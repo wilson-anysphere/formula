@@ -12,11 +12,13 @@ mod bitmap;
 mod bitpacking;
 mod cache;
 mod encoding;
+mod query;
 mod stats;
 mod table;
 mod types;
 
 pub use crate::cache::{CacheStats, PageCacheConfig};
+pub use crate::query::{hash_join, group_by, AggOp, AggSpec, GroupByEngine, GroupByResult, JoinResult, QueryError};
 pub use crate::stats::ColumnStats;
 pub use crate::table::{
     ColumnSchema, ColumnarRange, ColumnarTable, ColumnarTableBuilder, TableOptions, TableScan,

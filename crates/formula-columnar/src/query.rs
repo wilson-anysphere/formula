@@ -1,0 +1,1567 @@
+#![forbid(unsafe_code)]
+
+use crate::bitmap::BitVec;
+use crate::encoding::{EncodedChunk, U32SequenceEncoding, U64SequenceEncoding};
+use crate::table::{ColumnSchema, ColumnarTable, ColumnarTableBuilder, TableOptions};
+use crate::types::{ColumnType, Value};
+use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
+use std::sync::Arc;
+
+/// Aggregation operator supported by the columnar query engine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AggOp {
+    Count,
+    SumF64,
+    Min,
+    Max,
+}
+
+/// Aggregation specification for `GROUP BY`.
+///
+/// Notes:
+/// - `AggOp::Count` with `column: None` counts rows in the group.
+/// - `AggOp::Count` with `column: Some(i)` counts non-null values of column `i`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AggSpec {
+    pub op: AggOp,
+    pub column: Option<usize>,
+    pub name: Option<String>,
+}
+
+impl AggSpec {
+    pub fn count_rows() -> Self {
+        Self {
+            op: AggOp::Count,
+            column: None,
+            name: None,
+        }
+    }
+
+    pub fn count_non_null(column: usize) -> Self {
+        Self {
+            op: AggOp::Count,
+            column: Some(column),
+            name: None,
+        }
+    }
+
+    pub fn sum_f64(column: usize) -> Self {
+        Self {
+            op: AggOp::SumF64,
+            column: Some(column),
+            name: None,
+        }
+    }
+
+    pub fn min(column: usize) -> Self {
+        Self {
+            op: AggOp::Min,
+            column: Some(column),
+            name: None,
+        }
+    }
+
+    pub fn max(column: usize) -> Self {
+        Self {
+            op: AggOp::Max,
+            column: Some(column),
+            name: None,
+        }
+    }
+
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum QueryError {
+    EmptyKeys,
+    ColumnOutOfBounds { col: usize, column_count: usize },
+    UnsupportedColumnType {
+        col: usize,
+        column_type: ColumnType,
+        operation: &'static str,
+    },
+    MismatchedJoinKeyTypes {
+        left_type: ColumnType,
+        right_type: ColumnType,
+    },
+    MissingDictionary { col: usize },
+}
+
+impl std::fmt::Display for QueryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyKeys => write!(f, "GROUP BY requires at least one key column"),
+            Self::ColumnOutOfBounds { col, column_count } => write!(
+                f,
+                "column index {} out of bounds (table has {} columns)",
+                col, column_count
+            ),
+            Self::UnsupportedColumnType {
+                col,
+                column_type,
+                operation,
+            } => write!(
+                f,
+                "unsupported column type {:?} for column {} in {}",
+                column_type, col, operation
+            ),
+            Self::MismatchedJoinKeyTypes {
+                left_type,
+                right_type,
+            } => write!(
+                f,
+                "join key column types do not match: left={:?}, right={:?}",
+                left_type, right_type
+            ),
+            Self::MissingDictionary { col } => write!(f, "missing dictionary for string column {}", col),
+        }
+    }
+}
+
+impl std::error::Error for QueryError {}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum KeyValue {
+    Null,
+    I64(i64),
+    F64(u64),
+    Bool(bool),
+    Dict(u32),
+}
+
+fn canonical_f64_bits(v: f64) -> u64 {
+    // Canonicalize `-0.0` to `0.0`, and canonicalize NaNs so they group together.
+    if v == 0.0 {
+        0.0f64.to_bits()
+    } else if v.is_nan() {
+        f64::NAN.to_bits()
+    } else {
+        v.to_bits()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Scalar {
+    Null,
+    I64(i64),
+    F64(f64),
+    Bool(bool),
+    U32(u32),
+}
+
+#[derive(Clone, Copy, Debug)]
+enum KeyKind {
+    Int,
+    Float,
+    Bool,
+    Dict,
+}
+
+fn key_kind_for_column_type(column_type: ColumnType) -> Option<KeyKind> {
+    match column_type {
+        ColumnType::Number => Some(KeyKind::Float),
+        ColumnType::String => Some(KeyKind::Dict),
+        ColumnType::Boolean => Some(KeyKind::Bool),
+        ColumnType::DateTime | ColumnType::Currency { .. } | ColumnType::Percentage { .. } => {
+            Some(KeyKind::Int)
+        }
+    }
+}
+
+fn scalar_to_key(kind: KeyKind, scalar: Scalar) -> KeyValue {
+    match scalar {
+        Scalar::Null => KeyValue::Null,
+        Scalar::I64(v) => match kind {
+            KeyKind::Int => KeyValue::I64(v),
+            _ => KeyValue::Null,
+        },
+        Scalar::F64(v) => match kind {
+            KeyKind::Float => KeyValue::F64(canonical_f64_bits(v)),
+            _ => KeyValue::Null,
+        },
+        Scalar::Bool(v) => match kind {
+            KeyKind::Bool => KeyValue::Bool(v),
+            _ => KeyValue::Null,
+        },
+        Scalar::U32(v) => match kind {
+            KeyKind::Dict => KeyValue::Dict(v),
+            _ => KeyValue::Null,
+        },
+    }
+}
+
+fn value_from_i64(column_type: ColumnType, value: i64) -> Value {
+    match column_type {
+        ColumnType::DateTime => Value::DateTime(value),
+        ColumnType::Currency { .. } => Value::Currency(value),
+        ColumnType::Percentage { .. } => Value::Percentage(value),
+        _ => Value::Number(value as f64),
+    }
+}
+
+fn default_output_name(table: &ColumnarTable, spec: &AggSpec) -> String {
+    let col_name = spec
+        .column
+        .and_then(|idx| table.schema().get(idx))
+        .map(|s| s.name.as_str());
+
+    match (spec.op, col_name) {
+        (AggOp::Count, None) => "count".to_owned(),
+        (AggOp::Count, Some(name)) => format!("count_{name}"),
+        (AggOp::SumF64, Some(name)) => format!("sum_{name}"),
+        (AggOp::Min, Some(name)) => format!("min_{name}"),
+        (AggOp::Max, Some(name)) => format!("max_{name}"),
+        _ => "agg".to_owned(),
+    }
+}
+
+#[derive(Default)]
+struct FastHasher {
+    hash: u64,
+}
+
+impl Hasher for FastHasher {
+    fn finish(&self) -> u64 {
+        self.hash
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        // FNV-1a style mixing for arbitrary bytes.
+        const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+        const FNV_PRIME: u64 = 0x100000001b3;
+        let mut h = if self.hash == 0 { FNV_OFFSET } else { self.hash };
+        for b in bytes {
+            h ^= *b as u64;
+            h = h.wrapping_mul(FNV_PRIME);
+        }
+        self.hash = h;
+    }
+
+    fn write_u8(&mut self, i: u8) {
+        self.write_u64(i as u64);
+    }
+
+    fn write_u16(&mut self, i: u16) {
+        self.write_u64(i as u64);
+    }
+
+    fn write_u32(&mut self, i: u32) {
+        self.write_u64(i as u64);
+    }
+
+    fn write_u64(&mut self, i: u64) {
+        // A quick integer mixer (splitmix-ish).
+        let mut x = i.wrapping_add(self.hash).wrapping_add(0x9E3779B97F4A7C15);
+        x = (x ^ (x >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        x = (x ^ (x >> 27)).wrapping_mul(0x94D049BB133111EB);
+        self.hash = x ^ (x >> 31);
+    }
+
+    fn write_i64(&mut self, i: i64) {
+        self.write_u64(i as u64);
+    }
+
+    fn write_usize(&mut self, i: usize) {
+        self.write_u64(i as u64);
+    }
+}
+
+type FastBuildHasher = BuildHasherDefault<FastHasher>;
+type FastHashMap<K, V> = HashMap<K, V, FastBuildHasher>;
+
+struct U32SeqCursor<'a> {
+    pos: u32,
+    inner: U32SeqCursorInner<'a>,
+}
+
+enum U32SeqCursorInner<'a> {
+    Bitpacked { bit_width: u8, data: &'a [u8] },
+    Rle {
+        values: &'a [u32],
+        ends: &'a [u32],
+        run: usize,
+        run_value: u32,
+        run_end: u32,
+    },
+}
+
+impl<'a> U32SeqCursor<'a> {
+    fn new(encoding: &'a U32SequenceEncoding) -> Self {
+        match encoding {
+            U32SequenceEncoding::Bitpacked { bit_width, data } => Self {
+                pos: 0,
+                inner: U32SeqCursorInner::Bitpacked {
+                    bit_width: *bit_width,
+                    data,
+                },
+            },
+            U32SequenceEncoding::Rle(rle) => {
+                let (run_value, run_end) = rle
+                    .values
+                    .first()
+                    .copied()
+                    .zip(rle.ends.first().copied())
+                    .unwrap_or((0, 0));
+                Self {
+                    pos: 0,
+                    inner: U32SeqCursorInner::Rle {
+                        values: &rle.values,
+                        ends: &rle.ends,
+                        run: 0,
+                        run_value,
+                        run_end,
+                    },
+                }
+            }
+        }
+    }
+
+    fn next(&mut self) -> u32 {
+        let out = match &mut self.inner {
+            U32SeqCursorInner::Bitpacked { bit_width, data } => {
+                crate::bitpacking::get_u64_at(data, *bit_width, self.pos as usize) as u32
+            }
+            U32SeqCursorInner::Rle {
+                values,
+                ends,
+                run,
+                run_value,
+                run_end,
+            } => {
+                while *run < ends.len() && self.pos >= *run_end {
+                    *run += 1;
+                    if *run < ends.len() {
+                        *run_value = values[*run];
+                        *run_end = ends[*run];
+                    }
+                }
+                *run_value
+            }
+        };
+        self.pos = self.pos.saturating_add(1);
+        out
+    }
+}
+
+struct U64SeqCursor<'a> {
+    pos: u32,
+    inner: U64SeqCursorInner<'a>,
+}
+
+enum U64SeqCursorInner<'a> {
+    Bitpacked { bit_width: u8, data: &'a [u8] },
+    Rle {
+        values: &'a [u64],
+        ends: &'a [u32],
+        run: usize,
+        run_value: u64,
+        run_end: u32,
+    },
+}
+
+impl<'a> U64SeqCursor<'a> {
+    fn new(encoding: &'a U64SequenceEncoding) -> Self {
+        match encoding {
+            U64SequenceEncoding::Bitpacked { bit_width, data } => Self {
+                pos: 0,
+                inner: U64SeqCursorInner::Bitpacked {
+                    bit_width: *bit_width,
+                    data,
+                },
+            },
+            U64SequenceEncoding::Rle(rle) => {
+                let (run_value, run_end) = rle
+                    .values
+                    .first()
+                    .copied()
+                    .zip(rle.ends.first().copied())
+                    .unwrap_or((0, 0));
+                Self {
+                    pos: 0,
+                    inner: U64SeqCursorInner::Rle {
+                        values: &rle.values,
+                        ends: &rle.ends,
+                        run: 0,
+                        run_value,
+                        run_end,
+                    },
+                }
+            }
+        }
+    }
+
+    fn next(&mut self) -> u64 {
+        let out = match &mut self.inner {
+            U64SeqCursorInner::Bitpacked { bit_width, data } => {
+                crate::bitpacking::get_u64_at(data, *bit_width, self.pos as usize)
+            }
+            U64SeqCursorInner::Rle {
+                values,
+                ends,
+                run,
+                run_value,
+                run_end,
+            } => {
+                while *run < ends.len() && self.pos >= *run_end {
+                    *run += 1;
+                    if *run < ends.len() {
+                        *run_value = values[*run];
+                        *run_end = ends[*run];
+                    }
+                }
+                *run_value
+            }
+        };
+        self.pos = self.pos.saturating_add(1);
+        out
+    }
+}
+
+enum ScalarChunkCursor<'a> {
+    Int {
+        min: i64,
+        offsets: U64SeqCursor<'a>,
+        validity: Option<&'a BitVec>,
+        idx: usize,
+    },
+    Float {
+        values: &'a [f64],
+        validity: Option<&'a BitVec>,
+        idx: usize,
+    },
+    Bool {
+        data: &'a [u8],
+        validity: Option<&'a BitVec>,
+        idx: usize,
+    },
+    Dict {
+        indices: U32SeqCursor<'a>,
+        validity: Option<&'a BitVec>,
+        idx: usize,
+    },
+}
+
+impl<'a> ScalarChunkCursor<'a> {
+    fn from_column_chunk(
+        col: usize,
+        column_type: ColumnType,
+        chunk: &'a EncodedChunk,
+    ) -> Result<Self, QueryError> {
+        match (column_type, chunk) {
+            (
+                ColumnType::DateTime | ColumnType::Currency { .. } | ColumnType::Percentage { .. },
+                EncodedChunk::Int(c),
+            ) => Ok(Self::Int {
+                min: c.min,
+                offsets: U64SeqCursor::new(&c.offsets),
+                validity: c.validity.as_ref(),
+                idx: 0,
+            }),
+            (ColumnType::Number, EncodedChunk::Float(c)) => Ok(Self::Float {
+                values: &c.values,
+                validity: c.validity.as_ref(),
+                idx: 0,
+            }),
+            (ColumnType::Boolean, EncodedChunk::Bool(c)) => Ok(Self::Bool {
+                data: &c.data,
+                validity: c.validity.as_ref(),
+                idx: 0,
+            }),
+            (ColumnType::String, EncodedChunk::Dict(c)) => Ok(Self::Dict {
+                indices: U32SeqCursor::new(&c.indices),
+                validity: c.validity.as_ref(),
+                idx: 0,
+            }),
+            (ty, _) => Err(QueryError::UnsupportedColumnType {
+                col,
+                column_type: ty,
+                operation: "chunk decode",
+            }),
+        }
+    }
+
+    fn next(&mut self) -> Scalar {
+        match self {
+            Self::Int {
+                min,
+                offsets,
+                validity,
+                idx,
+            } => {
+                let offset = offsets.next();
+                let row = *idx;
+                *idx += 1;
+                if validity.as_ref().is_some_and(|v| !v.get(row)) {
+                    return Scalar::Null;
+                }
+                let value = (*min as i128 + offset as i128) as i64;
+                Scalar::I64(value)
+            }
+            Self::Float {
+                values,
+                validity,
+                idx,
+            } => {
+                let row = *idx;
+                *idx += 1;
+                if validity.as_ref().is_some_and(|v| !v.get(row)) {
+                    return Scalar::Null;
+                }
+                Scalar::F64(values[row])
+            }
+            Self::Bool {
+                data,
+                validity,
+                idx,
+            } => {
+                let row = *idx;
+                *idx += 1;
+                if validity.as_ref().is_some_and(|v| !v.get(row)) {
+                    return Scalar::Null;
+                }
+                let byte = data[row / 8];
+                let bit = row % 8;
+                Scalar::Bool(((byte >> bit) & 1) == 1)
+            }
+            Self::Dict {
+                indices,
+                validity,
+                idx,
+            } => {
+                let row = *idx;
+                *idx += 1;
+                let ix = indices.next();
+                if validity.as_ref().is_some_and(|v| !v.get(row)) {
+                    return Scalar::Null;
+                }
+                Scalar::U32(ix)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum ResultColumn {
+    Int { values: Vec<i64>, validity: BitVec },
+    Float { values: Vec<f64>, validity: BitVec },
+    Bool { values: BitVec, validity: BitVec },
+    Dict {
+        indices: Vec<u32>,
+        validity: BitVec,
+        dictionary: Arc<Vec<Arc<str>>>,
+    },
+}
+
+impl ResultColumn {
+    fn len(&self) -> usize {
+        match self {
+            Self::Int { values, .. } => values.len(),
+            Self::Float { values, .. } => values.len(),
+            Self::Bool { values, .. } => values.len(),
+            Self::Dict { indices, .. } => indices.len(),
+        }
+    }
+}
+
+/// Output of `GROUP BY`.
+#[derive(Clone, Debug)]
+pub struct GroupByResult {
+    schema: Vec<ColumnSchema>,
+    columns: Vec<ResultColumn>,
+    rows: usize,
+}
+
+impl GroupByResult {
+    pub fn schema(&self) -> &[ColumnSchema] {
+        &self.schema
+    }
+
+    pub fn row_count(&self) -> usize {
+        self.rows
+    }
+
+    pub fn column_count(&self) -> usize {
+        self.schema.len()
+    }
+
+    pub fn to_values(&self) -> Vec<Vec<Value>> {
+        let mut out: Vec<Vec<Value>> = Vec::with_capacity(self.columns.len());
+        for (col_idx, column) in self.columns.iter().enumerate() {
+            let column_type = self.schema.get(col_idx).map(|s| s.column_type);
+            let mut values: Vec<Value> = Vec::with_capacity(self.rows);
+            match (column, column_type) {
+                (ResultColumn::Float { values: v, validity }, Some(_)) => {
+                    for i in 0..self.rows {
+                        if !validity.get(i) {
+                            values.push(Value::Null);
+                        } else {
+                            values.push(Value::Number(v[i]));
+                        }
+                    }
+                }
+                (ResultColumn::Int { values: v, validity }, Some(ty)) => {
+                    for i in 0..self.rows {
+                        if !validity.get(i) {
+                            values.push(Value::Null);
+                        } else {
+                            values.push(value_from_i64(ty, v[i]));
+                        }
+                    }
+                }
+                (ResultColumn::Bool { values: v, validity }, Some(_)) => {
+                    for i in 0..self.rows {
+                        if !validity.get(i) {
+                            values.push(Value::Null);
+                        } else {
+                            values.push(Value::Boolean(v.get(i)));
+                        }
+                    }
+                }
+                (ResultColumn::Dict { indices, validity, dictionary }, Some(_)) => {
+                    for i in 0..self.rows {
+                        if !validity.get(i) {
+                            values.push(Value::Null);
+                        } else {
+                            let idx = indices[i] as usize;
+                            values.push(Value::String(dictionary[idx].clone()));
+                        }
+                    }
+                }
+                _ => {
+                    for _ in 0..self.rows {
+                        values.push(Value::Null);
+                    }
+                }
+            }
+            out.push(values);
+        }
+        out
+    }
+
+    pub fn to_table(&self, options: TableOptions) -> ColumnarTable {
+        let mut builder = ColumnarTableBuilder::new(self.schema.clone(), options);
+        let mut row: Vec<Value> = vec![Value::Null; self.columns.len()];
+        for r in 0..self.rows {
+            for c in 0..self.columns.len() {
+                row[c] = self.get_value(r, c);
+            }
+            builder.append_row(&row);
+        }
+        builder.finalize()
+    }
+
+    fn get_value(&self, row: usize, col: usize) -> Value {
+        let column_type = self.schema.get(col).map(|s| s.column_type);
+        match (self.columns.get(col), column_type) {
+            (Some(ResultColumn::Float { values, validity }), Some(_)) => {
+                if !validity.get(row) {
+                    Value::Null
+                } else {
+                    Value::Number(values[row])
+                }
+            }
+            (Some(ResultColumn::Int { values, validity }), Some(ty)) => {
+                if !validity.get(row) {
+                    Value::Null
+                } else {
+                    value_from_i64(ty, values[row])
+                }
+            }
+            (Some(ResultColumn::Bool { values, validity }), Some(_)) => {
+                if !validity.get(row) {
+                    Value::Null
+                } else {
+                    Value::Boolean(values.get(row))
+                }
+            }
+            (Some(ResultColumn::Dict { indices, validity, dictionary }), Some(_)) => {
+                if !validity.get(row) {
+                    Value::Null
+                } else {
+                    Value::String(dictionary[indices[row] as usize].clone())
+                }
+            }
+            _ => Value::Null,
+        }
+    }
+}
+
+enum KeyColumnBuilder {
+    Int { values: Vec<i64>, validity: BitVec },
+    Float { values: Vec<f64>, validity: BitVec },
+    Bool { values: BitVec, validity: BitVec },
+    Dict {
+        indices: Vec<u32>,
+        validity: BitVec,
+        dictionary: Arc<Vec<Arc<str>>>,
+    },
+}
+
+impl KeyColumnBuilder {
+    fn new(
+        col: usize,
+        column_type: ColumnType,
+        dict: Option<Arc<Vec<Arc<str>>>>,
+    ) -> Result<Self, QueryError> {
+        Ok(match column_type {
+            ColumnType::DateTime | ColumnType::Currency { .. } | ColumnType::Percentage { .. } => {
+                Self::Int {
+                    values: Vec::new(),
+                    validity: BitVec::new(),
+                }
+            }
+            ColumnType::Number => Self::Float {
+                values: Vec::new(),
+                validity: BitVec::new(),
+            },
+            ColumnType::Boolean => Self::Bool {
+                values: BitVec::new(),
+                validity: BitVec::new(),
+            },
+            ColumnType::String => Self::Dict {
+                indices: Vec::new(),
+                validity: BitVec::new(),
+                dictionary: dict.ok_or(QueryError::MissingDictionary { col })?,
+            },
+        })
+    }
+
+    fn push(&mut self, scalar: Scalar) {
+        match (self, scalar) {
+            (Self::Int { values, validity }, Scalar::I64(v)) => {
+                values.push(v);
+                validity.push(true);
+            }
+            (Self::Int { values, validity }, Scalar::Null) => {
+                values.push(0);
+                validity.push(false);
+            }
+            (Self::Float { values, validity }, Scalar::F64(v)) => {
+                values.push(v);
+                validity.push(true);
+            }
+            (Self::Float { values, validity }, Scalar::Null) => {
+                values.push(0.0);
+                validity.push(false);
+            }
+            (Self::Bool { values, validity }, Scalar::Bool(v)) => {
+                values.push(v);
+                validity.push(true);
+            }
+            (Self::Bool { values, validity }, Scalar::Null) => {
+                values.push(false);
+                validity.push(false);
+            }
+            (Self::Dict { indices, validity, .. }, Scalar::U32(v)) => {
+                indices.push(v);
+                validity.push(true);
+            }
+            (Self::Dict { indices, validity, .. }, Scalar::Null) => {
+                indices.push(0);
+                validity.push(false);
+            }
+            _ => {
+                // Type mismatch should be prevented by planning.
+                debug_assert!(false, "KeyColumnBuilder scalar type mismatch");
+            }
+        }
+    }
+
+    fn finish(self) -> ResultColumn {
+        match self {
+            Self::Int { values, validity } => ResultColumn::Int { values, validity },
+            Self::Float { values, validity } => ResultColumn::Float { values, validity },
+            Self::Bool { values, validity } => ResultColumn::Bool { values, validity },
+            Self::Dict {
+                indices,
+                validity,
+                dictionary,
+            } => ResultColumn::Dict {
+                indices,
+                validity,
+                dictionary,
+            },
+        }
+    }
+}
+
+enum AggState {
+    CountRows { counts: Vec<u64> },
+    CountNonNull { counts: Vec<u64>, col: usize },
+    SumF64 {
+        sums: Vec<f64>,
+        non_null: Vec<u64>,
+        col: usize,
+    },
+    MinI64 {
+        values: Vec<i64>,
+        validity: BitVec,
+        col: usize,
+    },
+    MaxI64 {
+        values: Vec<i64>,
+        validity: BitVec,
+        col: usize,
+    },
+    MinF64 {
+        values: Vec<f64>,
+        validity: BitVec,
+        col: usize,
+    },
+    MaxF64 {
+        values: Vec<f64>,
+        validity: BitVec,
+        col: usize,
+    },
+    MinBool {
+        values: BitVec,
+        validity: BitVec,
+        col: usize,
+    },
+    MaxBool {
+        values: BitVec,
+        validity: BitVec,
+        col: usize,
+    },
+}
+
+impl AggState {
+    fn input_col(&self) -> Option<usize> {
+        match self {
+            Self::CountRows { .. } => None,
+            Self::CountNonNull { col, .. } => Some(*col),
+            Self::SumF64 { col, .. } => Some(*col),
+            Self::MinI64 { col, .. } => Some(*col),
+            Self::MaxI64 { col, .. } => Some(*col),
+            Self::MinF64 { col, .. } => Some(*col),
+            Self::MaxF64 { col, .. } => Some(*col),
+            Self::MinBool { col, .. } => Some(*col),
+            Self::MaxBool { col, .. } => Some(*col),
+        }
+    }
+
+    fn push_group(&mut self) {
+        match self {
+            Self::CountRows { counts } => counts.push(0),
+            Self::CountNonNull { counts, .. } => counts.push(0),
+            Self::SumF64 { sums, non_null, .. } => {
+                sums.push(0.0);
+                non_null.push(0);
+            }
+            Self::MinI64 { values, validity, .. } | Self::MaxI64 { values, validity, .. } => {
+                values.push(0);
+                validity.push(false);
+            }
+            Self::MinF64 { values, validity, .. } | Self::MaxF64 { values, validity, .. } => {
+                values.push(0.0);
+                validity.push(false);
+            }
+            Self::MinBool { values, validity, .. } | Self::MaxBool { values, validity, .. } => {
+                values.push(false);
+                validity.push(false);
+            }
+        }
+    }
+
+    fn update_count_row(&mut self, group: usize) {
+        match self {
+            Self::CountRows { counts } => counts[group] += 1,
+            _ => {}
+        }
+    }
+
+    fn update_from_scalar(&mut self, group: usize, scalar: Scalar) {
+        match self {
+            Self::CountNonNull { counts, .. } => {
+                if !matches!(scalar, Scalar::Null) {
+                    counts[group] += 1;
+                }
+            }
+            Self::SumF64 { sums, non_null, .. } => match scalar {
+                Scalar::F64(v) => {
+                    sums[group] += v;
+                    non_null[group] += 1;
+                }
+                Scalar::I64(v) => {
+                    sums[group] += v as f64;
+                    non_null[group] += 1;
+                }
+                Scalar::Bool(v) => {
+                    sums[group] += if v { 1.0 } else { 0.0 };
+                    non_null[group] += 1;
+                }
+                Scalar::Null | Scalar::U32(_) => {}
+            },
+            Self::MinI64 { values, validity, .. } => match scalar {
+                Scalar::I64(v) => {
+                    if !validity.get(group) {
+                        values[group] = v;
+                        validity.set(group, true);
+                    } else {
+                        values[group] = values[group].min(v);
+                    }
+                }
+                _ => {}
+            },
+            Self::MaxI64 { values, validity, .. } => match scalar {
+                Scalar::I64(v) => {
+                    if !validity.get(group) {
+                        values[group] = v;
+                        validity.set(group, true);
+                    } else {
+                        values[group] = values[group].max(v);
+                    }
+                }
+                _ => {}
+            },
+            Self::MinF64 { values, validity, .. } => match scalar {
+                Scalar::F64(v) => {
+                    if !validity.get(group) {
+                        values[group] = v;
+                        validity.set(group, true);
+                    } else if v.total_cmp(&values[group]).is_lt() {
+                        values[group] = v;
+                    }
+                }
+                _ => {}
+            },
+            Self::MaxF64 { values, validity, .. } => match scalar {
+                Scalar::F64(v) => {
+                    if !validity.get(group) {
+                        values[group] = v;
+                        validity.set(group, true);
+                    } else if v.total_cmp(&values[group]).is_gt() {
+                        values[group] = v;
+                    }
+                }
+                _ => {}
+            },
+            Self::MinBool { values, validity, .. } => match scalar {
+                Scalar::Bool(v) => {
+                    if !validity.get(group) {
+                        values.set(group, v);
+                        validity.set(group, true);
+                    } else if !v {
+                        values.set(group, false);
+                    }
+                }
+                _ => {}
+            },
+            Self::MaxBool { values, validity, .. } => match scalar {
+                Scalar::Bool(v) => {
+                    if !validity.get(group) {
+                        values.set(group, v);
+                        validity.set(group, true);
+                    } else if v {
+                        values.set(group, true);
+                    }
+                }
+                _ => {}
+            },
+            Self::CountRows { .. } => {}
+        }
+    }
+
+    fn finish(self) -> ResultColumn {
+        match self {
+            Self::CountRows { counts } | Self::CountNonNull { counts, .. } => {
+                let mut validity = BitVec::new();
+                let values: Vec<f64> = counts
+                    .into_iter()
+                    .map(|c| {
+                        validity.push(true);
+                        c as f64
+                    })
+                    .collect();
+                ResultColumn::Float { values, validity }
+            }
+            Self::SumF64 { sums, non_null, .. } => {
+                let mut validity = BitVec::with_capacity_bits(sums.len());
+                for &cnt in &non_null {
+                    validity.push(cnt > 0);
+                }
+                ResultColumn::Float {
+                    values: sums,
+                    validity,
+                }
+            }
+            Self::MinI64 { values, validity, .. } | Self::MaxI64 { values, validity, .. } => {
+                ResultColumn::Int { values, validity }
+            }
+            Self::MinF64 { values, validity, .. } | Self::MaxF64 { values, validity, .. } => {
+                ResultColumn::Float { values, validity }
+            }
+            Self::MinBool { values, validity, .. } | Self::MaxBool { values, validity, .. } => {
+                ResultColumn::Bool { values, validity }
+            }
+        }
+    }
+}
+
+struct AggColumnPlan {
+    col: usize,
+    agg_indices: Vec<usize>,
+    from_key_pos: Option<usize>,
+}
+
+/// A streaming `GROUP BY` engine.
+///
+/// `consume_chunks` lets callers process very large tables incrementally (page-by-page)
+/// without decoding entire columns.
+pub struct GroupByEngine {
+    schema: Vec<ColumnSchema>,
+    key_cols: Vec<usize>,
+    key_kinds: Vec<KeyKind>,
+    key_builders: Vec<KeyColumnBuilder>,
+    agg_states: Vec<AggState>,
+    count_row_aggs: Vec<usize>,
+    agg_plans: Vec<AggColumnPlan>,
+    groups: FastHashMap<Box<[KeyValue]>, usize>,
+    scratch_keys: Vec<KeyValue>,
+    scratch_key_scalars: Vec<Scalar>,
+    groups_len: usize,
+}
+
+impl GroupByEngine {
+    pub fn new(table: &ColumnarTable, keys: &[usize], aggs: &[AggSpec]) -> Result<Self, QueryError> {
+        if keys.is_empty() {
+            return Err(QueryError::EmptyKeys);
+        }
+        let column_count = table.column_count();
+        for &k in keys {
+            if k >= column_count {
+                return Err(QueryError::ColumnOutOfBounds { col: k, column_count });
+            }
+        }
+        for spec in aggs {
+            if let Some(col) = spec.column {
+                if col >= column_count {
+                    return Err(QueryError::ColumnOutOfBounds { col, column_count });
+                }
+            }
+        }
+
+        let mut schema: Vec<ColumnSchema> = Vec::with_capacity(keys.len() + aggs.len());
+        let mut key_cols: Vec<usize> = Vec::with_capacity(keys.len());
+        let mut key_builders: Vec<KeyColumnBuilder> = Vec::with_capacity(keys.len());
+        let mut key_kinds: Vec<KeyKind> = Vec::with_capacity(keys.len());
+        for &key_col in keys {
+            let col_schema = table.schema()[key_col].clone();
+            let kind = key_kind_for_column_type(col_schema.column_type).ok_or(
+                QueryError::UnsupportedColumnType {
+                    col: key_col,
+                    column_type: col_schema.column_type,
+                    operation: "GROUP BY key",
+                },
+            )?;
+            let dict = if col_schema.column_type == ColumnType::String {
+                Some(table.dictionary(key_col).ok_or(QueryError::MissingDictionary { col: key_col })?)
+            } else {
+                None
+            };
+            key_kinds.push(kind);
+            key_builders.push(KeyColumnBuilder::new(key_col, col_schema.column_type, dict)?);
+            key_cols.push(key_col);
+            schema.push(col_schema);
+        }
+
+        let mut agg_states: Vec<AggState> = Vec::with_capacity(aggs.len());
+        let mut count_row_aggs: Vec<usize> = Vec::new();
+        for (idx, spec) in aggs.iter().enumerate() {
+            let name = spec
+                .name
+                .clone()
+                .unwrap_or_else(|| default_output_name(table, spec));
+
+            match spec.op {
+                AggOp::Count => {
+                    schema.push(ColumnSchema {
+                        name,
+                        column_type: ColumnType::Number,
+                    });
+                    match spec.column {
+                        None => {
+                            agg_states.push(AggState::CountRows { counts: Vec::new() });
+                            count_row_aggs.push(idx);
+                        }
+                        Some(col) => {
+                            agg_states.push(AggState::CountNonNull {
+                                counts: Vec::new(),
+                                col,
+                            });
+                        }
+                    }
+                }
+                AggOp::SumF64 => {
+                    let col = spec.column.ok_or(QueryError::UnsupportedColumnType {
+                        col: 0,
+                        column_type: ColumnType::String,
+                        operation: "SUM without column",
+                    })?;
+                    let ty = table.schema()[col].column_type;
+                    match ty {
+                        ColumnType::Number
+                        | ColumnType::DateTime
+                        | ColumnType::Currency { .. }
+                        | ColumnType::Percentage { .. }
+                        | ColumnType::Boolean => {}
+                        ColumnType::String => {
+                            return Err(QueryError::UnsupportedColumnType {
+                                col,
+                                column_type: ty,
+                                operation: "SUM",
+                            });
+                        }
+                    }
+                    schema.push(ColumnSchema {
+                        name,
+                        column_type: ColumnType::Number,
+                    });
+                    agg_states.push(AggState::SumF64 {
+                        sums: Vec::new(),
+                        non_null: Vec::new(),
+                        col,
+                    });
+                }
+                AggOp::Min | AggOp::Max => {
+                    let col = spec.column.ok_or(QueryError::UnsupportedColumnType {
+                        col: 0,
+                        column_type: ColumnType::String,
+                        operation: "MIN/MAX without column",
+                    })?;
+                    let ty = table.schema()[col].column_type;
+                    match ty {
+                        ColumnType::String => {
+                            return Err(QueryError::UnsupportedColumnType {
+                                col,
+                                column_type: ty,
+                                operation: "MIN/MAX",
+                            });
+                        }
+                        ColumnType::Number => {
+                            schema.push(ColumnSchema { name, column_type: ty });
+                            agg_states.push(if spec.op == AggOp::Min {
+                                AggState::MinF64 {
+                                    values: Vec::new(),
+                                    validity: BitVec::new(),
+                                    col,
+                                }
+                            } else {
+                                AggState::MaxF64 {
+                                    values: Vec::new(),
+                                    validity: BitVec::new(),
+                                    col,
+                                }
+                            });
+                        }
+                        ColumnType::Boolean => {
+                            schema.push(ColumnSchema { name, column_type: ty });
+                            agg_states.push(if spec.op == AggOp::Min {
+                                AggState::MinBool {
+                                    values: BitVec::new(),
+                                    validity: BitVec::new(),
+                                    col,
+                                }
+                            } else {
+                                AggState::MaxBool {
+                                    values: BitVec::new(),
+                                    validity: BitVec::new(),
+                                    col,
+                                }
+                            });
+                        }
+                        ColumnType::DateTime | ColumnType::Currency { .. } | ColumnType::Percentage { .. } => {
+                            schema.push(ColumnSchema { name, column_type: ty });
+                            agg_states.push(if spec.op == AggOp::Min {
+                                AggState::MinI64 {
+                                    values: Vec::new(),
+                                    validity: BitVec::new(),
+                                    col,
+                                }
+                            } else {
+                                AggState::MaxI64 {
+                                    values: Vec::new(),
+                                    validity: BitVec::new(),
+                                    col,
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Group aggs by input column for more cache-friendly scans.
+        let mut key_pos_by_col: FastHashMap<usize, usize> = FastHashMap::default();
+        for (pos, &col) in keys.iter().enumerate() {
+            key_pos_by_col.insert(col, pos);
+        }
+
+        let mut by_col: FastHashMap<usize, Vec<usize>> = FastHashMap::default();
+        for (agg_idx, state) in agg_states.iter().enumerate() {
+            if let Some(col) = state.input_col() {
+                by_col.entry(col).or_default().push(agg_idx);
+            }
+        }
+
+        let mut agg_plans: Vec<AggColumnPlan> = Vec::with_capacity(by_col.len());
+        for (col, agg_indices) in by_col {
+            let from_key_pos = key_pos_by_col.get(&col).copied();
+            agg_plans.push(AggColumnPlan {
+                col,
+                agg_indices,
+                from_key_pos,
+            });
+        }
+
+        // A rough initial capacity estimate helps avoid early rehashing for common cases.
+        let capacity_hint = table
+            .scan()
+            .stats(keys[0])
+            .map(|s| s.distinct_count as usize)
+            .unwrap_or(0)
+            .min(table.row_count());
+
+        Ok(Self {
+            schema,
+            key_cols,
+            key_kinds,
+            key_builders,
+            agg_states,
+            count_row_aggs,
+            agg_plans,
+            groups: FastHashMap::with_capacity_and_hasher(capacity_hint, FastBuildHasher::default()),
+            scratch_keys: vec![KeyValue::Null; keys.len()],
+            scratch_key_scalars: vec![Scalar::Null; keys.len()],
+            groups_len: 0,
+        })
+    }
+
+    pub fn consume_chunks(
+        &mut self,
+        table: &ColumnarTable,
+        chunk_start: usize,
+        chunk_end: usize,
+    ) -> Result<(), QueryError> {
+        let rows = table.row_count();
+        let page = table.page_size_rows();
+        let chunk_count = (rows + page - 1) / page;
+        let chunk_end = chunk_end.min(chunk_count);
+
+        for chunk_idx in chunk_start..chunk_end {
+            let base = chunk_idx * page;
+            if base >= rows {
+                break;
+            }
+            let chunk_rows = (rows - base).min(page);
+
+            let mut key_cursors: Vec<ScalarChunkCursor<'_>> = Vec::with_capacity(self.key_kinds.len());
+            for &col_idx in &self.key_cols {
+                let chunks = table
+                    .encoded_chunks(col_idx)
+                    .ok_or(QueryError::ColumnOutOfBounds { col: col_idx, column_count: table.column_count() })?;
+                let chunk = chunks.get(chunk_idx).ok_or(QueryError::ColumnOutOfBounds {
+                    col: col_idx,
+                    column_count: table.column_count(),
+                })?;
+                let ty = table.schema()[col_idx].column_type;
+                key_cursors.push(ScalarChunkCursor::from_column_chunk(col_idx, ty, chunk)?);
+            }
+
+            let mut agg_cursors: Vec<Option<ScalarChunkCursor<'_>>> = Vec::with_capacity(self.agg_plans.len());
+            for plan in &self.agg_plans {
+                if plan.from_key_pos.is_some() {
+                    agg_cursors.push(None);
+                    continue;
+                }
+                let chunks = table.encoded_chunks(plan.col).ok_or(QueryError::ColumnOutOfBounds {
+                    col: plan.col,
+                    column_count: table.column_count(),
+                })?;
+                let chunk = chunks.get(chunk_idx).ok_or(QueryError::ColumnOutOfBounds {
+                    col: plan.col,
+                    column_count: table.column_count(),
+                })?;
+                let ty = table.schema()[plan.col].column_type;
+                agg_cursors.push(Some(ScalarChunkCursor::from_column_chunk(plan.col, ty, chunk)?));
+            }
+
+            for _row_in_chunk in 0..chunk_rows {
+                for (pos, cursor) in key_cursors.iter_mut().enumerate() {
+                    let scalar = cursor.next();
+                    self.scratch_key_scalars[pos] = scalar;
+                    self.scratch_keys[pos] = scalar_to_key(self.key_kinds[pos], scalar);
+                }
+
+                let group_idx = if let Some(&idx) = self.groups.get(self.scratch_keys.as_slice()) {
+                    idx
+                } else {
+                    let idx = self.groups_len;
+                    self.groups_len += 1;
+                    self.groups
+                        .insert(self.scratch_keys.to_vec().into_boxed_slice(), idx);
+                    for (pos, builder) in self.key_builders.iter_mut().enumerate() {
+                        builder.push(self.scratch_key_scalars[pos]);
+                    }
+                    for state in &mut self.agg_states {
+                        state.push_group();
+                    }
+                    idx
+                };
+
+                for &agg_idx in &self.count_row_aggs {
+                    self.agg_states[agg_idx].update_count_row(group_idx);
+                }
+
+                for (plan_idx, plan) in self.agg_plans.iter().enumerate() {
+                    let scalar = if let Some(key_pos) = plan.from_key_pos {
+                        self.scratch_key_scalars[key_pos]
+                    } else {
+                        agg_cursors[plan_idx]
+                            .as_mut()
+                            .expect("cursor missing for non-key agg plan")
+                            .next()
+                    };
+                    for &agg_idx in &plan.agg_indices {
+                        self.agg_states[agg_idx].update_from_scalar(group_idx, scalar);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn consume_all(&mut self, table: &ColumnarTable) -> Result<(), QueryError> {
+        let rows = table.row_count();
+        let page = table.page_size_rows();
+        let chunk_count = (rows + page - 1) / page;
+        self.consume_chunks(table, 0, chunk_count)
+    }
+
+    pub fn finish(self) -> GroupByResult {
+        let mut columns: Vec<ResultColumn> = Vec::with_capacity(self.key_builders.len() + self.agg_states.len());
+        for b in self.key_builders {
+            columns.push(b.finish());
+        }
+        for s in self.agg_states {
+            columns.push(s.finish());
+        }
+
+        debug_assert!(
+            columns.iter().all(|c| c.len() == self.groups_len),
+            "group-by column lengths should match number of groups"
+        );
+
+        GroupByResult {
+            schema: self.schema,
+            columns,
+            rows: self.groups_len,
+        }
+    }
+}
+
+pub fn group_by(table: &ColumnarTable, keys: &[usize], aggs: &[AggSpec]) -> Result<GroupByResult, QueryError> {
+    let mut engine = GroupByEngine::new(table, keys, aggs)?;
+    engine.consume_all(table)?;
+    Ok(engine.finish())
+}
+
+/// Output of `hash_join`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct JoinResult {
+    pub left_indices: Vec<usize>,
+    pub right_indices: Vec<usize>,
+}
+
+impl JoinResult {
+    pub fn len(&self) -> usize {
+        self.left_indices.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.left_indices.is_empty()
+    }
+}
+
+fn build_dict_mapping(
+    left_dict: &Arc<Vec<Arc<str>>>,
+    right_dict: &Arc<Vec<Arc<str>>>,
+) -> Vec<Option<u32>> {
+    if Arc::ptr_eq(left_dict, right_dict) {
+        return (0..right_dict.len()).map(|i| Some(i as u32)).collect();
+    }
+
+    let mut map: FastHashMap<&str, u32> =
+        FastHashMap::with_capacity_and_hasher(left_dict.len(), FastBuildHasher::default());
+    for (idx, s) in left_dict.iter().enumerate() {
+        map.insert(s.as_ref(), idx as u32);
+    }
+
+    right_dict
+        .iter()
+        .map(|s| map.get(s.as_ref()).copied())
+        .collect()
+}
+
+pub fn hash_join(
+    left: &ColumnarTable,
+    right: &ColumnarTable,
+    left_on: usize,
+    right_on: usize,
+) -> Result<JoinResult, QueryError> {
+    let left_type = left
+        .schema()
+        .get(left_on)
+        .map(|s| s.column_type)
+        .ok_or(QueryError::ColumnOutOfBounds {
+            col: left_on,
+            column_count: left.column_count(),
+        })?;
+    let right_type = right
+        .schema()
+        .get(right_on)
+        .map(|s| s.column_type)
+        .ok_or(QueryError::ColumnOutOfBounds {
+            col: right_on,
+            column_count: right.column_count(),
+        })?;
+
+    if left_type != right_type {
+        return Err(QueryError::MismatchedJoinKeyTypes {
+            left_type,
+            right_type,
+        });
+    }
+
+    let key_kind = key_kind_for_column_type(left_type).ok_or(QueryError::UnsupportedColumnType {
+        col: left_on,
+        column_type: left_type,
+        operation: "JOIN key",
+    })?;
+
+    let dict_mapping = if left_type == ColumnType::String {
+        let left_dict = left
+            .dictionary(left_on)
+            .ok_or(QueryError::MissingDictionary { col: left_on })?;
+        let right_dict = right
+            .dictionary(right_on)
+            .ok_or(QueryError::MissingDictionary { col: right_on })?;
+        Some(build_dict_mapping(&left_dict, &right_dict))
+    } else {
+        None
+    };
+
+    let right_rows = right.row_count();
+    let mut next: Vec<usize> = vec![usize::MAX; right_rows];
+
+    let capacity_hint = right
+        .scan()
+        .stats(right_on)
+        .map(|s| s.distinct_count as usize)
+        .unwrap_or(0)
+        .min(right_rows);
+
+    let mut map: FastHashMap<KeyValue, usize> =
+        FastHashMap::with_capacity_and_hasher(capacity_hint, FastBuildHasher::default());
+
+    // Build phase (right).
+    let right_chunks = right
+        .encoded_chunks(right_on)
+        .ok_or(QueryError::ColumnOutOfBounds {
+            col: right_on,
+            column_count: right.column_count(),
+        })?;
+    let page = right.page_size_rows();
+    for (chunk_idx, chunk) in right_chunks.iter().enumerate() {
+        let base = chunk_idx * page;
+        let chunk_len = chunk.len();
+        let mut cursor = ScalarChunkCursor::from_column_chunk(right_on, right_type, chunk)?;
+        for i in 0..chunk_len {
+            let row = base + i;
+            if row >= right_rows {
+                break;
+            }
+            let scalar = cursor.next();
+            let key = match (key_kind, scalar) {
+                (_, Scalar::Null) => continue,
+                (KeyKind::Dict, Scalar::U32(ix)) => {
+                    let Some(mapping) = dict_mapping.as_ref() else {
+                        continue;
+                    };
+                    let Some(mapped) = mapping.get(ix as usize).and_then(|m| *m) else {
+                        continue;
+                    };
+                    KeyValue::Dict(mapped)
+                }
+                (kind, s) => scalar_to_key(kind, s),
+            };
+            if matches!(key, KeyValue::Null) {
+                continue;
+            }
+            match map.get(&key).copied() {
+                Some(head) => {
+                    next[row] = head;
+                    map.insert(key, row);
+                }
+                None => {
+                    map.insert(key, row);
+                }
+            }
+        }
+    }
+
+    // Probe phase (left).
+    let mut out = JoinResult {
+        left_indices: Vec::new(),
+        right_indices: Vec::new(),
+    };
+    out.left_indices.reserve(left.row_count().min(right.row_count()));
+    out.right_indices.reserve(left.row_count().min(right.row_count()));
+
+    let left_chunks = left
+        .encoded_chunks(left_on)
+        .ok_or(QueryError::ColumnOutOfBounds {
+            col: left_on,
+            column_count: left.column_count(),
+        })?;
+    let page = left.page_size_rows();
+    for (chunk_idx, chunk) in left_chunks.iter().enumerate() {
+        let base = chunk_idx * page;
+        let chunk_len = chunk.len();
+        let mut cursor = ScalarChunkCursor::from_column_chunk(left_on, left_type, chunk)?;
+        for i in 0..chunk_len {
+            let row = base + i;
+            if row >= left.row_count() {
+                break;
+            }
+            let scalar = cursor.next();
+            if matches!(scalar, Scalar::Null) {
+                continue;
+            }
+            let key = match (key_kind, scalar) {
+                (KeyKind::Dict, Scalar::U32(ix)) => KeyValue::Dict(ix),
+                (kind, s) => scalar_to_key(kind, s),
+            };
+            if matches!(key, KeyValue::Null) {
+                continue;
+            }
+            let Some(&head) = map.get(&key) else {
+                continue;
+            };
+            let mut r = head;
+            while r != usize::MAX {
+                out.left_indices.push(row);
+                out.right_indices.push(r);
+                r = next[r];
+            }
+        }
+    }
+
+    Ok(out)
+}

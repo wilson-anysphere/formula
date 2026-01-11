@@ -303,6 +303,35 @@ impl ColumnarTable {
     pub fn compressed_size_bytes(&self) -> usize {
         self.columns.iter().map(|c| c.compressed_size_bytes()).sum()
     }
+
+    pub(crate) fn page_size_rows(&self) -> usize {
+        self.options.page_size_rows
+    }
+
+    pub(crate) fn encoded_chunks(&self, col: usize) -> Option<&[EncodedChunk]> {
+        Some(self.columns.get(col)?.chunks.as_slice())
+    }
+
+    /// Group rows by one or more key columns and compute aggregations.
+    pub fn group_by(
+        &self,
+        keys: &[usize],
+        aggs: &[crate::query::AggSpec],
+    ) -> Result<crate::query::GroupByResult, crate::query::QueryError> {
+        crate::query::group_by(self, keys, aggs)
+    }
+
+    /// Hash join on a single key column.
+    ///
+    /// Returns row index mappings instead of materializing joined rows.
+    pub fn hash_join(
+        &self,
+        right: &ColumnarTable,
+        left_on: usize,
+        right_on: usize,
+    ) -> Result<crate::query::JoinResult, crate::query::QueryError> {
+        crate::query::hash_join(self, right, left_on, right_on)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
