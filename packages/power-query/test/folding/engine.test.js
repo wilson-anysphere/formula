@@ -627,6 +627,38 @@ test("QueryEngine: permission/credential caches reuse prompts for the same DB co
   assert.equal(credentialCount, 1);
 });
 
+test("QueryEngine: table source ids do not collide for DB sources without identity", async () => {
+  const engine = new QueryEngine({
+    connectors: {
+      sql: new SqlConnector({
+        querySql: async () =>
+          DataTable.fromGrid(
+            [
+              ["Value"],
+              [1],
+            ],
+            { hasHeaders: true, inferTypes: true },
+          ),
+      }),
+    },
+  });
+
+  const q1 = { id: "q_db_source_ids_1", name: "DB source ids 1", source: { type: "database", connection: {}, query: "SELECT 1" }, steps: [] };
+  const q2 = { id: "q_db_source_ids_2", name: "DB source ids 2", source: { type: "database", connection: {}, query: "SELECT 1" }, steps: [] };
+
+  const r1 = await engine.executeQueryWithMeta(q1, { queries: {} }, { cache: { mode: "bypass" } });
+  const r2 = await engine.executeQueryWithMeta(q2, { queries: {} }, { cache: { mode: "bypass" } });
+
+  // @ts-ignore - testing internal bookkeeping
+  const ids1 = Array.from(engine.getTableSourceIds(r1.table));
+  // @ts-ignore - testing internal bookkeeping
+  const ids2 = Array.from(engine.getTableSourceIds(r2.table));
+
+  assert.equal(ids1.length, 1);
+  assert.equal(ids2.length, 1);
+  assert.notEqual(ids1[0], ids2[0]);
+});
+
 test("QueryEngine: source-state cache validation respects explicit database connectionId", async () => {
   const store = new MemoryCacheStore();
   const cache = new CacheManager({ store, now: () => 0 });

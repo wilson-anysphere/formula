@@ -92,7 +92,10 @@ export class SqlConnector {
     });
 
     const connectionId = resolveConnectionId(request, this.getConnectionIdentity);
-    const sourceId = connectionId ? getSqlSourceId(connectionId) : getSqlSourceId(request.connection);
+    // Only include a `sourceId` when a stable connection identity is available.
+    // Avoid hashing opaque connection handles (which can collapse to `{}`) and
+    // cause collisions across distinct connections.
+    const sourceId = connectionId ? getSqlSourceId(connectionId) : undefined;
 
     return {
       table,
@@ -101,7 +104,12 @@ export class SqlConnector {
         schema: { columns: table.columns, inferred: true },
         rowCount: table.rows.length,
         rowCountEstimate: table.rows.length,
-        provenance: { kind: "sql", sourceId, connectionId: connectionId ?? undefined, sql: request.sql },
+        provenance: {
+          kind: "sql",
+          ...(sourceId ? { sourceId } : null),
+          ...(connectionId ? { connectionId } : null),
+          sql: request.sql,
+        },
       },
     };
   }

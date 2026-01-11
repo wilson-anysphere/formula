@@ -897,7 +897,14 @@ export class QueryEngine {
 
     // Ensure the final materialized table is tagged with the full source set so
     // downstream merge/append operations can enforce privacy levels correctly.
-    this.setTableSourceIds(table, this.collectSourceIdsFromMetas(sources));
+    //
+    // Note: Some sources (e.g. SQL connections without a stable identity) may
+    // only have an ephemeral per-engine id stored on the table, and will not be
+    // recoverable from connector provenance alone. Union the existing tags with
+    // the provenance-derived tags rather than overwriting them.
+    const existingSourceIds = this.getTableSourceIds(table);
+    const metaSourceIds = this.collectSourceIdsFromMetas(sources);
+    this.setTableSourceIds(table, new Set([...existingSourceIds, ...metaSourceIds]));
 
     if (this.cache && cacheKey && cacheMode !== "bypass" && (table instanceof DataTable || table instanceof ArrowTableAdapter)) {
       try {
@@ -1295,7 +1302,8 @@ export class QueryEngine {
       const connector = this.connectors.get("sql");
       if (!connector) return { type: "database", missingConnector: "sql" };
       const connectionId = resolveDatabaseConnectionId(source, connector);
-      const sourceId = connectionId ? `sql:${connectionId}` : getSourceIdForQuerySource(source);
+      const connectionRefId = this.getEphemeralObjectId(source.connection);
+      const sourceId = connectionId ? `sql:${connectionId}` : connectionRefId ? `sql:${connectionRefId}` : getSourceIdForQuerySource(source);
       const privacyLevel = getPrivacyLevel(context.privacy?.levelsBySourceId, sourceId);
       if (!connectionId) {
         return {
@@ -1635,7 +1643,9 @@ export class QueryEngine {
       }
 
       const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
-      const sqlSourceId = connectionId ? `sql:${connectionId}` : getSourceIdForQuerySource(source) ?? "<unknown-sql>";
+      const connectionRefId = this.getEphemeralObjectId(source.connection);
+      const sqlSourceId =
+        connectionId ? `sql:${connectionId}` : connectionRefId ? `sql:${connectionRefId}` : getSourceIdForQuerySource(source) ?? "<unknown-sql>";
       this.setTableSourceIds(result.table, [sqlSourceId]);
       const meta = {
         ...result.meta,
@@ -1705,7 +1715,9 @@ export class QueryEngine {
     }
 
     const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
-    const sqlSourceId = connectionId ? `sql:${connectionId}` : getSourceIdForQuerySource(source) ?? "<unknown-sql>";
+    const connectionRefId = this.getEphemeralObjectId(source.connection);
+    const sqlSourceId =
+      connectionId ? `sql:${connectionId}` : connectionRefId ? `sql:${connectionRefId}` : getSourceIdForQuerySource(source) ?? "<unknown-sql>";
     this.setTableSourceIds(result.table, [sqlSourceId]);
     const meta = {
       ...result.meta,
