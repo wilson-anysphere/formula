@@ -11,6 +11,7 @@
     "pyodide:setup": "node scripts/ensure-pyodide-assets.mjs",
     "test:node": "node --test",
     "test": "vitest run",
+    "pretest:e2e": "pnpm -w build:wasm",
     "test:e2e": "playwright test"
   },
   "dependencies": {
