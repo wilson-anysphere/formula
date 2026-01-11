@@ -6,9 +6,9 @@ export type RefreshState = Record<string, RefreshStateEntry>;
 /**
  * Desktop persistence hooks for `RefreshManager` scheduling state.
  *
- * Tauri webviews do not expose Node filesystem APIs, so we default to
- * LocalStorage in-browser (stable per-workbook key) with an in-memory fallback
- * for non-browser environments (tests, previews).
+ * In the full desktop app we prefer a Tauri-backed encrypted store so schedules
+ * survive app restarts. In non-Tauri environments (tests, previews) we fall back
+ * to LocalStorage (stable per-workbook key) and finally an in-memory store.
  */
 export type RefreshStateStore = {
   load(): Promise<RefreshState>;
@@ -20,6 +20,41 @@ export type StorageLike = {
   setItem(key: string, value: string): void;
   removeItem?(key: string): void;
 };
+
+type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+
+function getTauriInvokeOrNull(): TauriInvoke | null {
+  const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+  return typeof invoke === "function" ? invoke : null;
+}
+
+class TauriPowerQueryRefreshStateStore implements RefreshStateStore {
+  private readonly workbookId: string;
+  private readonly invoke: TauriInvoke;
+
+  constructor(opts: { workbookId: string; invoke: TauriInvoke }) {
+    this.workbookId = opts.workbookId;
+    this.invoke = opts.invoke;
+  }
+
+  async load(): Promise<RefreshState> {
+    try {
+      const payload = await this.invoke("power_query_refresh_state_get", { workbook_id: this.workbookId });
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) return {};
+      return payload as RefreshState;
+    } catch {
+      return {};
+    }
+  }
+
+  async save(state: RefreshState): Promise<void> {
+    try {
+      await this.invoke("power_query_refresh_state_set", { workbook_id: this.workbookId, state });
+    } catch {
+      // Best-effort: persistence should never break refresh.
+    }
+  }
+}
 
 function safeStorage(storage: StorageLike): StorageLike {
   return {
@@ -105,8 +140,17 @@ export function createPowerQueryRefreshStateStore(
     storage?: StorageLike | null;
   } = {},
 ): RefreshStateStore {
+  const workbookId = options.workbookId ?? "default";
+
+  if (options.storage === undefined) {
+    const invoke = getTauriInvokeOrNull();
+    if (invoke) {
+      return new TauriPowerQueryRefreshStateStore({ workbookId, invoke });
+    }
+  }
+
   const storage = options.storage === undefined ? getLocalStorageOrNull() : options.storage;
-  const key = storageKey(options.workbookId);
+  const key = storageKey(workbookId);
 
   if (!storage) {
     return {

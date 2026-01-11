@@ -7,6 +7,8 @@ use crate::macro_trust::MacroTrustDecision;
 use crate::storage::power_query_credentials::{
     PowerQueryCredentialEntry, PowerQueryCredentialListEntry, PowerQueryCredentialStore,
 };
+#[cfg(feature = "desktop")]
+use crate::storage::power_query_refresh_state::PowerQueryRefreshStateStore;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct PrintCellRange {
@@ -519,6 +521,30 @@ pub async fn power_query_credential_list() -> Result<Vec<PowerQueryCredentialLis
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryCredentialStore::open_default().map_err(|e| e.to_string())?;
         store.list().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Power Query: load the persisted refresh scheduling state for a workbook.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn power_query_refresh_state_get(workbook_id: String) -> Result<Option<JsonValue>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = PowerQueryRefreshStateStore::open_default().map_err(|e| e.to_string())?;
+        store.load(&workbook_id).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Power Query: persist refresh scheduling state for a workbook.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn power_query_refresh_state_set(workbook_id: String, state: JsonValue) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = PowerQueryRefreshStateStore::open_default().map_err(|e| e.to_string())?;
+        store.save(&workbook_id, state).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?

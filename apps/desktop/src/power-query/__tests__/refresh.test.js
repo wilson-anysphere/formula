@@ -148,6 +148,42 @@ test("DesktopPowerQueryRefreshManager persists refresh state when a stateStore i
   mgr.dispose();
 });
 
+test("DesktopPowerQueryRefreshManager restores persisted refresh policy when the query omits refreshPolicy", async () => {
+  const table = DataTable.fromGrid([["A"], [1]], { hasHeaders: true, inferTypes: true });
+  const engine = new StaticEngine(table);
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  /** @type {any} */
+  let savedState = null;
+
+  const stateStore = {
+    load: async () => ({
+      q_persisted: { policy: { type: "interval", intervalMs: 10_000 }, lastRunAtMs: 123 },
+    }),
+    save: async (state) => {
+      savedState = state;
+    },
+  };
+
+  const mgr = new DesktopPowerQueryRefreshManager({ engine, document: doc, concurrency: 1, batchSize: 1, stateStore });
+
+  const query = {
+    id: "q_persisted",
+    name: "Persisted",
+    source: { type: "range", range: { values: [["X"], [1]], hasHeaders: true } },
+    steps: [],
+  };
+
+  mgr.registerQuery(query);
+  await mgr.ready;
+  await new Promise((resolve) => queueMicrotask(resolve));
+
+  assert.equal(savedState?.q_persisted?.policy?.type, "interval");
+  assert.equal(savedState?.q_persisted?.policy?.intervalMs, 10_000);
+
+  mgr.dispose();
+});
+
 test("DesktopPowerQueryRefreshManager refreshAll respects dependencies and applies refreshed outputs", async () => {
   const tableA = DataTable.fromGrid([["A"], [1]], { hasHeaders: true, inferTypes: true });
   const tableB = DataTable.fromGrid([["B"], [2]], { hasHeaders: true, inferTypes: true });

@@ -163,7 +163,7 @@ export class DesktopPowerQueryRefreshManager {
     return this.emitter.on(handler);
   }
 
-  registerQuery(query: Query, policy: RefreshPolicy = query.refreshPolicy ?? { type: "manual" }) {
+  registerQuery(query: Query, policy?: RefreshPolicy) {
     this.queries.set(query.id, query);
     this.manager.registerQuery(query, policy);
     this.orchestrator.registerQuery(query);
