@@ -332,9 +332,25 @@ export class EngineWorker {
     formula: string,
     options?: FormulaParseOptions,
     rpcOptions?: RpcOptions
+  ): Promise<FormulaPartialLexResult>;
+  async lexFormulaPartial(formula: string, rpcOptions?: RpcOptions): Promise<FormulaPartialLexResult>;
+  async lexFormulaPartial(
+    formula: string,
+    optionsOrRpcOptions?: FormulaParseOptions | RpcOptions,
+    rpcOptions?: RpcOptions
   ): Promise<FormulaPartialLexResult> {
+    const isFormulaParseOptions = (value: unknown): value is FormulaParseOptions =>
+      isPlainObject(value) && !("signal" in value) && !("timeoutMs" in value);
+    const isRpcOptions = (value: unknown): value is RpcOptions =>
+      Boolean(value && typeof value === "object" && ("signal" in value || "timeoutMs" in value));
+
+    const options = isRpcOptions(optionsOrRpcOptions) && !isFormulaParseOptions(optionsOrRpcOptions)
+      ? undefined
+      : (optionsOrRpcOptions as FormulaParseOptions | undefined);
+    const finalRpcOptions = isRpcOptions(optionsOrRpcOptions) ? optionsOrRpcOptions : rpcOptions;
+
     const normalizedOptions = normalizeFormulaParseOptions(options);
-    return (await this.invoke("lexFormulaPartial", { formula, options: normalizedOptions }, rpcOptions)) as FormulaPartialLexResult;
+    return (await this.invoke("lexFormulaPartial", { formula, options: normalizedOptions }, finalRpcOptions)) as FormulaPartialLexResult;
   }
 
   /**

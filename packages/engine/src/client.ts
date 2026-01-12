@@ -133,6 +133,12 @@ export interface EngineClient {
     options?: FormulaParseOptions,
     rpcOptions?: RpcOptions
   ): Promise<FormulaPartialLexResult>;
+  /**
+   * Best-effort lexer for editor syntax highlighting (never throws).
+   *
+   * Convenience overload for `lexFormulaPartial(formula, undefined, rpcOptions)`.
+   */
+  lexFormulaPartial(formula: string, rpcOptions?: RpcOptions): Promise<FormulaPartialLexResult>;
 
   /**
    * Best-effort partial parse for editor/autocomplete scenarios.
@@ -260,8 +266,11 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => connected.rewriteFormulasForCopyDelta(requests, rpcOptions)),
     lexFormula: async (formula: string, optionsOrRpcOptions?: FormulaParseOptions | RpcOptions, rpcOptions?: RpcOptions) =>
       await withEngine((connected) => (connected.lexFormula as any)(formula, optionsOrRpcOptions, rpcOptions)),
-    lexFormulaPartial: async (formula, options, rpcOptions) =>
-      await withEngine((connected) => connected.lexFormulaPartial(formula, options, rpcOptions)),
+    lexFormulaPartial: async (
+      formula: string,
+      optionsOrRpcOptions?: FormulaParseOptions | RpcOptions,
+      rpcOptions?: RpcOptions
+    ) => await withEngine((connected) => (connected.lexFormulaPartial as any)(formula, optionsOrRpcOptions, rpcOptions)),
     parseFormulaPartial: async (
       formula: string,
       cursorOrOptions?: number | FormulaParseOptions,

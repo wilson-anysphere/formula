@@ -509,6 +509,26 @@ describe("EngineWorker RPC", () => {
     expect(lexIndex).toBeLessThan(setCellsIndex);
   });
 
+  it("supports lexFormulaPartial overload with rpcOptions as the second argument", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    await engine.lexFormulaPartial("=SUM(1,", { timeoutMs: 1_000 });
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "lexFormulaPartial"
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({
+      formula: "=SUM(1,",
+      options: undefined
+    });
+  });
+
   it("sends parseFormulaPartial RPC requests with the expected params", async () => {
     const worker = new MockWorker();
     const engine = await EngineWorker.connect({
