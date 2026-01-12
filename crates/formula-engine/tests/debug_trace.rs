@@ -1,4 +1,5 @@
 use formula_engine::debug::{Span, TraceKind, TraceRef};
+use formula_engine::date::ExcelDateSystem;
 use formula_engine::eval::CellAddr;
 use formula_engine::{
     Engine, ExternalDataProvider, ExternalValueProvider, NameDefinition, NameScope, Value,
@@ -360,6 +361,38 @@ fn debug_trace_respects_value_locale_for_concat_number_formatting() {
 
     let computed = engine.get_cell_value("Sheet1", "A1");
     assert_eq!(computed, Value::Text("1,5".to_string()));
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(dbg.value, computed);
+}
+
+#[test]
+fn debug_trace_respects_value_locale_for_numeric_coercion_in_operators() {
+    let mut engine = Engine::new();
+    assert!(engine.set_value_locale_id("de-DE"));
+
+    engine.set_cell_formula("Sheet1", "A1", "=\"1,5\"+0").unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(computed, Value::Number(1.5));
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(dbg.value, computed);
+}
+
+#[test]
+fn debug_trace_respects_date_system_for_text_date_coercion() {
+    let mut engine = Engine::new();
+    engine.set_date_system(ExcelDateSystem::Excel1904);
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=\"1/1/1904\"+0")
+        .unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(computed, Value::Number(0.0));
 
     let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
     assert_eq!(dbg.value, computed);
