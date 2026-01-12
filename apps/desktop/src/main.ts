@@ -139,7 +139,11 @@ window.addEventListener("unload", () => {
 
 // Startup performance instrumentation (no-op for web builds).
 void (async () => {
-  await installStartupTimingsListeners();
+  try {
+    await installStartupTimingsListeners();
+  } catch {
+    // Best-effort; instrumentation should never block startup.
+  }
   reportStartupWebviewLoaded();
 })();
 
@@ -4683,4 +4687,4 @@ try {
 (window as any).__formulaExtensionHostManager = extensionHostManagerForE2e;
 
 // Time-to-interactive instrumentation (best-effort, no-op for web builds).
-void markStartupTimeToInteractive({ whenIdle: () => app.whenIdle() });
+void markStartupTimeToInteractive({ whenIdle: () => app.whenIdle() }).catch(() => {});
