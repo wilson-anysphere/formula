@@ -429,6 +429,7 @@ let queuedInvoke: TauriInvoke | null = null;
 let workbookSync: ReturnType<typeof startWorkbookSync> | null = null;
 let rerenderLayout: (() => void) | null = null;
 let vbaEventMacros: ReturnType<typeof installVbaEventMacros> | null = null;
+let secondaryGridView: SecondaryGridView | null = null;
 let ribbonLayoutController: LayoutController | null = null;
 let activeMacroRecorder: MacroRecorder | null = null;
 type MacrosPanelFocusTarget = "runner-select" | "runner-run" | "runner-trust-center" | "recorder-start" | "recorder-stop";

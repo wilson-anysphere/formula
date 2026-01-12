@@ -12,6 +12,7 @@ test.describe("tauri native menu integration", () => {
 
       // Avoid accidental modal prompts blocking the test.
       window.confirm = () => true;
+      window.alert = () => {};
 
       // Force menu copy/paste to exercise the fallback code paths instead of relying on
       // browser/OS clipboard behavior (which is often disabled in headless WebViews).
@@ -107,7 +108,8 @@ test.describe("tauri native menu integration", () => {
                 return null;
 
               case "get_macro_security_status":
-                return { has_macros: true, trust: "blocked" };
+                // Avoid macro trust prompts (not relevant to this test); treat the workbook as macro-free.
+                return { has_macros: false, trust: "blocked" };
 
               case "set_cell":
               case "set_range":
@@ -160,11 +162,14 @@ test.describe("tauri native menu integration", () => {
     });
 
     await page.waitForFunction(() => (window as any).__tauriDialogOpenCalls === 1);
-    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+    // `menu-open` triggers an async workbook load; wait for the value to be materialized
+    // in the app state (not just for the menu handler to be invoked).
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1")), { timeout: 20_000 }).toBe("Hello");
     await expect(page.getByTestId("active-value")).toHaveText("Hello");
 
     // Menu Edit items should work while editing text (formula bar).
-    await page.getByTestId("formula-input").click();
+    // In view mode the formula bar textarea is hidden; click the highlight to enter edit mode.
+    await page.getByTestId("formula-highlight").click();
     await page.getByTestId("formula-input").fill("CopyMe");
     await page.evaluate(() => {
       const input = document.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
