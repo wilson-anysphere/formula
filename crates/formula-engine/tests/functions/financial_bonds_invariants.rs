@@ -335,6 +335,93 @@ fn price_matches_pv_when_settlement_is_coupon_date() {
 }
 
 #[test]
+fn duration_n1_equals_time_to_maturity() {
+    let mut sheet = TestSheet::new();
+
+    // Skip if DURATION or the COUP helpers it relies on aren't registered yet.
+    if eval_number_or_skip(
+        &mut sheet,
+        "=DURATION(DATE(2020,7,2),DATE(2021,1,1),0.05,0.04,2,0)",
+    )
+    .is_none()
+        || eval_number_or_skip(
+            &mut sheet,
+            "=COUPNUM(DATE(2020,7,2),DATE(2021,1,1),2,0)",
+        )
+        .is_none()
+        || eval_number_or_skip(
+            &mut sheet,
+            "=COUPDAYSNC(DATE(2020,7,2),DATE(2021,1,1),2,0)",
+        )
+        .is_none()
+        || eval_number_or_skip(
+            &mut sheet,
+            "=COUPDAYS(DATE(2020,7,2),DATE(2021,1,1),2,0)",
+        )
+        .is_none()
+    {
+        return;
+    }
+
+    // For N=1 (only one remaining cash flow date), duration collapses to the time in years until
+    // maturity:
+    //   DURATION = (DSC / E) / frequency
+    // This should be independent of coupon and yield (there's a single cash flow).
+    let maturities = ["DATE(2030,12,31)", "DATE(2031,2,28)", "DATE(2030,7,15)"];
+    let frequencies = [1, 2, 4];
+    let bases = [0, 1, 2, 3, 4];
+    let deltas = [1, 10, 30];
+    let coupons = [0.0, 0.025, 0.08];
+    let yields = [0.01, 0.05, 0.12];
+
+    for maturity in maturities {
+        for &frequency in &frequencies {
+            let months_per_period = 12 / frequency;
+
+            for &delta in &deltas {
+                let settlement =
+                    format!("(EDATE({maturity},-{months_per_period})+{delta})");
+
+                for &basis in &bases {
+                    let n = eval_number(
+                        &mut sheet,
+                        &format!("=COUPNUM({settlement},{maturity},{frequency},{basis})"),
+                    );
+                    if (n - 1.0).abs() > 1e-12 {
+                        // If the schedule construction doesn't land in the last coupon period for
+                        // this basis/date combination, skip rather than asserting an incorrect
+                        // identity.
+                        continue;
+                    }
+
+                    let dsc = eval_number(
+                        &mut sheet,
+                        &format!("=COUPDAYSNC({settlement},{maturity},{frequency},{basis})"),
+                    );
+                    let e = eval_number(
+                        &mut sheet,
+                        &format!("=COUPDAYS({settlement},{maturity},{frequency},{basis})"),
+                    );
+                    let expected = (dsc / e) / (frequency as f64);
+
+                    for &coupon in &coupons {
+                        for &yld in &yields {
+                            let dur = eval_number(
+                                &mut sheet,
+                                &format!(
+                                    "=DURATION({settlement},{maturity},{coupon},{yld},{frequency},{basis})"
+                                ),
+                            );
+                            assert_close(dur, expected, 1e-7);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn mduration_matches_duration_identity() {
     let mut sheet = TestSheet::new();
 
