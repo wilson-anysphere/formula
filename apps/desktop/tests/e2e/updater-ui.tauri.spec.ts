@@ -2,6 +2,14 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { gotoDesktop } from "./helpers";
 
+async function flushMicrotasks(page: Page, times = 6): Promise<void> {
+  await page.evaluate(async (n) => {
+    for (let idx = 0; idx < n; idx += 1) {
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+    }
+  }, times);
+}
+
 async function waitForTauriListeners(page: Page, eventName: string): Promise<void> {
   await page.waitForFunction(
     (name) => {
@@ -227,6 +235,115 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     expect(counts.focus).toBe(1);
     expect(counts.notifications).toBe(0);
     expect(counts.notifiedViaInvoke).toBe(false);
+  });
+
+  test("startup update notifications are suppressed after the user dismisses the same version", async ({ page }) => {
+    await page.addInitScript(() => {
+      const listeners: Record<string, Array<(event: any) => void>> = {};
+      const emitted: Array<{ event: string; payload: any }> = [];
+      const notifications: Array<{ title: string; body?: string }> = [];
+      const invokes: Array<{ cmd: string; args: any }> = [];
+
+      (window as any).__tauriListeners = listeners;
+      (window as any).__tauriEmittedEvents = emitted;
+      (window as any).__tauriNotifications = notifications;
+      (window as any).__tauriInvokes = invokes;
+      (window as any).__tauriShowCalls = 0;
+      (window as any).__tauriFocusCalls = 0;
+
+      const windowHandle = {
+        show: async () => {
+          (window as any).__tauriShowCalls += 1;
+        },
+        setFocus: async () => {
+          (window as any).__tauriFocusCalls += 1;
+        },
+      };
+
+      (window as any).__TAURI__ = {
+        core: {
+          invoke: async (cmd: string, args: any) => {
+            invokes.push({ cmd, args });
+            return null;
+          },
+        },
+        event: {
+          listen: async (name: string, handler: any) => {
+            if (!Array.isArray(listeners[name])) {
+              listeners[name] = [];
+            }
+            listeners[name].push(handler);
+            return () => {
+              const arr = listeners[name];
+              if (!Array.isArray(arr)) return;
+              const idx = arr.indexOf(handler);
+              if (idx >= 0) arr.splice(idx, 1);
+            };
+          },
+          emit: async (event: string, payload?: any) => {
+            emitted.push({ event, payload: payload ?? null });
+          },
+        },
+        window: {
+          getCurrentWebviewWindow: () => windowHandle,
+          getCurrentWindow: () => windowHandle,
+          getCurrent: () => windowHandle,
+          appWindow: windowHandle,
+        },
+        notification: {
+          notify: async (payload: { title: string; body?: string }) => {
+            notifications.push({ title: payload.title, body: payload.body });
+          },
+        },
+      };
+    });
+
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() =>
+      Boolean((window as any).__tauriEmittedEvents?.some((entry: any) => entry?.event === "updater-ui-ready")),
+    );
+
+    // Trigger a manual update dialog and dismiss it (which should persist suppression).
+    await waitForTauriListeners(page, "update-available");
+    await dispatchTauriEvent(page, "update-available", { source: "manual", version: "9.9.9", body: "Notes" });
+
+    const dialog = page.getByTestId("updater-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(page.getByTestId("updater-later")).toBeVisible();
+    await page.getByTestId("updater-later").click();
+    await expect(dialog).toBeHidden();
+
+    const dismissal = await page.evaluate(() => ({
+      version: localStorage.getItem("formula.updater.dismissedVersion"),
+      dismissedAt: localStorage.getItem("formula.updater.dismissedAt"),
+    }));
+    expect(dismissal.version).toBe("9.9.9");
+    expect(Number(dismissal.dismissedAt)).toBeGreaterThan(0);
+
+    // Clear any earlier notification side-effects from test setup.
+    await page.evaluate(() => {
+      const notifications = (window as any).__tauriNotifications;
+      if (Array.isArray(notifications)) notifications.length = 0;
+      const invokes = (window as any).__tauriInvokes;
+      if (Array.isArray(invokes)) invokes.length = 0;
+    });
+
+    // Now deliver the same version as a startup update. The UX should not open the dialog
+    // and should not request a system notification because the user dismissed it recently.
+    await dispatchTauriEvent(page, "update-available", { source: "startup", version: "9.9.9", body: "Notes" });
+    await flushMicrotasks(page);
+
+    await expect(dialog).toBeHidden();
+
+    const notificationStatus = await page.evaluate(() => {
+      const notifications = (window as any).__tauriNotifications ?? [];
+      const invokes = (window as any).__tauriInvokes ?? [];
+      const invoked = Array.isArray(invokes) && invokes.some((entry: any) => entry?.cmd === "show_system_notification");
+      return { notificationsCount: Array.isArray(notifications) ? notifications.length : 0, invoked };
+    });
+    expect(notificationStatus.notificationsCount).toBe(0);
+    expect(notificationStatus.invoked).toBe(false);
   });
 
   test("startup update-available events do not open the in-app dialog and instead request a system notification", async ({
