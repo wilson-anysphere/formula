@@ -205,6 +205,79 @@ describe("CanvasGridRenderer side border rendering (Excel-like)", () => {
     expect([...verticalXs].sort((a, b) => a - b)).toEqual([-0.5, 1.5, 19.5, 21.5]);
   });
 
+  it("scales double borders with zoom (per-line width + offsets)", () => {
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row === 0 && col === 0) {
+          return {
+            row,
+            col,
+            value: "A",
+            style: {
+              borders: {
+                top: { width: 3, style: "double", color: "#ff00ff" },
+                right: { width: 3, style: "double", color: "#ff00ff" },
+                bottom: { width: 3, style: "double", color: "#ff00ff" },
+                left: { width: 3, style: "double", color: "#ff00ff" }
+              }
+            }
+          };
+        }
+        return null;
+      }
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const { ctx: gridCtx, strokes: gridStrokes } = createRecording2dContext(gridCanvas);
+    const contentCtx = createRecording2dContext(contentCanvas).ctx;
+    const selectionCtx = createRecording2dContext(selectionCanvas).ctx;
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, gridCtx],
+      [contentCanvas, contentCtx],
+      [selectionCanvas, selectionCtx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      return contexts.get(this) ?? createRecording2dContext(this).ctx;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 1,
+      defaultRowHeight: 20,
+      defaultColWidth: 20
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 100, 1);
+
+    // Clear strokes from the initial render triggered by `resize` (requestAnimationFrame is stubbed to run immediately).
+    gridStrokes.length = 0;
+    renderer.setZoom(2);
+
+    // For zoom=2, totalWidth=6 and per-line width is 2 (totalWidth/3).
+    const purpleStrokes = gridStrokes.filter(
+      (stroke) => stroke.strokeStyle === "#ff00ff" && Math.abs(stroke.lineWidth - 2) < 1e-6
+    );
+    expect(purpleStrokes).toHaveLength(1);
+
+    const allSegments = purpleStrokes[0]!.segments;
+    const horizontalYs = new Set<number>(
+      allSegments.filter((seg) => seg.y1 === seg.y2).map((seg) => seg.y1)
+    );
+    const verticalXs = new Set<number>(
+      allSegments.filter((seg) => seg.x1 === seg.x2).map((seg) => seg.x1)
+    );
+
+    // For a 40x40 cell with per-line width=2, offsets are +/-2 and no half-pixel snapping is applied.
+    expect([...horizontalYs].sort((a, b) => a - b)).toEqual([-2, 2, 38, 42]);
+    expect([...verticalXs].sort((a, b) => a - b)).toEqual([-2, 2, 38, 42]);
+  });
+
   it("renders merged range side borders around the merged rect (anchor cell styles)", () => {
     const merged: CellRange = { startRow: 0, endRow: 2, startCol: 0, endCol: 2 };
     const contains = (range: CellRange, row: number, col: number) =>
