@@ -239,6 +239,15 @@ export function PivotBuilderPanelContainer(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Allow external triggers (e.g. command palette) to re-sync the source range from the
+  // latest selection without needing a full remount.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => useCurrentSelection();
+    window.addEventListener("pivot-builder:use-selection", handler as any);
+    return () => window.removeEventListener("pivot-builder:use-selection", handler as any);
+  }, [useCurrentSelection]);
+
   const parseSourceRangeText = useCallback(
     (text: string) => {
       const raw = text.trim();

@@ -777,9 +777,16 @@ if (
     getDocumentController: () => app.getDocument(),
     getActiveSheetId: () => app.getCurrentSheetId(),
     getSelection: () => {
-      const ranges = app.getSelectionRanges();
-      const first = ranges[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
-      return { sheetId: app.getCurrentSheetId(), range: first };
+      const selection = currentSelectionRect();
+      return {
+        sheetId: selection.sheetId,
+        range: {
+          startRow: selection.startRow,
+          startCol: selection.startCol,
+          endRow: selection.endRow,
+          endCol: selection.endCol,
+        },
+      };
     },
     workbookId,
     getWorkbookId: () => activePanelWorkbookId,
@@ -1482,7 +1489,12 @@ if (
     {
       id: "insertPivotTable",
       label: t("commandPalette.command.insertPivotTable"),
-      run: () => layoutController.openPanel(PanelIds.PIVOT_BUILDER),
+      run: () => {
+        layoutController.openPanel(PanelIds.PIVOT_BUILDER);
+        // If the panel is already open, we still want to refresh its source range from
+        // the latest selection.
+        window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
+      },
     },
     {
       id: "tracePrecedents",
