@@ -153,3 +153,28 @@ test("permission storage: resetPermissions clears a single extension and forces 
 
   assert.equal(promptCalls, 1);
 });
+
+test("permission gating: accepts object-form declared permissions", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-perms-object-declared-"));
+  const storePath = path.join(dir, "permissions.json");
+  const extensionId = "pub.obj";
+
+  const pm = new PermissionManager({
+    storagePath: storePath,
+    prompt: async () => true
+  });
+
+  await pm.ensurePermissions(
+    {
+      extensionId,
+      displayName: "Obj",
+      declaredPermissions: [{ network: { mode: "allowlist", hosts: ["example.com"] } }, { clipboard: true }]
+    },
+    ["network", "clipboard"]
+  );
+
+  assert.deepEqual(await pm.getGrantedPermissions(extensionId), {
+    network: { mode: "full" },
+    clipboard: true
+  });
+});
