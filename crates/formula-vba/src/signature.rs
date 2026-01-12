@@ -76,10 +76,10 @@ pub struct VbaDigitalSignature {
     /// signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`) even when
     /// `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256.
     ///
-    /// For the v3 `\x05DigitalSignatureExt` variant, signatures commonly embed a 32-byte SHA-256
-    /// binding digest over an MS-OVBA v3 transcript (but producers can vary). `formula-vba` treats
-    /// v3 binding as best-effort and currently compares the signed digest to
-    /// [`crate::contents_hash_v3`].
+    /// For the v3 `\x05DigitalSignatureExt` variant, binding is against MS-OVBA `ContentsHashV3`
+    /// (32-byte `SHA-256(ProjectNormalizedData)`). The `DigestInfo` algorithm OID is not
+    /// authoritative for binding (some producers emit inconsistent OIDs); `formula-vba` compares
+    /// digest bytes to [`crate::contents_hash_v3`].
     pub binding: VbaSignatureBinding,
 }
 
@@ -114,7 +114,8 @@ pub struct VbaDigitalSignatureBound {
     /// Note: for legacy VBA signature streams (`DigitalSignature` / `DigitalSignatureEx`), this OID
     /// is not authoritative for binding; Office uses 16-byte MD5 digest bytes per MS-OSHARED §4.3
     /// even when the OID indicates SHA-256. For v3 (`DigitalSignatureExt`), the OID is surfaced for
-    /// debugging/UI display (SHA-256 is common, but not universal).
+    /// debugging/UI display but is not authoritative for binding (some producers emit inconsistent
+    /// OIDs).
     pub hash_algorithm_oid: Option<String>,
     /// Human-readable name for the hash algorithm (best-effort).
     pub hash_algorithm_name: Option<String>,
@@ -637,13 +638,10 @@ pub fn verify_vba_digital_signature_bound(
 /// - For legacy signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`), the embedded
 ///   digest bytes are always a 16-byte MD5 even when `DigestInfo.digestAlgorithm.algorithm` indicates
 ///   SHA-256 (MS-OSHARED §4.3).
-/// - For v3 (`DigitalSignatureExt`), binding uses the MS-OVBA §2.4.2 v3 content-hash transcript.
-///   In the wild, the signed digest bytes are commonly 32-byte SHA-256, but the MS-OVBA v3
-///   pseudocode is written in terms of a generic hash function over:
-///   `ContentBuffer = V3ContentNormalizedData || ProjectNormalizedData`.
-///   `formula-vba` currently verifies v3 binding by comparing the signed digest bytes to
-///   [`crate::contents_hash_v3`] (a SHA-256 helper over `formula-vba`'s best-effort transcript; see
-///   `docs/vba-digital-signatures.md` for spec vs implementation notes).
+/// - For v3 (`DigitalSignatureExt`), binding is against MS-OVBA `ContentsHashV3` (SHA-256 over v3
+///   `ProjectNormalizedData`). The `DigestInfo` algorithm OID is not authoritative for binding
+///   (some producers emit inconsistent OIDs); binding compares digest bytes to
+///   [`crate::contents_hash_v3`].
 ///
 /// If multiple signature streams are present, we prefer:
 /// 1) The first signature stream (by Excel-like stream-name ordering; see `signature_path_rank`)

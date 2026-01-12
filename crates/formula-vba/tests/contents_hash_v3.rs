@@ -355,15 +355,15 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
 
     // ---- Expected normalized transcript ----
     //
-    // This test targets `contents_hash_v3`, which currently computes a SHA-256 digest over
-    // `project_normalized_data_v3_transcript` (a `formula-vba`-specific transcript):
+    // This test targets `contents_hash_v3`, which computes `ContentsHashV3` as:
     //
-    // `digest = SHA-256(project_normalized_data_v3_transcript)`
-    // `project_normalized_data_v3_transcript = (filtered PROJECT stream lines) || V3ContentNormalizedData || FormsNormalizedData`
+    // `ContentsHashV3 = SHA-256(ProjectNormalizedData)`
     //
-    // Note: this transcript/order does not match the spec definitions of MS-OVBA §2.4.2.6
-    // `ProjectNormalizedData` or MS-OVBA §2.4.2.7 `ContentBuffer`
-    // (`V3ContentNormalizedData || ProjectNormalizedData`). See `docs/vba-digital-signatures.md`.
+    // where `ProjectNormalizedData` is the transcript returned by `project_normalized_data_v3_transcript`:
+    //
+    // `ProjectNormalizedData = (filtered PROJECT stream properties) || V3ContentNormalizedData || FormsNormalizedData`
+    //
+    // See `docs/vba-digital-signatures.md` for background and transcript details.
     //
     // V3ContentNormalizedData includes (for procedural modules) `MODULETYPE.Id || MODULETYPE.Reserved`
     // followed by LF-normalized module source (Attribute filtering per MS-OVBA §2.4.2.5), and the

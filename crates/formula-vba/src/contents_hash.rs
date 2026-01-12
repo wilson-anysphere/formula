@@ -2349,20 +2349,20 @@ fn append_v3_module(
     Ok(())
 }
 
-/// Build `formula-vba`'s current v3 signature-binding transcript for a `vbaProject.bin`.
+/// Build the v3 `ProjectNormalizedData` transcript used for `DigitalSignatureExt` binding.
 ///
-/// Important: despite the name, this is **not** MS-OVBA §2.4.2.6 `ProjectNormalizedData`
-/// (`NormalizeProjectStream`), and the concatenation order does not match MS-OVBA §2.4.2.7
-/// (`ContentBuffer = V3ContentNormalizedData || ProjectNormalizedData`).
+/// Transcript:
 ///
-/// Current `formula-vba` transcript (best-effort):
-/// `(filtered PROJECT stream lines) || V3ContentNormalizedData || FormsNormalizedData`.
+/// `ProjectNormalizedData = (filtered PROJECT stream properties; [Workspace] ignored)
+///                         || V3ContentNormalizedData || FormsNormalizedData`
 ///
-/// Spec reference: MS-OVBA §2.4.2 ("Contents Hash" version 3).
+/// This is hashed as `ContentsHashV3 = SHA-256(ProjectNormalizedData)` by [`contents_hash_v3`].
+///
+/// Spec reference: MS-OVBA §2.4.2.6/§2.4.2.7.
 pub fn project_normalized_data_v3_transcript(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
-    // Best-effort: normalize/filter the textual `PROJECT` stream. MS-OVBA v3 binds the signature not
-    // just to module content, but also to a filtered subset of the `PROJECT` stream properties (see
-    // §2.4.2.6 "ProjectNormalizedData").
+    // Normalize/filter the textual `PROJECT` stream for v3 binding. MS-OVBA v3 binds the signature
+    // not just to module content, but also to a filtered subset of the `PROJECT` stream properties
+    // (see §2.4.2.6 "ProjectNormalizedData").
     //
     // Some `PROJECT` properties MUST be excluded because they are either security-sensitive or can
     // change without affecting macro semantics (e.g. CMG/DPB/GC protection fields).
@@ -2394,7 +2394,7 @@ fn normalize_project_stream_properties_v3(project_stream_bytes: &[u8]) -> Vec<u8
     // transcript preserves MBCS bytes verbatim.
 
 fn is_excluded_key(key: &[u8]) -> bool {
-        // Exclusions used by this helper's best-effort transcript.
+        // Exclusions used by the v3 `PROJECT` stream transcript (case-insensitive).
         key.eq_ignore_ascii_case(b"ID")
             || key.eq_ignore_ascii_case(b"Document")
             || key.eq_ignore_ascii_case(b"DocModule")
@@ -2470,9 +2470,7 @@ fn is_excluded_key(key: &[u8]) -> bool {
 //
 /// Compute a SHA-256 digest over [`project_normalized_data_v3_transcript`]'s transcript.
 ///
-/// This is a convenience/helper API: real-world `\x05DigitalSignatureExt` signatures most commonly
-/// use a 32-byte SHA-256 binding digest, but MS-OVBA v3 is defined in terms of hashing a
-/// `ContentBuffer` (`V3ContentNormalizedData || ProjectNormalizedData`) and producers may vary.
+/// This returns MS-OVBA v3 `ContentsHashV3` (the SHA-256 digest of v3 `ProjectNormalizedData`).
 ///
 /// For other algorithms (debugging/out-of-spec), callers can use
 /// [`crate::compute_vba_project_digest_v3`].
