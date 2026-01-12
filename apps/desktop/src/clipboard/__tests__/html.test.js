@@ -178,3 +178,12 @@ test("clipboard HTML handles CF_HTML byte offsets when non-ASCII content appears
 
   assert.equal(grid[0][0].value, "RIGHT");
 });
+
+test("clipboard HTML strips leading/trailing NUL padding from clipboard payloads", () => {
+  const cfHtml = buildCfHtmlPayload("<table><tr><td>Hello</td></tr></table>");
+  const padded = `\u0000${cfHtml}\u0000\u0000`;
+
+  const grid = parseHtmlToCellGrid(padded);
+  assert.ok(grid);
+  assert.equal(grid[0][0].value, "Hello");
+});
