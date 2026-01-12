@@ -315,7 +315,12 @@ fn looks_like_pkcs7_signed_data(bytes: &[u8]) -> bool {
         return false;
     }
 
-    let rest = &bytes[hdr_len..];
+    let rest = match bytes.get(hdr_len..) {
+        Some(v) => v,
+        None => return false,
+    };
+
+    // ContentInfo.contentType OBJECT IDENTIFIER
     let (tag2, oid_len, hdr2_len) = match ber_header(rest) {
         Some(v) => v,
         None => return false,
@@ -339,11 +344,77 @@ fn looks_like_pkcs7_signed_data(bytes: &[u8]) -> bool {
         Some(v) => v,
         None => return false,
     };
-    let (tag3, _len3, _hdr3_len) = match ber_header(after_oid) {
+    let (tag3, len3, hdr3_len) = match ber_header(after_oid) {
         Some(v) => v,
         None => return false,
     };
     tag3.tag_byte == 0xA0
+        && {
+            // SignedData ::= SEQUENCE { version INTEGER, digestAlgorithms SET, encapContentInfo SEQUENCE, ... }
+            let explicit_content = match after_oid.get(hdr3_len..) {
+                Some(v) => v,
+                None => return false,
+            };
+            let explicit_content = match len3 {
+                BerLen::Definite(l) => match explicit_content.get(..l) {
+                    Some(v) => v,
+                    None => return false,
+                },
+                BerLen::Indefinite => explicit_content,
+            };
+
+            let (sd_tag, sd_len, sd_hdr_len) = match ber_header(explicit_content) {
+                Some(v) => v,
+                None => return false,
+            };
+            if sd_tag.tag_byte != 0x30 {
+                return false;
+            }
+            let sd_content = match explicit_content.get(sd_hdr_len..) {
+                Some(v) => v,
+                None => return false,
+            };
+            let mut sd_cur = match sd_len {
+                BerLen::Definite(l) => match sd_content.get(..l) {
+                    Some(v) => v,
+                    None => return false,
+                },
+                BerLen::Indefinite => sd_content,
+            };
+
+            // version INTEGER
+            let (ver_tag, _ver_len, _ver_hdr_len) = match ber_header(sd_cur) {
+                Some(v) => v,
+                None => return false,
+            };
+            if ver_tag.tag_byte != 0x02 {
+                return false;
+            }
+            sd_cur = match ber_skip_any(sd_cur) {
+                Some(v) => v,
+                None => return false,
+            };
+
+            // digestAlgorithms SET
+            let (dig_tag, _dig_len, _dig_hdr_len) = match ber_header(sd_cur) {
+                Some(v) => v,
+                None => return false,
+            };
+            if dig_tag.tag_byte != 0x31 {
+                return false;
+            }
+            sd_cur = match ber_skip_any(sd_cur) {
+                Some(v) => v,
+                None => return false,
+            };
+
+            // encapContentInfo SEQUENCE
+            let (enc_tag, _enc_len, _enc_hdr_len) = match ber_header(sd_cur) {
+                Some(v) => v,
+                None => return false,
+            };
+            enc_tag.tag_byte == 0x30
+        }
 }
 
 #[cfg(test)]
