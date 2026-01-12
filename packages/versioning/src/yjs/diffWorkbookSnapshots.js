@@ -9,8 +9,21 @@ import { workbookStateFromYjsSnapshot } from "./workbookState.js";
  * @typedef {{ id: string, name: string | null, beforeIndex: number }} RemovedSheet
  * @typedef {{ id: string, beforeIndex: number, afterIndex: number }} MovedSheet
  * @typedef {{ row: number, col: number }} CellRef
- * @typedef {{ oldLocation: CellRef, newLocation: CellRef, value: any, formula?: string | null }} MoveChange
- * @typedef {{ cell: CellRef }} CellChange
+ * @typedef {{
+ *   oldLocation: CellRef,
+ *   newLocation: CellRef,
+ *   value: any,
+ *   formula?: string | null,
+ *   encrypted?: boolean,
+ *   keyId?: string | null,
+ * }} MoveChange
+ * @typedef {{
+ *   cell: CellRef,
+ *   oldEncrypted?: boolean,
+ *   newEncrypted?: boolean,
+ *   oldKeyId?: string | null,
+ *   newKeyId?: string | null,
+ * }} CellChange
  *
  * @typedef {{
  *   added: CellChange[];
