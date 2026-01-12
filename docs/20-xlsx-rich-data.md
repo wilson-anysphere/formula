@@ -142,6 +142,14 @@ This fixture contains:
   * `richValueTypes.xml`
   * `richValueStructure.xml`
 
+Worksheet-level note (important for parsing):
+
+* In `xl/worksheets/sheet1.xml`, the in-cell image at `A1` is encoded as a plain numeric cell:
+  * `<c r="A1" vm="1" cm="1"><v>0</v></c>`
+* In contrast, other real Excel “Place in Cell” fixtures in this repo use an error cell encoding
+  (`t="e"` with cached `#VALUE!`). Do not treat the cached `<v>` (or `t="e"`) as authoritative for image
+  binding; use `vm`/`cm` + `xl/metadata.xml` + `xl/richData/*`.
+
 Notable shape differences vs the minimal/synthetic `image-in-cell-richdata.xlsx` fixture:
 
 * `xl/richData/richValue.xml` uses a `<values>` wrapper and a `type="…"` attribute:
