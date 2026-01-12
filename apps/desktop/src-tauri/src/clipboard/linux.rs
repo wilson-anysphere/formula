@@ -201,7 +201,11 @@ mod gtk_backend {
                             .and_then(|t| wait_for_utf8_targets(clipboard, &[t], usize::MAX)),
                         None => wait_for_utf8_targets(
                             clipboard,
-                            &["text/plain", "text/plain;charset=utf-8"],
+                            &[
+                                "text/plain",
+                                "text/plain;charset=utf-8",
+                                "text/plain; charset=utf-8",
+                            ],
                             usize::MAX,
                         ),
                     });
@@ -211,7 +215,11 @@ mod gtk_backend {
                     // If target enumeration isn't available, fall back to the canonical target.
                     None => wait_for_utf8_targets(
                         clipboard,
-                        &["text/html", "text/html;charset=utf-8"],
+                        &[
+                            "text/html",
+                            "text/html;charset=utf-8",
+                            "text/html; charset=utf-8",
+                        ],
                         MAX_RICH_TEXT_BYTES,
                     ),
                 };
@@ -226,6 +234,7 @@ mod gtk_backend {
                         &[
                             "text/rtf",
                             "text/rtf;charset=utf-8",
+                            "text/rtf; charset=utf-8",
                             "application/rtf",
                             "application/x-rtf",
                         ],
