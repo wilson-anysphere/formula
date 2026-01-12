@@ -1502,6 +1502,15 @@ let sheetStoreDocSyncStore: WorkbookSheetStore | null = null;
 
 type SheetUiInfo = { id: string; name: string; visibility?: SheetVisibility; tabColor?: TabColor };
 
+function emitSheetMetadataChanged(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new CustomEvent("formula:sheet-metadata-changed"));
+  } catch {
+    // ignore
+  }
+}
+
 function listDocumentSheetIds(): string[] {
   const sheetIds = app.getDocument().getSheetIds();
   return sheetIds.length > 0 ? sheetIds : ["Sheet1"];
@@ -1939,6 +1948,7 @@ function syncSheetStoreFromCollabSession(session: CollabSession): void {
   // The sheet store instance is replaced whenever collab metadata changes; keep any
   // main.ts listeners (status bar, context keys, etc) subscribed to the latest store.
   installSheetStoreSubscription();
+  emitSheetMetadataChanged();
 }
 
 function listSheetsForUi(): SheetUiInfo[] {
@@ -2232,6 +2242,7 @@ function installSheetStoreSubscription(): void {
 
     renderSheetSwitcher(sheets, activeId);
     renderSheetPosition(sheets, activeId);
+    emitSheetMetadataChanged();
   });
 }
 
@@ -3064,6 +3075,7 @@ if (
   app.getDocument().on("change", () => updateContextKeys());
   window.addEventListener("formula:comments-panel-visibility-changed", () => updateContextKeys());
   window.addEventListener("formula:comments-changed", () => updateContextKeys());
+  window.addEventListener("formula:sheet-metadata-changed", () => updateContextKeys());
 
   type ExtensionSelectionChangedEvent = {
     selection: {
