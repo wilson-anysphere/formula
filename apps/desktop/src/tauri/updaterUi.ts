@@ -805,6 +805,11 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
       break;
     }
     case "update-available": {
+      // If the user clicked "Check for Updates" while a startup check is still running, the
+      // completion event will arrive with `source === "startup"`. Treat that as a manual result
+      // so we don't accidentally suppress the dialog (e.g. because the user previously clicked
+      // "Later" on the startup prompt).
+      const treatAsManual = source === "manual" || manualUpdateCheckFollowUp;
       setManualUpdateCheckFollowUp(false);
       const isManualRequest = source === "manual";
       // Only show the in-app update dialog for manual checks. Startup checks should be silent

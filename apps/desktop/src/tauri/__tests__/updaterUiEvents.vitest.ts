@@ -218,6 +218,24 @@ describe("updaterUi (events)", () => {
     );
   });
 
+  it("shows an update dialog (and skips the system notification) when a manual check is queued behind an in-flight startup check", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<div id="toast-root"></div>';
+
+    const notifySpy = vi.spyOn(notifications, "notify").mockResolvedValue(undefined);
+
+    await handleUpdaterEvent("update-check-already-running", { source: "manual" });
+    await handleUpdaterEvent("update-available", { source: "startup", version: "1.2.3", body: "Bug fixes" });
+
+    expect(notifySpy).not.toHaveBeenCalled();
+
+    const dialog = document.querySelector('[data-testid="updater-dialog"]');
+    expect(dialog).toBeTruthy();
+    expect(document.querySelector('[data-testid="updater-version"]')?.textContent).toBe(
+      tWithVars("updater.updateAvailableMessage", { version: "1.2.3" }),
+    );
+  });
+
   it("surfaces manual check results as toasts", async () => {
     vi.useFakeTimers();
     document.body.innerHTML = '<div id="toast-root"></div>';
