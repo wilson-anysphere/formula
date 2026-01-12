@@ -374,9 +374,47 @@ function detectNameSeries(inputs: CellScalar[]): NameSeries | null {
   );
 }
 
+type TextNumberSeries = {
+  kind: "textNumber";
+  prefix: string;
+  suffix: string;
+  start: number;
+  step: number;
+  padWidth: number;
+};
+
+function detectTextNumberSeries(inputs: CellScalar[]): TextNumberSeries | null {
+  if (inputs.length < 2) return null;
+
+  const parsed = inputs.map((value) => (typeof value === "string" ? /^(.*?)(\d+)([^0-9]*)$/.exec(value) : null));
+  if (parsed.some((match) => !match)) return null;
+
+  const [first] = parsed as RegExpExecArray[];
+  const prefix = first![1] ?? "";
+  const suffix = first![3] ?? "";
+  const padWidth = (first![2] ?? "").length;
+  if (padWidth === 0) return null;
+
+  const nums: number[] = [];
+  for (const match of parsed as RegExpExecArray[]) {
+    if ((match[1] ?? "") !== prefix) return null;
+    if ((match[3] ?? "") !== suffix) return null;
+    if ((match[2] ?? "").length !== padWidth) return null;
+    nums.push(Number.parseInt(match[2]!, 10));
+  }
+
+  const step = nums[1]! - nums[0]!;
+  for (let i = 2; i < nums.length; i++) {
+    if (nums[i]! - nums[i - 1]! !== step) return null;
+  }
+
+  return { kind: "textNumber", prefix, suffix, start: nums[0]!, step, padWidth };
+}
+
 type SeriesPlan =
   | { kind: "number"; start: number; step: number }
   | { kind: "date"; start: Date; stepDays: number; format: DateLike["kind"] }
+  | TextNumberSeries
   | NameSeries;
 
 function detectNumberSeries(inputs: CellScalar[]): SeriesPlan | null {
@@ -428,19 +466,26 @@ function detectDateSeries(inputs: CellScalar[]): SeriesPlan | null {
 }
 
 function detectSeriesPlan(inputs: CellScalar[]): SeriesPlan | null {
+  const textNumber = detectTextNumberSeries(inputs);
   const named = detectNameSeries(inputs);
-  return detectNumberSeries(inputs) ?? detectDateSeries(inputs) ?? named;
+  return detectNumberSeries(inputs) ?? detectDateSeries(inputs) ?? textNumber ?? named;
 }
 
 function seriesValueAt(plan: SeriesPlan, index: number): CellScalar {
-  if (plan.kind === "number") {
-    return plan.start + plan.step * index;
-  }
+  if (plan.kind === "number") return plan.start + plan.step * index;
+
   if (plan.kind === "date") {
     const msPerDay = 86_400_000;
     const t = plan.start.getTime() + plan.stepDays * msPerDay * index;
     return formatDateLike(plan.format, new Date(t));
   }
+
+  if (plan.kind === "textNumber") {
+    const n = plan.start + plan.step * index;
+    const digits = Math.abs(n).toString().padStart(plan.padWidth, "0");
+    return `${plan.prefix}${n < 0 ? "-" : ""}${digits}${plan.suffix}`;
+  }
+
   return formatNamed(plan.kind, plan.format, plan.casing, plan.startIndex + plan.step * index);
 }
 

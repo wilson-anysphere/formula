@@ -4,6 +4,7 @@ test("dragging the fill handle extends a numeric series", async ({ page }) => {
   await page.goto("/?e2e");
 
   await expect(page.getByTestId("engine-status")).toContainText("ready", { timeout: 30_000 });
+  await page.waitForFunction(() => (window as any).__gridApi != null);
 
   const grid = page.getByTestId("canvas-grid-selection");
   const input = page.getByTestId("formula-input");
@@ -38,11 +39,12 @@ test("dragging the fill handle extends a numeric series", async ({ page }) => {
 
   const { start, end } = await page.evaluate(() => {
     const api = (window as any).__gridApi;
-    const handleCellRect = api.getCellRect(2, 1); // A2
+    const handleRect = api.getFillHandleRect();
+    if (!handleRect) throw new Error("Fill handle not visible");
     const targetRect = api.getCellRect(4, 1); // A4
     return {
-      start: { x: handleCellRect.x + handleCellRect.width - 2, y: handleCellRect.y + handleCellRect.height - 2 },
-      end: { x: targetRect.x + targetRect.width - 2, y: targetRect.y + targetRect.height - 2 }
+      start: { x: handleRect.x + handleRect.width / 2, y: handleRect.y + handleRect.height / 2 },
+      end: { x: targetRect.x + targetRect.width / 2, y: targetRect.y + targetRect.height / 2 }
     };
   });
 

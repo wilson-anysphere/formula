@@ -68,7 +68,7 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   const a4Center = await cellCenter(3, 0);
   await page.mouse.move(a2Handle.x, a2Handle.y);
   await page.mouse.down();
-  await page.mouse.move(a2Handle.x, a4Center.y);
+  await page.mouse.move(a4Center.x, a4Center.y);
   await page.mouse.up();
 
   // Series fill (1,2,3,4...).
@@ -104,7 +104,7 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   const b3Center = await cellCenter(2, 1);
   await page.mouse.move(b1Handle.x, b1Handle.y);
   await page.mouse.down();
-  await page.mouse.move(b1Handle.x, b3Center.y);
+  await page.mouse.move(b3Center.x, b3Center.y);
   await page.mouse.up();
 
   const b2Center = await cellCenter(1, 1);
@@ -176,7 +176,7 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   const h3Center = await cellCenter(2, 7);
   await page.mouse.move(h6Handle.x, h6Handle.y);
   await page.mouse.down();
-  await page.mouse.move(h6Handle.x, h3Center.y);
+  await page.mouse.move(h3Center.x, h3Center.y);
   await page.mouse.up();
 
   await page.mouse.click(h3Center.x, h3Center.y);
@@ -223,7 +223,7 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   const k4Center = await cellCenter(3, 10);
   await page.mouse.move(k2Handle.x, k2Handle.y);
   await page.mouse.down();
-  await page.mouse.move(k2Handle.x, k4Center.y);
+  await page.mouse.move(k4Center.x, k4Center.y);
   await page.mouse.up();
 
   const j3Center = await cellCenter(2, 9);
@@ -272,7 +272,7 @@ test("dragging the fill handle fills series and shifts formulas", async ({ page 
   const g11Center = await cellCenter(10, 6);
   await page.mouse.move(g9Handle.x, g9Handle.y);
   await page.mouse.down();
-  await page.mouse.move(g9Handle.x, g11Center.y);
+  await page.mouse.move(g11Center.x, g11Center.y);
   await page.mouse.up();
 
   const g10Center = await cellCenter(9, 6);

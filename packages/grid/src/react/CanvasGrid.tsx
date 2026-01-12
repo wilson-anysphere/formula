@@ -345,8 +345,6 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const cancelFillHandleDragRef = useRef<(() => void) | null>(null);
   const fillHandleStateRef = useRef<{
     source: CellRange;
-    startX: number;
-    startY: number;
     target: CellRange;
     mode: FillMode;
     previewTarget: CellRange | null;
@@ -1100,18 +1098,39 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       return { startRow: source.startRow, endRow: source.endRow, startCol, endCol: source.endCol };
     };
 
-    const applyFillHandleDrag = (picked: { row: number; col: number }, point: { x: number; y: number }) => {
+    const applyFillHandleDrag = (picked: { row: number; col: number }) => {
       const renderer = rendererRef.current;
       if (!renderer) return;
       const state = fillHandleStateRef.current;
       if (!state) return;
 
-      const dx = point.x - state.startX;
-      const dy = point.y - state.startY;
-      const isVertical = Math.abs(dy) >= Math.abs(dx);
-      const direction = isVertical ? (dy >= 0 ? "down" : "up") : dx >= 0 ? "right" : "left";
+      const srcTop = state.source.startRow;
+      const srcBottom = state.source.endRow - 1;
+      const srcLeft = state.source.startCol;
+      const srcRight = state.source.endCol - 1;
 
-      const target = computeFillTarget(state.source, picked, direction);
+      const rowExtension = picked.row < srcTop ? picked.row - srcTop : picked.row > srcBottom ? picked.row - srcBottom : 0;
+      const colExtension = picked.col < srcLeft ? picked.col - srcLeft : picked.col > srcRight ? picked.col - srcRight : 0;
+
+      const target = (() => {
+        if (rowExtension === 0 && colExtension === 0) {
+          return state.source;
+        }
+
+        const axis =
+          rowExtension !== 0 && colExtension !== 0
+            ? Math.abs(rowExtension) >= Math.abs(colExtension)
+              ? "vertical"
+              : "horizontal"
+            : rowExtension !== 0
+              ? "vertical"
+              : "horizontal";
+
+        const direction =
+          axis === "vertical" ? (rowExtension > 0 ? "down" : "up") : colExtension > 0 ? "right" : "left";
+
+        return computeFillTarget(state.source, picked, direction);
+      })();
       if (rangesEqual(target, state.target)) return;
 
       const previewTarget = computeFillDeltaRange(state.source, target);
@@ -1226,7 +1245,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         const picked = renderer.pickCellAt(clampedX, clampedY);
         if (picked) {
           if (dragModeRef.current === "fillHandle") {
-            applyFillHandleDrag(picked, { x: clampedX, y: clampedY });
+            applyFillHandleDrag(picked);
           } else {
             applyDragRange(picked);
           }
@@ -1333,7 +1352,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           selectionPointerIdRef.current = event.pointerId;
           dragModeRef.current = "fillHandle";
           const mode: FillMode = event.altKey ? "formulas" : event.metaKey || event.ctrlKey ? "copy" : "series";
-          fillHandleStateRef.current = { source, startX: point.x, startY: point.y, target: source, mode, previewTarget: null };
+          fillHandleStateRef.current = { source, target: source, mode, previewTarget: null };
           selectionCanvas.setPointerCapture?.(event.pointerId);
 
           containerRef.current?.focus({ preventScroll: true });
@@ -1621,7 +1640,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       if (!picked) return;
 
       if (dragModeRef.current === "fillHandle") {
-        applyFillHandleDrag(picked, point);
+        applyFillHandleDrag(picked);
       } else {
         applyDragRange(picked);
       }

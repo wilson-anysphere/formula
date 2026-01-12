@@ -606,6 +606,13 @@ function EngineDemoApp() {
       }));
 
     provider.applyRecalcChanges(directChanges.length > 0 ? [...changes, ...directChanges] : changes);
+
+    // If the user clicks a new cell while the fill operation is still
+    // fetching/applying changes, the first read can race and show stale data.
+    // Refresh the currently active cell after the commit completes.
+    const currentActiveAddress = gridCellToA1Address(activeCellRef.current ?? activeCell);
+    if (!currentActiveAddress || isFormulaEditingRef.current || editingCellRef.current) return;
+    await syncFormulaBar(currentActiveAddress);
   };
 
   const onSelectionChange = (cell: { row: number; col: number } | null) => {

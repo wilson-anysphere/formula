@@ -57,6 +57,8 @@ import type { CellRange as GridCellRange } from "@formula/grid";
 import { resolveDesktopGridMode, type DesktopGridMode } from "../grid/shared/desktopGridMode.js";
 import { DocumentCellProvider } from "../grid/shared/documentCellProvider.js";
 import { DesktopSharedGrid } from "../grid/shared/desktopSharedGrid.js";
+import { applyFillCommitToDocumentController } from "../fill/applyFillCommit";
+import type { CellRange as FillEngineRange, FillMode as FillHandleMode } from "@formula/fill-engine";
 
 import * as Y from "yjs";
 import { CommentManager, bindDocToStorage } from "@formula/collab-comments";
@@ -233,7 +235,15 @@ type ChartDef = {
 type DragState =
   | { pointerId: number; mode: "normal" }
   | { pointerId: number; mode: "formula" }
-  | { pointerId: number; mode: "fill"; sourceRange: Range; targetRange: Range; endCell: CellCoord };
+  | {
+      pointerId: number;
+      mode: "fill";
+      sourceRange: Range;
+      targetRange: Range;
+      endCell: CellCoord;
+      fillMode: FillHandleMode;
+      activeRangeIndex: number;
+    };
 
 export interface SpreadsheetAppStatusElements {
   activeCell: HTMLElement;
@@ -3463,6 +3473,83 @@ export class SpreadsheetApp {
     return { row, col };
   }
 
+  private computeFillDragTarget(
+    source: Range,
+    cell: CellCoord
+  ): { targetRange: Range; endCell: CellCoord } {
+    const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+    const srcTop = source.startRow;
+    const srcBottom = source.endRow;
+    const srcLeft = source.startCol;
+    const srcRight = source.endCol;
+
+    const rowExtension = cell.row < srcTop ? cell.row - srcTop : cell.row > srcBottom ? cell.row - srcBottom : 0;
+    const colExtension = cell.col < srcLeft ? cell.col - srcLeft : cell.col > srcRight ? cell.col - srcRight : 0;
+
+    if (rowExtension === 0 && colExtension === 0) {
+      const endCell: CellCoord = {
+        row: clamp(cell.row, srcTop, srcBottom),
+        col: clamp(cell.col, srcLeft, srcRight)
+      };
+      return { targetRange: source, endCell };
+    }
+
+    const axis =
+      rowExtension !== 0 && colExtension !== 0
+        ? Math.abs(rowExtension) >= Math.abs(colExtension)
+          ? "vertical"
+          : "horizontal"
+        : rowExtension !== 0
+          ? "vertical"
+          : "horizontal";
+
+    if (axis === "vertical") {
+      const targetRange: Range =
+        rowExtension > 0
+          ? {
+              startRow: source.startRow,
+              endRow: Math.max(source.endRow, cell.row),
+              startCol: source.startCol,
+              endCol: source.endCol
+            }
+          : {
+              startRow: Math.min(source.startRow, cell.row),
+              endRow: source.endRow,
+              startCol: source.startCol,
+              endCol: source.endCol
+            };
+
+      const endCell: CellCoord = {
+        row: clamp(cell.row, targetRange.startRow, targetRange.endRow),
+        col: clamp(cell.col, targetRange.startCol, targetRange.endCol)
+      };
+
+      return { targetRange, endCell };
+    }
+
+    const targetRange: Range =
+      colExtension > 0
+        ? {
+            startRow: source.startRow,
+            endRow: source.endRow,
+            startCol: source.startCol,
+            endCol: Math.max(source.endCol, cell.col)
+          }
+        : {
+            startRow: source.startRow,
+            endRow: source.endRow,
+            startCol: Math.min(source.startCol, cell.col),
+            endCol: source.endCol
+          };
+
+    const endCell: CellCoord = {
+      row: clamp(cell.row, targetRange.startRow, targetRange.endRow),
+      col: clamp(cell.col, targetRange.startCol, targetRange.endCol)
+    };
+
+    return { targetRange, endCell };
+  }
+
   private maybeStartDragAutoScroll(): void {
     if (this.disposed) return;
     if (!this.dragState || !this.dragPointerPos) return;
@@ -3521,22 +3608,18 @@ export class SpreadsheetApp {
 
       const cell = this.cellFromPoint(px, py);
       if (this.dragState.mode === "fill") {
-        const source = this.dragState.sourceRange;
-        const target: Range = {
-          startRow: Math.min(source.startRow, cell.row),
-          endRow: Math.max(source.endRow, cell.row),
-          startCol: Math.min(source.startCol, cell.col),
-          endCol: Math.max(source.endCol, cell.col)
-        };
-        this.dragState.targetRange = target;
-        this.dragState.endCell = cell;
+        const state = this.dragState;
+        const source = state.sourceRange;
+        const { targetRange, endCell } = this.computeFillDragTarget(source, cell);
+        state.targetRange = targetRange;
+        state.endCell = endCell;
         this.fillPreviewRange =
-          target.startRow === source.startRow &&
-          target.endRow === source.endRow &&
-          target.startCol === source.startCol &&
-          target.endCol === source.endCol
+          targetRange.startRow === source.startRow &&
+          targetRange.endRow === source.endRow &&
+          targetRange.startCol === source.startCol &&
+          targetRange.endCol === source.endCol
             ? null
-            : target;
+            : targetRange;
       } else {
         this.selection = extendSelectionToCell(this.selection, cell, this.limits);
 
@@ -3670,12 +3753,15 @@ export class SpreadsheetApp {
       e.preventDefault();
       const sourceRange = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0];
       if (sourceRange) {
+        const fillMode: FillHandleMode = e.altKey ? "formulas" : e.ctrlKey || e.metaKey ? "copy" : "series";
         this.dragState = {
           pointerId: e.pointerId,
           mode: "fill",
           sourceRange,
           targetRange: sourceRange,
-          endCell: { row: sourceRange.endRow, col: sourceRange.endCol }
+          endCell: { row: sourceRange.endRow, col: sourceRange.endCol },
+          fillMode,
+          activeRangeIndex: this.selection.activeRangeIndex
         };
         this.dragPointerPos = { x, y };
         this.fillPreviewRange = null;
@@ -3737,22 +3823,18 @@ export class SpreadsheetApp {
       const cell = this.cellFromPoint(x, y);
 
       if (this.dragState.mode === "fill") {
-        const source = this.dragState.sourceRange;
-        const target: Range = {
-          startRow: Math.min(source.startRow, cell.row),
-          endRow: Math.max(source.endRow, cell.row),
-          startCol: Math.min(source.startCol, cell.col),
-          endCol: Math.max(source.endCol, cell.col)
-        };
-        this.dragState.targetRange = target;
-        this.dragState.endCell = cell;
+        const state = this.dragState;
+        const source = state.sourceRange;
+        const { targetRange, endCell } = this.computeFillDragTarget(source, cell);
+        state.targetRange = targetRange;
+        state.endCell = endCell;
         this.fillPreviewRange =
-          target.startRow === source.startRow &&
-          target.endRow === source.endRow &&
-          target.startCol === source.startCol &&
-          target.endCol === source.endCol
+          targetRange.startRow === source.startRow &&
+          targetRange.endRow === source.endRow &&
+          targetRange.startCol === source.startCol &&
+          targetRange.endCol === source.endCol
             ? null
-            : target;
+            : targetRange;
         this.renderSelection();
         this.maybeStartDragAutoScroll();
         return;
@@ -3848,24 +3930,32 @@ export class SpreadsheetApp {
 
     if (state.mode === "fill") {
       this.fillPreviewRange = null;
-      const { sourceRange, targetRange, endCell } = state;
+      const shouldCommit = e.type === "pointerup";
+      const { sourceRange, targetRange, endCell, fillMode, activeRangeIndex } = state;
       const changed =
         targetRange.startRow !== sourceRange.startRow ||
         targetRange.endRow !== sourceRange.endRow ||
         targetRange.startCol !== sourceRange.startCol ||
         targetRange.endCol !== sourceRange.endCol;
 
-      if (changed) {
-        this.applyFill(sourceRange, targetRange);
+      if (changed && shouldCommit) {
+        this.applyFill(sourceRange, targetRange, fillMode);
+
+        const existingRanges = this.selection.ranges;
+        const nextActiveIndex = Math.max(0, Math.min(existingRanges.length - 1, activeRangeIndex));
+        const updatedRanges = existingRanges.length === 0 ? [targetRange] : [...existingRanges];
+        updatedRanges[nextActiveIndex] = targetRange;
+
         this.selection = buildSelection(
           {
-            ranges: [targetRange],
+            ranges: updatedRanges,
             active: endCell,
             anchor: endCell,
-            activeRangeIndex: 0
+            activeRangeIndex: nextActiveIndex
           },
           this.limits
         );
+
         this.refresh();
         this.focus();
       } else {
@@ -3892,102 +3982,52 @@ export class SpreadsheetApp {
     }
   }
 
-  private applyFill(sourceRange: Range, targetRange: Range): void {
-    const sheetId = this.sheetId;
-    const source = sourceRange;
-    const target = targetRange;
+  private applyFill(sourceRange: Range, targetRange: Range, mode: FillHandleMode): void {
+    const toFillRange = (range: Range): FillEngineRange => ({
+      startRow: range.startRow,
+      endRow: range.endRow + 1,
+      startCol: range.startCol,
+      endCol: range.endCol + 1
+    });
 
-    const sourceHeight = source.endRow - source.startRow + 1;
-    const sourceWidth = source.endCol - source.startCol + 1;
+    const source = toFillRange(sourceRange);
+    const union = toFillRange(targetRange);
 
-    const isVertical1d =
-      sourceWidth === 1 && sourceHeight >= 1 && target.startCol === source.startCol && target.endCol === source.endCol;
-    const isHorizontal1d =
-      sourceHeight === 1 && sourceWidth >= 1 && target.startRow === source.startRow && target.endRow === source.endRow;
+    const deltaRange: FillEngineRange | null = (() => {
+      const sameCols = source.startCol === union.startCol && source.endCol === union.endCol;
+      const sameRows = source.startRow === union.startRow && source.endRow === union.endRow;
 
-    this.document.beginBatch({ label: "Fill" });
-    try {
-      // Excel-style numeric series for simple 1D numeric inputs (e.g. 1,2 -> 3,4).
-      const didSeries = (isVertical1d || isHorizontal1d) && this.applyNumericSeriesFill(sheetId, source, target);
-      if (!didSeries) {
-        this.applyPatternFill(sheetId, source, target, sourceHeight, sourceWidth);
-      }
-    } finally {
-      this.document.endBatch();
-    }
-  }
-
-  private applyNumericSeriesFill(sheetId: string, source: Range, target: Range): boolean {
-    const sourceHeight = source.endRow - source.startRow + 1;
-    const sourceWidth = source.endCol - source.startCol + 1;
-    const isVertical = sourceWidth === 1 && target.startCol === source.startCol && target.endCol === source.endCol;
-    const isHorizontal = sourceHeight === 1 && target.startRow === source.startRow && target.endRow === source.endRow;
-    if (!isVertical && !isHorizontal) return false;
-
-    const len = isVertical ? sourceHeight : sourceWidth;
-    if (len <= 0) return false;
-
-    const nums: number[] = [];
-    let outputAsString = true;
-
-    for (let i = 0; i < len; i += 1) {
-      const row = isVertical ? source.startRow + i : source.startRow;
-      const col = isVertical ? source.startCol : source.startCol + i;
-      const state = this.document.getCell(sheetId, { row, col }) as { value: unknown; formula: string | null };
-      if (state?.formula != null) return false;
-
-      const value = state?.value ?? null;
-      if (typeof value !== "string") outputAsString = false;
-      const num = coerceNumber(value);
-      if (num == null) return false;
-      nums.push(num);
-    }
-
-    let step = 0;
-    if (nums.length >= 2) {
-      step = nums[1]! - nums[0]!;
-      for (let i = 2; i < nums.length; i += 1) {
-        const expected = nums[0]! + step * i;
-        if (nums[i] !== expected) return false;
-      }
-    }
-
-    const start = nums[0]!;
-
-    for (let row = target.startRow; row <= target.endRow; row += 1) {
-      for (let col = target.startCol; col <= target.endCol; col += 1) {
-        if (row >= source.startRow && row <= source.endRow && col >= source.startCol && col <= source.endCol) continue;
-        const offset = isVertical ? row - source.startRow : col - source.startCol;
-        const next = start + step * offset;
-        this.document.setCellInput(sheetId, { row, col }, outputAsString ? String(next) : next);
-      }
-    }
-
-    return true;
-  }
-
-  private applyPatternFill(sheetId: string, source: Range, target: Range, sourceHeight: number, sourceWidth: number): void {
-    for (let row = target.startRow; row <= target.endRow; row += 1) {
-      for (let col = target.startCol; col <= target.endCol; col += 1) {
-        if (row >= source.startRow && row <= source.endRow && col >= source.startCol && col <= source.endCol) continue;
-
-        const sourceRow = source.startRow + mod(row - source.startRow, sourceHeight);
-        const sourceCol = source.startCol + mod(col - source.startCol, sourceWidth);
-        const state = this.document.getCell(sheetId, { row: sourceRow, col: sourceCol }) as {
-          value: unknown;
-          formula: string | null;
-        };
-
-        const deltaRow = row - sourceRow;
-        const deltaCol = col - sourceCol;
-
-        if (state?.formula != null) {
-          this.document.setCellInput(sheetId, { row, col }, shiftA1References(state.formula, deltaRow, deltaCol));
-        } else {
-          this.document.setCellInput(sheetId, { row, col }, state?.value ?? null);
+      if (sameCols) {
+        if (union.endRow > source.endRow) {
+          return { startRow: source.endRow, endRow: union.endRow, startCol: source.startCol, endCol: source.endCol };
+        }
+        if (union.startRow < source.startRow) {
+          return { startRow: union.startRow, endRow: source.startRow, startCol: source.startCol, endCol: source.endCol };
         }
       }
-    }
+
+      if (sameRows) {
+        if (union.endCol > source.endCol) {
+          return { startRow: source.startRow, endRow: source.endRow, startCol: source.endCol, endCol: union.endCol };
+        }
+        if (union.startCol < source.startCol) {
+          return { startRow: source.startRow, endRow: source.endRow, startCol: union.startCol, endCol: source.startCol };
+        }
+      }
+
+      return null;
+    })();
+
+    if (!deltaRange) return;
+
+    applyFillCommitToDocumentController({
+      document: this.document,
+      sheetId: this.sheetId,
+      sourceRange: source,
+      targetRange: deltaRange,
+      mode,
+      getCellComputedValue: (row, col) => this.getCellComputedValue({ row, col }) as any
+    });
   }
 
   private onKeyDown(e: KeyboardEvent): void {
@@ -3996,6 +4036,33 @@ export class SpreadsheetApp {
     }
     if (this.editor.isOpen()) {
       // The editor handles Enter/Tab/Escape itself. We keep focus on the textarea.
+      return;
+    }
+
+    if (e.key === "Escape" && this.dragState?.mode === "fill") {
+      e.preventDefault();
+      const state = this.dragState;
+      this.dragState = null;
+      this.dragPointerPos = null;
+      this.fillPreviewRange = null;
+      if (this.dragAutoScrollRaf != null) {
+        if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.dragAutoScrollRaf);
+        else globalThis.clearTimeout(this.dragAutoScrollRaf);
+      }
+      this.dragAutoScrollRaf = null;
+
+      try {
+        this.root.releasePointerCapture(state.pointerId);
+      } catch {
+        // ignore
+      }
+
+      this.renderSelection();
+
+      if (this.auditingNeedsUpdateAfterDrag) {
+        this.auditingNeedsUpdateAfterDrag = false;
+        this.scheduleAuditingUpdate();
+      }
       return;
     }
 

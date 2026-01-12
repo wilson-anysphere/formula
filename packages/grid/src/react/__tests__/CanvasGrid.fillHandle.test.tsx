@@ -146,8 +146,7 @@ describe("CanvasGrid fill handle", () => {
     expect(selectionCanvas).toBeTruthy();
 
     const start = { clientX: handle!.x + handle!.width / 2, clientY: handle!.y + handle!.height / 2 };
-    // Keep X roughly aligned with the fill handle so the drag resolves to a vertical fill.
-    const end = { clientX: start.clientX, clientY: targetCell!.y + targetCell!.height / 2 };
+    const end = { clientX: targetCell!.x + targetCell!.width / 2, clientY: targetCell!.y + targetCell!.height / 2 };
 
     await act(async () => {
       selectionCanvas.dispatchEvent(createPointerEvent("pointerdown", { ...start, pointerId: 1 }));
@@ -208,7 +207,7 @@ describe("CanvasGrid fill handle", () => {
     expect(selectionCanvas).toBeTruthy();
 
     const start = { clientX: handle!.x + handle!.width / 2, clientY: handle!.y + handle!.height / 2 };
-    const end = { clientX: start.clientX, clientY: targetCell!.y + targetCell!.height / 2 };
+    const end = { clientX: targetCell!.x + targetCell!.width / 2, clientY: targetCell!.y + targetCell!.height / 2 };
 
     await act(async () => {
       selectionCanvas.dispatchEvent(createPointerEvent("pointerdown", { ...start, pointerId: 1, ctrlKey: true }));
@@ -270,7 +269,7 @@ describe("CanvasGrid fill handle", () => {
     expect(selectionCanvas).toBeTruthy();
 
     const start = { clientX: handle!.x + handle!.width / 2, clientY: handle!.y + handle!.height / 2 };
-    const end = { clientX: start.clientX, clientY: targetCell!.y + targetCell!.height / 2 };
+    const end = { clientX: targetCell!.x + targetCell!.width / 2, clientY: targetCell!.y + targetCell!.height / 2 };
 
     await act(async () => {
       selectionCanvas.dispatchEvent(createPointerEvent("pointerdown", { ...start, pointerId: 1 }));
@@ -329,7 +328,7 @@ describe("CanvasGrid fill handle", () => {
     expect(selectionCanvas).toBeTruthy();
 
     const start = { clientX: handle!.x + handle!.width / 2, clientY: handle!.y + handle!.height / 2 };
-    const end = { clientX: start.clientX, clientY: targetCell!.y + targetCell!.height / 2 };
+    const end = { clientX: targetCell!.x + targetCell!.width / 2, clientY: targetCell!.y + targetCell!.height / 2 };
 
     await act(async () => {
       selectionCanvas.dispatchEvent(createPointerEvent("pointerdown", { ...start, pointerId: 1 }));
@@ -389,7 +388,7 @@ describe("CanvasGrid fill handle", () => {
     expect(container).toBeTruthy();
 
     const start = { clientX: handle!.x + handle!.width / 2, clientY: handle!.y + handle!.height / 2 };
-    const end = { clientX: start.clientX, clientY: targetCell!.y + targetCell!.height / 2 };
+    const end = { clientX: targetCell!.x + targetCell!.width / 2, clientY: targetCell!.y + targetCell!.height / 2 };
 
     await act(async () => {
       selectionCanvas.dispatchEvent(createPointerEvent("pointerdown", { ...start, pointerId: 1 }));
@@ -518,7 +517,7 @@ describe("CanvasGrid fill handle", () => {
     expect(selectionCanvas).toBeTruthy();
 
     const start = { clientX: handle!.x + handle!.width / 2, clientY: handle!.y + handle!.height / 2 };
-    const end = { clientX: start.clientX, clientY: headerCell!.y + headerCell!.height / 2 };
+    const end = { clientX: headerCell!.x + headerCell!.width / 2, clientY: headerCell!.y + headerCell!.height / 2 };
 
     await act(async () => {
       selectionCanvas.dispatchEvent(createPointerEvent("pointerdown", { ...start, pointerId: 1 }));
@@ -604,7 +603,7 @@ describe("CanvasGrid fill handle", () => {
     expect(selectionCanvas).toBeTruthy();
 
     const start = { clientX: handle!.x + handle!.width / 2, clientY: handle!.y + handle!.height / 2 };
-    const end = { clientX: start.clientX, clientY: targetCell!.y + targetCell!.height / 2 };
+    const end = { clientX: targetCell!.x + targetCell!.width / 2, clientY: targetCell!.y + targetCell!.height / 2 };
 
     await act(async () => {
       selectionCanvas.dispatchEvent(createPointerEvent("pointerdown", { ...start, pointerId: 1 }));

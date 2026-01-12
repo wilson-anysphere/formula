@@ -24,6 +24,36 @@ describe("computeFillEdits", () => {
     ]);
   });
 
+  it("extends numeric suffix text series vertically", () => {
+    const sourceRange: CellRange = { startRow: 0, endRow: 2, startCol: 0, endCol: 1 };
+    const targetRange: CellRange = { startRow: 2, endRow: 4, startCol: 0, endCol: 1 };
+    const sourceCells: FillSourceCell[][] = [
+      [{ input: "Item 1", value: "Item 1" }],
+      [{ input: "Item 3", value: "Item 3" }]
+    ];
+
+    const { edits } = computeFillEdits({ sourceRange, targetRange, sourceCells, mode: "series" });
+    expect(edits).toEqual([
+      { row: 2, col: 0, value: "Item 5" },
+      { row: 3, col: 0, value: "Item 7" }
+    ]);
+  });
+
+  it("preserves numeric suffix padding when extending text series vertically", () => {
+    const sourceRange: CellRange = { startRow: 0, endRow: 2, startCol: 0, endCol: 1 };
+    const targetRange: CellRange = { startRow: 2, endRow: 4, startCol: 0, endCol: 1 };
+    const sourceCells: FillSourceCell[][] = [
+      [{ input: "Item 01", value: "Item 01" }],
+      [{ input: "Item 03", value: "Item 03" }]
+    ];
+
+    const { edits } = computeFillEdits({ sourceRange, targetRange, sourceCells, mode: "series" });
+    expect(edits).toEqual([
+      { row: 2, col: 0, value: "Item 05" },
+      { row: 3, col: 0, value: "Item 07" }
+    ]);
+  });
+
   it("fills formulas with relative reference adjustment (pattern repetition)", () => {
     const sourceRange: CellRange = { startRow: 0, endRow: 2, startCol: 0, endCol: 1 };
     const targetRange: CellRange = { startRow: 2, endRow: 4, startCol: 0, endCol: 1 };
@@ -51,4 +81,3 @@ describe("computeFillEdits", () => {
     ]);
   });
 });
-

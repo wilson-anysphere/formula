@@ -1,4 +1,4 @@
-import { computeFillEdits, type CellRange, type FillMode, type FillSourceCell } from "../../../../packages/fill-engine/src/index.ts";
+import { computeFillEdits, type CellRange, type CellScalar, type FillMode, type FillSourceCell } from "@formula/fill-engine";
 
 import type { DocumentController } from "../document/documentController.js";
 
@@ -8,6 +8,13 @@ export interface ApplyFillCommitOptions {
   sourceRange: CellRange;
   targetRange: CellRange;
   mode: FillMode;
+  /**
+   * Optional hook to provide computed values for formula cells.
+   *
+   * This is only needed when `mode === "copy"` and the consumer wants to fill
+   * formulas as values (requires the evaluated value, not the stored input).
+   */
+  getCellComputedValue?: (row: number, col: number) => CellScalar;
   /**
    * Optional hook to prevent overwriting protected/locked cells.
    *
@@ -23,11 +30,19 @@ export interface ApplyFillCommitOptions {
  * recorded as one undo step.
  */
 export function applyFillCommitToDocumentController(options: ApplyFillCommitOptions): { editsApplied: number } {
-  const { document: doc, sheetId, sourceRange, targetRange, mode, canWriteCell } = options;
+  const { document: doc, sheetId, sourceRange, targetRange, mode, canWriteCell, getCellComputedValue } = options;
 
   const height = Math.max(0, sourceRange.endRow - sourceRange.startRow);
   const width = Math.max(0, sourceRange.endCol - sourceRange.startCol);
   if (height === 0 || width === 0) return { editsApplied: 0 };
+
+  const toScalar = (value: unknown): CellScalar => {
+    if (value == null) return null;
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+    const maybeRich = value as { text?: unknown } | null;
+    if (maybeRich && typeof maybeRich.text === "string") return maybeRich.text;
+    return String(value);
+  };
 
   const sourceCells: FillSourceCell[][] = [];
   for (let row = sourceRange.startRow; row < sourceRange.endRow; row++) {
@@ -35,9 +50,13 @@ export function applyFillCommitToDocumentController(options: ApplyFillCommitOpti
     for (let col = sourceRange.startCol; col < sourceRange.endCol; col++) {
       const cell = doc.getCell(sheetId, { row, col }) as { value: unknown; formula: string | null };
       const formula = typeof cell?.formula === "string" && cell.formula.trim() !== "" ? cell.formula : null;
-      const value = (cell?.value ?? null) as any;
-      const input = (formula ?? value) as any;
-      outRow.push({ input, value });
+      if (formula) {
+        const computed = getCellComputedValue ? getCellComputedValue(row, col) : null;
+        outRow.push({ input: formula, value: computed ?? null });
+        continue;
+      }
+      const scalar = toScalar(cell?.value ?? null);
+      outRow.push({ input: scalar, value: scalar });
     }
     sourceCells.push(outRow);
   }
