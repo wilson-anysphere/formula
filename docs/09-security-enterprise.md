@@ -692,6 +692,11 @@ cd services/api
 npm run secrets:rotate
 ```
 
+Optional env vars:
+
+- `PREFIX="oidc:<orgId>:"` to scope by name prefix
+- `BATCH_SIZE=250` to control pagination
+
 ###### Migrating from legacy `SECRET_STORE_KEY` to `SECRET_STORE_KEYS`
 
 If you have existing `v1:` rows encrypted with the legacy passphrase, include the derived key bytes

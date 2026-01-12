@@ -5,7 +5,10 @@ import { runSecretsRotation } from "../secrets/rotation";
 const config = loadConfig();
 const pool = createPool(config.databaseUrl);
 
-runSecretsRotation(pool, config.secretStoreKeys)
+const batchSize = process.env.BATCH_SIZE ? Number.parseInt(process.env.BATCH_SIZE, 10) : undefined;
+const prefix = process.env.PREFIX?.trim() || undefined;
+
+runSecretsRotation(pool, config.secretStoreKeys, { batchSize, prefix })
   .then(async (result) => {
     await pool.end();
     // eslint-disable-next-line no-console
@@ -17,4 +20,3 @@ runSecretsRotation(pool, config.secretStoreKeys)
     await pool.end();
     process.exitCode = 1;
   });
-

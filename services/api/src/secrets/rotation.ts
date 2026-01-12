@@ -28,38 +28,72 @@ type SecretRow = {
 export async function runSecretsRotation(
   db: Pool,
   keyring: SecretStoreKeyring,
-  { batchSize = 250 }: { batchSize?: number } = {}
+  {
+    batchSize = 250,
+    prefix
+  }: {
+    batchSize?: number;
+    /**
+     * Optional literal prefix filter for the secret name. When set, only secrets
+     * whose `name` starts with `prefix` are scanned/rotated.
+     */
+    prefix?: string;
+  } = {}
 ): Promise<SecretsRotationResult> {
   let scanned = 0;
   let rotated = 0;
   let failed = 0;
 
   let lastName: string | null = null;
+  const effectivePrefix = prefix?.trim() ?? "";
+  const prefixLength = effectivePrefix ? Array.from(effectivePrefix).length : 0;
 
   // Cursor pagination over the primary key (name) avoids OFFSET scans and allows
   // the script to be restarted safely.
   while (true) {
     const res: QueryResult<SecretRow> =
-      lastName == null
-        ? await db.query<SecretRow>(
-            `
-              SELECT name, encrypted_value
-              FROM secrets
-              ORDER BY name ASC
-              LIMIT $1
-            `,
-            [batchSize]
-          )
-        : await db.query<SecretRow>(
-            `
-              SELECT name, encrypted_value
-              FROM secrets
-              WHERE name > $1
-              ORDER BY name ASC
-              LIMIT $2
-            `,
-            [lastName, batchSize]
-          );
+      effectivePrefix.length === 0
+        ? lastName == null
+          ? await db.query<SecretRow>(
+              `
+                SELECT name, encrypted_value
+                FROM secrets
+                ORDER BY name ASC
+                LIMIT $1
+              `,
+              [batchSize]
+            )
+          : await db.query<SecretRow>(
+              `
+                SELECT name, encrypted_value
+                FROM secrets
+                WHERE name > $1
+                ORDER BY name ASC
+                LIMIT $2
+              `,
+              [lastName, batchSize]
+            )
+        : lastName == null
+          ? await db.query<SecretRow>(
+              `
+                SELECT name, encrypted_value
+                FROM secrets
+                WHERE substring(name, 1, $2) = $1
+                ORDER BY name ASC
+                LIMIT $3
+              `,
+              [effectivePrefix, prefixLength, batchSize]
+            )
+          : await db.query<SecretRow>(
+              `
+                SELECT name, encrypted_value
+                FROM secrets
+                WHERE substring(name, 1, $2) = $1 AND name > $3
+                ORDER BY name ASC
+                LIMIT $4
+              `,
+              [effectivePrefix, prefixLength, lastName, batchSize]
+            );
 
     if (res.rowCount === 0) break;
 

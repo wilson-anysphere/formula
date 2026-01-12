@@ -162,6 +162,28 @@ describe("secrets rotation (integration)", () => {
     }
   });
 
+  it("supports a prefix filter", async () => {
+    const db = await createDb();
+    try {
+      const oldKey = crypto.randomBytes(32);
+      const newKey = crypto.randomBytes(32);
+      const keyring: SecretStoreKeyring = { currentKeyId: "new", keys: { old: oldKey, new: newKey } };
+
+      await db.query("INSERT INTO secrets (name, encrypted_value) VALUES ($1, $2)", ["pref:one", encryptV1(oldKey, "1")]);
+      await db.query("INSERT INTO secrets (name, encrypted_value) VALUES ($1, $2)", ["other:one", encryptV1(oldKey, "2")]);
+
+      const result = await runSecretsRotation(db, keyring, { prefix: "pref:" });
+      expect(result.scanned).toBe(1);
+      expect(result.rotated).toBe(1);
+      expect(result.failed).toBe(0);
+
+      expect(await getSecret(db, keyring, "pref:one")).toBe("1");
+      expect(await getSecret(db, keyring, "other:one")).toBe("2");
+    } finally {
+      await db.end();
+    }
+  });
+
   it("lists and deletes secrets (prefix match is literal)", async () => {
     const db = await createDb();
     try {
