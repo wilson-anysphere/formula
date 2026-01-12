@@ -38,6 +38,19 @@ test("copyRangeToClipboardPayload serializes rich text values as plain text", ()
   assert.match(payload.html, />Rich Bold</);
 });
 
+test("copyRangeToClipboardPayload includes RTF output with basic formatting", () => {
+  const doc = new DocumentController();
+
+  doc.setCellValue("Sheet1", "A1", "Hello");
+  doc.setRangeFormat("Sheet1", "A1", { font: { bold: true } });
+
+  const payload = copyRangeToClipboardPayload(doc, "Sheet1", "A1");
+  assert.equal(typeof payload.rtf, "string");
+  assert.ok(payload.rtf.startsWith("{\\rtf1"));
+  assert.match(payload.rtf, /Hello/);
+  assert.match(payload.rtf, /\\b(?=\\|\s)/);
+});
+
 test("copyRangeToClipboardPayload uses effective formats (e.g. column defaults) when styleId is 0", () => {
   const doc = new DocumentController();
   doc.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } }, { label: "Bold Column" });
