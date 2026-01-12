@@ -728,8 +728,9 @@ Excel has been observed (in this repo) to use **both** encodings:
 - RichData-only (no `xl/cellImages.xml` / `xl/cellimages.xml`): `fixtures/xlsx/basic/image-in-cell.xlsx`
 - RichData **plus** `xl/cellimages.xml`: `fixtures/xlsx/rich-data/images-in-cell.xlsx`
 
-This repo also includes `fixtures/xlsx/basic/cellimages.xlsx`, which *does* contain a standalone
-`xl/cellimages.xml` part; treat it as an alternate store and preserve it when present.
+This repo also includes the **synthetic** fixture `fixtures/xlsx/basic/cellimages.xlsx`, which *does*
+contain a standalone `xl/cellimages.xml` part; treat it as an alternate store and preserve it when
+present.
 
 If a `cellImages` part is present, we should preserve it for round-trip safety.
 
@@ -770,7 +771,7 @@ Observed in this repo (see `crates/formula-xlsx/tests/cell_images.rs` and
 - `xl/_rels/cellImages.xml.rels` (casing varies) → `xl/media/*`:
   - **High confidence**: `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
 - `xl/workbook.xml.rels` → `xl/cellImages.xml` / `xl/cellimages.xml`:
-  - **Confirmed in fixtures** (`fixtures/xlsx/basic/cellimages.xlsx`):
+  - **Confirmed in the synthetic fixture** `fixtures/xlsx/basic/cellimages.xlsx`:
     - `http://schemas.microsoft.com/office/2022/relationships/cellImages`
   - Observed variants in tests/synthetic inputs:
     - `http://schemas.microsoft.com/office/2020/relationships/cellImages`
