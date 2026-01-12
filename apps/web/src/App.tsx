@@ -23,6 +23,8 @@ import { EngineCellProvider } from "./EngineCellProvider";
 import { isFormulaInput, parseCellScalarInput, scalarToDisplayString } from "./cellScalar";
 import { DEMO_WORKBOOK_JSON } from "./engine/documentControllerSync";
 
+const DEMO_SHEETS = ["Sheet1", "Sheet2"] as const;
+
 export function App() {
   const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const perfMode = params?.has("perf") ?? false;
@@ -33,7 +35,7 @@ function EngineDemoApp() {
   const [engineStatus, setEngineStatus] = useState("starting…");
   const engineRef = useRef<ReturnType<typeof createEngineClient> | null>(null);
   const [provider, setProvider] = useState<EngineCellProvider | null>(null);
-  const [activeSheet, setActiveSheet] = useState("Sheet1");
+  const [activeSheet, setActiveSheet] = useState<(typeof DEMO_SHEETS)[number]>(DEMO_SHEETS[0]);
   const previousSheetRef = useRef<string | null>(null);
   const activeSheetRef = useRef(activeSheet);
   activeSheetRef.current = activeSheet;
@@ -111,6 +113,19 @@ function EngineDemoApp() {
     grid?.focus({ preventScroll: true });
   };
 
+  const switchSheet = (delta: -1 | 1) => {
+    const current = activeSheetRef.current;
+    const currentIndex = DEMO_SHEETS.findIndex((sheet) => sheet === current);
+    if (currentIndex < 0) {
+      setActiveSheet(DEMO_SHEETS[0]);
+      queueMicrotask(() => focusGrid());
+      return;
+    }
+    const nextIndex = (currentIndex + delta + DEMO_SHEETS.length) % DEMO_SHEETS.length;
+    setActiveSheet(DEMO_SHEETS[nextIndex]);
+    queueMicrotask(() => focusGrid());
+  };
+
   const setActiveSheetFrozen = (next: { frozenRows: number; frozenCols: number }) => {
     setFrozenBySheet((prev) => ({ ...prev, [activeSheet]: next }));
   };
@@ -146,6 +161,18 @@ function EngineDemoApp() {
   };
 
   const commandPaletteCommands: Array<{ id: string; title: string; run: () => void; keywords?: string[] }> = [
+    {
+      id: "workbook.previousSheet",
+      title: "Previous Sheet",
+      run: () => switchSheet(-1),
+      keywords: ["sheet", "tab"],
+    },
+    {
+      id: "workbook.nextSheet",
+      title: "Next Sheet",
+      run: () => switchSheet(1),
+      keywords: ["sheet", "tab"],
+    },
     { id: "view.freezePanes", title: "Freeze Panes", run: handleFreezePanes, keywords: ["frozen", "pane"] },
     { id: "view.freezeTopRow", title: "Freeze Top Row", run: handleFreezeTopRow, keywords: ["frozen", "row"] },
     { id: "view.freezeFirstColumn", title: "Freeze First Column", run: handleFreezeFirstColumn, keywords: ["frozen", "column"] },
@@ -163,7 +190,7 @@ function EngineDemoApp() {
     () => ({
       getSheet: (name: string) => {
         const trimmed = String(name ?? "").trim();
-        const candidates = ["Sheet1", "Sheet2"];
+        const candidates = DEMO_SHEETS;
         const resolved = candidates.find((s) => s.toLowerCase() === trimmed.toLowerCase());
         if (!resolved) {
           throw new Error(`Unknown sheet: ${name}`);
@@ -201,7 +228,7 @@ function EngineDemoApp() {
           if (!api) return;
 
           if (goToSuggestion.sheetName !== activeSheet) {
-            setActiveSheet(goToSuggestion.sheetName);
+            setActiveSheet(goToSuggestion.sheetName as (typeof DEMO_SHEETS)[number]);
           }
 
           const { range } = goToSuggestion;
@@ -246,6 +273,34 @@ function EngineDemoApp() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null): boolean => {
+      if (!(target instanceof Element)) return false;
+      return Boolean(
+        target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]'),
+      );
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!provider) return;
+      if (event.defaultPrevented) return;
+
+      const primary = event.ctrlKey || event.metaKey;
+      if (!primary || event.shiftKey || event.altKey) return;
+      if (event.key !== "PageUp" && event.key !== "PageDown") return;
+      if (isEditableTarget(event.target)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      switchSheet(event.key === "PageDown" ? 1 : -1);
+    };
+
+    // Capture here so sheet switching works even when the grid hasn't registered focus yet.
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [provider]);
 
   useEffect(() => {
     if (!commandPaletteOpen) return;
@@ -1232,14 +1287,19 @@ function EngineDemoApp() {
           onChange={(e) => {
             // Treat sheet switching as a navigation action: after the change, restore
             // focus to the grid so keyboard workflows (F2, typing, arrows) keep working.
-            setActiveSheet(e.target.value);
+            const nextSheet = e.target.value;
+            if (!DEMO_SHEETS.includes(nextSheet as (typeof DEMO_SHEETS)[number])) return;
+            setActiveSheet(nextSheet as (typeof DEMO_SHEETS)[number]);
             queueMicrotask(() => focusGrid());
           }}
           style={{ padding: "4px 6px" }}
           disabled={!provider}
         >
-          <option value="Sheet1">Sheet1</option>
-          <option value="Sheet2">Sheet2</option>
+          {DEMO_SHEETS.map((sheet) => (
+            <option key={sheet} value={sheet}>
+              {sheet}
+            </option>
+          ))}
         </select>
       </label>
 

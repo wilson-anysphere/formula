@@ -18,7 +18,7 @@ const cargoHome =
     ? path.join(repoRoot, "target", "cargo-home-playwright")
     : envCargoHome!;
 
-function stablePortFromString(input: string, { base = 4173, range = 1000 } = {}): number {
+function stablePortFromString(input: string, { base = 4173, range = 10_000 } = {}): number {
   // Deterministic port selection avoids collisions when multiple agents run Playwright tests
   // on the same host. `repoRoot` is unique per checkout in our agent environment.
   let hash = 0;
@@ -34,7 +34,7 @@ const port = (() => {
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   if (Number.isFinite(parsed) && parsed > 0) return parsed;
   if (process.env.CI) return defaultPort;
-  return stablePortFromString(repoRoot, { base: defaultPort, range: 1000 });
+  return stablePortFromString(repoRoot, { base: defaultPort, range: 10_000 });
 })();
 const baseURL = process.env.PW_BASE_URL ?? `http://localhost:${port}`;
 
