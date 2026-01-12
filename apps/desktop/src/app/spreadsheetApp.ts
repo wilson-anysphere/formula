@@ -7370,13 +7370,8 @@ export class SpreadsheetApp {
     if (this.editor.isOpen()) return false;
     if (this.inlineEditController.isOpen()) return false;
     e.preventDefault();
-    if (e.shiftKey) {
-      this.insertCurrentDateTimeIntoSelectionExcelSerial("time");
-    } else {
-      this.insertCurrentDateTimeIntoSelectionExcelSerial("date");
-    }
-    this.refresh();
-    this.focus();
+    if (e.shiftKey) this.insertTime();
+    else this.insertDate();
     return true;
   }
 
