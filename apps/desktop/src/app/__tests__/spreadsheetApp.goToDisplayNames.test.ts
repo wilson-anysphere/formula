@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../spreadsheetApp";
 
+let priorGridMode: string | undefined;
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -74,11 +76,15 @@ function createRoot(): HTMLElement {
 
 describe("SpreadsheetApp goTo", () => {
   afterEach(() => {
+    if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
+    else process.env.DESKTOP_GRID_MODE = priorGridMode;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
   beforeEach(() => {
+    priorGridMode = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
     document.body.innerHTML = "";
 
     // Node 22 ships an experimental `localStorage` global that errors unless configured via flags.
