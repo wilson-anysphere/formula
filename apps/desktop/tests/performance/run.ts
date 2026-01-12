@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { accessSync, constants as fsConstants, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -76,7 +76,14 @@ function runRustBenchmarks(): BenchmarkResult[] {
   mkdirSync(cargoHome, { recursive: true });
 
   const safeRun = resolve(repoRoot, 'scripts/safe-cargo-run.sh');
-  const canUseSafeRun = process.platform !== 'win32' && existsSync(safeRun);
+  let canUseSafeRun = process.platform !== 'win32' && existsSync(safeRun);
+  if (canUseSafeRun) {
+    try {
+      accessSync(safeRun, fsConstants.X_OK);
+    } catch {
+      canUseSafeRun = false;
+    }
+  }
   const command = canUseSafeRun ? safeRun : 'cargo';
   const args = canUseSafeRun ? cargoArgs : ['run', ...cargoArgs];
 
