@@ -85,13 +85,24 @@ When adding odd-coupon coverage to the oracle corpus, prefer:
 The generator includes a small set of boundary-date equality cases (e.g. `issue == settlement`,
 `settlement == first_coupon`, `settlement == last_interest`).
 
+It also includes a small set of **negative yield / negative coupon rate** validation cases
+(tagged `odd_coupon_validation`) to confirm Excel’s input-domain behavior for:
+
+- negative yields (including `yld < -1` but still `yld > -frequency`)
+- the boundary `yld == -frequency` (`#DIV/0!`) vs `yld < -frequency` (`#NUM!`)
+- negative coupon rates (whether Excel returns `#NUM!`)
+
+For quick Windows + Excel runs, use the derived subset corpus:
+
+- `tools/excel-oracle/odd_coupon_validation_cases.json`
+
 Current engine behavior:
 
-- **ODDF\*** permits boundary equalities like `issue == settlement` (zero accrued interest) and
-  `settlement == first_coupon` (settlement on the first coupon date), matching Excel’s observed
-  behavior (see `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`).
-  The enforced chronology is `issue <= settlement <= first_coupon <= maturity` with
-  `issue < first_coupon` and `settlement < maturity`.
+- **ODDF\*** enforces strict date ordering for the key chronology constraints:
+  - `issue < settlement < first_coupon <= maturity`
+  - Equality boundaries `issue == settlement` and `settlement == first_coupon` are rejected with
+    `#NUM!` (see the oracle boundary cases + unit tests).
+  - `first_coupon == maturity` is allowed (a single odd stub period paid at maturity).
 - **ODDL\*** requires `settlement < maturity` and `last_interest < maturity`, but allows settlement
   dates **on or before** `last_interest` (as well as inside the odd-last stub).
   - `settlement == last_interest` is allowed (it implies zero accrued interest).
@@ -192,8 +203,8 @@ date-like inputs are truncated to integers before validation:
 
 The current engine implementation enforces:
 
-- ODDF\*: `issue <= settlement <= first_coupon <= maturity` with the additional constraints
-  `issue < first_coupon` and `settlement < maturity`
+- ODDF\*: `issue < settlement < first_coupon <= maturity` (strict inequalities for `issue/settlement/first_coupon`;
+  allows `first_coupon == maturity`)
 - ODDL\*: `settlement < maturity` and `last_interest < maturity` (settlement may be before, on, or
   after `last_interest`; see `odd_coupon.rs::oddl_equation`).
 
