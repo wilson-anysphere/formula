@@ -3536,21 +3536,6 @@ pub fn quit_app() {
     std::process::exit(0);
 }
 
-#[cfg(feature = "desktop")]
-#[tauri::command]
-pub fn exit_process(code: i32) {
-    std::process::exit(code);
-}
-
-#[cfg(feature = "desktop")]
-#[tauri::command]
-pub fn report_cross_origin_isolation(cross_origin_isolated: bool, shared_array_buffer: bool) {
-    println!(
-        "[formula][coi-check] crossOriginIsolated={}, SharedArrayBuffer={}",
-        cross_origin_isolated, shared_array_buffer
-    );
-}
-
 // Clipboard bridge commands.
 //
 // The frontend prefers the browser Clipboard API when available (so we can copy/paste rich HTML
@@ -3585,7 +3570,6 @@ pub async fn write_clipboard(
         .await
         .map_err(|e| e.to_string())?
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

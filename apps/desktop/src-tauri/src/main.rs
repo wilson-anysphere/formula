@@ -15,7 +15,7 @@ use desktop::open_file;
 use desktop::state::{AppState, CellUpdateData, SharedAppState};
 use desktop::tray_status::{self, TrayStatusState};
 use desktop::updater;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -481,8 +481,6 @@ fn main() {
             commands::run_python_script,
             commands::check_for_updates,
             commands::quit_app,
-            commands::exit_process,
-            commands::report_cross_origin_isolation,
             commands::fire_workbook_open,
             commands::fire_workbook_before_close,
             commands::fire_worksheet_change,
@@ -681,24 +679,52 @@ fn main() {
                     std::process::exit(2);
                 };
 
+                #[derive(Debug, Deserialize)]
+                struct CrossOriginIsolationCheckResult {
+                    cross_origin_isolated: bool,
+                    shared_array_buffer: bool,
+                }
+
+                window.listen("coi-check-result", |event| {
+                    let Some(payload) = event.payload() else {
+                        eprintln!("[formula][coi-check] missing payload");
+                        std::process::exit(2);
+                    };
+
+                    let parsed: CrossOriginIsolationCheckResult =
+                        match serde_json::from_str(payload) {
+                            Ok(parsed) => parsed,
+                            Err(err) => {
+                                eprintln!(
+                                    "[formula][coi-check] invalid payload {payload:?}: {err}"
+                                );
+                                std::process::exit(2);
+                            }
+                        };
+
+                    println!(
+                        "[formula][coi-check] crossOriginIsolated={}, SharedArrayBuffer={}",
+                        parsed.cross_origin_isolated, parsed.shared_array_buffer
+                    );
+
+                    let ok = parsed.cross_origin_isolated && parsed.shared_array_buffer;
+                    std::process::exit(if ok { 0 } else { 1 });
+                });
+
                 window
                     .eval(
                         r#"
 (() => {
   const deadline = Date.now() + 10_000;
   const tick = () => {
-    const invoke = globalThis.__TAURI__?.core?.invoke;
-    if (typeof invoke === "function") {
+    const emit = globalThis.__TAURI__?.event?.emit;
+    if (typeof emit === "function") {
       const crossOriginIsolated = globalThis.crossOriginIsolated === true;
       const sharedArrayBuffer = typeof SharedArrayBuffer !== "undefined";
-      const ok = crossOriginIsolated && sharedArrayBuffer;
-
-      invoke("report_cross_origin_isolation", {
+      emit("coi-check-result", {
         cross_origin_isolated: crossOriginIsolated,
         shared_array_buffer: sharedArrayBuffer,
       }).catch(() => {});
-
-      invoke("exit_process", { code: ok ? 0 : 1 });
       return;
     }
     if (Date.now() > deadline) return;
