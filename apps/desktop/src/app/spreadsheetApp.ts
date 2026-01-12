@@ -81,6 +81,22 @@ function isInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value);
 }
 
+function formatDateForInsertion(date: Date): string {
+  // Use a deterministic, Excel-like date string (MM/DD/YYYY without leading zeros).
+  // Store as plain text until we have a real date serial + number-format layer.
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const year = date.getFullYear();
+  return `${month}/${day}/${year}`;
+}
+
+function formatTimeForInsertion(date: Date): string {
+  // Use 24h time with a 2-digit minute component. Store as plain text.
+  const hours = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
 /**
  * Tracks async engine work so tests can deterministically await "engine idle".
  *
@@ -5083,6 +5099,7 @@ export class SpreadsheetApp {
     if (this.handleShowFormulasShortcut(e)) return;
     if (this.handleAuditingShortcut(e)) return;
     if (this.handleClipboardShortcut(e)) return;
+    if (this.handleInsertDateTimeShortcut(e)) return;
     if (this.handleAutoSumShortcut(e)) return;
 
     // Editing
@@ -5294,6 +5311,68 @@ export class SpreadsheetApp {
     this.renderSelection();
     this.updateStatus();
     if (didScroll) this.refresh("scroll");
+  }
+
+  private handleInsertDateTimeShortcut(e: KeyboardEvent): boolean {
+    const primary = e.ctrlKey || e.metaKey;
+    if (!primary || e.altKey) return false;
+
+    // Excel-style:
+    // - Ctrl+; inserts the current date
+    // - Ctrl+Shift+; inserts the current time
+    //
+    // `e.code` is layout-independent and stays "Semicolon" whether Shift is pressed (":" on US keyboards).
+    if (e.code !== "Semicolon") return false;
+
+    // Do not trigger while editing.
+    if (this.editor.isOpen()) return false;
+    if (this.inlineEditController.isOpen()) return false;
+    if (this.formulaBar?.isEditing() || this.formulaEditCell) return false;
+
+    const target = e.target as HTMLElement | null;
+    if (target) {
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return false;
+    }
+
+    e.preventDefault();
+    this.insertCurrentDateTimeIntoSelection(e.shiftKey ? "time" : "date");
+    this.refresh();
+    return true;
+  }
+
+  private insertCurrentDateTimeIntoSelection(kind: "date" | "time"): void {
+    const now = new Date();
+    const value = kind === "date" ? formatDateForInsertion(now) : formatTimeForInsertion(now);
+
+    const ranges = this.selection.ranges.length > 0 ? this.selection.ranges : [];
+    const active = this.selection.active;
+
+    const MAX_CELLS = 10_000;
+    let totalCells = 0;
+    for (const range of ranges) {
+      const rows = range.endRow - range.startRow + 1;
+      const cols = range.endCol - range.startCol + 1;
+      if (rows <= 0 || cols <= 0) continue;
+      totalCells += rows * cols;
+      if (totalCells > MAX_CELLS) break;
+    }
+
+    const inputs: Array<{ sheetId: string; row: number; col: number; value: string; formula: null }> = [];
+
+    if (totalCells > MAX_CELLS || ranges.length === 0) {
+      inputs.push({ sheetId: this.sheetId, row: active.row, col: active.col, value, formula: null });
+    } else {
+      for (const range of ranges) {
+        for (let row = range.startRow; row <= range.endRow; row += 1) {
+          for (let col = range.startCol; col <= range.endCol; col += 1) {
+            inputs.push({ sheetId: this.sheetId, row, col, value, formula: null });
+          }
+        }
+      }
+    }
+
+    this.document.setCellInputs(inputs, { label: kind === "date" ? "Insert Date" : "Insert Time" });
   }
 
   private handleAutoSumShortcut(e: KeyboardEvent): boolean {
