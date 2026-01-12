@@ -48,6 +48,14 @@ fn unicode_record_data(s: &str) -> Vec<u8> {
     out
 }
 
+fn unicode_record_data_bytes_len(s: &str) -> Vec<u8> {
+    let payload = utf16le_bytes(s);
+    let mut out = Vec::with_capacity(4 + payload.len());
+    out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    out.extend_from_slice(&payload);
+    out
+}
+
 #[test]
 fn project_normalized_data_includes_expected_dir_records_and_prefers_unicode_variants() {
     // Build a synthetic decompressed `VBA/dir` stream with:
@@ -831,6 +839,48 @@ fn project_normalized_data_v3_prefers_unicode_over_ansi_for_strings() {
             .any(|w| w == b"AnsiStream"),
         "expected ANSI MODULESTREAMNAME bytes to be omitted when MODULESTREAMNAMEUNICODE is present"
     );
+}
+
+#[test]
+fn project_normalized_data_v3_strips_unicode_length_prefix_when_prefix_is_byte_count() {
+    // Some producers embed an internal u32 length prefix in Unicode dir record payloads where the
+    // length is the UTF-16LE byte count (not code units). Ensure we strip the prefix in this case.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // Both ANSI and Unicode project docstring records; v3 should emit only Unicode payload bytes.
+        push_record(&mut out, 0x0005, b"AnsiDoc");
+        push_record(&mut out, 0x0040, &unicode_record_data_bytes_len("UniDoc"));
+
+        // Module group with both MODULENAME and MODULENAMEUNICODE.
+        push_record(&mut out, 0x0019, b"AnsiMod");
+        push_record(&mut out, 0x0047, &unicode_record_data_bytes_len("UniMod"));
+
+        // Both ANSI and Unicode MODULESTREAMNAME records.
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"AnsiStream");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        push_record(&mut out, 0x0032, &unicode_record_data_bytes_len("UniStream"));
+
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE
+
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let normalized =
+        project_normalized_data_v3_dir_records(&vba_bin).expect("ProjectNormalizedDataV3");
+
+    let expected = [
+        utf16le_bytes("UniDoc"),
+        utf16le_bytes("UniMod"),
+        utf16le_bytes("UniStream"),
+        0u16.to_le_bytes().to_vec(),
+    ]
+    .concat();
+
+    assert_eq!(normalized, expected);
 }
 
 #[test]
