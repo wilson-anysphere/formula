@@ -412,7 +412,9 @@ export class DesktopSharedGrid {
   }
 
   setZoom(zoom: number): void {
+    const before = this.renderer.getZoom();
     this.renderer.setZoom(zoom);
+    if (this.renderer.getZoom() === before) return;
     this.syncScrollbars();
     this.emitScroll();
     // `renderer.setZoom()` already schedules a repaint via `markAllDirty()`, but
@@ -685,6 +687,7 @@ export class DesktopSharedGrid {
         const nextZoom = startZoom * zoomFactor;
 
         renderer.setZoom(nextZoom, { anchorX: point.x, anchorY: point.y });
+        if (renderer.getZoom() === startZoom) return;
         this.syncScrollbars();
         this.emitScroll();
         return;

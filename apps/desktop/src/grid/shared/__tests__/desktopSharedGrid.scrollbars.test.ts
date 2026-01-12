@@ -307,4 +307,33 @@ describe("DesktopSharedGrid scrollbars", () => {
     grid.destroy();
     container.remove();
   });
+
+  it("avoids scroll/scrollbar sync work when ctrl+wheel zoom is clamped (no zoom change)", () => {
+    const { grid, container, selectionCanvas } = createGrid({
+      rowCount: 100,
+      colCount: 100,
+      defaultRowHeight: 10,
+      defaultColWidth: 10,
+      enableWheel: true
+    });
+
+    grid.resize(300, 200, 1);
+    grid.setZoom(4);
+    expect(grid.getZoom()).toBe(4);
+
+    const syncSpy = vi.spyOn(grid, "syncScrollbars");
+    syncSpy.mockClear();
+
+    const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true });
+    Object.defineProperty(event, "offsetX", { value: 120 });
+    Object.defineProperty(event, "offsetY", { value: 60 });
+    selectionCanvas.dispatchEvent(event);
+
+    // Zoom remains clamped; wheel handler should bail out before doing scrollbar/scroll sync work.
+    expect(grid.getZoom()).toBe(4);
+    expect(syncSpy).not.toHaveBeenCalled();
+
+    grid.destroy();
+    container.remove();
+  });
 });
