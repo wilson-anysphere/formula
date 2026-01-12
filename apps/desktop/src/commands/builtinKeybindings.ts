@@ -20,6 +20,12 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: null,
   },
   {
+    command: "view.togglePanel.aiChat",
+    key: "ctrl+shift+a",
+    mac: "cmd+shift+a",
+    when: null,
+  },
+  {
     command: "clipboard.copy",
     key: "ctrl+c",
     mac: "cmd+c",
@@ -38,4 +44,3 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: null,
   },
 ];
-

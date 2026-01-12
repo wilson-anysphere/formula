@@ -1,6 +1,7 @@
 import type { SpreadsheetApp } from "../app/spreadsheetApp";
 import type { CommandRegistry } from "../extensions/commandRegistry.js";
 import type { LayoutController } from "../layout/layoutController.js";
+import { getPanelPlacement } from "../layout/layoutState.js";
 import { PanelIds } from "../panels/panelRegistry.js";
 import { t } from "../i18n/index.js";
 
@@ -8,8 +9,16 @@ export function registerBuiltinCommands(params: {
   commandRegistry: CommandRegistry;
   app: SpreadsheetApp;
   layoutController: LayoutController;
+  ensureExtensionsLoaded?: (() => Promise<void>) | null;
+  onExtensionsLoaded?: (() => void) | null;
 }): void {
-  const { commandRegistry, app, layoutController } = params;
+  const { commandRegistry, app, layoutController, ensureExtensionsLoaded = null, onExtensionsLoaded = null } = params;
+
+  const toggleDockPanel = (panelId: string) => {
+    const placement = getPanelPlacement(layoutController.layout, panelId);
+    if (placement.kind === "closed") layoutController.openPanel(panelId);
+    else layoutController.closePanel(panelId);
+  };
 
   const listVisibleSheetIds = (): string[] => {
     const ids = app.getDocument().getSheetIds();
@@ -84,6 +93,99 @@ export function registerBuiltinCommands(params: {
       icon: null,
       description: "Open the Pivot Builder panel for the current selection",
       keywords: ["pivot", "pivot table", "pivotbuilder"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.togglePanel.aiChat",
+    "Toggle AI Chat",
+    () => toggleDockPanel(PanelIds.AI_CHAT),
+    {
+      category: "AI",
+      icon: null,
+      description: "Toggle the AI Chat panel",
+      keywords: ["ai", "chat", "assistant", "panel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.togglePanel.aiAudit",
+    "Toggle AI Audit",
+    () => toggleDockPanel(PanelIds.AI_AUDIT),
+    {
+      category: "AI",
+      icon: null,
+      description: "Toggle the AI Audit panel",
+      keywords: ["ai", "audit", "log", "panel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.togglePanel.extensions",
+    "Toggle Extensions",
+    () => {
+      if (ensureExtensionsLoaded) {
+        void ensureExtensionsLoaded()
+          .then(() => onExtensionsLoaded?.())
+          .catch(() => {
+            // ignore; panel open/close should still work
+          });
+      }
+      toggleDockPanel(PanelIds.EXTENSIONS);
+    },
+    {
+      category: "View",
+      icon: null,
+      description: "Toggle the Extensions panel",
+      keywords: ["extensions", "plugins", "panel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.togglePanel.macros",
+    "Toggle Macros",
+    () => toggleDockPanel(PanelIds.MACROS),
+    {
+      category: "View",
+      icon: null,
+      description: "Toggle the Macros panel",
+      keywords: ["macros", "panel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.togglePanel.dataQueries",
+    "Toggle Data Queries",
+    () => toggleDockPanel(PanelIds.DATA_QUERIES),
+    {
+      category: "View",
+      icon: null,
+      description: "Toggle the Data / Queries panel",
+      keywords: ["data", "queries", "power query", "panel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.togglePanel.scriptEditor",
+    "Toggle Script Editor",
+    () => toggleDockPanel(PanelIds.SCRIPT_EDITOR),
+    {
+      category: "View",
+      icon: null,
+      description: "Toggle the Script Editor panel",
+      keywords: ["script", "editor", "panel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.togglePanel.python",
+    "Toggle Python",
+    () => toggleDockPanel(PanelIds.PYTHON),
+    {
+      category: "View",
+      icon: null,
+      description: "Toggle the Python panel",
+      keywords: ["python", "panel"],
     },
   );
 

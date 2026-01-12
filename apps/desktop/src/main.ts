@@ -1772,7 +1772,17 @@ if (
 
   extensionHostManagerForE2e = extensionHostManager;
 
-  registerBuiltinCommands({ commandRegistry, app, layoutController });
+  registerBuiltinCommands({
+    commandRegistry,
+    app,
+    layoutController,
+    ensureExtensionsLoaded: () => ensureExtensionsLoadedRef?.() ?? Promise.resolve(),
+    onExtensionsLoaded: () => {
+      updateKeybindingsRef?.();
+      syncContributedCommandsRef?.();
+      syncContributedPanelsRef?.();
+    },
+  });
 
   const applyToSelectionInCommandBatch = (label: string, apply: (sheetId: string, range: CellRange) => void): void => {
     const doc = app.getDocument();

@@ -51,6 +51,7 @@ export class CommandRegistry {
       }
     }
   }
+
   registerBuiltinCommand(
     commandId: string,
     title: string,
