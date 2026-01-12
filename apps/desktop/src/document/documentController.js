@@ -637,6 +637,33 @@ export class DocumentController {
   }
 
   /**
+   * Iterate over all *stored* cells in a sheet.
+   *
+   * This visits only entries present in the underlying sparse cell map:
+   * - value cells
+   * - formula cells
+   * - format-only cells (styleId != 0)
+   *
+   * It intentionally does NOT scan the full grid area.
+   *
+   * NOTE: The `cell` argument is a reference to the internal model state; callers MUST
+   * treat it as read-only.
+   *
+   * @param {string} sheetId
+   * @param {(cell: { sheetId: string, row: number, col: number, cell: CellState }) => void} visitor
+   */
+  forEachCellInSheet(sheetId, visitor) {
+    if (typeof visitor !== "function") return;
+    const sheet = this.model.sheets.get(sheetId);
+    if (!sheet || !sheet.cells || sheet.cells.size === 0) return;
+    for (const [key, cell] of sheet.cells.entries()) {
+      if (!cell) continue;
+      const { row, col } = parseRowColKey(key);
+      visitor({ sheetId, row, col, cell });
+    }
+  }
+
+  /**
    * @param {string} sheetId
    * @param {CellCoord | string} coord
    * @param {CellValue} value

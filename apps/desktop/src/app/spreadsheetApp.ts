@@ -263,6 +263,40 @@ export type UndoRedoState = {
   redoLabel: string | null;
 };
 
+export interface SpreadsheetSelectionSummary {
+  /**
+   * Sum of numeric values in the current selection.
+   *
+   * - Uses computed values for formula cells.
+   * - Ignores non-numeric values (text, booleans, errors).
+   * - `null` when there are no numeric values selected.
+   */
+  sum: number | null;
+  /**
+   * Average of numeric values in the current selection.
+   *
+   * - Uses computed values for formula cells.
+   * - Ignores non-numeric values (text, booleans, errors).
+   * - `null` when there are no numeric values selected.
+   */
+  average: number | null;
+  /**
+   * "Count" as shown by default in Excel's status bar: number of *non-empty* cells.
+   *
+   * This counts cells with a value or a formula, and ignores format-only cells
+   * (styleId-only entries).
+   */
+  count: number;
+  /**
+   * Number of numeric values in the selection (Excel "Numerical Count").
+   */
+  numericCount: number;
+  /**
+   * Alias for `count` (explicit name for consumers that also expose `numericCount`).
+   */
+  countNonEmpty: number;
+}
+
 export class SpreadsheetApp {
   private sheetId = "Sheet1";
   private readonly idle = new IdleTracker();
@@ -1570,6 +1604,64 @@ export class SpreadsheetApp {
 
   getSelectionRanges(): Range[] {
     return this.selection.ranges;
+  }
+
+  /**
+   * Compute Excel-like status bar stats (Sum / Average / Count) for the current selection.
+   *
+   * Performance note: this is implemented by iterating only the *stored* cells in the
+   * DocumentController's sparse cell map (not every coordinate in the rectangular ranges).
+   */
+  getSelectionSummary(): SpreadsheetSelectionSummary {
+    const ranges = this.selection.ranges;
+    let countNonEmpty = 0;
+    let numericCount = 0;
+    let numericSum = 0;
+
+    // Iterate only stored cells (value/formula/format-only), then filter by selection.
+    this.document.forEachCellInSheet(this.sheetId, ({ row, col, cell }) => {
+      // Ignore cells outside the current selection ranges.
+      let inSelection = false;
+      for (const r of ranges) {
+        if (row >= r.startRow && row <= r.endRow && col >= r.startCol && col <= r.endCol) {
+          inSelection = true;
+          break;
+        }
+      }
+      if (!inSelection) return;
+
+      // Ignore format-only cells (styleId-only).
+      const hasContent = cell.value != null || cell.formula != null;
+      if (!hasContent) return;
+
+      countNonEmpty += 1;
+
+      // Sum/average operate on numeric values only (computed values for formulas).
+      if (cell.formula != null) {
+        const computed = this.getCellComputedValue({ row, col });
+        if (typeof computed === "number" && Number.isFinite(computed)) {
+          numericCount += 1;
+          numericSum += computed;
+        }
+        return;
+      }
+
+      if (typeof cell.value === "number" && Number.isFinite(cell.value)) {
+        numericCount += 1;
+        numericSum += cell.value;
+      }
+    });
+
+    const sum = numericCount > 0 ? numericSum : null;
+    const average = numericCount > 0 ? numericSum / numericCount : null;
+
+    return {
+      sum,
+      average,
+      count: countNonEmpty,
+      numericCount,
+      countNonEmpty,
+    };
   }
 
   getActiveCell(): CellCoord {

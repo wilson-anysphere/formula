@@ -1,6 +1,7 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`WorkbookContextBuilder > serializes a stable payload snapshot 1`] = `"{
+exports[`WorkbookContextBuilder > serializes a stable payload snapshot 1`] = `
+"{
   "activeSheetId": "Sheet1",
   "blocks": [
     {
@@ -63,8 +64,8 @@ exports[`WorkbookContextBuilder > serializes a stable payload snapshot 1`] = `"{
   "budget": {
     "contextWindowTokens": 16000,
     "maxPromptContextTokens": 2160,
-    "model": "unit-test-model",
     "mode": "chat",
+    "model": "unit-test-model",
     "reserveForOutputTokens": 1600,
     "usedPromptContextTokens": 0
   },
@@ -192,5 +193,5 @@ exports[`WorkbookContextBuilder > serializes a stable payload snapshot 1`] = `"{
   ],
   "version": 1,
   "workbookId": "wb_snapshot"
-}"`;
-
+}"
+`;
