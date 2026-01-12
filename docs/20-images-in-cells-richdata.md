@@ -92,6 +92,22 @@ Minimal representative shape for the `futureMetadata`/`rvb` variant (index bases
 </metadata>
 ```
 
+Observed minimal shape without `futureMetadata`/`rvb` (where `rc/@v` appears to reference the rich value
+index directly), from `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`:
+
+```xml
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE" minSupportedVersion="0" copy="1" pasteAll="1" pasteValues="1"/>
+  </metadataTypes>
+  <valueMetadata count="1">
+    <bk>
+      <rc t="1" v="0"/>
+    </bk>
+  </valueMetadata>
+</metadata>
+```
+
 This indirection is important for engineering because:
 
 * `vm` indexes are **independent** from `richValue.xml` indexes.
@@ -175,6 +191,10 @@ This design allows relationship IDs to change without rewriting every rich value
 The exact XML vocab inside `richValue.xml` varies across Excel builds, but the *indexing chain* for images-in-cell
 is generally:
 
+There are (at least) two observed variants for mapping `vm`/`metadata.xml` → rich value indices.
+
+### Variant A: `futureMetadata` / `rvb` indirection
+
 1. **Worksheet cell** (`xl/worksheets/sheetN.xml`)
    - Cell has `c/@vm="0"` or `c/@vm="1"` (value metadata index; **0-based or 1-based** in observed files).
 2. **Value metadata** (`xl/metadata.xml`)
@@ -194,6 +214,16 @@ is generally:
 
 So: **cell → vm (0/1-based) → metadata.xml → rvb@i (0-based) → richValue.xml → relIndex (0-based) →
 richValueRel.xml → rId → .rels target → image bytes**.
+
+### Variant B: `rc/@v` directly references the rich value index
+
+Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`:
+
+1. **Worksheet cell** has `c/@vm="0"`.
+2. In `xl/metadata.xml`, the first `<valueMetadata><bk>` has `<rc t="1" v="0"/>`.
+3. `v="0"` is treated as the rich value index (0-based) into `xl/richData/richValue.xml`.
+4. The rich value record contains a relationship index into `richValueRel.xml`, which resolves via
+   `xl/richData/_rels/richValueRel.xml.rels` to a media part.
 
 ## Minimal XML skeletons (best-effort)
 
