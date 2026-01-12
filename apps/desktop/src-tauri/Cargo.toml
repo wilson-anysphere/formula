@@ -59,6 +59,7 @@ futures-util = "0.3"
 dunce = "1.0"
 formula-columnar = { path = "../../../crates/formula-columnar" }
 formula-engine = { path = "../../../crates/formula-engine" }
+formula-fs = { path = "../../../crates/formula-fs" }
 formula-format = { path = "../../../crates/formula-format" }
 formula-xls = { path = "../../../crates/formula-xls" }
 formula-model = { path = "../../../crates/formula-model" }

@@ -66,6 +66,8 @@ pub(crate) fn ensure_xlsm_content_types(
         "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml";
     const WORKBOOK_MACRO_TEMPLATE_CONTENT_TYPE: &str =
         "application/vnd.ms-excel.template.macroEnabled.main+xml";
+    const WORKBOOK_ADDIN_MACRO_CONTENT_TYPE: &str =
+        "application/vnd.ms-excel.addin.macroEnabled.main+xml";
     const VBA_PART_NAME: &str = "/xl/vbaProject.bin";
     const VBA_CONTENT_TYPE: &str = "application/vnd.ms-office.vbaProject";
     const VBA_SIGNATURE_PART_NAME: &str = "/xl/vbaProjectSignature.bin";
@@ -94,10 +96,10 @@ pub(crate) fn ensure_xlsm_content_types(
         // unconditionally forcing `.xlsm`. This allows callers to patch `[Content_Types].xml`
         // for templates/add-ins and still rely on macro repair to inject the other required
         // VBA overrides.
-        content_type
-            .trim()
-            .to_ascii_lowercase()
-            .contains("macroenabled.main+xml")
+        let content_type = content_type.trim();
+        content_type.eq_ignore_ascii_case(WORKBOOK_MACRO_CONTENT_TYPE)
+            || content_type.eq_ignore_ascii_case(WORKBOOK_MACRO_TEMPLATE_CONTENT_TYPE)
+            || content_type.eq_ignore_ascii_case(WORKBOOK_ADDIN_MACRO_CONTENT_TYPE)
     }
 
     fn part_name_matches(candidate: &str, expected: &str) -> bool {

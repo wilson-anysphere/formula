@@ -3,6 +3,7 @@ use crate::state::{Cell, CellScalar};
 use anyhow::Context;
 use calamine::{open_workbook_auto, Data, Reader};
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
+use formula_fs::{atomic_write_with_path, AtomicWriteError};
 use formula_model::{
     import::{import_csv_to_columnar_table, CsvOptions, CsvTextEncoding},
     sanitize_sheet_name, CellValue as ModelCellValue, DateSystem as WorkbookDateSystem, WorksheetId,
@@ -1907,13 +1908,10 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
         .iter()
         .any(|sheet| !sheet.dirty_cells.is_empty());
 
-    let dest_is_origin = std::fs::canonicalize(origin_path)
-        .ok()
-        .zip(std::fs::canonicalize(path).ok())
-        .is_some_and(|(origin, dest)| origin == dest);
-
     let mut temp_paths: Vec<std::path::PathBuf> = Vec::new();
-    let res = (|| -> anyhow::Result<()> {
+    let res = atomic_write_with_path(path, |tmp_out_path| -> anyhow::Result<()> {
+        let final_out_path = tmp_out_path.to_path_buf();
+
         let xlsb = XlsbWorkbook::open_with_options(
             origin_path,
             XlsbOpenOptions {
@@ -1924,29 +1922,6 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
             },
         )
         .with_context(|| format!("open xlsb {:?}", origin_path))?;
-
-        // Avoid writing directly over the source workbook since `formula-xlsb` streams from
-        // `origin_path` while writing the destination ZIP.
-        let final_out_path = if dest_is_origin {
-            let dir = path.parent().unwrap_or_else(|| Path::new("."));
-            let pid = std::process::id();
-            let nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos();
-            let mut candidate = dir.join(format!(".formula-xlsb-save-{pid}-{nanos}-final.xlsb"));
-            let mut bump = 0u32;
-            while candidate.exists() {
-                bump += 1;
-                candidate = dir.join(format!(
-                    ".formula-xlsb-save-{pid}-{nanos}-{bump}-final.xlsb"
-                ));
-            }
-            temp_paths.push(candidate.clone());
-            candidate
-        } else {
-            path.to_path_buf()
-        };
 
         if !any_dirty_cells {
             xlsb.save_as(&final_out_path)
@@ -2174,40 +2149,26 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
         }
 
         Ok(())
-    })();
-
-    if let Err(err) = res {
-        for tmp in &temp_paths {
-            let _ = std::fs::remove_file(tmp);
-        }
-        return Err(err);
-    }
-
-    if dest_is_origin {
-        // We've already written to a temp path in the same directory.
-        let tmp_final = temp_paths
-            .iter()
-            .find(|p| {
-                p.file_name()
-                    .is_some_and(|n| n.to_string_lossy().contains("final"))
-            })
-            .cloned();
-        if let Some(tmp_final) = tmp_final {
-            #[cfg(windows)]
-            std::fs::remove_file(path)
-                .with_context(|| format!("remove original xlsb {:?}", path))?;
-            std::fs::rename(&tmp_final, path)
-                .with_context(|| format!("replace original xlsb {:?}", path))?;
-        }
-    }
+    });
 
     for tmp in &temp_paths {
         let _ = std::fs::remove_file(tmp);
     }
 
-    let bytes =
-        Arc::<[u8]>::from(std::fs::read(path).with_context(|| format!("read xlsb {:?}", path))?);
-    Ok(bytes)
+    match res {
+        Ok(()) => {
+            let bytes = Arc::<[u8]>::from(
+                std::fs::read(path).with_context(|| format!("read xlsb {:?}", path))?,
+            );
+            Ok(bytes)
+        }
+        Err(AtomicWriteError::Io(err)) => Err(
+            Err::<(), _>(err)
+                .with_context(|| format!("write xlsb {:?}", path))
+                .unwrap_err(),
+        ),
+        Err(AtomicWriteError::Writer(err)) => Err(err),
+    }
 }
 
 fn scalar_to_xlsb_value(value: &CellScalar) -> XlsbCellValue {

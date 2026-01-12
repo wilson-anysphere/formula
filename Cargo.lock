@@ -2024,6 +2024,7 @@ dependencies = [
  "formula-columnar",
  "formula-engine",
  "formula-format",
+ "formula-fs",
  "formula-model",
  "formula-storage",
  "formula-vba",
@@ -2119,6 +2120,14 @@ name = "formula-format"
 version = "0.1.0"
 
 [[package]]
+name = "formula-fs"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "formula-io"
 version = "0.1.0"
 dependencies = [
@@ -2126,6 +2135,7 @@ dependencies = [
  "encoding_rs",
  "formula-columnar",
  "formula-format",
+ "formula-fs",
  "formula-model",
  "formula-xls",
  "formula-xlsb",

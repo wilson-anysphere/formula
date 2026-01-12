@@ -1,54 +1,14 @@
 use std::borrow::Cow;
-use std::fs::{self, File};
-use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use encoding_rs::WINDOWS_1252;
+use formula_fs::{atomic_write, AtomicWriteError};
 use formula_model::import::{
     import_csv_into_workbook, CsvImportError, CsvOptions,
 };
 use formula_model::sanitize_sheet_name;
-use tempfile::NamedTempFile;
+use std::io::{Read, Seek};
 
-#[derive(Debug)]
-enum AtomicWriteError<E> {
-    Io(io::Error),
-    Write(E),
-}
-
-impl<E> From<io::Error> for AtomicWriteError<E> {
-    fn from(value: io::Error) -> Self {
-        Self::Io(value)
-    }
-}
-
-fn atomic_write<E>(
-    path: &Path,
-    write_fn: impl FnOnce(&mut File) -> Result<(), E>,
-) -> Result<(), AtomicWriteError<E>> {
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(dir)?;
-
-    let mut temp = NamedTempFile::new_in(dir)?;
-    write_fn(temp.as_file_mut()).map_err(AtomicWriteError::Write)?;
-    temp.flush()?;
-    temp.as_file().sync_all()?;
-
-    match temp.persist(path) {
-        Ok(_) => Ok(()),
-        Err(err) => match err.error.kind() {
-            // Best-effort replacement on platforms where rename doesn't clobber.
-            io::ErrorKind::AlreadyExists => {
-                let _ = fs::remove_file(path);
-                err.file
-                    .persist(path)
-                    .map(|_| ())
-                    .map_err(|e| AtomicWriteError::Io(e.error))
-            }
-            _ => Err(AtomicWriteError::Io(err.error)),
-        },
-    }
-}
 pub use formula_xls as xls;
 pub use formula_xlsb as xlsb;
 pub use formula_xlsx as xlsx;
@@ -767,126 +727,46 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
 
     match workbook {
         Workbook::Xlsx(package) => match ext.as_str() {
-            "xlsx" => {
+            "xlsx" | "xlsm" | "xltx" | "xltm" | "xlam" => {
+                let kind =
+                    xlsx::WorkbookKind::from_extension(&ext).expect("handled by match arm above");
+
                 let mut out = package.clone();
-                // If we're saving a workbook with any macro-capable content to a `.xlsx` filename,
-                // strip macro parts/relationships so we don't produce an XLSM-in-disguise (which
-                // Excel refuses to open).
+
+                // If we're saving a workbook with any macro-capable content to a macro-free
+                // extension (e.g. `.xlsx`/`.xltx`), strip macro parts/relationships so we don't
+                // produce a macro-enabled workbook in disguise (which Excel refuses to open).
                 //
                 // Macro-capable surfaces include:
                 // - classic VBA (`xl/vbaProject.bin`)
                 // - Excel 4.0 macro sheets (`xl/macrosheets/**`)
                 // - legacy dialog sheets (`xl/dialogsheets/**`)
-                if out.macro_presence().any() {
+                if kind.is_macro_free() && out.macro_presence().any() {
                     out.remove_vba_project()
                         .map_err(|source| Error::SaveXlsxPackage {
                             path: path.to_path_buf(),
                             source,
                         })?;
                 }
-                // Ensure the workbook main content type matches the target extension.
-                out.enforce_workbook_kind(xlsx::WorkbookKind::Workbook)
+
+                out.enforce_workbook_kind(kind)
                     .map_err(|source| Error::SaveXlsxPackage {
                         path: path.to_path_buf(),
                         source,
                     })?;
-                atomic_write(path, |file| out.write_to(file)).map_err(|err| match err {
-                    AtomicWriteError::Io(source) => Error::SaveIo {
+
+                let res = atomic_write(path, |file| out.write_to(file));
+                match res {
+                    Ok(()) => Ok(()),
+                    Err(AtomicWriteError::Io(source)) => Err(Error::SaveIo {
                         path: path.to_path_buf(),
                         source,
-                    },
-                    AtomicWriteError::Write(source) => Error::SaveXlsxPackage {
+                    }),
+                    Err(AtomicWriteError::Writer(source)) => Err(Error::SaveXlsxPackage {
                         path: path.to_path_buf(),
                         source,
-                    },
-                })
-            }
-            "xlsm" => {
-                let mut out = package.clone();
-                // Ensure the workbook main content type matches the target extension.
-                out.enforce_workbook_kind(xlsx::WorkbookKind::MacroEnabledWorkbook)
-                    .map_err(|source| Error::SaveXlsxPackage {
-                        path: path.to_path_buf(),
-                        source,
-                    })?;
-                atomic_write(path, |file| out.write_to(file)).map_err(|err| match err {
-                    AtomicWriteError::Io(source) => Error::SaveIo {
-                        path: path.to_path_buf(),
-                        source,
-                    },
-                    AtomicWriteError::Write(source) => Error::SaveXlsxPackage {
-                        path: path.to_path_buf(),
-                        source,
-                    },
-                })
-            }
-            "xltx" => {
-                let mut out = package.clone();
-                // If we're saving a workbook with any macro-capable content to a `.xltx` filename,
-                // strip macro parts/relationships so we don't produce a macro-capable template.
-                //
-                // Macro-capable surfaces include:
-                // - classic VBA (`xl/vbaProject.bin`)
-                // - Excel 4.0 macro sheets (`xl/macrosheets/**`)
-                // - legacy dialog sheets (`xl/dialogsheets/**`)
-                if out.macro_presence().any() {
-                    out.remove_vba_project()
-                        .map_err(|source| Error::SaveXlsxPackage {
-                            path: path.to_path_buf(),
-                            source,
-                        })?;
+                    }),
                 }
-                out.enforce_workbook_kind(xlsx::WorkbookKind::Template)
-                    .map_err(|source| Error::SaveXlsxPackage {
-                        path: path.to_path_buf(),
-                        source,
-                    })?;
-                atomic_write(path, |file| out.write_to(file)).map_err(|err| match err {
-                    AtomicWriteError::Io(source) => Error::SaveIo {
-                        path: path.to_path_buf(),
-                        source,
-                    },
-                    AtomicWriteError::Write(source) => Error::SaveXlsxPackage {
-                        path: path.to_path_buf(),
-                        source,
-                    },
-                })
-            }
-            "xltm" => {
-                let mut out = package.clone();
-                out.enforce_workbook_kind(xlsx::WorkbookKind::MacroEnabledTemplate)
-                    .map_err(|source| Error::SaveXlsxPackage {
-                        path: path.to_path_buf(),
-                        source,
-                    })?;
-                atomic_write(path, |file| out.write_to(file)).map_err(|err| match err {
-                    AtomicWriteError::Io(source) => Error::SaveIo {
-                        path: path.to_path_buf(),
-                        source,
-                    },
-                    AtomicWriteError::Write(source) => Error::SaveXlsxPackage {
-                        path: path.to_path_buf(),
-                        source,
-                    },
-                })
-            }
-            "xlam" => {
-                let mut out = package.clone();
-                out.enforce_workbook_kind(xlsx::WorkbookKind::MacroEnabledAddIn)
-                    .map_err(|source| Error::SaveXlsxPackage {
-                        path: path.to_path_buf(),
-                        source,
-                    })?;
-                atomic_write(path, |file| out.write_to(file)).map_err(|err| match err {
-                    AtomicWriteError::Io(source) => Error::SaveIo {
-                        path: path.to_path_buf(),
-                        source,
-                    },
-                    AtomicWriteError::Write(source) => Error::SaveXlsxPackage {
-                        path: path.to_path_buf(),
-                        source,
-                    },
-                })
             }
             other => Err(Error::UnsupportedExtension {
                 path: path.to_path_buf(),
@@ -895,27 +775,22 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
         },
         Workbook::Xls(result) => match ext.as_str() {
             "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind = match ext.as_str() {
-                    "xlsx" => xlsx::WorkbookKind::Workbook,
-                    "xltx" => xlsx::WorkbookKind::Template,
-                    "xltm" => xlsx::WorkbookKind::MacroEnabledTemplate,
-                    "xlam" => xlsx::WorkbookKind::MacroEnabledAddIn,
-                    _ => unreachable!(),
-                };
-
-                atomic_write(path, |file| {
+                let kind = xlsx::WorkbookKind::from_extension(&ext)
+                    .expect("handled by match arm above");
+                let res = atomic_write(path, |file| {
                     xlsx::write_workbook_to_writer_with_kind(&result.workbook, file, kind)
-                })
-                .map_err(|err| match err {
-                    AtomicWriteError::Io(source) => Error::SaveIo {
+                });
+                match res {
+                    Ok(()) => Ok(()),
+                    Err(AtomicWriteError::Io(source)) => Err(Error::SaveIo {
                         path: path.to_path_buf(),
                         source,
-                    },
-                    AtomicWriteError::Write(source) => Error::SaveXlsxExport {
+                    }),
+                    Err(AtomicWriteError::Writer(source)) => Err(Error::SaveXlsxExport {
                         path: path.to_path_buf(),
                         source,
-                    },
-                })
+                    }),
+                }
             }
             other => Err(Error::UnsupportedExtension {
                 path: path.to_path_buf(),
@@ -923,41 +798,41 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
             }),
         },
         Workbook::Xlsb(wb) => match ext.as_str() {
-            "xlsb" => atomic_write(path, |file| wb.save_as_to_writer(file)).map_err(|err| match err {
-                AtomicWriteError::Io(source) => Error::SaveIo {
-                    path: path.to_path_buf(),
-                    source,
-                },
-                AtomicWriteError::Write(source) => Error::SaveXlsbPackage {
-                    path: path.to_path_buf(),
-                    source,
-                },
-            }),
+            "xlsb" => {
+                let res = atomic_write(path, |file| wb.save_as_to_writer(file));
+                match res {
+                    Ok(()) => Ok(()),
+                    Err(AtomicWriteError::Io(source)) => Err(Error::SaveIo {
+                        path: path.to_path_buf(),
+                        source,
+                    }),
+                    Err(AtomicWriteError::Writer(source)) => Err(Error::SaveXlsbPackage {
+                        path: path.to_path_buf(),
+                        source,
+                    }),
+                }
+            }
             "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind = match ext.as_str() {
-                    "xlsx" => xlsx::WorkbookKind::Workbook,
-                    "xltx" => xlsx::WorkbookKind::Template,
-                    "xltm" => xlsx::WorkbookKind::MacroEnabledTemplate,
-                    "xlam" => xlsx::WorkbookKind::MacroEnabledAddIn,
-                    _ => unreachable!(),
-                };
+                let kind = xlsx::WorkbookKind::from_extension(&ext)
+                    .expect("handled by match arm above");
                 let model = xlsb_to_model_workbook(wb).map_err(|source| Error::SaveXlsbExport {
                     path: path.to_path_buf(),
                     source,
                 })?;
-                atomic_write(path, |file| {
+                let res = atomic_write(path, |file| {
                     xlsx::write_workbook_to_writer_with_kind(&model, file, kind)
-                })
-                .map_err(|err| match err {
-                    AtomicWriteError::Io(source) => Error::SaveIo {
+                });
+                match res {
+                    Ok(()) => Ok(()),
+                    Err(AtomicWriteError::Io(source)) => Err(Error::SaveIo {
                         path: path.to_path_buf(),
                         source,
-                    },
-                    AtomicWriteError::Write(source) => Error::SaveXlsxExport {
+                    }),
+                    Err(AtomicWriteError::Writer(source)) => Err(Error::SaveXlsxExport {
                         path: path.to_path_buf(),
                         source,
-                    },
-                })
+                    }),
+                }
             }
             other => Err(Error::UnsupportedExtension {
                 path: path.to_path_buf(),
@@ -966,26 +841,22 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
         },
         Workbook::Model(model) => match ext.as_str() {
             "xlsx" | "xltx" | "xltm" | "xlam" => {
-                let kind = match ext.as_str() {
-                    "xlsx" => xlsx::WorkbookKind::Workbook,
-                    "xltx" => xlsx::WorkbookKind::Template,
-                    "xltm" => xlsx::WorkbookKind::MacroEnabledTemplate,
-                    "xlam" => xlsx::WorkbookKind::MacroEnabledAddIn,
-                    _ => unreachable!(),
-                };
-                atomic_write(path, |file| {
+                let kind = xlsx::WorkbookKind::from_extension(&ext)
+                    .expect("handled by match arm above");
+                let res = atomic_write(path, |file| {
                     xlsx::write_workbook_to_writer_with_kind(model, file, kind)
-                })
-                .map_err(|err| match err {
-                    AtomicWriteError::Io(source) => Error::SaveIo {
+                });
+                match res {
+                    Ok(()) => Ok(()),
+                    Err(AtomicWriteError::Io(source)) => Err(Error::SaveIo {
                         path: path.to_path_buf(),
                         source,
-                    },
-                    AtomicWriteError::Write(source) => Error::SaveXlsxExport {
+                    }),
+                    Err(AtomicWriteError::Writer(source)) => Err(Error::SaveXlsxExport {
                         path: path.to_path_buf(),
                         source,
-                    },
-                })
+                    }),
+                }
             }
             other => Err(Error::UnsupportedExtension {
                 path: path.to_path_buf(),
