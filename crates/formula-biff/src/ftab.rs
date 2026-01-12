@@ -686,6 +686,7 @@ const FUTURE_UDF_FUNCTIONS: &[&str] = &[
     "SEC",
     "SECH",
     "SEQUENCE",
+    "SKEW.P",
     "SORT",
     "SORTBY",
     "STDEV.P",
