@@ -16,6 +16,7 @@ mod financial_cashflows;
 mod financial_accrint;
 mod financial_bonds_date_system;
 mod financial_coupons;
+mod financial_dollar_fractions;
 mod financial_dates;
 mod financial_depreciation;
 mod financial_amortization;
