@@ -283,15 +283,27 @@ export function DataQueriesPanelContainer(props: Props) {
         setLastRunAtMsByQueryId((prev) => ({ ...prev, [queryId]: ms }));
       }
 
-      if (
-        typeof queryId === "string" &&
-        ((evt as any)?.type === "error" ||
-          (evt as any)?.type === "cancelled" ||
-          (evt as any)?.type === "apply:completed" ||
-          (evt as any)?.type === "apply:error" ||
-          (evt as any)?.type === "apply:cancelled")
-      ) {
-        activeRefreshHandleByQueryId.current.delete(queryId);
+      if (typeof queryId === "string") {
+        const type = (evt as any)?.type;
+        if (type === "completed") {
+          const query = service.getQuery(queryId);
+          const dest = query?.destination as any;
+          const hasSheetDestination =
+            dest &&
+            typeof dest === "object" &&
+            typeof dest.sheetId === "string" &&
+            dest.start &&
+            typeof dest.start === "object" &&
+            typeof dest.start.row === "number" &&
+            typeof dest.start.col === "number";
+          // If there's no destination, the refresh finishes at "completed" (no apply phase),
+          // so clear the in-flight handle to allow subsequent manual refreshes.
+          if (!hasSheetDestination) {
+            activeRefreshHandleByQueryId.current.delete(queryId);
+          }
+        } else if (type === "error" || type === "cancelled" || type === "apply:completed" || type === "apply:error" || type === "apply:cancelled") {
+          activeRefreshHandleByQueryId.current.delete(queryId);
+        }
       }
     });
   }, [service]);
