@@ -10,6 +10,9 @@ use crate::{
 };
 use md5::{Digest as _, Md5};
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::project_digest::compute_vba_project_digest;
+
 /// Identifies which `\x05DigitalSignature*` stream/storage variant a signature was loaded from.
 ///
 /// Excel stores VBA project signatures in one of three known variants:
