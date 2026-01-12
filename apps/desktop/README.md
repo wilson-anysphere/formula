@@ -186,7 +186,7 @@ location.reload();
 For running a local marketplace server (and registering a publisher for test publishes), see
 `services/marketplace/README.md`.
 
-To open the built-in Marketplace panel in dev:
+To open the built-in Marketplace panel:
 
 - Use the ribbon: **View → Panels → Marketplace**
 - Or run from DevTools:
