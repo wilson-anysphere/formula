@@ -3,6 +3,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CanvasGrid, type GridApi } from "../CanvasGrid";
+import * as scrollbarMath from "../../virtualization/scrollbarMath";
 
 // React 18 relies on this flag to suppress act() warnings in test runners.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -36,6 +37,18 @@ function createPointerEvent(
 }
 
 describe("CanvasGrid scrollbars", () => {
+  const rect200 = {
+    left: 0,
+    top: 0,
+    right: 200,
+    bottom: 200,
+    width: 200,
+    height: 200,
+    x: 0,
+    y: 0,
+    toJSON: () => ({})
+  } as unknown as DOMRect;
+
   beforeEach(() => {
     vi.stubGlobal(
       "ResizeObserver",
@@ -71,17 +84,7 @@ describe("CanvasGrid scrollbars", () => {
   });
 
   it("scrolls when clicking the vertical scrollbar track and does not start a selection", async () => {
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-      left: 0,
-      top: 0,
-      right: 200,
-      bottom: 200,
-      width: 200,
-      height: 200,
-      x: 0,
-      y: 0,
-      toJSON: () => ({})
-    } as unknown as DOMRect);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect200);
 
     const apiRef = React.createRef<GridApi>();
 
@@ -114,17 +117,7 @@ describe("CanvasGrid scrollbars", () => {
   });
 
   it("scrolls when clicking the horizontal scrollbar track and does not start a selection", async () => {
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-      left: 0,
-      top: 0,
-      right: 200,
-      bottom: 200,
-      width: 200,
-      height: 200,
-      x: 0,
-      y: 0,
-      toJSON: () => ({})
-    } as unknown as DOMRect);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect200);
 
     const apiRef = React.createRef<GridApi>();
 
@@ -158,17 +151,7 @@ describe("CanvasGrid scrollbars", () => {
   });
 
   it("treats shift+wheel as horizontal scroll", async () => {
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-      left: 0,
-      top: 0,
-      right: 200,
-      bottom: 200,
-      width: 200,
-      height: 200,
-      x: 0,
-      y: 0,
-      toJSON: () => ({})
-    } as unknown as DOMRect);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect200);
 
     const apiRef = React.createRef<GridApi>();
 
@@ -200,17 +183,7 @@ describe("CanvasGrid scrollbars", () => {
   });
 
   it("normalizes wheel deltaMode for line and page scrolling", async () => {
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-      left: 0,
-      top: 0,
-      right: 200,
-      bottom: 200,
-      width: 200,
-      height: 200,
-      x: 0,
-      y: 0,
-      toJSON: () => ({})
-    } as unknown as DOMRect);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect200);
 
     const apiRef = React.createRef<GridApi>();
 
@@ -245,17 +218,7 @@ describe("CanvasGrid scrollbars", () => {
   });
 
   it("uses ctrl+wheel to zoom the grid", async () => {
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-      left: 0,
-      top: 0,
-      right: 200,
-      bottom: 200,
-      width: 200,
-      height: 200,
-      x: 0,
-      y: 0,
-      toJSON: () => ({})
-    } as unknown as DOMRect);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect200);
 
     const apiRef = React.createRef<GridApi>();
 
@@ -288,17 +251,7 @@ describe("CanvasGrid scrollbars", () => {
   });
 
   it("dragging the vertical scrollbar thumb respects zoom-scaled minimum thumb size", async () => {
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-      left: 0,
-      top: 0,
-      right: 200,
-      bottom: 200,
-      width: 200,
-      height: 200,
-      x: 0,
-      y: 0,
-      toJSON: () => ({})
-    } as unknown as DOMRect);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect200);
 
     const apiRef = React.createRef<GridApi>();
 
@@ -335,6 +288,241 @@ describe("CanvasGrid scrollbars", () => {
     });
 
     expect(apiRef.current?.getScroll().y).toBe(1800);
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
+  it("syncScrollbars derives track sizes from viewport metrics (no scrollbars)", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect200);
+    const thumbSpy = vi.spyOn(scrollbarMath, "computeScrollbarThumb");
+
+    const apiRef = React.createRef<GridApi>();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: () => null }}
+          rowCount={10}
+          colCount={10}
+          defaultRowHeight={10}
+          defaultColWidth={10}
+          apiRef={apiRef}
+        />
+      );
+    });
+
+    const viewport = apiRef.current?.getViewportState();
+    expect(viewport).toBeTruthy();
+
+    const zoom = apiRef.current?.getZoom() ?? 1;
+    const inset = 2 * zoom;
+    const thickness = 10 * zoom;
+    const gap = 4 * zoom;
+    const corner = inset + thickness + gap;
+
+    expect(thumbSpy).toHaveBeenCalledTimes(2);
+
+    const vArgs = thumbSpy.mock.calls[0]?.[0];
+    const hArgs = thumbSpy.mock.calls[1]?.[0];
+    expect(vArgs).toBeTruthy();
+    expect(hArgs).toBeTruthy();
+
+    expect(vArgs?.trackSize).toBeCloseTo(viewport!.height - inset - corner, 6);
+    expect(vArgs?.viewportSize).toBeCloseTo(viewport!.height - viewport!.frozenHeight, 6);
+    expect(vArgs?.contentSize).toBeCloseTo(viewport!.totalHeight - viewport!.frozenHeight, 6);
+
+    expect(hArgs?.trackSize).toBeCloseTo(viewport!.width - inset - corner, 6);
+    expect(hArgs?.viewportSize).toBeCloseTo(viewport!.width - viewport!.frozenWidth, 6);
+    expect(hArgs?.contentSize).toBeCloseTo(viewport!.totalWidth - viewport!.frozenWidth, 6);
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
+  it("syncScrollbars passes correct thumb inputs for vertical-only scroll", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect200);
+    const thumbSpy = vi.spyOn(scrollbarMath, "computeScrollbarThumb");
+
+    const apiRef = React.createRef<GridApi>();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: () => null }}
+          rowCount={100}
+          colCount={10}
+          defaultRowHeight={10}
+          defaultColWidth={10}
+          apiRef={apiRef}
+        />
+      );
+    });
+
+    const viewport = apiRef.current?.getViewportState();
+    expect(viewport).toBeTruthy();
+    expect(viewport?.maxScrollY).toBeGreaterThan(0);
+    expect(viewport?.maxScrollX).toBe(0);
+
+    const zoom = apiRef.current?.getZoom() ?? 1;
+    const inset = 2 * zoom;
+    const thickness = 10 * zoom;
+    const gap = 4 * zoom;
+    const corner = inset + thickness + gap;
+
+    expect(thumbSpy).toHaveBeenCalledTimes(2);
+    const vArgs = thumbSpy.mock.calls[0]?.[0];
+    const hArgs = thumbSpy.mock.calls[1]?.[0];
+
+    expect(vArgs?.trackSize).toBeCloseTo(viewport!.height - inset - corner, 6);
+    expect(vArgs?.viewportSize).toBeCloseTo(viewport!.height - viewport!.frozenHeight, 6);
+    expect(vArgs?.contentSize).toBeCloseTo(viewport!.totalHeight - viewport!.frozenHeight, 6);
+
+    expect(hArgs?.trackSize).toBeCloseTo(viewport!.width - inset - corner, 6);
+    expect(hArgs?.viewportSize).toBeCloseTo(viewport!.width - viewport!.frozenWidth, 6);
+    expect(hArgs?.contentSize).toBeCloseTo(viewport!.totalWidth - viewport!.frozenWidth, 6);
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
+  it("syncScrollbars passes correct thumb inputs for both-axis scroll", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect200);
+    const thumbSpy = vi.spyOn(scrollbarMath, "computeScrollbarThumb");
+
+    const apiRef = React.createRef<GridApi>();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: () => null }}
+          rowCount={100}
+          colCount={100}
+          defaultRowHeight={10}
+          defaultColWidth={10}
+          apiRef={apiRef}
+        />
+      );
+    });
+
+    const viewport = apiRef.current?.getViewportState();
+    expect(viewport).toBeTruthy();
+    expect(viewport?.maxScrollY).toBeGreaterThan(0);
+    expect(viewport?.maxScrollX).toBeGreaterThan(0);
+
+    const zoom = apiRef.current?.getZoom() ?? 1;
+    const inset = 2 * zoom;
+    const thickness = 10 * zoom;
+    const gap = 4 * zoom;
+    const corner = inset + thickness + gap;
+
+    expect(thumbSpy).toHaveBeenCalledTimes(2);
+    const vArgs = thumbSpy.mock.calls[0]?.[0];
+    const hArgs = thumbSpy.mock.calls[1]?.[0];
+
+    expect(vArgs?.trackSize).toBeCloseTo(viewport!.height - inset - corner, 6);
+    expect(vArgs?.viewportSize).toBeCloseTo(viewport!.height - viewport!.frozenHeight, 6);
+    expect(vArgs?.contentSize).toBeCloseTo(viewport!.totalHeight - viewport!.frozenHeight, 6);
+
+    expect(hArgs?.trackSize).toBeCloseTo(viewport!.width - inset - corner, 6);
+    expect(hArgs?.viewportSize).toBeCloseTo(viewport!.width - viewport!.frozenWidth, 6);
+    expect(hArgs?.contentSize).toBeCloseTo(viewport!.totalWidth - viewport!.frozenWidth, 6);
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
+  it("syncScrollbars passes correct thumb inputs with frozen panes", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect200);
+    const thumbSpy = vi.spyOn(scrollbarMath, "computeScrollbarThumb");
+
+    const apiRef = React.createRef<GridApi>();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: () => null }}
+          rowCount={100}
+          colCount={100}
+          frozenRows={2}
+          frozenCols={2}
+          defaultRowHeight={10}
+          defaultColWidth={10}
+          apiRef={apiRef}
+        />
+      );
+    });
+
+    const viewport = apiRef.current?.getViewportState();
+    expect(viewport).toBeTruthy();
+    expect(viewport?.frozenHeight).toBeGreaterThan(0);
+    expect(viewport?.frozenWidth).toBeGreaterThan(0);
+
+    const zoom = apiRef.current?.getZoom() ?? 1;
+    const inset = 2 * zoom;
+    const thickness = 10 * zoom;
+    const gap = 4 * zoom;
+    const corner = inset + thickness + gap;
+
+    expect(thumbSpy).toHaveBeenCalledTimes(2);
+    const vArgs = thumbSpy.mock.calls[0]?.[0];
+    const hArgs = thumbSpy.mock.calls[1]?.[0];
+
+    expect(vArgs?.trackSize).toBeCloseTo(viewport!.height - inset - corner, 6);
+    expect(vArgs?.viewportSize).toBeCloseTo(viewport!.height - viewport!.frozenHeight, 6);
+    expect(vArgs?.contentSize).toBeCloseTo(viewport!.totalHeight - viewport!.frozenHeight, 6);
+
+    expect(hArgs?.trackSize).toBeCloseTo(viewport!.width - inset - corner, 6);
+    expect(hArgs?.viewportSize).toBeCloseTo(viewport!.width - viewport!.frozenWidth, 6);
+    expect(hArgs?.contentSize).toBeCloseTo(viewport!.totalWidth - viewport!.frozenWidth, 6);
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
+  it("syncScrollbars avoids getBoundingClientRect during scroll updates", async () => {
+    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect200);
+
+    const apiRef = React.createRef<GridApi>();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid provider={{ getCell: () => null }} rowCount={100} colCount={100} defaultRowHeight={10} defaultColWidth={10} apiRef={apiRef} />
+      );
+    });
+
+    const callsAfterMount = rectSpy.mock.calls.length;
+
+    await act(async () => {
+      apiRef.current?.scrollBy(10, 10);
+    });
+
+    expect(rectSpy.mock.calls.length).toBe(callsAfterMount);
 
     await act(async () => {
       root.unmount();

@@ -303,6 +303,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const hTrackRef = useRef<HTMLDivElement | null>(null);
   const hThumbRef = useRef<HTMLDivElement | null>(null);
 
+  const scrollbarLayoutRef = useRef<{ inset: number; corner: number }>({ inset: 0, corner: 0 });
+
   const rendererRef = useRef<CanvasGridRenderer | null>(null);
   const onSelectionChangeRef = useRef(props.onSelectionChange);
   const onSelectionRangeChangeRef = useRef(props.onSelectionRangeChange);
@@ -461,8 +463,11 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const scroll = renderer.scroll.getScroll();
     const minThumbSize = 24 * zoomRef.current;
 
-    const vTrackSize = vTrack.getBoundingClientRect().height;
-    const hTrackSize = hTrack.getBoundingClientRect().width;
+    // Avoid layout reads during continuous scroll; track sizing is deterministic from the
+    // viewport dimensions + the same inset/corner values used to style the tracks.
+    const { inset, corner } = scrollbarLayoutRef.current;
+    const vTrackSize = Math.max(0, viewport.height - inset - corner);
+    const hTrackSize = Math.max(0, viewport.width - inset - corner);
 
     const frozenHeight = viewport.frozenHeight;
     const frozenWidth = viewport.frozenWidth;
@@ -2721,6 +2726,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const scrollbarCorner = scrollbarInset + scrollbarThickness + scrollbarGap;
   const scrollbarRadius = 6 * zoom;
   const scrollbarThumbInset = 1 * zoom;
+
+  scrollbarLayoutRef.current = { inset: scrollbarInset, corner: scrollbarCorner };
 
   const containerStyle: React.CSSProperties = useMemo(
     () => ({

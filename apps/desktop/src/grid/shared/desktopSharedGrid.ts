@@ -1870,7 +1870,9 @@ export class DesktopSharedGrid {
       this.vTrack.style.bottom = `${(showH ? thickness : 0) + padding}px`;
       this.vTrack.style.width = `${thickness}px`;
 
-      const trackSize = this.vTrack.getBoundingClientRect().height;
+      // Avoid layout reads during scroll; the track size is deterministic from the
+      // viewport + the same top/bottom offsets applied above.
+      const trackSize = Math.max(0, viewport.height - frozenHeight - (showH ? thickness : 0) - 2 * padding);
       const thumb = computeScrollbarThumb({
         scrollPos: scroll.y,
         viewportSize: Math.max(0, viewport.height - frozenHeight),
@@ -1888,7 +1890,9 @@ export class DesktopSharedGrid {
       this.hTrack.style.bottom = `${padding}px`;
       this.hTrack.style.height = `${thickness}px`;
 
-      const trackSize = this.hTrack.getBoundingClientRect().width;
+      // Avoid layout reads during scroll; the track size is deterministic from the
+      // viewport + the same left/right offsets applied above.
+      const trackSize = Math.max(0, viewport.width - frozenWidth - (showV ? thickness : 0) - 2 * padding);
       const thumb = computeScrollbarThumb({
         scrollPos: scroll.x,
         viewportSize: Math.max(0, viewport.width - frozenWidth),
