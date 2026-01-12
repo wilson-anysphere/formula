@@ -37,7 +37,9 @@ export type RichTextRun = {
 
 export type RichTextValue = {
   text: string;
-  runs: RichTextRun[];
+  // Use a readonly array so callers can conveniently construct rich text values with
+  // `as const` without fighting TS's readonly tuple inference.
+  runs: ReadonlyArray<RichTextRun>;
 };
 
 export type EntityValue = {
