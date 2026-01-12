@@ -124,9 +124,16 @@ pub(crate) fn parse_digsig_info_serialized(stream: &[u8]) -> Option<DigSigInfoSe
         }
 
         // Project name length can be either bytes or WCHAR count; try both interpretations.
+        //
+        // Some producers also appear to omit the terminating NUL from the count, so include +2 byte
+        // variants (for UTF-16LE NUL) as well.
         for proj_bytes in [
             Some(header.proj_len),
+            header.proj_len.checked_add(2),
             header.proj_len.checked_mul(2),
+            header.proj_len
+                .checked_mul(2)
+                .and_then(|n| n.checked_add(2)),
         ]
         .into_iter()
         .flatten()
