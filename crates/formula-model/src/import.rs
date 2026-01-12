@@ -18,7 +18,8 @@ pub struct CsvOptions {
     /// Field delimiter byte (`,`/`;`/tab/`|`).
     ///
     /// Use [`CSV_DELIMITER_AUTO`] to automatically detect the delimiter from the first few records
-    /// (Excel-like behavior).
+    /// (Excel-like behavior). Auto-detection also honors Excel's `sep=<delimiter>` directive when
+    /// it appears as the first line in the file.
     pub delimiter: u8,
     pub has_header: bool,
     pub sample_rows: usize,
@@ -65,6 +66,8 @@ pub const CSV_DELIMITER_AUTO: u8 = 0;
 /// This mirrors the importer behavior when using [`CSV_DELIMITER_AUTO`], but operates on an
 /// in-memory prefix (useful for callers that need the delimiter before constructing their own CSV
 /// reader).
+///
+/// Note: this also honors Excel's `sep=<delimiter>` directive when present on the first line.
 pub fn sniff_csv_delimiter(sample: &[u8]) -> u8 {
     let mut cursor = Cursor::new(sample);
     sniff_csv_delimiter_prefix(&mut cursor)

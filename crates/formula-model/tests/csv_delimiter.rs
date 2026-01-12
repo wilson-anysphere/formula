@@ -81,3 +81,26 @@ fn csv_auto_detect_respects_excel_sep_directive_tab() {
     );
     assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Empty);
 }
+
+#[test]
+fn csv_auto_detect_respects_excel_sep_directive_with_space_after_equals() {
+    // Be tolerant of a single extra space after `sep=` (seen in some CSV generators).
+    let csv = "sep= ;\na;b\n1;2\n";
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
+        .unwrap();
+
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.0));
+    assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Number(2.0));
+}
+
+#[test]
+fn csv_auto_detect_respects_excel_sep_directive_with_utf8_bom() {
+    // Excel-exported CSVs can include a UTF-8 BOM; we should still detect and honor the `sep=`
+    // directive.
+    let csv = "\u{FEFF}sep=;\na;b\n1;2\n";
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
+        .unwrap();
+
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.0));
+    assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Number(2.0));
+}
