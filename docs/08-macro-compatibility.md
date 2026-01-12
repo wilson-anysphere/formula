@@ -1025,7 +1025,8 @@ Important notes:
   stored inside the signature stream (binding the signature to the VBA project streams). This is
   currently best-effort and exposed via `formula-vba` as `VbaDigitalSignature::binding`, and helps
   detect cases where a signature blob verifies internally but the VBA project bytes have been
-  modified.
+  modified. The desktop Trust Center currently gates `trusted_signed_only` on PKCS#7 verification
+  status; it can be tightened to also require `binding == Bound` (closer to Excel).
 
 #### VBA digital signatures: stream location, payload variants, and digest binding
 
@@ -1060,7 +1061,7 @@ How to obtain the signed digest for MS-OVBA “project digest” binding:
   - digest algorithm (hash OID)
   - digest bytes
 
-Binding plan (future work; see MS-OVBA):
+Binding plan (future tightening; see MS-OVBA):
 
 1. Compute the MS-OVBA “VBA project digest” over the project streams (excluding the signature
    streams), using the hash algorithm indicated by the extracted `DigestInfo`.

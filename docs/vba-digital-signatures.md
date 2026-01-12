@@ -1,13 +1,14 @@
 # VBA Digital Signatures (vbaProject.bin)
 
 This document captures how Excel/VBA macro signatures are stored in `xl/vbaProject.bin`, and how we
-*bind* (verify) those signatures against the MS-OVBA “VBA project digest”.
+extract and **bind** those signatures against the MS-OVBA “VBA project digest”.
 
-`formula-vba` implements best-effort:
+In this repo, `crates/formula-vba` implements best-effort:
 
-- PKCS#7/CMS internal signature verification (integrity of the signature blob), and
-- MS-OVBA-style **project digest** binding verification (signature is bound to the VBA project OLE
-  streams).
+- signature stream parsing + PKCS#7/CMS internal verification (`verify_vba_digital_signature`)
+- extraction of the signed digest (`SpcIndirectDataContent` → `DigestInfo`)
+- MS-OVBA-style project digest binding verification (signature is bound to the VBA project OLE
+  streams), exposed via `VbaDigitalSignature::binding`
 
 ## Where signatures live
 
@@ -35,9 +36,8 @@ In the wild, the signature stream bytes are not always “just a PKCS#7 blob”.
 2. **MS-OFFCRYPTO `DigSigInfoSerialized` wrapper/prefix**
    - Some Office producers wrap or prefix the CMS bytes with a `DigSigInfoSerialized` structure
      (see MS-OFFCRYPTO).
-   - Verification code should either parse `DigSigInfoSerialized` to locate/extract the inner CMS
-     payload or fall back to heuristics (e.g. scanning for an embedded DER `SEQUENCE` that parses as
-     CMS).
+   - `DigSigInfoSerialized` is a little-endian length-prefixed structure; parsing it lets us locate
+     the embedded CMS payload deterministically instead of scanning for a DER `SEQUENCE`.
 3. **Detached `content || pkcs7`**
    - The stream contains `signed_content_bytes` followed by a detached CMS signature (`pkcs7_der`).
    - Verification must pass the prefix bytes as the detached content when verifying the CMS blob.
@@ -105,6 +105,22 @@ Result interpretation (current behavior):
   real-world files (e.g. if Excel hashes decompressed module source, only parts of module streams,
   etc.).
 - Callers should treat `VbaSignatureBinding::Unknown` as "could not verify binding", not as "bound".
+- Treat `binding == Bound` as a strong signal, but validate against Excel fixtures before relying on
+  it as a hard security boundary.
+
+## Repo implementation pointers
+
+If you need to update or extend signature handling, start with:
+
+- `crates/formula-vba/src/signature.rs`
+  - signature stream discovery (`\x05DigitalSignature*`)
+  - CMS verification and the `VbaDigitalSignature::binding` decision
+- `crates/formula-vba/src/offcrypto.rs`
+  - `[MS-OFFCRYPTO] DigSigInfoSerialized` parsing (deterministic CMS offset/length)
+- `crates/formula-vba/src/authenticode.rs`
+  - `SignedData.encapContentInfo.eContent` parsing and `SpcIndirectDataContent` → `DigestInfo`
+- `crates/formula-vba/src/project_digest.rs`
+  - best-effort MS-OVBA-style project digest transcript over OLE streams
 
 ## Specs / references
 
