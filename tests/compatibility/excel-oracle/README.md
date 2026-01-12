@@ -52,6 +52,11 @@ corpus runs locally or on a self-hosted Windows runner.
 few baseline functions), plus a small amount of **dynamic array spill coverage**
 (`range`, `TRANSPOSE`, `SEQUENCE`).
 
+The default tag slice also includes representative **value coercion / conversion**
+coverage (tagged `coercion` / `VALUE` / `DATEVALUE` / `TIMEVALUE`), so changes to
+text→number/date/time semantics are exercised in CI even before a full Excel
+oracle dataset is generated.
+
 ## Regenerate the case corpus
 
 From repo root:
