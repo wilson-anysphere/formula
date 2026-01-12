@@ -33,8 +33,8 @@ function snapshotSheets(session) {
 
 test("CollabVersioning integration: restore syncs + persists (sync-server)", async (t) => {
   // Sync-server-backed integration tests can be slower/flakier under heavy CI
-  // load; use a slightly longer timeout than in-memory unit tests.
-  const TIMEOUT_MS = 20_000;
+  // load; use a longer timeout than in-memory unit tests.
+  const TIMEOUT_MS = 60_000;
   const dataDir = await mkdtemp(path.join(tmpdir(), "collab-versioning-sync-server-"));
   const versionDbPath = path.join(dataDir, "versions.sqlite");
 

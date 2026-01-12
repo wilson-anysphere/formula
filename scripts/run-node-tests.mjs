@@ -91,8 +91,9 @@ if (runnableTestFiles.length === 0) {
   process.exit(0);
 }
 
-const nodeArgs = ["--no-warnings"];
-if (canStripTypes) nodeArgs.push("--experimental-strip-types");
+const baseNodeArgs = ["--no-warnings"];
+if (canStripTypes) baseNodeArgs.push("--experimental-strip-types");
+
 // Node's test runner defaults `--test-concurrency` to the number of available CPU
 // cores. On large/shared runners this can massively over-parallelize heavyweight
 // integration tests (sync-server, extension sandboxing, python runtime) and lead
@@ -107,20 +108,42 @@ let testConcurrency = Number.isFinite(envConcurrency) && envConcurrency > 0 ? en
 // (In practice we don't want to spin up hundreds of node:test workers on a big host.)
 const maxTestConcurrency = Math.min(16, os.availableParallelism?.() ?? 4);
 testConcurrency = Math.max(1, Math.min(testConcurrency, maxTestConcurrency));
-nodeArgs.push(`--test-concurrency=${testConcurrency}`);
-nodeArgs.push("--test", ...runnableTestFiles);
 
-const child = spawn(process.execPath, nodeArgs, {
-  stdio: "inherit",
-});
+// `.e2e.test.js` suites tend to start background services (sync-server, sandbox
+// workers, etc). Even with a low global `--test-concurrency`, running those files
+// in parallel with unrelated unit tests can still create enough load to cause
+// spurious timeouts. Run them separately with `--test-concurrency=1` to keep the
+// suite reliable.
+const e2eTestFiles = runnableTestFiles.filter((file) => file.endsWith(".e2e.test.js"));
+const unitTestFiles = runnableTestFiles.filter((file) => !file.endsWith(".e2e.test.js"));
 
-child.on("exit", (code, signal) => {
-  if (signal) {
-    console.error(`node:test exited with signal ${signal}`);
-    process.exit(1);
-  }
-  process.exit(code ?? 1);
-});
+/**
+ * @param {string[]} files
+ * @param {number} concurrency
+ * @returns {Promise<number>} exit code
+ */
+async function runTestBatch(files, concurrency) {
+  if (files.length === 0) return 0;
+
+  const nodeArgs = [...baseNodeArgs, `--test-concurrency=${concurrency}`, "--test", ...files];
+  const child = spawn(process.execPath, nodeArgs, { stdio: "inherit" });
+  return await new Promise((resolve) => {
+    child.on("exit", (code, signal) => {
+      if (signal) {
+        console.error(`node:test exited with signal ${signal}`);
+        resolve(1);
+        return;
+      }
+      resolve(code ?? 1);
+    });
+  });
+}
+
+let exitCode = 0;
+exitCode = await runTestBatch(e2eTestFiles, 1);
+if (exitCode !== 0) process.exit(exitCode);
+exitCode = await runTestBatch(unitTestFiles, testConcurrency);
+process.exit(exitCode);
 
 function supportsTypeStripping() {
   const probe = spawnSync(process.execPath, ["--experimental-strip-types", "-e", "process.exit(0)"], {

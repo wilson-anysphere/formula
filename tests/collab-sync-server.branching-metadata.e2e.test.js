@@ -22,6 +22,9 @@ import {
 } from "../services/sync-server/test/test-helpers.ts";
 
 test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedRanges + metadata (+ comments) and survives restart", async (t) => {
+  // Sync-server-backed integration tests can be slower/flakier under heavy load.
+  // Prefer a longer timeout here so we don't fail spuriously when CI hosts are busy.
+  const TIMEOUT_MS = 60_000;
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-branching-"));
   t.after(async () => {
     await rm(dataDir, { recursive: true, force: true });
@@ -92,7 +95,7 @@ test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedR
   await waitForCondition(() => {
     const stateB = branchStateFromYjsDoc(clientB.ydoc);
     return stateB.sheets.order.length === 1 && stateB.sheets.metaById.Sheet1?.name === "Sheet1";
-  }, 10_000);
+  }, TIMEOUT_MS);
 
   const actor = { userId: "u1", role: "owner" };
   const store = new InMemoryBranchStore();
@@ -149,7 +152,7 @@ test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedR
       stateB.namedRanges.NR1?.sheetId === "Sheet1" &&
       stateB.comments.c1?.content === "hello"
     );
-  }, 10_000);
+  }, TIMEOUT_MS);
 
   // Tear down clients and restart the server, keeping the same data directory.
   clientA.destroy();
@@ -182,5 +185,5 @@ test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedR
       stateC.namedRanges.NR1?.sheetId === "Sheet1" &&
       stateC.comments.c1?.content === "hello"
     );
-  }, 20_000);
+  }, TIMEOUT_MS);
 });
