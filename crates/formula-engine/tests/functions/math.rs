@@ -14,6 +14,19 @@ fn sum_ignores_text_in_ranges_but_coerces_scalar_text() {
 }
 
 #[test]
+fn average_ignores_text_in_ranges_but_coerces_scalar_text() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Text("5".to_string()));
+    sheet.set("A2", 3.0);
+    sheet.set("A3", 5.0);
+
+    // Text in references is ignored by AVERAGE.
+    assert_number(&sheet.eval("=AVERAGE(A1:A3)"), 4.0);
+    // Scalar text/logicals are coerced by AVERAGE.
+    assert_number(&sheet.eval(r#"=AVERAGE("5", TRUE, 3)"#), 3.0);
+}
+
+#[test]
 fn sum_propagates_errors() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1.0);

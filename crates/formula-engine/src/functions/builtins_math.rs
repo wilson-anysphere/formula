@@ -271,34 +271,64 @@ inventory::submit! {
 fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut acc = 0.0;
     let mut count = 0u64;
+    let mut saw_nan = false;
 
     for arg in args {
         match ctx.eval_arg(arg) {
             ArgValue::Scalar(v) => match v {
                 Value::Error(e) => return Value::Error(e),
                 Value::Number(n) => {
-                    acc += n;
-                    count += 1;
-                }
-                Value::Bool(b) => {
-                    acc += if b { 1.0 } else { 0.0 };
-                    count += 1;
-                }
-                Value::Blank => {}
-                Value::Text(s) => match Value::Text(s).coerce_to_number_with_ctx(ctx) {
-                    Ok(n) => {
+                    if n.is_nan() {
+                        saw_nan = true;
+                        count += 1;
+                    } else if !saw_nan {
                         acc += n;
                         count += 1;
                     }
-                    Err(e) => return Value::Error(e),
-                },
+                }
+                Value::Bool(b) => {
+                    // Scalar logicals participate in AVERAGE.
+                    if !saw_nan {
+                        acc += if b { 1.0 } else { 0.0 };
+                        count += 1;
+                    }
+                }
+                Value::Blank => {}
+                Value::Text(s) => {
+                    // Scalar text is coerced (and errors propagate), even if we've already seen a
+                    // NaN elsewhere.
+                    let n = match Value::Text(s).coerce_to_number_with_ctx(ctx) {
+                        Ok(n) => n,
+                        Err(e) => return Value::Error(e),
+                    };
+                    if n.is_nan() {
+                        saw_nan = true;
+                        count += 1;
+                    } else if !saw_nan {
+                        acc += n;
+                        count += 1;
+                    }
+                }
                 Value::Array(arr) => {
+                    let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                    let mut len = 0usize;
+                    let mut sum = 0.0;
                     for v in arr.iter() {
                         match v {
                             Value::Error(e) => return Value::Error(*e),
                             Value::Number(n) => {
-                                acc += n;
-                                count += 1;
+                                if n.is_nan() {
+                                    saw_nan = true;
+                                    count += 1;
+                                } else if !saw_nan {
+                                    buf[len] = *n;
+                                    len += 1;
+                                    count += 1;
+                                    if len == SIMD_AGGREGATE_BLOCK {
+                                        sum += simd::sum_ignore_nan_f64(&buf);
+                                        len = 0;
+                                    }
+                                }
                             }
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
@@ -310,6 +340,13 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::ReferenceUnion(_) => {}
                         }
                     }
+
+                    if !saw_nan {
+                        if len > 0 {
+                            sum += simd::sum_ignore_nan_f64(&buf[..len]);
+                        }
+                        acc += sum;
+                    }
                 }
                 Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
@@ -318,13 +355,26 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
             },
             ArgValue::Reference(r) => {
+                let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                let mut len = 0usize;
+                let mut sum = 0.0;
                 for addr in ctx.iter_reference_cells(&r) {
                     let v = ctx.get_cell_value(&r.sheet_id, addr);
                     match v {
                         Value::Error(e) => return Value::Error(e),
                         Value::Number(n) => {
-                            acc += n;
-                            count += 1;
+                            if n.is_nan() {
+                                saw_nan = true;
+                                count += 1;
+                            } else if !saw_nan {
+                                buf[len] = n;
+                                len += 1;
+                                count += 1;
+                                if len == SIMD_AGGREGATE_BLOCK {
+                                    sum += simd::sum_ignore_nan_f64(&buf);
+                                    len = 0;
+                                }
+                            }
                         }
                         Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         // Ignore logical/text/blank in references.
@@ -337,9 +387,19 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::ReferenceUnion(_) => {}
                     }
                 }
+
+                if !saw_nan {
+                    if len > 0 {
+                        sum += simd::sum_ignore_nan_f64(&buf[..len]);
+                    }
+                    acc += sum;
+                }
             }
             ArgValue::ReferenceUnion(ranges) => {
                 let mut seen = std::collections::HashSet::new();
+                let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+                let mut len = 0usize;
+                let mut sum = 0.0;
                 for r in ranges {
                     for addr in ctx.iter_reference_cells(&r) {
                         if !seen.insert((r.sheet_id.clone(), addr)) {
@@ -349,8 +409,18 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         match v {
                             Value::Error(e) => return Value::Error(e),
                             Value::Number(n) => {
-                                acc += n;
-                                count += 1;
+                                if n.is_nan() {
+                                    saw_nan = true;
+                                    count += 1;
+                                } else if !saw_nan {
+                                    buf[len] = n;
+                                    len += 1;
+                                    count += 1;
+                                    if len == SIMD_AGGREGATE_BLOCK {
+                                        sum += simd::sum_ignore_nan_f64(&buf);
+                                        len = 0;
+                                    }
+                                }
                             }
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             // Ignore logical/text/blank in references.
@@ -364,6 +434,13 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         }
                     }
                 }
+
+                if !saw_nan {
+                    if len > 0 {
+                        sum += simd::sum_ignore_nan_f64(&buf[..len]);
+                    }
+                    acc += sum;
+                }
             }
         }
     }
@@ -371,7 +448,11 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     if count == 0 {
         return Value::Error(ErrorKind::Div0);
     }
-    Value::Number(acc / (count as f64))
+    if saw_nan {
+        Value::Number(f64::NAN)
+    } else {
+        Value::Number(acc / (count as f64))
+    }
 }
 
 inventory::submit! {
@@ -2146,13 +2227,9 @@ fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return e,
     };
 
-    // SUMPRODUCT broadcasts 1x1 scalars to the other array length.
-    let (va, vb) = match (va.len(), vb.len()) {
-        (0, _) | (_, 0) => return Value::Error(ErrorKind::Value),
-        (1, len) if len != 1 => (vec![va[0].clone(); len], vb),
-        (len, 1) if len != 1 => (va, vec![vb[0].clone(); len]),
-        _ => (va, vb),
-    };
+    if va.is_empty() || vb.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
 
     match crate::functions::math::sumproduct(&[&va, &vb], ctx.number_locale()) {
         Ok(v) => Value::Number(v),

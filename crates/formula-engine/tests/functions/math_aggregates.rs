@@ -162,6 +162,23 @@ fn sumproduct_treats_non_numeric_text_as_zero() {
 }
 
 #[test]
+fn sumproduct_broadcasts_scalar_to_other_array_len() {
+    let scalar = vec![2.into()];
+    let values = vec![1.into(), 2.into(), 3.into()];
+
+    // 2 is broadcast to [2,2,2].
+    assert_eq!(
+        math::sumproduct(&[&scalar, &values], NumberLocale::en_us()).unwrap(),
+        12.0
+    );
+    // Broadcast should work regardless of whether the scalar is the first or second array.
+    assert_eq!(
+        math::sumproduct(&[&values, &scalar], NumberLocale::en_us()).unwrap(),
+        12.0
+    );
+}
+
+#[test]
 fn subtotal_implements_common_function_nums() {
     let values = vec![1.into(), 2.into(), 3.into(), Value::from("x"), Value::Blank];
     assert_eq!(math::subtotal(9, &values).unwrap(), 6.0);

@@ -305,9 +305,13 @@ pub fn sumproduct(arrays: &[&[Value]], locale: NumberLocale) -> Result<f64, Erro
         return Ok(0.0);
     }
 
-    let len = arrays[0].len();
-    for arr in arrays.iter().skip(1) {
-        if arr.len() != len {
+    // Excel broadcasts 1x1 scalars across the other array length.
+    let len = arrays.iter().map(|arr| arr.len()).max().unwrap_or(0);
+    if len == 0 {
+        return Err(ErrorKind::Value);
+    }
+    for arr in arrays {
+        if arr.len() != len && arr.len() != 1 {
             return Err(ErrorKind::Value);
         }
     }
@@ -319,50 +323,145 @@ pub fn sumproduct(arrays: &[&[Value]], locale: NumberLocale) -> Result<f64, Erro
 
         let a = arrays[0];
         let b = arrays[1];
-        let mut buf_a = [0.0_f64; BLOCK];
-        let mut buf_b = [0.0_f64; BLOCK];
-        let mut buf_len = 0usize;
 
-        let mut sum = 0.0;
-        let mut saw_nan = false;
+        // Both arrays already have matching length: SIMD hot path.
+        if a.len() == len && b.len() == len {
+            let mut buf_a = [0.0_f64; BLOCK];
+            let mut buf_b = [0.0_f64; BLOCK];
+            let mut buf_len = 0usize;
 
-        for idx in 0..len {
-            // Preserve Excel-like error precedence: first array is coerced before the second.
-            let xa = coerce_sumproduct_number(&a[idx], locale)?;
-            let xb = coerce_sumproduct_number(&b[idx], locale)?;
+            let mut sum = 0.0;
+            let mut saw_nan = false;
 
-            if xa.is_nan() || xb.is_nan() {
-                saw_nan = true;
+            for idx in 0..len {
+                // Preserve Excel-like error precedence: first array is coerced before the second.
+                let xa = coerce_sumproduct_number(&a[idx], locale)?;
+                let xb = coerce_sumproduct_number(&b[idx], locale)?;
+
+                if xa.is_nan() || xb.is_nan() {
+                    saw_nan = true;
+                }
+
+                if !saw_nan {
+                    buf_a[buf_len] = xa;
+                    buf_b[buf_len] = xb;
+                    buf_len += 1;
+
+                    if buf_len == BLOCK {
+                        sum += simd::sumproduct_ignore_nan_f64(&buf_a, &buf_b);
+                        buf_len = 0;
+                    }
+                }
             }
 
-            if !saw_nan {
+            if saw_nan {
+                return Ok(f64::NAN);
+            }
+
+            if buf_len > 0 {
+                sum += simd::sumproduct_ignore_nan_f64(&buf_a[..buf_len], &buf_b[..buf_len]);
+            }
+
+            return Ok(sum);
+        }
+
+        // Broadcast fast path: one side is a scalar, the other is a longer array.
+        if a.len() == 1 && b.len() == len {
+            let xa = coerce_sumproduct_number(&a[0], locale)?;
+            let mut saw_nan = xa.is_nan();
+
+            let mut buf_a = [0.0_f64; BLOCK];
+            let mut buf_b = [0.0_f64; BLOCK];
+            let mut buf_len = 0usize;
+            let mut sum = 0.0;
+
+            for idx in 0..len {
+                let xb = coerce_sumproduct_number(&b[idx], locale)?;
+
+                if saw_nan {
+                    continue;
+                }
+
+                if xb.is_nan() {
+                    saw_nan = true;
+                    continue;
+                }
+
                 buf_a[buf_len] = xa;
                 buf_b[buf_len] = xb;
                 buf_len += 1;
-
                 if buf_len == BLOCK {
                     sum += simd::sumproduct_ignore_nan_f64(&buf_a, &buf_b);
                     buf_len = 0;
                 }
             }
+
+            if saw_nan {
+                return Ok(f64::NAN);
+            }
+            if buf_len > 0 {
+                sum += simd::sumproduct_ignore_nan_f64(&buf_a[..buf_len], &buf_b[..buf_len]);
+            }
+            return Ok(sum);
         }
 
-        if saw_nan {
-            return Ok(f64::NAN);
+        if a.len() == len && b.len() == 1 {
+            // Preserve error precedence: for idx=0 we must coerce `a[0]` before `b[0]`.
+            let xa0 = coerce_sumproduct_number(&a[0], locale)?;
+            let xb = coerce_sumproduct_number(&b[0], locale)?;
+
+            let mut saw_nan = xa0.is_nan() || xb.is_nan();
+
+            let mut buf_a = [0.0_f64; BLOCK];
+            let mut buf_b = [0.0_f64; BLOCK];
+            let mut buf_len = 0usize;
+            let mut sum = 0.0;
+
+            if !saw_nan {
+                buf_a[buf_len] = xa0;
+                buf_b[buf_len] = xb;
+                buf_len += 1;
+            }
+
+            for idx in 1..len {
+                let xa = coerce_sumproduct_number(&a[idx], locale)?;
+
+                if saw_nan {
+                    continue;
+                }
+
+                if xa.is_nan() {
+                    saw_nan = true;
+                    continue;
+                }
+
+                buf_a[buf_len] = xa;
+                buf_b[buf_len] = xb;
+                buf_len += 1;
+                if buf_len == BLOCK {
+                    sum += simd::sumproduct_ignore_nan_f64(&buf_a, &buf_b);
+                    buf_len = 0;
+                }
+            }
+
+            if saw_nan {
+                return Ok(f64::NAN);
+            }
+            if buf_len > 0 {
+                sum += simd::sumproduct_ignore_nan_f64(&buf_a[..buf_len], &buf_b[..buf_len]);
+            }
+            return Ok(sum);
         }
 
-        if buf_len > 0 {
-            sum += simd::sumproduct_ignore_nan_f64(&buf_a[..buf_len], &buf_b[..buf_len]);
-        }
-
-        return Ok(sum);
+        unreachable!("broadcast validation should have handled all length combinations");
     }
 
     let mut sum = 0.0;
     for idx in 0..len {
         let mut prod = 1.0;
         for arr in arrays {
-            let n = coerce_sumproduct_number(&arr[idx], locale)?;
+            let v = if arr.len() == 1 { &arr[0] } else { &arr[idx] };
+            let n = coerce_sumproduct_number(v, locale)?;
             prod *= n;
         }
         sum += prod;
