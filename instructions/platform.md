@@ -105,12 +105,20 @@ Example (see `apps/desktop/src-tauri/capabilities/main.json`):
         { "event": "tray-quit" },
         { "event": "shortcut-quick-open" },
         { "event": "shortcut-command-palette" },
+        { "event": "update-check-already-running" },
+        { "event": "update-check-started" },
+        { "event": "update-not-available" },
+        { "event": "update-check-error" },
         { "event": "update-available" }
       ]
     },
     {
       "identifier": "event:allow-emit",
-      "allow": [{ "event": "close-prep-done" }, { "event": "close-handled" }]
+      "allow": [
+        { "event": "close-prep-done" },
+        { "event": "close-handled" },
+        { "event": "updater-ui-ready" }
+      ]
     },
     "dialog:allow-open",
     "dialog:allow-save",

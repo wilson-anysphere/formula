@@ -427,10 +427,12 @@ Capabilities are assigned to windows by **label**.
     - close flow: `close-prep`, `close-requested`
     - open flows: `file-dropped`
     - tray + shortcuts: `tray-open`, `tray-new`, `tray-quit`, `shortcut-quick-open`, `shortcut-command-palette`
-    - updater: `update-available`
+    - updater: `update-check-already-running`, `update-check-started`, `update-not-available`, `update-check-error`, `update-available`
 - `event:allow-emit` (scoped to a small allowlist of event names)
   - Allows the frontend to emit acknowledgement events during close handling:
     - `close-prep-done`, `close-handled`
+  - Allows the frontend to signal that its updater UI event listeners are installed:
+    - `updater-ui-ready`
 - `dialog:allow-open`, `dialog:allow-save`
   - Enables native open/save dialogs from the UI (`__TAURI__.dialog.open` / `save`).
 - `window:allow-hide`, `window:allow-show`, `window:allow-close`
