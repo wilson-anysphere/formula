@@ -494,8 +494,3 @@ fn patch_content_types_for_sheet_edits_preserves_prefix_only_content_types() {
         );
     }
 }
-
-=======
-    assert!(found, "expected to find <c r=\"A1\"> in worksheet xml");
-}
->>>>>>> 94345d9c (feat(formula-xlsx): preserve SpreadsheetML cell vm/cm metadata)

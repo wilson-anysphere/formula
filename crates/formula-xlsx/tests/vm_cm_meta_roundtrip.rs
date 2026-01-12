@@ -66,8 +66,8 @@ fn vm_cm_cell_meta_roundtrips_in_xlsx_document() -> Result<(), Box<dyn std::erro
         .cell_meta
         .get(&(sheet_id, CellRef::from_a1("A1")?))
         .expect("expected cell meta for Sheet1!A1");
-    assert_eq!(meta.vm, Some(1));
-    assert_eq!(meta.cm, Some(2));
+    assert_eq!(meta.vm.as_deref(), Some("1"));
+    assert_eq!(meta.cm.as_deref(), Some("2"));
 
     let saved = doc.save_to_vec()?;
     let xml_bytes = zip_part(&saved, "xl/worksheets/sheet1.xml");
