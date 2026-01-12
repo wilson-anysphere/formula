@@ -74,6 +74,7 @@ import * as nativeDialogs from "../tauri/nativeDialogs.js";
 import { shellOpen } from "../tauri/shellOpen.js";
 import { applyFillCommitToDocumentController } from "../fill/applyFillCommit";
 import type { CellRange as FillEngineRange, FillMode as FillHandleMode } from "@formula/fill-engine";
+import { bindSheetViewToCollabSession, type SheetViewBinder } from "../collab/sheetViewBinder";
 
 import * as Y from "yjs";
 import { CommentManager, bindDocToStorage, getCommentsRoot } from "@formula/collab-comments";
@@ -619,6 +620,8 @@ export class SpreadsheetApp {
   private newCommentInput!: HTMLInputElement;
   private commentTooltip!: HTMLDivElement;
 
+  private sheetViewBinder: SheetViewBinder | null = null;
+
   private renderScheduled = false;
   private pendingRenderMode: "full" | "scroll" = "full";
   private windowKeyDownListener: ((e: KeyboardEvent) => void) | null = null;
@@ -678,6 +681,12 @@ export class SpreadsheetApp {
       this.collabSession = createCollabSession({
         connection: { wsUrl: collab.wsUrl, docId: collab.docId, token: collab.token },
         presence: { user: collab.user, activeSheet: this.sheetId },
+      });
+
+      this.sheetViewBinder = bindSheetViewToCollabSession({
+        session: this.collabSession,
+        documentController: this.document,
+        origin: binderOrigin,
       });
 
       const undoScope: Array<Y.AbstractType<any>> = [
@@ -1611,6 +1620,8 @@ export class SpreadsheetApp {
 
   destroy(): void {
     this.disposed = true;
+    this.sheetViewBinder?.destroy();
+    this.sheetViewBinder = null;
     this.domAbort.abort();
     this.setCollabUndoService(null);
     this.collabSelectionUnsubscribe?.();
