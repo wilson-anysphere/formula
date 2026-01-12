@@ -435,11 +435,27 @@ fn scan_for_embedded_der_certificates(bytes: &[u8]) -> impl Iterator<Item = &[u8
 fn parse_pkcs7_with_offset(signature: &[u8]) -> Option<(openssl::pkcs7::Pkcs7, usize)> {
     use openssl::pkcs7::Pkcs7;
 
+    fn parse_pkcs7_exact(bytes: &[u8]) -> Option<Pkcs7> {
+        let pkcs7 = Pkcs7::from_der(bytes).ok()?;
+        // OpenSSL's decoder may accept BER-ish inputs; re-encode and ensure the PKCS#7 we parsed
+        // corresponds to the full byte slice to avoid false positives when scanning.
+        let der = pkcs7.to_der().ok()?;
+        if der == bytes {
+            Some(pkcs7)
+        } else {
+            None
+        }
+    }
+
     // Some producers include a small header before the DER-encoded PKCS#7 payload. Try parsing
     // from the start first, then scan for an embedded DER SEQUENCE that parses as PKCS#7.
-    if let Ok(pkcs7) = Pkcs7::from_der(signature) {
+    if let Some(pkcs7) = parse_pkcs7_exact(signature) {
         return Some((pkcs7, 0));
     }
+
+    // Keep a fallback candidate in case we can't find an "exact" DER match; prefer the one that
+    // starts latest in the stream since the signature payload usually comes last.
+    let mut fallback: Option<(Pkcs7, usize)> = None;
 
     // Office commonly wraps the PKCS#7 blob in a [MS-OFFCRYPTO] DigSigInfoSerialized structure.
     // Parsing the header is deterministic and avoids the worst-case behavior of scanning/parsing
@@ -458,12 +474,16 @@ fn parse_pkcs7_with_offset(signature: &[u8]) -> Option<(openssl::pkcs7::Pkcs7, u
         if signature[start] != 0x30 {
             continue;
         }
-        if let Ok(pkcs7) = Pkcs7::from_der(&signature[start..]) {
+        let slice = &signature[start..];
+        if let Some(pkcs7) = parse_pkcs7_exact(slice) {
             return Some((pkcs7, start));
+        }
+        if let Ok(pkcs7) = Pkcs7::from_der(slice) {
+            fallback = Some((pkcs7, start));
         }
     }
 
-    None
+    fallback
 }
 
 #[cfg(not(target_arch = "wasm32"))]

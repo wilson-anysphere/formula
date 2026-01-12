@@ -1023,7 +1023,9 @@ Important notes:
   publisher). This can be extended in the future with an explicit `untrusted` state.
 - We also attempt to re-compute the MS-OVBA "project digest" and compare it to the signed digest
   stored inside the signature stream (binding the signature to the VBA project streams). This is
-  currently best-effort and exposed via `formula-vba` as `VbaDigitalSignature::binding`.
+  currently best-effort and exposed via `formula-vba` as `VbaDigitalSignature::binding`, and helps
+  detect cases where a signature blob verifies internally but the VBA project bytes have been
+  modified.
 
 #### VBA digital signatures: stream location, payload variants, and digest binding
 
