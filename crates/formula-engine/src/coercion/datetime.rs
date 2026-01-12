@@ -240,8 +240,10 @@ fn parse_date_token(token: &str, cfg: ValueLocaleConfig, now_year: i32) -> Optio
 
         if parts.len() == 2 {
             // Excel accepts `m/d` or `d/m` without a year, using the current year.
-            // Restrict this to `/` to avoid confusing decimal numbers like `1.5`.
-            if sep != '/' {
+            // Restrict this to the locale's date separator to avoid confusing decimal numbers
+            // like `1.5` in locales where `.` is the decimal separator.
+            let allow_missing_year = sep == '/' || sep == cfg.separators.date_sep;
+            if !allow_missing_year {
                 continue;
             }
 
@@ -670,5 +672,14 @@ mod tests {
         let cfg = ValueLocaleConfig::en_us();
         assert_eq!(parse_timevalue_text("1 PM", cfg).unwrap(), 13.0 / 24.0);
         assert_eq!(parse_timevalue_text("1PM", cfg).unwrap(), 13.0 / 24.0);
+    }
+
+    #[test]
+    fn parses_dot_separated_dates_without_year_for_dot_date_sep_locales() {
+        let now = Utc.with_ymd_and_hms(2024, 6, 1, 0, 0, 0).unwrap();
+        let cfg = ValueLocaleConfig::de_de();
+        let serial = parse_datevalue_text("1.2", cfg, now, ExcelDateSystem::EXCEL_1900).unwrap();
+        let expected = date_parts_to_serial(2024, 2, 1, ExcelDateSystem::EXCEL_1900).unwrap();
+        assert_eq!(serial, expected);
     }
 }
