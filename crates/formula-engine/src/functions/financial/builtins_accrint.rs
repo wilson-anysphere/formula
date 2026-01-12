@@ -64,6 +64,10 @@ fn accrintm_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             Err(e) => return Value::Error(e),
         }
     };
+    let basis = match super::coupon_schedule::validate_basis(basis) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(excel_error_kind(e)),
+    };
 
     match super::accrintm(issue, settlement, rate, par, basis, system) {
         Ok(v) => Value::Number(v),
@@ -142,6 +146,10 @@ fn accrint_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
+    let frequency = match super::coupon_schedule::validate_frequency(frequency) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(excel_error_kind(e)),
+    };
 
     let basis = if matches!(basis, Value::Blank) {
         0
@@ -150,6 +158,10 @@ fn accrint_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         }
+    };
+    let basis = match super::coupon_schedule::validate_basis(basis) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(excel_error_kind(e)),
     };
 
     let calc_method = if matches!(calc_method, Value::Blank) {
