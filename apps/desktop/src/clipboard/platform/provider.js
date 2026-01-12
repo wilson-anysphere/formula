@@ -112,7 +112,11 @@ function createTauriClipboardProvider() {
     async read() {
       // Prefer rich reads via the WebView Clipboard API when available so we can
       // ingest HTML tables + formats from external spreadsheets.
-      const web = await createWebClipboardProvider().read();
+      const web = await createWebClipboardProvider({
+        // Prefer native Tauri `readText` for plain text when available; use the Web
+        // `readText` fallback only when we don't have a native alternative.
+        fallbackToReadText: !tauriClipboard?.readText,
+      }).read();
       let merged = web;
       if (tauriCore?.invoke) {
         try {
@@ -199,7 +203,9 @@ function createTauriClipboardProvider() {
 /**
  * @returns {ClipboardProvider}
  */
-function createWebClipboardProvider() {
+function createWebClipboardProvider(options = {}) {
+  const { fallbackToReadText = true } = options;
+
   return {
     async read() {
       // Prefer rich read if available.
@@ -240,6 +246,8 @@ function createWebClipboardProvider() {
           // Permission denied or unsupported – fall back to plain text below.
         }
       }
+
+      if (!fallbackToReadText) return {};
 
       let text;
       try {
