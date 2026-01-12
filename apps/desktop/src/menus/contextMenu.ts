@@ -54,6 +54,16 @@ export class ContextMenu {
   private submenuParent: HTMLButtonElement | null = null;
   private isShown = false;
   private lastAnchor: Point | null = null;
+  /**
+   * Ignore external scroll events for a brief grace period after opening.
+   *
+   * Some browsers/WebView environments can emit a `scroll` event shortly after
+   * focusing an element (even when the scroll offsets don't meaningfully change).
+   * If a context menu is opened immediately after that focus, the delayed scroll
+   * event would otherwise instantly dismiss the menu, which feels broken and can
+   * flake e2e tests.
+   */
+  private ignoreExternalScrollUntil: number | null = null;
 
   private readonly onClose: (() => void) | null;
   private keydownListener: ((e: KeyboardEvent) => void) | null = null;
@@ -101,6 +111,9 @@ export class ContextMenu {
     this.close();
     this.isShown = true;
     this.lastAnchor = { x, y };
+    // Brief grace period to avoid immediately closing due to delayed scroll events
+    // (e.g. focus-induced scrollIntoView).
+    this.ignoreExternalScrollUntil = performance.now() + 100;
 
     this.menu.replaceChildren();
     this.closeSubmenu();
@@ -138,6 +151,9 @@ export class ContextMenu {
           this.closeSubmenu();
           if (focusInSubmenu) parent?.focus({ preventScroll: true });
         }
+        return;
+      }
+      if (this.ignoreExternalScrollUntil != null && performance.now() < this.ignoreExternalScrollUntil) {
         return;
       }
       this.close();
@@ -235,6 +251,7 @@ export class ContextMenu {
     if (!this.isShown) return;
     this.isShown = false;
     this.lastAnchor = null;
+    this.ignoreExternalScrollUntil = null;
 
     this.overlay.hidden = true;
     this.menu.replaceChildren();
