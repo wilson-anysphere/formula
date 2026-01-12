@@ -116,8 +116,9 @@ Tauri v2 replaces Tauri v1’s “allowlist” with **capabilities**, defined as
 
 - `apps/desktop/src-tauri/capabilities/` (main capability: `capabilities/main.json`)
 
-Capabilities are associated to windows by **label** using the capability file’s `"windows": [...]` list, which
-matches `app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json` (the main window label is `main`).
+Capabilities are scoped to windows by **label**. Each capability file lists which window labels it targets via
+`"windows": [...]`, and each window must explicitly opt into that capability in `tauri.conf.json` via
+`app.windows[].capabilities` (the main window label is `main`, and it opts into the `main` capability).
 
 When adding new uses of privileged APIs (e.g. clipboard, dialog, updater, shell, window APIs) or adding new desktop event
 names, update the relevant allowlists in `capabilities/main.json`.
@@ -222,7 +223,7 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
       "csp": "..." // see `apps/desktop/src-tauri/tauri.conf.json` for the full, current CSP
     },
     "windows": [
-      { "label": "main", "title": "Formula", "width": 1280, "height": 800, "dragDropEnabled": true }
+      { "label": "main", "title": "Formula", "width": 1280, "height": 800, "dragDropEnabled": true, "capabilities": ["main"] }
     ]
   },
   "bundle": {
@@ -655,7 +656,8 @@ Source of truth in this repo:
 - `apps/desktop/src-tauri/capabilities/main.json`
 
 Capability files list which window labels they apply to via `"windows": [...]` (matching `app.windows[].label` in
-`apps/desktop/src-tauri/tauri.conf.json`). The main window label is `main`.
+`apps/desktop/src-tauri/tauri.conf.json`). Windows must also opt into the capability via `app.windows[].capabilities`.
+The main window label is `main`.
 
 ### What `main.json` does
 
