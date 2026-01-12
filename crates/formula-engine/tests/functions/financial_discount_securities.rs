@@ -323,6 +323,22 @@ fn pricemat_yieldmat_roundtrip() {
 }
 
 #[test]
+fn tbilleq_long_branch_matches_bond_equivalent_yield_definition() {
+    // Exercise the TBILLEQ branch used for maturities longer than 182 days.
+    let settlement = serial_1900(2020, 1, 1);
+    let maturity = settlement + 200;
+    let discount = 0.05;
+
+    let dsm = (maturity - settlement) as f64;
+    let price_factor = 1.0 - discount * dsm / 360.0;
+    let exponent = 365.0 / (2.0 * dsm);
+    let expected = 2.0 * ((1.0 / price_factor).powf(exponent) - 1.0);
+
+    let eq = tbilleq(settlement, maturity, discount).unwrap();
+    assert_close(eq, expected, 1e-12);
+}
+
+#[test]
 fn error_cases() {
     let system = ExcelDateSystem::EXCEL_1900;
     let settlement = serial_1900(2024, 1, 1);
