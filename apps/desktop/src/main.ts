@@ -1031,6 +1031,48 @@ if (
 
   let secondaryGridView: SecondaryGridView | null = null;
 
+  const invalidateSecondaryProvider = () => {
+    if (!secondaryGridView) return;
+    const sharedProvider = (app as any).sharedProvider ?? null;
+    // In shared-grid mode we reuse the primary provider, and SpreadsheetApp already
+    // invalidates it on sheet changes / show-formulas toggles. Avoid extra churn.
+    if (sharedProvider && secondaryGridView.provider === sharedProvider) return;
+    secondaryGridView.provider.invalidateAll();
+  };
+
+  // Keep secondary grid in sync with non-DocumentController view changes in legacy mode
+  // (sheet switching, show-formulas toggles). Shared-grid mode reuses the primary provider,
+  // so the app already handles invalidations there.
+  const activateSheetWithSplitSync = app.activateSheet.bind(app);
+  app.activateSheet = (sheetId: string): void => {
+    activateSheetWithSplitSync(sheetId);
+    invalidateSecondaryProvider();
+  };
+
+  const activateCellWithSplitSync = app.activateCell.bind(app);
+  app.activateCell = (target: Parameters<SpreadsheetApp["activateCell"]>[0]): void => {
+    const prevSheet = app.getCurrentSheetId();
+    activateCellWithSplitSync(target);
+    if (target.sheetId && target.sheetId !== prevSheet) invalidateSecondaryProvider();
+  };
+
+  const selectRangeWithSplitSync = app.selectRange.bind(app);
+  app.selectRange = (target: Parameters<SpreadsheetApp["selectRange"]>[0]): void => {
+    const prevSheet = app.getCurrentSheetId();
+    selectRangeWithSplitSync(target);
+    if (target.sheetId && target.sheetId !== prevSheet) invalidateSecondaryProvider();
+  };
+
+  window.addEventListener("keydown", (event) => {
+    if (!secondaryGridView) return;
+    const primary = event.ctrlKey || event.metaKey;
+    if (!primary) return;
+    if (event.code !== "Backquote") return;
+    // Only invalidate when SpreadsheetApp actually handled the shortcut.
+    if (!event.defaultPrevented) return;
+    invalidateSecondaryProvider();
+  });
+
   function renderSplitView() {
     const split = layoutController.layout.splitView;
     const ratio = typeof split.ratio === "number" ? split.ratio : 0.5;
