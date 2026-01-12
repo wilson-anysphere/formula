@@ -90,6 +90,22 @@ describe("clampUsedRange", () => {
       truncatedCols: true,
     });
   });
+
+  it("handles degenerate/empty used ranges (start > end) without truncation", () => {
+    const result = clampUsedRange(
+      { start_row: 10, end_row: 5, start_col: 3, end_col: 2 },
+      { maxRows: 100, maxCols: 10 },
+    );
+
+    expect(result).toEqual({
+      startRow: 10,
+      endRow: 5,
+      startCol: 3,
+      endCol: 2,
+      truncatedRows: false,
+      truncatedCols: false,
+    });
+  });
 });
 
 describe("resolveWorkbookLoadLimits", () => {
