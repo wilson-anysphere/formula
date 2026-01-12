@@ -279,6 +279,34 @@ fn debug_trace_supports_single_quoted_3d_sheet_range_refs() {
 }
 
 #[test]
+fn debug_trace_supports_double_quoted_3d_sheet_range_refs() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet 1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet 2", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet 3", "A1", 3.0).unwrap();
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM('Sheet 1':'Sheet 3'!A1)")
+        .unwrap();
+    engine.recalculate();
+
+    let dbg = engine.debug_evaluate("Summary", "A1").unwrap();
+    assert_eq!(dbg.value, Value::Number(6.0));
+    assert_eq!(
+        slice(&dbg.formula, dbg.trace.span),
+        "SUM('Sheet 1':'Sheet 3'!A1)"
+    );
+
+    let arg = &dbg.trace.children[0];
+    assert_eq!(slice(&dbg.formula, arg.span), "'Sheet 1':'Sheet 3'!A1");
+    assert!(matches!(arg.kind, TraceKind::CellRef));
+    assert_eq!(arg.value, Value::Blank);
+    assert!(
+        arg.reference.is_none(),
+        "3D sheet-range refs resolve to multiple sheets"
+    );
+}
+
+#[test]
 fn debug_trace_supports_reversed_3d_sheet_range_refs() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();

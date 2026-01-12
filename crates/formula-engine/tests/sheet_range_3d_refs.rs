@@ -25,6 +25,13 @@ fn roundtrip_preserves_single_quoted_sheet_range_when_required() {
 }
 
 #[test]
+fn parses_double_quoted_sheet_range_prefix() {
+    let ast = parse_formula("=SUM('Sheet 1':'Sheet 3'!A1)", ParseOptions::default()).unwrap();
+    let roundtrip = ast.to_string(SerializeOptions::default()).unwrap();
+    assert_eq!(roundtrip, "=SUM('Sheet 1:Sheet 3'!A1)");
+}
+
+#[test]
 fn collapses_degenerate_sheet_range_refs_to_single_sheet() {
     let ast = parse_formula("=SUM(Sheet1:Sheet1!A1)", ParseOptions::default()).unwrap();
     let roundtrip = ast.to_string(SerializeOptions::default()).unwrap();
