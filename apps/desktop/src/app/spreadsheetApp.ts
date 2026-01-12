@@ -3266,8 +3266,8 @@ export class SpreadsheetApp {
       cachedRect &&
       x >= cachedRect.x &&
       y >= cachedRect.y &&
-      x <= cachedRect.x + cachedRect.width &&
-      y <= cachedRect.y + cachedRect.height
+      x < cachedRect.x + cachedRect.width &&
+      y < cachedRect.y + cachedRect.height
     ) {
       if (!this.sharedHoverCellHasComment) {
         if (this.commentTooltip.classList.contains("comment-tooltip--visible")) {
