@@ -232,6 +232,99 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 #[test]
+fn project_normalized_data_preserves_designer_storage_element_traversal_order() {
+    // Regression test for MS-OVBA `NormalizeDesignerStorage` / `NormalizeStorage` traversal order as
+    // used by `ProjectNormalizedData` (MS-OVBA §2.4.2.2 + §2.4.2.6).
+    //
+    // The spec pseudocode iterates:
+    //   FOR EACH StorageElement (stream or storage) IN Storage
+    // without defining a sort order. Our implementation intentionally follows the deterministic
+    // compound-file enumeration order exposed by the `cfb` crate (MS-CFB red-black tree ordering),
+    // rather than sorting by full OLE path.
+    //
+    // This test constructs a designer storage with:
+    // - stream `Y` with bytes `b"Y"`
+    // - nested storage `Child` containing stream `X` with bytes `b"X"`
+    //
+    // Lexicographic full-path sorting would yield `Child/X` before `Y`. The storage-element order
+    // used by `cfb` yields `Y` before `Child` because `Y` has a shorter name (MS-CFB compares name
+    // length first).
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+
+    // Minimal PROJECT stream identifying one designer module (ProjectDesignerModule.BaseClass).
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"BaseClass=UserForm1\r\n")
+            .expect("write PROJECT");
+    }
+
+    // Minimal VBA/dir describing the designer module → designer storage mapping.
+    //
+    // FormsNormalizedData (which contributes to ProjectNormalizedData) resolves `BaseClass=` values
+    // via `VBA/dir` MODULENAME → MODULESTREAMNAME.
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let dir_decompressed = {
+            let mut out = Vec::new();
+            // PROJECTCODEPAGE (u16 LE): Windows-1252.
+            push_record(&mut out, 0x0003, &1252u16.to_le_bytes());
+            // MODULENAME (module identifier)
+            push_record(&mut out, 0x0019, b"UserForm1");
+            // MODULESTREAMNAME (designer storage name) + reserved u16
+            let mut stream_name = Vec::new();
+            stream_name.extend_from_slice(b"UserForm1");
+            stream_name.extend_from_slice(&0u16.to_le_bytes());
+            push_record(&mut out, 0x001A, &stream_name);
+            // MODULETYPE (UserForm)
+            push_record(&mut out, 0x0021, &3u16.to_le_bytes());
+            out
+        };
+        let dir_container = compress_container(&dir_decompressed);
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    // Designer storage: `UserForm1` with `Y` and `Child/X`.
+    ole.create_storage("UserForm1").expect("designer storage");
+    ole.create_storage("UserForm1/Child")
+        .expect("nested storage");
+    {
+        let mut s = ole.create_stream("UserForm1/Y").expect("Y stream");
+        s.write_all(b"Y").expect("write Y");
+    }
+    {
+        let mut s = ole
+            .create_stream("UserForm1/Child/X")
+            .expect("X stream");
+        s.write_all(b"X").expect("write X");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized =
+        project_normalized_data(&vba_project_bin).expect("compute ProjectNormalizedData");
+
+    // Extract the FormsNormalizedData suffix (two 1023-byte padded blocks).
+    let forms_len = 1023 * 2;
+    assert!(
+        normalized.len() >= forms_len,
+        "expected output to include FormsNormalizedData suffix"
+    );
+    let forms = &normalized[normalized.len() - forms_len..];
+
+    let mut expected = Vec::new();
+    expected.extend_from_slice(b"Y");
+    expected.extend(std::iter::repeat(0u8).take(1022));
+    expected.extend_from_slice(b"X");
+    expected.extend(std::iter::repeat(0u8).take(1022));
+
+    assert_eq!(
+        forms, expected,
+        "expected designer stream `Y` to be normalized before nested `Child/X`"
+    );
+}
+
+#[test]
 fn project_normalized_data_v3_is_sensitive_to_module_record_group_order() {
     fn build_dir_with_modules(order: [&'static str; 2]) -> Vec<u8> {
         let mut out = Vec::new();
