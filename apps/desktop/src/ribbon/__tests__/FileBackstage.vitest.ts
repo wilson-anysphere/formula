@@ -144,8 +144,8 @@ describe("FileBackstage", () => {
     expect(document.activeElement).toBe(versionHistoryItem);
 
     // Wrap around on ArrowUp from the first item.
-    newItem?.focus();
     act(() => {
+      newItem?.focus();
       newItem?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
     });
     expect(document.activeElement).toBe(quitItem);

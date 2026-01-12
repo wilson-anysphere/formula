@@ -4056,8 +4056,8 @@ export class SpreadsheetApp {
     const last = this.rootPosLastMeasuredAtMs;
     const force = opts.force ?? false;
     // Root position changes (e.g. window scroll / layout shifts) are rare compared to pointermove.
-    // Refresh at most a few times per second to avoid reintroducing per-move layout reads.
-    if (!force && now - last < 250) return;
+    // Refresh at most ~once per second to avoid reintroducing per-move layout reads.
+    if (!force && now - last < 1_000) return;
 
     const rect = root.getBoundingClientRect();
     this.rootLeft = rect.left;
