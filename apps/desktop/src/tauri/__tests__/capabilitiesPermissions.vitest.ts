@@ -1,5 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -12,33 +11,18 @@ describe("Tauri capabilities", () => {
     return capability.permissions as unknown[];
   }
 
-  it("scopes custom Rust command invocation via core:allow-invoke", () => {
+  it("does not rely on core:allow-invoke permissions (commands must validate in Rust)", () => {
     const permissions = readPermissions();
-    // Use the object form so we can keep the command allowlist explicit (no allow-all).
+
     expect(permissions).not.toContain("core:allow-invoke");
 
     const allowInvoke = permissions.find(
-      (permission) => Boolean(permission) && typeof permission === "object" && (permission as any).identifier === "core:allow-invoke",
+      (permission) =>
+        Boolean(permission) &&
+        typeof permission === "object" &&
+        (permission as Record<string, unknown>).identifier === "core:allow-invoke",
     );
-    expect(allowInvoke).toBeTruthy();
-
-    const allow = (allowInvoke as any).allow;
-    expect(Array.isArray(allow)).toBe(true);
-    expect(allow.length).toBeGreaterThan(0);
-
-    const commands = allow
-      .map((entry: any) => entry?.command)
-      .filter((cmd: any): cmd is string => typeof cmd === "string");
-    expect(commands.length).toBe(allow.length);
-
-    // No duplicates.
-    expect(new Set(commands).size).toBe(commands.length);
-
-    for (const cmd of commands) {
-      expect(cmd.trim()).not.toBe("");
-      // Disallow wildcard/pattern scopes; keep commands explicit.
-      expect(cmd).not.toContain("*");
-    }
+    expect(allowInvoke).toBeFalsy();
   });
 
   it("grants the dialog + clipboard permissions required by the frontend", () => {
@@ -51,23 +35,24 @@ describe("Tauri capabilities", () => {
     // Keep dialog permission surface minimal.
     expect(permissions).not.toContain("dialog:default");
 
-    expect(permissions).toContain("clipboard:allow-read-text");
-    expect(permissions).toContain("clipboard:allow-write-text");
+    expect(permissions).toContain("clipboard-manager:allow-read-text");
+    expect(permissions).toContain("clipboard-manager:allow-write-text");
     // Keep clipboard permission surface minimal.
-    expect(permissions).not.toContain("clipboard:default");
+    expect(permissions).not.toContain("clipboard-manager:default");
   });
 
   it("grants the window permissions required by the UI window helpers", () => {
     const permissions = readPermissions();
-    expect(permissions).toContain("window:allow-hide");
-    expect(permissions).toContain("window:allow-show");
-    expect(permissions).toContain("window:allow-set-focus");
-    expect(permissions).toContain("window:allow-close");
-    expect(permissions).toContain("window:allow-minimize");
-    expect(permissions).toContain("window:allow-toggle-maximize");
-    expect(permissions).toContain("window:allow-is-maximized");
+    expect(permissions).toContain("core:window:allow-hide");
+    expect(permissions).toContain("core:window:allow-show");
+    expect(permissions).toContain("core:window:allow-set-focus");
+    expect(permissions).toContain("core:window:allow-close");
+    expect(permissions).toContain("core:window:allow-minimize");
+    expect(permissions).toContain("core:window:allow-toggle-maximize");
+    expect(permissions).toContain("core:window:allow-is-maximized");
 
     // Keep window permission surface minimal.
+    expect(permissions).not.toContain("core:window:default");
     expect(permissions).not.toContain("window:default");
   });
 
@@ -106,82 +91,5 @@ describe("Tauri capabilities", () => {
     // Some Tauri versions may namespace this as a core permission.
     expect(identifiers.some((permission) => permission.startsWith("core:notification:"))).toBe(false);
   });
-
-  it("keeps core:allow-invoke in sync with the frontend's invoke() usage", () => {
-    const permissions = readPermissions();
-
-    const allowInvoke = permissions.find(
-      (permission) => Boolean(permission) && typeof permission === "object" && (permission as any).identifier === "core:allow-invoke",
-    ) as any;
-    expect(allowInvoke).toBeTruthy();
-
-    const allow = Array.isArray(allowInvoke?.allow) ? allowInvoke.allow : [];
-    const allowlistedCommands = new Set(
-      allow.map((entry: any) => entry?.command).filter((cmd: any): cmd is string => typeof cmd === "string"),
-    );
-
-    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-
-    const isRuntimeSource = (filePath: string): boolean => {
-      const normalized = filePath.replace(/\\/g, "/");
-      if (normalized.includes("/__tests__/")) return false;
-      if (normalized.match(/\.(test|spec|vitest)\./)) return false;
-      if (normalized.endsWith(".md")) return false;
-      if (normalized.includes("/src-tauri/capabilities/")) return false;
-      const ext = path.extname(filePath);
-      return ext === ".ts" || ext === ".tsx" || ext === ".js" || ext === ".jsx" || ext === ".mjs";
-    };
-
-    const walk = (dir: string): string[] => {
-      const out: string[] = [];
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          if (entry.name === "node_modules" || entry.name === "__tests__") continue;
-          out.push(...walk(full));
-        } else if (entry.isFile()) {
-          if (isRuntimeSource(full)) out.push(full);
-        }
-      }
-      return out;
-    };
-
-    const runtimeFiles = [
-      ...walk(path.join(root, "apps/desktop/src")),
-      ...walk(path.join(root, "packages/extension-marketplace/src")),
-      ...walk(path.join(root, "packages/extension-host/src/browser")),
-      ...walk(path.join(root, "shared/extension-package")),
-    ].sort();
-
-    const runtimeText = runtimeFiles.map((p) => readFileSync(p, "utf8")).join("\n");
-
-    // Capture command invocations from helpers like:
-    // - invoke("...")
-    // - tauriInvoke("...")
-    // - invokeFn("...")
-    // - args.invoke("...") (the `.invoke` segment still matches)
-    const invokedCommands = new Set<string>();
-    const invokeCall = /\b[\w$]*invoke[\w$]*\s*\(\s*(["'])([^"']+)\1/gim;
-    for (const match of runtimeText.matchAll(invokeCall)) {
-      invokedCommands.add(match[2]);
-    }
-
-    // Some code uses indirection (e.g. VBA event macros pass the command name into a helper).
-    // Keep those allowlisted too.
-    {
-      const eventMacrosPath = path.join(root, "apps/desktop/src/macros/event_macros.ts");
-      const eventMacrosText = readFileSync(eventMacrosPath, "utf8");
-      const runEventMacroCall = /runEventMacro\s*\(\s*[^,]+,\s*(["'])([^"']+)\1/gm;
-      for (const match of eventMacrosText.matchAll(runEventMacroCall)) {
-        invokedCommands.add(match[2]);
-      }
-    }
-
-    for (const cmd of invokedCommands) {
-      expect(allowlistedCommands.has(cmd)).toBe(true);
-    }
-
-    // Keep the allowlist as small as possible: it should match actual invoke usage.
-    expect(Array.from(allowlistedCommands).sort()).toEqual(Array.from(invokedCommands).sort());
-  });
 });
+

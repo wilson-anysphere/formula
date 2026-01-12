@@ -32,17 +32,13 @@ test("Tauri main capability allows emitting coi-check-result (used by pnpm check
   const perms = cap?.permissions;
   assert.ok(Array.isArray(perms), "expected capabilities/main.json to have a permissions array");
 
-  // Tauri permission identifiers can be namespaced (e.g. `core:event:*`) depending on
-  // the tauri-cli/plugin versions. Accept either form so this test remains stable.
+  // Tauri v2.9 core permissions use the `core:` prefix (see `cargo tauri permission ls`).
   const emitPerm = perms.find(
-    (p) =>
-      p &&
-      typeof p === "object" &&
-      (p.identifier === "core:event:allow-emit" || p.identifier === "event:allow-emit"),
+    (p) => p && typeof p === "object" && p.identifier === "core:event:allow-emit",
   );
   assert.ok(
     emitPerm,
-    "expected capabilities/main.json to include a core:event:allow-emit (or event:allow-emit) permission object",
+    "expected capabilities/main.json to include a core:event:allow-emit permission object",
   );
 
   const allowed = Array.isArray(emitPerm.allow) ? emitPerm.allow : [];
