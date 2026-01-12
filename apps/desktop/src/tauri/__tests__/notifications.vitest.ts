@@ -22,6 +22,18 @@ describe("tauri/notifications", () => {
     expect(tauriNotify).toHaveBeenCalledWith({ title: "Hello", body: "World" });
   });
 
+  it("falls back to invoke(show_system_notification) when direct Tauri notify fails", async () => {
+    const tauriNotify = vi.fn().mockRejectedValue(new Error("permission denied"));
+    const invoke = vi.fn().mockResolvedValue(null);
+    (globalThis as any).__TAURI__ = { notification: { notify: tauriNotify }, core: { invoke } };
+
+    await notify({ title: "Hello", body: "World" });
+
+    expect(tauriNotify).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("show_system_notification", { title: "Hello", body: "World" });
+  });
+
   it("falls back to invoke(show_system_notification) when running in Tauri without a direct notification API", async () => {
     const invoke = vi.fn().mockResolvedValue(null);
     (globalThis as any).__TAURI__ = { core: { invoke } };

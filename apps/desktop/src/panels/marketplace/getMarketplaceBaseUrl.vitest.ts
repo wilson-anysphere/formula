@@ -39,4 +39,3 @@ describe("getMarketplaceBaseUrl", () => {
     expect(getMarketplaceBaseUrl({ env: { PROD: true } })).toBe("https://marketplace.formula.app/api");
   });
 });
-

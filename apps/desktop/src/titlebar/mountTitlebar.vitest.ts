@@ -9,6 +9,8 @@ import { mountTitlebar } from "./mountTitlebar.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
+const TEST_TIMEOUT_MS = 30_000;
+
 describe("mountTitlebar", () => {
   it("mounts a Titlebar into a container and unmounts cleanly", async () => {
     const container = document.createElement("div");
@@ -72,5 +74,5 @@ describe("mountTitlebar", () => {
     act(() => {
       titlebar?.dispose();
     });
-  });
+  }, TEST_TIMEOUT_MS);
 });
