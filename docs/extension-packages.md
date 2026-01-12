@@ -26,6 +26,8 @@ The production Web + Desktop/Tauri runtime installs extensions without Node/`fs`
 - `WebExtensionManager` (`packages/extension-marketplace/src/WebExtensionManager.ts`, exported as `@formula/extension-marketplace`)
   downloads `.fextpkg` bytes, verifies them client-side (SHA-256 + Ed25519), and persists verified packages in IndexedDB
   (`formula.webExtensions`).
+  - Note: on Desktop/Tauri, Ed25519 verification uses WebCrypto when available, but can fall back to a Rust-backed verifier
+    via Tauri IPC on WebViews that don't support Ed25519 in WebCrypto (e.g. WKWebView/WebKitGTK).
 - Extensions are loaded into `BrowserExtensionHost` (exported as `@formula/extension-host/browser`) from in-memory
   `blob:`/`data:` module URLs (no extracted extension directory on disk).
 

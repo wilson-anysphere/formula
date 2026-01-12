@@ -43,7 +43,11 @@ exported as `@formula/extension-marketplace`) which keeps the initial code load 
    - parse the tar archive
    - validate `manifest.json`, `checksums.json`, `signature.json`
    - compute SHA-256 checksums (WebCrypto)
-   - verify the Ed25519 signature (WebCrypto Ed25519)
+   - verify the Ed25519 signature:
+     - **Web:** requires WebCrypto Ed25519 support (installs must fail when unavailable).
+     - **Desktop/Tauri:** uses WebCrypto when available, but can fall back to a Rust-backed verifier via
+       Tauri IPC (`verify_ed25519_signature`) on WebViews that don't support Ed25519 in WebCrypto
+       (notably WKWebView/WebKitGTK).
 3. Persist the verified package bytes + verification metadata in IndexedDB (keyed by `{id, version}`).
 4. Extract the entrypoint (`manifest.browser`, falling back to `module`/`main`) from the archive, create a `blob:` URL
    for that module, and load it into `BrowserExtensionHost` (exported as `@formula/extension-host/browser`).
