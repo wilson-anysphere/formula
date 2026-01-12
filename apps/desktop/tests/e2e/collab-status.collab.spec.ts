@@ -74,5 +74,32 @@ test.describe("collab status indicator (collab mode)", () => {
     await page.context().setOffline(false);
     await expect(page.getByTestId("collab-status")).toHaveAttribute("data-collab-sync", "synced", { timeout: 60_000 });
     await expect(page2.getByTestId("collab-status")).toHaveAttribute("data-collab-sync", "synced", { timeout: 60_000 });
+
+    // Ensure collab mode never triggers the browser/Tauri beforeunload unsaved prompt, even if
+    // DocumentController is dirty.
+    await page.locator("#grid").click({ position: { x: 80, y: 40 } });
+    await page.keyboard.press("F2");
+    const editor = page.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await editor.fill("dirty");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
+
+    let beforeUnloadDialogs = 0;
+    page.on("dialog", async (dialog) => {
+      if (dialog.type() === "beforeunload") beforeUnloadDialogs += 1;
+      await dialog.accept();
+    });
+
+    await page.reload();
+    await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 60_000 });
+    await page.evaluate(async () => {
+      const app = (window as any).__formulaApp;
+      if (app && typeof app.whenIdle === "function") {
+        await Promise.race([app.whenIdle(), new Promise<void>((r) => setTimeout(r, 10_000))]);
+      }
+    });
+
+    expect(beforeUnloadDialogs).toBe(0);
   });
 });
