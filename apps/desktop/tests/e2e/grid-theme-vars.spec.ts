@@ -49,6 +49,12 @@ test.describe("grid theme css vars", () => {
       return {
         vars: values,
         resolved: {
+          raw: {
+            formulaGridBg: style.getPropertyValue("--formula-grid-bg").trim(),
+            bgPrimary: style.getPropertyValue("--bg-primary").trim(),
+            formulaGridLine: style.getPropertyValue("--formula-grid-line").trim(),
+            gridLine: style.getPropertyValue("--grid-line").trim(),
+          },
           gridBg: resolveColor("--formula-grid-bg"),
           bgPrimary: resolveColor("--bg-primary"),
           gridLine: resolveColor("--formula-grid-line"),
@@ -61,8 +67,11 @@ test.describe("grid theme css vars", () => {
       expect(value, `${name} should be defined`).not.toBe("");
     }
 
+    // Mapping verification (token parity).
+    expect([resolved.raw.bgPrimary, "var(--bg-primary)"]).toContain(resolved.raw.formulaGridBg);
+    expect([resolved.raw.gridLine, "var(--grid-line)"]).toContain(resolved.raw.formulaGridLine);
+
     expect(resolved.gridBg).toBe(resolved.bgPrimary);
     expect(resolved.gridLine).toBe(resolved.tokenGridLine);
   });
 });
-
