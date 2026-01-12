@@ -417,6 +417,7 @@ export class SpreadsheetApp {
   private wasmUnsubscribe: (() => void) | null = null;
   private wasmSyncPromise: Promise<void> = Promise.resolve();
   private auditingUnsubscribe: (() => void) | null = null;
+  private externalRepaintUnsubscribe: (() => void) | null = null;
 
   private gridCanvas: HTMLCanvasElement;
   private chartLayer: HTMLDivElement;
@@ -1198,6 +1199,18 @@ export class SpreadsheetApp {
       }
     });
 
+    // SpreadsheetApp's legacy (non-shared) renderer only repaints when explicitly asked.
+    // Remote/collaboration updates arrive via `DocumentController.applyExternalDeltas()` and
+    // emit `document.on("change")`, but do not necessarily go through any local UI action
+    // that would call `refresh()`. Ensure we schedule a repaint for externally-sourced
+    // deltas so collaboration never appears "stuck" until the next scroll/input event.
+    this.externalRepaintUnsubscribe = this.document.on("change", (payload: any) => {
+      const source = typeof payload?.source === "string" ? payload.source : "";
+      const isExternalSource = source === "collab" || source === "backend" || source === "python" || source === "macro";
+      if (!isExternalSource) return;
+      this.refresh("scroll");
+    });
+
     if (!collabEnabled && typeof window !== "undefined") {
       try {
         this.stopCommentPersistence = bindDocToStorage(this.commentsDoc, window.localStorage, "formula:comments");
@@ -1530,6 +1543,8 @@ export class SpreadsheetApp {
     this.wasmUnsubscribe = null;
     this.auditingUnsubscribe?.();
     this.auditingUnsubscribe = null;
+    this.externalRepaintUnsubscribe?.();
+    this.externalRepaintUnsubscribe = null;
     this.wasmEngine?.terminate();
     this.wasmEngine = null;
     this.stopCommentPersistence?.();
