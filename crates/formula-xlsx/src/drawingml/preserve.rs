@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+use quick_xml::events::{BytesEnd, BytesStart, Event};
+use quick_xml::{Reader as XmlReader, Writer as XmlWriter};
 use roxmltree::Document;
 
 use crate::path::{rels_for_part, resolve_target};
@@ -205,7 +207,10 @@ impl XlsxPackage {
                     .attribute((REL_NS, "id"))
                     .or_else(|| node.attribute("r:id"))
                     .or_else(|| node.attribute("id"))?;
-                Some((rid.to_string(), sheet_xml_str.as_bytes()[node.range()].to_vec()))
+                Some((
+                    rid.to_string(),
+                    sheet_xml_str.as_bytes()[node.range()].to_vec(),
+                ))
             });
 
             let ole_objects_node = doc
@@ -228,14 +233,22 @@ impl XlsxPackage {
             let controls_node = doc
                 .descendants()
                 .find(|n| n.is_element() && n.tag_name().name() == "controls");
-            let controls =
-                controls_node.map(|node| (sheet_xml_str.as_bytes()[node.range()].to_vec(), extract_relationship_ids(node)));
+            let controls = controls_node.map(|node| {
+                (
+                    sheet_xml_str.as_bytes()[node.range()].to_vec(),
+                    extract_relationship_ids(node),
+                )
+            });
 
             let drawing_hf_node = doc
                 .descendants()
                 .find(|n| n.is_element() && n.tag_name().name() == "drawingHF");
-            let drawing_hf = drawing_hf_node
-                .map(|node| (sheet_xml_str.as_bytes()[node.range()].to_vec(), extract_relationship_ids(node)));
+            let drawing_hf = drawing_hf_node.map(|node| {
+                (
+                    sheet_xml_str.as_bytes()[node.range()].to_vec(),
+                    extract_relationship_ids(node),
+                )
+            });
 
             if drawing_rids.is_empty()
                 && picture.is_none()
@@ -427,11 +440,9 @@ impl XlsxPackage {
             if preserved_sheet.drawings.is_empty() {
                 continue;
             }
-            let Some(sheet) = match_sheet_by_name_or_index(
-                &sheets,
-                sheet_name,
-                preserved_sheet.sheet_index,
-            ) else {
+            let Some(sheet) =
+                match_sheet_by_name_or_index(&sheets, sheet_name, preserved_sheet.sheet_index)
+            else {
                 continue;
             };
 
@@ -757,7 +768,9 @@ fn is_drawing_adjacent_relationship(rel_type: &str, resolved_target: &str) -> bo
         "xl/diagrams/",
     ];
 
-    PREFIXES.iter().any(|prefix| resolved_target.starts_with(prefix))
+    PREFIXES
+        .iter()
+        .any(|prefix| resolved_target.starts_with(prefix))
 }
 
 fn extract_relationship_ids(node: roxmltree::Node<'_, '_>) -> Vec<String> {
@@ -800,8 +813,8 @@ fn ensure_sheet_xml_has_drawings(
 
     let xml_str = std::str::from_utf8(sheet_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
-    let doc =
-        Document::parse(xml_str).map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
+    let doc = Document::parse(xml_str)
+        .map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
     let root = doc.root_element();
     let root_name = root.tag_name().name();
     let root_start = root.range().start;
@@ -873,13 +886,13 @@ fn ensure_sheet_xml_has_picture(
 
     let picture_str = std::str::from_utf8(picture_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8("picture".to_string(), e))?;
-    let picture_str = remap_relationship_ids(picture_str, rid_map);
+    let mut picture_str = remap_relationship_ids(picture_str, rid_map);
 
     let xml_str = std::str::from_utf8(sheet_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
 
-    let doc =
-        Document::parse(xml_str).map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
+    let doc = Document::parse(xml_str)
+        .map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
     let root = doc.root_element();
     let root_name = root.tag_name().name();
     let root_start = root.range().start;
@@ -888,6 +901,16 @@ fn ensure_sheet_xml_has_picture(
         return Err(ChartExtractionError::XmlStructure(format!(
             "{part_name}: expected <worksheet>, found <{root_name}>"
         )));
+    }
+
+    // Ensure the inserted `<picture>` tag uses the worksheet's SpreadsheetML prefix style.
+    // This matters for prefix-only worksheets (`<x:worksheet ...>`) where unprefixed tags are in
+    // *no namespace*, and also for default-namespace worksheets where inserting a prefixed tag
+    // (e.g. `<x:picture>`) would introduce an undeclared prefix.
+    let picture_prefix = root_element_prefix(&picture_str)?;
+    if picture_prefix.as_deref() != root_prefix {
+        picture_str =
+            rewrite_fragment_prefix(&picture_str, picture_prefix.as_deref(), root_prefix)?;
     }
 
     if root
@@ -945,13 +968,13 @@ fn ensure_sheet_xml_has_ole_objects(
 
     let ole_str = std::str::from_utf8(ole_objects_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8("oleObjects".to_string(), e))?;
-    let ole_str = remap_relationship_ids(ole_str, rid_map);
+    let mut ole_str = remap_relationship_ids(ole_str, rid_map);
 
     let xml_str = std::str::from_utf8(sheet_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
 
-    let doc =
-        Document::parse(xml_str).map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
+    let doc = Document::parse(xml_str)
+        .map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
     let root = doc.root_element();
     let root_name = root.tag_name().name();
     let root_start = root.range().start;
@@ -960,6 +983,11 @@ fn ensure_sheet_xml_has_ole_objects(
         return Err(ChartExtractionError::XmlStructure(format!(
             "{part_name}: expected <worksheet>, found <{root_name}>"
         )));
+    }
+
+    let ole_prefix = root_element_prefix(&ole_str)?;
+    if ole_prefix.as_deref() != root_prefix {
+        ole_str = rewrite_fragment_prefix(&ole_str, ole_prefix.as_deref(), root_prefix)?;
     }
 
     if root
@@ -1022,8 +1050,8 @@ fn ensure_sheet_xml_has_controls(
     let xml_str = std::str::from_utf8(sheet_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
 
-    let doc =
-        Document::parse(xml_str).map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
+    let doc = Document::parse(xml_str)
+        .map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
     let root = doc.root_element();
     let root_name = root.tag_name().name();
     let root_start = root.range().start;
@@ -1056,7 +1084,11 @@ fn ensure_sheet_xml_has_controls(
     let insert_idx = root
         .children()
         .find(|n| {
-            n.is_element() && matches!(n.tag_name().name(), "webPublishItems" | "tableParts" | "extLst")
+            n.is_element()
+                && matches!(
+                    n.tag_name().name(),
+                    "webPublishItems" | "tableParts" | "extLst"
+                )
         })
         .map(|n| n.range().start)
         .unwrap_or(close_idx)
@@ -1066,9 +1098,7 @@ fn ensure_sheet_xml_has_controls(
     let mut xml = xml_str.to_string();
     xml.insert_str(insert_idx, &controls_str);
 
-    if controls_str.contains("r:")
-        && !root_start_has_r_namespace(&xml, root_start, part_name)?
-    {
+    if controls_str.contains("r:") && !root_start_has_r_namespace(&xml, root_start, part_name)? {
         xml = add_r_namespace_to_root(&xml, root_start, part_name)?;
     }
 
@@ -1092,8 +1122,8 @@ fn ensure_sheet_xml_has_drawing_hf(
     let xml_str = std::str::from_utf8(sheet_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
 
-    let doc =
-        Document::parse(xml_str).map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
+    let doc = Document::parse(xml_str)
+        .map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
     let root = doc.root_element();
     let root_name = root.tag_name().name();
     let root_start = root.range().start;
@@ -1129,7 +1159,12 @@ fn ensure_sheet_xml_has_drawing_hf(
             n.is_element()
                 && matches!(
                     n.tag_name().name(),
-                    "picture" | "oleObjects" | "controls" | "webPublishItems" | "tableParts" | "extLst"
+                    "picture"
+                        | "oleObjects"
+                        | "controls"
+                        | "webPublishItems"
+                        | "tableParts"
+                        | "extLst"
                 )
         })
         .map(|n| n.range().start)
@@ -1140,9 +1175,7 @@ fn ensure_sheet_xml_has_drawing_hf(
     let mut xml = xml_str.to_string();
     xml.insert_str(insert_idx, &drawing_hf_str);
 
-    if drawing_hf_str.contains("r:")
-        && !root_start_has_r_namespace(&xml, root_start, part_name)?
-    {
+    if drawing_hf_str.contains("r:") && !root_start_has_r_namespace(&xml, root_start, part_name)? {
         xml = add_r_namespace_to_root(&xml, root_start, part_name)?;
     }
 
@@ -1207,6 +1240,124 @@ fn remap_relationship_ids(fragment: &str, rid_map: &HashMap<String, String>) -> 
     out
 }
 
+fn root_element_prefix(fragment: &str) -> Result<Option<String>, ChartExtractionError> {
+    let mut reader = XmlReader::from_str(fragment);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf).map_err(|e| {
+            ChartExtractionError::XmlStructure(format!("failed to parse XML fragment: {e}"))
+        })? {
+            Event::Start(e) | Event::Empty(e) => {
+                let name = e.name();
+                let name = name.as_ref();
+                let prefix = name
+                    .iter()
+                    .rposition(|b| *b == b':')
+                    .map(|idx| &name[..idx])
+                    .and_then(|p| std::str::from_utf8(p).ok())
+                    .map(|s| s.to_string());
+                return Ok(prefix);
+            }
+            Event::Eof => return Ok(None),
+            _ => {}
+        }
+        buf.clear();
+    }
+}
+
+fn rewrite_fragment_prefix(
+    fragment: &str,
+    from_prefix: Option<&str>,
+    to_prefix: Option<&str>,
+) -> Result<String, ChartExtractionError> {
+    if from_prefix == to_prefix {
+        return Ok(fragment.to_string());
+    }
+
+    let mut reader = XmlReader::from_str(fragment);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::new());
+    let mut buf = Vec::new();
+
+    loop {
+        let event = reader.read_event_into(&mut buf).map_err(|e| {
+            ChartExtractionError::XmlStructure(format!("failed to parse XML fragment: {e}"))
+        })?;
+
+        match event {
+            Event::Eof => break,
+            Event::Start(e) => {
+                let tag = rewrite_tag_name(e.name().as_ref(), from_prefix, to_prefix);
+                let mut out = BytesStart::new(tag.as_str()).into_owned();
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr.map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "failed to parse XML fragment attribute: {e}"
+                        ))
+                    })?;
+                    out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+                }
+                writer.write_event(Event::Start(out)).map_err(|e| {
+                    ChartExtractionError::XmlStructure(format!("xml write error: {e}"))
+                })?;
+            }
+            Event::Empty(e) => {
+                let tag = rewrite_tag_name(e.name().as_ref(), from_prefix, to_prefix);
+                let mut out = BytesStart::new(tag.as_str()).into_owned();
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr.map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "failed to parse XML fragment attribute: {e}"
+                        ))
+                    })?;
+                    out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+                }
+                writer.write_event(Event::Empty(out)).map_err(|e| {
+                    ChartExtractionError::XmlStructure(format!("xml write error: {e}"))
+                })?;
+            }
+            Event::End(e) => {
+                let tag = rewrite_tag_name(e.name().as_ref(), from_prefix, to_prefix);
+                writer
+                    .write_event(Event::End(BytesEnd::new(tag.as_str())))
+                    .map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!("xml write error: {e}"))
+                    })?;
+            }
+            other => {
+                writer.write_event(other.to_owned()).map_err(|e| {
+                    ChartExtractionError::XmlStructure(format!("xml write error: {e}"))
+                })?;
+            }
+        }
+
+        buf.clear();
+    }
+
+    String::from_utf8(writer.into_inner()).map_err(|e| {
+        ChartExtractionError::XmlStructure(format!("xml write produced invalid UTF-8: {e}"))
+    })
+}
+
+fn rewrite_tag_name(name: &[u8], from_prefix: Option<&str>, to_prefix: Option<&str>) -> String {
+    let name_str = std::str::from_utf8(name).unwrap_or_default();
+    let (prefix, local) = match name_str.split_once(':') {
+        Some((p, local)) => (Some(p), local),
+        None => (None, name_str),
+    };
+    let matches_from = match from_prefix {
+        Some(from) => prefix == Some(from),
+        None => prefix.is_none(),
+    };
+
+    if matches_from {
+        crate::xml::prefixed_tag(to_prefix, local)
+    } else {
+        name_str.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1229,7 +1380,10 @@ mod tests {
 
         let drawing_pos = updated_str.find("<drawing").unwrap();
         let ext_pos = updated_str.find("<extLst").unwrap();
-        assert!(drawing_pos < ext_pos, "drawing should be inserted before extLst");
+        assert!(
+            drawing_pos < ext_pos,
+            "drawing should be inserted before extLst"
+        );
     }
 
     #[test]
@@ -1348,6 +1502,136 @@ mod tests {
             "expected xmlns:r to be added when inserting r:* attributes, got:\n{updated_str}"
         );
     }
+
+    #[test]
+    fn inserts_picture_with_prefix_when_worksheet_is_prefix_only() {
+        let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:sheetData/>
+</x:worksheet>"#;
+        let picture_xml = br#"<picture r:id="rId1"/>"#;
+
+        let updated = ensure_sheet_xml_has_picture(
+            sheet_xml,
+            "xl/worksheets/sheet1.xml",
+            picture_xml,
+            &HashMap::new(),
+        )
+        .expect("patch sheet xml");
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        roxmltree::Document::parse(updated_str).expect("output XML should be well-formed");
+        assert!(
+            updated_str.contains("<x:picture r:id=\"rId1\"/>"),
+            "expected inserted <x:picture>, got:\n{updated_str}"
+        );
+        assert!(
+            !updated_str.contains("<picture r:id"),
+            "should not introduce unprefixed <picture> in prefix-only worksheets, got:\n{updated_str}"
+        );
+    }
+
+    #[test]
+    fn inserts_picture_without_prefix_when_worksheet_uses_default_namespace() {
+        let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+</worksheet>"#;
+        let picture_xml = br#"<x:picture r:id="rId1"/>"#;
+
+        let updated = ensure_sheet_xml_has_picture(
+            sheet_xml,
+            "xl/worksheets/sheet1.xml",
+            picture_xml,
+            &HashMap::new(),
+        )
+        .expect("patch sheet xml");
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        roxmltree::Document::parse(updated_str).expect("output XML should be well-formed");
+        assert!(
+            updated_str.contains("<picture r:id=\"rId1\"/>"),
+            "expected inserted <picture> without a prefix, got:\n{updated_str}"
+        );
+        assert!(
+            !updated_str.contains("<x:picture"),
+            "should not introduce prefixed <x:picture> tags in default-namespace worksheets, got:\n{updated_str}"
+        );
+        assert!(
+            updated_str.contains("xmlns:r="),
+            "expected xmlns:r to be added to root when inserting r:id attributes, got:\n{updated_str}"
+        );
+    }
+
+    #[test]
+    fn inserts_ole_objects_with_prefix_when_worksheet_is_prefix_only() {
+        let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:sheetData/>
+</x:worksheet>"#;
+        let ole_xml = br#"<oleObjects><oleObject r:id="rId1"/></oleObjects>"#;
+
+        let updated = ensure_sheet_xml_has_ole_objects(
+            sheet_xml,
+            "xl/worksheets/sheet1.xml",
+            ole_xml,
+            &HashMap::new(),
+        )
+        .expect("patch sheet xml");
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        roxmltree::Document::parse(updated_str).expect("output XML should be well-formed");
+        assert!(
+            updated_str.contains("<x:oleObjects>") && updated_str.contains("</x:oleObjects>"),
+            "expected inserted <x:oleObjects> block, got:\n{updated_str}"
+        );
+        assert!(
+            updated_str.contains("<x:oleObject r:id=\"rId1\"/>"),
+            "expected inserted <x:oleObject>, got:\n{updated_str}"
+        );
+        assert!(
+            !updated_str.contains("<oleObjects>"),
+            "should not introduce unprefixed <oleObjects> in prefix-only worksheets, got:\n{updated_str}"
+        );
+    }
+
+    #[test]
+    fn inserts_ole_objects_without_prefix_when_worksheet_uses_default_namespace() {
+        let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+</worksheet>"#;
+        let ole_xml = br#"<x:oleObjects><x:oleObject r:id="rId1"/></x:oleObjects>"#;
+
+        let updated = ensure_sheet_xml_has_ole_objects(
+            sheet_xml,
+            "xl/worksheets/sheet1.xml",
+            ole_xml,
+            &HashMap::new(),
+        )
+        .expect("patch sheet xml");
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        roxmltree::Document::parse(updated_str).expect("output XML should be well-formed");
+        assert!(
+            updated_str.contains("<oleObjects>") && updated_str.contains("</oleObjects>"),
+            "expected inserted <oleObjects> block, got:\n{updated_str}"
+        );
+        assert!(
+            updated_str.contains("<oleObject r:id=\"rId1\"/>"),
+            "expected inserted <oleObject>, got:\n{updated_str}"
+        );
+        assert!(
+            !updated_str.contains("<x:oleObjects"),
+            "should not introduce prefixed <x:oleObjects> tags in default-namespace worksheets, got:\n{updated_str}"
+        );
+        assert!(
+            updated_str.contains("xmlns:r="),
+            "expected xmlns:r to be added to root when inserting r:id attributes, got:\n{updated_str}"
+        );
+    }
 }
 
 fn root_start_has_r_namespace(
@@ -1418,7 +1702,9 @@ fn ensure_workbook_has_chartsheets(
     let sheets_node = doc
         .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "sheets")
-        .ok_or_else(|| ChartExtractionError::XmlStructure("workbook.xml missing <sheets>".to_string()))?;
+        .ok_or_else(|| {
+            ChartExtractionError::XmlStructure("workbook.xml missing <sheets>".to_string())
+        })?;
     let sheets_prefix = element_prefix_at(&workbook_xml, sheets_node.range().start);
     let sheet_tag = crate::xml::prefixed_tag(sheets_prefix, "sheet");
     let sheets_close_tag = format!("</{}>", crate::xml::prefixed_tag(sheets_prefix, "sheets"));
@@ -1433,7 +1719,10 @@ fn ensure_workbook_has_chartsheets(
         if let Some(name) = sheet.attribute("name") {
             existing_sheet_names.insert(name.to_string());
         }
-        if let Some(sheet_id) = sheet.attribute("sheetId").and_then(|v| v.parse::<u32>().ok()) {
+        if let Some(sheet_id) = sheet
+            .attribute("sheetId")
+            .and_then(|v| v.parse::<u32>().ok())
+        {
             used_sheet_ids.insert(sheet_id);
             max_sheet_id = max_sheet_id.max(sheet_id);
         }
