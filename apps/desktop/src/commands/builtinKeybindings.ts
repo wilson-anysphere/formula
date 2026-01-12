@@ -38,9 +38,20 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: "focus.inTextInput == false",
   },
   {
+    // Some environments emit both Ctrl+Meta for a single chord (remote desktop / VM keyboard setups).
+    command: "workbench.newWorkbook",
+    key: "ctrl+cmd+n",
+    when: "focus.inTextInput == false",
+  },
+  {
     command: "workbench.openWorkbook",
     key: "ctrl+o",
     mac: "cmd+o",
+    when: "focus.inTextInput == false",
+  },
+  {
+    command: "workbench.openWorkbook",
+    key: "ctrl+cmd+o",
     when: "focus.inTextInput == false",
   },
   {
@@ -50,9 +61,19 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: "focus.inTextInput == false",
   },
   {
+    command: "workbench.saveWorkbook",
+    key: "ctrl+cmd+s",
+    when: "focus.inTextInput == false",
+  },
+  {
     command: "workbench.saveWorkbookAs",
     key: "ctrl+shift+s",
     mac: "cmd+shift+s",
+    when: "focus.inTextInput == false",
+  },
+  {
+    command: "workbench.saveWorkbookAs",
+    key: "ctrl+cmd+shift+s",
     when: "focus.inTextInput == false",
   },
   {
@@ -62,9 +83,19 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: "focus.inTextInput == false",
   },
   {
+    command: "workbench.closeWorkbook",
+    key: "ctrl+cmd+w",
+    when: "focus.inTextInput == false",
+  },
+  {
     command: "workbench.quit",
     key: "ctrl+q",
     mac: "cmd+q",
+    when: "focus.inTextInput == false",
+  },
+  {
+    command: "workbench.quit",
+    key: "ctrl+cmd+q",
     when: "focus.inTextInput == false",
   },
   {
