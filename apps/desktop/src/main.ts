@@ -415,6 +415,7 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
   let currentProvider: unknown = null;
   let providerStatus: string | null = null;
   let providerSynced: boolean | null = null;
+  let hasEverSynced = false;
   let currentOffline: unknown = null;
   let offlineWaitStarted = false;
 
@@ -487,6 +488,7 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
 
   const onProviderSync = (isSynced: unknown): void => {
     providerSynced = Boolean(isSynced);
+    if (providerSynced) hasEverSynced = true;
     render();
   };
 
@@ -499,6 +501,7 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
       currentProvider = null;
       providerStatus = null;
       providerSynced = null;
+      hasEverSynced = false;
       currentOffline = null;
       offlineWaitStarted = false;
       setIndicatorText("Local");
@@ -545,6 +548,8 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
       currentProvider = provider;
       providerStatus = null;
       providerSynced = null;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      hasEverSynced = Boolean((currentProvider as any)?.synced);
       attachProviderListeners(currentProvider);
     }
 
@@ -553,38 +558,51 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
       return;
     }
 
+    // No provider: offline-only/local collab session.
+    if (!currentProvider) {
+      setIndicatorText(`${docId} • Offline`);
+      return;
+    }
+
+    const synced = (() => {
+      if (typeof providerSynced === "boolean") return providerSynced;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const anyProvider = currentProvider as any;
+      if (typeof anyProvider.synced === "boolean") return anyProvider.synced;
+      return false;
+    })();
+
+    if (synced) hasEverSynced = true;
+
     const connected = (() => {
-      if (!currentProvider) return null;
       if (providerStatus === "connected") return true;
-      if (providerStatus === "disconnected") return false;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const anyProvider = currentProvider as any;
       if (typeof anyProvider.wsconnected === "boolean") return anyProvider.wsconnected;
       if (typeof anyProvider.connected === "boolean") return anyProvider.connected;
-      return null;
+      return false;
     })();
 
-    const synced = (() => {
-      if (!currentProvider) return null;
-      if (typeof providerSynced === "boolean") return providerSynced;
+    const connecting = (() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const anyProvider = currentProvider as any;
-      if (typeof anyProvider.synced === "boolean") return anyProvider.synced;
-      return null;
+      if (typeof anyProvider.wsconnecting === "boolean") return anyProvider.wsconnecting;
+
+      // y-websocket reports `status: "disconnected"` both before the first connect and
+      // when reconnecting. Treat "disconnected before first sync" as Connecting.
+      if (!hasEverSynced && providerStatus === "disconnected") return true;
+
+      return false;
     })();
 
-    const connectionLabel = currentProvider
-      ? connected === true
-        ? "Connected"
-        : connected === false
-          ? "Disconnected"
-          : "Connecting…"
-      : "Offline";
+    const state = (() => {
+      if (connected) return synced ? "Synced" : "Connected";
+      if (connecting || !hasEverSynced) return "Connecting…";
+      return "Disconnected";
+    })();
 
-    const syncLabel = currentProvider ? (synced === true ? "Synced" : "Syncing…") : "Local";
-
-    setIndicatorText(`${docId} • ${connectionLabel} • ${syncLabel}`);
+    setIndicatorText(`${docId} • ${state}`);
   };
 
   abortController.signal.addEventListener("abort", () => {
