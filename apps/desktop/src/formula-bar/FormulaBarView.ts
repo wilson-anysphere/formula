@@ -1,6 +1,6 @@
 import { FormulaBarModel, type FormulaBarAiSuggestion } from "./FormulaBarModel.js";
 import { parseA1Range, type RangeAddress } from "../spreadsheet/a1.js";
-import { extractFormulaReferences, toggleA1AbsoluteAtCursor, type FormulaReferenceRange } from "@formula/spreadsheet-frontend";
+import { toggleA1AbsoluteAtCursor, type FormulaReferenceRange } from "@formula/spreadsheet-frontend";
 
 export interface FormulaBarViewCallbacks {
   onBeginEdit?: (activeCellAddress: string) => void;
@@ -343,17 +343,10 @@ export class FormulaBarView {
       const toggled = toggleA1AbsoluteAtCursor(prevText, cursorStart, cursorEnd);
       if (!toggled) return;
 
-      // Excel UX: after toggling (even from a caret), keep the whole reference token
-      // selected so repeated F4 presses continue cycling the same token.
-      const { references, activeIndex } = extractFormulaReferences(toggled.text, toggled.cursorStart, toggled.cursorEnd);
-      const active = activeIndex == null ? null : references[activeIndex] ?? null;
-      const nextStart = active?.start ?? toggled.cursorStart;
-      const nextEnd = active?.end ?? toggled.cursorEnd;
-
       this.textarea.value = toggled.text;
-      this.textarea.setSelectionRange(nextStart, nextEnd);
-      this.model.updateDraft(toggled.text, nextStart, nextEnd);
-      this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(nextStart, nextEnd);
+      this.textarea.setSelectionRange(toggled.cursorStart, toggled.cursorEnd);
+      this.model.updateDraft(toggled.text, toggled.cursorStart, toggled.cursorEnd);
+      this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(toggled.cursorStart, toggled.cursorEnd);
       this.#render({ preserveTextareaValue: true });
       this.#emitOverlays();
       return;
