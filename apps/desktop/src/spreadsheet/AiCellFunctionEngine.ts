@@ -546,6 +546,19 @@ function splitSheetQualifier(input: string): { sheetId: string | null; ref: stri
   return { sheetId: null, ref: s };
 }
 
+function sheetDisplayName(sheetId: string, sheetNameResolver: SheetNameResolver | null): string {
+  const id = String(sheetId ?? "").trim();
+  if (!id) return "";
+  return sheetNameResolver?.getSheetNameById(id) ?? id;
+}
+
+function formatSheetNameForA1(sheetName: string): string {
+  const name = String(sheetName ?? "").trim();
+  if (!name) return "";
+  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
+  return `'${name.replace(/'/g, "''")}'`;
+}
+
 type ParsedProvenanceRef = { sheetId: string; range: RangeAddress; canonical: string; isCell: boolean };
 
 function parseProvenanceRef(
@@ -1058,10 +1071,17 @@ function compactArrayForPrompt(params: {
     ...(truncated ? { truncated: true } : {}),
   };
 
-  const rangeText = range && rangeSheetId ? `${rangeSheetId}!${rangeToA1(range)}` : range ? rangeToA1(range) : null;
+  const rangeA1 = range ? rangeToA1(range) : null;
+  // Use stable ids for determinism (sampling) but display names in prompts/audit logs.
+  // This avoids leaking internal sheet ids to the model while keeping sampling stable across renames.
+  const rangeStableText = rangeA1 && rangeSheetId ? `${rangeSheetId}!${rangeA1}` : rangeA1;
+  const rangeDisplayText =
+    rangeA1 && rangeSheetId
+      ? `${formatSheetNameForA1(sheetDisplayName(rangeSheetId, params.sheetNameResolver) || rangeSheetId)}!${rangeA1}`
+      : rangeA1;
 
   const seedHex = hashText(
-    `${params.documentId}:${rangeSheetId ?? params.defaultSheetId}:${params.functionName}:${params.argIndex}:${rangeText ?? "array"}`,
+    `${params.documentId}:${rangeSheetId ?? params.defaultSheetId}:${params.functionName}:${params.argIndex}:${rangeStableText ?? "array"}`,
   );
   const seed = Number.parseInt(seedHex, 16) >>> 0;
   const rand = mulberry32(seed);
@@ -1248,8 +1268,8 @@ function compactArrayForPrompt(params: {
     : { total_cells: providedCount };
 
   const value = {
-    kind: rangeText ? "range" : "array",
-    ...(rangeText ? { range: rangeText } : {}),
+    kind: rangeDisplayText ? "range" : "array",
+    ...(rangeDisplayText ? { range: rangeDisplayText } : {}),
     ...countMeta,
     shape,
     ...(header ? { header } : {}),
@@ -1260,8 +1280,8 @@ function compactArrayForPrompt(params: {
   };
 
   const compaction = {
-    kind: rangeText ? "range" : "array",
-    ...(rangeText ? { range: rangeText } : {}),
+    kind: rangeDisplayText ? "range" : "array",
+    ...(rangeDisplayText ? { range: rangeDisplayText } : {}),
     ...countMeta,
     shape,
     header_count: headerIndices.length,

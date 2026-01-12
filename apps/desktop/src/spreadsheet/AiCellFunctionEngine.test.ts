@@ -11,6 +11,7 @@ import { LocalClassificationStore } from "../../../../packages/security/dlp/src/
 import { createDefaultOrgPolicy } from "../../../../packages/security/dlp/src/policy.js";
 import { LocalPolicyStore } from "../../../../packages/security/dlp/src/policyStore.js";
 import { getAiDlpAuditLogger, resetAiDlpAuditLoggerForTests } from "../ai/dlp/aiDlp.js";
+import { createSheetNameResolverFromIdToNameMap } from "../sheet/sheetNameResolver.js";
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -116,6 +117,36 @@ describe("AiCellFunctionEngine", () => {
     const second = evaluateFormula('=AI("summarize", "hello")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
     expect(second).toBe("cached");
     expect(llmClient.chat).toHaveBeenCalledTimes(1);
+  });
+
+  it("formats range inputs in LLM prompts using sheet display names (Excel quoting)", async () => {
+    const sheetId = "sheet_test_1";
+    const sheetIdToName = new Map([[sheetId, "O'Brien"]]);
+    const sheetNameResolver = createSheetNameResolverFromIdToNameMap(sheetIdToName);
+
+    const llmClient = {
+      chat: vi.fn(async (_request: any) => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      sheetNameResolver,
+    });
+
+    const getCellValue = (addr: string) => (addr === "A1" ? "Name" : addr === "A2" ? "Alice" : null);
+
+    const pending = evaluateFormula('=AI("summarize", A1:A2)', getCellValue, { ai: engine, cellAddress: `${sheetId}!B1` });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    expect(llmClient.chat).toHaveBeenCalledTimes(1);
+
+    const request = llmClient.chat.mock.calls[0]![0];
+    const content = String(request?.messages?.[1]?.content ?? "");
+    expect(content).toContain("'O''Brien'!A1:A2");
+    expect(content).not.toContain(`${sheetId}!A1:A2`);
   });
 
   it("purges legacy persisted cache keys that embed raw prompt text", async () => {
