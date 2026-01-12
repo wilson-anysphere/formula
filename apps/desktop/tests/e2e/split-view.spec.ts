@@ -2,6 +2,25 @@ import { expect, test } from "@playwright/test";
 
 import { gotoDesktop, waitForDesktopReady } from "./helpers";
 
+async function waitForGridCanvasesToBeSized(
+  page: import("@playwright/test").Page,
+  rootSelector: string,
+): Promise<void> {
+  // Canvas sizing happens asynchronously (ResizeObserver + rAF). Ensure the renderer
+  // has produced non-zero backing buffers before attempting wheel/drag interactions.
+  await page.waitForFunction(
+    (selector) => {
+      const root = document.querySelector(selector);
+      if (!root) return false;
+      const canvases = root.querySelectorAll("canvas");
+      if (canvases.length === 0) return false;
+      return Array.from(canvases).every((c) => (c as HTMLCanvasElement).width > 0 && (c as HTMLCanvasElement).height > 0);
+    },
+    rootSelector,
+    { timeout: 10_000 },
+  );
+}
+
 async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
   // Vite may occasionally trigger a one-time full reload after dependency optimization.
   // Retry once if the execution context is destroyed mid-wait.
@@ -38,6 +57,7 @@ test.describe("split view", () => {
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
     await expect(secondary.locator("canvas")).toHaveCount(3);
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
     const primaryScrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
     const secondaryScrollBefore = Number((await secondary.getAttribute("data-scroll-y")) ?? 0);
