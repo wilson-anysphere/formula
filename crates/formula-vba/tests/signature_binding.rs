@@ -338,8 +338,8 @@ fn embedded_pkcs7_content_is_used_for_binding() {
 fn md5_binding_is_supported() {
     let module1 = b"module1-bytes";
     let unsigned = build_minimal_vba_project_bin(module1, None);
-    let digest = compute_vba_project_digest(&unsigned, DigestAlg::Md5).expect("digest");
-    assert_eq!(digest.len(), 16, "MD5 digest should be 16 bytes");
+    let normalized = content_normalized_data(&unsigned).expect("content normalized data");
+    let digest: [u8; 16] = Md5::digest(&normalized).into();
 
     let signed_content = build_spc_indirect_data_content_md5(&digest);
     let pkcs7 = make_pkcs7_detached_signature(&signed_content);
