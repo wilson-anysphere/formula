@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::{Reader, Writer};
 
+use crate::xml::workbook_xml_namespaces_from_workbook_start;
+
 /// Policy describing how writers should ensure Excel recalculates formulas after edits.
 ///
 /// Excel workbooks may contain both cached `<v>` values and an optional `xl/calcChain.xml`. If we
@@ -93,25 +95,31 @@ pub(crate) fn workbook_xml_force_full_calc_on_load(
     let mut buf = Vec::new();
     let mut saw_calc_pr = false;
     let mut in_workbook = false;
+    let mut workbook_ns: Option<crate::xml::WorkbookXmlNamespaces> = None;
 
     loop {
         let event = reader.read_event_into(&mut buf)?;
         match event {
-            Event::Start(ref e) if e.name().as_ref() == b"workbook" => {
+            Event::Start(ref e) if e.local_name().as_ref() == b"workbook" => {
                 in_workbook = true;
+                workbook_ns.get_or_insert(workbook_xml_namespaces_from_workbook_start(e)?);
                 writer.write_event(Event::Start(e.to_owned()))?;
             }
-            Event::Empty(ref e) if e.name().as_ref() == b"calcPr" => {
+            Event::Empty(ref e) if e.local_name().as_ref() == b"calcPr" => {
                 saw_calc_pr = true;
                 writer.write_event(Event::Empty(patched_calc_pr(e)?))?;
             }
-            Event::Start(ref e) if e.name().as_ref() == b"calcPr" => {
+            Event::Start(ref e) if e.local_name().as_ref() == b"calcPr" => {
                 saw_calc_pr = true;
                 writer.write_event(Event::Start(patched_calc_pr(e)?))?;
             }
-            Event::End(ref e) if e.name().as_ref() == b"workbook" => {
+            Event::End(ref e) if e.local_name().as_ref() == b"workbook" => {
                 if in_workbook && !saw_calc_pr {
-                    let mut calc_pr = BytesStart::new("calcPr");
+                    let tag = workbook_ns
+                        .as_ref()
+                        .map(|ns| crate::xml::prefixed_tag(ns.spreadsheetml_prefix.as_deref(), "calcPr"))
+                        .unwrap_or_else(|| "calcPr".to_string());
+                    let mut calc_pr = BytesStart::new(tag.as_str());
                     calc_pr.push_attribute(("fullCalcOnLoad", "1"));
                     writer.write_event(Event::Empty(calc_pr))?;
                 }
@@ -127,7 +135,9 @@ pub(crate) fn workbook_xml_force_full_calc_on_load(
 }
 
 fn patched_calc_pr(e: &BytesStart<'_>) -> Result<BytesStart<'static>, RecalcPolicyError> {
-    let mut calc_pr = BytesStart::new("calcPr");
+    let name = e.name();
+    let name = std::str::from_utf8(name.as_ref()).unwrap_or("calcPr");
+    let mut calc_pr = BytesStart::new(name);
     for attr in e.attributes() {
         let attr = attr?;
         if attr.key.as_ref() == b"fullCalcOnLoad" {

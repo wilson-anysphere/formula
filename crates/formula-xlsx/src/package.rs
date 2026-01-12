@@ -792,14 +792,20 @@ fn workbook_xml_set_date_system(
 
     let mut buf = Vec::new();
     let mut skipping_workbook_pr = false;
+    let mut workbook_ns: Option<crate::xml::WorkbookXmlNamespaces> = None;
 
     loop {
         let event = reader.read_event_into(&mut buf)?;
         match event {
             Event::Start(ref e) if local_name(e.name().as_ref()) == b"workbook" => {
+                workbook_ns.get_or_insert(crate::xml::workbook_xml_namespaces_from_workbook_start(e)?);
                 writer.write_event(Event::Start(e.to_owned()))?;
                 if date_system == DateSystem::V1904 && !has_workbook_pr {
-                    let mut wb_pr = BytesStart::new("workbookPr");
+                    let tag = workbook_ns
+                        .as_ref()
+                        .map(|ns| crate::xml::prefixed_tag(ns.spreadsheetml_prefix.as_deref(), "workbookPr"))
+                        .unwrap_or_else(|| "workbookPr".to_string());
+                    let mut wb_pr = BytesStart::new(tag.as_str());
                     wb_pr.push_attribute(("date1904", "1"));
                     writer.write_event(Event::Empty(wb_pr))?;
                 }

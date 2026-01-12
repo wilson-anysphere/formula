@@ -1730,6 +1730,9 @@ fn patch_workbook_xml(
     let mut buf = Vec::new();
     let mut writer = Writer::new(Vec::with_capacity(original.len()));
 
+    let mut spreadsheetml_prefix: Option<String> = None;
+    let mut office_rels_prefix: Option<String> = None;
+
     let mut skipping_sheets = false;
     let mut skipping_workbook_pr = false;
     let mut skipping_calc_pr = false;
@@ -1752,7 +1755,20 @@ fn patch_workbook_xml(
         }
 
         match event {
-            Event::Start(e) if e.name().as_ref() == b"workbookPr" => {
+            Event::Start(e) if e.local_name().as_ref() == b"workbook" => {
+                let ns = crate::xml::workbook_xml_namespaces_from_workbook_start(&e)?;
+                spreadsheetml_prefix = ns.spreadsheetml_prefix;
+                office_rels_prefix = ns.office_relationships_prefix;
+                writer.write_event(Event::Start(e.into_owned()))?;
+            }
+            Event::Empty(e) if e.local_name().as_ref() == b"workbook" => {
+                let ns = crate::xml::workbook_xml_namespaces_from_workbook_start(&e)?;
+                spreadsheetml_prefix = ns.spreadsheetml_prefix;
+                office_rels_prefix = ns.office_relationships_prefix;
+                writer.write_event(Event::Empty(e.into_owned()))?;
+            }
+
+            Event::Start(e) if e.local_name().as_ref() == b"workbookPr" => {
                 skipping_workbook_pr = true;
                 let empty = Event::Empty(e.into_owned());
                 match empty {
@@ -1760,8 +1776,10 @@ fn patch_workbook_xml(
                     _ => unreachable!(),
                 }
             }
-            Event::Empty(e) if e.name().as_ref() == b"workbookPr" => write_workbook_pr(doc, &mut writer, &e)?,
-            Event::End(e) if e.name().as_ref() == b"workbookPr" => {
+            Event::Empty(e) if e.local_name().as_ref() == b"workbookPr" => {
+                write_workbook_pr(doc, &mut writer, &e)?
+            }
+            Event::End(e) if e.local_name().as_ref() == b"workbookPr" => {
                 if skipping_workbook_pr {
                     skipping_workbook_pr = false;
                 } else {
@@ -1769,7 +1787,7 @@ fn patch_workbook_xml(
                 }
             }
 
-            Event::Start(e) if e.name().as_ref() == b"calcPr" => {
+            Event::Start(e) if e.local_name().as_ref() == b"calcPr" => {
                 skipping_calc_pr = true;
                 let empty = Event::Empty(e.into_owned());
                 match empty {
@@ -1777,8 +1795,10 @@ fn patch_workbook_xml(
                     _ => unreachable!(),
                 }
             }
-            Event::Empty(e) if e.name().as_ref() == b"calcPr" => write_calc_pr(doc, &mut writer, &e)?,
-            Event::End(e) if e.name().as_ref() == b"calcPr" => {
+            Event::Empty(e) if e.local_name().as_ref() == b"calcPr" => {
+                write_calc_pr(doc, &mut writer, &e)?
+            }
+            Event::End(e) if e.local_name().as_ref() == b"calcPr" => {
                 if skipping_calc_pr {
                     skipping_calc_pr = false;
                 } else {
@@ -1786,8 +1806,10 @@ fn patch_workbook_xml(
                 }
             }
 
-            Event::Start(e) if e.name().as_ref() == b"workbookView" => {
-                writer.get_mut().extend_from_slice(b"<workbookView");
+            Event::Start(e) if e.local_name().as_ref() == b"workbookView" => {
+                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                writer.get_mut().extend_from_slice(b"<");
+                writer.get_mut().extend_from_slice(tag.as_bytes());
                 for attr in e.attributes() {
                     let attr = attr?;
                     writer.get_mut().push(b' ');
@@ -1815,8 +1837,10 @@ fn patch_workbook_xml(
                 }
                 writer.get_mut().push(b'>');
             }
-            Event::Empty(e) if e.name().as_ref() == b"workbookView" => {
-                writer.get_mut().extend_from_slice(b"<workbookView");
+            Event::Empty(e) if e.local_name().as_ref() == b"workbookView" => {
+                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                writer.get_mut().extend_from_slice(b"<");
+                writer.get_mut().extend_from_slice(tag.as_bytes());
                 for attr in e.attributes() {
                     let attr = attr?;
                     writer.get_mut().push(b' ');
@@ -1845,9 +1869,14 @@ fn patch_workbook_xml(
                 writer.get_mut().extend_from_slice(b"/>");
             }
 
-            Event::Start(e) if e.name().as_ref() == b"sheets" => {
+            Event::Start(e) if e.local_name().as_ref() == b"sheets" => {
                 skipping_sheets = true;
-                writer.get_mut().extend_from_slice(b"<sheets");
+                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                let sheet_tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "sheet");
+                let rel_id_attr = prefixed_tag(office_rels_prefix.as_deref().or(Some("r")), "id");
+
+                writer.get_mut().extend_from_slice(b"<");
+                writer.get_mut().extend_from_slice(tag.as_bytes());
                 for attr in e.attributes() {
                     let attr = attr?;
                     writer.get_mut().push(b' ');
@@ -1864,7 +1893,8 @@ fn patch_workbook_xml(
                     let sheet = doc.workbook.sheet(sheet_meta.worksheet_id);
                     let name = sheet.map(|s| s.name.as_str()).unwrap_or("Sheet");
                     let visibility = sheet.map(|s| s.visibility).unwrap_or(SheetVisibility::Visible);
-                    writer.get_mut().extend_from_slice(b"<sheet");
+                    writer.get_mut().extend_from_slice(b"<");
+                    writer.get_mut().extend_from_slice(sheet_tag.as_bytes());
                     writer.get_mut().extend_from_slice(b" name=\"");
                     writer.get_mut().extend_from_slice(escape_attr(name).as_bytes());
                     writer.get_mut().push(b'"');
@@ -1873,7 +1903,9 @@ fn patch_workbook_xml(
                         .get_mut()
                         .extend_from_slice(sheet_meta.sheet_id.to_string().as_bytes());
                     writer.get_mut().push(b'"');
-                    writer.get_mut().extend_from_slice(b" r:id=\"");
+                    writer.get_mut().push(b' ');
+                    writer.get_mut().extend_from_slice(rel_id_attr.as_bytes());
+                    writer.get_mut().extend_from_slice(b"=\"");
                     writer.get_mut().extend_from_slice(
                         escape_attr(&sheet_meta.relationship_id).as_bytes(),
                     );
@@ -1890,9 +1922,14 @@ fn patch_workbook_xml(
                     writer.get_mut().extend_from_slice(b"/>");
                 }
             }
-            Event::Empty(e) if e.name().as_ref() == b"sheets" => {
+            Event::Empty(e) if e.local_name().as_ref() == b"sheets" => {
                 // Replace `<sheets/>` with a full section.
-                writer.get_mut().extend_from_slice(b"<sheets");
+                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                let sheet_tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "sheet");
+                let rel_id_attr = prefixed_tag(office_rels_prefix.as_deref().or(Some("r")), "id");
+
+                writer.get_mut().extend_from_slice(b"<");
+                writer.get_mut().extend_from_slice(tag.as_bytes());
                 for attr in e.attributes() {
                     let attr = attr?;
                     writer.get_mut().push(b' ');
@@ -1908,7 +1945,8 @@ fn patch_workbook_xml(
                     let sheet = doc.workbook.sheet(sheet_meta.worksheet_id);
                     let name = sheet.map(|s| s.name.as_str()).unwrap_or("Sheet");
                     let visibility = sheet.map(|s| s.visibility).unwrap_or(SheetVisibility::Visible);
-                    writer.get_mut().extend_from_slice(b"<sheet");
+                    writer.get_mut().extend_from_slice(b"<");
+                    writer.get_mut().extend_from_slice(sheet_tag.as_bytes());
                     writer.get_mut().extend_from_slice(b" name=\"");
                     writer.get_mut().extend_from_slice(escape_attr(name).as_bytes());
                     writer.get_mut().push(b'"');
@@ -1917,7 +1955,9 @@ fn patch_workbook_xml(
                         .get_mut()
                         .extend_from_slice(sheet_meta.sheet_id.to_string().as_bytes());
                     writer.get_mut().push(b'"');
-                    writer.get_mut().extend_from_slice(b" r:id=\"");
+                    writer.get_mut().push(b' ');
+                    writer.get_mut().extend_from_slice(rel_id_attr.as_bytes());
+                    writer.get_mut().extend_from_slice(b"=\"");
                     writer.get_mut().extend_from_slice(
                         escape_attr(&sheet_meta.relationship_id).as_bytes(),
                     );
@@ -1933,14 +1973,19 @@ fn patch_workbook_xml(
                     }
                     writer.get_mut().extend_from_slice(b"/>");
                 }
-                writer.get_mut().extend_from_slice(b"</sheets>");
+                writer.get_mut().extend_from_slice(b"</");
+                writer.get_mut().extend_from_slice(tag.as_bytes());
+                writer.get_mut().extend_from_slice(b">");
             }
-            Event::End(e) if e.name().as_ref() == b"sheets" => {
+            Event::End(e) if e.local_name().as_ref() == b"sheets" => {
                 skipping_sheets = false;
-                writer.get_mut().extend_from_slice(b"</sheets>");
+                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                writer.get_mut().extend_from_slice(b"</");
+                writer.get_mut().extend_from_slice(tag.as_bytes());
+                writer.get_mut().extend_from_slice(b">");
             }
 
-            Event::Start(e) if e.name().as_ref() == b"definedName" => {
+            Event::Start(e) if e.local_name().as_ref() == b"definedName" => {
                 let mut local_sheet_id: Option<usize> = None;
                 for attr in e.attributes().with_checks(false) {
                     let attr = attr?;
@@ -1956,7 +2001,9 @@ fn patch_workbook_xml(
                         .copied()
                         .flatten()
                     {
-                        writer.get_mut().extend_from_slice(b"<definedName");
+                        let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                        writer.get_mut().extend_from_slice(b"<");
+                        writer.get_mut().extend_from_slice(tag.as_bytes());
                         for attr in e.attributes().with_checks(false) {
                             let attr = attr?;
                             writer.get_mut().push(b' ');
@@ -1980,7 +2027,7 @@ fn patch_workbook_xml(
                     writer.write_event(Event::Start(e.into_owned()))?;
                 }
             }
-            Event::Empty(e) if e.name().as_ref() == b"definedName" => {
+            Event::Empty(e) if e.local_name().as_ref() == b"definedName" => {
                 let mut local_sheet_id: Option<usize> = None;
                 for attr in e.attributes().with_checks(false) {
                     let attr = attr?;
@@ -1996,7 +2043,9 @@ fn patch_workbook_xml(
                         .copied()
                         .flatten()
                     {
-                        writer.get_mut().extend_from_slice(b"<definedName");
+                        let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                        writer.get_mut().extend_from_slice(b"<");
+                        writer.get_mut().extend_from_slice(tag.as_bytes());
                         for attr in e.attributes().with_checks(false) {
                             let attr = attr?;
                             writer.get_mut().push(b' ');
@@ -2035,12 +2084,14 @@ fn write_workbook_pr(
     writer: &mut Writer<Vec<u8>>,
     e: &quick_xml::events::BytesStart<'_>,
 ) -> Result<(), WriteError> {
+    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
     let had_date1904 = e
         .attributes()
         .flatten()
         .any(|a| a.key.as_ref() == b"date1904");
 
-    writer.get_mut().extend_from_slice(b"<workbookPr");
+    writer.get_mut().extend_from_slice(b"<");
+    writer.get_mut().extend_from_slice(tag.as_bytes());
     for attr in e.attributes() {
         let attr = attr?;
         if attr.key.as_ref() == b"date1904" {
@@ -2069,7 +2120,9 @@ fn write_calc_pr(
     writer: &mut Writer<Vec<u8>>,
     e: &quick_xml::events::BytesStart<'_>,
 ) -> Result<(), WriteError> {
-    writer.get_mut().extend_from_slice(b"<calcPr");
+    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+    writer.get_mut().extend_from_slice(b"<");
+    writer.get_mut().extend_from_slice(tag.as_bytes());
     for attr in e.attributes() {
         let attr = attr?;
         match attr.key.as_ref() {

@@ -203,13 +203,13 @@ fn parse_workbook_xml(workbook_xml: &[u8]) -> Result<WorkbookInfo, PrintError> {
 
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) if e.name().as_ref() == b"sheet" => {
+            Event::Start(e) if e.local_name().as_ref() == b"sheet" => {
                 sheets.push(parse_sheet_info(&reader, &e)?);
             }
-            Event::Empty(e) if e.name().as_ref() == b"sheet" => {
+            Event::Empty(e) if e.local_name().as_ref() == b"sheet" => {
                 sheets.push(parse_sheet_info(&reader, &e)?);
             }
-            Event::Start(e) if e.name().as_ref() == b"definedName" => {
+            Event::Start(e) if e.local_name().as_ref() == b"definedName" => {
                 current_defined = Some(parse_defined_name_start(&reader, &e)?);
             }
             Event::Text(e) if current_defined.is_some() => {
@@ -217,7 +217,7 @@ fn parse_workbook_xml(workbook_xml: &[u8]) -> Result<WorkbookInfo, PrintError> {
                     dn.value.push_str(&e.unescape()?.to_string());
                 }
             }
-            Event::End(e) if e.name().as_ref() == b"definedName" => {
+            Event::End(e) if e.local_name().as_ref() == b"definedName" => {
                 if let Some(dn) = current_defined.take() {
                     defined_names.push(dn);
                 }
@@ -242,7 +242,9 @@ fn parse_sheet_info(reader: &Reader<&[u8]>, e: &BytesStart<'_>) -> Result<SheetI
         let attr = attr?;
         match attr.key.as_ref() {
             b"name" => name = Some(attr.unescape_value()?.to_string()),
-            b"r:id" => r_id = Some(attr.unescape_value()?.to_string()),
+            key if crate::openxml::local_name(key) == b"id" => {
+                r_id = Some(attr.unescape_value()?.to_string())
+            }
             _ => {}
         }
     }
@@ -518,6 +520,7 @@ fn update_workbook_xml(
     let mut writer = Writer::new(Vec::new());
     let mut buf = Vec::new();
 
+    let mut workbook_prefix: Option<String> = None;
     let mut in_defined_names = false;
     let mut seen_defined_names = false;
     let mut skipping_defined_name = false;
@@ -527,26 +530,39 @@ fn update_workbook_xml(
     loop {
         let event = reader.read_event_into(&mut buf)?;
         match event {
-            Event::Start(ref e) if e.name().as_ref() == b"definedNames" => {
+            Event::Start(ref e) if e.local_name().as_ref() == b"workbook" => {
+                let ns = crate::xml::workbook_xml_namespaces_from_workbook_start(e)?;
+                workbook_prefix = ns.spreadsheetml_prefix;
+                writer.write_event(event)?;
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"workbook" => {
+                let ns = crate::xml::workbook_xml_namespaces_from_workbook_start(e)?;
+                workbook_prefix = ns.spreadsheetml_prefix;
+                writer.write_event(event)?;
+            }
+
+            Event::Start(ref e) if e.local_name().as_ref() == b"definedNames" => {
                 in_defined_names = true;
                 seen_defined_names = true;
                 writer.write_event(event)?;
             }
-            Event::End(ref e) if e.name().as_ref() == b"definedNames" => {
+            Event::End(ref e) if e.local_name().as_ref() == b"definedNames" => {
                 if in_defined_names {
                     for ((name, local_sheet_id), edit) in edits {
                         if applied.contains(&(name.clone(), *local_sheet_id)) {
                             continue;
                         }
                         if let DefinedNameEdit::Set(value) = edit {
-                            write_defined_name(&mut writer, name, *local_sheet_id, value)?;
+                            let tag =
+                                crate::xml::prefixed_tag(workbook_prefix.as_deref(), "definedName");
+                            write_defined_name(&mut writer, tag.as_str(), name, *local_sheet_id, value)?;
                         }
                     }
                 }
                 in_defined_names = false;
                 writer.write_event(event)?;
             }
-            Event::Start(ref e) if in_defined_names && e.name().as_ref() == b"definedName" => {
+            Event::Start(ref e) if in_defined_names && e.local_name().as_ref() == b"definedName" => {
                 let (name, local_sheet_id) = parse_defined_name_key(e)?;
                 if let (Some(name), Some(local_sheet_id)) = (name, local_sheet_id) {
                     let key = (name.clone(), local_sheet_id);
@@ -571,26 +587,31 @@ fn update_workbook_xml(
                 }
                 writer.write_event(event)?;
             }
-            Event::End(ref e) if skipping_defined_name && e.name().as_ref() == b"definedName" => {
+            Event::End(ref e) if skipping_defined_name && e.local_name().as_ref() == b"definedName" => {
                 if let Some(key) = current_defined_key.take() {
                     if matches!(edits.get(&key), Some(DefinedNameEdit::Set(_))) {
-                        writer.write_event(Event::End(BytesEnd::new("definedName")))?;
+                        writer.write_event(Event::End(e.to_owned()))?;
                     }
                 }
                 skipping_defined_name = false;
             }
             Event::End(ref e)
-                if e.name().as_ref() == b"workbook"
+                if e.local_name().as_ref() == b"workbook"
                     && !seen_defined_names
                     && edits.values().any(|e| matches!(e, DefinedNameEdit::Set(_))) =>
             {
-                writer.write_event(Event::Start(BytesStart::new("definedNames")))?;
+                let defined_names_tag =
+                    crate::xml::prefixed_tag(workbook_prefix.as_deref(), "definedNames");
+                let defined_name_tag =
+                    crate::xml::prefixed_tag(workbook_prefix.as_deref(), "definedName");
+
+                writer.write_event(Event::Start(BytesStart::new(defined_names_tag.as_str())))?;
                 for ((name, local_sheet_id), edit) in edits {
                     if let DefinedNameEdit::Set(value) = edit {
-                        write_defined_name(&mut writer, name, *local_sheet_id, value)?;
+                        write_defined_name(&mut writer, defined_name_tag.as_str(), name, *local_sheet_id, value)?;
                     }
                 }
-                writer.write_event(Event::End(BytesEnd::new("definedNames")))?;
+                writer.write_event(Event::End(BytesEnd::new(defined_names_tag.as_str())))?;
                 writer.write_event(event)?;
             }
             Event::Eof => break,
@@ -626,17 +647,18 @@ fn parse_defined_name_key(
 
 fn write_defined_name(
     writer: &mut Writer<Vec<u8>>,
+    tag: &str,
     name: &str,
     local_sheet_id: usize,
     value: &str,
 ) -> Result<(), PrintError> {
     let local_sheet_id_str = local_sheet_id.to_string();
-    let mut start = BytesStart::new("definedName");
+    let mut start = BytesStart::new(tag).into_owned();
     start.push_attribute(("name", name));
     start.push_attribute(("localSheetId", local_sheet_id_str.as_str()));
     writer.write_event(Event::Start(start))?;
     writer.write_event(Event::Text(BytesText::new(value)))?;
-    writer.write_event(Event::End(BytesEnd::new("definedName")))?;
+    writer.write_event(Event::End(BytesEnd::new(tag)))?;
     Ok(())
 }
 

@@ -3,6 +3,7 @@ use quick_xml::events::{BytesEnd, BytesStart, Event};
 use quick_xml::{Reader, Writer};
 
 use crate::package::XlsxPackage;
+use crate::xml::workbook_xml_namespaces_from_workbook_start;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CalcSettingsError {
@@ -47,7 +48,7 @@ pub fn read_calc_settings_from_workbook_xml(
     let mut buf = Vec::new();
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Empty(e) | Event::Start(e) if e.name().as_ref() == b"calcPr" => {
+            Event::Empty(e) | Event::Start(e) if e.local_name().as_ref() == b"calcPr" => {
                 apply_calc_pr_attributes(&mut reader, &e, &mut settings)?;
                 break;
             }
@@ -118,37 +119,45 @@ pub fn write_calc_settings_to_workbook_xml(
     let mut buf = Vec::new();
     let mut wrote_calc_pr = false;
     let mut pending_insert_before_workbook_end = false;
+    let mut workbook_ns: Option<crate::xml::WorkbookXmlNamespaces> = None;
 
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) if e.name().as_ref() == b"workbook" => {
+            Event::Start(e) if e.local_name().as_ref() == b"workbook" => {
                 pending_insert_before_workbook_end = true;
+                workbook_ns.get_or_insert(workbook_xml_namespaces_from_workbook_start(&e)?);
                 writer.write_event(Event::Start(e.to_owned()))?;
             }
-            Event::Empty(e) if e.name().as_ref() == b"calcPr" => {
-                write_calc_pr_event(&mut writer, settings, CalcPrEventKind::Empty)?;
+            Event::Empty(e) if e.local_name().as_ref() == b"calcPr" => {
+                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                write_calc_pr_event(&mut writer, settings, CalcPrEventKind::Empty, tag.as_str())?;
                 wrote_calc_pr = true;
             }
-            Event::Start(e) if e.name().as_ref() == b"calcPr" => {
+            Event::Start(e) if e.local_name().as_ref() == b"calcPr" => {
                 // Replace the start element, then skip until its end.
-                write_calc_pr_event(&mut writer, settings, CalcPrEventKind::Start)?;
+                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                write_calc_pr_event(&mut writer, settings, CalcPrEventKind::Start, tag.as_str())?;
                 wrote_calc_pr = true;
 
                 // Consume inner content (calcPr should be empty in Excel, but be defensive).
                 let mut inner_buf = Vec::new();
                 loop {
                     match reader.read_event_into(&mut inner_buf)? {
-                        Event::End(end) if end.name().as_ref() == b"calcPr" => break,
+                        Event::End(end) if end.local_name().as_ref() == b"calcPr" => break,
                         Event::Eof => break,
                         _ => {}
                     }
                     inner_buf.clear();
                 }
-                writer.write_event(Event::End(BytesEnd::new("calcPr")))?;
+                writer.write_event(Event::End(BytesEnd::new(tag.as_str())))?;
             }
-            Event::End(e) if e.name().as_ref() == b"workbook" => {
+            Event::End(e) if e.local_name().as_ref() == b"workbook" => {
                 if pending_insert_before_workbook_end && !wrote_calc_pr {
-                    write_calc_pr_event(&mut writer, settings, CalcPrEventKind::Empty)?;
+                    let tag = workbook_ns
+                        .as_ref()
+                        .map(|ns| crate::xml::prefixed_tag(ns.spreadsheetml_prefix.as_deref(), "calcPr"))
+                        .unwrap_or_else(|| "calcPr".to_string());
+                    write_calc_pr_event(&mut writer, settings, CalcPrEventKind::Empty, tag.as_str())?;
                     wrote_calc_pr = true;
                 }
                 writer.write_event(Event::End(e.to_owned()))?;
@@ -174,8 +183,9 @@ fn write_calc_pr_event(
     writer: &mut Writer<Vec<u8>>,
     settings: &CalcSettings,
     kind: CalcPrEventKind,
+    tag: &str,
 ) -> Result<(), quick_xml::Error> {
-    let mut calc_pr = BytesStart::new("calcPr");
+    let mut calc_pr = BytesStart::new(tag);
     calc_pr.push_attribute(("calcMode", settings.calculation_mode.as_calc_mode_attr()));
     let calc_on_save = bool_attr(settings.calculate_before_save);
     calc_pr.push_attribute(("calcOnSave", calc_on_save.as_str()));

@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use quick_xml::events::BytesStart;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use roxmltree::{Document, Node};
@@ -68,6 +69,69 @@ pub(crate) fn prefixed_tag(prefix: Option<&str>, local: &str) -> String {
         Some(prefix) => format!("{prefix}:{local}"),
         None => local.to_string(),
     }
+}
+
+pub(crate) const SPREADSHEETML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+pub(crate) const OFFICE_RELATIONSHIPS_NS: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct WorkbookXmlNamespaces {
+    /// Prefix bound to the SpreadsheetML namespace. If SpreadsheetML is the default namespace,
+    /// this will be `None`.
+    pub spreadsheetml_prefix: Option<String>,
+    /// Whether SpreadsheetML is set as the default namespace (`xmlns="…/main"`).
+    pub spreadsheetml_is_default: bool,
+    /// Prefix bound to the officeDocument relationships namespace
+    /// (`http://schemas.openxmlformats.org/officeDocument/2006/relationships`).
+    pub office_relationships_prefix: Option<String>,
+}
+
+pub(crate) fn workbook_xml_namespaces_from_workbook_start(
+    e: &BytesStart<'_>,
+) -> Result<WorkbookXmlNamespaces, quick_xml::Error> {
+    let mut spreadsheetml_is_default = false;
+    let mut spreadsheetml_prefix_decl: Option<String> = None;
+    let mut rels_prefix_decl: Option<String> = None;
+
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        let key = attr.key.as_ref();
+        let value = attr.value.as_ref();
+
+        if key == b"xmlns" && value == SPREADSHEETML_NS.as_bytes() {
+            spreadsheetml_is_default = true;
+            continue;
+        }
+
+        if let Some(prefix) = key.strip_prefix(b"xmlns:") {
+            if value == SPREADSHEETML_NS.as_bytes() {
+                spreadsheetml_prefix_decl = Some(String::from_utf8_lossy(prefix).into_owned());
+            } else if value == OFFICE_RELATIONSHIPS_NS.as_bytes() {
+                rels_prefix_decl = Some(String::from_utf8_lossy(prefix).into_owned());
+            }
+        }
+    }
+
+    let name = e.name();
+    let name = name.as_ref();
+    let element_prefix = name
+        .iter()
+        .rposition(|b| *b == b':')
+        .map(|idx| &name[..idx])
+        .map(|bytes| String::from_utf8_lossy(bytes).into_owned());
+
+    let spreadsheetml_prefix = if spreadsheetml_is_default {
+        None
+    } else {
+        spreadsheetml_prefix_decl.or(element_prefix)
+    };
+
+    Ok(WorkbookXmlNamespaces {
+        spreadsheetml_prefix,
+        spreadsheetml_is_default,
+        office_relationships_prefix: rels_prefix_decl,
+    })
 }
 
 impl XmlElement {
