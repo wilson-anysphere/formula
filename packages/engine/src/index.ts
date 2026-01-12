@@ -11,6 +11,7 @@ export type {
   EditOp,
   EditResult,
   FormulaParseError,
+  FormulaParseOptions,
   FormulaPartialParseResult,
   FormulaSpan,
   FormulaToken,
