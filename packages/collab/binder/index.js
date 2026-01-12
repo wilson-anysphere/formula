@@ -695,18 +695,24 @@ export function bindYjsToDocumentController(options) {
   }
 
   /**
+   * Read the raw `SheetViewState` object stored in Yjs, converting nested Yjs values
+   * (Y.Map/Y.Array/Y.Text) into plain JSON.
+   *
+   * Note: BranchService snapshots may include *format defaults* (defaultFormat/rowFormats/colFormats)
+   * alongside the usual view fields. DocumentController stores layered formats outside of the view,
+   * so those fields are handled separately.
+   *
    * @param {any} sheetEntry
-   * @returns {{ frozenRows: number, frozenCols: number, colWidths?: Record<string, number>, rowHeights?: Record<string, number> }}
+   * @returns {any | null}
    */
-  function readSheetViewFromYjsSheetEntry(sheetEntry) {
+  function readSheetViewJsonFromYjsSheetEntry(sheetEntry) {
     const sheetMap = getYMap(sheetEntry);
     if (sheetMap) {
       // Canonical format (BranchService):
       //   sheetMap.set("view", { frozenRows, frozenCols, colWidths?, rowHeights? })
       const rawView = sheetMap.get("view");
       if (rawView !== undefined) {
-        const json = yjsValueToJson(rawView);
-        return normalizeSheetViewState(json);
+        return yjsValueToJson(rawView);
       }
 
       // Back-compat: legacy top-level sheet view fields.
@@ -717,16 +723,30 @@ export function bindYjsToDocumentController(options) {
       const frozenCols = sheetMap.get("frozenCols");
       const colWidths = sheetMap.get("colWidths");
       const rowHeights = sheetMap.get("rowHeights");
-      if (frozenRows !== undefined || frozenCols !== undefined || colWidths !== undefined || rowHeights !== undefined) {
-        return normalizeSheetViewState({
+      const defaultFormat = sheetMap.get("defaultFormat");
+      const rowFormats = sheetMap.get("rowFormats");
+      const colFormats = sheetMap.get("colFormats");
+      if (
+        frozenRows !== undefined ||
+        frozenCols !== undefined ||
+        colWidths !== undefined ||
+        rowHeights !== undefined ||
+        defaultFormat !== undefined ||
+        rowFormats !== undefined ||
+        colFormats !== undefined
+      ) {
+        return {
           frozenRows: yjsValueToJson(frozenRows) ?? 0,
           frozenCols: yjsValueToJson(frozenCols) ?? 0,
           colWidths: yjsValueToJson(colWidths),
           rowHeights: yjsValueToJson(rowHeights),
-        });
+          defaultFormat: yjsValueToJson(defaultFormat),
+          rowFormats: yjsValueToJson(rowFormats),
+          colFormats: yjsValueToJson(colFormats),
+        };
       }
 
-      return emptySheetViewState();
+      return null;
     }
 
     // Some workflows/tests (and some historical docs) may store sheet entries as
@@ -735,20 +755,56 @@ export function bindYjsToDocumentController(options) {
     if (isRecord(sheetEntry)) {
       const rawView = sheetEntry.view;
       if (rawView !== undefined) {
-        const json = yjsValueToJson(rawView);
-        return normalizeSheetViewState(json);
+        return yjsValueToJson(rawView);
       }
 
       const frozenRows = sheetEntry.frozenRows;
       const frozenCols = sheetEntry.frozenCols;
       const colWidths = sheetEntry.colWidths;
       const rowHeights = sheetEntry.rowHeights;
-      if (frozenRows !== undefined || frozenCols !== undefined || colWidths !== undefined || rowHeights !== undefined) {
-        return normalizeSheetViewState({ frozenRows, frozenCols, colWidths, rowHeights });
+      const defaultFormat = sheetEntry.defaultFormat;
+      const rowFormats = sheetEntry.rowFormats;
+      const colFormats = sheetEntry.colFormats;
+      if (
+        frozenRows !== undefined ||
+        frozenCols !== undefined ||
+        colWidths !== undefined ||
+        rowHeights !== undefined ||
+        defaultFormat !== undefined ||
+        rowFormats !== undefined ||
+        colFormats !== undefined
+      ) {
+        return { frozenRows, frozenCols, colWidths, rowHeights, defaultFormat, rowFormats, colFormats };
       }
     }
 
-    return emptySheetViewState();
+    return null;
+  }
+
+  /**
+   * @param {any} sheetEntry
+   * @returns {{ frozenRows: number, frozenCols: number, colWidths?: Record<string, number>, rowHeights?: Record<string, number> }}
+   */
+  function readSheetViewFromYjsSheetEntry(sheetEntry) {
+    const json = readSheetViewJsonFromYjsSheetEntry(sheetEntry);
+    return json ? normalizeSheetViewState(json) : emptySheetViewState();
+  }
+
+  /**
+   * Extract the layered formatting defaults (sheet/row/col) encoded inside a BranchService-style
+   * `SheetViewState` object.
+   *
+   * @param {any} sheetEntry
+   * @returns {{ defaultFormat: any, rowFormats: any, colFormats: any }}
+   */
+  function readSheetFormatDefaultsFromYjsSheetEntry(sheetEntry) {
+    const json = readSheetViewJsonFromYjsSheetEntry(sheetEntry);
+    if (!isRecord(json)) return { defaultFormat: null, rowFormats: null, colFormats: null };
+    return {
+      defaultFormat: json.defaultFormat ?? null,
+      rowFormats: json.rowFormats ?? null,
+      colFormats: json.colFormats ?? null,
+    };
   }
 
   /**
@@ -913,7 +969,17 @@ export function bindYjsToDocumentController(options) {
       // Layered formats (sheet/row/col defaults) are stored sparsely on sheet metadata.
       const sheetModel = documentController?.model?.sheets?.get?.(sheetId) ?? null;
       const beforeDefaultStyleId = Number.isInteger(sheetModel?.defaultStyleId) ? sheetModel.defaultStyleId : 0;
-      const afterDefaultStyleId = styleIdFromYjsFormat(readSheetEntryField(sheetEntry, "defaultFormat"));
+
+      // Prefer top-level sheet metadata fields when present; fall back to BranchService-style
+      // encodings nested in `sheet.view`.
+      const viewFormats = readSheetFormatDefaultsFromYjsSheetEntry(sheetEntry);
+      const rawDefaultFormat = readSheetEntryField(sheetEntry, "defaultFormat");
+      const rawRowFormats = readSheetEntryField(sheetEntry, "rowFormats");
+      const rawColFormats = readSheetEntryField(sheetEntry, "colFormats");
+
+      const afterDefaultStyleId = styleIdFromYjsFormat(
+        rawDefaultFormat !== undefined ? rawDefaultFormat : viewFormats.defaultFormat,
+      );
       if (beforeDefaultStyleId !== afterDefaultStyleId) {
         formatDeltas.push({
           sheetId,
@@ -925,8 +991,8 @@ export function bindYjsToDocumentController(options) {
 
       const beforeRowStyles = sheetModel?.rowStyleIds instanceof Map ? sheetModel.rowStyleIds : new Map();
       const beforeColStyles = sheetModel?.colStyleIds instanceof Map ? sheetModel.colStyleIds : new Map();
-      const afterRowStyles = readSparseStyleIds(readSheetEntryField(sheetEntry, "rowFormats"), "row");
-      const afterColStyles = readSparseStyleIds(readSheetEntryField(sheetEntry, "colFormats"), "col");
+      const afterRowStyles = readSparseStyleIds(rawRowFormats !== undefined ? rawRowFormats : viewFormats.rowFormats, "row");
+      const afterColStyles = readSparseStyleIds(rawColFormats !== undefined ? rawColFormats : viewFormats.colFormats, "col");
 
       const rowKeys = new Set([...beforeRowStyles.keys(), ...afterRowStyles.keys()]);
       for (const row of rowKeys) {
@@ -1380,7 +1446,24 @@ export function bindYjsToDocumentController(options) {
             sheets.insert(found.index, [sheetMap]);
           }
 
-          sheetMap.set("view", view);
+          const nextView = { ...view };
+
+          // Preserve any unknown keys stored alongside view state (e.g. BranchService-style
+          // layered formatting defaults: defaultFormat/rowFormats/colFormats) so view-only
+          // interactions (freeze panes, resizing) do not accidentally wipe them.
+          const existingView = sheetMap.get("view");
+          if (existingView !== undefined) {
+            const json = yjsValueToJson(existingView);
+            if (isRecord(json)) {
+              for (const [key, value] of Object.entries(json)) {
+                if (key === "frozenRows" || key === "frozenCols" || key === "colWidths" || key === "rowHeights") continue;
+                if (value === undefined) continue;
+                nextView[key] = value;
+              }
+            }
+          }
+
+          sheetMap.set("view", nextView);
         }
       }
     };

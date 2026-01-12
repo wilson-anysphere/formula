@@ -2241,6 +2241,8 @@ export class DocumentController {
    *
    * Like {@link applyExternalDeltas}, these updates:
    * - bypass undo/redo history (not user-editable)
+   * - bypass undo/redo history (not user-editable)
+   * - bypass `canEditCell` (permissions should be enforced at the collaboration layer)
    * - emit `change` + `update` events so UI + versioning layers can react
    * - mark the document dirty by default
    *
