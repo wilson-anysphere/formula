@@ -2952,7 +2952,10 @@ class BrowserExtensionHost {
       const deliveredValuesCells = matrixCellCount(selection.values);
       const deliveredFormulasCells = matrixCellCount(selection.formulas);
       const deliveredCells = Math.max(deliveredValuesCells, deliveredFormulasCells);
-      if (deliveredCells > 0 && deliveredCells <= DEFAULT_EXTENSION_RANGE_CELL_LIMIT) {
+      // Only preserve matrices when the producer explicitly marks them as truncated; otherwise,
+      // mismatched payloads (huge declared range but tiny matrix) are treated as unsafe/inconsistent
+      // and are stripped to avoid extensions misinterpreting partial data as complete.
+      if (selection.truncated === true && deliveredCells > 0 && deliveredCells <= DEFAULT_EXTENSION_RANGE_CELL_LIMIT) {
         return data;
       }
 
