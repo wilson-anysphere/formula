@@ -10,12 +10,32 @@ type Props = {
   onActivateSheet: (sheetId: string) => void;
   onAddSheet: () => Promise<void> | void;
   /**
+   * Called after a sheet rename is successfully committed.
+   *
+   * Used by `main.ts` to rewrite DocumentController formulas referencing the old sheet name.
+   */
+  onSheetRenamed?: (event: { sheetId: string; oldName: string; newName: string }) => void;
+  /**
+   * Called after a sheet is successfully deleted from the metadata store.
+   *
+   * Used by `main.ts` to rewrite DocumentController formulas referencing the deleted sheet name.
+   */
+  onSheetDeleted?: (event: { sheetId: string; name: string }) => void;
+  /**
    * Optional toast/error surface (used by the desktop shell).
    */
   onError?: (message: string) => void;
 };
 
-export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddSheet, onError }: Props) {
+export function SheetTabStrip({
+  store,
+  activeSheetId,
+  onActivateSheet,
+  onAddSheet,
+  onSheetRenamed,
+  onSheetDeleted,
+  onError,
+}: Props) {
   const [sheets, setSheets] = useState<SheetMeta[]>(() => store.listAll());
 
   useEffect(() => {
@@ -108,6 +128,7 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
   }, []);
 
   const commitRename = (sheetId: string): boolean => {
+    const oldName = store.getName(sheetId) ?? "";
     try {
       store.rename(sheetId, draftName);
     } catch (err) {
@@ -118,8 +139,16 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
       requestAnimationFrame(() => renameInputRef.current?.focus());
       return false;
     }
+    const newName = store.getName(sheetId) ?? draftName.trim();
     setRenameError(null);
     setEditingSheetId(null);
+    if (oldName && newName && oldName !== newName) {
+      try {
+        onSheetRenamed?.({ sheetId, oldName, newName });
+      } catch (err) {
+        onError?.(err instanceof Error ? err.message : String(err));
+      }
+    }
     return true;
   };
 
@@ -164,9 +193,49 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
         label: "Rename",
         onSelect: () => beginRenameWithGuard(sheet),
       },
+      {
+        type: "item",
+        label: "Delete",
+        onSelect: () => deleteSheet(sheet),
+      },
     ];
 
     tabContextMenu.open({ x: anchor.x, y: anchor.y, items });
+  };
+
+  const deleteSheet = (sheet: SheetMeta): void => {
+    if (editingSheetId && editingSheetId !== sheet.id) {
+      const ok = commitRename(editingSheetId);
+      if (!ok) return;
+    }
+
+    if (editingSheetId === sheet.id) return;
+
+    const ok = window.confirm(`Delete sheet "${sheet.name}"?`);
+    if (!ok) return;
+
+    const deletedName = sheet.name;
+
+    try {
+      store.remove(sheet.id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      onError?.(message);
+      return;
+    }
+
+    if (sheet.id === activeSheetId) {
+      const next = store.listVisible().at(0)?.id ?? store.listAll().at(0)?.id ?? null;
+      if (next && next !== sheet.id) {
+        onActivateSheet(next);
+      }
+    }
+
+    try {
+      onSheetDeleted?.({ sheetId: sheet.id, name: deletedName });
+    } catch (err) {
+      onError?.(err instanceof Error ? err.message : String(err));
+    }
   };
 
   const updateScrollButtons = useCallback(() => {

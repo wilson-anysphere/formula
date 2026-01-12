@@ -168,6 +168,51 @@ test.describe("sheet tabs", () => {
     await switcher.selectOption("Sheet2", { force: true });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 3");
+
+  test("renaming a sheet rewrites formulas that reference it", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const store =
+        typeof app.getWorkbookSheetStore === "function" ? app.getWorkbookSheetStore() : (window as any).__workbookSheetStore;
+
+      // Create a sheet whose id is not equal to its user-visible name.
+      store.addAfter("Sheet1", { id: "s2", name: "Budget" });
+      app.getDocument().setCellValue("s2", "A1", 123);
+      app.getDocument().setCellFormula("Sheet1", "B1", "=Budget!A1+1");
+    });
+
+    const before = await page.evaluate(async () => {
+      const app = (window as any).__formulaApp;
+      await app.whenIdle();
+      return app.getCellDisplayValueA1("B1");
+    });
+    expect(before).toBe("124");
+
+    const tab = page.getByTestId("sheet-tab-s2");
+    await expect(tab.locator(".sheet-tab__name")).toHaveText("Budget");
+
+    await tab.dblclick();
+    const input = tab.locator("input.sheet-tab__input");
+    await expect(input).toBeVisible();
+    await input.fill("Budget2");
+    await input.press("Enter");
+
+    await expect(tab.locator(".sheet-tab__name")).toHaveText("Budget2");
+
+    const after = await page.evaluate(async () => {
+      const app = (window as any).__formulaApp;
+      await app.whenIdle();
+      return app.getCellDisplayValueA1("B1");
+    });
+    expect(after).toBe("124");
+
+    const updatedFormula = await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      return app.getDocument().getCell("Sheet1", "B1").formula;
+    });
+    expect(updatedFormula).toBe("=Budget2!A1+1");
   });
 
   test("rename cancels on Escape (does not commit via blur)", async ({ page }) => {

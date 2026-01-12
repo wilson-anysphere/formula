@@ -30,6 +30,8 @@ import { setRibbonUiState } from "./ribbon/ribbonUiState.js";
 
 import type { CellRange as GridCellRange } from "@formula/grid";
 
+import { rewriteDocumentFormulasForSheetDelete, rewriteDocumentFormulasForSheetRename } from "./sheets/sheetFormulaRewrite";
+
 import { LayoutController } from "./layout/layoutController.js";
 import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
@@ -722,6 +724,8 @@ const app = new SpreadsheetApp(
 (window as any).__formulaApp = app;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (app as any).getWorkbookSheetStore = () => workbookSheetStore;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(window as any).__workbookSheetStore = workbookSheetStore;
 
 function sharedGridZoomStorageKey(): string {
   // Scope zoom persistence by workbook/session id. For file-backed workbooks this can be
@@ -1979,6 +1983,27 @@ function renderSheetTabs(): void {
         restoreFocusAfterSheetNavigation();
       },
       onAddSheet: handleAddSheet,
+      onSheetRenamed: ({ oldName, newName }) => {
+        try {
+          rewriteDocumentFormulasForSheetRename(app.getDocument(), oldName, newName);
+        } catch (err) {
+          showToast(`Failed to update formulas after rename: ${String((err as any)?.message ?? err)}`, "error");
+        }
+      },
+      onSheetDeleted: ({ sheetId, name }) => {
+        const doc = app.getDocument() as any;
+        try {
+          doc?.model?.sheets?.delete?.(sheetId);
+        } catch {
+          // ignore
+        }
+
+        try {
+          rewriteDocumentFormulasForSheetDelete(doc, name);
+        } catch (err) {
+          showToast(`Failed to update formulas after delete: ${String((err as any)?.message ?? err)}`, "error");
+        }
+      },
       onError: (message: string) => showToast(message, "error"),
     }),
   );
@@ -7186,6 +7211,9 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   );
   syncWorkbookSheetNamesFromSheetStore();
   installSheetStoreSubscription();
+  // Keep the e2e harness up-to-date when we swap the store after opening a workbook.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).__workbookSheetStore = workbookSheetStore;
 
   const CHUNK_ROWS = 200;
   const { maxRows: MAX_ROWS, maxCols: MAX_COLS } = getWorkbookLoadLimits();
@@ -8508,6 +8536,8 @@ try {
 (window as any).__formulaExtensionHostManager = extensionHostManagerForE2e;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (window as any).__formulaExtensionHost = extensionHostManagerForE2e?.host ?? null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(window as any).__workbookSheetStore = workbookSheetStore;
 
 // Time-to-interactive instrumentation (best-effort, no-op for web builds).
 void markStartupTimeToInteractive({ whenIdle: () => app.whenIdle() }).catch(() => {});
