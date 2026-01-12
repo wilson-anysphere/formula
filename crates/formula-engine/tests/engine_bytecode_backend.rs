@@ -2615,6 +2615,87 @@ fn bytecode_backend_matches_ast_for_coupon_schedule_functions() {
 }
 
 #[test]
+fn bytecode_backend_coupon_basis_4_uses_fixed_period_length_and_preserves_additivity() {
+    let mut engine = Engine::new();
+
+    // This schedule exercises the basis=4 (European 30E/360) quirk where:
+    // - Day counts use DAYS360(..., TRUE)
+    // - But the modeled coupon period length E used by COUPDAYS is fixed as 360/frequency
+    //   (and COUPDAYSNC is computed as E - A to preserve the additivity invariant).
+    //
+    // settlement=2020-11-15, maturity=2021-02-28, frequency=2:
+    // PCD=2020-08-31, NCD=2021-02-28, DAYS360_EU(PCD,NCD)=178 != 180 (=360/frequency)
+    // A=DAYS360_EU(PCD,settlement)=75, so COUPDAYSNC should be 180-75=105 (not 103).
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=COUPPCD("2020-11-15","2021-02-28",2,4)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", r#"=COUPNCD("2020-11-15","2021-02-28",2,4)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", r#"=COUPDAYS("2020-11-15","2021-02-28",2,4)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", r#"=COUPDAYBS("2020-11-15","2021-02-28",2,4)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A5", r#"=COUPDAYSNC("2020-11-15","2021-02-28",2,4)"#)
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 5);
+    assert_eq!(stats.compiled, 5);
+    assert_eq!(stats.fallback, 0);
+    assert_eq!(engine.bytecode_program_count(), 5);
+
+    engine.recalculate_single_threaded();
+
+    let system = engine.date_system();
+    let expected_pcd = ymd_to_serial(ExcelDate::new(2020, 8, 31), system).unwrap() as f64;
+    let expected_ncd = ymd_to_serial(ExcelDate::new(2021, 2, 28), system).unwrap() as f64;
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected_pcd));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(expected_ncd));
+
+    // COUPDAYS uses the fixed modeled coupon period length for basis=4.
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(180.0));
+    // COUPDAYBS uses European DAYS360 for basis=4.
+    assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Number(75.0));
+    // COUPDAYSNC is computed as E - A for basis=4 (preserving additivity).
+    assert_eq!(engine.get_cell_value("Sheet1", "A5"), Value::Number(105.0));
+
+    // Guard: ensure we really hit a schedule where DAYS360_EU(PCD,NCD) differs from E.
+    let pcd = expected_pcd as i32;
+    let ncd = expected_ncd as i32;
+    let days360_eu = formula_engine::functions::date_time::days360(pcd, ncd, true, system).unwrap();
+    assert_eq!(days360_eu, 178);
+    assert_ne!(days360_eu as f64, 180.0);
+
+    // Also guard that COUPDAYSNC differs from the direct European day-count (settlement->NCD).
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 11, 15), system).unwrap();
+    let dsc_eu =
+        formula_engine::functions::date_time::days360(settlement, ncd, true, system).unwrap();
+    assert_eq!(dsc_eu, 103);
+
+    // Bytecode-vs-AST parity (and a sanity check that additivity holds).
+    assert_engine_matches_ast(&engine, r#"=COUPPCD("2020-11-15","2021-02-28",2,4)"#, "A1");
+    assert_engine_matches_ast(&engine, r#"=COUPNCD("2020-11-15","2021-02-28",2,4)"#, "A2");
+    assert_engine_matches_ast(&engine, r#"=COUPDAYS("2020-11-15","2021-02-28",2,4)"#, "A3");
+    assert_engine_matches_ast(&engine, r#"=COUPDAYBS("2020-11-15","2021-02-28",2,4)"#, "A4");
+    assert_engine_matches_ast(&engine, r#"=COUPDAYSNC("2020-11-15","2021-02-28",2,4)"#, "A5");
+    let Value::Number(days) = engine.get_cell_value("Sheet1", "A3") else {
+        panic!("expected COUPDAYS to return a number");
+    };
+    let Value::Number(daybs) = engine.get_cell_value("Sheet1", "A4") else {
+        panic!("expected COUPDAYBS to return a number");
+    };
+    let Value::Number(daysnc) = engine.get_cell_value("Sheet1", "A5") else {
+        panic!("expected COUPDAYSNC to return a number");
+    };
+    assert_eq!(days, daybs + daysnc);
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_standard_bond_functions() {
     let mut engine = Engine::new();
 
