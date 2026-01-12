@@ -78,6 +78,9 @@ Build the native desktop application shell using **Tauri**. Handle system integr
 5. **System tray:** Background sync indicator
 6. **Global shortcuts:** Capture shortcuts even when unfocused
 7. **Notifications:** Native system notifications
+8. **Deep links (`formula://...`) / OAuth redirects:** allow OAuth PKCE redirects to round-trip back into the running desktop app
+   - The desktop shell registers the `formula://` scheme at runtime via `tauri-plugin-deep-link` (best-effort; see `apps/desktop/src-tauri/src/main.rs`).
+   - Redirects are forwarded to the frontend via the `oauth-redirect` event.
 
 ### Tauri v2 Capabilities & Permissions
 
