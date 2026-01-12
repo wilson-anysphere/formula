@@ -59,7 +59,8 @@ function canonicalize(value, seen, path) {
   }
 
   if (value instanceof Date) {
-    return { $type: "date", value: value.toISOString() };
+    const time = value.getTime();
+    return { $type: "date", value: Number.isNaN(time) ? "NaN" : value.toISOString() };
   }
 
   if (value instanceof Uint8Array) {

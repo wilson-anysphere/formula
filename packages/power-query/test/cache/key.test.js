@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { stableStringify } from "../../src/cache/key.js";
 import { PqDateTimeZone, PqDecimal, PqDuration, PqTime } from "../../src/values.js";
+import { valueKey } from "../../src/valueKey.js";
 
 test("stableStringify tags Power Query wrapper values to avoid cache key collisions", () => {
   const time = new PqTime(0);
@@ -24,3 +25,16 @@ test("stableStringify encodes Uint8Array values as base64", () => {
   assert.deepEqual(JSON.parse(stableStringify(bytes)), { $type: "binary", value: "AQID" });
 });
 
+test("stableStringify handles invalid Date values without throwing", () => {
+  const invalid = new Date("not a date");
+  assert.ok(Number.isNaN(invalid.getTime()));
+
+  assert.deepEqual(JSON.parse(stableStringify(invalid)), { $type: "date", value: "NaN" });
+  assert.deepEqual(JSON.parse(stableStringify({ when: invalid })), { when: { $type: "date", value: "NaN" } });
+});
+
+test("valueKey can key objects containing invalid Date values", () => {
+  const invalid = new Date("not a date");
+  assert.ok(Number.isNaN(invalid.getTime()));
+  assert.doesNotThrow(() => valueKey({ when: invalid }));
+});
