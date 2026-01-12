@@ -7838,7 +7838,36 @@ try {
   });
 
   void listen("menu-about", () => {
-    showToast("Formula Desktop", "info");
+    void (async () => {
+      const tauri = (globalThis as any).__TAURI__;
+      const appApi = tauri?.app;
+      const getName = appApi?.getName as (() => Promise<unknown>) | undefined;
+      const getVersion = appApi?.getVersion as (() => Promise<unknown>) | undefined;
+
+      let name = "Formula";
+      let version: string | null = null;
+
+      if (typeof getName === "function") {
+        try {
+          const resolved = await getName();
+          if (typeof resolved === "string" && resolved.trim()) name = resolved.trim();
+        } catch {
+          // ignore
+        }
+      }
+
+      if (typeof getVersion === "function") {
+        try {
+          const resolved = await getVersion();
+          if (typeof resolved === "string" && resolved.trim()) version = resolved.trim();
+        } catch {
+          // ignore
+        }
+      }
+
+      const message = version ? `${name}\nVersion ${version}` : name;
+      await nativeDialogs.alert(message, { title: `About ${name}` });
+    })();
   });
 
   // Some desktop builds trigger update checks directly from the Rust menu/tray handlers (and
