@@ -666,6 +666,13 @@ def generate(
     )
     add_case(
         cases,
+        prefix="forecast_ets_month_end",
+        tags=["stat", "FORECAST.ETS", "dates", "eom"],
+        formula="=FORECAST.ETS(44012,{10,10,10,10},{43890,43921,43951,43982},1)",
+        description="Month-end date serial timeline (2020-02-29..2020-05-31) forecasting 2020-06-30",
+    )
+    add_case(
+        cases,
         prefix="forecast_ets_confint",
         tags=["stat", "FORECAST.ETS.CONFINT"],
         formula="=FORECAST.ETS.CONFINT(7,{1,2,3,4,5,6},{1,2,3,4,5,6},0.95,1)",
@@ -676,6 +683,13 @@ def generate(
         tags=["stat", "FORECAST.ETS.CONFINT", "dates"],
         formula="=FORECAST.ETS.CONFINT(43952,{10,10,10,10},{43831,43862,43891,43922},0.95,1)",
         description="Confidence interval for monthly date serial timeline (perfect fit -> 0)",
+    )
+    add_case(
+        cases,
+        prefix="forecast_ets_confint_month_end",
+        tags=["stat", "FORECAST.ETS.CONFINT", "dates", "eom"],
+        formula="=FORECAST.ETS.CONFINT(44012,{10,10,10,10},{43890,43921,43951,43982},0.95,1)",
+        description="Confidence interval for month-end date serial timeline (perfect fit -> 0)",
     )
     add_case(
         cases,
@@ -692,6 +706,13 @@ def generate(
     )
     add_case(
         cases,
+        prefix="forecast_ets_seasonality_month_end",
+        tags=["stat", "FORECAST.ETS.SEASONALITY", "dates", "eom"],
+        formula="=FORECAST.ETS.SEASONALITY({10,10,10,10},{43890,43921,43951,43982})",
+        description="Seasonality detection on a month-end date serial timeline (constant series)",
+    )
+    add_case(
+        cases,
         prefix="forecast_ets_stat",
         tags=["stat", "FORECAST.ETS.STAT"],
         formula="=FORECAST.ETS.STAT({1,2,3,4,5,6},{1,2,3,4,5,6},1,1,1,8)",
@@ -702,6 +723,13 @@ def generate(
         tags=["stat", "FORECAST.ETS.STAT", "dates"],
         formula="=FORECAST.ETS.STAT({10,10,10,10},{43831,43862,43891,43922},1,1,1,8)",
         description="RMSE for monthly date serial timeline (perfect fit -> 0)",
+    )
+    add_case(
+        cases,
+        prefix="forecast_ets_stat_month_end",
+        tags=["stat", "FORECAST.ETS.STAT", "dates", "eom"],
+        formula="=FORECAST.ETS.STAT({10,10,10,10},{43890,43921,43951,43982},1,1,1,8)",
+        description="RMSE for month-end date serial timeline (perfect fit -> 0)",
     )
 
     # STEYX should be 0 for a perfectly linear relationship (y = 2x + 1).

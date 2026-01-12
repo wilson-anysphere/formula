@@ -20566,6 +20566,19 @@
       "id": "forecast_ets_monthly_a85a1d4ee073"
     },
     {
+      "formula": "=FORECAST.ETS(44012,{10,10,10,10},{43890,43921,43951,43982},1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "FORECAST.ETS",
+        "dates",
+        "eom"
+      ],
+      "description": "Month-end date serial timeline (2020-02-29..2020-05-31) forecasting 2020-06-30",
+      "id": "forecast_ets_month_end_dca7dfb54af4"
+    },
+    {
       "formula": "=FORECAST.ETS.CONFINT(7,{1,2,3,4,5,6},{1,2,3,4,5,6},0.95,1)",
       "outputCell": "C1",
       "inputs": [],
@@ -20586,6 +20599,19 @@
       ],
       "description": "Confidence interval for monthly date serial timeline (perfect fit -> 0)",
       "id": "forecast_ets_confint_monthly_a7b2f6ab6f6a"
+    },
+    {
+      "formula": "=FORECAST.ETS.CONFINT(44012,{10,10,10,10},{43890,43921,43951,43982},0.95,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "FORECAST.ETS.CONFINT",
+        "dates",
+        "eom"
+      ],
+      "description": "Confidence interval for month-end date serial timeline (perfect fit -> 0)",
+      "id": "forecast_ets_confint_month_end_bd0ca4705a6d"
     },
     {
       "formula": "=FORECAST.ETS.SEASONALITY({10,20,10,20,10,20,10,20},{1,2,3,4,5,6,7,8})",
@@ -20610,6 +20636,19 @@
       "id": "forecast_ets_seasonality_monthly_b0903c51d41f"
     },
     {
+      "formula": "=FORECAST.ETS.SEASONALITY({10,10,10,10},{43890,43921,43951,43982})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "FORECAST.ETS.SEASONALITY",
+        "dates",
+        "eom"
+      ],
+      "description": "Seasonality detection on a month-end date serial timeline (constant series)",
+      "id": "forecast_ets_seasonality_month_end_87dcd184d7cd"
+    },
+    {
       "formula": "=FORECAST.ETS.STAT({1,2,3,4,5,6},{1,2,3,4,5,6},1,1,1,8)",
       "outputCell": "C1",
       "inputs": [],
@@ -20630,6 +20669,19 @@
       ],
       "description": "RMSE for monthly date serial timeline (perfect fit -> 0)",
       "id": "forecast_ets_stat_monthly_f8804c55be98"
+    },
+    {
+      "formula": "=FORECAST.ETS.STAT({10,10,10,10},{43890,43921,43951,43982},1,1,1,8)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "FORECAST.ETS.STAT",
+        "dates",
+        "eom"
+      ],
+      "description": "RMSE for month-end date serial timeline (perfect fit -> 0)",
+      "id": "forecast_ets_stat_month_end_1588c95fb7b5"
     },
     {
       "formula": "=STEYX({3,5,7,9,11},{1,2,3,4,5})",

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T16:50:06.513898269Z",
+  "generatedAt": "2026-01-12T17:00:07.404813977Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "3da1c8febd5d6f0f06335fa24eb080875c53a4b627a1e6da66dbf61bb4f7b897",
-    "count": 1765
+    "sha256": "bb926d74cd5f0ec7ecd55546dc4f8eae95af6569a28331248991d1cf7e6b14cb",
+    "count": 1769
   },
   "results": [
     {
@@ -10160,6 +10160,16 @@
       "displayText": "10"
     },
     {
+      "caseId": "forecast_ets_month_end_dca7dfb54af4",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 10.0
+      },
+      "address": "C1",
+      "displayText": "10"
+    },
+    {
       "caseId": "forecast_ets_confint_8eafb6e3d87f",
       "outputCell": "C1",
       "result": {
@@ -10171,6 +10181,16 @@
     },
     {
       "caseId": "forecast_ets_confint_monthly_a7b2f6ab6f6a",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0
+      },
+      "address": "C1",
+      "displayText": "0"
+    },
+    {
+      "caseId": "forecast_ets_confint_month_end_bd0ca4705a6d",
       "outputCell": "C1",
       "result": {
         "t": "n",
@@ -10200,6 +10220,16 @@
       "displayText": "1"
     },
     {
+      "caseId": "forecast_ets_seasonality_month_end_87dcd184d7cd",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
       "caseId": "forecast_ets_stat_c8d98934d450",
       "outputCell": "C1",
       "result": {
@@ -10211,6 +10241,16 @@
     },
     {
       "caseId": "forecast_ets_stat_monthly_f8804c55be98",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0
+      },
+      "address": "C1",
+      "displayText": "0"
+    },
+    {
+      "caseId": "forecast_ets_stat_month_end_1588c95fb7b5",
       "outputCell": "C1",
       "result": {
         "t": "n",
