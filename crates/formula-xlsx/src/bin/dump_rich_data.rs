@@ -20,6 +20,8 @@ use std::path::{Path, PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
 use formula_model::{CellRef, HyperlinkTarget};
 #[cfg(not(target_arch = "wasm32"))]
+use formula_xlsx::openxml;
+#[cfg(not(target_arch = "wasm32"))]
 use formula_xlsx::rich_data::RichDataVmIndex;
 #[cfg(not(target_arch = "wasm32"))]
 use formula_xlsx::XlsxPackage;
@@ -122,6 +124,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let bytes = fs::read(&xlsx_path)?;
     let pkg = XlsxPackage::from_bytes(&bytes)?;
 
+    eprintln!("workbook: {}", xlsx_path.display());
+    dump_required_part_presence(&pkg);
+    dump_workbook_relationships(&pkg);
+    dump_worksheet_vm_cm_usage(&pkg);
+
     let found_vm_cells = dump_vm_mappings(&pkg);
 
     // Optional debug output.
@@ -138,6 +145,454 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn dump_required_part_presence(pkg: &XlsxPackage) {
+    eprintln!();
+    eprintln!("parts:");
+
+    match pkg.part("xl/metadata.xml") {
+        Some(bytes) => eprintln!("  xl/metadata.xml: present ({} bytes)", bytes.len()),
+        None => eprintln!("  xl/metadata.xml: missing"),
+    }
+
+    let mut rich_data_parts: Vec<(&str, usize)> = pkg
+        .part_names()
+        .filter_map(|name| {
+            let lower = name.to_ascii_lowercase();
+            if lower.starts_with("xl/richdata/") {
+                Some((name, pkg.part(name).map(|b| b.len()).unwrap_or(0)))
+            } else {
+                None
+            }
+        })
+        .collect();
+    rich_data_parts.sort_by(|a, b| a.0.cmp(&b.0));
+    if rich_data_parts.is_empty() {
+        eprintln!("  xl/richData/: (none)");
+    } else {
+        eprintln!("  xl/richData/: {} part(s)", rich_data_parts.len());
+        for (name, len) in rich_data_parts {
+            eprintln!("    {name} ({len} bytes)");
+        }
+    }
+
+    let mut image_parts: Vec<(&str, usize)> = pkg
+        .part_names()
+        .filter_map(|name| {
+            if is_in_cell_image_candidate_part(name) {
+                Some((name, pkg.part(name).map(|b| b.len()).unwrap_or(0)))
+            } else {
+                None
+            }
+        })
+        .collect();
+    image_parts.sort_by(|a, b| a.0.cmp(&b.0));
+    if image_parts.is_empty() {
+        eprintln!("  in-cell image candidates: (none)");
+    } else {
+        eprintln!("  in-cell image candidates: {} part(s)", image_parts.len());
+        for (name, len) in image_parts {
+            eprintln!("    {name} ({len} bytes)");
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn is_in_cell_image_candidate_part(part_name: &str) -> bool {
+    let lower = part_name.to_ascii_lowercase();
+
+    // Common/known in-cell image parts.
+    if lower.starts_with("xl/cellimages") || lower.starts_with("xl/_rels/cellimages") {
+        return true;
+    }
+
+    // Image payloads.
+    if lower.starts_with("xl/media/") {
+        return true;
+    }
+
+    // Fallback heuristic: any part whose name suggests cell images.
+    lower.contains("cellimage")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn dump_workbook_relationships(pkg: &XlsxPackage) {
+    eprintln!();
+    eprintln!("xl/_rels/workbook.xml.rels (filtered metadata/richData):");
+
+    let Some(rels_bytes) = pkg.part("xl/_rels/workbook.xml.rels") else {
+        eprintln!("  (missing)");
+        return;
+    };
+
+    let relationships = match openxml::parse_relationships(rels_bytes) {
+        Ok(r) => r,
+        Err(err) => {
+            eprintln!("  warning: failed to parse workbook.xml.rels: {err}");
+            return;
+        }
+    };
+
+    let mut matched = 0usize;
+    for rel in relationships {
+        let target_lower = rel.target.to_ascii_lowercase();
+        let type_lower = rel.type_uri.to_ascii_lowercase();
+        if target_lower.contains("metadata")
+            || type_lower.contains("metadata")
+            || type_lower.contains("richdata")
+        {
+            matched += 1;
+            if let Some(mode) = rel.target_mode.as_deref() {
+                eprintln!(
+                    "  Id={} Type={} Target={} TargetMode={} (resolved: {})",
+                    rel.id,
+                    rel.type_uri,
+                    rel.target,
+                    mode,
+                    openxml::resolve_target("xl/workbook.xml", &rel.target)
+                );
+            } else {
+                eprintln!(
+                    "  Id={} Type={} Target={} (resolved: {})",
+                    rel.id,
+                    rel.type_uri,
+                    rel.target,
+                    openxml::resolve_target("xl/workbook.xml", &rel.target)
+                );
+            }
+        }
+    }
+
+    if matched == 0 {
+        eprintln!("  (none)");
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn dump_worksheet_vm_cm_usage(pkg: &XlsxPackage) {
+    let shared_strings = parse_shared_strings_best_effort(pkg);
+    let sheets = list_sheets_best_effort(pkg);
+    if sheets.is_empty() {
+        return;
+    }
+
+    eprintln!();
+    eprintln!("worksheet vm/cm usage:");
+
+    for sheet in &sheets {
+        let Some(bytes) = pkg.part(&sheet.worksheet_part) else {
+            eprintln!("  {} ({}): (missing part)", sheet.sheet_name, sheet.worksheet_part);
+            continue;
+        };
+
+        let scan = match scan_sheet_vm_cm_best_effort(bytes, shared_strings.as_ref()) {
+            Ok(scan) => scan,
+            Err(err) => {
+                eprintln!(
+                    "  warning: failed to scan {} ({}): {err}",
+                    sheet.sheet_name, sheet.worksheet_part
+                );
+                VmCmScan::default()
+            }
+        };
+        eprintln!(
+            "  {} ({}): vm-cells={} cm-cells={}",
+            sheet.sheet_name, sheet.worksheet_part, scan.vm_cells, scan.cm_cells
+        );
+        if !scan.samples.is_empty() {
+            eprintln!("    samples:");
+            for sample in &scan.samples {
+                let value = sample.value.as_deref().unwrap_or("<no value>");
+                eprintln!(
+                    "      {}: vm={:?} cm={:?} value={}",
+                    sample.cell_ref, sample.vm, sample.cm, value
+                );
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone)]
+struct VmCmSample {
+    cell_ref: String,
+    vm: Option<u32>,
+    cm: Option<u32>,
+    value: Option<String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, Default)]
+struct VmCmScan {
+    vm_cells: u64,
+    cm_cells: u64,
+    samples: Vec<VmCmSample>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn scan_sheet_vm_cm_best_effort(
+    worksheet_xml: &[u8],
+    shared_strings: Option<&Vec<String>>,
+) -> Result<VmCmScan, quick_xml::Error> {
+    const MAX_SAMPLES: usize = 5;
+
+    let mut reader = Reader::from_reader(worksheet_xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+
+    let mut out = VmCmScan::default();
+    #[derive(Debug)]
+    struct CurrentCell {
+        r: Option<String>,
+        t: Option<String>,
+        vm: Option<u32>,
+        cm: Option<u32>,
+        v_text: String,
+        inline_text: String,
+        in_v: bool,
+        in_is: bool,
+        in_is_t: bool,
+    }
+    let mut current: Option<CurrentCell> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                let qname = e.name();
+                let name = local_name(qname.as_ref());
+                if name.eq_ignore_ascii_case(b"c") {
+                    let mut r: Option<String> = None;
+                    let mut t: Option<String> = None;
+                    let mut vm: Option<u32> = None;
+                    let mut cm: Option<u32> = None;
+
+                    for attr in e.attributes().with_checks(false) {
+                        let Ok(attr) = attr else {
+                            continue;
+                        };
+                        let Ok(v) = attr.unescape_value() else {
+                            continue;
+                        };
+                        match local_name(attr.key.as_ref()) {
+                            b"r" => r = Some(v.into_owned()),
+                            b"t" => t = Some(v.into_owned()),
+                            b"vm" => vm = v.parse::<u32>().ok(),
+                            b"cm" => cm = v.parse::<u32>().ok(),
+                            _ => {}
+                        }
+                    }
+
+                    if vm.is_some() {
+                        out.vm_cells += 1;
+                    }
+                    if cm.is_some() {
+                        out.cm_cells += 1;
+                    }
+
+                    if out.samples.len() < MAX_SAMPLES && (vm.is_some() || cm.is_some()) {
+                        current = Some(CurrentCell {
+                            r,
+                            t,
+                            vm,
+                            cm,
+                            v_text: String::new(),
+                            inline_text: String::new(),
+                            in_v: false,
+                            in_is: false,
+                            in_is_t: false,
+                        });
+                    } else {
+                        current = None;
+                    }
+                } else if let Some(cell) = current.as_mut() {
+                    if name.eq_ignore_ascii_case(b"v") {
+                        cell.in_v = true;
+                    } else if name.eq_ignore_ascii_case(b"is") {
+                        cell.in_is = true;
+                    } else if cell.in_is && name.eq_ignore_ascii_case(b"t") {
+                        cell.in_is_t = true;
+                    }
+                }
+            }
+            Ok(Event::Empty(e)) => {
+                let qname = e.name();
+                let name = local_name(qname.as_ref());
+                if name.eq_ignore_ascii_case(b"c") {
+                    let mut r: Option<String> = None;
+                    let mut vm: Option<u32> = None;
+                    let mut cm: Option<u32> = None;
+
+                    for attr in e.attributes().with_checks(false) {
+                        let Ok(attr) = attr else {
+                            continue;
+                        };
+                        let Ok(v) = attr.unescape_value() else {
+                            continue;
+                        };
+                        match local_name(attr.key.as_ref()) {
+                            b"r" => r = Some(v.into_owned()),
+                            b"vm" => vm = v.parse::<u32>().ok(),
+                            b"cm" => cm = v.parse::<u32>().ok(),
+                            _ => {}
+                        }
+                    }
+
+                    if vm.is_some() {
+                        out.vm_cells += 1;
+                    }
+                    if cm.is_some() {
+                        out.cm_cells += 1;
+                    }
+
+                    if out.samples.len() < MAX_SAMPLES && (vm.is_some() || cm.is_some()) {
+                        out.samples.push(VmCmSample {
+                            cell_ref: r.unwrap_or_else(|| "<missing r>".to_string()),
+                            vm,
+                            cm,
+                            value: None,
+                        });
+                    }
+                }
+            }
+            Ok(Event::Text(t)) => {
+                if let Some(cell) = current.as_mut() {
+                    let Ok(text) = t.unescape() else {
+                        buf.clear();
+                        continue;
+                    };
+                    if cell.in_v {
+                        cell.v_text.push_str(&text);
+                    } else if cell.in_is_t {
+                        cell.inline_text.push_str(&text);
+                    }
+                }
+            }
+            Ok(Event::CData(t)) => {
+                if let Some(cell) = current.as_mut() {
+                    let text = String::from_utf8_lossy(t.as_ref());
+                    if cell.in_v {
+                        cell.v_text.push_str(&text);
+                    } else if cell.in_is_t {
+                        cell.inline_text.push_str(&text);
+                    }
+                }
+            }
+            Ok(Event::End(e)) => {
+                let qname = e.name();
+                let name = local_name(qname.as_ref());
+                if let Some(cell) = current.as_mut() {
+                    if name.eq_ignore_ascii_case(b"v") {
+                        cell.in_v = false;
+                    } else if name.eq_ignore_ascii_case(b"t") {
+                        cell.in_is_t = false;
+                    } else if name.eq_ignore_ascii_case(b"is") {
+                        cell.in_is = false;
+                    }
+                }
+                if name.eq_ignore_ascii_case(b"c") {
+                    if let Some(cell) = current.take() {
+                        if out.samples.len() < MAX_SAMPLES && (cell.vm.is_some() || cell.cm.is_some()) {
+                            let raw = if !cell.inline_text.is_empty() {
+                                Some(cell.inline_text)
+                            } else if !cell.v_text.is_empty() {
+                                Some(cell.v_text)
+                            } else {
+                                None
+                            };
+
+                            let mut value = raw;
+                            if cell.t.as_deref() == Some("s") {
+                                if let (Some(shared), Some(raw)) =
+                                    (shared_strings, value.as_deref())
+                                {
+                                    if let Ok(idx) = raw.parse::<usize>() {
+                                        if let Some(s) = shared.get(idx) {
+                                            value = Some(s.clone());
+                                        }
+                                    }
+                                }
+                            }
+
+                            out.samples.push(VmCmSample {
+                                cell_ref: cell.r.unwrap_or_else(|| "<missing r>".to_string()),
+                                vm: cell.vm,
+                                cm: cell.cm,
+                                value,
+                            });
+                        }
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(err) => return Err(err),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_shared_strings_best_effort(pkg: &XlsxPackage) -> Option<Vec<String>> {
+    let bytes = pkg.part("xl/sharedStrings.xml")?;
+    let mut reader = Reader::from_reader(bytes);
+    reader.config_mut().trim_text(false);
+
+    let mut buf = Vec::new();
+    let mut out: Vec<String> = Vec::new();
+    let mut current_si: Option<String> = None;
+    let mut in_t = false;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                let qname = e.name();
+                let name = local_name(qname.as_ref());
+                if name.eq_ignore_ascii_case(b"si") {
+                    current_si = Some(String::new());
+                } else if name.eq_ignore_ascii_case(b"t") {
+                    in_t = true;
+                }
+            }
+            Ok(Event::End(e)) => {
+                let qname = e.name();
+                let name = local_name(qname.as_ref());
+                if name.eq_ignore_ascii_case(b"t") {
+                    in_t = false;
+                } else if name.eq_ignore_ascii_case(b"si") {
+                    out.push(current_si.take().unwrap_or_default());
+                }
+            }
+            Ok(Event::Text(t)) => {
+                if in_t {
+                    if let Some(si) = current_si.as_mut() {
+                        if let Ok(text) = t.unescape() {
+                            si.push_str(&text);
+                        }
+                    }
+                }
+            }
+            Ok(Event::CData(t)) => {
+                if in_t {
+                    if let Some(si) = current_si.as_mut() {
+                        si.push_str(&String::from_utf8_lossy(t.as_ref()));
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(err) => {
+                eprintln!("warning: failed to parse xl/sharedStrings.xml: {err}");
+                return None;
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Some(out)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
