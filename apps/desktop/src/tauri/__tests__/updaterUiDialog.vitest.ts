@@ -114,6 +114,9 @@ describe("updaterUi (dialog + download)", () => {
       window.localStorage.setItem("formula.updater.dismissedVersion", "9.9.9");
       window.localStorage.setItem("formula.updater.dismissedAt", String(Date.now()));
 
+      const notifications = await import("../notifications");
+      const notifySpy = vi.spyOn(notifications, "notify").mockResolvedValue(undefined);
+
       const { handleUpdaterEvent } = await import("../updaterUi");
 
       // User clicks "Check for Updates" while a startup check is already running.
@@ -127,6 +130,10 @@ describe("updaterUi (dialog + download)", () => {
       const dialog = document.querySelector<HTMLDialogElement>('[data-testid="updater-dialog"]');
       expect(dialog).not.toBeNull();
       expect(dialog?.getAttribute("open") === "" || dialog?.open === true).toBe(true);
+
+      // This update result is treated as "manual" UX (dialog) because the user requested a check,
+      // so it should NOT also create a system notification.
+      expect(notifySpy).not.toHaveBeenCalled();
     },
     TEST_TIMEOUT_MS,
   );
