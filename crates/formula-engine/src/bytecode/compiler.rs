@@ -470,24 +470,44 @@ impl<'a> CompileCtx<'a> {
             return;
         }
 
-        // Evaluate the index expression once, coerce it to an integer (Excel truncates via
-        // `coerce_to_i64`, which is equivalent to `INT` for non-negative indices), and store it in
-        // a temp local so we can compare it against multiple branch constants without re-evaluating
-        // it.
-        self.compile_expr_inner(&args[0], false);
-        let int_func = intern_func(self.program, Function::Int);
-        self.program
-            .instrs
-            .push(Instruction::new(OpCode::CallFunc, int_func, 1));
-        let idx_local = self.alloc_temp_local("\u{0}CHOOSE_INDEX");
-        self.program
-            .instrs
-            .push(Instruction::new(OpCode::StoreLocal, idx_local, 0));
+        let choice_count = args.len() - 1;
 
-        // If the coerced index is an error, return it without evaluating any branch expressions.
+        // Compute a normalized integer selection using the runtime CHOOSE implementation
+        // over constant 1..=choice_count. This preserves the engine's coercion rules for:
+        // - numeric truncation (including NaN -> 0 via float->int cast)
+        // - text-to-number parsing
+        // - range/array rejection via #SPILL
+        //
+        // The constant arguments have no side effects, so eager evaluation here is fine.
+        self.compile_expr_inner(&args[0], false);
+        let mut selector_consts: Vec<u32> = Vec::with_capacity(choice_count);
+        for i in 1..=choice_count {
+            let idx = self.program.consts.len() as u32;
+            self.program
+                .consts
+                .push(ConstValue::Value(Value::Number(i as f64)));
+            selector_consts.push(idx);
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::PushConst, idx, 0));
+        }
+        let func_idx = intern_func(self.program, Function::Choose);
         self.program
             .instrs
-            .push(Instruction::new(OpCode::LoadLocal, idx_local, 0));
+            .push(Instruction::new(OpCode::CallFunc, func_idx, args.len() as u32));
+
+        // Store the selection result so we can branch on it multiple times without
+        // re-evaluating the index expression.
+        let sel_local = self.alloc_temp_local("\u{0}CHOOSE_SEL");
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::StoreLocal, sel_local, 0));
+
+        // If selection is an error (invalid index/coercion), return it without evaluating any
+        // branch expressions.
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::LoadLocal, sel_local, 0));
         let jump_not_error_idx = self.program.instrs.len();
         self.program
             .instrs
@@ -495,7 +515,7 @@ impl<'a> CompileCtx<'a> {
         // Error path: reload the error and jump to end.
         self.program
             .instrs
-            .push(Instruction::new(OpCode::LoadLocal, idx_local, 0));
+            .push(Instruction::new(OpCode::LoadLocal, sel_local, 0));
         let jump_error_end_idx = self.program.instrs.len();
         self.program
             .instrs
@@ -512,14 +532,11 @@ impl<'a> CompileCtx<'a> {
             if idx != 0 {
                 self.program
                     .instrs
-                    .push(Instruction::new(OpCode::LoadLocal, idx_local, 0));
+                    .push(Instruction::new(OpCode::LoadLocal, sel_local, 0));
             }
 
-            // Compare the index against the 1-based branch number.
-            let const_idx = self.program.consts.len() as u32;
-            self.program
-                .consts
-                .push(ConstValue::Value(Value::Number((idx + 1) as f64)));
+            // Compare selection == (idx + 1).
+            let const_idx = selector_consts[idx];
             self.program
                 .instrs
                 .push(Instruction::new(OpCode::PushConst, const_idx, 0));
@@ -546,13 +563,15 @@ impl<'a> CompileCtx<'a> {
             jump_end_idxs.push(jump_end_idx);
         }
 
-        // If no branch matches (including idx < 1 or idx > choices.len()), CHOOSE returns #VALUE!.
+        // Should be unreachable because the selection call above guarantees the index is in
+        // range when it's not an error, but keep a deterministic fallback.
         self.push_error_const(ErrorKind::Value);
         let end_target = self.program.instrs.len() as u32;
 
         for idx in jump_if_idxs {
             let a = self.program.instrs[idx].a();
-            self.program.instrs[idx] = Instruction::new(OpCode::JumpIfFalseOrError, a, end_target);
+            self.program.instrs[idx] =
+                Instruction::new(OpCode::JumpIfFalseOrError, a, end_target);
         }
         for idx in jump_end_idxs {
             self.program.instrs[idx] = Instruction::new(OpCode::Jump, end_target, 0);
