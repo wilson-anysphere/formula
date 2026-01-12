@@ -45,3 +45,43 @@ test("ExtensionHost: workbook.saveAs rejects whitespace-only paths", async (t) =
     /Workbook path must be a non-empty string/,
   );
 });
+
+test("ExtensionHost: workbook.openWorkbook rejects non-string paths", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-host-workbook-open-nonstring-"));
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await assert.rejects(
+    () => host._executeApi("workbook", "openWorkbook", [123], { id: "test" }),
+    /Workbook path must be a non-empty string/,
+  );
+});
+
+test("ExtensionHost: workbook.saveAs rejects non-string paths", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-host-workbook-saveas-nonstring-"));
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await assert.rejects(
+    () => host._executeApi("workbook", "saveAs", [123], { id: "test" }),
+    /Workbook path must be a non-empty string/,
+  );
+});

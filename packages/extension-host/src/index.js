@@ -1446,11 +1446,11 @@ class ExtensionHost {
         return this._getWorkbookSnapshot();
       case "workbook.openWorkbook":
         {
-          const workbookPathStr = args[0] == null ? null : String(args[0]);
-          if (workbookPathStr == null || workbookPathStr.trim().length === 0) {
+          const workbookPath = args?.[0];
+          if (typeof workbookPath !== "string" || workbookPath.trim().length === 0) {
             throw new Error("Workbook path must be a non-empty string");
           }
-          return this.openWorkbook(workbookPathStr);
+          return this.openWorkbook(workbookPath);
         }
       case "workbook.createWorkbook":
         return this.openWorkbook(null);
@@ -1458,8 +1458,14 @@ class ExtensionHost {
         this.saveWorkbook();
         return null;
       case "workbook.saveAs":
-        this.saveWorkbookAs(args[0]);
-        return null;
+        {
+          const workbookPath = args?.[0];
+          if (typeof workbookPath !== "string" || workbookPath.trim().length === 0) {
+            throw new Error("Workbook path must be a non-empty string");
+          }
+          this.saveWorkbookAs(workbookPath);
+          return null;
+        }
       case "workbook.close":
         this.closeWorkbook();
         return null;
