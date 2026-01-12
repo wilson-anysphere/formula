@@ -94,9 +94,14 @@ test.describe("sheet tabs", () => {
       .toBe(initialSheetIds.length + 1);
 
     // Undo should remove the sheet and return to the last-saved dirty state.
-    await page.evaluate(() => {
+    //
+    // Use `app.undo()` (not `doc.undo()`) so SpreadsheetApp can fall back to a valid active
+    // sheet id. Otherwise the renderer can re-materialize the deleted sheet via
+    // DocumentController's lazy sheet creation.
+    await page.evaluate(async () => {
       const app = (window as any).__formulaApp;
-      app.getDocument().undo();
+      app.undo();
+      await app.whenIdle();
     });
 
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);

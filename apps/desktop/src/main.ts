@@ -3627,6 +3627,18 @@ if (
   const updateContextKeys = (selection: SelectionState | null = lastSelection) => {
     if (!selection) return;
     const sheetId = app.getCurrentSheetId();
+    // Avoid resurrecting deleted sheets while responding to DocumentController change events.
+    //
+    // DocumentController lazily creates sheets when `getCell` is called. During undo/redo of
+    // sheet-structure operations (add/delete/hide), the active sheet id can temporarily point at
+    // a sheet that was just removed. Calling `getCell` in that window would re-materialize the
+    // sheet without recording a history entry, breaking undo semantics and dirty tracking.
+    try {
+      const meta = (app.getDocument() as any).getSheetMeta?.(sheetId) ?? null;
+      if (!meta) return;
+    } catch {
+      // Best-effort: if metadata access fails, continue and let downstream logic handle it.
+    }
     const sheetName = workbookSheetStore.getName(sheetId) ?? sheetId;
     const active = selection.active;
     const cell = app.getDocument().getCell(sheetId, { row: active.row, col: active.col }) as any;
