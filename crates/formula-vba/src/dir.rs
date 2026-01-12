@@ -94,6 +94,36 @@ impl DirStream {
                         text_offset: None,
                     });
                 }
+                0x0047 => {
+                    // MODULENAMEUNICODE.
+                    //
+                    // When both ANSI and Unicode variants are present, this record usually appears
+                    // immediately after MODULENAME and should be treated as an alternate
+                    // representation for the current module's name. When the ANSI MODULENAME record
+                    // is absent, treat this as the start of a new module.
+                    let start_new = match current_module.as_ref() {
+                        None => true,
+                        Some(m) => {
+                            !m.stream_name.is_empty()
+                                || m.text_offset.is_some()
+                                || !matches!(m.module_type, ModuleType::Unknown(0))
+                        }
+                    };
+
+                    if start_new {
+                        if let Some(m) = current_module.take() {
+                            modules.push(m);
+                        }
+                        current_module = Some(ModuleRecord {
+                            name: decode_unicode_bytes(data),
+                            stream_name: String::new(),
+                            module_type: ModuleType::Unknown(0),
+                            text_offset: None,
+                        });
+                    } else if let Some(m) = current_module.as_mut() {
+                        m.name = decode_unicode_bytes(data);
+                    }
+                }
                 0x001A => {
                     // MODULESTREAMNAME. Some files include a reserved u16 at the end.
                     if let Some(m) = current_module.as_mut() {
@@ -222,6 +252,27 @@ fn decode_bytes(bytes: &[u8], encoding: &'static Encoding) -> String {
 
     let (cow, _, _) = encoding.decode(bytes);
     cow.into_owned()
+}
+
+fn decode_unicode_bytes(bytes: &[u8]) -> String {
+    let mut utf16_bytes = bytes;
+
+    // Some producers include an internal u32 length prefix. Accept both:
+    // - length == remaining bytes (byte count), or
+    // - length*2 == remaining bytes (UTF-16 code units).
+    if bytes.len() >= 4 {
+        let n = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+        let remaining = bytes.len() - 4;
+        if n == remaining || n.saturating_mul(2) == remaining {
+            utf16_bytes = &bytes[4..];
+        }
+    }
+
+    let (cow, _) = UTF_16LE.decode_without_bom_handling(utf16_bytes);
+    let mut s = cow.into_owned();
+    // Stream/module names should not contain NULs; strip defensively.
+    s.retain(|c| c != '\u{0000}');
+    s
 }
 
 fn looks_like_utf16le(bytes: &[u8]) -> bool {

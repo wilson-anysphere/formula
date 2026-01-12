@@ -10,6 +10,9 @@ use crate::{decompress_container, DirParseError, DirStream, OleFile, ParseError}
 struct ModuleInfo {
     stream_name: String,
     text_offset: Option<usize>,
+    // Tracks whether we've seen any non-name module records (e.g. stream name / text offset). This
+    // is used to disambiguate MODULENAMEUNICODE when both ANSI+Unicode record variants are present.
+    seen_non_name_record: bool,
 }
 
 // MS-OVBA §2.4.2.5 DefaultAttributes list (byte-equality, NOT case-insensitive compare).
@@ -400,13 +403,51 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
                 current_module = Some(ModuleInfo {
                     stream_name: decode_dir_string(data, encoding),
                     text_offset: None,
+                    seen_non_name_record: false,
                 });
+            }
+
+            // MODULENAMEUNICODE (UTF-16LE).
+            //
+            // Some `VBA/dir` streams provide a Unicode module name record (0x0047). In the
+            // simplified TLV-ish layouts used by some fixtures/producers, this can appear without a
+            // preceding MODULENAME record, so treat it as a module-group start when we are not
+            // currently in a module record group.
+            0x0047 => {
+                let start_new = match current_module.as_ref() {
+                    None => true,
+                    Some(m) => m.seen_non_name_record,
+                };
+                if start_new {
+                    if let Some(m) = current_module.take() {
+                        modules.push(m);
+                    }
+                    current_module = Some(ModuleInfo {
+                        stream_name: decode_dir_unicode_string(data),
+                        text_offset: None,
+                        seen_non_name_record: false,
+                    });
+                } else if let Some(m) = current_module.as_mut() {
+                    // Update the module-name-derived default stream name; this matters when a
+                    // MODULESTREAMNAME record is absent and the stream name must be inferred from
+                    // the module name.
+                    m.stream_name = decode_dir_unicode_string(data);
+                }
             }
 
             // MODULESTREAMNAME. Some files include a reserved u16 at the end.
             0x001A => {
                 if let Some(m) = current_module.as_mut() {
                     m.stream_name = decode_dir_string(trim_reserved_u16(data), encoding);
+                    m.seen_non_name_record = true;
+                }
+            }
+
+            // MODULESTREAMNAMEUNICODE (UTF-16LE).
+            0x0032 => {
+                if let Some(m) = current_module.as_mut() {
+                    m.stream_name = decode_dir_unicode_string(data);
+                    m.seen_non_name_record = true;
                 }
             }
 
@@ -416,6 +457,7 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
                     if data.len() >= 4 {
                         let n = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
                         m.text_offset = Some(n);
+                        m.seen_non_name_record = true;
                     }
                 }
             }
@@ -1040,6 +1082,10 @@ struct ModuleInfoV3 {
     name_bytes: Vec<u8>,
     name_unicode_bytes: Option<Vec<u8>>,
     type_record_reserved: Option<[u8; 2]>,
+    // Tracks whether we've seen any non-name module records (e.g. stream name / text offset /
+    // module type). Used to disambiguate MODULENAMEUNICODE when the ANSI MODULENAME record is
+    // absent and modules are described only by Unicode records.
+    seen_non_name_record: bool,
 }
 
 /// Build the MS-OVBA §2.4.2 V3 "V3ContentNormalizedData" byte sequence for a VBA project.
@@ -1301,13 +1347,40 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                     name_bytes: data.to_vec(),
                     name_unicode_bytes: None,
                     type_record_reserved: None,
+                    seen_non_name_record: false,
                 });
             }
 
-            // MODULENAMEUNICODE
+            // MODULENAMEUNICODE (UTF-16LE).
+            //
+            // Some producers emit a Unicode module name record without an ANSI MODULENAME record.
+            // Treat it as a module-group start when we're not currently in a module group or when
+            // we've already consumed non-name module records for the current module.
             0x0047 => {
-                if let Some(m) = current_module.as_mut() {
+                let start_new = match current_module.as_ref() {
+                    None => true,
+                    Some(m) => m.seen_non_name_record,
+                };
+
+                if start_new {
+                    if let Some(m) = current_module.take() {
+                        append_v3_module(&mut out, &mut ole, &m)?;
+                    }
+                    current_module = Some(ModuleInfoV3 {
+                        stream_name: decode_dir_unicode_string(data),
+                        text_offset: None,
+                        name_bytes: Vec::new(),
+                        name_unicode_bytes: Some(data.to_vec()),
+                        type_record_reserved: None,
+                        seen_non_name_record: false,
+                    });
+                } else if let Some(m) = current_module.as_mut() {
                     m.name_unicode_bytes = Some(data.to_vec());
+                    // If we haven't yet seen an explicit stream name, update the default stream
+                    // name derived from MODULENAME.
+                    if !m.seen_non_name_record {
+                        m.stream_name = decode_dir_unicode_string(data);
+                    }
                 }
             }
 
@@ -1316,6 +1389,7 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                 if let Some(m) = current_module.as_mut() {
                     let trimmed = trim_reserved_u16(data);
                     m.stream_name = decode_dir_string(trimmed, encoding);
+                    m.seen_non_name_record = true;
                 }
             }
 
@@ -1325,11 +1399,8 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
             // MODULESTREAMNAME. Prefer it when present since the stream name is used for OLE lookup.
             0x0032 => {
                 if let Some(m) = current_module.as_mut() {
-                    let (cow, _had_errors) = UTF_16LE.decode_without_bom_handling(data);
-                    let mut s = cow.into_owned();
-                    // Stream names should not contain NUL; strip just in case a producer emits them.
-                    s.retain(|c| c != '\u{0000}');
-                    m.stream_name = s;
+                    m.stream_name = decode_dir_unicode_string(data);
+                    m.seen_non_name_record = true;
                 }
             }
 
@@ -1350,11 +1421,15 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                         [0u8, 0u8]
                     };
                     m.type_record_reserved = Some(reserved);
+                    m.seen_non_name_record = true;
                 }
             }
             0x0022 => {
                 // Explicitly ignored: non-procedural module type records do not contribute to the
                 // v3 transcript per MS-OVBA §2.4.2.5 pseudocode.
+                if let Some(m) = current_module.as_mut() {
+                    m.seen_non_name_record = true;
+                }
             }
 
             // MODULETEXTOFFSET (u32 LE).
@@ -1363,6 +1438,7 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                     if data.len() >= 4 {
                         let n = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
                         m.text_offset = Some(n);
+                        m.seen_non_name_record = true;
                     }
                 }
             }
@@ -1870,6 +1946,36 @@ fn decode_dir_string(bytes: &[u8], encoding: &'static Encoding) -> String {
 
     let (cow, _, _) = encoding.decode(bytes);
     cow.into_owned()
+}
+
+fn decode_dir_unicode_string(bytes: &[u8]) -> String {
+    let bytes = trim_u32_len_prefix_unicode_string(bytes);
+    let (cow, _) = UTF_16LE.decode_without_bom_handling(bytes);
+    let mut s = cow.into_owned();
+    // Defensively strip embedded NULs; stream/module names should not contain them.
+    s.retain(|c| c != '\u{0000}');
+    s
+}
+
+fn trim_u32_len_prefix_unicode_string(bytes: &[u8]) -> &[u8] {
+    // Some MS-OVBA `*_UNICODE` record payloads are specified/observed as an optional u32 length
+    // prefix followed by UTF-16LE bytes.
+    //
+    // Heuristics:
+    // - if the first u32 equals the remaining byte count, treat it as a byte-length prefix.
+    // - if the first u32 equals the remaining UTF-16 code unit count, treat it as a char-length prefix.
+    if bytes.len() < 4 {
+        return bytes;
+    }
+    let n = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+    let rest = &bytes[4..];
+    if n == rest.len() {
+        return rest;
+    }
+    if rest.len() % 2 == 0 && n.saturating_mul(2) == rest.len() {
+        return rest;
+    }
+    bytes
 }
 
 fn looks_like_utf16le(bytes: &[u8]) -> bool {
