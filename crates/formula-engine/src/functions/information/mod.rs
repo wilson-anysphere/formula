@@ -57,9 +57,9 @@ pub fn r#type(value: &Value) -> i32 {
 
 /// Returns the numeric error type codes used by Excel's ERROR.TYPE function.
 ///
-/// Excel historically defined codes 1-8 for the classic errors. Modern Excel adds new
-/// error values for dynamic arrays; this engine follows the extended mapping documented in
-/// `docs/01-formula-engine.md`:
+/// Excel historically defined codes 1-8 for the classic errors. Modern Excel adds new error values
+/// for dynamic arrays and data connectivity; this engine follows the extended mapping documented
+/// in `docs/01-formula-engine.md`:
 ///
 /// - 1: `#NULL!`
 /// - 2: `#DIV/0!`
@@ -76,7 +76,7 @@ pub fn r#type(value: &Value) -> i32 {
 /// - 13: `#BLOCKED!`
 /// - 14: `#UNKNOWN!`
 pub fn error_type_code(kind: ErrorKind) -> i32 {
-    kind.code().into()
+    kind.code() as i32
 }
 
 /// Returns the ERROR.TYPE numeric code for a value, or `None` if the value is not an error.

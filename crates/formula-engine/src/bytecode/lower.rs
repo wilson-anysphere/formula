@@ -251,8 +251,10 @@ fn parse_number(raw: &str) -> Result<f64, LowerError> {
     }
 }
 
-fn parse_error_kind(raw: &str) -> crate::value::ErrorKind {
-    crate::value::ErrorKind::from_code(raw).unwrap_or(crate::value::ErrorKind::Value)
+fn parse_error_kind(raw: &str) -> BytecodeErrorKind {
+    // Keep this in sync with `eval::compiler::parse_error_kind` so AST and bytecode evaluation
+    // agree on the canonical set of supported error literals.
+    BytecodeErrorKind::from_code(raw).unwrap_or(BytecodeErrorKind::Value)
 }
 
 fn lower_array_literal_element(expr: &crate::Expr) -> Result<Value, LowerError> {
@@ -348,9 +350,7 @@ pub fn lower_canonical_expr(
         crate::Expr::Number(raw) => Ok(BytecodeExpr::Literal(Value::Number(parse_number(raw)?))),
         crate::Expr::String(s) => Ok(BytecodeExpr::Literal(Value::Text(Arc::from(s.as_str())))),
         crate::Expr::Boolean(b) => Ok(BytecodeExpr::Literal(Value::Bool(*b))),
-        crate::Expr::Error(raw) => Ok(BytecodeExpr::Literal(Value::Error(
-            BytecodeErrorKind::from(parse_error_kind(raw)),
-        ))),
+        crate::Expr::Error(raw) => Ok(BytecodeExpr::Literal(Value::Error(parse_error_kind(raw)))),
         crate::Expr::Missing => Ok(BytecodeExpr::Literal(Value::Empty)),
         crate::Expr::Array(arr) => Ok(BytecodeExpr::Literal(lower_array_literal(arr)?)),
         crate::Expr::CellRef(r) => lower_cell_ref_expr(r, origin, current_sheet, resolve_sheet),

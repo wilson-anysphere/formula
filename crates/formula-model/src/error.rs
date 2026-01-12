@@ -47,6 +47,14 @@ impl ErrorValue {
         }
     }
 
+    /// Alias for [`ErrorValue::as_str`].
+    ///
+    /// Historically some callers used `as_code()` for the canonical error text; keep this helper
+    /// to avoid breaking downstream code while `ErrorValue` is the shared canonical error type.
+    pub const fn as_code(self) -> &'static str {
+        self.as_str()
+    }
+
     /// Numeric error code used by Excel in various internal representations.
     ///
     /// Values are based on the mapping documented in `docs/01-formula-engine.md`.

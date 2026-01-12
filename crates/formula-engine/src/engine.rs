@@ -5899,7 +5899,6 @@ fn engine_error_to_bytecode(err: ErrorKind) -> bytecode::ErrorKind {
 fn bytecode_error_to_engine(err: bytecode::ErrorKind) -> ErrorKind {
     err.into()
 }
-
 fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
     match value {
         Value::Number(n) => bytecode::Value::Number(*n),

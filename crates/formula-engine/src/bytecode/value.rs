@@ -1,5 +1,5 @@
-use std::fmt;
 use std::sync::Arc;
+use std::fmt;
 
 /// Engine sheet id (0-indexed).
 pub type SheetId = usize;
@@ -294,7 +294,6 @@ impl PartialEq for Value {
 }
 
 impl Eq for Value {}
-
 impl fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_code())

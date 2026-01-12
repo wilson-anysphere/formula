@@ -424,54 +424,27 @@ impl<'a> Parser<'a> {
     fn parse_error_literal(&mut self) -> Result<Expr, ParseError> {
         debug_assert_eq!(self.peek_byte(), Some(b'#'));
         let start = self.pos;
-        let remaining = &self.input[start..];
-
-        // Excel error literals are case-insensitive and start with `#`.
-        //
-        // We accept the canonical 14-error set for parity with the main parser.
-        // Unknown `#...` sequences are rejected.
-        const ERROR_LITERALS: &[(&str, ErrorKind)] = &[
-            ("#NULL!", ErrorKind::Null),
-            ("#DIV/0!", ErrorKind::Div0),
-            ("#VALUE!", ErrorKind::Value),
-            ("#REF!", ErrorKind::Ref),
-            ("#NAME?", ErrorKind::Name),
-            ("#NUM!", ErrorKind::Num),
-            ("#N/A", ErrorKind::NA),
-            ("#GETTING_DATA", ErrorKind::GettingData),
-            ("#SPILL!", ErrorKind::Spill),
-            ("#CALC!", ErrorKind::Calc),
-            ("#FIELD!", ErrorKind::Field),
-            ("#CONNECT!", ErrorKind::Connect),
-            ("#BLOCKED!", ErrorKind::Blocked),
-            ("#UNKNOWN!", ErrorKind::Unknown),
-        ];
-
-        let mut best: Option<(usize, ErrorKind)> = None;
-        for &(lit, kind) in ERROR_LITERALS {
-            let lit_bytes = lit.as_bytes();
-            if remaining.len() < lit_bytes.len() {
-                continue;
-            }
-            let matches = remaining[..lit_bytes.len()]
-                .iter()
-                .zip(lit_bytes.iter())
-                .all(|(a, b)| a.to_ascii_uppercase() == b.to_ascii_uppercase());
-            if matches {
-                best = Some(match best {
-                    Some((cur_len, cur_kind)) if cur_len >= lit_bytes.len() => {
-                        (cur_len, cur_kind)
-                    }
-                    _ => (lit_bytes.len(), kind),
-                });
+        self.pos += 1; // '#'
+        while let Some(b) = self.peek_byte() {
+            if matches!(b, b'_' | b'/' | b'.' | b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z') {
+                self.pos += 1;
+            } else {
+                break;
             }
         }
 
-        let Some((len, kind)) = best else {
-            return Err(ParseError::UnexpectedToken(start));
-        };
+        // Optional `!` / `?` suffix (e.g. `#REF!`, `#NAME?`).
+        if matches!(self.peek_byte(), Some(b'!' | b'?')) {
+            self.pos += 1;
+        }
 
-        self.pos = start + len;
+        if self.pos == start + 1 {
+            return Err(ParseError::UnexpectedToken(start));
+        }
+
+        let s = std::str::from_utf8(&self.input[start..self.pos])
+            .map_err(|_| ParseError::UnexpectedToken(start))?;
+        let kind = ErrorKind::from_code(s).ok_or(ParseError::UnexpectedToken(start))?;
         Ok(Expr::Literal(Value::Error(kind)))
     }
 
@@ -752,7 +725,7 @@ mod tests {
         let origin = CellCoord::new(0, 0);
 
         assert_eq!(
-            parse_formula("=#NOT_A_REAL_ERROR", origin),
+            parse_formula("=#NOT_A_REAL_ERROR!", origin),
             Err(ParseError::UnexpectedToken(1))
         );
     }
