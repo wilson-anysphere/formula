@@ -61,7 +61,6 @@
         { "command": "read_text_file" },
         { "command": "refresh_pivot_table" },
         { "command": "rename_sheet" },
-        { "command": "reorder_sheets" },
         { "command": "report_startup_tti" },
         { "command": "report_startup_webview_loaded" },
         { "command": "restart_app" },
