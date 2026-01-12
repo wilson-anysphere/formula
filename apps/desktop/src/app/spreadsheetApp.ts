@@ -689,17 +689,33 @@ export class SpreadsheetApp {
         },
       });
 
-      // Collaborative undo/redo in the desktop UI is backed by Yjs UndoManager
-      // semantics (local-only, never overwriting remote edits). The binder origin
-      // is tracked so only DocumentController-origin changes are undoable.
+      const undoScope: Array<Y.AbstractType<any>> = [
+        this.collabSession.cells,
+        this.collabSession.sheets,
+        this.collabSession.metadata,
+        this.collabSession.namedRanges,
+      ];
+
+      // Include comments in the undo scope when the comments root already exists in
+      // the doc. Avoid instantiating `doc.getMap("comments")` pre-hydration because
+      // older documents may still use an Array-backed schema.
+      try {
+        if (this.collabSession.doc.share.get("comments")) {
+          const root = getCommentsRoot(this.collabSession.doc);
+          undoScope.push(root.kind === "map" ? root.map : root.array);
+        }
+      } catch {
+        // Best-effort; never block app startup on comment schema issues.
+      }
+
       const undoService = createUndoService({
         mode: "collab",
         doc: this.collabSession.doc,
-        scope: [this.collabSession.cells, this.collabSession.sheets, this.collabSession.metadata, this.collabSession.namedRanges],
+        scope: undoScope,
         origin: binderOrigin,
       }) as UndoService & { origin?: any };
-      // The binder expects an `origin` field for echo suppression; `createUndoService`
-      // does not currently expose it.
+
+      // The binder expects an explicit origin token for echo suppression.
       undoService.origin = binderOrigin;
       this.setCollabUndoService(undoService);
 

@@ -1,4 +1,5 @@
 import { bindCollabSessionToDocumentController, type CollabSession, type DocumentControllerBinder } from "@formula/collab-session";
+import { getCommentsRoot } from "@formula/collab-comments";
 import { createUndoService, type UndoService } from "@formula/collab-undo";
 
 export type DocumentControllerCollabUndoBinding = {
@@ -37,9 +38,17 @@ export async function bindDocumentControllerWithCollabUndo(options: {
     session.sheets,
     session.metadata,
     session.namedRanges,
-    // Include comments root deterministically (collab comments live in session.doc).
-    session.doc.getMap("comments"),
   ];
+  // Include comments root when present. Avoid instantiating `doc.getMap("comments")`
+  // pre-hydration because older docs may still use an Array-backed schema.
+  try {
+    if (session.doc.share.get("comments")) {
+      const root = getCommentsRoot(session.doc);
+      scope.push(root.kind === "map" ? root.map : root.array);
+    }
+  } catch {
+    // Best-effort; avoid breaking binder setup due to comment schema issues.
+  }
 
   const undoService = createUndoService({
     mode: "collab",
@@ -67,4 +76,3 @@ export async function bindDocumentControllerWithCollabUndo(options: {
 
   return { binder, undoService, binderOrigin };
 }
-
