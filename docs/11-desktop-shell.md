@@ -148,13 +148,18 @@ Tauri v2 replaces Tauri v1’s “allowlist” with **capabilities**, defined as
 
 - `apps/desktop/src-tauri/capabilities/` (main capability: `capabilities/main.json`)
 
-Capabilities are scoped per window via the capability file itself. In this repo the main window is labeled `main`
-(`app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json`), and `apps/desktop/src-tauri/capabilities/main.json`
-scopes itself to that window via `"windows": ["main"]`.
+Capabilities are scoped per window in **two** places (defense-in-depth):
 
-> Note: some toolchains also support window-level opt-in via `app.windows[].capabilities` in `tauri.conf.json`. When
-> present, keep it in sync with the capability file’s `"windows": [...]` scoping so adding a new window never implicitly
-> grants it the main capability (guardrailed by `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`).
+- `apps/desktop/src-tauri/tauri.conf.json` opts a window into capability identifiers via `app.windows[].capabilities`.
+- Each capability file under `apps/desktop/src-tauri/capabilities/` further scopes itself to window labels via
+  `"windows": [...]`.
+
+In this repo the main window is labeled `main` (`app.windows[].label` in `tauri.conf.json`). It opts into the `main`
+capability via `"capabilities": ["main"]`, and `capabilities/main.json` also scopes itself to that window via
+`"windows": ["main"]`.
+
+> Keep `app.windows[].capabilities` and the capability file’s `"windows": [...]` scoping in sync so adding a new window never
+> implicitly grants it the main capability (guardrailed by `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`).
 
 Example excerpt:
 
@@ -177,11 +182,6 @@ Example excerpt:
   ]
 }
 ```
-
-Note: windows explicitly opt into capabilities via `app.windows[].capabilities` in
-`apps/desktop/src-tauri/tauri.conf.json` (e.g. the main window includes `"capabilities": ["main"]`). Keep this in sync
-with the capability file’s `"windows": [...]` scoping so adding a new window never implicitly grants it the main
-capability.
 
 When adding new uses of privileged plugin APIs (clipboard/dialog/updater/window APIs) or adding new desktop event names,
 update the relevant allowlists in `capabilities/main.json`.
