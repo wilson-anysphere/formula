@@ -592,6 +592,8 @@ describe("WorkbookContextBuilder", () => {
     expect(first.promptContextTokens).toBe(ctx1.payload.budget.usedPromptContextTokens);
     expect(first.cache.schema.misses).toBeGreaterThanOrEqual(1);
     expect(first.cache.block.misses).toBeGreaterThanOrEqual(1);
+    expect(first.cache.schema.entries).toBeGreaterThanOrEqual(1);
+    expect(first.cache.block.entries).toBeGreaterThanOrEqual(1);
     expect(first.readBlockCellCount).toBeGreaterThanOrEqual(1);
     expect(first.readBlockCellCountByKind.sheet_sample).toBeGreaterThanOrEqual(1);
     expect(first.rag.enabled).toBe(false);
@@ -600,6 +602,8 @@ describe("WorkbookContextBuilder", () => {
     // Second build should reuse cached schema + sampled blocks.
     expect(second.cache.schema.hits).toBeGreaterThanOrEqual(1);
     expect(second.cache.block.hits).toBeGreaterThanOrEqual(1);
+    expect(second.cache.schema.entries).toBeGreaterThanOrEqual(1);
+    expect(second.cache.block.entries).toBeGreaterThanOrEqual(1);
     expect(second.readBlockCellCount).toBe(0);
     expect(second.readBlockCellCountByKind.sheet_sample).toBe(0);
     expect(second.blockCountByKind).toEqual({ selection: 0, sheet_sample: 1, retrieved: 0 });
