@@ -1,9 +1,38 @@
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
+use tokio::sync::Notify;
 
 static UPDATE_CHECK_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+static UPDATE_DOWNLOAD_STATE: OnceLock<Mutex<UpdateDownloadState>> = OnceLock::new();
+
+struct DownloadedUpdate {
+    version: String,
+    update: tauri_plugin_updater::Update,
+    bytes: Vec<u8>,
+}
+
+struct UpdateDownloadState {
+    in_flight: bool,
+    downloading_version: Option<String>,
+    downloaded: Option<DownloadedUpdate>,
+    last_error: Option<String>,
+    notify: std::sync::Arc<Notify>,
+}
+
+fn update_download_state() -> &'static Mutex<UpdateDownloadState> {
+    UPDATE_DOWNLOAD_STATE.get_or_init(|| {
+        Mutex::new(UpdateDownloadState {
+            in_flight: false,
+            downloading_version: None,
+            downloaded: None,
+            last_error: None,
+            notify: std::sync::Arc::new(Notify::new()),
+        })
+    })
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -36,14 +65,35 @@ pub fn spawn_update_check(app: &AppHandle, source: UpdateCheckSource) {
         }
         let _guard = UpdateCheckInFlightGuard;
 
-        match check_for_updates(&handle, source).await {
-            Ok(Some(payload)) => {
-                let _ = handle.emit("update-available", payload);
-            }
-            Ok(None) => {
-                let _ =
-                    handle.emit("update-not-available", serde_json::json!({ "source": source }));
-            }
+        match handle.updater() {
+            Ok(updater) => match updater.check().await {
+                Ok(Some(update)) => {
+                    let version = update.version.clone();
+                    let body = update.body.clone();
+                    let payload = serde_json::json!({
+                        "source": source,
+                        "version": version,
+                        "body": body,
+                    });
+                    let _ = handle.emit("update-available", payload);
+
+                    // Start a best-effort background download so the user can apply the update
+                    // immediately once they approve a restart.
+                    spawn_update_download(&handle, source, update);
+                }
+                Ok(None) => {
+                    let _ = handle
+                        .emit("update-not-available", serde_json::json!({ "source": source }));
+                }
+                Err(err) => {
+                    let msg = err.to_string();
+                    let _ = handle.emit(
+                        "update-check-error",
+                        serde_json::json!({ "source": source, "message": msg }),
+                    );
+                    eprintln!("updater check failed: {err}");
+                }
+            },
             Err(err) => {
                 let msg = err.to_string();
                 let _ = handle.emit(
@@ -56,16 +106,159 @@ pub fn spawn_update_check(app: &AppHandle, source: UpdateCheckSource) {
     });
 }
 
-async fn check_for_updates(
+fn spawn_update_download(
     app: &AppHandle,
     source: UpdateCheckSource,
-) -> tauri_plugin_updater::Result<Option<serde_json::Value>> {
-    let update = app.updater()?.check().await?;
-    Ok(update.map(|update| {
-        serde_json::json!({
-            "source": source,
-            "version": update.version,
-            "body": update.body,
-        })
-    }))
+    update: tauri_plugin_updater::Update,
+) {
+    let version = update.version.clone();
+
+    {
+        let mut state = update_download_state()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+
+        if state
+            .downloaded
+            .as_ref()
+            .is_some_and(|downloaded| downloaded.version == version)
+        {
+            return;
+        }
+
+        if state.in_flight {
+            // Another download is already in flight (avoid double-downloads). If it's for this
+            // same version, we also skip.
+            if state.downloading_version.as_deref() == Some(&version) {
+                return;
+            }
+            return;
+        }
+
+        state.in_flight = true;
+        state.downloading_version = Some(version.clone());
+        state.last_error = None;
+    }
+
+    let handle = app.clone();
+    let version_for_events = version.clone();
+    let _ = handle.emit(
+        "update-download-started",
+        serde_json::json!({ "source": source, "version": version_for_events }),
+    );
+
+    tauri::async_runtime::spawn(async move {
+        let version_for_progress = version.clone();
+        let mut downloaded_bytes: u64 = 0;
+        let download_result = update
+            .download(
+                |chunk_length, content_length| {
+                    downloaded_bytes = downloaded_bytes.saturating_add(chunk_length as u64);
+                    let percent =
+                        content_length.and_then(|total| (total > 0).then(|| (downloaded_bytes as f64 / total as f64) * 100.0));
+                    let _ = handle.emit(
+                        "update-download-progress",
+                        serde_json::json!({
+                            "source": source,
+                            "version": version_for_progress.as_str(),
+                            "chunkLength": chunk_length,
+                            "downloaded": downloaded_bytes,
+                            "total": content_length,
+                            "percent": percent,
+                        }),
+                    );
+                },
+                || {},
+            )
+            .await;
+
+        match download_result {
+            Ok(bytes) => {
+                let notify = {
+                    let mut state = update_download_state()
+                        .lock()
+                        .unwrap_or_else(|err| err.into_inner());
+                    state.in_flight = false;
+                    if state.downloading_version.as_deref() == Some(version.as_str()) {
+                        state.downloading_version = None;
+                    }
+
+                    state.downloaded = Some(DownloadedUpdate {
+                        version: version.clone(),
+                        update,
+                        bytes,
+                    });
+                    state.last_error = None;
+                    state.notify.clone()
+                };
+                notify.notify_waiters();
+
+                let _ = handle.emit(
+                    "update-downloaded",
+                    serde_json::json!({ "source": source, "version": version }),
+                );
+            }
+            Err(err) => {
+                let msg = err.to_string();
+                let notify = {
+                    let mut state = update_download_state()
+                        .lock()
+                        .unwrap_or_else(|err| err.into_inner());
+                    state.in_flight = false;
+                    if state.downloading_version.as_deref() == Some(version.as_str()) {
+                        state.downloading_version = None;
+                    }
+                    state.downloaded = None;
+                    state.last_error = Some(msg.clone());
+                    state.notify.clone()
+                };
+                notify.notify_waiters();
+
+                let _ = handle.emit(
+                    "update-download-error",
+                    serde_json::json!({ "source": source, "version": version, "message": msg }),
+                );
+                eprintln!("updater download failed: {err}");
+            }
+        }
+    });
+}
+
+/// Installs the currently downloaded update (if any).
+///
+/// Intended to be called after the user approves a restart via `restartToInstallUpdate()`.
+#[tauri::command]
+pub async fn install_downloaded_update(_app: AppHandle) -> Result<(), String> {
+    loop {
+        // Create the wait handle *before* checking state so we can't miss a `notify_waiters()`
+        // that happens between observing `in_flight` and calling `.notified().await`.
+        let notify = {
+            let state = update_download_state()
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            state.notify.clone()
+        };
+        let notified = notify.notified();
+
+        let mut state = update_download_state()
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+
+        if let Some(downloaded) = state.downloaded.take() {
+            return downloaded
+                .update
+                .install(&downloaded.bytes)
+                .map_err(|err| err.to_string());
+        }
+
+        if !state.in_flight {
+            if let Some(err) = state.last_error.clone() {
+                return Err(err);
+            }
+            return Err("No downloaded update is available".to_string());
+        }
+
+        drop(state);
+        notified.await;
+    }
 }

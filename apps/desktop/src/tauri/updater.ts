@@ -15,6 +15,20 @@ export type UpdateCheckSource = "manual";
  * without importing `@tauri-apps/*` directly.
  */
 export async function installUpdateAndRestart(): Promise<void> {
+  // Prefer our backend command which installs the already-downloaded update (from the startup
+  // background download). This avoids waiting for a second download when the user approves a restart.
+  const invoke = getTauriInvoke();
+  if (invoke) {
+    try {
+      await invoke("install_downloaded_update");
+      return;
+    } catch (err) {
+      // Fall back to the plugin API below (e.g. if the command isn't available yet or the
+      // invoke is blocked by capabilities).
+      console.warn("[formula][updater] Failed to invoke install_downloaded_update; falling back to updater plugin:", err);
+    }
+  }
+
   // We intentionally avoid importing `@tauri-apps/plugin-updater` because the desktop
   // frontend leans on global `__TAURI__` bindings (see `src/main.ts`).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -80,3 +94,4 @@ export async function checkForUpdatesFromCommandPalette(source: UpdateCheckSourc
 
   await invoke("check_for_updates", { source });
 }
+

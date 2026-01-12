@@ -17,7 +17,11 @@ type UpdaterEventName =
   | "update-check-started"
   | "update-not-available"
   | "update-check-error"
-  | "update-available";
+  | "update-available"
+  | "update-download-started"
+  | "update-download-progress"
+  | "update-downloaded"
+  | "update-download-error";
 
 type UpdaterEventPayload = {
   source?: string;
@@ -25,6 +29,11 @@ type UpdaterEventPayload = {
   body?: string | null;
   message?: string;
   error?: string;
+  // Optional background download progress metadata.
+  downloaded?: number;
+  total?: number | null;
+  percent?: number | null;
+  chunkLength?: number;
   // Optional manual download metadata (may be added to updater payloads in the future).
   releaseUrl?: string;
   release_url?: string;
@@ -94,6 +103,7 @@ let progressDownloaded = 0;
 let progressTotal: number | null = null;
 let progressPercent: number | null = null;
 
+let updateReadyToastShownForVersion: string | null = null;
 function getLocalStorageOrNull(): StorageLike | null {
   try {
     // Prefer `window.localStorage` when available (jsdom/webview), but fall back to
@@ -736,6 +746,90 @@ function openUpdateAvailableDialog(payload: UpdaterEventPayload): void {
   safeShowModal(updateDialog!.dialog);
 }
 
+function showUpdateReadyToast(update: { version: string }): void {
+  if (typeof document === "undefined") return;
+
+  const root = document.getElementById("toast-root");
+  if (!root) {
+    // Fall back to a vanilla toast when running in environments without the shared toast root.
+    try {
+      const versionMessage = tWithVars("updater.updateAvailableMessage", { version: update.version });
+      showToast(`${versionMessage}. ${t("updater.downloadComplete")} ${t("updater.restartToInstall")}`, "info");
+    } catch {
+      // ignore
+    }
+    return;
+  }
+
+  if (updateReadyToastShownForVersion === update.version) return;
+  updateReadyToastShownForVersion = update.version;
+
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.dataset.type = "info";
+  toast.dataset.testid = "update-ready-toast";
+  toast.style.display = "flex";
+  toast.style.alignItems = "center";
+  toast.style.gap = "10px";
+
+  const message = document.createElement("div");
+  const versionMessage = tWithVars("updater.updateAvailableMessage", { version: update.version });
+  message.textContent = `${versionMessage}. ${t("updater.downloadComplete")} ${t("updater.restartToInstall")}`;
+  message.style.flex = "1";
+  toast.appendChild(message);
+
+  const controls = document.createElement("div");
+  // Reuse dialog button styles so the toast CTA matches the rest of the desktop shell.
+  controls.className = "dialog__controls";
+  controls.style.marginTop = "0";
+  controls.style.pointerEvents = "auto";
+  controls.style.flex = "0 0 auto";
+
+  const viewVersionsBtn = document.createElement("button");
+  viewVersionsBtn.type = "button";
+  viewVersionsBtn.textContent = t("updater.openReleasePage");
+  viewVersionsBtn.dataset.testid = "update-ready-view-versions";
+
+  const restartBtn = document.createElement("button");
+  restartBtn.type = "button";
+  restartBtn.textContent = t("updater.restartNow");
+  restartBtn.dataset.testid = "update-ready-restart";
+
+  controls.appendChild(viewVersionsBtn);
+  controls.appendChild(restartBtn);
+  toast.appendChild(controls);
+  root.appendChild(toast);
+
+  const cleanup = () => {
+    toast.remove();
+  };
+
+  viewVersionsBtn.addEventListener("click", () => {
+    void openExternalUrl(FORMULA_RELEASES_URL);
+    cleanup();
+  });
+
+  restartBtn.addEventListener("click", () => {
+    void (async () => {
+      // Prevent double-click restart attempts.
+      restartBtn.disabled = true;
+      viewVersionsBtn.disabled = true;
+      try {
+        const didRestart = await restartToInstallUpdate();
+        if (didRestart) {
+          cleanup();
+        }
+      } finally {
+        // If the restart was cancelled (unsaved changes) or failed, keep the toast visible.
+        if (toast.isConnected) {
+          restartBtn.disabled = false;
+          viewVersionsBtn.disabled = false;
+        }
+      }
+    })();
+  });
+}
+
 export async function handleUpdaterEvent(name: UpdaterEventName, payload: UpdaterEventPayload): Promise<void> {
   const rawSource = payload?.source;
   const followUpEligible =
@@ -776,6 +870,14 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
   const shouldSurfaceCompletion =
     manualUpdateCheckFollowUp && (name === "update-not-available" || name === "update-check-error");
   const shouldSurfaceToast = source === "manual" || shouldSurfaceCompletion;
+
+  // `update-downloaded` can happen from a startup background download. Surface lightweight UI so
+  // the user can approve a restart/apply step when they're ready.
+  if (name === "update-downloaded") {
+    const version = typeof payload?.version === "string" && payload.version.trim() !== "" ? payload.version.trim() : "unknown";
+    showUpdateReadyToast({ version });
+    return;
+  }
 
   switch (name) {
     case "update-check-already-running": {
@@ -840,6 +942,19 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
       openUpdateAvailableDialog({ ...payload, version, body });
       break;
     }
+    case "update-download-started": {
+      // Manual-check UX already shows an update dialog; keep download events quiet for now.
+      break;
+    }
+    case "update-download-progress": {
+      break;
+    }
+    case "update-download-error": {
+      break;
+    }
+    case "update-downloaded": {
+      break;
+    }
   }
 }
 
@@ -853,6 +968,10 @@ export async function installUpdaterUi(listenArg?: TauriListen): Promise<void> {
     "update-not-available",
     "update-check-error",
     "update-available",
+    "update-download-started",
+    "update-download-progress",
+    "update-downloaded",
+    "update-download-error",
   ];
 
   const installs = events.map((eventName) => {

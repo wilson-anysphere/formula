@@ -873,6 +873,7 @@ fn main() {
             tray_status::set_tray_status,
             show_system_notification,
             oauth_loopback_listen,
+            updater::install_downloaded_update,
             report_startup_webview_loaded,
             report_startup_tti,
         ])

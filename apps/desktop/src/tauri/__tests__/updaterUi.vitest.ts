@@ -161,4 +161,27 @@ describe("updater restart", () => {
     expect(toast?.dataset.type).toBe("error");
     expect(toast?.textContent).toBe(t("updater.restartFailed"));
   });
+
+  it("installs when the user clicks the update-ready toast CTA", async () => {
+    document.body.innerHTML = `<div id="toast-root"></div>`;
+    registerAppQuitHandlers({
+      isDirty: () => false,
+      drainBackendSync: vi.fn().mockResolvedValue(undefined),
+      quitApp: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const { handleUpdaterEvent } = await import("../updaterUi");
+    await handleUpdaterEvent("update-downloaded", { source: "startup", version: "9.9.7" });
+
+    const restart = document.querySelector<HTMLButtonElement>('[data-testid="update-ready-restart"]');
+    expect(restart).toBeTruthy();
+
+    restart?.click();
+
+    // The toast click handler intentionally doesn't await the restart flow; yield to the event
+    // loop so the async quit pipeline can run.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mocks.installUpdateAndRestart).toHaveBeenCalledTimes(1);
+  });
 });
