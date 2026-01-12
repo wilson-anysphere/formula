@@ -135,6 +135,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut decoded_ok = 0usize;
     let mut decoded_failed = 0usize;
     let mut failures_by_ptg: BTreeMap<String, usize> = BTreeMap::new();
+
+    if args.max == Some(0) {
+        let summary = SummaryLine {
+            kind: "summary",
+            formulas_total,
+            decoded_ok,
+            decoded_failed,
+            failures_by_ptg,
+        };
+        serde_json::to_writer(&mut stdout, &summary)?;
+        writeln!(&mut stdout)?;
+        return Ok(());
+    }
+
     let mut stop_all = false;
 
     for sheet_index in selected {
@@ -240,6 +254,16 @@ fn resolve_sheets(sheets: &[SheetMeta], selector: Option<&str>) -> Result<Vec<us
     }
 
     if let Some((idx, _)) = sheets.iter().enumerate().find(|(_, s)| s.name == selector) {
+        return Ok(vec![idx]);
+    }
+
+    // Fall back to case-insensitive matching for ergonomics.
+    let selector_folded = selector.to_lowercase();
+    if let Some((idx, _)) = sheets
+        .iter()
+        .enumerate()
+        .find(|(_, s)| s.name.to_lowercase() == selector_folded)
+    {
         return Ok(vec![idx]);
     }
 
