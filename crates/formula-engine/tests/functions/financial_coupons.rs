@@ -161,8 +161,9 @@ fn coupdays_basis_4_uses_european_days360_between_coupon_dates() {
     let system = ExcelDateSystem::EXCEL_1900;
 
     // Semiannual schedule with an end-of-month February maturity. For European 30/360 (basis=4),
-    // the coupon-period length `E` is computed as the European `DAYS360` day-count between coupon
-    // dates (PCD->NCD). Here, `DAYS360(2020-08-31, 2021-02-28, TRUE) = 178` (not 180).
+    // the modeled coupon period length `E` is computed as the European `DAYS360` day-count between
+    // coupon dates (PCD->NCD). Here, `DAYS360(2020-08-31, 2021-02-28, TRUE) = 178` (not
+    // 180 = 360/frequency).
     let settlement = ymd_to_serial(ExcelDate::new(2020, 11, 15), system).unwrap();
     let maturity = ymd_to_serial(ExcelDate::new(2021, 2, 28), system).unwrap();
     let expected_pcd = ymd_to_serial(ExcelDate::new(2020, 8, 31), system).unwrap();

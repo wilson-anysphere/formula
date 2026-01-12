@@ -4082,7 +4082,6 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
             let e4 = coupon_period_e(prev_coupon, first_coupon, 4, frequency, system);
             assert_close(e4, 182.0, 0.0);
         }
-
         // Guard: ensure US vs EU DAYS360 behavior actually diverges in this scenario.
         let a0 = days_between(issue, settlement, 0, system);
         let a4 = days_between(issue, settlement, 4, system);
