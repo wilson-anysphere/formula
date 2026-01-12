@@ -148,16 +148,19 @@ Tauri v2 replaces Tauri v1’s “allowlist” with **capabilities**, defined as
 
 - `apps/desktop/src-tauri/capabilities/` (main capability: `capabilities/main.json`)
 
-Capabilities are granted per window. In this repo the main window is labeled `main` and opts into the `main` capability
-via the capability file’s `"windows": ["main"]` list (matching `app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json`):
+Capabilities are scoped per window. In this repo the main window is labeled `main` (`app.windows[].label` in
+`apps/desktop/src-tauri/tauri.conf.json`). The `main` capability is scoped to that label in
+`apps/desktop/src-tauri/capabilities/main.json` via `"windows": ["main"]`:
 
 ```jsonc
-// apps/desktop/src-tauri/capabilities/main.json
-{ "identifier": "main", "windows": ["main"], "permissions": ["..."] }
+{
+  "identifier": "main",
+  "windows": ["main"]
+}
 ```
 
-Note: our current `tauri-build` toolchain does **not** support window-level opt-in via `app.windows[].capabilities`
-(it causes a build error). Keep window scoping in the capability file.
+Note: the `tauri-build` config schema used in this repo does not currently support window-level opt-in via
+`app.windows[].capabilities` in `tauri.conf.json`. Window scoping happens via the capability file instead.
 
 When adding new uses of privileged APIs (e.g. clipboard, dialog, updater, shell, window APIs) or adding new desktop event
 names, update the relevant allowlists in `capabilities/main.json`.
@@ -795,8 +798,8 @@ Source of truth in this repo:
 
 - `apps/desktop/src-tauri/capabilities/main.json`
 
-Capabilities are granted per window. In this repo the main window is labeled `main` and opts into the `main` capability
-via the capability file’s `"windows": ["main"]` list (matching `app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json`):
+Capability files scope themselves to window labels via the capability file’s `"windows": [...]` list
+(matching `app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json`). The main window label is `main`:
 
 ```jsonc
 {
@@ -808,7 +811,6 @@ via the capability file’s `"windows": ["main"]` list (matching `app.windows[].
 
 Note: our current `tauri-build` toolchain does **not** support window-level opt-in via `app.windows[].capabilities`
 (it causes a build error). Keep window scoping in the capability file.
-
 ### What `main.json` does
 
 `apps/desktop/src-tauri/capabilities/main.json` is intentionally an explicit allowlist for what the webview is allowed to do.
@@ -818,15 +820,15 @@ It gates:
 - **`core:event:allow-listen` / `core:event:allow-emit`**: which event names the frontend can `listen(...)` for or `emit(...)`.
 - **`core:event:allow-unlisten`**: allows the frontend to unregister event listeners it previously installed (so we don’t leak
   listeners for one-shot flows like close/open/OAuth readiness signals).
-- Additional plugin permissions for using JS plugin APIs (dialog/window/clipboard/updater), for example:
+- Additional core/plugin permissions for using JS plugin APIs (dialog/window/clipboard/updater), for example:
   - `dialog:allow-open`, `dialog:allow-save`, `dialog:allow-confirm`, `dialog:allow-message`
   - `core:window:allow-hide`, `core:window:allow-show`, `core:window:allow-set-focus`, `core:window:allow-close`
   - `clipboard-manager:allow-read-text`, `clipboard-manager:allow-write-text`
   - `updater:allow-check`, `updater:allow-download`, `updater:allow-install`
 
-This repo intentionally does **not** rely on a Tauri capability allowlist for custom `#[tauri::command]` invocation (no
-`core:allow-invoke`). Custom commands must be hardened in Rust (window label + trusted-origin checks, argument validation,
-filesystem/network scope checks, etc.).
+Custom Rust commands (everything behind `#[tauri::command]`, invoked via `__TAURI__.core.invoke(...)`) are not currently
+gated by a per-command capability allowlist in this repo’s Tauri toolchain (no `core:allow-invoke`); keep them hardened
+in Rust (window label + trusted-origin checks, argument validation, filesystem/network scope checks, etc.).
 
 Note: the clipboard plugin permissions above only cover the legacy **plain-text** clipboard helpers
 (`globalThis.__TAURI__.clipboard.readText` / `writeText`). Rich clipboard formats (HTML/RTF/PNG) are handled via
@@ -900,8 +902,9 @@ cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri permission ls
   permission string(s).
   - Window permissions are currently `core:window:allow-*`.
   - Plain-text clipboard permissions are currently `clipboard-manager:allow-*`.
-- If the frontend starts calling a new Rust `#[tauri::command]` via `__TAURI__.core.invoke(...)`, keep it hardened in Rust
-  (trusted-origin + window-label checks, input validation, scope checks, etc).
+- For custom Rust `#[tauri::command]` functions invoked via `__TAURI__.core.invoke(...)`, keep input validation and scope checks
+  in Rust (trusted-origin + window-label checks, etc). There is no per-command capability allowlist in this repo’s current
+  Tauri toolchain.
 
 Guardrails (CI/tests):
 

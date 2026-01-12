@@ -13,18 +13,15 @@ describe("Tauri capabilities", () => {
 
   it("does not rely on core:allow-invoke permissions (commands must validate in Rust)", () => {
     const permissions = readPermissions();
-    // The capability schema used by this repo/toolchain does not support a per-command allowlist for
-    // custom `#[tauri::command]` handlers. Keep `core:allow-invoke` absent so we don't accidentally
-    // broaden capabilities under the assumption it is being enforced.
-    expect(permissions).not.toContain("core:allow-invoke");
 
-    const allowInvoke = permissions.find(
+    // Some Tauri toolchains expose a `core:allow-invoke` permission for per-command allowlisting,
+    // but the current config/schema used in this repo does not.
+    const hasAllowInvoke = permissions.some(
       (permission) =>
-        Boolean(permission) &&
-        typeof permission === "object" &&
-        (permission as Record<string, unknown>).identifier === "core:allow-invoke",
+        permission === "core:allow-invoke" ||
+        (Boolean(permission) && typeof permission === "object" && (permission as any).identifier === "core:allow-invoke"),
     );
-    expect(allowInvoke).toBeFalsy();
+    expect(hasAllowInvoke).toBe(false);
   });
 
   it("grants the dialog + clipboard permissions required by the frontend", () => {
@@ -37,36 +34,26 @@ describe("Tauri capabilities", () => {
     // Keep dialog permission surface minimal.
     expect(permissions).not.toContain("dialog:default");
 
-    // Clipboard permission identifiers differ slightly between toolchains:
-    // - `clipboard:*` (older Tauri/plugin naming)
-    // - `clipboard-manager:*` (tauri-plugin-clipboard-manager)
-    expect(
-      permissions.includes("clipboard:allow-read-text") || permissions.includes("clipboard-manager:allow-read-text"),
-    ).toBe(true);
-    expect(
-      permissions.includes("clipboard:allow-write-text") || permissions.includes("clipboard-manager:allow-write-text"),
-    ).toBe(true);
-    // Keep clipboard permission surface minimal (no broad defaults).
-    expect(permissions).not.toContain("clipboard:default");
+    expect(permissions).toContain("clipboard-manager:allow-read-text");
+    expect(permissions).toContain("clipboard-manager:allow-write-text");
+    // Keep clipboard permission surface minimal.
     expect(permissions).not.toContain("clipboard-manager:default");
   });
 
   it("grants the window permissions required by the UI window helpers", () => {
     const permissions = readPermissions();
-    const hasWindowPerm = (name: string): boolean =>
-      permissions.includes(name) || permissions.includes(`core:${name}`);
 
-    expect(hasWindowPerm("window:allow-hide")).toBe(true);
-    expect(hasWindowPerm("window:allow-show")).toBe(true);
-    expect(hasWindowPerm("window:allow-set-focus")).toBe(true);
-    expect(hasWindowPerm("window:allow-close")).toBe(true);
-    expect(hasWindowPerm("window:allow-minimize")).toBe(true);
-    expect(hasWindowPerm("window:allow-toggle-maximize")).toBe(true);
-    expect(hasWindowPerm("window:allow-is-maximized")).toBe(true);
+    expect(permissions).toContain("core:window:allow-hide");
+    expect(permissions).toContain("core:window:allow-show");
+    expect(permissions).toContain("core:window:allow-set-focus");
+    expect(permissions).toContain("core:window:allow-close");
+    expect(permissions).toContain("core:window:allow-minimize");
+    expect(permissions).toContain("core:window:allow-toggle-maximize");
+    expect(permissions).toContain("core:window:allow-is-maximized");
 
     // Keep window permission surface minimal.
-    expect(permissions).not.toContain("window:default");
     expect(permissions).not.toContain("core:window:default");
+    expect(permissions).not.toContain("window:default");
   });
 
   it("does not grant shell open permissions to the frontend (external navigation goes through Rust)", () => {

@@ -103,7 +103,8 @@ See `docs/11-desktop-shell.md` for details.
 Tauri v2 permissions are granted via **capabilities**:
 
 - `apps/desktop/src-tauri/capabilities/*.json`
-- capability files scope themselves to window labels via the capability file’s `"windows": [...]` list (matching `app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json`)
+- capability files scope themselves to window labels via the capability file’s `"windows": [...]` list (matches `app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json`)
+  - the main window label is `main`, and `apps/desktop/src-tauri/capabilities/main.json` applies to it via `"windows": ["main"]`
 
 Note: our current `tauri-build` toolchain does **not** support window-level opt-in via `app.windows[].capabilities` (it causes
 a build error). Keep window scoping in the capability file.
@@ -292,9 +293,10 @@ TypeScript ↔ Rust communication:
 // In this repo, commands must also be:
 //  1) registered in `apps/desktop/src-tauri/src/main.rs` (`generate_handler![...]`)
 //
-// Note: this repo does **not** rely on a Tauri capability allowlist for custom command invocation
-// (no `core:allow-invoke`). Commands must be hardened in Rust (trusted-origin + window-label
-// checks, argument validation, filesystem/network scope checks, etc).
+// Note: the capability system primarily gates built-in core/plugin APIs (event/window/dialog/etc).
+// This repo does **not** rely on a per-command capability allowlist for app-defined `#[tauri::command]` invocation
+// (no `core:allow-invoke`). Commands must be hardened in Rust (trusted-origin + window-label checks, argument validation,
+// filesystem/network scope checks, etc).
 //
 #[tauri::command]
 fn check_for_updates(app: tauri::AppHandle, source: crate::updater::UpdateCheckSource) -> Result<(), String> {
