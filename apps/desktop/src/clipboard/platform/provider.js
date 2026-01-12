@@ -26,6 +26,45 @@ function hasTauri() {
   return Boolean(globalThis.__TAURI__);
 }
 
+const isTrimChar = (code) => code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d; // space, tab, lf, cr
+
+function hasDataUrlPrefixAt(str, start) {
+  if (start + 5 > str.length) return false;
+  // ASCII case-insensitive match for "data:" without allocating.
+  return (
+    (str.charCodeAt(start) | 32) === 0x64 && // d
+    (str.charCodeAt(start + 1) | 32) === 0x61 && // a
+    (str.charCodeAt(start + 2) | 32) === 0x74 && // t
+    (str.charCodeAt(start + 3) | 32) === 0x61 && // a
+    str.charCodeAt(start + 4) === 0x3a // :
+  );
+}
+
+/**
+ * Compute the (start,end) bounds for the base64 payload inside an input string.
+ *
+ * - Trims leading/trailing whitespace without allocating.
+ * - If a `data:*;base64,` prefix is present (case-insensitive, ignoring leading whitespace),
+ *   skips everything up to the first comma.
+ *
+ * @param {string} base64
+ * @returns {{ start: number; end: number }}
+ */
+function base64Bounds(base64) {
+  let start = 0;
+  while (start < base64.length && isTrimChar(base64.charCodeAt(start))) start += 1;
+
+  if (hasDataUrlPrefixAt(base64, start)) {
+    const commaIndex = base64.indexOf(",", start);
+    if (commaIndex >= 0) start = commaIndex + 1;
+    while (start < base64.length && isTrimChar(base64.charCodeAt(start))) start += 1;
+  }
+
+  let end = base64.length;
+  while (end > start && isTrimChar(base64.charCodeAt(end - 1))) end -= 1;
+  return { start, end };
+}
+
 /**
  * Strip any `data:*;base64,` prefix and trim whitespace.
  *
@@ -34,11 +73,9 @@ function hasTauri() {
  */
 function normalizeBase64String(base64) {
   if (typeof base64 !== "string") return "";
-  if (base64.startsWith("data:")) {
-    const commaIndex = base64.indexOf(",");
-    if (commaIndex >= 0) return base64.slice(commaIndex + 1).trim();
-  }
-  return base64.trim();
+  const { start, end } = base64Bounds(base64);
+  if (end <= start) return "";
+  return base64.slice(start, end);
 }
 
 /**
@@ -48,29 +85,15 @@ function normalizeBase64String(base64) {
  * @returns {number}
  */
 function estimateBase64Bytes(base64) {
-  const isTrimChar = (code) => code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d; // space, tab, lf, cr
-
-  let start = 0;
-  if (base64.startsWith("data:")) {
-    const comma = base64.indexOf(",");
-    if (comma === -1) return 0;
-    start = comma + 1;
-  }
-
-  // Trim leading/trailing whitespace without allocating a new string (important when inputs are huge).
-  while (start < base64.length && isTrimChar(base64.charCodeAt(start))) start += 1;
-
-  let end = base64.length - 1;
-  while (end >= start && isTrimChar(base64.charCodeAt(end))) end -= 1;
-
-  const len = end - start + 1;
+  const { start, end } = base64Bounds(base64);
+  const len = end - start;
   if (len <= 0) return 0;
 
   let padding = 0;
-  if (base64.charCodeAt(end) === 0x3d) {
+  if (base64.charCodeAt(end - 1) === 0x3d) {
     // '=' padding
     padding = 1;
-    if (end - 1 >= start && base64.charCodeAt(end - 1) === 0x3d) padding = 2;
+    if (end - 2 >= start && base64.charCodeAt(end - 2) === 0x3d) padding = 2;
   }
 
   const bytes = Math.floor((len * 3) / 4) - padding;

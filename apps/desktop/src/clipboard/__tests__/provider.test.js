@@ -803,6 +803,28 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("tauri: read decodes data URL pngBase64 case-insensitively (with whitespace)", async () => {
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd) {
+              assert.equal(cmd, "clipboard_read");
+              return { pngBase64: " \n DATA:image/png;base64,CQgH \n" };
+            },
+          },
+        },
+        navigator: undefined,
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.ok(content.imagePng instanceof Uint8Array);
+        assert.deepEqual(content, { text: undefined, imagePng: new Uint8Array([0x09, 0x08, 0x07]) });
+      }
+    );
+  });
+
   await t.test("tauri: read drops oversized pngBase64 payloads", async () => {
     const largeBase64 = "A".repeat(14 * 1024 * 1024);
 
@@ -1053,6 +1075,43 @@ test("clipboard provider", async (t) => {
       async () => {
         const provider = await createClipboardProvider();
         await provider.write({ text: "plain", html: "<p>hello</p>", pngBase64: "data:image/png;base64,CQgH" });
+
+        assert.equal(invokeCalls.length, 1);
+        assert.equal(invokeCalls[0][0], "clipboard_write");
+        assert.deepEqual(invokeCalls[0][1], {
+          payload: {
+            text: "plain",
+            html: "<p>hello</p>",
+            pngBase64: "CQgH",
+          },
+        });
+      }
+    );
+  });
+
+  await t.test("tauri: write normalizes data URL pngBase64 case-insensitively (with whitespace)", async () => {
+    /** @type {any[]} */
+    const invokeCalls = [];
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd, args) {
+              invokeCalls.push([cmd, args]);
+            },
+          },
+          clipboard: {
+            async writeText() {
+              throw new Error("should not call legacy writeText when clipboard_write succeeds");
+            },
+          },
+        },
+        navigator: undefined,
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: "plain", html: "<p>hello</p>", pngBase64: " \n DATA:image/png;base64,CQgH \n" });
 
         assert.equal(invokeCalls.length, 1);
         assert.equal(invokeCalls[0][0], "clipboard_write");
