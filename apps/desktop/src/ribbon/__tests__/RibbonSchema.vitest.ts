@@ -43,7 +43,7 @@ describe("defaultRibbonSchema", () => {
     expect(branchManager?.testId).toBe("open-branch-manager-panel");
   });
 
-  it("keeps the File → Info → Manage Workbook → Version History menu item id wired", () => {
+  it("keeps File → Info → Manage Workbook menu item ids wired", () => {
     const fileTab = defaultRibbonSchema.tabs.find((tab) => tab.id === "file");
     expect(fileTab, "Expected File tab to exist").toBeTruthy();
     if (!fileTab) return;
