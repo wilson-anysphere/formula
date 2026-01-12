@@ -103,6 +103,28 @@ impl XlsxPackage {
         }
         let has_vm_mapping = !vm_to_rich_value.is_empty();
 
+        // Best-effort worksheet discovery:
+        //
+        // `XlsxPackage::worksheet_parts()` requires `xl/_rels/workbook.xml.rels`. Some minimal or
+        // malformed files omit it but still include usable worksheet parts under `xl/worksheets/*`.
+        let mut worksheet_parts: Vec<String> = self
+            .worksheet_parts()
+            .ok()
+            .map(|parts| parts.into_iter().map(|p| p.worksheet_part).collect())
+            .unwrap_or_default();
+        if worksheet_parts.is_empty() {
+            worksheet_parts = self
+                .part_names()
+                .filter_map(|name| {
+                    let name = name.strip_prefix('/').unwrap_or(name);
+                    (name.starts_with("xl/worksheets/") && name.ends_with(".xml"))
+                        .then_some(name.to_string())
+                })
+                .collect();
+            worksheet_parts.sort();
+            worksheet_parts.dedup();
+        }
+
         // Excel has been observed to encode worksheet `c/@vm` as both 0-based and 1-based indices
         // into `xl/metadata.xml`'s `<valueMetadata>` `<bk>` list. The metadata parser returns a
         // *1-based* mapping.
@@ -113,8 +135,8 @@ impl XlsxPackage {
         // present.
         let vm_offset: u32 = if has_vm_mapping {
             let mut saw_zero = false;
-            for sheet in self.worksheet_parts()? {
-                let Some(sheet_xml_bytes) = self.part(&sheet.worksheet_part) else {
+            for worksheet_part in &worksheet_parts {
+                let Some(sheet_xml_bytes) = self.part(worksheet_part) else {
                     continue;
                 };
                 let vm_cells = parse_sheet_vm_image_cells(sheet_xml_bytes)?;
@@ -141,8 +163,8 @@ impl XlsxPackage {
         } else {
             let mut zero_based_matches: usize = 0;
             let mut one_based_matches: usize = 0;
-            for sheet in self.worksheet_parts()? {
-                let Some(sheet_xml_bytes) = self.part(&sheet.worksheet_part) else {
+            for worksheet_part in &worksheet_parts {
+                let Some(sheet_xml_bytes) = self.part(worksheet_part) else {
                     continue;
                 };
                 for (_cell_ref, vm) in parse_sheet_vm_image_cells(sheet_xml_bytes)? {
@@ -189,15 +211,15 @@ impl XlsxPackage {
             !local_image_by_rich_value_index.is_empty() || !rich_value_rel_indices.is_empty();
 
         let mut out = HashMap::new();
-        for sheet in self.worksheet_parts()? {
-            let Some(sheet_xml_bytes) = self.part(&sheet.worksheet_part) else {
+        for worksheet_part in worksheet_parts {
+            let Some(sheet_xml_bytes) = self.part(&worksheet_part) else {
                 continue;
             };
             let sheet_xml = std::str::from_utf8(sheet_xml_bytes).map_err(|e| {
-                XlsxError::Invalid(format!("{} not utf-8: {e}", sheet.worksheet_part))
+                XlsxError::Invalid(format!("{worksheet_part} not utf-8: {e}"))
             })?;
 
-            let sheet_rels_part = rels_for_part(&sheet.worksheet_part);
+            let sheet_rels_part = rels_for_part(&worksheet_part);
             let sheet_rels_xml = self
                 .part(&sheet_rels_part)
                 .and_then(|bytes| std::str::from_utf8(bytes).ok());
@@ -286,7 +308,7 @@ impl XlsxPackage {
                     .map(|link| link.target.clone());
 
                 out.insert(
-                    (sheet.worksheet_part.clone(), cell_ref),
+                    (worksheet_part.clone(), cell_ref),
                     EmbeddedCellImage {
                         image_part,
                         image_bytes: image_bytes.to_vec(),
