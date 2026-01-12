@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import { DocumentController } from "../../../document/documentController.js";
 import { DocumentCellProvider } from "../documentCellProvider";
+import type { CellRichText } from "@formula/grid/node";
 
 describe("DocumentCellProvider (shared grid) rich text mapping", () => {
   it("preserves DocumentController rich text values on CellData.richText while keeping value as plain text", () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";
 
-    const richText = {
+    const richText: CellRichText = {
       text: "Hello world",
       runs: [
         { start: 0, end: 5, style: { italic: true, underline: "single" } },
@@ -35,4 +36,3 @@ describe("DocumentCellProvider (shared grid) rich text mapping", () => {
     expect((cell as any).richText).toEqual(richText);
   });
 });
-
