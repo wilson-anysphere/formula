@@ -127,7 +127,10 @@ test.describe("global keybindings", () => {
       document.getElementById("toast-root")?.replaceChildren();
     });
 
-    // Focus the formula bar editor (which focuses the hidden textarea) and ensure global shortcuts do not fire.
+    // Focus the formula bar editor (which focuses the hidden textarea) and ensure input focus scoping works:
+    // - Find/Go To/Replace should *not* open while typing.
+    // - Command palette should still open.
+    // - Extension keybindings should not fire.
     await page.getByTestId("formula-highlight").click();
     await expect(page.getByTestId("formula-input")).toBeFocused();
 
@@ -158,10 +161,44 @@ test.describe("global keybindings", () => {
     await page.waitForTimeout(100);
     await expect(page.getByTestId("replace-dialog")).not.toBeVisible();
 
-    // Ctrl/Cmd+Shift+P should not open our command palette while typing in an input.
-    await page.keyboard.press(`${primary}+Shift+P`);
-    await page.waitForTimeout(100);
+    // Ctrl/Cmd+Shift+P *should* open our command palette while typing in an input.
+    // Dispatch directly to avoid any environment-specific shortcut interception.
+    await page.evaluate((isMac) => {
+      const target = document.activeElement ?? window;
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "p",
+          metaKey: isMac,
+          ctrlKey: !isMac,
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, process.platform === "darwin");
+    await expect(page.getByTestId("command-palette")).toBeVisible();
+    await page.keyboard.press("Escape");
     await expect(page.getByTestId("command-palette")).not.toBeVisible();
+
+    // Focus should be restored to something sensible (grid or formula bar).
+    await expect
+      .poll(async () => {
+        return page.evaluate(() => {
+          const active = document.activeElement;
+          if (!active) return false;
+
+          const formulaInput = document.querySelector('[data-testid="formula-input"]');
+          if (active === formulaInput) return true;
+
+          const grid = document.getElementById("grid");
+          return grid ? grid.contains(active) : false;
+        });
+      })
+      .toBe(true);
+
+    // Ensure we're still "typing in an input" for the remaining assertions.
+    await page.getByTestId("formula-highlight").click();
+    await expect(page.getByTestId("formula-input")).toBeFocused();
 
     // Comments shortcuts should not fire while typing in an input.
     await page.evaluate(() => {
