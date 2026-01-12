@@ -150,7 +150,7 @@ Runs a small, high-signal slice of the corpus (fast).
 
 Preset include tags:
 
-`add`, `sub`, `mul`, `div`, `cmp`, `SUM`, `IF`, `IFERROR`, `error`, `range`, `TRANSPOSE`, `SEQUENCE`, `COUNT`, `COUNTIF`, `TEXT`, `TEXTSPLIT`, `VALUE`, `DATEVALUE`, `WORKDAY`, `NETWORKDAYS`, `XLOOKUP`, `XMATCH`, `FILTER`, `SORT`, `UNIQUE`, `ISERROR`, `thai`, `boundary`, `odd_coupon`, `coercion`
+`add`, `sub`, `mul`, `div`, `cmp`, `SUM`, `IF`, `IFERROR`, `error`, `range`, `TRANSPOSE`, `SEQUENCE`, `COUNT`, `COUNTIF`, `TEXT`, `TEXTSPLIT`, `VALUE`, `DATEVALUE`, `WORKDAY`, `NETWORKDAYS`, `XLOOKUP`, `XMATCH`, `FILTER`, `SORT`, `UNIQUE`, `ISERROR`, `thai`, `boundary`, `odd_coupon`, `coupon_schedule`, `coercion`
 
 ```bash
 python tools/excel-oracle/compat_gate.py --tier smoke
