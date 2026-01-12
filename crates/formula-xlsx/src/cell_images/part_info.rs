@@ -212,6 +212,13 @@ fn parse_cell_images_image_relationships(
     let relationships = parse_relationships(rels_xml)?;
     let mut out: HashMap<String, String> = HashMap::new();
 
+    fn strip_fragment(target: &str) -> &str {
+        target
+            .split_once('#')
+            .map(|(base, _)| base)
+            .unwrap_or(target)
+    }
+
     for rel in relationships {
         if rel
             .target_mode
@@ -225,7 +232,12 @@ fn parse_cell_images_image_relationships(
             continue;
         }
 
-        let mut target_part = resolve_target(cell_images_part, &rel.target);
+        let target = strip_fragment(&rel.target);
+        if target.is_empty() {
+            continue;
+        }
+
+        let mut target_part = resolve_target(cell_images_part, target);
         // Some producers emit targets like `../media/image1.png` for workbook-level parts such as
         // `xl/cellimages.xml`, which resolves to `media/image1.png` with strict URI resolution.
         // In XLSX packages, worksheet media lives under `xl/media/*`, so normalize these to an
@@ -271,8 +283,8 @@ mod tests {
     fn parse_cell_images_image_relationships_normalizes_parent_media_targets() {
         let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image2.png"/>
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png#frag"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image2.png#frag"/>
 </Relationships>"#;
 
         let map =

@@ -1244,7 +1244,7 @@ mod tests {
 
         let cell_images_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png#frag"/>
 </Relationships>"#;
 
         let image_bytes = b"known-image-bytes";
@@ -1299,7 +1299,7 @@ mod tests {
         // Some producers emit `../media/...` for workbook-level parts; ensure this resolves to `xl/media/...`.
         let cell_images_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png#frag"/>
 </Relationships>"#;
 
         let image_bytes = b"known-image-bytes";
