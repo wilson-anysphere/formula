@@ -18593,10 +18593,10 @@
       "outputCell": "C1",
       "result": {
         "t": "s",
-        "v": "Automatic"
+        "v": "Manual"
       },
       "address": "C1",
-      "displayText": "Automatic"
+      "displayText": "Manual"
     },
     {
       "caseId": "info_ffe59ed06a96",
