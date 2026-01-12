@@ -357,6 +357,7 @@ The CSP must also allow the extension runtime mechanics:
 
 - `worker-src blob:` (extensions run in module workers)
 - `script-src blob: data:` (extensions are loaded from in-memory module URLs)
+- `child-src blob:` (extension panels are sandboxed `blob:` iframes)
 
 Note: extension panels are additionally sandboxed with `connect-src 'none'`, so panels cannot make network requests
 directly. Any network access must happen in the extension worker (and will still be subject to both the permission

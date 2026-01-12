@@ -108,6 +108,8 @@ Rationale:
   - `worker-src 'self' blob:` for module workers (Vite may use `blob:` URLs for worker bootstrapping).
 - The extension runtime (`BrowserExtensionHost`) also runs each extension in a **module Worker** loaded from an in-memory
   `blob:`/`data:` module URL, so CSP must allow `worker-src blob:` and `script-src blob: data:`.
+- Extension panels are rendered as sandboxed **`blob:` iframes**, so CSP must allow `child-src blob:` (or `frame-src blob:`)
+  to avoid blocking the iframe load.
 - We also rely on `script-src 'unsafe-eval'` for the scripting sandbox (`new Function`-based evaluation in a Worker).
 - `connect-src` stays narrow but must allow:
   - `https:` for remote APIs and user-driven Power Query fetches.
