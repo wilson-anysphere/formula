@@ -132,5 +132,10 @@ describe("tauri.conf.json security guardrails", () => {
     expect(cap?.identifier).toBe("main");
     expect(Array.isArray(cap?.windows)).toBe(true);
     expect(cap.windows).toContain("main");
+    // Avoid wildcard/pattern scoping that could accidentally grant this capability to new windows.
+    for (const label of cap.windows as unknown[]) {
+      expect(typeof label).toBe("string");
+      expect(label).not.toContain("*");
+    }
   });
 });
