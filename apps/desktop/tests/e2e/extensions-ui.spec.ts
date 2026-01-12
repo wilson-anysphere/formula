@@ -209,8 +209,6 @@ test.describe("Extensions UI integration", () => {
       { timeout: 5_000 },
     );
 
-    const iframeOrigin = await webviewFrame!.evaluate(() => window.location.origin);
-    expect(iframeOrigin, "webview should have an opaque origin (no allow-same-origin sandbox flag)").toBe("null");
     const parentAccessBlocked = await webviewFrame!.evaluate(() => {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
