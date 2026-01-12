@@ -1512,6 +1512,93 @@ fn rich_values_support_image_inputs() {
 }
 
 #[wasm_bindgen_test]
+fn rich_values_accept_scalar_cell_value_inputs() {
+    let mut wb = WasmWorkbook::new();
+
+    let number = json!({ "type": "number", "value": 42.0 });
+    wb.set_cell_rich(
+        "A1".to_string(),
+        serde_wasm_bindgen::to_value(&number).unwrap(),
+        Some(DEFAULT_SHEET.to_string()),
+    )
+    .unwrap();
+
+    // Scalar API remains scalar-only and should store the scalar input.
+    let a1_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let a1: CellData = serde_wasm_bindgen::from_value(a1_js).unwrap();
+    assert_json_number(&a1.input, 42.0);
+    assert_json_number(&a1.value, 42.0);
+
+    // Rich API should preserve the typed schema.
+    let got_js = wb
+        .get_cell_rich("A1".to_string(), Some(DEFAULT_SHEET.to_string()))
+        .unwrap();
+    let got: JsonValue = serde_wasm_bindgen::from_value(got_js).unwrap();
+    assert_eq!(got["input"]["type"].as_str(), Some("number"));
+    assert_json_number(&got["input"]["value"], 42.0);
+    assert_eq!(got["value"]["type"].as_str(), Some("number"));
+    assert_json_number(&got["value"]["value"], 42.0);
+}
+
+#[wasm_bindgen_test]
+fn rich_values_accept_error_cell_value_inputs() {
+    let mut wb = WasmWorkbook::new();
+
+    let error = json!({ "type": "error", "value": "#FIELD!" });
+    wb.set_cell_rich(
+        "A1".to_string(),
+        serde_wasm_bindgen::to_value(&error).unwrap(),
+        Some(DEFAULT_SHEET.to_string()),
+    )
+    .unwrap();
+
+    // Scalar API keeps returning scalar-ish values.
+    let a1_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let a1: CellData = serde_wasm_bindgen::from_value(a1_js).unwrap();
+    assert_eq!(a1.input, JsonValue::String("#FIELD!".to_string()));
+    assert_eq!(a1.value, JsonValue::String("#FIELD!".to_string()));
+
+    // Rich API should round-trip the typed error schema.
+    let got_js = wb
+        .get_cell_rich("A1".to_string(), Some(DEFAULT_SHEET.to_string()))
+        .unwrap();
+    let got: JsonValue = serde_wasm_bindgen::from_value(got_js).unwrap();
+    assert_eq!(got["input"]["type"].as_str(), Some("error"));
+    assert_eq!(got["input"]["value"].as_str(), Some("#FIELD!"));
+    assert_eq!(got["value"]["type"].as_str(), Some("error"));
+    assert_eq!(got["value"]["value"].as_str(), Some("#FIELD!"));
+}
+
+#[wasm_bindgen_test]
+fn rich_values_typed_string_preserves_error_like_text() {
+    let mut wb = WasmWorkbook::new();
+
+    // Strings that look like error codes must be quote-prefixed in the scalar protocol so they
+    // remain literal text (rather than being re-interpreted as errors).
+    let text = json!({ "type": "string", "value": "#FIELD!" });
+    wb.set_cell_rich(
+        "A1".to_string(),
+        serde_wasm_bindgen::to_value(&text).unwrap(),
+        Some(DEFAULT_SHEET.to_string()),
+    )
+    .unwrap();
+
+    let a1_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let a1: CellData = serde_wasm_bindgen::from_value(a1_js).unwrap();
+    assert_eq!(a1.input, JsonValue::String("'#FIELD!".to_string()));
+    assert_eq!(a1.value, JsonValue::String("#FIELD!".to_string()));
+
+    let got_js = wb
+        .get_cell_rich("A1".to_string(), Some(DEFAULT_SHEET.to_string()))
+        .unwrap();
+    let got: JsonValue = serde_wasm_bindgen::from_value(got_js).unwrap();
+    assert_eq!(got["input"]["type"].as_str(), Some("string"));
+    assert_eq!(got["input"]["value"].as_str(), Some("#FIELD!"));
+    assert_eq!(got["value"]["type"].as_str(), Some("string"));
+    assert_eq!(got["value"]["value"].as_str(), Some("#FIELD!"));
+}
+
+#[wasm_bindgen_test]
 fn rich_values_support_bracketed_field_access_formulas() {
     let mut wb = WasmWorkbook::new();
 
