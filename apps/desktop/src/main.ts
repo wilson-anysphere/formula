@@ -9677,41 +9677,13 @@ try {
     }
   };
   const readClipboardTextBestEffort = async (): Promise<string | null> => {
-    const invoke = (globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined;
-    if (typeof invoke === "function") {
-      for (const cmd of ["clipboard_read", "read_clipboard"]) {
-        try {
-          const payload = await invoke(cmd);
-          const text = (payload as any)?.text;
-          if (typeof text === "string") return text;
-        } catch {
-          // try next
-        }
-      }
+    try {
+      const provider = await getClipboardProvider();
+      const { text } = await provider.read();
+      return typeof text === "string" ? text : null;
+    } catch {
+      return null;
     }
-
-    const navigatorClipboard = (globalThis as any)?.navigator?.clipboard;
-    const readText = navigatorClipboard?.readText as (() => Promise<string>) | undefined;
-    if (typeof readText === "function") {
-      try {
-        const text = await readText.call(navigatorClipboard);
-        if (typeof text === "string") return text;
-      } catch {
-        // ignore and fall through
-      }
-    }
-
-    const legacyReadText = (globalThis as any).__TAURI__?.clipboard?.readText as (() => Promise<string>) | undefined;
-    if (typeof legacyReadText === "function") {
-      try {
-        const text = await legacyReadText();
-        if (typeof text === "string") return text;
-      } catch {
-        // ignore
-      }
-    }
-
-    return null;
   };
   const writeClipboardTextBestEffort = async (text: string): Promise<boolean> => {
     try {
