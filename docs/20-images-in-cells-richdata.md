@@ -4,6 +4,9 @@ Excel’s “Images in Cell” feature (insert picture → **Place in Cell**, an
 
 This note documents the **expected part set**, the **role of each part**, and the **minimal XML shapes** needed to parse/write Excel-generated files.
 
+For the overall “images in cells” packaging overview (including `xl/cellimages.xml`, `xl/metadata.xml`,
+and current Formula status/tests), see: [20-images-in-cells.md](./20-images-in-cells.md).
+
 > Status: best-effort reverse engineering. Exact namespaces / relationship-type URIs may vary by Excel version; preserve unknown attributes and namespaces when round-tripping.
 
 ---
@@ -97,11 +100,12 @@ In worksheet XML, cells can carry `vm="n"` to attach value metadata:
 </c>
 ```
 
-Notes:
+Current Formula behavior:
 
-* `vm` is **1-based** (i.e. `vm="1"` refers to the *first* `<valueMetadata><bk>` record in `xl/metadata.xml`).
-* Missing `vm` means “no metadata”.
-* Treat `vm="0"` as suspicious/uncommon; preserve if encountered.
+* `vm` is treated as **1-based** (i.e. `vm="1"` refers to the *first* `<valueMetadata><bk>` record).
+  See `crates/formula-xlsx/src/rich_data/metadata.rs` (and its unit tests).
+* Missing `vm` means “no value metadata”.
+* Preserve unusual values like `vm="0"` if encountered (even if they don’t resolve cleanly).
 
 ### Indices inside `xl/metadata.xml` used by `XLRICHVALUE`
 

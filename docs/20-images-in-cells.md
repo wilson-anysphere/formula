@@ -53,7 +53,7 @@ Notes:
 - `xl/metadata.xml` and the per-cell `c/@vm` + `c/@cm` attributes connect worksheet cells to the rich
   value system.
 
-See also: [20-xlsx-richdata-images-in-cell.md](./20-xlsx-richdata-images-in-cell.md) for a deeper (still
+See also: [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) for a deeper (still
 best-effort) description of the `richValue*` part set and how `richValueRel.xml` is used to resolve
 media relationships.
 
