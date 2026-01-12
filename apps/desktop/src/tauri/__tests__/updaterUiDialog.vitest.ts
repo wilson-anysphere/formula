@@ -197,6 +197,26 @@ describe("updaterUi (dialog + download)", () => {
   );
 
   it(
+    "shows a restart CTA immediately when the update was already downloaded in the background",
+    async () => {
+      const { handleUpdaterEvent } = await import("../updaterUi");
+
+      await handleUpdaterEvent("update-downloaded", { source: "startup", version: "1.2.3" });
+      await handleUpdaterEvent("update-available", { source: "manual", version: "1.2.3", body: "notes" });
+      await flushMicrotasks();
+
+      const restartBtn = document.querySelector<HTMLButtonElement>('[data-testid="updater-restart"]');
+      expect(restartBtn).not.toBeNull();
+      expect(restartBtn?.hidden).toBe(false);
+
+      const downloadBtn = document.querySelector<HTMLButtonElement>('[data-testid="updater-download"]');
+      expect(downloadBtn).not.toBeNull();
+      expect(downloadBtn?.disabled).toBe(true);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
     "keeps the update dialog open if the user cancels the unsaved-changes prompt on restart",
     async () => {
       const handlers = new Map<string, (event: any) => void>();
