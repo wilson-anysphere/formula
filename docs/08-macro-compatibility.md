@@ -1041,10 +1041,14 @@ Important notes:
   (`DigitalSignature` / `DigitalSignatureEx`) are always **MD5 (16 bytes)** even when the PKCS#7/CMS
   signature uses SHA-256 and even when `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256 (the
   OID is informational for v1/v2 VBA binding). For the newest `DigitalSignatureExt` stream, Office
-  uses the MS-OVBA v3 digest over the v3 content-hash input (`V3ContentNormalizedData || ProjectNormalizedData`)
-  and the digest algorithm OID is meaningful (SHA-256 is common). `formula-vba` currently verifies
-  v3 binding by computing a SHA-256 digest (`contents_hash_v3`), so signatures that use a different
-  digest algorithm may be treated as untrusted/not bound.
+  uses the MS-OVBA v3 digest over the v3 content-hash input
+  (`V3ContentNormalizedData || ProjectNormalizedData`). In the wild this is commonly SHA-256 (32
+  bytes).
+  
+  The digest algorithm OID is useful for debugging/UI display, but binding should compare digest
+  bytes (some producers emit inconsistent OIDs). `formula-vba` verifies v3 binding by recomputing
+  the v3 transcript and hashing it (currently SHA-256 via `contents_hash_v3`) and comparing digest
+  bytes. Signatures that use a different digest algorithm may be treated as untrusted/not bound.
   
   This binding check is exposed via `formula-vba` as `VbaDigitalSignature::binding`. The desktop
   Trust Center treats a VBA project as "signed" only when the PKCS#7/CMS signature verifies **and**
