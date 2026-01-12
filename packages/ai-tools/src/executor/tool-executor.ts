@@ -1224,13 +1224,15 @@ export class ToolExecutor {
 
   private buildDlpRangeIndex(
     ref: { documentId: string; sheetId: string; range: DlpNormalizedRange },
-    records: Array<{ selector: any; classification: any }>
+    records: Array<{ selector: any; classification: any }>,
+    opts: { maxAllowedRank: number }
   ): DlpRangeIndex {
     const selectionRange = ref.range;
     const startRow = selectionRange.start.row;
     const startCol = selectionRange.start.col;
     const rowCount = selectionRange.end.row - selectionRange.start.row + 1;
     const colCount = selectionRange.end.col - selectionRange.start.col + 1;
+    const { maxAllowedRank } = opts;
 
     const rankFromClassification = (classification: any): number => {
       if (!classification) return DEFAULT_CLASSIFICATION_RANK;
@@ -1256,7 +1258,9 @@ export class ToolExecutor {
       // The index only needs to track restrictions above the baseline (Public). Public-scoped
       // records do not affect max-classification enforcement and would just add Map churn.
       const recordRank = rankFromClassification(record.classification);
-      if (recordRank <= DEFAULT_CLASSIFICATION_RANK) continue;
+      // Ignore classifications that cannot influence the per-cell allow/redact decision
+      // (anything at or below the policy maxAllowed threshold).
+      if (recordRank <= maxAllowedRank) continue;
 
       switch (selector.scope) {
         case "document": {
@@ -1361,7 +1365,8 @@ export class ToolExecutor {
       dlp.index ??
       (dlp.index = this.buildDlpRangeIndex(
         { documentId: dlp.documentId, sheetId: dlp.sheetId, range: dlp.selectionRange },
-        dlp.records
+        dlp.records,
+        { maxAllowedRank: dlp.maxAllowedRank }
       ));
 
     const row0 = row - 1;
