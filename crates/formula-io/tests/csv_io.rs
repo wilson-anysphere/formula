@@ -118,6 +118,27 @@ fn csv_import_sanitizes_sheet_name_from_file_stem() {
 }
 
 #[test]
+fn csv_import_invalid_sheet_name_falls_back_to_sheet1() {
+    let dir = tempfile::tempdir().expect("temp dir");
+
+    // Use a stem that becomes empty after Excel sheet-name sanitization.
+    // `[` and `]` are invalid in sheet names but valid on common filesystems.
+    let path = dir.path().join("[].csv");
+
+    std::fs::write(&path, "col1\n1\n").expect("write csv");
+
+    let wb = open_workbook(&path).expect("open csv workbook");
+    let model = match wb {
+        Workbook::Model(model) => model,
+        other => panic!("expected Workbook::Model, got {other:?}"),
+    };
+
+    assert_eq!(sanitize_sheet_name("[]"), "Sheet1");
+    let sheet = model.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+}
+
+#[test]
 fn opens_csv_with_wrong_extension() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("data.xlsx");
