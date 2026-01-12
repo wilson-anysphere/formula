@@ -85,8 +85,8 @@ fn v3_content_normalized_data_preserves_non_ascii_mbcs_bytes_verbatim() {
 
 #[test]
 fn project_normalized_data_preserves_non_ascii_mbcs_bytes_verbatim() {
-    // Regression test: MS-OVBA ProjectNormalizedData (dir-record based) appends project metadata as
-    // MBCS bytes. Accidental UTF-8 transcoding would change the binding digest for non-ASCII
+    // Regression test: `formula-vba`'s `project_normalized_data` helper incorporates project metadata
+    // as MBCS bytes. Accidental UTF-8 transcoding would change the binding digest for non-ASCII
     // projects.
     let project_name = "Проект"; // "project" in Russian (non-ASCII)
     let (mbcs, _, _) = WINDOWS_1251.encode(project_name);
