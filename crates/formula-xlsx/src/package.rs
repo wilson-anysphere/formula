@@ -84,6 +84,164 @@ impl WorkbookKind {
     }
 }
 
+/// Rewrite an existing `[Content_Types].xml` payload so that the `/xl/workbook.xml` override
+/// advertises the workbook main content type corresponding to `kind`.
+///
+/// Returns `Ok(None)` when the input already matches `kind`.
+pub fn rewrite_content_types_workbook_kind(
+    content_types_xml: &[u8],
+    kind: WorkbookKind,
+) -> Result<Option<Vec<u8>>, XlsxError> {
+    rewrite_content_types_workbook_content_type(content_types_xml, kind.workbook_content_type())
+}
+
+/// Rewrite an existing `[Content_Types].xml` payload so that the `/xl/workbook.xml` override
+/// advertises `workbook_content_type`.
+///
+/// Returns `Ok(None)` when no change is required.
+pub fn rewrite_content_types_workbook_content_type(
+    content_types_xml: &[u8],
+    workbook_content_type: &str,
+) -> Result<Option<Vec<u8>>, XlsxError> {
+    let mut reader = XmlReader::from_reader(content_types_xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(content_types_xml.len() + 128));
+    let mut buf = Vec::new();
+
+    let mut override_tag_name: Option<String> = None;
+    let mut found = false;
+    let mut changed = false;
+
+    fn patch_workbook_override(
+        e: &BytesStart<'_>,
+        workbook_content_type: &str,
+    ) -> Result<(bool, Option<BytesStart<'static>>), XlsxError> {
+        let mut part_name = None;
+        let mut existing_content_type = None;
+
+        for attr in e.attributes().with_checks(false) {
+            let attr = attr?;
+            match crate::openxml::local_name(attr.key.as_ref()) {
+                b"PartName" => part_name = Some(attr.unescape_value()?.into_owned()),
+                b"ContentType" => existing_content_type = Some(attr.unescape_value()?.into_owned()),
+                _ => {}
+            }
+        }
+
+        let Some(part_name) = part_name else {
+            return Ok((false, None));
+        };
+        let normalized = part_name.strip_prefix('/').unwrap_or(part_name.as_str());
+        if normalized != "xl/workbook.xml" {
+            return Ok((false, None));
+        }
+
+        if existing_content_type.as_deref() == Some(workbook_content_type) {
+            return Ok((true, None));
+        }
+
+        let name = e.name();
+        let tag_name = std::str::from_utf8(name.as_ref()).unwrap_or("Override");
+        let mut patched = BytesStart::new(tag_name);
+        let mut saw_content_type = false;
+        for attr in e.attributes().with_checks(false) {
+            let attr = attr?;
+            if crate::openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"ContentType") {
+                saw_content_type = true;
+                patched.push_attribute((attr.key.as_ref(), workbook_content_type.as_bytes()));
+            } else {
+                patched.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+            }
+        }
+        if !saw_content_type {
+            patched.push_attribute(("ContentType", workbook_content_type));
+        }
+
+        Ok((true, Some(patched.into_owned())))
+    }
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Start(ref e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Override") => {
+                if override_tag_name.is_none() {
+                    override_tag_name =
+                        Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                }
+                let (is_workbook, patched) = patch_workbook_override(e, workbook_content_type)?;
+                if is_workbook {
+                    found = true;
+                }
+                if let Some(patched) = patched {
+                    changed = true;
+                    writer.write_event(Event::Start(patched))?;
+                } else {
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                }
+            }
+            Event::Empty(ref e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Override") => {
+                if override_tag_name.is_none() {
+                    override_tag_name =
+                        Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                }
+                let (is_workbook, patched) = patch_workbook_override(e, workbook_content_type)?;
+                if is_workbook {
+                    found = true;
+                }
+                if let Some(patched) = patched {
+                    changed = true;
+                    writer.write_event(Event::Empty(patched))?;
+                } else {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                }
+            }
+            Event::End(ref e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Types") => {
+                if !found {
+                    changed = true;
+                    let override_tag_name = override_tag_name
+                        .clone()
+                        .unwrap_or_else(|| prefixed_tag(e.name().as_ref(), "Override"));
+                    let mut override_el = BytesStart::new(override_tag_name.as_str());
+                    override_el.push_attribute(("PartName", "/xl/workbook.xml"));
+                    override_el.push_attribute(("ContentType", workbook_content_type));
+                    writer.write_event(Event::Empty(override_el))?;
+                }
+                writer.write_event(Event::End(e.to_owned()))?;
+            }
+            Event::Empty(ref e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Types") => {
+                if !found {
+                    changed = true;
+                    let types_tag_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    let override_tag_name = override_tag_name
+                        .clone()
+                        .unwrap_or_else(|| prefixed_tag(types_tag_name.as_bytes(), "Override"));
+
+                    writer.write_event(Event::Start(e.to_owned()))?;
+
+                    let mut override_el = BytesStart::new(override_tag_name.as_str());
+                    override_el.push_attribute(("PartName", "/xl/workbook.xml"));
+                    override_el.push_attribute(("ContentType", workbook_content_type));
+                    writer.write_event(Event::Empty(override_el))?;
+
+                    writer.write_event(Event::End(BytesEnd::new(types_tag_name.as_str())))?;
+                } else {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                }
+            }
+            Event::Eof => break,
+            other => writer.write_event(other.into_owned())?,
+        }
+
+        buf.clear();
+    }
+
+    if changed {
+        Ok(Some(writer.into_inner()))
+    } else {
+        Ok(None)
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum XlsxError {
     #[error("zip error: {0}")]

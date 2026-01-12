@@ -82,7 +82,8 @@ pub use hyperlinks::{
 };
 pub use model_package::{WorkbookPackage, WorkbookPackageError};
 pub use package::{
-    read_part_from_reader, theme_palette_from_reader, worksheet_parts_from_reader,
+    read_part_from_reader, rewrite_content_types_workbook_content_type,
+    rewrite_content_types_workbook_kind, theme_palette_from_reader, worksheet_parts_from_reader,
     CellPatch as PackageCellPatch, CellPatchSheet, MacroPresence, WorkbookKind, WorksheetPartInfo,
     XlsxError, XlsxPackage,
 };

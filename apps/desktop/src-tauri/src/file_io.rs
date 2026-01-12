@@ -19,7 +19,8 @@ use formula_xlsx::print::{
 use formula_xlsx::{
     patch_xlsx_streaming_workbook_cell_patches,
     patch_xlsx_streaming_workbook_cell_patches_with_part_overrides, strip_vba_project_streaming,
-    CellPatch as XlsxCellPatch, PartOverride, PreservedPivotParts, WorkbookCellPatches, XlsxPackage,
+    CellPatch as XlsxCellPatch, PartOverride, PreservedPivotParts, WorkbookCellPatches,
+    WorkbookKind, XlsxPackage,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufReader, Cursor, Read};
@@ -587,10 +588,12 @@ fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
         out.power_query_xml = Some(power_query_xml.clone());
         out.original_power_query_xml = Some(power_query_xml);
     }
-    if let (Some(origin), Some(vba)) = (out.origin_path.as_deref(), out.vba_project_bin.as_deref()) {
+    if let (Some(origin), Some(vba)) = (out.origin_path.as_deref(), out.vba_project_bin.as_deref())
+    {
         out.macro_fingerprint = Some(compute_macro_fingerprint(origin, vba));
     }
-    if let Ok(parts) = formula_xlsx::worksheet_parts_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
+    if let Ok(parts) =
+        formula_xlsx::worksheet_parts_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
     {
         for part in parts {
             worksheet_parts_by_name.insert(part.name, part.worksheet_part);
@@ -603,14 +606,15 @@ fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
             out.preserved_drawing_parts = Some(preserved);
         }
     }
-    if let Ok(preserved) =
-        formula_xlsx::pivots::preserve_pivot_parts_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
-    {
+    if let Ok(preserved) = formula_xlsx::pivots::preserve_pivot_parts_from_reader(Cursor::new(
+        origin_xlsx_bytes.as_ref(),
+    )) {
         if !preserved.is_empty() {
             out.preserved_pivot_parts = Some(preserved);
         }
     }
-    if let Ok(palette) = formula_xlsx::theme_palette_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
+    if let Ok(palette) =
+        formula_xlsx::theme_palette_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
     {
         out.theme_palette = palette;
     }
@@ -831,7 +835,8 @@ pub fn read_workbook_blocking(path: &Path) -> anyhow::Result<Workbook> {
 
     // Best-effort: sniff for text/CSV and only route to the CSV importer when it doesn't look
     // like a binary file.
-    let mut file = std::fs::File::open(path).with_context(|| format!("open workbook {:?}", path))?;
+    let mut file =
+        std::fs::File::open(path).with_context(|| format!("open workbook {:?}", path))?;
     let mut buf = vec![0u8; TEXT_SNIFF_BYTES];
     let read = file
         .read(&mut buf)
@@ -1048,7 +1053,8 @@ fn formula_model_value_to_scalar(value: &ModelCellValue) -> CellScalar {
         ModelCellValue::Record(record) => CellScalar::Text(record.to_string()),
         ModelCellValue::Array(arr) => CellScalar::Text(format!("{:?}", arr.data)),
         ModelCellValue::Spill(_) => CellScalar::Error("#SPILL!".to_string()),
-        _ => rich_model_cell_value_to_scalar(value).unwrap_or_else(|| CellScalar::Text(format!("{value:?}"))),
+        _ => rich_model_cell_value_to_scalar(value)
+            .unwrap_or_else(|| CellScalar::Text(format!("{value:?}"))),
     }
 }
 
@@ -1119,8 +1125,8 @@ pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
             ..CsvOptions::default()
         },
     )
-        .map_err(|e| anyhow::anyhow!(e.to_string()))
-        .with_context(|| format!("import csv {:?}", path))?;
+    .map_err(|e| anyhow::anyhow!(e.to_string()))
+    .with_context(|| format!("import csv {:?}", path))?;
 
     let sheet_name = sanitize_sheet_name(path.file_stem().and_then(|s| s.to_str()).unwrap_or(""));
     let mut sheet = Sheet::new(sheet_name.clone(), sheet_name);
@@ -1548,6 +1554,11 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         return write_xlsb_blocking(path, workbook);
     }
 
+    let workbook_kind = extension
+        .as_deref()
+        .and_then(WorkbookKind::from_extension)
+        .unwrap_or(WorkbookKind::Workbook);
+
     let xlsx_date_system = match workbook.date_system {
         WorkbookDateSystem::Excel1900 => formula_xlsx::DateSystem::V1900,
         WorkbookDateSystem::Excel1904 => formula_xlsx::DateSystem::V1904,
@@ -1740,7 +1751,6 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
                     }
                 }
             }
-
             let mut cursor = Cursor::new(Vec::new());
             if part_overrides.is_empty() {
                 patch_xlsx_streaming_workbook_cell_patches(
@@ -1758,7 +1768,6 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
                 )
                 .context("apply worksheet cell patches + part overrides (streaming)")?;
             }
-
             cursor.into_inner()
         };
 
@@ -1810,7 +1819,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
 
     let model = app_workbook_to_formula_model(workbook).context("convert workbook to model")?;
     let mut cursor = Cursor::new(Vec::new());
-    formula_xlsx::write_workbook_to_writer(&model, &mut cursor)
+    formula_xlsx::write_workbook_to_writer_with_kind(&model, &mut cursor, workbook_kind)
         .map_err(|e| anyhow::anyhow!(e.to_string()))
         .with_context(|| "serialize workbook to buffer")?;
     let mut bytes = cursor.into_inner();
@@ -1832,7 +1841,8 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         || wants_power_query
         || needs_date_system_update
     {
-        let mut pkg = XlsxPackage::from_bytes(&bytes).context("parse generated workbook package")?;
+        let mut pkg =
+            XlsxPackage::from_bytes(&bytes).context("parse generated workbook package")?;
 
         if wants_vba {
             pkg.set_part(
@@ -1886,7 +1896,8 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
     }
 
     let bytes = Arc::<[u8]>::from(bytes);
-    write_file_atomic(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
+    write_file_atomic(path, bytes.as_ref())
+        .with_context(|| format!("write workbook {:?}", path))?;
     Ok(bytes)
 }
 
@@ -2062,8 +2073,12 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
                     && edit.new_rgcb.is_none()
             });
             if has_text_edits {
-                xlsb.save_with_cell_edits_streaming_shared_strings(&final_out_path, sheet_index, edits)
-                    .with_context(|| format!("save edited xlsb {:?}", final_out_path))?;
+                xlsb.save_with_cell_edits_streaming_shared_strings(
+                    &final_out_path,
+                    sheet_index,
+                    edits,
+                )
+                .with_context(|| format!("save edited xlsb {:?}", final_out_path))?;
             } else {
                 xlsb.save_with_cell_edits_streaming(&final_out_path, sheet_index, edits)
                     .with_context(|| format!("save edited xlsb {:?}", final_out_path))?;
@@ -2071,19 +2086,19 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
             return Ok(());
         }
 
-        let has_text_edits = edits_by_sheet
-            .values()
-            .flatten()
-            .any(|edit| {
-                matches!(edit.new_value, XlsbCellValue::Text(_))
-                    && edit.new_formula.is_none()
-                    && edit.new_rgcb.is_none()
-            });
+        let has_text_edits = edits_by_sheet.values().flatten().any(|edit| {
+            matches!(edit.new_value, XlsbCellValue::Text(_))
+                && edit.new_formula.is_none()
+                && edit.new_rgcb.is_none()
+        });
 
         // Prefer a single-pass multi-sheet streaming save. Keep the older "patch through temp
         // workbooks" approach only as a fallback if the multi-sheet writer errors.
         let multi_res = if has_text_edits {
-            xlsb.save_with_cell_edits_streaming_multi_shared_strings(&final_out_path, &edits_by_sheet)
+            xlsb.save_with_cell_edits_streaming_multi_shared_strings(
+                &final_out_path,
+                &edits_by_sheet,
+            )
         } else {
             xlsb.save_with_cell_edits_streaming_multi(&final_out_path, &edits_by_sheet)
         };
@@ -2138,8 +2153,12 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
                     && edit.new_rgcb.is_none()
             });
             if has_text_edits {
-                wb.save_with_cell_edits_streaming_shared_strings(&out_path, sheet_index, sheet_edits)
-                    .with_context(|| format!("save edited xlsb {:?}", out_path))?;
+                wb.save_with_cell_edits_streaming_shared_strings(
+                    &out_path,
+                    sheet_index,
+                    sheet_edits,
+                )
+                .with_context(|| format!("save edited xlsb {:?}", out_path))?;
             } else {
                 wb.save_with_cell_edits_streaming(&out_path, sheet_index, sheet_edits)
                     .with_context(|| format!("save edited xlsb {:?}", out_path))?;
@@ -2258,8 +2277,10 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
         }
 
         for ((row, col), cell) in sheet.cells_iter() {
-            let row_u32 = u32::try_from(row).map_err(|_| anyhow::anyhow!("row out of bounds: {row}"))?;
-            let col_u32 = u32::try_from(col).map_err(|_| anyhow::anyhow!("col out of bounds: {col}"))?;
+            let row_u32 =
+                u32::try_from(row).map_err(|_| anyhow::anyhow!("row out of bounds: {row}"))?;
+            let col_u32 =
+                u32::try_from(col).map_err(|_| anyhow::anyhow!("col out of bounds: {col}"))?;
             let Some(cell_ref) = formula_model::CellRef::try_new(row_u32, col_u32) else {
                 continue;
             };
@@ -2395,14 +2416,16 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
 }
 
 #[cfg(test)]
-    mod tests {
-        use super::*;
-        use crate::state::AppState;
-        use formula_format::{format_value, FormatOptions, Value as FormatValue};
-        use formula_xlsb::biff12_varint;
-        use std::collections::BTreeSet;
-        use std::io::Read;
-        use xlsx_diff::{diff_workbooks, diff_workbooks_with_options, DiffOptions, Severity, WorkbookArchive};
+mod tests {
+    use super::*;
+    use crate::state::AppState;
+    use formula_format::{format_value, FormatOptions, Value as FormatValue};
+    use formula_xlsb::biff12_varint;
+    use std::collections::BTreeSet;
+    use std::io::Read;
+    use xlsx_diff::{
+        diff_workbooks, diff_workbooks_with_options, DiffOptions, Severity, WorkbookArchive,
+    };
 
     fn assert_no_critical_diffs(expected: &Path, actual: &Path) {
         let report = diff_workbooks(expected, actual).expect("diff workbooks");
@@ -2688,7 +2711,10 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
         let workbook =
             read_xlsx_blocking(&renamed_path).expect("read xlsb workbook with unknown extension");
         let renamed_str = renamed_path.to_string_lossy().to_string();
-        assert_eq!(workbook.origin_xlsb_path.as_deref(), Some(renamed_str.as_str()));
+        assert_eq!(
+            workbook.origin_xlsb_path.as_deref(),
+            Some(renamed_str.as_str())
+        );
 
         assert_eq!(workbook.sheets.len(), 1);
         let sheet = &workbook.sheets[0];
@@ -2697,8 +2723,14 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
             sheet.get_cell(0, 0).computed_value,
             CellScalar::Text("Hello".to_string())
         );
-        assert_eq!(sheet.get_cell(0, 1).computed_value, CellScalar::Number(42.5));
-        assert_eq!(sheet.get_cell(0, 2).computed_value, CellScalar::Number(85.0));
+        assert_eq!(
+            sheet.get_cell(0, 1).computed_value,
+            CellScalar::Number(42.5)
+        );
+        assert_eq!(
+            sheet.get_cell(0, 2).computed_value,
+            CellScalar::Number(85.0)
+        );
         assert_eq!(sheet.get_cell(0, 2).formula.as_deref(), Some("=B1*2"));
     }
 
@@ -2730,7 +2762,10 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
             sheet1.get_cell(0, 0).computed_value,
             CellScalar::Text("Hello".to_string())
         );
-        assert_eq!(sheet1.get_cell(1, 1).computed_value, CellScalar::Number(123.0));
+        assert_eq!(
+            sheet1.get_cell(1, 1).computed_value,
+            CellScalar::Number(123.0)
+        );
         assert_eq!(sheet1.get_cell(2, 2).formula.as_deref(), Some("=B2*2"));
 
         let second = workbook
@@ -2754,8 +2789,8 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
         let renamed_path = tmp.path().join("basic.xls");
         std::fs::copy(fixture_path, &renamed_path).expect("copy fixture");
 
-        let workbook =
-            read_xlsx_blocking(&renamed_path).expect("read xlsx workbook with wrong .xls extension");
+        let workbook = read_xlsx_blocking(&renamed_path)
+            .expect("read xlsx workbook with wrong .xls extension");
         assert!(
             workbook.origin_xlsx_bytes.is_some(),
             "expected XLSX/XLSM reader path"
@@ -2786,8 +2821,8 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
         let renamed_path = tmp.path().join("basic.xlsx");
         std::fs::copy(fixture_path, &renamed_path).expect("copy fixture");
 
-        let workbook =
-            read_xlsx_blocking(&renamed_path).expect("read xls workbook with wrong .xlsx extension");
+        let workbook = read_xlsx_blocking(&renamed_path)
+            .expect("read xls workbook with wrong .xlsx extension");
         assert!(workbook.origin_xlsx_bytes.is_none());
         assert_eq!(workbook.date_system, expected_date_system);
         let sheet1 = workbook
@@ -2811,10 +2846,13 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
         let renamed_path = tmp.path().join("simple.xlsx");
         std::fs::copy(fixture_path, &renamed_path).expect("copy fixture");
 
-        let workbook =
-            read_xlsx_blocking(&renamed_path).expect("read xlsb workbook with wrong .xlsx extension");
+        let workbook = read_xlsx_blocking(&renamed_path)
+            .expect("read xlsb workbook with wrong .xlsx extension");
         let renamed_str = renamed_path.to_string_lossy().to_string();
-        assert_eq!(workbook.origin_xlsb_path.as_deref(), Some(renamed_str.as_str()));
+        assert_eq!(
+            workbook.origin_xlsb_path.as_deref(),
+            Some(renamed_str.as_str())
+        );
         assert_eq!(workbook.sheets.len(), 1);
         let sheet = &workbook.sheets[0];
         assert_eq!(sheet.name, "Sheet1");
@@ -2964,7 +3002,10 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
             .find(|n| n.name == "ZedName")
             .expect("ZedName exists");
         assert_eq!(zed.refers_to, "Sheet1!$B$1");
-        assert!(zed.sheet_id.is_none(), "expected ZedName to be workbook-scoped");
+        assert!(
+            zed.sheet_id.is_none(),
+            "expected ZedName to be workbook-scoped"
+        );
 
         let local = workbook
             .defined_names
@@ -3440,8 +3481,8 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
 
         assert_non_worksheet_parts_preserved(&original_bytes, written_bytes.as_ref());
 
-        let doc =
-            formula_xlsx::load_from_bytes(written_bytes.as_ref()).expect("load saved workbook from bytes");
+        let doc = formula_xlsx::load_from_bytes(written_bytes.as_ref())
+            .expect("load saved workbook from bytes");
         let sheet = doc
             .workbook
             .sheet_by_name("Sheet2")
@@ -3502,7 +3543,10 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
             CellScalar::Text("Bob".to_string())
         );
         assert_eq!(sheet.get_cell(2, 2).computed_value, CellScalar::Bool(true));
-        assert_eq!(sheet.get_cell(2, 3).computed_value, CellScalar::Number(3.75));
+        assert_eq!(
+            sheet.get_cell(2, 3).computed_value,
+            CellScalar::Number(3.75)
+        );
     }
 
     #[test]
@@ -3584,7 +3628,10 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
         let sheet = &workbook.sheets[0];
 
         assert_eq!(sheet.name, "badnametest");
-        assert!(!sheet.name.trim().is_empty(), "sheet name should be non-empty");
+        assert!(
+            !sheet.name.trim().is_empty(),
+            "sheet name should be non-empty"
+        );
         for ch in [':', '\\', '/', '?', '*', '[', ']'] {
             assert!(
                 !sheet.name.contains(ch),
@@ -3812,6 +3859,130 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
         assert!(
             !content_types.contains("macroEnabled.main+xml"),
             "expected workbook content type to be downgraded (got {content_types:?})"
+        );
+    }
+
+    #[test]
+    fn saves_xlsx_family_with_correct_workbook_main_content_type_and_vba_policy() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/macros/basic.xlsm"
+        ));
+        let workbook = read_xlsx_blocking(fixture_path).expect("read workbook");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+
+        let cases = [
+            ("xlsx", WorkbookKind::Workbook, false),
+            ("xlsm", WorkbookKind::MacroEnabledWorkbook, true),
+            ("xltx", WorkbookKind::Template, false),
+            ("xltm", WorkbookKind::MacroEnabledTemplate, true),
+            ("xlam", WorkbookKind::MacroEnabledAddIn, true),
+        ];
+
+        let all_kinds = [
+            WorkbookKind::Workbook,
+            WorkbookKind::MacroEnabledWorkbook,
+            WorkbookKind::Template,
+            WorkbookKind::MacroEnabledTemplate,
+            WorkbookKind::MacroEnabledAddIn,
+        ];
+
+        for (ext, expected_kind, expect_vba) in cases {
+            let out_path = tmp.path().join(format!("out.{ext}"));
+            write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+            let bytes = std::fs::read(&out_path).expect("read written workbook");
+            let pkg = XlsxPackage::from_bytes(&bytes).expect("parse written package");
+
+            let content_types = std::str::from_utf8(
+                pkg.part("[Content_Types].xml")
+                    .expect("expected [Content_Types].xml part"),
+            )
+            .expect("content types should be utf-8");
+            assert!(
+                content_types.contains(expected_kind.workbook_content_type()),
+                "expected `[Content_Types].xml` to advertise the correct workbook main content type for .{ext} ({expected_kind:?})"
+            );
+            for other in all_kinds {
+                if other == expected_kind {
+                    continue;
+                }
+                assert!(
+                    !content_types.contains(other.workbook_content_type()),
+                    "expected `.{}\" workbook main content type to be absent when saving as .{ext}",
+                    other.workbook_content_type()
+                );
+            }
+
+            assert_eq!(
+                pkg.vba_project_bin().is_some(),
+                expect_vba,
+                "unexpected VBA preservation policy for .{ext}"
+            );
+        }
+    }
+
+    #[test]
+    fn saving_template_keeps_print_settings_roundtrip() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/print-settings.xlsx"
+        ));
+        let mut workbook = read_xlsx_blocking(fixture_path).expect("read print settings workbook");
+        assert!(
+            !workbook.print_settings.sheets.is_empty(),
+            "expected print-settings fixture to contain at least one sheet print settings entry"
+        );
+
+        // Flip orientation so we can assert it round-trips.
+        let existing = workbook.print_settings.sheets[0].page_setup.orientation;
+        let updated = match existing {
+            formula_xlsx::print::Orientation::Portrait => {
+                formula_xlsx::print::Orientation::Landscape
+            }
+            formula_xlsx::print::Orientation::Landscape => {
+                formula_xlsx::print::Orientation::Portrait
+            }
+        };
+        workbook.print_settings.sheets[0].page_setup.orientation = updated;
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("out.xltx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let bytes = std::fs::read(&out_path).expect("read written workbook");
+        let roundtrip = read_workbook_print_settings(&bytes).expect("read print settings");
+        assert!(
+            !roundtrip.sheets.is_empty(),
+            "expected saved workbook to still contain sheet print settings"
+        );
+        assert_eq!(roundtrip.sheets[0].page_setup.orientation, updated);
+    }
+
+    #[test]
+    fn saving_date_system_1904_workbook_as_template_preserves_date1904_flag() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/metadata/date-system-1904.xlsx"
+        ));
+        let workbook = read_xlsx_blocking(fixture_path).expect("read date system workbook");
+        assert_eq!(workbook.date_system, WorkbookDateSystem::Excel1904);
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("out.xltx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let bytes = std::fs::read(&out_path).expect("read written workbook");
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("parse written package");
+        let workbook_xml = std::str::from_utf8(
+            pkg.part("xl/workbook.xml")
+                .expect("expected xl/workbook.xml part"),
+        )
+        .expect("workbook.xml should be utf-8");
+        assert!(
+            workbook_xml.contains("date1904=\"1\""),
+            "expected xl/workbook.xml to preserve date1904=\"1\" when saving as .xltx"
         );
     }
 
