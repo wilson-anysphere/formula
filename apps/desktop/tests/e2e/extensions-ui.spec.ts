@@ -183,6 +183,20 @@ test.describe("Extensions UI integration", () => {
     expect(after).toEqual(before);
   });
 
+  test("loads extensions when opening the grid context menu", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Open the context menu without first opening the Extensions panel.
+    await page.locator("#grid").click({ button: "right", position: { x: 100, y: 40 } });
+    const menu = page.getByTestId("context-menu");
+    await expect(menu).toBeVisible();
+
+    // Extension contributions should appear once the lazy-loaded extension host finishes
+    // initializing.
+    const item = menu.getByRole("button", { name: "Sample Hello: Open Sample Panel" });
+    await expect(item).toBeVisible({ timeout: 10_000 });
+  });
+
   test("executes a contributed context menu item when its when-clause matches", async ({ page }) => {
     await gotoDesktop(page);
     await grantSampleHelloPermissions(page);
