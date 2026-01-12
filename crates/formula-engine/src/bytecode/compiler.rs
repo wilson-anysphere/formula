@@ -258,7 +258,7 @@ impl<'a> CompileCtx<'a> {
                     self.program.instrs[jump_idx] =
                         Instruction::new(OpCode::JumpIfNotNaError, end_target, 0);
                 }
-                Function::Choose => self.compile_choose(args, allow_range),
+                Function::Choose => self.compile_choose(args),
                 Function::Switch => self.compile_switch(args),
                 _ => {
                     for (arg_idx, arg) in args.iter().enumerate() {
@@ -389,12 +389,15 @@ impl<'a> CompileCtx<'a> {
         }
     }
 
-    fn compile_choose(&mut self, args: &[Expr], allow_range: bool) {
-        // CHOOSE(index_num, value1, [value2], ...)
+    fn compile_choose(&mut self, args: &[Expr]) {
+        // CHOOSE(index, value1, value2, ...)
+        // Excel semantics:
+        // - Evaluate `index` once.
+        // - Coerce to number, truncate toward zero (NOT floor), and select the 1-based branch.
+        // - If index is an error, return it without evaluating any branch.
+        // - If index is out of range, return #VALUE! without evaluating any branch.
         //
-        // Excel evaluates `index_num` first and then lazily evaluates only the selected branch.
-        // This is important for both performance and semantics:
-        // `CHOOSE(2, 1/0, 7)` must return 7, not #DIV/0!.
+        // This is compiled into explicit control-flow so unselected branches are not evaluated.
         if args.len() < 2 {
             self.push_error_const(ErrorKind::Value);
             return;
@@ -402,11 +405,9 @@ impl<'a> CompileCtx<'a> {
 
         let choice_count = args.len() - 1;
 
-        // Compute a normalized integer selection using the runtime CHOOSE implementation over
-        // constant 1..=choice_count. This preserves the engine's coercion rules (including NaN
-        // handling via float->int casts) while keeping the actual choice expressions lazy.
-        //
-        // The constant arguments have no side effects, so eager evaluation here is fine.
+        // Normalize the index once using the runtime CHOOSE implementation over constants
+        // 1..=choice_count. This preserves the engine's coercion rules (notably NaN -> 0 via
+        // float-to-int casts) while ensuring the actual choice expressions remain lazy.
         self.compile_expr_inner(&args[0], false);
         let mut selector_consts: Vec<u32> = Vec::with_capacity(choice_count);
         for i in 1..=choice_count {
@@ -456,7 +457,7 @@ impl<'a> CompileCtx<'a> {
         let mut jump_if_idxs: Vec<usize> = Vec::new();
         let mut jump_end_idxs: Vec<usize> = vec![jump_error_end_idx];
 
-        for (idx, choice) in args[1..].iter().enumerate() {
+        for (idx, choice_expr) in args[1..].iter().enumerate() {
             if idx != 0 {
                 self.program
                     .instrs
@@ -476,8 +477,11 @@ impl<'a> CompileCtx<'a> {
                 .instrs
                 .push(Instruction::new(OpCode::JumpIfFalseOrError, 0, 0));
 
-            // Match branch: evaluate the selected value and jump to end.
-            self.compile_expr_inner(choice, allow_range);
+            // Match branch: evaluate the selected choice expression and jump to end.
+            // Evaluate in "argument mode" so direct cell refs are treated as references (ranges),
+            // matching the main evaluator's `eval_arg` semantics for CHOOSE.
+            self.compile_expr_inner(choice_expr, true);
+
             let jump_end_idx = self.program.instrs.len();
             self.program
                 .instrs
@@ -486,6 +490,7 @@ impl<'a> CompileCtx<'a> {
             let next_case_target = self.program.instrs.len() as u32;
             self.program.instrs[jump_idx] =
                 Instruction::new(OpCode::JumpIfFalseOrError, next_case_target, 0);
+
             jump_if_idxs.push(jump_idx);
             jump_end_idxs.push(jump_end_idx);
         }
