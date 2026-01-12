@@ -20,6 +20,7 @@ const RECORD_CONTINUE: u16 = 0x003C;
 const RECORD_XF: u16 = 0x00E0;
 const RECORD_BOUNDSHEET: u16 = 0x0085;
 const RECORD_SAVERECALC: u16 = 0x005F;
+const RECORD_SHEETEXT: u16 = 0x0862;
 const RECORD_WINDOW2: u16 = 0x023E;
 const RECORD_DIMENSIONS: u16 = 0x0200;
 const RECORD_MERGEDCELLS: u16 = 0x00E5;
@@ -237,6 +238,21 @@ pub fn build_hyperlink_fixture_xls() -> Vec<u8> {
 /// records are imported into [`formula_model::Workbook::calc_settings`].
 pub fn build_calc_settings_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_calc_settings_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture with a custom sheet tab color.
+pub fn build_tab_color_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_tab_color_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -749,6 +765,46 @@ fn build_calc_settings_workbook_stream() -> Vec<u8> {
     globals
 }
 
+fn build_tab_color_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+
+    // Keep a minimal style XF table so readers tolerate the file even if it contains no cells.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "TabColor");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // SHEETEXT: store a tab color as an XColor RGB payload.
+    // The importer converts this to an OOXML-style ARGB string.
+    push_record(&mut globals, RECORD_SHEETEXT, &sheetext_record_rgb(0x11, 0x22, 0x33));
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_tab_color_sheet_stream();
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
 fn build_hyperlink_sheet_stream(xf_cell: u16, hlink: Vec<u8>) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
@@ -793,6 +849,24 @@ fn build_calc_settings_sheet_stream(xf: u16) -> Vec<u8> {
     // A1: NUMBER record (value doesn't matter; ensures calamine sees a used cell).
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf, 42.0));
 
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_tab_color_sheet_stream() -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
 }
@@ -1582,4 +1656,27 @@ fn write_unicode_string(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(&len.to_le_bytes());
     out.push(0); // compressed (8-bit)
     out.extend_from_slice(bytes);
+}
+
+fn sheetext_record_rgb(r: u8, g: u8, b: u8) -> Vec<u8> {
+    // BIFF8 `SHEETEXT` is an FRT record that begins with an `FrtHeader` (8 bytes).
+    //
+    // For the purposes of our importer tests, we only need to include an `XColor` payload at the
+    // end of the record:
+    // - xclrType (u16) = 2 (RGB)
+    // - index (u16) = 0 (unused for RGB)
+    // - longRGB (4 bytes) = {r,g,b,0}
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&RECORD_SHEETEXT.to_le_bytes()); // rt
+    out.extend_from_slice(&0u16.to_le_bytes()); // grbitFrt
+    out.extend_from_slice(&0u32.to_le_bytes()); // reserved
+
+    // SheetExt flags (unused for this fixture).
+    out.extend_from_slice(&0u32.to_le_bytes());
+
+    // XColor payload.
+    out.extend_from_slice(&2u16.to_le_bytes()); // xclrType = RGB
+    out.extend_from_slice(&0u16.to_le_bytes()); // index
+    out.extend_from_slice(&[r, g, b, 0]);
+    out
 }

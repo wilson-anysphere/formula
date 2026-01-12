@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use calamine::{open_workbook, Data, Reader, Sheet, SheetType, SheetVisible, Xls};
 use formula_model::{
     normalize_formula_text, CellRef, CellValue, ErrorValue, HyperlinkTarget, Range, SheetVisibility,
-    Style, Workbook, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, EXCEL_MAX_SHEET_NAME_LEN,
+    Style, TabColor, Workbook, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, EXCEL_MAX_SHEET_NAME_LEN,
 };
 use thiserror::Error;
 
@@ -172,6 +172,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
 
     let mut xf_style_ids: Option<Vec<Option<u32>>> = None;
     let mut xf_has_number_format: Option<Vec<bool>> = None;
+    let mut sheet_tab_colors: Option<Vec<Option<TabColor>>> = None;
     let mut biff_sheets: Option<Vec<biff::BoundSheetInfo>> = None;
     let mut row_col_props: Option<Vec<biff::SheetRowColProperties>> = None;
     let mut cell_xf_indices: Option<Vec<HashMap<CellRef, u16>>> = None;
@@ -205,6 +206,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                     out.calc_settings.full_precision = full_precision;
                 }
                 warnings.extend(globals.warnings.drain(..).map(ImportWarning::new));
+                sheet_tab_colors = Some(std::mem::take(&mut globals.sheet_tab_colors));
 
                 let mut cache: HashMap<String, u32> = HashMap::new();
                 let mut style_ids = Vec::with_capacity(globals.xf_count());
@@ -428,6 +430,9 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             .expect("sheet id should exist immediately after add");
 
         sheet.visibility = sheet_visible_to_visibility(sheet_meta.visible);
+        sheet.tab_color = biff_idx
+            .and_then(|idx| sheet_tab_colors.as_ref().and_then(|v| v.get(idx)).cloned())
+            .flatten();
 
         if sheet_meta.typ != SheetType::WorkSheet {
             warnings.push(ImportWarning::new(format!(

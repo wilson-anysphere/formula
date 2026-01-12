@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use formula_model::{CalculationMode, DateSystem};
+use formula_model::{CalculationMode, DateSystem, TabColor};
 
 use super::{records, strings, BiffVersion};
 
@@ -29,6 +29,8 @@ const RECORD_FORMAT_BIFF8: u16 = 0x041E;
 const RECORD_FORMAT2_BIFF5: u16 = 0x001E;
 const RECORD_XF: u16 = 0x00E0;
 const RECORD_SAVERECALC: u16 = 0x005F;
+// SHEETEXT [MS-XLS 2.4.269] (BIFF8 only) stores extended sheet metadata such as sheet tab color.
+const RECORD_SHEETEXT: u16 = 0x0862;
 
 // XF type/protection flags: bit 2 is fStyle in BIFF5/8.
 const XF_FLAG_STYLE: u16 = 0x0004;
@@ -123,6 +125,12 @@ pub(crate) struct BiffWorkbookGlobals {
     pub(crate) calculate_before_save: Option<bool>,
     formats: HashMap<u16, String>,
     xfs: Vec<BiffXf>,
+    /// Sheet tab colors parsed from BIFF8 `SHEETEXT` records, in stream order.
+    ///
+    /// These correspond to sheets in workbook order (same as `BoundSheet8` order) for BIFF8
+    /// workbooks produced by Excel. When the counts differ, callers should treat this as
+    /// best-effort metadata.
+    pub(crate) sheet_tab_colors: Vec<Option<TabColor>>,
     pub(crate) warnings: Vec<String>,
 }
 
@@ -138,6 +146,7 @@ impl Default for BiffWorkbookGlobals {
             calculate_before_save: None,
             formats: HashMap::new(),
             xfs: Vec::new(),
+            sheet_tab_colors: Vec::new(),
             warnings: Vec::new(),
         }
     }
@@ -346,6 +355,23 @@ pub(crate) fn parse_biff_workbook_globals(
                 let flag = u16::from_le_bytes([data[0], data[1]]);
                 out.calculate_before_save = Some(flag != 0);
             }
+            // SHEETEXT [MS-XLS 2.4.269]
+            //
+            // This is a BIFF8-only Future Record that may include sheet tab color metadata.
+            RECORD_SHEETEXT if biff == BiffVersion::Biff8 => {
+                match parse_biff_sheetext_tab_color(data) {
+                    Ok(color) => out.sheet_tab_colors.push(color),
+                    Err(err) => {
+                        out.warnings.push(format!(
+                            "failed to parse BIFF SHEETEXT record at offset {}: {err}",
+                            record.offset
+                        ));
+                        // Preserve record count so callers can still align subsequent SheetExt
+                        // records with workbook sheet order (best-effort).
+                        out.sheet_tab_colors.push(None);
+                    }
+                }
+            }
             // EOF terminates the workbook global substream.
             records::RECORD_EOF => {
                 saw_eof = true;
@@ -372,6 +398,117 @@ pub(crate) fn parse_biff_workbook_globals(
     }
 
     Ok(out)
+}
+
+/// Parse a BIFF8 `SHEETEXT` record and return the optional sheet tab color.
+///
+/// The `SHEETEXT` record is a Future Record Type (FRT) record and begins with an `FrtHeader`
+/// (8 bytes). The remainder of the record includes various worksheet-level flags; the tab color is
+/// stored as an `XColor` structure at the end of the record in files produced by Excel.
+///
+/// This parser is best-effort and only extracts `rgb`/`indexed` when they can be inferred.
+fn parse_biff_sheetext_tab_color(data: &[u8]) -> Result<Option<TabColor>, String> {
+    // `FrtHeader` is 8 bytes: rt (u16), grbitFrt (u16), reserved (u32).
+    if data.len() < 8 {
+        return Err(format!("SHEETEXT record too short (len={})", data.len()));
+    }
+
+    let payload = &data[8..];
+
+    // Best-effort: In BIFF8 files produced by Excel, the tab color is stored as an `XColor`
+    // structure (8 bytes) at the end of the record. Prefer that representation because it can
+    // include RGB values directly.
+    if payload.len() >= 8 {
+        let xcolor = &payload[payload.len() - 8..];
+        if let Some(color) = parse_biff_xcolor_tab_color(xcolor) {
+            return Ok(Some(color));
+        }
+        // Fall through to additional heuristics in case we mis-detected the `XColor` layout.
+    }
+
+    // Fallback: treat the final 2 bytes as an indexed color (`ICV`).
+    if payload.len() >= 2 {
+        let idx_bytes = &payload[payload.len() - 2..];
+        let idx = u16::from_le_bytes([idx_bytes[0], idx_bytes[1]]);
+        if let Some(color) = icv_to_tab_color_indexed(idx) {
+            return Ok(Some(color));
+        }
+    }
+
+    // Fallback: treat the final 4 bytes as a `LongRGB`/`COLORREF` if present and non-zero.
+    if payload.len() >= 4 {
+        let rgb = &payload[payload.len() - 4..];
+        if rgb[..3].iter().any(|b| *b != 0) {
+            return Ok(Some(TabColor::rgb(long_rgb_to_argb_hex(rgb))));
+        }
+    }
+
+    Ok(None)
+}
+
+fn parse_biff_xcolor_tab_color(data: &[u8]) -> Option<TabColor> {
+    // Best-effort `XColor` parsing:
+    //
+    // `XColor` is used throughout BIFF8 to represent colors and can be specified in different
+    // modes (indexed vs RGB). For sheet tab colors, Excel stores an `XColor` payload at the end of
+    // the `SHEETEXT` record.
+    //
+    // Layout (best-effort, as used by Excel):
+    // - [0..2]  xclrType (u16)
+    // - [2..4]  icv / index (u16)
+    // - [4..8]  `LongRGB` / `COLORREF` (4 bytes)
+    if data.len() < 8 {
+        return None;
+    }
+
+    let xclr_type = u16::from_le_bytes([data[0], data[1]]);
+    let idx = u16::from_le_bytes([data[2], data[3]]);
+    let rgb_bytes = &data[4..8];
+
+    // Common `XColorType` values (best-effort):
+    // 0 = automatic/none
+    // 1 = indexed (legacy palette)
+    // 2 = RGB
+    // 3 = theme
+    match xclr_type {
+        0 => None,
+        1 => icv_to_tab_color_indexed(idx),
+        2 => Some(TabColor::rgb(long_rgb_to_argb_hex(rgb_bytes))),
+        3 => {
+            // Best-effort: treat the index field as an OOXML theme index.
+            let mut out = TabColor::default();
+            out.theme = Some(idx as u32);
+            Some(out)
+        }
+        // Be conservative for unknown variants to avoid introducing incorrect tab colors.
+        _ => None,
+    }
+}
+
+fn icv_to_tab_color_indexed(idx: u16) -> Option<TabColor> {
+    // BIFF `ICV` uses 0x7FFF for "automatic". Treat that (and 0) as "no tab color".
+    const ICV_AUTOMATIC: u16 = 0x7FFF;
+    if idx == 0 || idx == ICV_AUTOMATIC {
+        return None;
+    }
+    let mut out = TabColor::default();
+    out.indexed = Some(idx as u32);
+    Some(out)
+}
+
+fn long_rgb_to_argb_hex(rgb: &[u8]) -> String {
+    // BIFF `LongRGB`/`COLORREF` is stored as:
+    // - red (u8)
+    // - green (u8)
+    // - blue (u8)
+    // - reserved / alpha (u8, typically 0)
+    let r = rgb.get(0).copied().unwrap_or(0);
+    let g = rgb.get(1).copied().unwrap_or(0);
+    let b = rgb.get(2).copied().unwrap_or(0);
+    let a = rgb.get(3).copied().unwrap_or(0);
+
+    let alpha = if a == 0 { 0xFF } else { a };
+    format!("{alpha:02X}{r:02X}{g:02X}{b:02X}")
 }
 
 fn workbook_globals_allows_continuation_biff5(record_id: u16) -> bool {
