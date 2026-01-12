@@ -722,7 +722,37 @@ export class SpreadsheetApp {
           },
           onRangeSelectionStart: (range) => this.onSharedRangeSelectionStart(range),
           onRangeSelectionChange: (range) => this.onSharedRangeSelectionChange(range),
-          onRangeSelectionEnd: () => this.onSharedRangeSelectionEnd()
+          onRangeSelectionEnd: () => this.onSharedRangeSelectionEnd(),
+          onFillCommit: ({ sourceRange, targetRange, mode }) => {
+            const headerRows = this.sharedHeaderRows();
+            const headerCols = this.sharedHeaderCols();
+
+            const toFillRange = (range: GridCellRange): FillEngineRange | null => {
+              const startRow = Math.max(0, range.startRow - headerRows);
+              const endRow = Math.max(0, range.endRow - headerRows);
+              const startCol = Math.max(0, range.startCol - headerCols);
+              const endCol = Math.max(0, range.endCol - headerCols);
+              if (endRow <= startRow || endCol <= startCol) return null;
+              return { startRow, endRow, startCol, endCol };
+            };
+
+            const source = toFillRange(sourceRange);
+            const target = toFillRange(targetRange);
+            if (!source || !target) return;
+
+            applyFillCommitToDocumentController({
+              document: this.document,
+              sheetId: this.sheetId,
+              sourceRange: source,
+              targetRange: target,
+              mode,
+              getCellComputedValue: (row, col) => this.getCellComputedValue({ row, col }) as any
+            });
+
+            // Ensure non-grid overlays (charts, auditing) refresh after the mutation.
+            this.refresh();
+            this.focus();
+          }
         }
       });
 
@@ -1762,6 +1792,9 @@ export class SpreadsheetApp {
 
   getFillHandleRect(): { x: number; y: number; width: number; height: number } | null {
     if (this.formulaBar?.isFormulaEditing()) return null;
+    if (this.sharedGrid) {
+      return this.sharedGrid.renderer.getFillHandleRect();
+    }
     this.ensureViewportMappingCurrent();
     return this.selectionRenderer.getFillHandleRect(
       this.selection,
@@ -4542,31 +4575,38 @@ export class SpreadsheetApp {
       return;
     }
 
-    if (e.key === "Escape" && this.dragState?.mode === "fill") {
-      e.preventDefault();
-      const state = this.dragState;
-      this.dragState = null;
-      this.dragPointerPos = null;
-      this.fillPreviewRange = null;
-      if (this.dragAutoScrollRaf != null) {
-        if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.dragAutoScrollRaf);
-        else globalThis.clearTimeout(this.dragAutoScrollRaf);
-      }
-      this.dragAutoScrollRaf = null;
+    if (e.key === "Escape") {
+      if (this.dragState?.mode === "fill") {
+        e.preventDefault();
+        const state = this.dragState;
+        this.dragState = null;
+        this.dragPointerPos = null;
+        this.fillPreviewRange = null;
+        if (this.dragAutoScrollRaf != null) {
+          if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.dragAutoScrollRaf);
+          else globalThis.clearTimeout(this.dragAutoScrollRaf);
+        }
+        this.dragAutoScrollRaf = null;
 
-      try {
-        this.root.releasePointerCapture(state.pointerId);
-      } catch {
-        // ignore
+        try {
+          this.root.releasePointerCapture(state.pointerId);
+        } catch {
+          // ignore
+        }
+
+        this.renderSelection();
+
+        if (this.auditingNeedsUpdateAfterDrag) {
+          this.auditingNeedsUpdateAfterDrag = false;
+          this.scheduleAuditingUpdate();
+        }
+        return;
       }
 
-      this.renderSelection();
-
-      if (this.auditingNeedsUpdateAfterDrag) {
-        this.auditingNeedsUpdateAfterDrag = false;
-        this.scheduleAuditingUpdate();
+      if (this.sharedGrid?.cancelFillHandleDrag()) {
+        e.preventDefault();
+        return;
       }
-      return;
     }
 
     if (this.handleUndoRedoShortcut(e)) return;

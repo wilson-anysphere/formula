@@ -1,4 +1,13 @@
-import type { CellProvider, CellRange, GridAxisSizeChange, GridPerfStats, GridViewportState, ScrollToCellAlign } from "@formula/grid";
+import type {
+  CellProvider,
+  CellRange,
+  FillCommitEvent,
+  FillMode,
+  GridAxisSizeChange,
+  GridPerfStats,
+  GridViewportState,
+  ScrollToCellAlign
+} from "@formula/grid";
 import { CanvasGridRenderer, computeScrollbarThumb, resolveGridThemeFromCssVars } from "@formula/grid";
 
 export type DesktopGridInteractionMode = "default" | "rangeSelection";
@@ -13,6 +22,14 @@ export interface DesktopSharedGridCallbacks {
   onRangeSelectionStart?: (range: CellRange) => void;
   onRangeSelectionChange?: (range: CellRange) => void;
   onRangeSelectionEnd?: (range: CellRange) => void;
+
+  /**
+   * Called when the user commits a fill handle drag.
+   *
+   * The `targetRange` excludes the `sourceRange` (it only includes the cells that
+   * should be written).
+   */
+  onFillCommit?: (event: FillCommitEvent) => void | Promise<void>;
 }
 
 type ResizeHit = { kind: "col"; index: number } | { kind: "row"; index: number };
@@ -123,6 +140,15 @@ export class DesktopSharedGrid {
   private lastPointerViewport: { x: number; y: number } | null = null;
   private autoScrollFrame: number | null = null;
 
+  private dragMode: "selection" | "fillHandle" | null = null;
+  private fillHandleState: {
+    source: CellRange;
+    target: CellRange;
+    mode: FillMode;
+    previewTarget: CellRange | null;
+    endCell: { row: number; col: number };
+  } | null = null;
+
   private resizePointerId: number | null = null;
   private resizeDrag: ResizeDragState | null = null;
 
@@ -220,6 +246,7 @@ export class DesktopSharedGrid {
       selection: this.selectionCanvas
     });
     this.renderer.setFrozen(this.frozenRows, this.frozenCols);
+    this.renderer.setFillHandleEnabled(this.interactionMode === "default" && Boolean(this.callbacks.onFillCommit));
 
     // Ensure the selection canvas captures pointer events (background/content are paint-only).
     this.gridCanvas.style.pointerEvents = "none";
@@ -246,6 +273,41 @@ export class DesktopSharedGrid {
 
   setInteractionMode(mode: DesktopGridInteractionMode): void {
     this.interactionMode = mode;
+    if (mode !== "default") {
+      this.cancelFillHandleDrag();
+    }
+    this.renderer.setFillHandleEnabled(mode === "default" && Boolean(this.callbacks.onFillCommit));
+  }
+
+  /**
+   * Cancel an in-progress fill handle drag (if any).
+   *
+   * Returns true when a fill drag was active and was canceled.
+   */
+  cancelFillHandleDrag(): boolean {
+    if (this.dragMode !== "fillHandle") return false;
+
+    this.dragMode = null;
+    this.fillHandleState = null;
+    this.lastPointerViewport = null;
+    this.selectionAnchor = null;
+    this.stopAutoScroll();
+
+    const pointerId = this.selectionPointerId;
+    this.selectionPointerId = null;
+
+    this.renderer.setFillPreviewRange(null);
+    this.selectionCanvas.style.cursor = "default";
+
+    if (pointerId !== null) {
+      try {
+        this.selectionCanvas.releasePointerCapture?.(pointerId);
+      } catch {
+        // Ignore capture release failures.
+      }
+    }
+
+    return true;
   }
 
   getScroll(): { x: number; y: number } {
@@ -718,7 +780,10 @@ export class DesktopSharedGrid {
       const clampedX = Math.max(0, Math.min(viewport.width, point.x));
       const clampedY = Math.max(0, Math.min(viewport.height, point.y));
       const picked = renderer.pickCellAt(clampedX, clampedY);
-      if (picked) this.applyDragRange(picked);
+      if (picked) {
+        if (this.dragMode === "fillHandle") this.applyFillHandleDrag(picked);
+        else this.applyDragRange(picked);
+      }
 
       this.autoScrollFrame = requestAnimationFrame(tick);
     };
@@ -761,6 +826,102 @@ export class DesktopSharedGrid {
     const nextRange = renderer.getSelectionRange();
     this.announceSelection(nextSelection, nextRange);
     this.callbacks.onSelectionRangeChange?.(nextRange ?? range);
+  }
+
+  private computeFillDeltaRange(source: CellRange, union: CellRange): CellRange | null {
+    const sameCols = source.startCol === union.startCol && source.endCol === union.endCol;
+    const sameRows = source.startRow === union.startRow && source.endRow === union.endRow;
+
+    if (sameCols) {
+      if (union.endRow > source.endRow) {
+        return { startRow: source.endRow, endRow: union.endRow, startCol: source.startCol, endCol: source.endCol };
+      }
+      if (union.startRow < source.startRow) {
+        return { startRow: union.startRow, endRow: source.startRow, startCol: source.startCol, endCol: source.endCol };
+      }
+    }
+
+    if (sameRows) {
+      if (union.endCol > source.endCol) {
+        return { startRow: source.startRow, endRow: source.endRow, startCol: source.endCol, endCol: union.endCol };
+      }
+      if (union.startCol < source.startCol) {
+        return { startRow: source.startRow, endRow: source.endRow, startCol: union.startCol, endCol: source.startCol };
+      }
+    }
+
+    return null;
+  }
+
+  private computeFillTarget(source: CellRange, picked: { row: number; col: number }, direction: "up" | "down" | "left" | "right"): CellRange {
+    const { rowCount, colCount } = this.renderer.scroll.getCounts();
+    const dataStartRow = this.headerRows >= rowCount ? 0 : this.headerRows;
+    const dataStartCol = this.headerCols >= colCount ? 0 : this.headerCols;
+
+    const clampRow = (row: number) => Math.max(dataStartRow, Math.min(row, rowCount));
+    const clampCol = (col: number) => Math.max(dataStartCol, Math.min(col, colCount));
+
+    if (direction === "down") {
+      const endRow = clampRow(Math.max(source.endRow, picked.row + 1));
+      return { startRow: source.startRow, endRow, startCol: source.startCol, endCol: source.endCol };
+    }
+
+    if (direction === "up") {
+      const startRow = clampRow(Math.min(source.startRow, picked.row));
+      return { startRow, endRow: source.endRow, startCol: source.startCol, endCol: source.endCol };
+    }
+
+    if (direction === "right") {
+      const endCol = clampCol(Math.max(source.endCol, picked.col + 1));
+      return { startRow: source.startRow, endRow: source.endRow, startCol: source.startCol, endCol };
+    }
+
+    const startCol = clampCol(Math.min(source.startCol, picked.col));
+    return { startRow: source.startRow, endRow: source.endRow, startCol, endCol: source.endCol };
+  }
+
+  private applyFillHandleDrag(picked: { row: number; col: number }): void {
+    const state = this.fillHandleState;
+    if (!state) return;
+
+    const srcTop = state.source.startRow;
+    const srcBottom = state.source.endRow - 1;
+    const srcLeft = state.source.startCol;
+    const srcRight = state.source.endCol - 1;
+
+    const rowExtension = picked.row < srcTop ? picked.row - srcTop : picked.row > srcBottom ? picked.row - srcBottom : 0;
+    const colExtension = picked.col < srcLeft ? picked.col - srcLeft : picked.col > srcRight ? picked.col - srcRight : 0;
+
+    const unionRange = (() => {
+      if (rowExtension === 0 && colExtension === 0) return state.source;
+
+      const axis =
+        rowExtension !== 0 && colExtension !== 0
+          ? Math.abs(rowExtension) >= Math.abs(colExtension)
+            ? "vertical"
+            : "horizontal"
+          : rowExtension !== 0
+            ? "vertical"
+            : "horizontal";
+
+      const direction =
+        axis === "vertical" ? (rowExtension > 0 ? "down" : "up") : colExtension > 0 ? "right" : "left";
+
+      return this.computeFillTarget(state.source, picked, direction);
+    })();
+
+    const endCell = {
+      row: clamp(picked.row, unionRange.startRow, unionRange.endRow - 1),
+      col: clamp(picked.col, unionRange.startCol, unionRange.endCol - 1)
+    };
+
+    if (rangesEqual(unionRange, state.target) && endCell.row === state.endCell.row && endCell.col === state.endCell.col) {
+      return;
+    }
+
+    const previewTarget = this.computeFillDeltaRange(state.source, unionRange);
+    this.fillHandleState = { ...state, target: unionRange, previewTarget, endCell };
+    this.renderer.setFillPreviewRange(unionRange);
   }
 
   private getViewportPoint(event: { clientX: number; clientY: number }): { x: number; y: number } {
@@ -852,6 +1013,9 @@ export class DesktopSharedGrid {
       const renderer = this.renderer;
       event.preventDefault();
       this.keyboardAnchor = null;
+      this.dragMode = null;
+      this.fillHandleState = null;
+      renderer.setFillPreviewRange(null);
       const point = this.getViewportPoint(event);
       this.lastPointerViewport = point;
 
@@ -872,11 +1036,53 @@ export class DesktopSharedGrid {
         }
       }
 
+      if (this.interactionMode === "default" && this.callbacks.onFillCommit) {
+        const handleRect = renderer.getFillHandleRect();
+        if (
+          handleRect &&
+          point.x >= handleRect.x &&
+          point.x <= handleRect.x + handleRect.width &&
+          point.y >= handleRect.y &&
+          point.y <= handleRect.y + handleRect.height
+        ) {
+          const source = renderer.getSelectionRange();
+          if (source) {
+            this.selectionPointerId = event.pointerId;
+            this.dragMode = "fillHandle";
+            this.selectionAnchor = null;
+            const mode: FillMode = event.altKey ? "formulas" : event.metaKey || event.ctrlKey ? "copy" : "series";
+            this.fillHandleState = {
+              source,
+              target: source,
+              mode,
+              previewTarget: null,
+              endCell: { row: source.endRow - 1, col: source.endCol - 1 }
+            };
+            selectionCanvas.setPointerCapture?.(event.pointerId);
+
+            // Focus the container so keyboard shortcuts (e.g. Escape) still work while dragging.
+            try {
+              (this.container as any).focus?.({ preventScroll: true });
+            } catch {
+              this.container.focus?.();
+            }
+
+            this.transientRange = null;
+            renderer.setRangeSelection(null);
+
+            renderer.setFillPreviewRange(source);
+            this.scheduleAutoScroll();
+            return;
+          }
+        }
+      }
+
       const picked = renderer.pickCellAt(point.x, point.y);
       if (!picked) return;
 
       if (this.interactionMode === "rangeSelection") {
         this.selectionPointerId = event.pointerId;
+        this.dragMode = "selection";
         selectionCanvas.setPointerCapture?.(event.pointerId);
 
         this.selectionAnchor = picked;
@@ -986,6 +1192,7 @@ export class DesktopSharedGrid {
       }
 
       this.selectionPointerId = event.pointerId;
+      this.dragMode = "selection";
       selectionCanvas.setPointerCapture?.(event.pointerId);
 
       if (isAdditive) {
@@ -1050,11 +1257,13 @@ export class DesktopSharedGrid {
 
       const picked = renderer.pickCellAt(point.x, point.y);
       if (!picked) return;
-      this.applyDragRange(picked);
+      if (this.dragMode === "fillHandle") this.applyFillHandleDrag(picked);
+      else this.applyDragRange(picked);
       this.scheduleAutoScroll();
     };
 
     const endDrag = (event: PointerEvent) => {
+      const renderer = this.renderer;
       if (this.resizePointerId != null && event.pointerId === this.resizePointerId) {
         const drag = this.resizeDrag;
         this.resizePointerId = null;
@@ -1086,15 +1295,58 @@ export class DesktopSharedGrid {
       if (this.selectionPointerId == null) return;
       if (event.pointerId !== this.selectionPointerId) return;
 
+      const prevSelection = renderer.getSelection();
+      const prevRange = renderer.getSelectionRange();
+      const dragMode = this.dragMode;
+      this.dragMode = null;
+
       this.selectionPointerId = null;
       this.selectionAnchor = null;
       this.lastPointerViewport = null;
       this.stopAutoScroll();
 
-      if (this.interactionMode === "rangeSelection") {
-        const range = this.transientRange;
-        if (range) this.callbacks.onRangeSelectionEnd?.(range);
+      if (dragMode === "fillHandle") {
+        const state = this.fillHandleState;
+        this.fillHandleState = null;
+        renderer.setFillPreviewRange(null);
+
+        const shouldCommit = event.type === "pointerup";
+        if (state && shouldCommit && !rangesEqual(state.source, state.target)) {
+          const targetRange = this.computeFillDeltaRange(state.source, state.target);
+          if (targetRange) {
+            const commitResult = this.callbacks.onFillCommit?.({
+              sourceRange: state.source,
+              targetRange,
+              mode: state.mode
+            });
+            void Promise.resolve(commitResult).catch(() => {
+              // Consumers own commit error handling; swallow to avoid unhandled rejections.
+            });
+
+            const ranges = renderer.getSelectionRanges();
+            const activeIndex = renderer.getActiveSelectionIndex();
+            const updatedRanges = ranges.length === 0 ? [state.target] : [...ranges];
+            updatedRanges[Math.min(activeIndex, updatedRanges.length - 1)] = state.target;
+            renderer.setSelectionRanges(updatedRanges, { activeIndex, activeCell: state.endCell });
+          }
+        }
+
+        const nextSelection = renderer.getSelection();
+        const nextRange = renderer.getSelectionRange();
+        this.announceSelection(nextSelection, nextRange);
+        this.emitSelectionChange(prevSelection, nextSelection);
+        this.emitSelectionRangeChange(prevRange, nextRange);
+      } else {
+        this.fillHandleState = null;
+        renderer.setFillPreviewRange(null);
+
+        if (this.interactionMode === "rangeSelection") {
+          const range = this.transientRange;
+          if (range) this.callbacks.onRangeSelectionEnd?.(range);
+        }
       }
+
+      selectionCanvas.style.cursor = "default";
 
       try {
         selectionCanvas.releasePointerCapture?.(event.pointerId);
@@ -1104,11 +1356,32 @@ export class DesktopSharedGrid {
     };
 
     const onPointerHover = (event: PointerEvent) => {
-      if (!options.enableResize) return;
       if (this.resizePointerId != null || this.selectionPointerId != null) return;
       const point = this.getViewportPoint(event);
-      const hit = this.getResizeHit(point.x, point.y);
-      selectionCanvas.style.cursor = hit?.kind === "col" ? "col-resize" : hit?.kind === "row" ? "row-resize" : "default";
+
+      if (options.enableResize) {
+        const hit = this.getResizeHit(point.x, point.y);
+        if (hit) {
+          selectionCanvas.style.cursor = hit.kind === "col" ? "col-resize" : "row-resize";
+          return;
+        }
+      }
+
+      if (this.interactionMode === "default" && this.callbacks.onFillCommit) {
+        const handleRect = this.renderer.getFillHandleRect();
+        if (
+          handleRect &&
+          point.x >= handleRect.x &&
+          point.x <= handleRect.x + handleRect.width &&
+          point.y >= handleRect.y &&
+          point.y <= handleRect.y + handleRect.height
+        ) {
+          selectionCanvas.style.cursor = "crosshair";
+          return;
+        }
+      }
+
+      selectionCanvas.style.cursor = "default";
     };
 
     const onPointerLeave = () => {
