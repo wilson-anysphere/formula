@@ -19,10 +19,26 @@ function extractSection(source, startMarker, endMarker) {
 }
 
 test("extension UI dialogs avoid inline style assignments", () => {
+  const mainPath = path.join(__dirname, "..", "src", "main.ts");
+  const mainSource = fs.readFileSync(mainPath, "utf8");
+
   const extensionsDir = path.join(__dirname, "..", "src", "extensions");
   const uiCandidates = ["ui.js", "ui.ts"];
   let uiPath = null;
+
+  // Prefer the UI helper module that the desktop app actually imports.
+  const uiImportMatch = mainSource.match(
+    /import\s+\{[^}]*\bshowInputBox\b[^}]*\}\s+from\s+["'](\.\/extensions\/ui[^"']*)["'];/,
+  );
+  if (uiImportMatch?.[1]) {
+    const candidatePath = path.join(__dirname, "..", "src", uiImportMatch[1]);
+    if (fs.existsSync(candidatePath)) {
+      uiPath = candidatePath;
+    }
+  }
+
   for (const candidate of uiCandidates) {
+    if (uiPath) break;
     const candidatePath = path.join(extensionsDir, candidate);
     if (fs.existsSync(candidatePath)) {
       uiPath = candidatePath;
@@ -125,8 +141,6 @@ test("extension UI dialogs avoid inline style assignments", () => {
     "showQuickPick should associate an accessible name via aria-labelledby",
   );
 
-  const mainPath = path.join(__dirname, "..", "src", "main.ts");
-  const mainSource = fs.readFileSync(mainPath, "utf8");
   assert.match(
     mainSource,
     /import\s+["']\.\/styles\/dialogs\.css["'];/,
