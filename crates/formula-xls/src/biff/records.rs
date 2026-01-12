@@ -313,6 +313,42 @@ mod tests {
     }
 
     #[test]
+    fn best_effort_iter_stops_at_next_bof() {
+        let prefix = record(0x0001, &[0xAA]);
+        let start_offset = prefix.len();
+
+        let stream = [
+            prefix,
+            record(0x0809, &[0u8; 16]),
+            record(0x0002, &[0xBB]),
+            record(0x0809, &[0u8; 16]),
+            record(0x0003, &[0xCC]),
+        ]
+        .concat();
+
+        let iter = BestEffortSubstreamIter::from_offset(&stream, start_offset).unwrap();
+        let ids: Vec<u16> = iter.map(|r| r.record_id).collect();
+        assert_eq!(ids, vec![0x0809, 0x0002]);
+    }
+
+    #[test]
+    fn best_effort_iter_stops_on_malformed_record() {
+        // Truncated record: declares 4 bytes but only provides 2.
+        let mut truncated = Vec::new();
+        truncated.extend_from_slice(&0x0002u16.to_le_bytes());
+        truncated.extend_from_slice(&4u16.to_le_bytes());
+        truncated.extend_from_slice(&[0xAA, 0xBB]);
+
+        // The truncated record must be at the end of the stream so the physical iterator detects
+        // that it extends past the end of the buffer.
+        let stream = [record(0x0001, &[1]), truncated].concat();
+
+        let iter = BestEffortSubstreamIter::from_offset(&stream, 0).unwrap();
+        let ids: Vec<u16> = iter.map(|r| r.record_id).collect();
+        assert_eq!(ids, vec![0x0001]);
+    }
+
+    #[test]
     fn iterates_physical_records_with_bounds_checks() {
         let stream = [record(0x0001, &[1, 2, 3]), record(0x0002, &[4])].concat();
         let mut iter = BiffRecordIter::from_offset(&stream, 0).unwrap();
