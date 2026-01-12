@@ -376,7 +376,16 @@ export class DesktopSharedGrid {
 
   setSelectionRanges(
     ranges: CellRange[] | null,
-    opts?: { activeIndex?: number; activeCell?: { row: number; col: number } | null; scrollIntoView?: boolean }
+    opts?: {
+      activeIndex?: number;
+      activeCell?: { row: number; col: number } | null;
+      /**
+       * When true (default), scroll the active cell into view after updating selection.
+       * Set to false for programmatic selection syncing (eg split-view) where each pane
+       * should preserve its own scroll position.
+       */
+      scrollIntoView?: boolean;
+    }
   ): void {
     this.keyboardAnchor = null;
     this.transientRange = null;

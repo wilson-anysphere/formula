@@ -94,6 +94,34 @@ test.describe("split view", () => {
       .poll(async () => Number((await page.locator("#grid-secondary").getAttribute("data-zoom")) ?? 1))
       .toBeCloseTo(persistedZoom, 2);
   });
+
+  test("selection is global across panes without cross-pane scrolling", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("split-vertical").click();
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await expect(secondary.locator("canvas")).toHaveCount(3);
+
+    // Scroll the primary pane so A1 is offscreen.
+    const primary = page.locator("#grid");
+    await primary.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(0, 200 * 24);
+    await expect.poll(async () => await page.evaluate(() => (window as any).__formulaApp.getScroll().y)).toBeGreaterThan(0);
+
+    const scrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+
+    // Click B2 in the secondary pane (account for headers: row header ~48px, col header ~24px).
+    await secondary.click({ position: { x: 48 + 100 + 12, y: 24 + 24 + 12 } });
+
+    await expect(page.getByTestId("active-cell")).toHaveText("B2");
+    const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThan(0.1);
+  });
 });
 
 test.describe("split view / shared grid zoom", () => {

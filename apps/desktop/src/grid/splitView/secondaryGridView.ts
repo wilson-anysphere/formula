@@ -1,5 +1,6 @@
 import type { GridAxisSizeChange } from "@formula/grid";
 import type { DocumentController } from "../../document/documentController.js";
+import type { CellRange } from "@formula/grid";
 import { DesktopSharedGrid } from "../shared/desktopSharedGrid.js";
 import { DocumentCellProvider } from "../shared/documentCellProvider.js";
 
@@ -56,6 +57,8 @@ export class SecondaryGridView {
     colCount: number;
     showFormulas: () => boolean;
     getComputedValue: (cell: { row: number; col: number }) => string | number | boolean | null;
+    onSelectionChange?: (selection: { row: number; col: number } | null) => void;
+    onSelectionRangeChange?: (range: CellRange | null) => void;
     getCommentMeta?: (cellRef: string) => { resolved: boolean } | null;
     initialScroll?: ScrollState;
     initialZoom?: number;
@@ -148,6 +151,8 @@ export class SecondaryGridView {
           this.schedulePersistScroll({ scrollX: scroll.x, scrollY: scroll.y });
         },
         onAxisSizeChange: (change) => this.onAxisSizeChange(change),
+        onSelectionChange: options.onSelectionChange,
+        onSelectionRangeChange: options.onSelectionRangeChange,
       }
     });
 

@@ -23,6 +23,8 @@ import { mountRibbon } from "./ribbon/index.js";
 import { computeSelectionFormatState } from "./ribbon/selectionFormatState.js";
 import { setRibbonUiState } from "./ribbon/ribbonUiState.js";
 
+import type { CellRange as GridCellRange } from "@formula/grid";
+
 import { LayoutController } from "./layout/layoutController.js";
 import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
@@ -1222,6 +1224,76 @@ if (
     invalidateSecondaryProvider();
   });
 
+  // --- Split-view selection synchronization (primary SpreadsheetApp ↔ secondary grid) ---
+
+  const SPLIT_HEADER_ROWS = 1;
+  const SPLIT_HEADER_COLS = 1;
+  let splitSelectionSyncInProgress = false;
+  let lastSplitSelection: SelectionState | null = null;
+
+  function gridRangeFromDocRange(range: Range): GridCellRange {
+    return {
+      startRow: range.startRow + SPLIT_HEADER_ROWS,
+      endRow: range.endRow + SPLIT_HEADER_ROWS + 1,
+      startCol: range.startCol + SPLIT_HEADER_COLS,
+      endCol: range.endCol + SPLIT_HEADER_COLS + 1,
+    };
+  }
+
+  function docRangeFromGridRange(range: GridCellRange): Range {
+    return {
+      startRow: Math.max(0, range.startRow - SPLIT_HEADER_ROWS),
+      endRow: Math.max(0, range.endRow - SPLIT_HEADER_ROWS - 1),
+      startCol: Math.max(0, range.startCol - SPLIT_HEADER_COLS),
+      endCol: Math.max(0, range.endCol - SPLIT_HEADER_COLS - 1),
+    };
+  }
+
+  function syncPrimarySelectionFromSecondary(): void {
+    if (!secondaryGridView) return;
+    if (splitSelectionSyncInProgress) return;
+
+    const gridSelection = secondaryGridView.grid.renderer.getSelection();
+    const gridRanges = secondaryGridView.grid.renderer.getSelectionRanges();
+    const activeIndex = secondaryGridView.grid.renderer.getActiveSelectionIndex();
+    if (!gridSelection || gridRanges.length === 0) return;
+
+    // SpreadsheetApp does not currently support multi-range programmatic selection. Mirror
+    // the active range and active cell only.
+    const activeRange = gridRanges[Math.max(0, Math.min(activeIndex, gridRanges.length - 1))] ?? gridRanges[0];
+    if (!activeRange) return;
+
+    const docRange = docRangeFromGridRange(activeRange);
+
+    splitSelectionSyncInProgress = true;
+    try {
+      // Prevent the primary pane from scrolling/focusing when selection is driven from the secondary pane.
+      app.selectRange({ range: docRange }, { scrollIntoView: false, focus: false });
+    } finally {
+      splitSelectionSyncInProgress = false;
+    }
+  }
+
+  app.subscribeSelection((selection) => {
+    lastSplitSelection = selection;
+    if (!secondaryGridView) return;
+    if (splitSelectionSyncInProgress) return;
+
+    splitSelectionSyncInProgress = true;
+    try {
+      const ranges = selection.ranges.map((r) => gridRangeFromDocRange(r));
+      const activeCell = { row: selection.active.row + SPLIT_HEADER_ROWS, col: selection.active.col + SPLIT_HEADER_COLS };
+      secondaryGridView.grid.setSelectionRanges(ranges, {
+        activeIndex: selection.activeRangeIndex,
+        activeCell,
+        // Never cross-scroll panes: selection sync should not disturb the destination pane's scroll.
+        scrollIntoView: false,
+      });
+    } finally {
+      splitSelectionSyncInProgress = false;
+    }
+  });
+
   function renderSplitView() {
     const split = layoutController.layout.splitView;
     const ratio = typeof split.ratio === "number" ? split.ratio : 0.5;
@@ -1262,6 +1334,8 @@ if (
         colCount,
         showFormulas: () => Boolean((app as any).showFormulas),
         getComputedValue: (cell) => (app as any).getCellComputedValue(cell),
+        onSelectionChange: () => syncPrimarySelectionFromSecondary(),
+        onSelectionRangeChange: () => syncPrimarySelectionFromSecondary(),
         initialScroll,
         initialZoom,
         persistScroll: (scroll) => {
@@ -1277,6 +1351,24 @@ if (
           scheduleSplitPanePersist();
         },
       });
+
+      // Ensure the secondary selection reflects the current primary selection without
+      // affecting either pane's scroll positions.
+      if (lastSplitSelection) {
+        const selection = lastSplitSelection;
+        splitSelectionSyncInProgress = true;
+        try {
+          const ranges = selection.ranges.map((r) => gridRangeFromDocRange(r));
+          const activeCell = { row: selection.active.row + SPLIT_HEADER_ROWS, col: selection.active.col + SPLIT_HEADER_COLS };
+          secondaryGridView.grid.setSelectionRanges(ranges, {
+            activeIndex: selection.activeRangeIndex,
+            activeCell,
+            scrollIntoView: false,
+          });
+        } finally {
+          splitSelectionSyncInProgress = false;
+        }
+      }
     }
 
     const active = split.activePane ?? "primary";
