@@ -117,6 +117,26 @@ test("Macro recorder receives formatChanged for colFormats changes in sheetViewD
   workbook.dispose();
 });
 
+test("Macro recorder receives formatChanged for DocumentController formatDeltas (layer=col)", () => {
+  const doc = new FakeDocumentController();
+  const boldId = doc.styleTable.intern({ font: { bold: true } });
+
+  const workbook = new DocumentControllerWorkbookAdapter(doc, { activeSheetName: "Sheet1" });
+  const recorder = new MacroRecorder(workbook);
+  recorder.start();
+
+  doc.emitChange({
+    deltas: [],
+    formatDeltas: [{ sheetId: "Sheet1", layer: "col", index: 2, beforeStyleId: 0, afterStyleId: boldId }],
+  });
+
+  assert.deepEqual(recorder.stop(), [
+    { type: "setFormat", sheetName: "Sheet1", address: "C1:C1048576", format: { bold: true } },
+  ]);
+
+  workbook.dispose();
+});
+
 test("Macro recorder receives formatChanged for row style deltas (layered formatting)", () => {
   const doc = new FakeDocumentController();
   const italicId = doc.styleTable.intern({ font: { italic: true } });
@@ -163,6 +183,26 @@ test("Macro recorder receives formatChanged for rowFormats changes in sheetViewD
   workbook.dispose();
 });
 
+test("Macro recorder receives formatChanged for DocumentController formatDeltas (layer=row)", () => {
+  const doc = new FakeDocumentController();
+  const italicId = doc.styleTable.intern({ font: { italic: true } });
+
+  const workbook = new DocumentControllerWorkbookAdapter(doc, { activeSheetName: "Sheet1" });
+  const recorder = new MacroRecorder(workbook);
+  recorder.start();
+
+  doc.emitChange({
+    deltas: [],
+    formatDeltas: [{ sheetId: "Sheet1", layer: "row", index: 5, beforeStyleId: 0, afterStyleId: italicId }],
+  });
+
+  assert.deepEqual(recorder.stop(), [
+    { type: "setFormat", sheetName: "Sheet1", address: "A6:XFD6", format: { italic: true } },
+  ]);
+
+  workbook.dispose();
+});
+
 test("Macro recorder receives formatChanged for sheet default style deltas (layered formatting)", () => {
   const doc = new FakeDocumentController();
   const fillId = doc.styleTable.intern({ fill: { fgColor: "#FF00FF00" } });
@@ -174,6 +214,26 @@ test("Macro recorder receives formatChanged for sheet default style deltas (laye
   doc.emitChange({
     deltas: [],
     sheetStyleIdDeltas: [{ sheetId: "Sheet1", beforeStyleId: 0, afterStyleId: fillId }],
+  });
+
+  assert.deepEqual(recorder.stop(), [
+    { type: "setFormat", sheetName: "Sheet1", address: "A1:XFD1048576", format: { backgroundColor: "#FF00FF00" } },
+  ]);
+
+  workbook.dispose();
+});
+
+test("Macro recorder receives formatChanged for DocumentController formatDeltas (layer=sheet)", () => {
+  const doc = new FakeDocumentController();
+  const fillId = doc.styleTable.intern({ fill: { fgColor: "#FF00FF00" } });
+
+  const workbook = new DocumentControllerWorkbookAdapter(doc, { activeSheetName: "Sheet1" });
+  const recorder = new MacroRecorder(workbook);
+  recorder.start();
+
+  doc.emitChange({
+    deltas: [],
+    formatDeltas: [{ sheetId: "Sheet1", layer: "sheet", beforeStyleId: 0, afterStyleId: fillId }],
   });
 
   assert.deepEqual(recorder.stop(), [
