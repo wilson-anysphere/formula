@@ -39,7 +39,7 @@ test.describe("command palette: panel toggles", () => {
     // Open via command palette.
     await page.keyboard.press(`${primary}+Shift+P`);
     await expect(page.getByTestId("command-palette-input")).toBeVisible();
-    await page.getByTestId("command-palette-input").fill("Version History");
+    await page.getByTestId("command-palette-input").fill("view.togglePanel.versionHistory");
     await page.keyboard.press("Enter");
 
     await expect(page.getByTestId("panel-versionHistory")).toBeVisible();
@@ -47,7 +47,7 @@ test.describe("command palette: panel toggles", () => {
     // Close via command palette.
     await page.keyboard.press(`${primary}+Shift+P`);
     await expect(page.getByTestId("command-palette-input")).toBeVisible();
-    await page.getByTestId("command-palette-input").fill("Version History");
+    await page.getByTestId("command-palette-input").fill("view.togglePanel.versionHistory");
     await page.keyboard.press("Enter");
 
     await expect(page.getByTestId("panel-versionHistory")).toHaveCount(0);
@@ -64,7 +64,7 @@ test.describe("command palette: panel toggles", () => {
     // Open via command palette.
     await page.keyboard.press(`${primary}+Shift+P`);
     await expect(page.getByTestId("command-palette-input")).toBeVisible();
-    await page.getByTestId("command-palette-input").fill("Branch Manager");
+    await page.getByTestId("command-palette-input").fill("view.togglePanel.branchManager");
     await page.keyboard.press("Enter");
 
     await expect(page.getByTestId("panel-branchManager")).toBeVisible();
@@ -72,7 +72,7 @@ test.describe("command palette: panel toggles", () => {
     // Close via command palette.
     await page.keyboard.press(`${primary}+Shift+P`);
     await expect(page.getByTestId("command-palette-input")).toBeVisible();
-    await page.getByTestId("command-palette-input").fill("Branch Manager");
+    await page.getByTestId("command-palette-input").fill("view.togglePanel.branchManager");
     await page.keyboard.press("Enter");
 
     await expect(page.getByTestId("panel-branchManager")).toHaveCount(0);
