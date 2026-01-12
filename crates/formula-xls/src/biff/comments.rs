@@ -1061,8 +1061,16 @@ fn parse_txo_cch_text_biff5(header: &[u8], max_chars: usize) -> Option<usize> {
 
 fn estimate_max_chars_with_byte_limit(continues: &[&[u8]], byte_limit: usize) -> usize {
     // Best-effort estimate used only for header heuristics.
+    //
+    // Most BIFF8 TXO continuation fragments begin with a 1-byte "high-byte" flag (0/1) followed
+    // by the text bytes. Some malformed files omit that flag in one or more fragments, and some
+    // files split UTF-16LE code units across fragment boundaries. Keep this estimate robust enough
+    // that we don't under-count the available text bytes (which would silently truncate comment
+    // text when `cchText` is missing/zero).
     let mut total = 0usize;
     let mut remaining = byte_limit;
+    let mut current_is_unicode: Option<bool> = None;
+    let mut pending_unicode_byte = false;
     for frag in continues {
         if remaining == 0 {
             break;
@@ -1070,11 +1078,35 @@ fn estimate_max_chars_with_byte_limit(continues: &[&[u8]], byte_limit: usize) ->
         let take_len = frag.len().min(remaining);
         remaining = remaining.saturating_sub(take_len);
         let frag = &frag[..take_len];
-        let Some((&flags, bytes)) = frag.split_first() else {
+        if frag.is_empty() {
             continue;
         };
-        let bytes_per_char = if (flags & 0x01) != 0 { 2 } else { 1 };
-        total = total.saturating_add(bytes.len() / bytes_per_char);
+
+        if looks_like_txo_formatting_runs(frag) {
+            break;
+        }
+
+        let first = frag[0];
+        let (bytes, is_unicode) = if matches!(first, 0 | 1) {
+            let is_unicode = (first & 0x01) != 0;
+            current_is_unicode = Some(is_unicode);
+            (&frag[1..], is_unicode)
+        } else {
+            // Missing flags byte: assume the previous fragment encoding (default: compressed).
+            let is_unicode = current_is_unicode.unwrap_or(false);
+            (frag, is_unicode)
+        };
+
+        if is_unicode {
+            let combined_len = bytes.len() + usize::from(pending_unicode_byte);
+            total = total
+                .saturating_add(combined_len / 2)
+                .min(TXO_MAX_TEXT_CHARS);
+            pending_unicode_byte = combined_len % 2 == 1;
+        } else {
+            pending_unicode_byte = false;
+            total = total.saturating_add(bytes.len()).min(TXO_MAX_TEXT_CHARS);
+        }
     }
     total
 }
@@ -1537,6 +1569,36 @@ mod tests {
             note(0, 0, 1, "Alice"),
             obj_with_id(1),
             txo_with_cch_text_and_cb_runs(5, 4),
+            continue_text_compressed_bytes(b"He"),
+            // Second fragment omits the flags byte.
+            record(records::RECORD_CONTINUE, b"llo"),
+            // Formatting runs CONTINUE payload (dummy bytes, no leading flags byte).
+            record(records::RECORD_CONTINUE, &[0u8; 4]),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
+        assert!(
+            warnings.iter().any(|w| w.contains("missing BIFF8 flags byte")),
+            "expected missing-flags warning; warnings={warnings:?}"
+        );
+    }
+
+    #[test]
+    fn parses_biff8_txo_text_when_cchtext_is_zero_and_a_later_continue_fragment_is_missing_flags_byte(
+    ) {
+        // When the TXO header reports `cchText=0`, we infer the length from the continuation area.
+        // Ensure the inference still accounts for the full text bytes even if a later fragment is
+        // missing the BIFF8 flags byte.
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text_and_cb_runs(0, 4),
             continue_text_compressed_bytes(b"He"),
             // Second fragment omits the flags byte.
             record(records::RECORD_CONTINUE, b"llo"),
