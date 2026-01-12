@@ -262,21 +262,14 @@ fn engine_value_to_json(value: EngineValue) -> JsonValue {
             .map(JsonValue::Number)
             .unwrap_or_else(|| JsonValue::String(ErrorKind::Num.as_code().to_string())),
         EngineValue::Error(kind) => JsonValue::String(kind.as_code().to_string()),
-        // The JS worker protocol only supports scalar-ish values today.
-        // References are intermediate Excel values; surface them as #VALUE!.
-        EngineValue::Reference(_) | EngineValue::ReferenceUnion(_) => {
-            JsonValue::String(ErrorKind::Value.as_code().to_string())
-        }
         // Arrays should generally be spilled into grid cells. If one reaches the JS boundary,
         // degrade to its top-left value so callers still get a scalar.
         EngineValue::Array(arr) => engine_value_to_json(arr.top_left()),
-        // Spill markers should not leak because `Engine::get_cell_value` resolves spill cells to
-        // their concrete values. Keep a defensive fallback anyway.
-        EngineValue::Spill { .. } => JsonValue::String(ErrorKind::Spill.as_code().to_string()),
-        // Excel treats bare lambda values (not invoked) as a #CALC! cell result.
-        // Degrade any lambda that leaks to the JS worker boundary to the same error code so
-        // callers never have to handle function-valued JSON payloads.
-        EngineValue::Lambda(_) => JsonValue::String(ErrorKind::Calc.as_code().to_string()),
+        // The JS worker protocol only supports scalar-ish values today.
+        //
+        // Degrade any rich/non-scalar value (references, lambdas, entities, records, etc.) to its
+        // display string so existing `getCell` / `recalculate` callers keep receiving scalars.
+        other => JsonValue::String(other.to_string()),
     }
 }
 
@@ -1576,6 +1569,33 @@ pub fn lex_formula_js(formula: String, options: Option<JsValue>) -> Result<JsVal
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn engine_value_to_json_degrades_rich_values_to_display_string() {
+        // The JS worker protocol expects scalar-ish JSON values today. Rich values like
+        // references/lambdas (and future entity/record values) should degrade to their display
+        // strings so existing callers never have to handle structured JSON objects.
+        let value = EngineValue::Spill {
+            origin: CellRef::new(0, 0),
+        };
+        let expected = value.to_string();
+        assert_eq!(engine_value_to_json(value), JsonValue::String(expected));
+    }
+
+    #[test]
+    fn engine_value_to_json_arrays_use_top_left_value() {
+        let arr = formula_engine::value::Array::new(
+            2,
+            2,
+            vec![
+                EngineValue::Number(1.0),
+                EngineValue::Number(2.0),
+                EngineValue::Number(3.0),
+                EngineValue::Number(4.0),
+            ],
+        );
+        assert_eq!(engine_value_to_json(EngineValue::Array(arr)), json!(1.0));
+    }
 
     #[test]
     fn parse_formula_partial_uses_utf16_cursor_and_spans() {
