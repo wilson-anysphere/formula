@@ -9382,45 +9382,13 @@ try {
     return null;
   };
   const writeClipboardTextBestEffort = async (text: string): Promise<boolean> => {
-    const invoke = (globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined;
-    if (typeof invoke === "function") {
-      // Prefer the multi-format clipboard bridge (`clipboard_write`) when available.
-      try {
-        await invoke("clipboard_write", { payload: { text } });
-        return true;
-      } catch {
-        // fall through
-      }
-      try {
-        await invoke("write_clipboard", { text });
-        return true;
-      } catch {
-        // fall through
-      }
+    try {
+      const provider = await getClipboardProvider();
+      await provider.write({ text: String(text ?? "") });
+      return true;
+    } catch {
+      return false;
     }
-
-    const navigatorClipboard = (globalThis as any)?.navigator?.clipboard;
-    const writeText = navigatorClipboard?.writeText as ((text: string) => Promise<void>) | undefined;
-    if (typeof writeText === "function") {
-      try {
-        await writeText.call(navigatorClipboard, text);
-        return true;
-      } catch {
-        // ignore and fall through
-      }
-    }
-
-    const legacyWriteText = (globalThis as any).__TAURI__?.clipboard?.writeText as ((text: string) => Promise<void>) | undefined;
-    if (typeof legacyWriteText === "function") {
-      try {
-        await legacyWriteText(text);
-        return true;
-      } catch {
-        // ignore
-      }
-    }
-
-    return false;
   };
   const dispatchSpreadsheetShortcut = (key: string, opts: { shift?: boolean; alt?: boolean } = {}) => {
     const { ctrlKey, metaKey } = primaryModifiers();
