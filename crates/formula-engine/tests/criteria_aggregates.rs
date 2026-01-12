@@ -98,7 +98,24 @@ fn sumif_supports_wildcards_and_blank_criteria() {
     sheet.set("B6", 6);
 
     assert_number(&sheet.eval(r#"=SUMIF(A4:A6,"",B4:B6)"#), 9.0);
+    // Missing criteria argument is treated as blank criteria.
+    assert_number(&sheet.eval(r#"=SUMIF(A4:A6,,B4:B6)"#), 9.0);
     assert_number(&sheet.eval(r#"=SUMIF(A4:A6,"<>",B4:B6)"#), 6.0);
+}
+
+#[test]
+fn sumifs_supports_blank_criteria_when_omitted() {
+    let mut sheet = TestSheet::new();
+
+    // A1 is blank (unset); A2 is empty string; A3 is non-blank.
+    sheet.set("A2", "");
+    sheet.set("A3", "x");
+
+    sheet.set("B1", 4);
+    sheet.set("B2", 5);
+    sheet.set("B3", 6);
+
+    assert_number(&sheet.eval(r#"=SUMIFS(B1:B3,A1:A3,)"#), 9.0);
 }
 
 #[test]
