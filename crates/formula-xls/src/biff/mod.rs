@@ -12,7 +12,7 @@ use std::io::{Read, Seek};
 use std::path::Path;
 
 pub(crate) mod globals;
-pub(crate) mod comments;
+mod comments;
 pub(crate) mod defined_names;
 pub(crate) mod extern_sheet;
 pub(crate) mod rgce;

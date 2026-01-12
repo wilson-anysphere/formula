@@ -11,8 +11,6 @@
 //! - Malformed/incomplete record sequences may yield partial output and warnings.
 //! - Modern threaded comments are an OOXML feature and are not supported in `.xls`.
 
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 
 use formula_model::{CellRef, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
