@@ -734,17 +734,22 @@ test.describe("sheet tabs", () => {
     await page.getByTestId("sheet-tab-Sheet3").click();
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
 
-    await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
-      app.getWorkbookSheetStore().hide("Sheet2");
-    });
+    // Hide Sheet2 through the tab context menu so the position indicator reflects
+    // visible sheets (Excel-like behavior).
+    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
+    const menu = page.getByTestId("sheet-tab-context-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Hide" }).click();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
 
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
 
-    await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
-      app.getWorkbookSheetStore().unhide("Sheet2");
-    });
+    // Unhide Sheet2 through the same context menu.
+    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Unhide…" }).click();
+    await menu.getByRole("button", { name: "Sheet2" }).click();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
 
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
   });
