@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 
 use calamine::{open_workbook, Data, Reader, Sheet, SheetType, SheetVisible, Xls};
 use formula_model::{
-    normalize_formula_text, CellRef, CellValue, ErrorValue, Range, SheetVisibility, Style,
-    Workbook, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, EXCEL_MAX_SHEET_NAME_LEN,
+    normalize_formula_text, CellRef, CellValue, ErrorValue, HyperlinkTarget, Range, SheetVisibility,
+    Style, Workbook, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, EXCEL_MAX_SHEET_NAME_LEN,
 };
 use thiserror::Error;
 
@@ -333,6 +333,8 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
         warnings.push(ImportWarning::new(message));
     }
 
+    let mut final_sheet_names_by_idx: Vec<String> = Vec::with_capacity(sheets.len());
+
     for (sheet_idx, sheet_meta) in sheets.iter().enumerate() {
         let source_sheet_name = sheet_meta.name.clone();
         let biff_idx = sheet_mapping.get(sheet_idx).copied().flatten();
@@ -411,6 +413,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 (sheet_id, candidate)
             }
         };
+        final_sheet_names_by_idx.push(sheet_name.clone());
         let sheet = out
             .sheet_mut(sheet_id)
             .expect("sheet id should exist immediately after add");
@@ -692,6 +695,48 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 warnings.push(ImportWarning::new(format!(
                     "skipped {out_of_range_xf_count} cells in sheet `{sheet_name}` with out-of-range XF indices"
                 )));
+            }
+        }
+    }
+
+    // If we had to sanitize sheet names, internal hyperlinks may still reference the original
+    // (invalid) sheet names. Rewrite internal hyperlink targets to point at the final imported
+    // sheet names so navigation remains correct after import and round-trips to XLSX.
+    if !final_sheet_names_by_idx.is_empty() {
+        let mut resolved_sheet_names: HashMap<String, String> = HashMap::new();
+        for (idx, sheet_meta) in sheets.iter().enumerate() {
+            let Some(final_name) = final_sheet_names_by_idx.get(idx) else {
+                continue;
+            };
+            resolved_sheet_names.insert(
+                normalize_sheet_name_for_match(&sheet_meta.name),
+                final_name.clone(),
+            );
+
+            if let Some(biff_idx) = sheet_mapping.get(idx).copied().flatten() {
+                if let Some(biff_name) = biff_sheets
+                    .as_ref()
+                    .and_then(|sheets| sheets.get(biff_idx))
+                    .map(|s| s.name.as_str())
+                {
+                    resolved_sheet_names
+                        .entry(normalize_sheet_name_for_match(biff_name))
+                        .or_insert_with(|| final_name.clone());
+                }
+            }
+        }
+
+        if !resolved_sheet_names.is_empty() {
+            for sheet in &mut out.sheets {
+                for link in &mut sheet.hyperlinks {
+                    let HyperlinkTarget::Internal { sheet, .. } = &mut link.target else {
+                        continue;
+                    };
+                    let key = normalize_sheet_name_for_match(sheet);
+                    if let Some(resolved) = resolved_sheet_names.get(&key) {
+                        *sheet = resolved.clone();
+                    }
+                }
             }
         }
     }

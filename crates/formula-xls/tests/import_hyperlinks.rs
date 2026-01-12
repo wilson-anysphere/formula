@@ -110,3 +110,30 @@ fn imports_biff_hyperlinks_continued_record() {
     assert_eq!(link.display.as_deref(), Some("Example"));
     assert_eq!(link.tooltip.as_deref(), Some("Example tooltip"));
 }
+
+#[test]
+fn rewrites_internal_hyperlinks_to_sanitized_sheet_names() {
+    let bytes = xls_fixture_builder::build_sanitized_sheet_name_internal_hyperlink_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    assert!(
+        result.workbook.sheet_by_name("A:B").is_none(),
+        "expected invalid sheet name to be sanitized"
+    );
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("A_B")
+        .expect("sanitized sheet missing");
+
+    assert_eq!(sheet.hyperlinks.len(), 1);
+    let link = &sheet.hyperlinks[0];
+    assert_eq!(link.range, Range::from_a1("A1").unwrap());
+    assert_eq!(
+        link.target,
+        HyperlinkTarget::Internal {
+            sheet: "A_B".to_string(),
+            cell: CellRef::from_a1("B2").unwrap()
+        }
+    );
+}

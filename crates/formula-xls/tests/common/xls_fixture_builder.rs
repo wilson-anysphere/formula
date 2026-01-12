@@ -776,6 +776,25 @@ pub fn build_internal_hyperlink_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture where the worksheet name is invalid and will be sanitized by the
+/// importer, but an internal hyperlink still references the original name.
+pub fn build_sanitized_sheet_name_internal_hyperlink_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_hyperlink_workbook_stream(
+        "A:B",
+        hlink_internal_location(0, 0, 0, 0, "A:B!B2", "Go to B2", "Internal tooltip"),
+    );
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture where the HLINK payload is split across a `CONTINUE` record.
 pub fn build_continued_hyperlink_fixture_xls() -> Vec<u8> {
     let url = format!("https://example.com/{}", "a".repeat(200));
