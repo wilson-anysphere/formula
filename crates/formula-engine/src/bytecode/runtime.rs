@@ -1051,12 +1051,12 @@ fn or_range(
 }
 
 fn format_number_general(n: f64) -> String {
-    // Match the engine's number-to-text coercion semantics used by the AST evaluator. The AST
-    // path uses `Value::coerce_to_string_with_ctx`, which relies on `formula-format` for locale-
-    // aware "General" formatting.
+    // Match the engine's number-to-text coercion semantics used by the AST evaluator.
     //
-    // Using the same logic here avoids backend divergence in bytecode-eligible formulas like
-    // `=A1&B1` and locale-specific cases like `=CONCAT(1.5)` under `de-DE` (`1,5`).
+    // The AST path uses `Value::coerce_to_string_with_ctx`, which relies on `formula-format` for
+    // locale-aware "General" formatting. Using the same logic here avoids backend divergence from
+    // subtle rounding differences (e.g. in `&` / CONCAT) and from locale-specific formatting (e.g.
+    // `=CONCAT(1.5)` under `de-DE`, which should yield `1,5`).
     let options = FormatOptions {
         locale: thread_value_locale().separators,
         date_system: match thread_date_system() {

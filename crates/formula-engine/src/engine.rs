@@ -5369,15 +5369,12 @@ fn rewrite_defined_name_constants_for_bytecode(
                 })
             }
             crate::Expr::Call(_) => None,
-            crate::Expr::Unary(u) => match u.op {
-                crate::UnaryOp::ImplicitIntersection => None,
-                _ => rewrite_inner(&u.expr, current_sheet, workbook).map(|inner| {
-                    crate::Expr::Unary(crate::UnaryExpr {
-                        op: u.op,
-                        expr: Box::new(inner),
-                    })
-                }),
-            },
+            crate::Expr::Unary(u) => rewrite_inner(&u.expr, current_sheet, workbook).map(|inner| {
+                crate::Expr::Unary(crate::UnaryExpr {
+                    op: u.op,
+                    expr: Box::new(inner),
+                })
+            }),
             crate::Expr::Postfix(_) => None,
             crate::Expr::Binary(b) => {
                 if matches!(
@@ -8165,6 +8162,28 @@ mod tests {
             engine.get_cell_value("Sheet1", "XFD1"),
             Value::Error(ErrorKind::Value)
         );
+    }
+
+    #[test]
+    fn bytecode_compiler_inlines_defined_name_constants_under_implicit_intersection() {
+        let mut engine = Engine::new();
+        engine
+            .define_name(
+                "X",
+                NameScope::Workbook,
+                NameDefinition::Constant(Value::Number(5.0)),
+            )
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=@X")
+            .unwrap();
+
+        // Ensure the name constant was inlined so the bytecode backend can compile the `@`
+        // expression (bytecode lowering does not support NameRef directly).
+        assert_eq!(engine.bytecode_program_count(), 1);
+
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(5.0));
     }
 
     #[test]
