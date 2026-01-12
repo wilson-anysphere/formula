@@ -219,7 +219,9 @@ test.describe("split view", () => {
     };
 
     // Focus the primary pane and move selection via keyboard.
-    await page.click("#grid", { position: { x: 5, y: 5 } }); // A1
+    const rectA1 = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"));
+    if (!rectA1) throw new Error("Missing A1 rect");
+    await page.click("#grid", { position: { x: rectA1.x + rectA1.width / 2, y: rectA1.y + rectA1.height / 2 } }); // A1
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
     await page.keyboard.press("ArrowDown");
