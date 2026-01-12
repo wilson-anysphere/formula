@@ -283,7 +283,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               menuItems: [
                 { id: "file.export.changeFileType.xlsx", label: "Excel Workbook (*.xlsx)", ariaLabel: "Excel Workbook", iconId: "chart" },
                 { id: "file.export.changeFileType.csv", label: "CSV (Comma delimited) (*.csv)", ariaLabel: "CSV", iconId: "file" },
-                { id: "file.export.changeFileType.tsv", label: "TSV (Tab delimited) (*.tsv)", ariaLabel: "TSV", icon: "⇥" },
+                { id: "file.export.changeFileType.tsv", label: "TSV (Tab delimited) (*.tsv)", ariaLabel: "TSV", iconId: "return" },
                 { id: "file.export.changeFileType.pdf", label: "PDF (*.pdf)", ariaLabel: "PDF", iconId: "file" },
               ],
             },
@@ -1402,12 +1402,12 @@ export const defaultRibbonSchema: RibbonSchema = {
               id: "pageLayout.pageSetup.breaks",
               label: "Breaks",
               ariaLabel: "Breaks",
-              icon: "⤶",
+              iconId: "pageBreak",
               kind: "dropdown",
               menuItems: [
-                { id: "pageLayout.pageSetup.breaks.insertPageBreak", label: "Insert Page Break", ariaLabel: "Insert Page Break", icon: "⤶" },
+                { id: "pageLayout.pageSetup.breaks.insertPageBreak", label: "Insert Page Break", ariaLabel: "Insert Page Break", iconId: "pageBreak" },
                 { id: "pageLayout.pageSetup.breaks.removePageBreak", label: "Remove Page Break", ariaLabel: "Remove Page Break", iconId: "close" },
-                { id: "pageLayout.pageSetup.breaks.resetAll", label: "Reset All Page Breaks", ariaLabel: "Reset All Page Breaks", icon: "↺" },
+                { id: "pageLayout.pageSetup.breaks.resetAll", label: "Reset All Page Breaks", ariaLabel: "Reset All Page Breaks", iconId: "undo" },
               ],
             },
             {
