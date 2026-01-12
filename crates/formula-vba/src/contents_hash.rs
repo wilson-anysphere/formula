@@ -1,4 +1,10 @@
-use crate::{decompress_container, DirParseError, OleFile, ParseError};
+use encoding_rs::{
+    Encoding, BIG5, EUC_KR, GBK, SHIFT_JIS, UTF_16LE, UTF_8, WINDOWS_1250, WINDOWS_1251,
+    WINDOWS_1252, WINDOWS_1253, WINDOWS_1254, WINDOWS_1255, WINDOWS_1256, WINDOWS_1257,
+    WINDOWS_1258, WINDOWS_874,
+};
+
+use crate::{decompress_container, DirParseError, DirStream, OleFile, ParseError};
 
 #[derive(Debug, Clone, Default)]
 struct ModuleInfo {
@@ -29,6 +35,9 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
         .read_stream_opt("VBA/dir")?
         .ok_or(ParseError::MissingStream("VBA/dir"))?;
     let dir_decompressed = decompress_container(&dir_bytes)?;
+    let encoding = DirStream::detect_codepage(&dir_decompressed)
+        .map(encoding_for_codepage)
+        .unwrap_or(WINDOWS_1252);
 
     let mut out = Vec::new();
     let mut modules: Vec<ModuleInfo> = Vec::new();
@@ -71,7 +80,7 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
                     modules.push(m);
                 }
                 current_module = Some(ModuleInfo {
-                    stream_name: String::from_utf8_lossy(data).into_owned(),
+                    stream_name: decode_dir_string(data, encoding),
                     text_offset: None,
                 });
             }
@@ -79,7 +88,7 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
             // MODULESTREAMNAME. Some files include a reserved u16 at the end.
             0x001A => {
                 if let Some(m) = current_module.as_mut() {
-                    m.stream_name = String::from_utf8_lossy(trim_reserved_u16(data)).into_owned();
+                    m.stream_name = decode_dir_string(trim_reserved_u16(data), encoding);
                 }
             }
 
@@ -249,3 +258,49 @@ fn is_attribute_line(line: &[u8]) -> bool {
     matches!(line[keyword.len()], b' ' | b'\t')
 }
 
+fn encoding_for_codepage(codepage: u16) -> &'static Encoding {
+    match codepage as u32 {
+        874 => WINDOWS_874,
+        932 => SHIFT_JIS,
+        936 => GBK,
+        949 => EUC_KR,
+        950 => BIG5,
+        1250 => WINDOWS_1250,
+        1251 => WINDOWS_1251,
+        1252 => WINDOWS_1252,
+        1253 => WINDOWS_1253,
+        1254 => WINDOWS_1254,
+        1255 => WINDOWS_1255,
+        1256 => WINDOWS_1256,
+        1257 => WINDOWS_1257,
+        1258 => WINDOWS_1258,
+        65001 => UTF_8,
+        _ => WINDOWS_1252,
+    }
+}
+
+fn decode_dir_string(bytes: &[u8], encoding: &'static Encoding) -> String {
+    // MS-OVBA dir strings are generally stored using the project codepage, but some records may
+    // appear in UTF-16LE form. Use the same heuristic as the main `DirStream` parser so we can
+    // reliably locate module streams with non-ASCII names.
+    if looks_like_utf16le(bytes) {
+        let (cow, _) = UTF_16LE.decode_without_bom_handling(bytes);
+        return cow.into_owned();
+    }
+
+    let (cow, _, _) = encoding.decode(bytes);
+    cow.into_owned()
+}
+
+fn looks_like_utf16le(bytes: &[u8]) -> bool {
+    if bytes.len() < 2 || bytes.len() % 2 != 0 {
+        return false;
+    }
+
+    // If a substantial portion of the high bytes are NUL, it's probably UTF-16LE for ASCII-range
+    // characters (common for simple names).
+    let high_bytes = bytes.iter().skip(1).step_by(2);
+    let total = bytes.len() / 2;
+    let nul_count = high_bytes.filter(|&&b| b == 0).count();
+    nul_count >= total / 2
+}

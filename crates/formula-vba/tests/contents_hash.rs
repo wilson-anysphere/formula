@@ -1,5 +1,6 @@
 use std::io::{Cursor, Write};
 
+use encoding_rs::WINDOWS_1252;
 use formula_vba::{compress_container, content_normalized_data};
 
 fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
@@ -234,3 +235,46 @@ fn content_normalized_data_module_newlines_and_attribute_stripping() {
     assert_eq!(normalized, expected);
 }
 
+#[test]
+fn content_normalized_data_decodes_module_stream_name_using_dir_codepage() {
+    let module_name = "Módülé1";
+    let module_code = "Option Explicit\r\n";
+    let module_container = compress_container(module_code.as_bytes());
+
+    let (module_name_bytes, _, _) = WINDOWS_1252.encode(module_name);
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        // PROJECTCODEPAGE (u16 LE)
+        push_record(&mut out, 0x0003, &1252u16.to_le_bytes());
+        // MODULENAME
+        push_record(&mut out, 0x0019, module_name_bytes.as_ref());
+        // MODULESTREAMNAME + reserved u16
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(module_name_bytes.as_ref());
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        // MODULETYPE + MODULETEXTOFFSET
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let stream_path = format!("VBA/{module_name}");
+        let mut s = ole.create_stream(&stream_path).expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+    assert_eq!(normalized, module_code.as_bytes());
+}
