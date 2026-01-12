@@ -7,8 +7,34 @@ import { DLP_ACTION } from "../../../../../packages/security/dlp/src/actions.js"
 import { CLASSIFICATION_SCOPE } from "../../../../../packages/security/dlp/src/selectors.js";
 
 import { DocumentControllerSpreadsheetApi } from "./documentControllerSpreadsheetApi.js";
+import { createSheetNameResolverFromIdToNameMap } from "../../sheet/sheetNameResolver.js";
 
 describe("DocumentControllerSpreadsheetApi", () => {
+  it("resolves display names to stable sheet ids (no phantom sheet creation after rename)", async () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet2", "A1", 1);
+
+    const sheetNames = new Map<string, string>([["Sheet2", "Budget"]]);
+    const sheetNameResolver = createSheetNameResolverFromIdToNameMap(sheetNames);
+
+    const api = new DocumentControllerSpreadsheetApi(controller, { sheetNameResolver });
+    expect(api.listSheets()).toEqual(["Budget"]);
+
+    const executor = new ToolExecutor(api, { default_sheet: "Sheet2" });
+    const result = await executor.execute({
+      name: "write_cell",
+      parameters: { cell: "Budget!A1", value: 99 }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(controller.getCell("Sheet2", "A1").value).toBe(99);
+    expect(controller.getSheetIds()).toContain("Sheet2");
+    expect(controller.getSheetIds()).not.toContain("Budget");
+
+    expect(() => api.getCell({ sheet: "DoesNotExist", row: 1, col: 1 })).toThrow(/Unknown sheet/i);
+    expect(controller.getSheetIds()).not.toContain("DoesNotExist");
+  });
+
   it("allows ToolExecutor to apply updates through DocumentController", async () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", 1);

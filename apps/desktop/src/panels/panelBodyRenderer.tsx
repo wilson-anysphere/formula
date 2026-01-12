@@ -18,6 +18,7 @@ import type { PanelRegistry } from "./panelRegistry.js";
 import { PivotBuilderPanelContainer } from "./pivot-builder/PivotBuilderPanelContainer.js";
 import type { SpreadsheetApi } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 import { MarketplaceClient, WebExtensionManager } from "@formula/extension-marketplace";
+import type { SheetNameResolver } from "../sheet/sheetNameResolver.js";
 import type { CollabSession } from "@formula/collab-session";
 import { buildVersionHistoryItems } from "./version-history/index.js";
 import { BranchManagerPanel, type Actor as BranchActor } from "./branch-manager/BranchManagerPanel.js";
@@ -308,6 +309,7 @@ export interface PanelBodyRendererOptions {
   getActiveSheetId?: () => string;
   getSelection?: () => unknown;
   getSearchWorkbook?: () => unknown;
+  sheetNameResolver?: SheetNameResolver | null;
   workbookId?: string;
   /**
    * Optional invoke wrapper (typically a queued/serialized Tauri invoke).
@@ -487,6 +489,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           getActiveSheetId={options.getActiveSheetId}
           getSelection={options.getSelection as any}
           getSearchWorkbook={options.getSearchWorkbook}
+          sheetNameResolver={options.sheetNameResolver}
           workbookId={workbookId}
           createChart={options.createChart}
         />,

@@ -3,6 +3,10 @@ export class DocumentControllerWorkbookAdapter {
     documentController: any,
     options?: {
       activeSheetName?: string;
+      sheetNameResolver?: {
+        getSheetIdByName(name: string): string | null;
+        getSheetNameById(id: string): string | null;
+      } | null;
       getActiveSheetName?: () => string;
       getSelection?: () => { sheetName: string; address: string };
       setSelection?: (sheetName: string, address: string) => void;
@@ -15,9 +19,9 @@ export class DocumentControllerWorkbookAdapter {
   sheets: Map<string, any>;
   activeSheetName: string;
   selection: { sheetName: string; address: string } | null;
+  sheetNameResolver: any;
 
   dispose(): void;
   getActiveSheet(): any;
   getSheet(sheetName: string): any;
 }
-

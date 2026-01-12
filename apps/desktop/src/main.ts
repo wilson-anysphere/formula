@@ -249,7 +249,6 @@ function getWorkbookLoadLimits(): { maxRows: number; maxCols: number } {
     overrides,
   });
 }
-
 // Task 13 adds this helper in collab mode. Declare it here so main.ts can
 // consume it without taking a hard dependency on collab wiring being present.
 interface SpreadsheetApp {
@@ -2251,7 +2250,6 @@ function installSheetStoreSubscription(): void {
         }
       }
     }
-
     const sheets = listSheetsForUi();
     const activeId = app.getCurrentSheetId();
 
@@ -2534,6 +2532,7 @@ if (
   const panelMounts = new Map<string, { container: HTMLElement; dispose: () => void }>();
 
   const scriptingWorkbook = new DocumentControllerWorkbookAdapter(app.getDocument(), {
+    sheetNameResolver,
     getActiveSheetName: () => app.getCurrentSheetId(),
     getSelection: () => {
       const ranges = app.getSelectionRanges();
@@ -4557,6 +4556,7 @@ if (
       macrosBackend = new WebMacroBackend({
         getDocumentController: () => app.getDocument(),
         getActiveSheetId: () => app.getCurrentSheetId(),
+        sheetNameResolver,
       });
     }
     return macrosBackend as any;
@@ -4566,6 +4566,7 @@ if (
     getDocumentController: () => app.getDocument(),
     getActiveSheetId: () => app.getCurrentSheetId(),
     getSearchWorkbook: () => app.getSearchWorkbook(),
+    sheetNameResolver,
     getSelection: () => {
       const selection = currentSelectionRect();
       return {
@@ -4671,6 +4672,7 @@ if (
               const scriptBackend = new WebMacroBackend({
                 getDocumentController: () => app.getDocument(),
                 getActiveSheetId: () => app.getCurrentSheetId(),
+                sheetNameResolver,
               });
 
               /** @type {Map<string, "tauri" | "web">} */

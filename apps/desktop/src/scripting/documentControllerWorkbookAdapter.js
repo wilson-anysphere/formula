@@ -7,6 +7,9 @@ import { applyStylePatch } from "../formatting/styleTable.js";
 // - Cols: A..XFD (0-based: 0..16383)
 const EXCEL_MAX_ROW = 1048575;
 const EXCEL_MAX_COL = 16383;
+/**
+ * @typedef {import("../sheet/sheetNameResolver.js").SheetNameResolver} SheetNameResolver
+ */
 
 function valueEquals(a, b) {
   if (a === b) return true;
@@ -410,6 +413,7 @@ export class DocumentControllerWorkbookAdapter {
    * @param {import("../document/documentController.js").DocumentController} documentController
    * @param {{
    *   activeSheetName?: string,
+   *   sheetNameResolver?: SheetNameResolver | null,
    *   getActiveSheetName?: () => string,
    *   getSelection?: () => { sheetName: string, address: string },
    *   setSelection?: (sheetName: string, address: string) => void,
@@ -424,6 +428,8 @@ export class DocumentControllerWorkbookAdapter {
     this.activeSheetName = options.activeSheetName ?? "Sheet1";
     /** @type {{ sheetName: string, address: string } | null} */
     this.selection = null;
+
+    this.sheetNameResolver = options.sheetNameResolver ?? null;
 
     this.getActiveSheetNameImpl = typeof options.getActiveSheetName === "function" ? options.getActiveSheetName : null;
     this.getSelectionImpl = typeof options.getSelection === "function" ? options.getSelection : null;
@@ -447,6 +453,9 @@ export class DocumentControllerWorkbookAdapter {
 
   /** @type {{ sheetName: string, address: string } | null} */
   selection;
+
+  /** @type {SheetNameResolver | null} */
+  sheetNameResolver;
 
   /** @type {(() => string) | null} */
   getActiveSheetNameImpl;
@@ -474,10 +483,15 @@ export class DocumentControllerWorkbookAdapter {
 
   getSheet(name) {
     const sheetName = String(name);
-    let sheet = this.sheets.get(sheetName);
+    const sheetId = this.#resolveSheetId(sheetName);
+    if (!sheetId) {
+      throw new Error(`Unknown sheet: ${sheetName}`);
+    }
+
+    let sheet = this.sheets.get(sheetId);
     if (!sheet) {
-      sheet = new DocumentControllerSheetAdapter(this, sheetName);
-      this.sheets.set(sheetName, sheet);
+      sheet = new DocumentControllerSheetAdapter(this, sheetId);
+      this.sheets.set(sheetId, sheet);
     }
     return sheet;
   }
@@ -514,7 +528,10 @@ export class DocumentControllerWorkbookAdapter {
   getSelection() {
     if (this.getSelectionImpl) {
       const sel = this.getSelectionImpl();
-      return { sheetName: String(sel.sheetName), address: String(sel.address) };
+      const rawSheetName = String(sel.sheetName);
+      const sheetId = this.#resolveSheetId(rawSheetName);
+      const displayName = sheetId ? this.#sheetDisplayName(sheetId) : rawSheetName;
+      return { sheetName: displayName, address: String(sel.address) };
     }
 
     if (!this.selection) {
@@ -529,9 +546,16 @@ export class DocumentControllerWorkbookAdapter {
     // Validate address early to keep selection consistent.
     parseRangeAddress(normalizedAddress);
 
-    this.selection = { sheetName: normalizedSheetName, address: normalizedAddress };
+    const sheetId = this.#resolveSheetId(normalizedSheetName);
+    if (!sheetId) {
+      throw new Error(`Unknown sheet: ${normalizedSheetName}`);
+    }
+
+    const displayName = this.#sheetDisplayName(sheetId);
+    this.selection = { sheetName: displayName, address: normalizedAddress };
     this.events.emit("selectionChanged", this.selection);
-    this.setSelectionImpl?.(normalizedSheetName, normalizedAddress);
+    // `setSelectionImpl` expects the DocumentController sheet id (used by the UI layer).
+    this.setSelectionImpl?.(sheetId, normalizedAddress);
   }
 
   /**
@@ -545,7 +569,7 @@ export class DocumentControllerWorkbookAdapter {
 
     for (const delta of deltas) {
       if (!delta) continue;
-      const sheetName = delta.sheetId;
+      const sheetName = this.#sheetDisplayName(delta.sheetId);
       let bucket = bySheet.get(sheetName);
       if (!bucket) {
         bucket = { value: [], format: [] };
@@ -894,23 +918,68 @@ export class DocumentControllerWorkbookAdapter {
       }
     }
   }
+
+  /**
+   * Resolve a scripting-facing sheet identifier (usually a display name) to the
+   * underlying DocumentController sheet id.
+   *
+   * Returning `null` signals "unknown" and MUST NOT cause sheet creation.
+   *
+   * @param {string} sheetNameOrId
+   * @returns {string | null}
+   */
+  #resolveSheetId(sheetNameOrId) {
+    const raw = String(sheetNameOrId ?? "").trim();
+    if (!raw) return null;
+
+    // Prefer the UI resolver when available (handles renames).
+    if (this.sheetNameResolver) {
+      const resolved = this.sheetNameResolver.getSheetIdByName(raw);
+      if (resolved) return resolved;
+
+      // If the caller provided a sheet id, translate id->name->id to canonicalize.
+      const resolvedName = this.sheetNameResolver.getSheetNameById(raw);
+      if (resolvedName) {
+        const roundTrip = this.sheetNameResolver.getSheetIdByName(resolvedName);
+        if (roundTrip) return roundTrip;
+      }
+    }
+
+    // Fallback: avoid phantom sheet creation by only allowing known ids.
+    const ids = typeof this.documentController.getSheetIds === "function" ? this.documentController.getSheetIds() : [];
+    const candidates = ids.length > 0 ? ids : ["Sheet1"];
+    return candidates.find((id) => String(id).toLowerCase() === raw.toLowerCase()) ?? null;
+  }
+
+  /**
+   * @param {string} sheetId
+   * @returns {string}
+   */
+  #sheetDisplayName(sheetId) {
+    if (!this.sheetNameResolver) return sheetId;
+    return this.sheetNameResolver.getSheetNameById(sheetId) ?? sheetId;
+  }
 }
 
 class DocumentControllerSheetAdapter {
   /**
    * @param {DocumentControllerWorkbookAdapter} workbook
-   * @param {string} name
+   * @param {string} sheetId
    */
-  constructor(workbook, name) {
+  constructor(workbook, sheetId) {
     this.workbook = workbook;
-    this.name = name;
+    this.sheetId = sheetId;
   }
 
   /** @type {DocumentControllerWorkbookAdapter} */
   workbook;
 
   /** @type {string} */
-  name;
+  sheetId;
+
+  get name() {
+    return this.workbook.sheetNameResolver?.getSheetNameById(this.sheetId) ?? this.sheetId;
+  }
 
   getRange(address) {
     return new DocumentControllerRangeAdapter(this, parseRangeAddress(String(address)));
@@ -977,7 +1046,7 @@ class DocumentControllerRangeAdapter {
     for (let r = 0; r < rows; r++) {
       const row = [];
       for (let c = 0; c < cols; c++) {
-        const cell = this.sheet.workbook.documentController.getCell(this.sheet.name, {
+        const cell = this.sheet.workbook.documentController.getCell(this.sheet.sheetId, {
           row: this.coords.startRow + r,
           col: this.coords.startCol + c,
         });
@@ -995,7 +1064,7 @@ class DocumentControllerRangeAdapter {
     for (let r = 0; r < rows; r++) {
       const row = [];
       for (let c = 0; c < cols; c++) {
-        const cell = this.sheet.workbook.documentController.getCell(this.sheet.name, {
+        const cell = this.sheet.workbook.documentController.getCell(this.sheet.sheetId, {
           row: this.coords.startRow + r,
           col: this.coords.startCol + c,
         });
@@ -1015,7 +1084,7 @@ class DocumentControllerRangeAdapter {
       );
     }
 
-    this.sheet.workbook.documentController.setRangeValues(this.sheet.name, this.address, values, {
+    this.sheet.workbook.documentController.setRangeValues(this.sheet.sheetId, this.address, values, {
       label: "Script: set values",
     });
     this.sheet.workbook._notifyMutate();
@@ -1037,7 +1106,7 @@ class DocumentControllerRangeAdapter {
       }),
     );
 
-    this.sheet.workbook.documentController.setRangeValues(this.sheet.name, this.address, values, {
+    this.sheet.workbook.documentController.setRangeValues(this.sheet.sheetId, this.address, values, {
       label: "Script: set formulas",
     });
     this.sheet.workbook._notifyMutate();
@@ -1061,14 +1130,14 @@ class DocumentControllerRangeAdapter {
 
     if (typeof value === "string") {
       if (value.startsWith("'")) {
-        this.sheet.workbook.documentController.setCellValue(this.sheet.name, coord, value.slice(1), {
+        this.sheet.workbook.documentController.setCellValue(this.sheet.sheetId, coord, value.slice(1), {
           label: "Script: set value",
         });
         this.sheet.workbook._notifyMutate();
         return;
       }
       if (isFormulaString(value)) {
-        this.sheet.workbook.documentController.setCellFormula(this.sheet.name, coord, value, {
+        this.sheet.workbook.documentController.setCellFormula(this.sheet.sheetId, coord, value, {
           label: "Script: set value",
         });
         this.sheet.workbook._notifyMutate();
@@ -1076,7 +1145,7 @@ class DocumentControllerRangeAdapter {
       }
     }
 
-    this.sheet.workbook.documentController.setCellValue(this.sheet.name, coord, value ?? null, { label: "Script: set value" });
+    this.sheet.workbook.documentController.setCellValue(this.sheet.sheetId, coord, value ?? null, { label: "Script: set value" });
     this.sheet.workbook._notifyMutate();
   }
 
@@ -1087,7 +1156,7 @@ class DocumentControllerRangeAdapter {
     // Prefer DocumentController's effective/layered formatting API when available so
     // scripts observe inherited row/col/sheet formats (not just cell-level overrides).
     if (typeof doc.getCellFormat === "function") {
-      const effective = doc.getCellFormat(this.sheet.name, coord);
+      const effective = doc.getCellFormat(this.sheet.sheetId, coord);
       // Some implementations may return a styleId instead of a style object.
       if (typeof effective === "number") {
         return scriptFormatFromDocStyle(doc.styleTable?.get(effective) ?? {});
@@ -1098,7 +1167,7 @@ class DocumentControllerRangeAdapter {
       return scriptFormatFromDocStyle(effective);
     }
 
-    const cell = doc.getCell(this.sheet.name, coord);
+    const cell = doc.getCell(this.sheet.sheetId, coord);
     const style = doc.styleTable.get(cell.styleId);
     return scriptFormatFromDocStyle(style);
   }
@@ -1140,7 +1209,7 @@ class DocumentControllerRangeAdapter {
 
   setFormat(format) {
     const patch = docStylePatchFromScriptFormat(format);
-    this.sheet.workbook.documentController.setRangeFormat(this.sheet.name, this.address, patch, { label: "Script: set format" });
+    this.sheet.workbook.documentController.setRangeFormat(this.sheet.sheetId, this.address, patch, { label: "Script: set format" });
     this.sheet.workbook._notifyMutate();
   }
 

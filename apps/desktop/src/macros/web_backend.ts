@@ -5,6 +5,7 @@ import { DocumentControllerBridge } from "@formula/python-runtime/document-contr
 import { DocumentControllerWorkbookAdapter } from "../scripting/documentControllerWorkbookAdapter.js";
 
 import type { DocumentController } from "../document/documentController.js";
+import type { SheetNameResolver } from "../sheet/sheetNameResolver.js";
 import type {
   MacroBackend,
   MacroInfo,
@@ -27,6 +28,7 @@ type StoredMacro = MacroInfo & { code: string };
 export interface WebMacroBackendOptions {
   getDocumentController: () => DocumentController;
   getActiveSheetId?: () => string;
+  sheetNameResolver?: SheetNameResolver | null;
   storage?: Storage;
   /**
    * Base URL to load Pyodide assets from (must end with a trailing slash).
@@ -269,7 +271,10 @@ export class WebMacroBackend implements MacroBackend {
 
   private async runTypeScriptMacro(macro: StoredMacro, request: MacroRunRequest): Promise<MacroRunResult> {
     const doc = this.options.getDocumentController();
-    const workbook = new DocumentControllerWorkbookAdapter(doc, { activeSheetName: this.activeSheetId() });
+    const workbook = new DocumentControllerWorkbookAdapter(doc, {
+      activeSheetName: this.activeSheetId(),
+      sheetNameResolver: this.options.sheetNameResolver ?? null
+    });
     const runtime = new ScriptRuntime(workbook as any);
 
     try {

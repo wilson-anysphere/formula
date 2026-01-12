@@ -21,6 +21,7 @@ import { createDesktopRagService, type DesktopRagService, type DesktopRagService
 import { getDesktopAIAuditStore } from "../audit/auditStore.js";
 import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
 import { WorkbookContextBuilder, type WorkbookContextBuildStats, type WorkbookSchemaProvider } from "../context/WorkbookContextBuilder.js";
+import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
 
 export interface AgentApprovalRequest {
   call: ToolCall;
@@ -85,6 +86,11 @@ export interface RunAgentTaskParams {
   constraints?: string[];
   workbookId: string;
   documentController: DocumentController;
+  /**
+   * Optional resolver that maps user-facing sheet names (display names) to stable
+   * DocumentController sheet ids.
+   */
+  sheetNameResolver?: SheetNameResolver | null;
   llmClient: LLMClient;
   schemaProvider?: WorkbookSchemaProvider | null;
   auditStore?: AIAuditStore;
@@ -270,7 +276,10 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
     const keepLastMessages = params.keepLastMessages ?? 60;
 
     const defaultSheetId = params.defaultSheetId ?? "Sheet1";
-    const spreadsheet = new DocumentControllerSpreadsheetApi(params.documentController, { createChart: params.createChart });
+    const spreadsheet = new DocumentControllerSpreadsheetApi(params.documentController, {
+      createChart: params.createChart,
+      sheetNameResolver: params.sheetNameResolver ?? null
+    });
     const toolPolicy = getDesktopToolPolicy({ mode: "agent" });
 
     const dlp = maybeGetAiCloudDlpOptions({ documentId: params.workbookId, sheetId: defaultSheetId }) ?? undefined;

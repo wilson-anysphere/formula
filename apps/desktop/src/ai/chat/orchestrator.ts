@@ -30,6 +30,7 @@ import { DlpViolationError } from "../../../../../packages/security/dlp/src/erro
 
 import type { DocumentController } from "../../document/documentController.js";
 import type { Range } from "../../selection/types";
+import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
 
 import { DocumentControllerSpreadsheetApi } from "../tools/documentControllerSpreadsheetApi.js";
 import { createDesktopRagService, type DesktopRagService, type DesktopRagServiceOptions } from "../rag/ragService.js";
@@ -159,6 +160,14 @@ export interface AiChatOrchestratorOptions {
   workbookId: string;
   llmClient: LLMClient;
   model: string;
+  /**
+   * Optional resolver that maps user-facing sheet names (display names) to stable
+   * DocumentController sheet ids.
+   *
+   * When provided, AI tool calls can safely reference renamed sheets without
+   * accidentally creating phantom sheets in the DocumentController model.
+   */
+  sheetNameResolver?: SheetNameResolver | null;
 
   getActiveSheetId?: () => string;
   /**
@@ -263,7 +272,10 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     options.reserveForOutputTokens ?? getDefaultReserveForOutputTokens("chat", contextWindowTokens);
   const keepLastMessages = options.keepLastMessages ?? 40;
 
-  const spreadsheet = new DocumentControllerSpreadsheetApi(options.documentController, { createChart: options.createChart });
+  const spreadsheet = new DocumentControllerSpreadsheetApi(options.documentController, {
+    createChart: options.createChart,
+    sheetNameResolver: options.sheetNameResolver ?? null
+  });
   const devOnBuildStats =
     import.meta.env.MODE === "development"
       ? (stats: WorkbookContextBuildStats) => {

@@ -6,6 +6,7 @@ import { normalizeFormulaTextOpt } from "@formula/engine";
 import type { CellAddress, RangeAddress } from "../../../../../packages/ai-tools/src/spreadsheet/a1.js";
 import type { CellEntry, SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
 import { isCellEmpty, type CellData, type CellFormat } from "../../../../../packages/ai-tools/src/spreadsheet/types.js";
+import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
 
 type DocumentControllerStyle = Record<string, any>;
 
@@ -324,10 +325,15 @@ function toCellDataFromCellState(controller: DocumentController, cellState: any)
 export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
   readonly controller: DocumentController;
   readonly createChart?: SpreadsheetApi["createChart"];
+  readonly sheetNameResolver: SheetNameResolver | null;
 
-  constructor(controller: DocumentController, options: { createChart?: SpreadsheetApi["createChart"] } = {}) {
+  constructor(
+    controller: DocumentController,
+    options: { createChart?: SpreadsheetApi["createChart"]; sheetNameResolver?: SheetNameResolver | null } = {}
+  ) {
     this.controller = controller;
     this.createChart = options.createChart;
+    this.sheetNameResolver = options.sheetNameResolver ?? null;
   }
 
   listSheets(): string[] {
@@ -335,21 +341,23 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     // DocumentController creates sheets lazily; expose the default sheet name so
     // downstream consumers (RAG context, etc) can still reason about "Sheet1"
     // even before any edits.
-    return ids.length > 0 ? ids : ["Sheet1"];
+    const sheetIds = ids.length > 0 ? ids : ["Sheet1"];
+    return sheetIds.map((id) => this.getSheetNameById(id));
   }
 
   listNonEmptyCells(sheet?: string): CellEntry[] {
-    const sheetIds = sheet ? [sheet] : this.controller.getSheetIds();
+    const sheetIds = sheet ? [this.resolveSheetIdOrThrow(sheet)] : this.controller.getSheetIds();
     const entries: CellEntry[] = [];
     for (const sheetId of sheetIds) {
+      const displayName = this.getSheetNameById(sheetId);
       const sheetModel = this.controller.model.sheets.get(sheetId);
       if (!sheetModel?.cells) continue;
       for (const [key, cellState] of sheetModel.cells.entries()) {
         const { row, col } = parseControllerCellKey(key);
-        const cell = toCellDataFromCellState(this.controller, cellState);
+        const cell = toCellData(this.controller, sheetId, { row, col }, cellState);
         if (isCellEmpty(cell)) continue;
         entries.push({
-          address: { sheet: sheetId, row: row + 1, col: col + 1 },
+          address: { sheet: displayName, row: row + 1, col: col + 1 },
           cell
         });
       }
@@ -358,12 +366,14 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
   }
 
   getCell(address: CellAddress): CellData {
+    const sheetId = this.resolveSheetIdOrThrow(address.sheet);
     const coord = toControllerCoord(address);
-    const state = this.controller.getCell(address.sheet, coord);
-    return toCellData(this.controller, address.sheet, coord, state);
+    const state = this.controller.getCell(sheetId, coord);
+    return toCellData(this.controller, sheetId, coord, state);
   }
 
   setCell(address: CellAddress, cell: CellData): void {
+    const sheetId = this.resolveSheetIdOrThrow(address.sheet);
     const coord = toControllerCoord(address);
     const beforeCell = this.getCell(address);
     const desiredFormula = normalizeFormula(cell.formula);
@@ -378,15 +388,15 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     this.controller.beginBatch({ label: "AI write_cell" });
     try {
       if (shouldUpdateContent && desiredFormula) {
-        this.controller.setCellFormula(address.sheet, coord, desiredFormula, { label: "AI write_cell" });
+        this.controller.setCellFormula(sheetId, coord, desiredFormula, { label: "AI write_cell" });
       } else if (shouldUpdateContent) {
-        this.controller.setCellValue(address.sheet, coord, cell.value ?? null, { label: "AI write_cell" });
+        this.controller.setCellValue(sheetId, coord, cell.value ?? null, { label: "AI write_cell" });
       }
 
       if (cell.format && Object.keys(cell.format).length > 0) {
         const patch = cellFormatToStylePatch(cell.format);
         if (patch) {
-          this.controller.setRangeFormat(address.sheet, { start: coord, end: coord }, patch, {
+          this.controller.setRangeFormat(sheetId, { start: coord, end: coord }, patch, {
             label: "AI apply_formatting"
           });
         }
@@ -397,6 +407,7 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
   }
 
   readRange(range: RangeAddress): CellData[][] {
+    const sheetId = this.resolveSheetIdOrThrow(range.sheet);
     const rowCount = Math.max(0, range.endRow - range.startRow + 1);
     const colCount = Math.max(0, range.endCol - range.startCol + 1);
 
@@ -405,7 +416,7 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     // Hot path: many callers (WorkbookContextBuilder) read 5k-10k cells at once.
     // Avoid per-cell `DocumentController.getCell()` calls which clone cell state,
     // normalize formulas, and perform style lookups.
-    const sheetModel = this.controller.model.sheets.get(range.sheet);
+    const sheetModel = this.controller.model.sheets.get(sheetId);
     const cellMap: Map<string, any> | undefined = sheetModel?.cells;
 
     const hasLayeredFormattingReadPath = typeof (this.controller as any).getCellFormat === "function";
@@ -535,6 +546,7 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
   }
 
   writeRange(range: RangeAddress, cells: CellData[][]): void {
+    const sheetId = this.resolveSheetIdOrThrow(range.sheet);
     const rowCount = range.endRow - range.startRow + 1;
     const colCount = range.endCol - range.startCol + 1;
 
@@ -560,7 +572,7 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
         const values = cells.map((row) =>
           row.map((cell) => (cell?.formula ? { formula: cell.formula } : cell?.value ?? null))
         );
-        this.controller.setRangeValues(range.sheet, toControllerRange(range), values, { label: "AI set_range" });
+        this.controller.setRangeValues(sheetId, toControllerRange(range), values, { label: "AI set_range" });
         return;
       }
 
@@ -667,16 +679,17 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
         inputs.push(outRow);
       }
 
-      this.controller.setRangeValues(range.sheet, toControllerRange(range), inputs, { label: "AI set_range" });
+      this.controller.setRangeValues(sheetId, toControllerRange(range), inputs, { label: "AI set_range" });
     } finally {
       this.controller.endBatch();
     }
   }
 
   applyFormatting(range: RangeAddress, format: Partial<CellFormat>): number {
+    const sheetId = this.resolveSheetIdOrThrow(range.sheet);
     const patch = cellFormatToStylePatch(format);
     if (patch) {
-      this.controller.setRangeFormat(range.sheet, toControllerRange(range), patch, { label: "AI apply_formatting" });
+      this.controller.setRangeFormat(sheetId, toControllerRange(range), patch, { label: "AI apply_formatting" });
     }
     const rows = range.endRow - range.startRow + 1;
     const cols = range.endCol - range.startCol + 1;
@@ -685,11 +698,12 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
 
   getLastUsedRow(sheet: string): number {
     let max = 0;
-    const sheetModel = this.controller.model.sheets.get(sheet);
+    const sheetId = this.resolveSheetIdOrThrow(sheet);
+    const sheetModel = this.controller.model.sheets.get(sheetId);
     if (!sheetModel?.cells) return 0;
     for (const [key, cellState] of sheetModel.cells.entries()) {
-      const { row } = parseControllerCellKey(key);
-      const cell = toCellDataFromCellState(this.controller, cellState);
+      const { row, col } = parseControllerCellKey(key);
+      const cell = toCellData(this.controller, sheetId, { row, col }, cellState);
       if (isCellEmpty(cell)) continue;
       max = Math.max(max, row + 1);
     }
@@ -710,6 +724,32 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
           return () => ({ chart_id: `preview_chart_${++counter}` });
         })()
       : undefined;
-    return new DocumentControllerSpreadsheetApi(cloned, { createChart });
+    return new DocumentControllerSpreadsheetApi(cloned, { createChart, sheetNameResolver: this.sheetNameResolver });
+  }
+
+  private getSheetNameById(sheetId: string): string {
+    if (!this.sheetNameResolver) return sheetId;
+    return this.sheetNameResolver.getSheetNameById(sheetId) ?? sheetId;
+  }
+
+  private resolveSheetIdOrThrow(sheet: string): string {
+    const name = String(sheet ?? "").trim();
+    if (!name) {
+      throw new Error("Sheet name is required.");
+    }
+
+    // Prefer the shared resolver when available (handles renamed sheet display names).
+    if (this.sheetNameResolver) {
+      const resolved = this.sheetNameResolver.getSheetIdByName(name);
+      if (resolved) return resolved;
+    }
+
+    // Fallback: avoid creating phantom sheets by only allowing known sheet ids.
+    const knownSheetIds = this.controller.getSheetIds();
+    const candidates = knownSheetIds.length > 0 ? knownSheetIds : ["Sheet1"];
+    const match = candidates.find((id) => id.toLowerCase() === name.toLowerCase());
+    if (match) return match;
+
+    throw new Error(`Unknown sheet "${name}".`);
   }
 }

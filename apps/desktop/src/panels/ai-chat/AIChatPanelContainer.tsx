@@ -11,6 +11,7 @@ import type { ToolPlanPreview } from "../../../../../packages/ai-tools/src/previ
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
 import { getDesktopAIAuditStore } from "../../ai/audit/auditStore.js";
 import { getDesktopLLMClient, getDesktopModel, purgeLegacyDesktopLLMSettings } from "../../ai/llm/desktopLLMClient.js";
+import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
 
 import { AIChatPanel, type AIChatPanelSendMessage } from "./AIChatPanel.js";
 import { ApprovalModal } from "./ApprovalModal.js";
@@ -40,6 +41,7 @@ export interface AIChatPanelContainerProps {
    * When provided, chat/agent can include this metadata in workbook context.
    */
   getSearchWorkbook?: () => unknown;
+  sheetNameResolver?: SheetNameResolver | null;
   workbookId?: string;
   createChart?: SpreadsheetApi["createChart"];
 }
@@ -131,6 +133,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
       workbookId,
       llmClient: client as any,
       model,
+      sheetNameResolver: props.sheetNameResolver ?? null,
       getActiveSheetId: props.getActiveSheetId,
       getSelectedRange: props.getSelection as any,
       schemaProvider,
@@ -150,6 +153,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
     props.createChart,
     props.getActiveSheetId,
     props.getSelection,
+    props.sheetNameResolver,
     schemaProvider,
     ragService,
     workbookId,
@@ -249,6 +253,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
         workbookId,
         defaultSheetId,
         documentController,
+        sheetNameResolver: props.sheetNameResolver ?? null,
         llmClient: client as any,
         auditStore,
         createChart: props.createChart,
