@@ -1864,6 +1864,7 @@ fn and_range(
                     // Text/blanks in references are ignored.
                     Value::Text(_)
                     | Value::Empty
+                    | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
                     | Value::MultiRange(_) => {}
@@ -1939,6 +1940,7 @@ fn or_range(
                     // Text/blanks in references are ignored.
                     Value::Text(_)
                     | Value::Empty
+                    | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
                     | Value::MultiRange(_) => {}
@@ -2032,6 +2034,7 @@ fn and_range_on_sheet(
                     // Text/blanks in references are ignored.
                     Value::Text(_)
                     | Value::Empty
+                    | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
                     | Value::MultiRange(_) => {}
@@ -2125,6 +2128,7 @@ fn or_range_on_sheet(
                     // Text/blanks in references are ignored.
                     Value::Text(_)
                     | Value::Empty
+                    | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
                     | Value::MultiRange(_) => {}
