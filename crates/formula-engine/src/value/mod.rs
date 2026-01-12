@@ -56,6 +56,14 @@ pub(crate) fn cmp_case_insensitive(a: &str, b: &str) -> Ordering {
     }
 }
 
+pub(crate) fn casefold(s: &str) -> String {
+    if s.is_ascii() {
+        return s.to_ascii_uppercase();
+    }
+
+    s.chars().flat_map(|c| c.to_uppercase()).collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorKind {
     Null,

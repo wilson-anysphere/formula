@@ -145,7 +145,7 @@ impl Workbook {
     fn sheet_key(name: &str) -> String {
         // Excel treats sheet names as case-insensitive. Use a normalized lookup key while
         // preserving the original display name.
-        name.to_ascii_uppercase()
+        crate::value::casefold(name)
     }
 
     fn ensure_sheet(&mut self, name: &str) -> SheetId {
