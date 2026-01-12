@@ -152,6 +152,34 @@ fn parquet_opens_with_wrong_extension_and_sanitizes_sheet_name() {
 }
 
 #[test]
+fn parquet_opens_extensionless_and_uses_file_stem_as_sheet_name() {
+    let parquet_path = parquet_fixture_path("simple.parquet");
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    // Note: extension intentionally missing; content sniffing should still treat it as Parquet.
+    let path = dir.path().join("simple");
+    std::fs::copy(&parquet_path, &path).expect("copy parquet fixture");
+
+    let wb = open_workbook(&path).expect("open parquet workbook");
+    let model = match wb {
+        Workbook::Model(model) => model,
+        other => panic!("expected Workbook::Model, got {other:?}"),
+    };
+
+    let sheet = model
+        .sheet_by_name("simple")
+        .expect("expected worksheet name to match file stem");
+
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value_a1("B1").unwrap(),
+        CellValue::String("Alice".to_string())
+    );
+    assert_eq!(sheet.value_a1("C2").unwrap(), CellValue::Boolean(false));
+    assert_eq!(sheet.value_a1("D3").unwrap(), CellValue::Number(3.75));
+}
+
+#[test]
 fn parquet_import_invalid_sheet_name_falls_back_to_sheet1() {
     let parquet_path = parquet_fixture_path("simple.parquet");
 
