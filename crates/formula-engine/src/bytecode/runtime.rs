@@ -7436,6 +7436,7 @@ fn fn_xmatch(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 
     let lookup_array = match args[1] {
         Value::Range(r) => r,
+        Value::Error(e) => return Value::Error(e),
         _ => return Value::Error(ErrorKind::Value),
     };
     let lookup_range = lookup_array.resolve(base);
@@ -7502,10 +7503,12 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 
     let lookup_array = match args[1] {
         Value::Range(r) => r,
+        Value::Error(e) => return Value::Error(e),
         _ => return Value::Error(ErrorKind::Value),
     };
     let return_array = match args[2] {
         Value::Range(r) => r,
+        Value::Error(e) => return Value::Error(e),
         _ => return Value::Error(ErrorKind::Value),
     };
 

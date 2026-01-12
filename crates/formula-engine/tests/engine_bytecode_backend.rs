@@ -3390,6 +3390,75 @@ fn bytecode_backend_xlookup_xmatch_accept_spill_ranges_and_let_range_locals() {
 }
 
 #[test]
+fn bytecode_backend_xlookup_xmatch_accept_let_single_cell_reference_locals() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", "a").unwrap();
+    engine.set_cell_value("Sheet1", "A2", "b").unwrap();
+    engine.set_cell_value("Sheet1", "B1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 20.0).unwrap();
+
+    // LET-bound single-cell references should be accepted for lookup_array / return_array.
+    engine
+        .set_cell_formula("Sheet1", "C1", r#"=LET(arr,A2,XMATCH("b",arr))"#)
+        .unwrap();
+
+    // Ensure CHOOSE can still produce reference locals that are consumed by XMATCH/XLOOKUP, while
+    // preserving lazy evaluation and error propagation semantics.
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "C2",
+            r#"=LET(arr,CHOOSE(1,A2,1/0),XMATCH("b",arr))"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "C3",
+            r#"=LET(arr,CHOOSE(2,A2,1/0),XMATCH("b",arr))"#,
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "D1", r#"=LET(arr,A2,ret,B2,XLOOKUP("b",arr,ret))"#)
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "D2",
+            r#"=LET(arr,CHOOSE(1,A2,1/0),ret,CHOOSE(1,B2,1/0),XLOOKUP("b",arr,ret))"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "D3",
+            r#"=LET(arr,CHOOSE(2,A2,1/0),ret,B2,XLOOKUP("b",arr,ret))"#,
+        )
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path for all of the above formulas.
+    assert_eq!(engine.bytecode_program_count(), 6);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        (r#"=LET(arr,A2,XMATCH("b",arr))"#, "C1"),
+        (r#"=LET(arr,CHOOSE(1,A2,1/0),XMATCH("b",arr))"#, "C2"),
+        (r#"=LET(arr,CHOOSE(2,A2,1/0),XMATCH("b",arr))"#, "C3"),
+        (r#"=LET(arr,A2,ret,B2,XLOOKUP("b",arr,ret))"#, "D1"),
+        (
+            r#"=LET(arr,CHOOSE(1,A2,1/0),ret,CHOOSE(1,B2,1/0),XLOOKUP("b",arr,ret))"#,
+            "D2",
+        ),
+        (r#"=LET(arr,CHOOSE(2,A2,1/0),ret,B2,XLOOKUP("b",arr,ret))"#, "D3"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_common_logical_error_functions() {
     let mut engine = Engine::new();
 

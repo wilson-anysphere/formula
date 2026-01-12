@@ -7295,6 +7295,12 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
 enum BytecodeLocalBindingKind {
     /// Scalar value (number/text/bool/empty/error).
     Scalar,
+    /// Single-cell reference value (e.g. `A1` / `A1:A1`).
+    ///
+    /// This is treated as scalar-safe in contexts that do not allow spilling ranges (the bytecode
+    /// compiler will apply implicit intersection when such locals are consumed in scalar context),
+    /// but can also participate in "reference-like" positions (e.g. XLOOKUP/XMATCH lookup vectors).
+    RefSingle,
     /// Range reference value.
     Range,
     /// Array literal constant value.
@@ -7463,23 +7469,37 @@ fn bytecode_expr_is_eligible_inner(
 
         match expr {
             bytecode::Expr::Literal(v) => match v {
-                bytecode::Value::Range(_) | bytecode::Value::MultiRange(_) => {
-                    BytecodeLocalBindingKind::Range
+                bytecode::Value::Range(r) => {
+                    if r.start == r.end {
+                        BytecodeLocalBindingKind::RefSingle
+                    } else {
+                        BytecodeLocalBindingKind::Range
+                    }
                 }
+                bytecode::Value::MultiRange(_) => BytecodeLocalBindingKind::Range,
                 bytecode::Value::Array(_) => BytecodeLocalBindingKind::ArrayLiteral,
                 _ => BytecodeLocalBindingKind::Scalar,
             },
-            bytecode::Expr::CellRef(_) => BytecodeLocalBindingKind::Scalar,
-            bytecode::Expr::RangeRef(_)
-            | bytecode::Expr::MultiRangeRef(_)
-            | bytecode::Expr::SpillRange(_) => BytecodeLocalBindingKind::Range,
+            bytecode::Expr::CellRef(_) => BytecodeLocalBindingKind::RefSingle,
+            bytecode::Expr::RangeRef(r) => {
+                if r.start == r.end {
+                    BytecodeLocalBindingKind::RefSingle
+                } else {
+                    BytecodeLocalBindingKind::Range
+                }
+            }
+            bytecode::Expr::MultiRangeRef(_) | bytecode::Expr::SpillRange(_) => {
+                BytecodeLocalBindingKind::Range
+            }
             bytecode::Expr::NameRef(name) => {
                 local_binding_kind(scopes, name).unwrap_or(BytecodeLocalBindingKind::Scalar)
             }
             bytecode::Expr::Unary { op, expr } => match op {
                 UnaryOp::ImplicitIntersection => BytecodeLocalBindingKind::Scalar,
                 UnaryOp::Plus | UnaryOp::Neg => match infer_binding_kind(expr, scopes) {
-                    BytecodeLocalBindingKind::Scalar => BytecodeLocalBindingKind::Scalar,
+                    BytecodeLocalBindingKind::Scalar | BytecodeLocalBindingKind::RefSingle => {
+                        BytecodeLocalBindingKind::Scalar
+                    }
                     BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::ArrayLiteral => {
                         BytecodeLocalBindingKind::ArrayLiteral
                     }
@@ -7489,7 +7509,10 @@ fn bytecode_expr_is_eligible_inner(
                 let left_kind = infer_binding_kind(left, scopes);
                 let right_kind = infer_binding_kind(right, scopes);
                 match (left_kind, right_kind) {
-                    (BytecodeLocalBindingKind::Scalar, BytecodeLocalBindingKind::Scalar) => {
+                    (
+                        BytecodeLocalBindingKind::Scalar | BytecodeLocalBindingKind::RefSingle,
+                        BytecodeLocalBindingKind::Scalar | BytecodeLocalBindingKind::RefSingle,
+                    ) => {
                         BytecodeLocalBindingKind::Scalar
                     }
                     _ => BytecodeLocalBindingKind::ArrayLiteral,
@@ -7534,6 +7557,11 @@ fn bytecode_expr_is_eligible_inner(
                     for arg in args.iter().skip(1) {
                         match infer_binding_kind(arg, scopes) {
                             BytecodeLocalBindingKind::Scalar => {}
+                            BytecodeLocalBindingKind::RefSingle => {
+                                if kind == BytecodeLocalBindingKind::Scalar {
+                                    kind = BytecodeLocalBindingKind::RefSingle;
+                                }
+                            }
                             BytecodeLocalBindingKind::Range => {
                                 kind = BytecodeLocalBindingKind::Range;
                             }
@@ -7559,7 +7587,10 @@ fn bytecode_expr_is_eligible_inner(
                 | Function::T => {
                     let mut all_scalar = true;
                     for arg in args {
-                        if infer_binding_kind(arg, scopes) != BytecodeLocalBindingKind::Scalar {
+                        if !matches!(
+                            infer_binding_kind(arg, scopes),
+                            BytecodeLocalBindingKind::Scalar | BytecodeLocalBindingKind::RefSingle
+                        ) {
                             all_scalar = false;
                             break;
                         }
@@ -7597,6 +7628,7 @@ fn bytecode_expr_is_eligible_inner(
         }
         bytecode::Expr::NameRef(name) => match local_binding_kind(lexical_scopes, name) {
             Some(BytecodeLocalBindingKind::Scalar) => true,
+            Some(BytecodeLocalBindingKind::RefSingle) => true,
             Some(BytecodeLocalBindingKind::Range) => allow_range,
             Some(BytecodeLocalBindingKind::ArrayLiteral) => allow_array_literals,
             None => false,
@@ -7879,7 +7911,7 @@ fn bytecode_expr_is_eligible_inner(
                     }
                     bytecode::Expr::NameRef(name) => matches!(
                         local_binding_kind(lexical_scopes, name),
-                        Some(BytecodeLocalBindingKind::Range)
+                        Some(BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::RefSingle)
                     ),
                     _ => false,
                 };
@@ -7910,7 +7942,7 @@ fn bytecode_expr_is_eligible_inner(
                     }
                     bytecode::Expr::NameRef(name) => matches!(
                         local_binding_kind(lexical_scopes, name),
-                        Some(BytecodeLocalBindingKind::Range)
+                        Some(BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::RefSingle)
                     ),
                     _ => false,
                 };
@@ -8055,8 +8087,10 @@ fn bytecode_expr_is_eligible_inner(
                 // In addition to direct references (A1:A3), allow spill ranges (A1#) and LET-bound
                 // range locals (LET(a, A1:A3, XMATCH(..., a))).
                 let lookup_array_is_range_like = matches!(args[1], bytecode::Expr::CellRef(_))
-                    || infer_binding_kind(&args[1], lexical_scopes)
-                        == BytecodeLocalBindingKind::Range;
+                    || matches!(
+                        infer_binding_kind(&args[1], lexical_scopes),
+                        BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::RefSingle
+                    );
                 let lookup_array_ok = lookup_array_is_range_like
                     && bytecode_expr_is_eligible_inner(&args[1], true, false, lexical_scopes);
                 let match_mode_ok = args.get(2).map_or(true, |arg| {
@@ -8074,15 +8108,19 @@ fn bytecode_expr_is_eligible_inner(
                 let lookup_ok =
                     bytecode_expr_is_eligible_inner(&args[0], false, false, lexical_scopes);
                 let lookup_array_is_range_like = matches!(args[1], bytecode::Expr::CellRef(_))
-                    || infer_binding_kind(&args[1], lexical_scopes)
-                        == BytecodeLocalBindingKind::Range;
+                    || matches!(
+                        infer_binding_kind(&args[1], lexical_scopes),
+                        BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::RefSingle
+                    );
                 let lookup_array_ok = lookup_array_is_range_like
                     && bytecode_expr_is_eligible_inner(&args[1], true, false, lexical_scopes);
                 // Bytecode supports XLOOKUP's vector spill semantics (row/column slice) as long as
                 // lookup_array/return_array are reference-like arguments (ranges).
                 let return_array_is_range_like = matches!(args[2], bytecode::Expr::CellRef(_))
-                    || infer_binding_kind(&args[2], lexical_scopes)
-                        == BytecodeLocalBindingKind::Range;
+                    || matches!(
+                        infer_binding_kind(&args[2], lexical_scopes),
+                        BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::RefSingle
+                    );
                 let return_array_ok = return_array_is_range_like
                     && bytecode_expr_is_eligible_inner(&args[2], true, false, lexical_scopes);
                 let if_not_found_ok = args.get(3).map_or(true, |arg| {
