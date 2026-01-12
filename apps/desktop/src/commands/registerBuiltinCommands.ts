@@ -756,7 +756,7 @@ export function registerBuiltinCommands(params: {
       category: t("commandCategory.editing"),
       icon: null,
       description: t("commandDescription.edit.selectCurrentRegion"),
-      keywords: ["select", "current region", "region", "excel", "ctrl+shift+8", "ctrl+shift+*"],
+      keywords: ["select", "current region", "region", "excel", "ctrl+shift+8", "ctrl+shift+*", "ctrl+*", "numpad"],
     },
   );
 
