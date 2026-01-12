@@ -164,16 +164,16 @@ fn parse_note_record(
 
     let row = u16::from_le_bytes([data[0], data[1]]) as u32;
     let col = u16::from_le_bytes([data[2], data[3]]) as u32;
-    if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
-        warnings.push(format!(
-            "NOTE record at offset {offset} references out-of-bounds cell ({row},{col})"
-        ));
-        return None;
-    }
     // Some parsers differ on whether `idObj` precedes `grbit`. Capture both fields and match them
     // up with OBJ/TXO payloads later (join by object id).
     let primary_obj_id = u16::from_le_bytes([data[6], data[7]]);
     let secondary_obj_id = u16::from_le_bytes([data[4], data[5]]);
+    if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
+        warnings.push(format!(
+            "NOTE record at offset {offset} references out-of-bounds cell ({row},{col}) (obj_id={primary_obj_id}, fallback_obj_id={secondary_obj_id})"
+        ));
+        return None;
+    }
 
     // `stAuthor` is specified as a `ShortXLUnicodeString` (BIFF8) or an ANSI short string (BIFF5),
     // but files in the wild sometimes store it as an `XLUnicodeString` (16-bit length prefix), and
@@ -891,7 +891,9 @@ mod tests {
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert!(notes.is_empty(), "expected note to be skipped");
         assert!(
-            warnings.iter().any(|w| w.contains("out-of-bounds")),
+            warnings
+                .iter()
+                .any(|w| w.contains("out-of-bounds") && w.contains("obj_id=1")),
             "expected out-of-bounds warning; warnings={warnings:?}"
         );
     }
