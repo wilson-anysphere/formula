@@ -128,7 +128,6 @@ export async function showInputBox(options = {}) {
   dialog.setAttribute("aria-labelledby", title.id);
 
   const mode = options.type ?? "text";
-
   /** @type {HTMLInputElement | HTMLTextAreaElement} */
   const field = (() => {
     if (mode === "textarea") {

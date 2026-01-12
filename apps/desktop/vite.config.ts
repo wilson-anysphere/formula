@@ -21,6 +21,7 @@ const marketplaceSharedRoot = fileURLToPath(new URL("../../shared", import.meta.
 const tauriConfigPath = fileURLToPath(new URL("./src-tauri/tauri.conf.json", import.meta.url));
 const tauriCsp = (JSON.parse(readFileSync(tauriConfigPath, "utf8")) as any)?.app?.security?.csp as unknown;
 const isE2E = process.env.FORMULA_E2E === "1";
+const isPlaywright = process.env.FORMULA_E2E === "0" || process.env.FORMULA_E2E === "1";
 const cacheDir =
   process.env.FORMULA_E2E === "1"
     ? "node_modules/.vite-e2e-csp"
@@ -120,6 +121,10 @@ export default defineConfig({
       // Allow serving workspace packages during dev (`packages/*`).
       allow: [repoRoot],
     },
+    // The Grind/CI environment can run many agents in parallel, exhausting the default inotify
+    // watcher limits and causing Vite startup to fail with EMFILE/ENOSPC. E2E does not rely on
+    // file watching, so use polling to keep the dev server resilient under load.
+    ...(isPlaywright ? { watch: { usePolling: true, interval: 1000 } } : {}),
     // Always enable COOP/COEP so the webview can use SharedArrayBuffer.
     headers: {
       ...crossOriginIsolationHeaders,

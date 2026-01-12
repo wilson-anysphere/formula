@@ -3852,13 +3852,15 @@ if (
 
   let extensionPanelBridge: ExtensionPanelBridge | null = null;
 
-  // Extensions can access spreadsheet data via `formula.cells.*` and `formula.events.*` and then write
+  // Extensions can access spreadsheet data via `formula.cells.*` / `formula.events.*` and then write
   // arbitrary text to the system clipboard via `formula.clipboard.writeText()`. SpreadsheetApp's
   // copy/cut handlers already enforce clipboard-copy DLP, but extensions would otherwise bypass it.
   //
-  // The BrowserExtensionHost runtime tracks which ranges have been exposed to each extension
-  // (via `cells.getCell/getRange/getSelection` and event payloads) and forwards them through the
-  // `clipboardWriteGuard` hook so the desktop adapter can apply the same DLP policy.
+  // BrowserExtensionHost tracks read taint (API reads + event payloads) and passes those ranges to this
+  // optional `clipboardWriteGuard`, which runs *before* any clipboard write. Enforce clipboard-copy DLP
+  // against any workbook data the extension has observed (taintedRanges). Clipboard writes that are
+  // not derived from spreadsheet data (no taint) remain allowed, even if the current selection is
+  // Restricted.
   const extensionClipboardDlp = createDesktopDlpContext({ documentId: workbookId });
 
   const normalizeSelectionRange = (range: { startRow: number; startCol: number; endRow: number; endCol: number }) => {
@@ -3885,13 +3887,14 @@ if (
     });
   };
 
-  const extensionClipboardWriteGuard = async (params: { extensionId: string; taintedRanges: any[] }) => {
+  const clipboardWriteGuard = async (params: { extensionId: string; taintedRanges: any[] }) => {
     try {
       const taintedRanges = Array.isArray(params.taintedRanges) ? params.taintedRanges : [];
+      if (taintedRanges.length === 0) return;
       for (const raw of taintedRanges) {
         if (!raw || typeof raw !== "object") continue;
         const sheetId = typeof (raw as any).sheetId === "string" ? String((raw as any).sheetId) : "";
-        if (!sheetId) continue;
+        if (!sheetId.trim()) continue;
         const startRow = Number((raw as any).startRow);
         const startCol = Number((raw as any).startCol);
         const endRow = Number((raw as any).endRow);
@@ -3911,17 +3914,20 @@ if (
     } catch (err) {
       const isDlpViolation = err instanceof DlpViolationError || (err as any)?.name === "DlpViolationError";
       if (isDlpViolation) {
+        const message =
+          typeof (err as any)?.message === "string" && String((err as any).message).trim().length > 0
+            ? String((err as any).message)
+            : "Clipboard copy is blocked by data loss prevention policy.";
         try {
-          const message =
-            typeof (err as any)?.message === "string" && (err as any).message.trim()
-              ? String((err as any).message)
-              : "Clipboard copy blocked by data loss prevention policy.";
           showToast(message, "error");
         } catch {
           // `showToast` requires a #toast-root; unit tests don't always include it.
         }
+        throw err;
       }
-      throw err;
+
+      // Best-effort: guard failures should never take down clipboard writes.
+      console.error(`[formula][desktop] clipboardWriteGuard error for ${String(params.extensionId)}:`, err);
     }
   };
 
@@ -4311,7 +4317,7 @@ if (
   const extensionHostManager = new DesktopExtensionHostManager({
     engineVersion: "1.0.0",
     spreadsheetApi: extensionSpreadsheetApi,
-    clipboardWriteGuard: extensionClipboardWriteGuard,
+    clipboardWriteGuard,
     clipboardApi: {
       readText: async () => {
         const provider = await clipboardProviderPromise;
