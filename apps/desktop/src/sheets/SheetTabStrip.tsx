@@ -3,11 +3,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ContextMenu, type ContextMenuItem } from "../menus/contextMenu.js";
 import { normalizeExcelColorToCss } from "../shared/colors.js";
 import { resolveCssVar } from "../theme/cssVars.js";
-import { showInputBox } from "../extensions/ui.js";
+import { showInputBox, showQuickPick } from "../extensions/ui.js";
 import * as nativeDialogs from "../tauri/nativeDialogs";
-import { validateSheetName, type SheetMeta, type TabColor, type WorkbookSheetStore } from "./workbookSheetStore";
+import { validateSheetName, type SheetMeta, type SheetVisibility, type TabColor, type WorkbookSheetStore } from "./workbookSheetStore";
 import { computeWorkbookSheetMoveIndex } from "./sheetReorder";
-import { showQuickPick } from "../extensions/ui.js";
 
 const SHEET_TAB_COLOR_PALETTE: Array<{ label: string; token: string; fallbackCss: string }> = [
   { label: "Red", token: "--sheet-tab-red", fallbackCss: "red" },
@@ -19,6 +18,34 @@ const SHEET_TAB_COLOR_PALETTE: Array<{ label: string; token: string; fallbackCss
   { label: "Purple", token: "--sheet-tab-purple", fallbackCss: "purple" },
   { label: "Gray", token: "--sheet-tab-gray", fallbackCss: "gray" },
 ];
+
+function normalizeCssHexToExcelArgb(cssColor: string): string | null {
+  const trimmed = String(cssColor ?? "").trim();
+  if (!trimmed) return null;
+
+  const hasHash = trimmed.startsWith("#");
+  const raw = hasHash ? trimmed.slice(1) : trimmed;
+  if (!/^[0-9a-fA-F]+$/.test(raw)) return null;
+
+  // #RRGGBB / RRGGBB
+  if (raw.length === 6) {
+    return `FF${raw.toUpperCase()}`;
+  }
+
+  // #RGB / RGB (expand to RRGGBB)
+  if (raw.length === 3) {
+    const [r, g, b] = raw.toUpperCase().split("");
+    if (!r || !g || !b) return null;
+    return `FF${r}${r}${g}${g}${b}${b}`;
+  }
+
+  // Already ARGB (#AARRGGBB / AARRGGBB)
+  if (raw.length === 8) {
+    return raw.toUpperCase();
+  }
+
+  return null;
+}
 
 type Props = {
   store: WorkbookSheetStore;
@@ -39,6 +66,20 @@ type Props = {
    * stays consistent across reloads.
    */
   onPersistSheetDelete?: (sheetId: string) => Promise<void> | void;
+  /**
+   * Optional hook to persist sheet visibility changes before updating the local sheet metadata store.
+   *
+   * Used by the desktop (Tauri) shell to route sheet hide/unhide through the backend so the workbook
+   * stays consistent across reloads.
+   */
+  onPersistSheetVisibility?: (sheetId: string, visibility: SheetVisibility) => Promise<void> | void;
+  /**
+   * Optional hook to persist sheet tab color changes before updating the local sheet metadata store.
+   *
+   * Used by the desktop (Tauri) shell to route tab color changes through the backend so the workbook
+   * stays consistent across reloads.
+   */
+  onPersistSheetTabColor?: (sheetId: string, tabColor: TabColor | undefined) => Promise<void> | void;
   /**
    * Called after a sheet tab reorder is committed (drag-and-drop).
    *
@@ -78,6 +119,8 @@ export function SheetTabStrip({
   onAddSheet,
   onPersistSheetRename,
   onPersistSheetDelete,
+  onPersistSheetVisibility,
+  onPersistSheetTabColor,
   onSheetsReordered,
   onSheetRenamed,
   onSheetDeleted,
@@ -407,12 +450,20 @@ export function SheetTabStrip({
         type: "item",
         label: "Hide",
         enabled: canHide,
-        onSelect: () => {
+        onSelect: async () => {
           const wasActive = sheet.id === activeSheetIdRef.current;
           let nextActiveId: string | null = null;
           if (wasActive) {
             const idx = visibleSheets.findIndex((s) => s.id === sheet.id);
             nextActiveId = idx === -1 ? null : (visibleSheets[idx + 1]?.id ?? visibleSheets[idx - 1]?.id ?? null);
+          }
+
+          try {
+            await onPersistSheetVisibility?.(sheet.id, "hidden");
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            onError?.(message);
+            return;
           }
 
           try {
@@ -441,7 +492,15 @@ export function SheetTabStrip({
         items: hiddenSheets.map((hidden) => ({
           type: "item" as const,
           label: hidden.name,
-          onSelect: () => {
+          onSelect: async () => {
+            try {
+              await onPersistSheetVisibility?.(hidden.id, "visible");
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              onError?.(message);
+              return;
+            }
+
             try {
               store.unhide(hidden.id);
             } catch (err) {
@@ -460,7 +519,15 @@ export function SheetTabStrip({
           {
             type: "item",
             label: "No Color",
-            onSelect: () => {
+            onSelect: async () => {
+              try {
+                await onPersistSheetTabColor?.(sheet.id, undefined);
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                onError?.(message);
+                return;
+              }
+
               try {
                 store.setTabColor(sheet.id, undefined);
               } catch (err) {
@@ -479,9 +546,24 @@ export function SheetTabStrip({
               // across WebView engines (some do not support `var(--token)` in SVG
               // presentation attributes).
               leading: { type: "swatch" as const, color: rgb },
-              onSelect: () => {
+              onSelect: async () => {
+                const excelArgb = normalizeCssHexToExcelArgb(rgb);
+                if (!excelArgb) {
+                  onError?.(`Failed to set tab color: "${entry.label}" is not a hex color (${rgb}).`);
+                  return;
+                }
+
+                const tabColor: TabColor = { rgb: excelArgb };
                 try {
-                  store.setTabColor(sheet.id, { rgb });
+                  await onPersistSheetTabColor?.(sheet.id, tabColor);
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : String(err);
+                  onError?.(message);
+                  return;
+                }
+
+                try {
+                  store.setTabColor(sheet.id, tabColor);
                 } catch (err) {
                   const message = err instanceof Error ? err.message : String(err);
                   onError?.(message);
@@ -512,13 +594,31 @@ export function SheetTabStrip({
               // listeners across cancels.
               input.onchange = () => {
                 input.onchange = null;
-                try {
-                  store.setTabColor(sheet.id, { rgb: input.value });
-                } catch (err) {
-                  const message = err instanceof Error ? err.message : String(err);
-                  onError?.(message);
-                }
-                if (restore?.isConnected) restore.focus({ preventScroll: true });
+                void (async () => {
+                  const excelArgb = normalizeCssHexToExcelArgb(input.value);
+                  if (!excelArgb) {
+                    onError?.(`Failed to set tab color: selected color is not a hex value (${input.value}).`);
+                    return;
+                  }
+
+                  const tabColor: TabColor = { rgb: excelArgb };
+                  try {
+                    await onPersistSheetTabColor?.(sheet.id, tabColor);
+                  } catch (err) {
+                    const message = err instanceof Error ? err.message : String(err);
+                    onError?.(message);
+                    return;
+                  }
+
+                  try {
+                    store.setTabColor(sheet.id, tabColor);
+                  } catch (err) {
+                    const message = err instanceof Error ? err.message : String(err);
+                    onError?.(message);
+                  }
+                })().finally(() => {
+                  if (restore?.isConnected) restore.focus({ preventScroll: true });
+                });
               };
 
               input.click();

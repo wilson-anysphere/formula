@@ -88,6 +88,8 @@ function installTauriStubForTests(
 
           case "mark_saved":
           case "move_sheet":
+          case "set_sheet_visibility":
+          case "set_sheet_tab_color":
           case "set_cell":
           case "set_range":
           case "save_workbook":
@@ -392,5 +394,82 @@ test.describe("tauri workbook integration", () => {
           (c.args?.sheet_id ?? c.args?.sheetId) === "Sheet2-backend",
       ),
     );
+  });
+
+  test("sheet hide/unhide + tab color persist through tauri backend", async ({ page }) => {
+    await page.addInitScript(installTauriStubForTests, {
+      sheets: [
+        { id: "Sheet1", name: "Sheet1", visibility: "visible" },
+        { id: "Sheet2", name: "Sheet2", visibility: "visible" },
+      ],
+    });
+
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
+    });
+
+    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    // Hide Sheet1.
+    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+    const menu = page.getByTestId("sheet-tab-context-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Hide" }).click();
+
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveCount(0);
+    await expect(page.getByTestId("sheet-switcher")).toHaveValue("Sheet2");
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            ((window as any).__tauriInvokeCalls ?? []).filter(
+              (c: any) => c?.cmd === "set_sheet_visibility" && c?.args?.sheet_id === "Sheet1" && c?.args?.visibility === "hidden",
+            ).length,
+        ),
+      )
+      .toBe(1);
+
+    // Unhide Sheet1.
+    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Unhide…" }).click();
+    await menu.getByRole("button", { name: "Sheet1" }).click();
+
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            ((window as any).__tauriInvokeCalls ?? []).filter(
+              (c: any) => c?.cmd === "set_sheet_visibility" && c?.args?.sheet_id === "Sheet1" && c?.args?.visibility === "visible",
+            ).length,
+        ),
+      )
+      .toBe(1);
+
+    // Set tab color for Sheet1.
+    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Tab Color" }).click();
+    await menu.getByRole("button", { name: "Red" }).click();
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            ((window as any).__tauriInvokeCalls ?? []).find(
+              (c: any) => c?.cmd === "set_sheet_tab_color" && c?.args?.sheet_id === "Sheet1",
+            )?.args?.tab_color?.rgb ?? null,
+        ),
+      )
+      .toBe("FFFF0000");
   });
 });
