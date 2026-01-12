@@ -206,6 +206,14 @@ The exact enum definition is not documented publicly by Microsoft; treat `CalcOr
 </richValueRels>
 ```
 
+Important indexing note:
+
+* `_rvRel:LocalImageIdentifier` is a **0-based index into the `<rel>` list in `richValueRel.xml`**.
+* The OPC relationships file (`richValueRel.xml.rels`) is **not** order-sensitive; it is a map from `Id="rId…"` to a `Target=…`.
+  * In the Excel-produced fixture `fixtures/xlsx/basic/image-in-cell.xlsx`, the `<rel>` list is
+    `rId1`, `rId2`, but the `.rels` file lists `<Relationship Id="rId2" …/>` before `<Relationship Id="rId1" …/>`.
+    Consumers must follow the `richValueRel.xml` list order first, then resolve by relationship ID.
+
 The relationship ID is resolved via:
 
 `xl/richData/_rels/richValueRel.xml.rels`
