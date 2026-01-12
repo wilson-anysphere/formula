@@ -1132,12 +1132,7 @@ export class WebExtensionManager {
     if (installed.corrupted) {
       return { ok: false, reason: installed.corruptedReason ? String(installed.corruptedReason) : "Extension is corrupted" };
     }
-    if (installed.incompatible) {
-      return {
-        ok: false,
-        reason: installed.incompatibleReason ? String(installed.incompatibleReason) : "Extension is incompatible"
-      };
-    }
+    const wasIncompatible = Boolean(installed.incompatible || installed.incompatibleAt || installed.incompatibleReason);
 
     const pkg = await this._getPackage(installed.id, installed.version);
     if (!pkg) {
@@ -1204,6 +1199,9 @@ export class WebExtensionManager {
       return { ok: false, reason };
     }
 
+    if (wasIncompatible) {
+      await this._clearIncompatibleInstall(installed).catch(() => {});
+    }
     return { ok: true };
   }
 

@@ -1335,6 +1335,60 @@ test("loadInstalled quarantines when a stored manifest becomes incompatible with
   await fs.rm(tmpRoot, { recursive: true, force: true });
 });
 
+test("verifyInstalled clears incompatible flag when the manifest becomes compatible again", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-unquarantine-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const manifest = {
+    name: "unquarantine-ext",
+    publisher: "test",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    browser: "./dist/extension.mjs",
+    engines: { formula: "^1.0.0" }
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+  const source = `export async function activate() {}\n`;
+  await fs.writeFile(path.join(extDir, "dist", "extension.mjs"), source);
+  await fs.writeFile(path.join(extDir, "dist", "extension.js"), source);
+
+  const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "test.unquarantine-ext",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const installer = new WebExtensionManager({ marketplaceClient, engineVersion: "1.0.0" });
+  await installer.install("test.unquarantine-ext");
+  await installer.dispose();
+
+  // Mark the install incompatible under a different engine version.
+  const managerV2 = new WebExtensionManager({ marketplaceClient, engineVersion: "2.0.0" });
+  const firstCheck = await managerV2.verifyInstalled("test.unquarantine-ext");
+  expect(firstCheck.ok).toBe(false);
+  expect(String(firstCheck.reason ?? "")).toMatch(/engine mismatch/i);
+  const storedAfterV2 = await managerV2.getInstalled("test.unquarantine-ext");
+  expect(storedAfterV2?.incompatible).toBe(true);
+  await managerV2.dispose();
+
+  // Switching back to a compatible engine should clear the quarantine flag via verifyInstalled().
+  const managerV1 = new WebExtensionManager({ marketplaceClient, engineVersion: "1.0.0" });
+  const secondCheck = await managerV1.verifyInstalled("test.unquarantine-ext");
+  expect(secondCheck.ok).toBe(true);
+  const storedAfterV1 = await managerV1.getInstalled("test.unquarantine-ext");
+  expect(storedAfterV1?.incompatible).not.toBe(true);
+  expect(storedAfterV1?.incompatibleAt).toBeUndefined();
+  expect(storedAfterV1?.incompatibleReason).toBeUndefined();
+  await managerV1.dispose();
+
+  await fs.rm(tmpRoot, { recursive: true, force: true });
+});
+
 test("update flow replaces installed version and reloads when loaded", async () => {
   const keys = generateEd25519KeyPair();
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-update-"));
