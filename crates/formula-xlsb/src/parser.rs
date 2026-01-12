@@ -4,7 +4,9 @@ use std::ops::ControlFlow;
 
 use crate::biff12_varint;
 use crate::shared_strings::SharedString;
-use crate::workbook_context::{ExternName, ExternSheet, SupBook, SupBookKind, WorkbookContext};
+use crate::workbook_context::{
+    display_supbook_name, ExternName, ExternSheet, SupBook, SupBookKind, WorkbookContext,
+};
 use formula_model::rich_text::{RichText, RichTextRunStyle};
 use thiserror::Error;
 
@@ -527,17 +529,27 @@ pub(crate) fn parse_workbook<R: Read>(
                 .map(|sb| &sb.kind);
             let is_internal = matches!(supbook_kind, Some(SupBookKind::Internal))
                 || (supbook_kind.is_none() && entry.supbook_index == 0);
-            if !is_internal {
+            if is_internal {
+                let Some(first_sheet) = sheets.get(entry.sheet_first as usize) else {
+                    continue;
+                };
+                let Some(last_sheet) = sheets.get(entry.sheet_last as usize) else {
+                    continue;
+                };
+                ctx.add_extern_sheet(&first_sheet.name, &last_sheet.name, ixti as u16);
                 continue;
             }
 
-            let Some(first_sheet) = sheets.get(entry.sheet_first as usize) else {
-                continue;
-            };
-            let Some(last_sheet) = sheets.get(entry.sheet_last as usize) else {
-                continue;
-            };
-            ctx.add_extern_sheet(&first_sheet.name, &last_sheet.name, ixti as u16);
+            if matches!(supbook_kind, Some(SupBookKind::ExternalWorkbook)) {
+                let Some(supbook) = supbooks.get(entry.supbook_index as usize) else {
+                    continue;
+                };
+                let book = display_supbook_name(&supbook.raw_name);
+                let sheet_list = supbook_sheets.get(entry.supbook_index as usize);
+                let first_sheet = resolve_supbook_sheet_name(sheet_list, entry.sheet_first);
+                let last_sheet = resolve_supbook_sheet_name(sheet_list, entry.sheet_last);
+                ctx.add_extern_sheet_external_workbook(book, first_sheet, last_sheet, ixti as u16);
+            }
         }
     }
 
@@ -949,6 +961,40 @@ mod tests {
         assert_eq!(defined_names[0].name, "GoodName");
         assert_eq!(defined_names[0].index, 2);
         assert_eq!(ctx.name_index("GoodName", None), Some(2));
+    }
+
+    #[test]
+    fn parse_workbook_populates_external_workbook_extern_sheet_targets() {
+        // workbook.bin containing an external SupBook (with sheet names) + ExternSheet mapping.
+        let mut workbook_bin = Vec::new();
+
+        // End of sheets list (we keep scanning for context records).
+        write_record(&mut workbook_bin, biff12::SHEETS_END, &[]);
+
+        // External SupBook: ctab=2, raw_name is a path, followed by sheet name list.
+        let mut supbook = Vec::new();
+        supbook.extend_from_slice(&2u16.to_le_bytes()); // ctab
+        write_utf16_string(&mut supbook, r"C:\tmp\Book2.xlsb");
+        write_utf16_string(&mut supbook, "SheetA");
+        write_utf16_string(&mut supbook, "SheetB");
+        write_record(&mut workbook_bin, 0x00AE, &supbook);
+
+        // ExternSheet entry referencing the external SupBook's sheet range.
+        let mut extern_sheet = Vec::new();
+        extern_sheet.extend_from_slice(&1u16.to_le_bytes()); // cxti
+        extern_sheet.extend_from_slice(&0u16.to_le_bytes()); // supbook index
+        extern_sheet.extend_from_slice(&0u16.to_le_bytes()); // sheet first
+        extern_sheet.extend_from_slice(&1u16.to_le_bytes()); // sheet last
+        write_record(&mut workbook_bin, 0x0017, &extern_sheet);
+
+        let rels: HashMap<String, String> = HashMap::new();
+        let (_sheets, ctx, _props, _defined_names) =
+            parse_workbook(&mut Cursor::new(&workbook_bin), &rels).expect("parse workbook.bin");
+
+        let (workbook, first, last) = ctx.extern_sheet_target(0).expect("extern sheet target");
+        assert_eq!(workbook, Some("Book2.xlsb"));
+        assert_eq!(first, "SheetA");
+        assert_eq!(last, "SheetB");
     }
 
     #[test]
@@ -1508,6 +1554,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                                     rgcb_for_decode = materialized.rgcb;
                                 }
                             }
+
                             let base = crate::rgce::CellCoord::new(row, col);
                             let decoded =
                                 crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
@@ -1538,9 +1585,11 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                                             decoded
                                         } else {
                                             let decoded =
-                                            crate::rgce::decode_formula_rgce_with_context_and_rgcb(
-                                                &rgce, rgcb_for_decode, ctx,
-                                            );
+                                                crate::rgce::decode_formula_rgce_with_context_and_rgcb(
+                                                    &rgce,
+                                                    rgcb_for_decode,
+                                                    ctx,
+                                                );
                                             if decoded.text.is_some() {
                                                 decoded
                                             } else {
@@ -2501,22 +2550,40 @@ fn parse_supbook(data: &[u8]) -> Option<(SupBook, Vec<String>)> {
 }
 
 fn read_supbook_sheet_names(rr: &mut RecordReader<'_>, ctab: usize) -> Vec<String> {
-    // The BIFF `SupBook` record for external workbooks commonly stores the sheet names for the
-    // referenced workbook after the workbook name/path. We parse them best-effort so we can
-    // render sheet-scoped `PtgNameX` tokens as `'[Book]Sheet'!Name` when possible.
-    let mut out = Vec::new();
+    // SupBook `ctab` is the number of sheet names in the record.
+    //
+    // We parse best-effort: if anything looks malformed, fall back to no sheet list so callers
+    // can still decode formulas deterministically using placeholders.
+    const MAX_SUPBOOK_SHEETS: usize = 16_384;
+    if ctab == 0 || ctab > MAX_SUPBOOK_SHEETS {
+        return Vec::new();
+    }
+
+    let start_offset = rr.offset;
+    let mut out = Vec::with_capacity(ctab);
     for _ in 0..ctab {
-        if rr.offset >= rr.data.len() {
-            break;
-        }
         match rr.read_utf16_string() {
-            Ok(name) => out.push(name),
-            Err(_) => break,
+            Ok(s) => out.push(s),
+            Err(_) => {
+                rr.offset = start_offset;
+                return Vec::new();
+            }
         }
     }
     out
 }
 
+fn resolve_supbook_sheet_name(sheet_list: Option<&Vec<String>>, sheet_index: u32) -> String {
+    sheet_list
+        .and_then(|sheets| sheets.get(sheet_index as usize))
+        .cloned()
+        .unwrap_or_else(|| {
+            // ExternSheet sheet indices are 0-based. Use the traditional 1-based "Sheet{n}" naming
+            // so the fallback is stable and looks like a plausible Excel sheet name.
+            let n = sheet_index.checked_add(1).unwrap_or(sheet_index);
+            format!("Sheet{n}")
+        })
+}
 fn classify_supbook_name(raw_name: &str) -> SupBookKind {
     if raw_name.is_empty() {
         return SupBookKind::Internal;

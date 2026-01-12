@@ -412,6 +412,42 @@ fn format_sheet_prefix(first: &str, last: &str) -> String {
     out
 }
 
+fn format_external_sheet_prefix(book: &str, first: &str, last: &str) -> String {
+    let same_sheet = first.eq_ignore_ascii_case(last);
+    let needs_quotes = if same_sheet {
+        sheet_name_needs_quotes(first)
+    } else {
+        sheet_name_needs_quotes(first) || sheet_name_needs_quotes(last)
+    };
+
+    if needs_quotes {
+        let combined = if same_sheet {
+            format!("[{book}]{first}")
+        } else {
+            format!("[{book}]{first}:{last}")
+        };
+        let mut out = String::new();
+        out.push('\'');
+        for ch in combined.chars() {
+            if ch == '\'' {
+                out.push('\'');
+                out.push('\'');
+            } else {
+                out.push(ch);
+            }
+        }
+        out.push('\'');
+        out.push('!');
+        return out;
+    }
+
+    if same_sheet {
+        format!("[{book}]{first}!")
+    } else {
+        format!("[{book}]{first}:{last}!")
+    }
+}
+
 fn sheet_name_needs_quotes(sheet: &str) -> bool {
     if sheet.is_empty() {
         return true;
@@ -1089,10 +1125,17 @@ fn decode_rgce_impl(
                 let col_field = u16::from_le_bytes([rgce[i + 6], rgce[i + 7]]);
                 i += 8;
 
-                let (first, last) = ctx
-                    .extern_sheet_names(ixti)
+                let (workbook, first, last) = ctx
+                    .extern_sheet_target(ixti)
                     .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
-                let prefix = format_sheet_prefix(first, last);
+                let prefix = match workbook {
+                    None => {
+                        format_sheet_prefix(first, last)
+                    }
+                    Some(book) => {
+                        format_external_sheet_prefix(book, first, last)
+                    }
+                };
                 let cell = format_cell_ref_from_field(row0, col_field);
                 stack.push(ExprFragment::new(format!("{prefix}{cell}")));
             }
@@ -1120,10 +1163,17 @@ fn decode_rgce_impl(
                 let col_last = u16::from_le_bytes([rgce[i + 12], rgce[i + 13]]);
                 i += 14;
 
-                let (first, last) = ctx
-                    .extern_sheet_names(ixti)
+                let (workbook, first, last) = ctx
+                    .extern_sheet_target(ixti)
                     .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
-                let prefix = format_sheet_prefix(first, last);
+                let prefix = match workbook {
+                    None => {
+                        format_sheet_prefix(first, last)
+                    }
+                    Some(book) => {
+                        format_external_sheet_prefix(book, first, last)
+                    }
+                };
 
                 let a = format_cell_ref_from_field(row_first0, col_first);
                 let b = format_cell_ref_from_field(row_last0, col_last);

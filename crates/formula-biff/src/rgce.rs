@@ -986,6 +986,11 @@ fn encode_structured_ref(
             start,
             end,
         ),
+        (_, formula_engine::structured_refs::StructuredColumns::Multi(_)) => {
+            return Err(EncodeRgceError::Unsupported(
+                "structured reference column unions",
+            ));
+        }
     };
 
     const PTG_LIST: u8 = 0x2E;

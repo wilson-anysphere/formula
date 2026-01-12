@@ -83,6 +83,22 @@ fn decodes_ptg_area3dv_with_sheet_prefix_and_at() {
 }
 
 #[test]
+fn decodes_ptg_ref3d_with_external_workbook_prefix() {
+    // PtgRef3d: [ptg][ixti: u16][row: u32][col: u16]
+    let mut rgce = vec![0x3A];
+    rgce.extend_from_slice(&0u16.to_le_bytes()); // extern sheet index
+    rgce.extend_from_slice(&0u32.to_le_bytes()); // row = 0 (A1)
+    rgce.extend_from_slice(&0xC000u16.to_le_bytes()); // col = A, relative row/col
+
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet_external_workbook("Book2.xlsb", "SheetA", "SheetB", 0);
+
+    let text = decode_rgce_with_context(&rgce, &ctx).expect("decode");
+    assert_eq!(text, "[Book2.xlsb]SheetA:SheetB!A1");
+    assert_parses_and_roundtrips(&text);
+}
+
+#[test]
 fn does_not_emit_at_for_single_cell_ptg_refv() {
     let rgce = rgce_ref(0x44);
     let text = decode_rgce(&rgce).expect("decode");

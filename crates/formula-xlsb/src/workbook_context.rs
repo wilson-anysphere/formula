@@ -13,6 +13,11 @@ pub struct WorkbookContext {
     extern_sheets: HashMap<(String, String), u16>,
     /// Reverse lookup for `ixti` -> `(first, last)` display names.
     extern_sheets_rev: HashMap<u16, (String, String)>,
+    /// Reverse lookup for `ixti` -> external target (optional workbook + sheet range).
+    ///
+    /// This is used to decode 3D references that point at external workbooks, which Excel
+    /// represents via the SupBook + ExternSheet tables.
+    extern_sheet_targets_rev: HashMap<u16, ExternSheetTarget>,
 
     /// Maps `(scope, name)` to the defined name index.
     ///
@@ -31,6 +36,13 @@ pub struct WorkbookContext {
     namex_extern_names: HashMap<(u16, u16), ExternName>,
     /// Map `ixti` (ExternSheet index) -> supbook index for `PtgNameX`.
     namex_ixti_supbooks: HashMap<u16, u16>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExternSheetTarget {
+    workbook: Option<String>,
+    first_sheet: String,
+    last_sheet: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,6 +113,41 @@ impl WorkbookContext {
         self.extern_sheets.insert(key, ixti);
         self.extern_sheets_rev
             .insert(ixti, (first_sheet, last_sheet));
+        self.extern_sheet_targets_rev.insert(
+            ixti,
+            ExternSheetTarget {
+                workbook: None,
+                first_sheet: self
+                    .extern_sheets_rev
+                    .get(&ixti)
+                    .map(|(a, _)| a.clone())
+                    .unwrap_or_default(),
+                last_sheet: self
+                    .extern_sheets_rev
+                    .get(&ixti)
+                    .map(|(_, b)| b.clone())
+                    .unwrap_or_default(),
+            },
+        );
+    }
+
+    /// Registers an ExternSheet table entry targeting an external workbook so formulas can decode
+    /// 3D references like `'[Book2.xlsx]Sheet1'!A1`.
+    pub fn add_extern_sheet_external_workbook(
+        &mut self,
+        workbook: impl Into<String>,
+        first_sheet: impl Into<String>,
+        last_sheet: impl Into<String>,
+        ixti: u16,
+    ) {
+        self.extern_sheet_targets_rev.insert(
+            ixti,
+            ExternSheetTarget {
+                workbook: Some(workbook.into()),
+                first_sheet: first_sheet.into(),
+                last_sheet: last_sheet.into(),
+            },
+        );
     }
 
     /// Returns the ExternSheet index (`ixti`) for a sheet.
@@ -120,6 +167,23 @@ impl WorkbookContext {
         self.extern_sheets_rev
             .get(&ixti)
             .map(|(a, b)| (a.as_str(), b.as_str()))
+    }
+
+    /// Returns the target of an ExternSheet index (`ixti`).
+    ///
+    /// The workbook name is `None` for internal references and `Some` for external workbook
+    /// references.
+    pub fn extern_sheet_target(&self, ixti: u16) -> Option<(Option<&str>, &str, &str)> {
+        if let Some(target) = self.extern_sheet_targets_rev.get(&ixti) {
+            return Some((
+                target.workbook.as_deref(),
+                target.first_sheet.as_str(),
+                target.last_sheet.as_str(),
+            ));
+        }
+        self.extern_sheets_rev
+            .get(&ixti)
+            .map(|(a, b)| (None, a.as_str(), b.as_str()))
     }
 
     /// Registers a workbook-scoped defined name.
@@ -309,7 +373,7 @@ fn normalize_key(s: &str) -> String {
     s.to_ascii_lowercase()
 }
 
-fn display_supbook_name(raw: &str) -> String {
+pub(crate) fn display_supbook_name(raw: &str) -> String {
     raw.rsplit(['/', '\\']).next().unwrap_or(raw).to_string()
 }
 
@@ -357,7 +421,7 @@ mod tests {
         )]);
         let ixti_supbooks = HashMap::from([(0u16, 0u16)]);
 
-        ctx.set_namex_tables(supbooks, vec![vec![]], extern_names, ixti_supbooks);
+        ctx.set_namex_tables(supbooks, vec![Vec::new()], extern_names, ixti_supbooks);
 
         let txt = ctx.format_namex(0, 1).expect("format");
         assert_eq!(txt, "'[Book2.xlsb]MyName'");
@@ -423,7 +487,7 @@ mod tests {
         ]);
         let ixti_supbooks = HashMap::from([(5u16, 0u16), (2u16, 0u16)]);
 
-        ctx.set_namex_tables(supbooks, vec![vec![]], extern_names, ixti_supbooks);
+        ctx.set_namex_tables(supbooks, vec![Vec::new()], extern_names, ixti_supbooks);
 
         // Chooses smallest (supbook, name_index) match and smallest ixti pointing at that supbook.
         assert_eq!(ctx.namex_function_ref("myfunc"), Some((2u16, 1u16)));
