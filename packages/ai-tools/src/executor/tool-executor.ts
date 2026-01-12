@@ -1373,7 +1373,7 @@ export class ToolExecutor {
     }
 
     for (const record of index.rangeRecords) {
-      if (!cellInNormalizedRange({ row: row0, col: col0 }, record.range)) continue;
+      if (!cellInNormalizedRange(row0, col0, record.range)) continue;
       if (record.rank > rank) rank = record.rank;
       if (rank === RESTRICTED_CLASSIFICATION_RANK) {
         return decideAllowed(rank);
@@ -2010,12 +2010,12 @@ function nowMs(): number {
   return Date.now();
 }
 
-function cellInNormalizedRange(cell: { row: number; col: number }, range: DlpNormalizedRange): boolean {
+function cellInNormalizedRange(row: number, col: number, range: DlpNormalizedRange): boolean {
   return (
-    cell.row >= range.start.row &&
-    cell.row <= range.end.row &&
-    cell.col >= range.start.col &&
-    cell.col <= range.end.col
+    row >= range.start.row &&
+    row <= range.end.row &&
+    col >= range.start.col &&
+    col <= range.end.col
   );
 }
 
