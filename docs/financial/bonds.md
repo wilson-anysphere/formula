@@ -275,7 +275,8 @@ Let:
 
 - `E` be the regular period length in days (per the basis conventions from earlier):
   - basis 1: `E = actual_days(NCD - PCD)` (variable)
-  - basis 0/2/4: `E = 360/f`
+  - basis 0/2: `E = 360/f`
+  - basis 4: `E = DAYS360(PCD, NCD, TRUE)`
   - basis 3: `E = 365/f`
 
 Let:
@@ -627,9 +628,10 @@ Excel’s bond functions are historically underspecified. The following are know
 
 2. **`COUPDAYS` (`E`) conventions by basis**
    - Resolution:
-     - basis 1: `E = actual_days(PCD→NCD)` (variable)
-     - basis 0/2/4: `E = 360/f` (constant)
-     - basis 3: `E = 365/f` (constant)
+      - basis 1: `E = actual_days(PCD→NCD)` (variable)
+      - basis 0/2: `E = 360/f` (constant)
+      - basis 4: `E = DAYS360(PCD→NCD, TRUE)` (variable)
+      - basis 3: `E = 365/f` (constant)
    - This implies `A + DSC` may not equal `E` for basis 2/3; that is expected.
 
 3. **`ACCRINT` `calc_method` behavior**
