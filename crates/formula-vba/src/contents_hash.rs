@@ -82,6 +82,7 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
     let mut out = Vec::new();
 
     let mut offset = 0usize;
+    let mut in_project_information = true;
     while offset < dir_decompressed.len() {
         if offset + 2 > dir_decompressed.len() {
             return Err(DirParseError::Truncated.into());
@@ -140,10 +141,18 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
         let data = &dir_decompressed[offset..offset + len];
         offset += len;
 
-        // Stop once we hit the first module record group to avoid accidentally treating module-level
-        // Unicode records (some of which reuse the same numeric IDs) as ProjectInformation records.
+        // Stop *interpreting* records once we hit the first module record group, but keep parsing
+        // to the end of the stream so truncation/length errors are still reported (strictness).
+        //
+        // This avoids accidentally treating module-level Unicode records (some of which reuse the
+        // same numeric IDs, e.g. 0x004A) as ProjectInformation records while still validating the
+        // overall record framing.
         if id == 0x0019 {
-            break;
+            in_project_information = false;
+            continue;
+        }
+        if !in_project_information {
+            continue;
         }
 
         let next_id = peek_next_record_id(&dir_decompressed, offset);
