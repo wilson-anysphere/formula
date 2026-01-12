@@ -294,6 +294,17 @@ export class SecondaryGridView {
     this.container.replaceChildren();
   }
 
+  /**
+   * Commit any in-progress cell edit without moving selection.
+   *
+   * This is intended for "command" entry points (Save/Open/Close/Quit) so pending
+   * edits in the secondary pane are not lost.
+   */
+  commitPendingEditsForCommand(): void {
+    if (!this.editor.isOpen()) return;
+    this.editor.commit("command");
+  }
+
   private openEditor(request: { row: number; col: number; initialKey?: string }): void {
     if (this.editor.isOpen()) return;
     if (request.row < this.headerRows || request.col < this.headerCols) return;

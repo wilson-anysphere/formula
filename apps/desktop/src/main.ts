@@ -7725,10 +7725,17 @@ function normalizeSheetList(info: WorkbookInfo): SheetUiInfo[] {
     .filter((sheet) => sheet.id !== "");
 }
 
+function commitAllPendingEditsForCommand(): void {
+  // Secondary pane has its own in-cell editor; ensure we commit it too so unsaved-change
+  // prompts and file operations include the latest user input.
+  secondaryGridView?.commitPendingEditsForCommand();
+  app.commitPendingEditsForCommand();
+}
+
 async function confirmDiscardDirtyState(actionLabel: string): Promise<boolean> {
   // If the user triggers File commands while editing, the document may not yet be dirty
   // (the edit is still in the UI editor). Commit first so discard prompts are correct.
-  app.commitPendingEditsForCommand();
+  commitAllPendingEditsForCommand();
   if (!isDirtyForUnsavedChangesPrompts()) return true;
   return nativeDialogs.confirm(`You have unsaved changes. Discard them and ${actionLabel}?`);
 }
@@ -8143,7 +8150,7 @@ async function copyPowerQueryPersistence(fromWorkbookId: string, toWorkbookId: s
 }
 
 async function handleSave(options: { notifyExtensions?: boolean; throwOnCancel?: boolean } = {}): Promise<void> {
-  app.commitPendingEditsForCommand();
+  commitAllPendingEditsForCommand();
   if (!tauriBackend) return;
   if (!activeWorkbook) return;
   if (!workbookSync) return;
@@ -8166,7 +8173,7 @@ async function handleSave(options: { notifyExtensions?: boolean; throwOnCancel?:
 async function handleSaveAs(
   options: { previousPanelWorkbookId?: string; notifyExtensions?: boolean; throwOnCancel?: boolean } = {},
 ): Promise<void> {
-  app.commitPendingEditsForCommand();
+  commitAllPendingEditsForCommand();
   if (!tauriBackend) return;
   if (!activeWorkbook) return;
 
@@ -8192,7 +8199,7 @@ async function handleSaveAsPath(
   path: string,
   options: { previousPanelWorkbookId?: string; notifyExtensions?: boolean } = {},
 ): Promise<void> {
-  app.commitPendingEditsForCommand();
+  commitAllPendingEditsForCommand();
   if (!tauriBackend) return;
   if (!activeWorkbook) return;
   if (typeof path !== "string" || path.trim() === "") return;
@@ -8364,7 +8371,7 @@ try {
   registerAppQuitHandlers({
     isDirty: () => isDirtyForUnsavedChangesPrompts(),
     runWorkbookBeforeClose: async () => {
-      app.commitPendingEditsForCommand();
+      commitAllPendingEditsForCommand();
       if (!queuedInvoke) return;
       await fireWorkbookBeforeCloseBestEffort({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
     },
@@ -8428,7 +8435,7 @@ try {
     try {
       // If the user is mid-edit when a native window close is requested, ensure the edit
       // is committed before we flush workbook sync and before the backend runs Workbook_BeforeClose.
-      app.commitPendingEditsForCommand();
+      commitAllPendingEditsForCommand();
       await new Promise<void>((resolve) => queueMicrotask(resolve));
       await drainBackendSync();
 
@@ -9016,7 +9023,7 @@ try {
     try {
       // Ensure in-progress cell/formula edits are committed so `doc.isDirty` is accurate
       // and Workbook_BeforeClose macros see the latest inputs.
-      app.commitPendingEditsForCommand();
+      commitAllPendingEditsForCommand();
 
       // The Rust host runs `Workbook_BeforeClose` when the user clicks the native window close
       // button (and then emits `close-requested` with any macro-driven updates). Other close
