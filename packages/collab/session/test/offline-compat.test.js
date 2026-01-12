@@ -70,16 +70,16 @@ test("CollabSession legacy `options.offline` (file) migrates old .yjslog format 
 
     session.destroy();
     session.doc.destroy();
+    // Wait for the file persistence binding to finish its final compaction
+    // (queued in `binding.destroy()`), otherwise a file can be created while
+    // the test runner is tearing down the temporary directory.
+    await session.flushLocalPersistence();
   }
 });
 
 test("CollabSession legacy `options.offline` with autoLoad=false gates schema init until load", async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), "collab-session-offline-compat-file-schema-"));
   const legacyFilePath = path.join(dir, "doc.yjslog");
-
-  t.after(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
 
   // Seed a legacy offline log with a workbook that already has a non-default sheet id.
   {
@@ -100,9 +100,13 @@ test("CollabSession legacy `options.offline` with autoLoad=false gates schema in
     offline: { mode: "file", filePath: legacyFilePath, autoLoad: false },
   });
 
-  t.after(() => {
+  t.after(async () => {
     session.destroy();
     session.doc.destroy();
+    await session.flushLocalPersistence();
+  });
+  t.after(async () => {
+    await rm(dir, { recursive: true, force: true });
   });
 
   // No default sheet should be created before offline state is loaded.
@@ -334,6 +338,9 @@ test("CollabSession legacy `options.offline` binds before load so edits during l
 
     session.destroy();
     session.doc.destroy();
+    // `destroy()` queues a final snapshot rewrite via the persistence binding;
+    // wait for it so the temporary directory can be safely removed.
+    await session.flushLocalPersistence();
   }
 
   {
