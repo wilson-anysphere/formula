@@ -84,12 +84,13 @@ export class FormulaConflictMonitor {
    * @param {Y.Map<any>} [opts.cells]
    * @param {object} [opts.origin] Origin token used for local transactions.
    * @param {Set<any>} [opts.localOrigins] Origins treated as local (for ignoring).
-   * @param {(conflict: FormulaConflict) => void} opts.onConflict
-   * @param {(ref: { sheetId: string, row: number, col: number }) => any} [opts.getCellValue]
-   * @param {number} [opts.concurrencyWindowMs] Deprecated (ignored). Former wall-clock heuristic.
-   * @param {"formula" | "formula+value"} [opts.mode]
-   * @param {boolean} [opts.includeValueConflicts] Backwards-compatible alias for `mode: "formula+value"`.
-   */
+    * @param {(conflict: FormulaConflict) => void} opts.onConflict
+    * @param {(ref: { sheetId: string, row: number, col: number }) => any} [opts.getCellValue]
+    * @param {number} [opts.concurrencyWindowMs] Deprecated/ignored. Former wall-clock heuristic.
+    * @deprecated
+    * @param {"formula" | "formula+value"} [opts.mode]
+    * @param {boolean} [opts.includeValueConflicts] Backwards-compatible alias for `mode: "formula+value"`.
+    */
   constructor(opts) {
     this.doc = opts.doc;
     this.cells = opts.cells ?? this.doc.getMap("cells");
