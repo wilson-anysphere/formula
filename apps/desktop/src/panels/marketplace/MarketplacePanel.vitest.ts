@@ -181,6 +181,64 @@ describe("MarketplacePanel", () => {
     expect(container.textContent).not.toContain("Uninstalled");
   });
 
+  it("disables install when the marketplace flags an extension as blocked", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const marketplaceClient = {
+      search: vi.fn(async () => ({
+        total: 1,
+        results: [
+          {
+            id: "formula.sample-hello",
+            name: "sample-hello",
+            displayName: "Sample Hello",
+            publisher: "formula",
+            description: "hello",
+            latestVersion: "1.0.0",
+            verified: true,
+            featured: false,
+            blocked: true,
+          },
+        ],
+        nextCursor: null,
+      })),
+      // Simulate failing to load full details; we should still disable install using the summary flag.
+      getExtension: vi.fn(async () => null),
+    };
+
+    const extensionManager = {
+      getInstalled: vi.fn(async () => null),
+      install: vi.fn(async () => {
+        throw new Error("should not be called");
+      }),
+      uninstall: vi.fn(async () => {
+        throw new Error("not implemented");
+      }),
+      checkForUpdates: vi.fn(async () => []),
+      update: vi.fn(async () => {
+        throw new Error("not implemented");
+      }),
+    };
+
+    createMarketplacePanel({ container, marketplaceClient: marketplaceClient as any, extensionManager: extensionManager as any });
+
+    const searchInput = container.querySelector<HTMLInputElement>('input[type="search"]');
+    expect(searchInput).toBeInstanceOf(HTMLInputElement);
+    searchInput!.value = "sample";
+
+    const searchButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Search");
+    expect(searchButton).toBeInstanceOf(HTMLButtonElement);
+    searchButton!.click();
+
+    await waitFor(() => Boolean(container.querySelector(".marketplace-result")));
+    expect(Array.from(container.querySelectorAll(".marketplace-badge")).map((el) => el.textContent)).toContain("blocked");
+
+    const installButton = container.querySelector<HTMLButtonElement>('[data-testid="marketplace-install-formula.sample-hello"]');
+    expect(installButton).toBeInstanceOf(HTMLButtonElement);
+    expect(installButton?.disabled).toBe(true);
+  });
+
   it("surfaces install cancellation errors via toast when confirm() rejects", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 

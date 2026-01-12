@@ -267,15 +267,15 @@ async function renderSearchResults({
           el("div", { className: "installed-meta" }, [document.createTextNode(String(transientStatus))]),
         );
       }
-      actions.append(
-        el(
-          "button",
-          {
-            disabled: policy.blocked ? "true" : undefined,
-            dataset: { testid: `marketplace-install-${item.id}` },
-            onClick: async () => {
-              actions.textContent = "Installing…";
-              try {
+        actions.append(
+          el(
+            "button",
+            {
+              disabled: policy.blocked || blocked || malicious || publisherRevoked ? "true" : undefined,
+              dataset: { testid: `marketplace-install-${item.id}` },
+              onClick: async () => {
+                actions.textContent = "Installing…";
+                try {
                 const record = await extensionManager.install(item.id, null, {
                   confirm: async (warning) => {
                     const message = `${warning.message}\n\nProceed with install?`;
