@@ -1,61 +1,17 @@
-use chrono::{DateTime, Utc};
-
-use crate::coercion::ValueLocaleConfig;
-use crate::date::ExcelDateSystem;
-use crate::error::{ExcelError, ExcelResult};
+use crate::error::ExcelResult;
 use crate::eval::CompiledExpr;
-use crate::functions::date_time;
 use crate::functions::{eval_scalar_arg, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{ErrorKind, Value};
 
-fn excel_error_kind(e: ExcelError) -> ErrorKind {
-    match e {
-        ExcelError::Div0 => ErrorKind::Div0,
-        ExcelError::Value => ErrorKind::Value,
-        ExcelError::Num => ErrorKind::Num,
-    }
-}
-
-fn excel_result_number(res: ExcelResult<f64>) -> Value {
-    match res {
-        Ok(n) => Value::Number(n),
-        Err(e) => Value::Error(excel_error_kind(e)),
-    }
-}
+use super::builtins_helpers::{
+    coerce_to_finite_number, datevalue_from_value, excel_error_kind, excel_result_number,
+};
 
 fn excel_result_serial(res: ExcelResult<i32>) -> Value {
     match res {
         Ok(n) => Value::Number(n as f64),
         Err(e) => Value::Error(excel_error_kind(e)),
-    }
-}
-
-fn coerce_to_finite_number(ctx: &dyn FunctionContext, v: &Value) -> Result<f64, ErrorKind> {
-    let n = v.coerce_to_number_with_ctx(ctx)?;
-    if !n.is_finite() {
-        return Err(ErrorKind::Num);
-    }
-    Ok(n)
-}
-
-fn datevalue_from_value(
-    ctx: &dyn FunctionContext,
-    value: &Value,
-    system: ExcelDateSystem,
-    cfg: ValueLocaleConfig,
-    now_utc: DateTime<Utc>,
-) -> Result<i32, ErrorKind> {
-    match value {
-        Value::Text(s) => date_time::datevalue(s, cfg, now_utc, system).map_err(excel_error_kind),
-        _ => {
-            let n = coerce_to_finite_number(ctx, value)?;
-            let serial = n.floor();
-            if serial < (i32::MIN as f64) || serial > (i32::MAX as f64) {
-                return Err(ErrorKind::Num);
-            }
-            Ok(serial as i32)
-        }
     }
 }
 
@@ -76,13 +32,7 @@ fn eval_date_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<i32, 
     let v = eval_scalar_arg(ctx, expr);
     match v {
         Value::Error(e) => Err(e),
-        other => datevalue_from_value(
-            ctx,
-            &other,
-            ctx.date_system(),
-            ctx.value_locale(),
-            ctx.now_utc(),
-        ),
+        other => datevalue_from_value(ctx, &other, ctx.date_system(), ctx.now_utc()),
     }
 }
 

@@ -47,10 +47,7 @@ pub(super) fn basis_from_optional_arg(
         return Err(ErrorKind::Num);
     }
     let basis = t as i32;
-    if !(0..=4).contains(&basis) {
-        return Err(ErrorKind::Num);
-    }
-    Ok(basis)
+    super::coupon_schedule::validate_basis(basis).map_err(excel_error_kind)
 }
 
 pub(super) fn datevalue_from_value(
@@ -74,4 +71,3 @@ pub(super) fn datevalue_from_value(
         }
     }
 }
-
