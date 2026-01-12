@@ -31,7 +31,8 @@ struct BkRun<T> {
 }
 
 /// Parse `xl/metadata.xml` and return a mapping from worksheet `c/@vm` indices to rich-value
-/// indices (`xl/richData/richValue.xml` records).
+/// indices (0-based records in the rich value store part, e.g. `xl/richData/richValue*.xml` or
+/// `xl/richData/rdrichvalue.xml` depending on workbook).
 ///
 /// The returned map uses:
 /// - key: `vm` (the **1-based** `<valueMetadata>` `<bk>` record index; callers should consider
