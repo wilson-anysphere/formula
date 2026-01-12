@@ -56,11 +56,14 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "STDEV.S",
     "SWITCH",
     "TAKE",
+    "TEXTAFTER",
+    "TEXTBEFORE",
     "TEXTJOIN",
     "TEXTSPLIT",
     "TOCOL",
     "TOROW",
     "UNIQUE",
+    "VALUETOTEXT",
     "VAR.P",
     "VAR.S",
     "VSTACK",
@@ -308,6 +311,27 @@ mod tests {
     fn add_xlfn_prefixes_prefixes_textsplit() {
         let input = r#"TEXTSPLIT("a,b",",")"#;
         let expected = r#"_xlfn.TEXTSPLIT("a,b",",")"#;
+        assert_eq!(add_xlfn_prefixes(input), expected);
+    }
+
+    #[test]
+    fn add_xlfn_prefixes_prefixes_textafter() {
+        let input = r#"TEXTAFTER("a_b","_")"#;
+        let expected = r#"_xlfn.TEXTAFTER("a_b","_")"#;
+        assert_eq!(add_xlfn_prefixes(input), expected);
+    }
+
+    #[test]
+    fn add_xlfn_prefixes_prefixes_textbefore() {
+        let input = r#"TEXTBEFORE("a_b","_")"#;
+        let expected = r#"_xlfn.TEXTBEFORE("a_b","_")"#;
+        assert_eq!(add_xlfn_prefixes(input), expected);
+    }
+
+    #[test]
+    fn add_xlfn_prefixes_prefixes_valuetotext() {
+        let input = r#"VALUETOTEXT(1)"#;
+        let expected = r#"_xlfn.VALUETOTEXT(1)"#;
         assert_eq!(add_xlfn_prefixes(input), expected);
     }
 
