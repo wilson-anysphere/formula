@@ -6406,6 +6406,15 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn iter_sheet_cells(&self, sheet_id: usize) -> Option<Box<dyn Iterator<Item = CellAddr> + '_>> {
+        // When values are provided out-of-band, we cannot safely enumerate only the snapshot's
+        // stored cells: provider-backed values may exist for addresses that are not present in
+        // `ordered_cells`, and skipping them would produce incorrect results for range functions
+        // (e.g. SUM/COUNT over provider-backed inputs).
+        //
+        // Fall back to dense range iteration in the evaluator by returning `None`.
+        if self.external_value_provider.is_some() {
+            return None;
+        }
         if !self.sheet_exists(sheet_id) {
             return None;
         }
