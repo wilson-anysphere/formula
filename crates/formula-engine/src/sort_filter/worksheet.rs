@@ -418,7 +418,7 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                     .ok()
                                     .map(|v: ModelCellValue| model_cell_value_to_sort_value(&v)),
                                 _ => None,
-                             };
+                            };
 
                              if parsed.is_some() {
                                  return parsed;
