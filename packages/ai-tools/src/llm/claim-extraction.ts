@@ -50,7 +50,9 @@ const A1_CELL_REFERENCE_PATTERN = `(?:(?:${SHEET_NAME_PATTERN})!\\s*)?${CELL_PAT
 // - leading-decimal floats (".5")
 // - scientific notation ("1e-3")
 // - optional percent suffix ("10%")
-const NUMBER_PATTERN = "[-+]?(?:\\d+(?:,\\d{3})*(?:\\.\\d+)?|\\.\\d+)(?:e[-+]?\\d+)?%?";
+// - optional parentheses for negative formatting ("(1,234)")
+const NUMBER_CORE_PATTERN = "[-+]?(?:\\d+(?:,\\d{3})*(?:\\.\\d+)?|\\.\\d+)(?:e[-+]?\\d+)?%?";
+const NUMBER_PATTERN = `(?:${NUMBER_CORE_PATTERN}|\\(${NUMBER_CORE_PATTERN}\\))`;
 
 const KEYWORD_TO_MEASURE: Record<string, SpreadsheetClaimMeasure> = {
   average: "mean",
@@ -354,13 +356,28 @@ function normalizeA1Reference(raw: string): string {
 }
 
 function parseNumberToken(token: string): number | null {
-  const raw = String(token ?? "").trim();
+  let raw = String(token ?? "").trim();
   if (!raw) return null;
+
+  const hasParens = raw.startsWith("(") && raw.endsWith(")");
+  if (hasParens) {
+    raw = raw.slice(1, -1).trim();
+  }
+
+  // Common spreadsheet formatting: currency symbols. We intentionally keep this
+  // conservative (single leading symbol) to avoid over-matching.
+  raw = raw.replace(/^[€£$]/, "");
+
   const isPercent = raw.endsWith("%");
   const normalized = raw.replace(/,/g, "").replace(/%$/, "");
   const value = Number(normalized);
   if (!Number.isFinite(value)) return null;
-  return isPercent ? value / 100 : value;
+  let out = isPercent ? value / 100 : value;
+  // Parentheses typically indicate a negative number in spreadsheets.
+  // Only apply the negation when the parsed value is positive to avoid
+  // double-negating tokens like "(-5)".
+  if (hasParens && out > 0) out = -out;
+  return out;
 }
 
 function dedupeClaims(claims: ExtractedSpreadsheetClaim[]): ExtractedSpreadsheetClaim[] {
