@@ -517,7 +517,22 @@ export class DocumentCellProvider implements CellProvider {
       if (textIndentPx > 0) out.textIndentPx = textIndentPx;
     }
 
-    const vertical = alignment?.vertical;
+    // Like horizontal alignment, vertical alignment may arrive in camelCase or snake_case forms.
+    // Treat an explicit `alignment.vertical` (including null) as authoritative so callers can
+    // clear imported `vertical_alignment` values.
+    let verticalRaw: unknown = undefined;
+    if (hasOwn(alignment, "vertical")) verticalRaw = (alignment as any).vertical;
+    else if (hasOwn(alignment, "vertical_align")) verticalRaw = (alignment as any).vertical_align;
+    else if (hasOwn(alignment, "vertical_alignment")) verticalRaw = (alignment as any).vertical_alignment;
+    else if (hasOwn(alignment, "verticalAlign")) verticalRaw = (alignment as any).verticalAlign;
+    else if (hasOwn(alignment, "verticalAlignment")) verticalRaw = (alignment as any).verticalAlignment;
+    else if (hasOwn(docStyle, "verticalAlign")) verticalRaw = (docStyle as any).verticalAlign;
+    else if (hasOwn(docStyle, "vertical_align")) verticalRaw = (docStyle as any).vertical_align;
+    else if (hasOwn(docStyle, "verticalAlignment")) verticalRaw = (docStyle as any).verticalAlignment;
+    else if (hasOwn(docStyle, "vertical_alignment")) verticalRaw = (docStyle as any).vertical_alignment;
+    else verticalRaw = alignment?.vertical;
+
+    const vertical = typeof verticalRaw === "string" ? verticalRaw.toLowerCase() : null;
     if (vertical === "top") out.verticalAlign = "top";
     else if (vertical === "center") out.verticalAlign = "middle";
     else if (vertical === "bottom") out.verticalAlign = "bottom";

@@ -136,6 +136,29 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     expect((cell as any).style?.color).toBe("#ff0000"); // Excel indexed color 2
   });
 
+  it('supports snake_case alignment.vertical_alignment when mapping vertical alignment', () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    doc.setCellValue(sheetId, "A1", "Aligned");
+    doc.setRangeFormat(sheetId, "A1", { alignment: { vertical_alignment: "center" } });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell).not.toBeNull();
+    expect((cell as any).style?.verticalAlign).toBe("middle");
+  });
+
   it("allows modern fill:null patches to clear legacy flat backgroundColor fills", () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";
