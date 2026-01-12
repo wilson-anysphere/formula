@@ -3061,14 +3061,24 @@ mod tests {
 
         // One error literal + implicit End token.
         assert_eq!(tokens.len(), 2);
-        assert!(
-            matches!(tokens[0].kind, TokenKind::Error(_)),
-            "expected error token, got {:?}",
-            tokens[0].kind
-        );
+        assert_eq!(tokens[0].kind, TokenKind::Error(ErrorKind::GettingData));
         assert_eq!(
             &formula[tokens[0].span.start..tokens[0].span.end],
             "#GETTING_DATA"
+        );
+    }
+
+    #[test]
+    fn lexes_getting_data_error_literal_case_insensitive() {
+        let formula = "=#getting_data";
+        let mut lexer = Lexer::new(formula);
+        let tokens = lexer.tokenize().expect("tokenize should succeed");
+
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[0].kind, TokenKind::Error(ErrorKind::GettingData));
+        assert_eq!(
+            &formula[tokens[0].span.start..tokens[0].span.end],
+            "#getting_data"
         );
     }
 }
