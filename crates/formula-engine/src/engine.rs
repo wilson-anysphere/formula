@@ -414,9 +414,11 @@ impl Engine {
                     }
                     Some(CompiledFormula::Ast(_)) => {
                         stats.fallback += 1;
-                        if let Some(reason) = cell.bytecode_compile_reason.as_ref() {
-                            *stats.fallback_reasons.entry(reason.clone()).or_insert(0) += 1;
-                        }
+                        let reason = cell
+                            .bytecode_compile_reason
+                            .clone()
+                            .unwrap_or(BytecodeCompileReason::IneligibleExpr);
+                        *stats.fallback_reasons.entry(reason).or_insert(0) += 1;
                     }
                     None => {
                         // Formula cells should always have a compiled representation, but avoid
