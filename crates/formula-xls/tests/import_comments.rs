@@ -380,6 +380,36 @@ fn skips_note_comment_when_txo_payload_is_missing() {
 }
 
 #[test]
+fn skips_note_comment_when_txo_payload_is_missing_biff5() {
+    let bytes = xls_fixture_builder::build_note_comment_biff5_missing_txo_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("NotesBiff5MissingTxo")
+        .expect("NotesBiff5MissingTxo missing");
+
+    let a1 = CellRef::from_a1("A1").unwrap();
+    assert!(
+        sheet.comments_for_cell(a1).is_empty(),
+        "expected no comments when TXO payload is missing"
+    );
+
+    assert!(
+        result
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("missing TXO payload")),
+        "expected missing TXO warning; warnings={:?}",
+        result
+            .warnings
+            .iter()
+            .map(|w| w.message.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn imports_note_comment_text_split_across_continue_records_with_mixed_encoding_flags() {
     let bytes =
         xls_fixture_builder::build_note_comment_split_across_continues_mixed_encoding_fixture_xls();

@@ -628,6 +628,23 @@ pub fn build_note_comment_biff5_in_merged_region_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF5 `.xls` fixture containing a NOTE/OBJ pair but **no** TXO payload.
+///
+/// The importer should emit a warning and skip creating a model comment.
+pub fn build_note_comment_biff5_missing_txo_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_biff5_missing_txo_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a single sheet with a merged region (`A1:B1`).
 ///
 /// The NOTE record is targeted at the non-anchor cell (`B1`), but the importer should
@@ -2272,6 +2289,14 @@ fn build_note_comment_biff5_in_merged_region_workbook_stream() -> Vec<u8> {
     )
 }
 
+fn build_note_comment_biff5_missing_txo_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream_biff5(
+        "NotesBiff5MissingTxo",
+        &build_note_comment_biff5_missing_txo_sheet_stream(),
+        1252,
+    )
+}
+
 fn build_note_comment_codepage_1251_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream(
         "NotesCp1251",
@@ -2712,6 +2737,40 @@ fn build_note_comment_biff5_in_merged_region_sheet_stream() -> Vec<u8> {
     // Formatting runs continuation (dummy bytes).
     push_record(&mut sheet, RECORD_CONTINUE, &[0u8; 4]);
 
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_note_comment_biff5_missing_txo_sheet_stream() -> Vec<u8> {
+    const OBJECT_ID: u16 = 1;
+    const XF_GENERAL_CELL: u16 = 16;
+    const AUTHOR: &str = "Alice";
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof_biff5(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS (BIFF5): rows [0, 1), cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&1u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&1u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Ensure the anchor cell exists in the calamine value grid.
+    push_record(&mut sheet, RECORD_BLANK, &blank_cell(0, 0, XF_GENERAL_CELL));
+
+    push_record(
+        &mut sheet,
+        RECORD_NOTE,
+        &note_record_biff5_author_bytes(0u16, 0u16, OBJECT_ID, AUTHOR.as_bytes()),
+    );
+    push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
+
+    // Intentionally omit TXO/CONTINUE records.
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
 }
