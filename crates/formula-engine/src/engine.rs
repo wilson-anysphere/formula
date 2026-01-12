@@ -462,7 +462,9 @@ impl Engine {
         let sheet_id = self.workbook.ensure_sheet(sheet);
 
         if row_count == 0 {
-            return Err(EngineError::Address(crate::eval::AddressParseError::RowOutOfRange));
+            return Err(EngineError::Address(
+                crate::eval::AddressParseError::RowOutOfRange,
+            ));
         }
         if col_count == 0 {
             return Err(EngineError::Address(
@@ -475,7 +477,9 @@ impl Engine {
             ));
         }
         if row_count > i32::MAX as u32 {
-            return Err(EngineError::Address(crate::eval::AddressParseError::RowOutOfRange));
+            return Err(EngineError::Address(
+                crate::eval::AddressParseError::RowOutOfRange,
+            ));
         }
 
         // Prevent shrinking below existing populated/spill cells. This avoids having "stored" cells
@@ -483,7 +487,9 @@ impl Engine {
         if let Some(sheet_state) = self.workbook.sheets.get(sheet_id) {
             for addr in sheet_state.cells.keys() {
                 if addr.row >= row_count {
-                    return Err(EngineError::Address(crate::eval::AddressParseError::RowOutOfRange));
+                    return Err(EngineError::Address(
+                        crate::eval::AddressParseError::RowOutOfRange,
+                    ));
                 }
                 if addr.col >= col_count {
                     return Err(EngineError::Address(
@@ -496,7 +502,9 @@ impl Engine {
                     continue;
                 }
                 if spill.end.row >= row_count {
-                    return Err(EngineError::Address(crate::eval::AddressParseError::RowOutOfRange));
+                    return Err(EngineError::Address(
+                        crate::eval::AddressParseError::RowOutOfRange,
+                    ));
                 }
                 if spill.end.col >= col_count {
                     return Err(EngineError::Address(
@@ -549,10 +557,7 @@ impl Engine {
         self.external_value_provider = provider;
     }
 
-    pub fn set_external_data_provider(
-        &mut self,
-        provider: Option<Arc<dyn ExternalDataProvider>>,
-    ) {
+    pub fn set_external_data_provider(&mut self, provider: Option<Arc<dyn ExternalDataProvider>>) {
         self.external_data_provider = provider;
     }
 
@@ -637,7 +642,11 @@ impl Engine {
                 .get(sheet_id)
                 .cloned()
                 .unwrap_or_default();
-            out.push(BytecodeCompileReportEntry { sheet, addr, reason });
+            out.push(BytecodeCompileReportEntry {
+                sheet,
+                addr,
+                reason,
+            });
         }
         out
     }
@@ -650,7 +659,8 @@ impl Engine {
 
         // Rebuild compiled formula variants to match the new bytecode setting. This ensures tests
         // (and callers) can force AST vs bytecode evaluation deterministically.
-        let mut updates: Vec<(CellKey, CompiledFormula, Option<BytecodeCompileReason>)> = Vec::new();
+        let mut updates: Vec<(CellKey, CompiledFormula, Option<BytecodeCompileReason>)> =
+            Vec::new();
         for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
             for (addr, cell) in &sheet.cells {
                 let Some(formula) = cell.formula.as_deref() else {
@@ -856,10 +866,14 @@ impl Engine {
         };
         if let Some(sheet_state) = self.workbook.sheets.get(sheet_id) {
             if addr.row >= sheet_state.row_count {
-                return Err(EngineError::Address(crate::eval::AddressParseError::RowOutOfRange));
+                return Err(EngineError::Address(
+                    crate::eval::AddressParseError::RowOutOfRange,
+                ));
             }
             if addr.col >= sheet_state.col_count {
-                return Err(EngineError::Address(crate::eval::AddressParseError::ColumnOutOfRange));
+                return Err(EngineError::Address(
+                    crate::eval::AddressParseError::ColumnOutOfRange,
+                ));
             }
         }
         let key = CellKey {
@@ -956,7 +970,10 @@ impl Engine {
             self.calc_graph.update_cell_dependencies(cell_id, deps);
 
             let (compiled_formula, bytecode_compile_reason) = if !self.bytecode_enabled {
-                (CompiledFormula::Ast(ast.clone()), Some(BytecodeCompileReason::Disabled))
+                (
+                    CompiledFormula::Ast(ast.clone()),
+                    Some(BytecodeCompileReason::Disabled),
+                )
             } else {
                 let origin = crate::CellAddr::new(key.addr.row, key.addr.col);
                 let parsed = crate::parse_formula(
@@ -1066,8 +1083,13 @@ impl Engine {
                 analyze_expr_flags(&compiled_ast, key, &tables_by_sheet, &self.workbook);
             self.set_cell_name_refs(key, names);
 
-            let calc_precedents =
-                analyze_calc_precedents(&compiled_ast, key, &tables_by_sheet, &self.workbook, &self.spills);
+            let calc_precedents = analyze_calc_precedents(
+                &compiled_ast,
+                key,
+                &tables_by_sheet,
+                &self.workbook,
+                &self.spills,
+            );
             let mut calc_vec: Vec<Precedent> = calc_precedents.into_iter().collect();
             calc_vec.sort_by_key(|p| match p {
                 Precedent::Cell(c) => (0u8, c.sheet_id, c.cell.row, c.cell.col, 0u32, 0u32),
@@ -1261,8 +1283,13 @@ impl Engine {
                 .map(|s| (s.row_count, s.col_count))
                 .unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS))
         };
-        let compiled =
-            compile_canonical_expr(&parsed.expr, sheet_id, addr, &mut resolve_sheet, &mut sheet_dims);
+        let compiled = compile_canonical_expr(
+            &parsed.expr,
+            sheet_id,
+            addr,
+            &mut resolve_sheet,
+            &mut sheet_dims,
+        );
         let tables_by_sheet: Vec<Vec<Table>> = self
             .workbook
             .sheets
@@ -1297,7 +1324,8 @@ impl Engine {
         self.calc_graph.update_cell_dependencies(cell_id, deps);
 
         let (compiled_formula, bytecode_compile_reason) =
-            match self.try_compile_bytecode(&parsed.expr, key, volatile, thread_safe, dynamic_deps) {
+            match self.try_compile_bytecode(&parsed.expr, key, volatile, thread_safe, dynamic_deps)
+            {
                 Ok(program) => (
                     CompiledFormula::Bytecode(BytecodeFormula {
                         ast: compiled.clone(),
@@ -2068,17 +2096,19 @@ impl Engine {
                                 // any sheet grows beyond the default dimensions, evaluate via the
                                 // AST evaluator so whole-row/whole-column references resolve
                                 // against dynamic sheet sizes.
-                                let evaluator = crate::eval::Evaluator::new_with_date_system_and_locales(
-                                    &snapshot,
-                                    ctx,
-                                    recalc_ctx,
-                                    date_system,
-                                    value_locale,
-                                    locale_config.clone(),
-                                );
+                                let evaluator =
+                                    crate::eval::Evaluator::new_with_date_system_and_locales(
+                                        &snapshot,
+                                        ctx,
+                                        recalc_ctx,
+                                        date_system,
+                                        value_locale,
+                                        locale_config.clone(),
+                                    );
                                 evaluator.eval_formula(&bc.ast)
                             } else {
-                                let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
+                                let cols =
+                                    column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
                                 let slice_mode = slice_mode_for_program(&bc.program);
                                 let grid = EngineBytecodeGrid {
                                     snapshot: &snapshot,
@@ -2215,14 +2245,15 @@ impl Engine {
                             // any sheet grows beyond the default dimensions, evaluate via the
                             // AST evaluator so whole-row/whole-column references resolve
                             // against dynamic sheet sizes.
-                            let evaluator = crate::eval::Evaluator::new_with_date_system_and_locales(
-                                &snapshot,
-                                ctx,
-                                recalc_ctx,
-                                date_system,
-                                value_locale,
-                                locale_config.clone(),
-                            );
+                            let evaluator =
+                                crate::eval::Evaluator::new_with_date_system_and_locales(
+                                    &snapshot,
+                                    ctx,
+                                    recalc_ctx,
+                                    date_system,
+                                    value_locale,
+                                    locale_config.clone(),
+                                );
                             evaluator.eval_formula(&bc.ast)
                         } else {
                             let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
@@ -2283,15 +2314,16 @@ impl Engine {
                     }
                     CompiledFormula::Bytecode(bc) => {
                         if !bytecode_default_bounds {
-                            let evaluator = crate::eval::Evaluator::new_with_date_system_and_locales(
-                                &snapshot,
-                                ctx,
-                                recalc_ctx,
-                                date_system,
-                                value_locale,
-                                locale_config.clone(),
-                            )
-                            .with_dependency_trace(&trace);
+                            let evaluator =
+                                crate::eval::Evaluator::new_with_date_system_and_locales(
+                                    &snapshot,
+                                    ctx,
+                                    recalc_ctx,
+                                    date_system,
+                                    value_locale,
+                                    locale_config.clone(),
+                                )
+                                .with_dependency_trace(&trace);
                             evaluator.eval_formula(&bc.ast)
                         } else {
                             // Dynamic dependency tracing is only supported for AST formulas. Fallback
@@ -3071,8 +3103,10 @@ impl Engine {
 
         let origin_ast = crate::CellAddr::new(key.addr.row, key.addr.col);
         let origin = bytecode::CellCoord {
-            row: i32::try_from(key.addr.row).map_err(|_| BytecodeCompileReason::ExceedsGridLimits)?,
-            col: i32::try_from(key.addr.col).map_err(|_| BytecodeCompileReason::ExceedsGridLimits)?,
+            row: i32::try_from(key.addr.row)
+                .map_err(|_| BytecodeCompileReason::ExceedsGridLimits)?,
+            col: i32::try_from(key.addr.col)
+                .map_err(|_| BytecodeCompileReason::ExceedsGridLimits)?,
         };
         // Inline any defined names that resolve to static expressions/values before lowering.
         // This improves bytecode eligibility and keeps the bytecode backend deterministic.
@@ -3099,18 +3133,26 @@ impl Engine {
         let expr_after_structured = maybe_structured_rewritten.as_ref().unwrap_or(&expr);
 
         let mut resolve_sheet = |name: &str| self.workbook.sheet_id(name);
-        let rewritten_names =
-            rewrite_defined_name_constants_for_bytecode(expr_after_structured, key.sheet, &self.workbook);
+        let rewritten_names = rewrite_defined_name_constants_for_bytecode(
+            expr_after_structured,
+            key.sheet,
+            &self.workbook,
+        );
         let expr_to_lower = rewritten_names.as_ref().unwrap_or(expr_after_structured);
-        let expr = bytecode::lower_canonical_expr(expr_to_lower, origin_ast, key.sheet, &mut resolve_sheet)
-            .map_err(|e| match e {
-                // The lowering layer uses `Unsupported` as a catch-all for expression shapes the
-                // bytecode backend doesn't implement. Surface these as `IneligibleExpr` so compile
-                // reports can distinguish "missing implementation" from structural lowering errors
-                // like cross-sheet references.
-                bytecode::LowerError::Unsupported => BytecodeCompileReason::IneligibleExpr,
-                other => BytecodeCompileReason::LowerError(other),
-            })?;
+        let expr = bytecode::lower_canonical_expr(
+            expr_to_lower,
+            origin_ast,
+            key.sheet,
+            &mut resolve_sheet,
+        )
+        .map_err(|e| match e {
+            // The lowering layer uses `Unsupported` as a catch-all for expression shapes the
+            // bytecode backend doesn't implement. Surface these as `IneligibleExpr` so compile
+            // reports can distinguish "missing implementation" from structural lowering errors
+            // like cross-sheet references.
+            bytecode::LowerError::Unsupported => BytecodeCompileReason::IneligibleExpr,
+            other => BytecodeCompileReason::LowerError(other),
+        })?;
         if let Some(name) = bytecode_expr_first_unsupported_function(&expr) {
             return Err(BytecodeCompileReason::UnsupportedFunction(name));
         }
@@ -3422,22 +3464,24 @@ impl Engine {
                     }
                 };
                 match &ast.expr {
-                    crate::Expr::CellRef(_) => {
-                        self.extract_static_ref_expr_for_bytecode(
-                            &ast.expr,
-                            sheet_id,
-                            visiting,
-                            lexical_scopes,
-                        )
-                    }
+                    crate::Expr::CellRef(_) => self.extract_static_ref_expr_for_bytecode(
+                        &ast.expr,
+                        sheet_id,
+                        visiting,
+                        lexical_scopes,
+                    ),
                     crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
                         // Reference definitions must be a direct cell/range reference.
                         if !matches!(
                             b.left.as_ref(),
-                            crate::Expr::CellRef(_) | crate::Expr::ColRef(_) | crate::Expr::RowRef(_)
+                            crate::Expr::CellRef(_)
+                                | crate::Expr::ColRef(_)
+                                | crate::Expr::RowRef(_)
                         ) || !matches!(
                             b.right.as_ref(),
-                            crate::Expr::CellRef(_) | crate::Expr::ColRef(_) | crate::Expr::RowRef(_)
+                            crate::Expr::CellRef(_)
+                                | crate::Expr::ColRef(_)
+                                | crate::Expr::RowRef(_)
                         ) {
                             None
                         } else {
@@ -3511,14 +3555,12 @@ impl Engine {
                     right: Box::new(right),
                 }))
             }
-            crate::Expr::NameRef(nref) => {
-                self.try_inline_defined_name_ref_for_bytecode(
-                    nref,
-                    current_sheet,
-                    visiting,
-                    lexical_scopes,
-                )
-            }
+            crate::Expr::NameRef(nref) => self.try_inline_defined_name_ref_for_bytecode(
+                nref,
+                current_sheet,
+                visiting,
+                lexical_scopes,
+            ),
             _ => None,
         }
     }
@@ -5161,7 +5203,9 @@ fn canonical_expr_contains_external_workbook_refs(expr: &crate::Expr) -> bool {
         crate::Expr::ColRef(r) => r.workbook.is_some(),
         crate::Expr::RowRef(r) => r.workbook.is_some(),
         crate::Expr::StructuredRef(r) => r.workbook.is_some(),
-        crate::Expr::FieldAccess(access) => canonical_expr_contains_external_workbook_refs(access.base.as_ref()),
+        crate::Expr::FieldAccess(access) => {
+            canonical_expr_contains_external_workbook_refs(access.base.as_ref())
+        }
         crate::Expr::FunctionCall(call) => call
             .args
             .iter()
@@ -5200,7 +5244,9 @@ fn canonical_expr_contains_let_or_lambda(expr: &crate::Expr) -> bool {
             }
             call.args.iter().any(canonical_expr_contains_let_or_lambda)
         }
-        crate::Expr::FieldAccess(access) => canonical_expr_contains_let_or_lambda(access.base.as_ref()),
+        crate::Expr::FieldAccess(access) => {
+            canonical_expr_contains_let_or_lambda(access.base.as_ref())
+        }
         crate::Expr::Call(call) => {
             canonical_expr_contains_let_or_lambda(call.callee.as_ref())
                 || call
@@ -5283,16 +5329,39 @@ fn canonical_expr_collect_sheet_prefix_errors(
 ) {
     match expr {
         crate::Expr::CellRef(r) => {
-            update_sheet_prefix_flags(&r.workbook, r.sheet.as_ref(), current_sheet, workbook, flags);
+            update_sheet_prefix_flags(
+                &r.workbook,
+                r.sheet.as_ref(),
+                current_sheet,
+                workbook,
+                flags,
+            );
         }
         crate::Expr::ColRef(r) => {
-            update_sheet_prefix_flags(&r.workbook, r.sheet.as_ref(), current_sheet, workbook, flags);
+            update_sheet_prefix_flags(
+                &r.workbook,
+                r.sheet.as_ref(),
+                current_sheet,
+                workbook,
+                flags,
+            );
         }
         crate::Expr::RowRef(r) => {
-            update_sheet_prefix_flags(&r.workbook, r.sheet.as_ref(), current_sheet, workbook, flags);
+            update_sheet_prefix_flags(
+                &r.workbook,
+                r.sheet.as_ref(),
+                current_sheet,
+                workbook,
+                flags,
+            );
         }
         crate::Expr::FieldAccess(access) => {
-            canonical_expr_collect_sheet_prefix_errors(access.base.as_ref(), current_sheet, workbook, flags);
+            canonical_expr_collect_sheet_prefix_errors(
+                access.base.as_ref(),
+                current_sheet,
+                workbook,
+                flags,
+            );
         }
         crate::Expr::FunctionCall(call) => {
             for arg in &call.args {
@@ -5300,7 +5369,12 @@ fn canonical_expr_collect_sheet_prefix_errors(
             }
         }
         crate::Expr::Call(call) => {
-            canonical_expr_collect_sheet_prefix_errors(call.callee.as_ref(), current_sheet, workbook, flags);
+            canonical_expr_collect_sheet_prefix_errors(
+                call.callee.as_ref(),
+                current_sheet,
+                workbook,
+                flags,
+            );
             for arg in &call.args {
                 canonical_expr_collect_sheet_prefix_errors(arg, current_sheet, workbook, flags);
             }
@@ -5522,16 +5596,13 @@ fn canonical_expr_collect_defined_name_prefix_errors_for_name(
         NameDefinition::Constant(_) => {}
         NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
             if let Ok(ast) = crate::parse_formula(formula, crate::ParseOptions::default()) {
-                flags.external_reference |= canonical_expr_contains_external_workbook_refs(&ast.expr);
+                flags.external_reference |=
+                    canonical_expr_contains_external_workbook_refs(&ast.expr);
                 canonical_expr_collect_sheet_prefix_errors(&ast.expr, sheet_id, workbook, flags);
 
                 if !flags.external_reference && !canonical_expr_contains_let_or_lambda(&ast.expr) {
                     canonical_expr_collect_defined_name_prefix_errors(
-                        &ast.expr,
-                        sheet_id,
-                        workbook,
-                        visiting,
-                        flags,
+                        &ast.expr, sheet_id, workbook, visiting, flags,
                     );
                 }
             }
@@ -5568,7 +5639,10 @@ fn rewrite_structured_refs_for_bytecode(
             sheet: None,
             // Structured refs like `[@Col]` should keep referring to the same *column*, even if the
             // formula is moved horizontally, but should follow the current row.
-            col: crate::Coord::A1 { index: col, abs: true },
+            col: crate::Coord::A1 {
+                index: col,
+                abs: true,
+            },
             row: crate::Coord::Offset(0),
         })
     }
@@ -5673,21 +5747,30 @@ fn rewrite_structured_refs_for_bytecode(
                 Some(build_union_expr(parts))
             }
         }
-        crate::Expr::FieldAccess(access) => Some(crate::Expr::FieldAccess(crate::FieldAccessExpr {
-            base: Box::new(rewrite_structured_refs_for_bytecode(
-                access.base.as_ref(),
-                origin_sheet,
-                origin_cell,
-                tables_by_sheet,
-            )?),
-            field: access.field.clone(),
-        })),
+        crate::Expr::FieldAccess(access) => {
+            Some(crate::Expr::FieldAccess(crate::FieldAccessExpr {
+                base: Box::new(rewrite_structured_refs_for_bytecode(
+                    access.base.as_ref(),
+                    origin_sheet,
+                    origin_cell,
+                    tables_by_sheet,
+                )?),
+                field: access.field.clone(),
+            }))
+        }
         crate::Expr::FunctionCall(call) => Some(crate::Expr::FunctionCall(crate::FunctionCall {
             name: call.name.clone(),
             args: call
                 .args
                 .iter()
-                .map(|arg| rewrite_structured_refs_for_bytecode(arg, origin_sheet, origin_cell, tables_by_sheet))
+                .map(|arg| {
+                    rewrite_structured_refs_for_bytecode(
+                        arg,
+                        origin_sheet,
+                        origin_cell,
+                        tables_by_sheet,
+                    )
+                })
                 .collect::<Option<Vec<_>>>()?,
         })),
         crate::Expr::Call(call) => Some(crate::Expr::Call(crate::CallExpr {
@@ -5700,7 +5783,14 @@ fn rewrite_structured_refs_for_bytecode(
             args: call
                 .args
                 .iter()
-                .map(|arg| rewrite_structured_refs_for_bytecode(arg, origin_sheet, origin_cell, tables_by_sheet))
+                .map(|arg| {
+                    rewrite_structured_refs_for_bytecode(
+                        arg,
+                        origin_sheet,
+                        origin_cell,
+                        tables_by_sheet,
+                    )
+                })
                 .collect::<Option<Vec<_>>>()?,
         })),
         crate::Expr::Unary(u) => Some(crate::Expr::Unary(crate::UnaryExpr {
@@ -5914,12 +6004,18 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn sheet_dimensions(&self, sheet_id: usize) -> (u32, u32) {
-        self.sheet_dimensions.get(sheet_id).copied().unwrap_or((0, 0))
+        self.sheet_dimensions
+            .get(sheet_id)
+            .copied()
+            .unwrap_or((0, 0))
     }
 
     fn get_cell_formula(&self, sheet_id: usize, addr: CellAddr) -> Option<&str> {
         self.formulas
-            .get(&CellKey { sheet: sheet_id, addr })
+            .get(&CellKey {
+                sheet: sheet_id,
+                addr,
+            })
             .map(|s| s.as_str())
     }
 
@@ -6127,14 +6223,21 @@ fn rewrite_defined_name_constants_for_bytecode(
         lexical_scopes: &mut Vec<HashSet<String>>,
     ) -> Option<crate::Expr> {
         match expr {
-            crate::Expr::NameRef(nref) => inline_name_ref(nref, current_sheet, workbook, lexical_scopes),
-            crate::Expr::FieldAccess(access) => rewrite_inner(access.base.as_ref(), current_sheet, workbook, lexical_scopes)
-                .map(|inner| {
-                    crate::Expr::FieldAccess(crate::FieldAccessExpr {
-                        base: Box::new(inner),
-                        field: access.field.clone(),
-                    })
-                }),
+            crate::Expr::NameRef(nref) => {
+                inline_name_ref(nref, current_sheet, workbook, lexical_scopes)
+            }
+            crate::Expr::FieldAccess(access) => rewrite_inner(
+                access.base.as_ref(),
+                current_sheet,
+                workbook,
+                lexical_scopes,
+            )
+            .map(|inner| {
+                crate::Expr::FieldAccess(crate::FieldAccessExpr {
+                    base: Box::new(inner),
+                    field: access.field.clone(),
+                })
+            }),
             crate::Expr::FunctionCall(call) if call.name.name_upper == "LET" => {
                 if call.args.len() < 3 || call.args.len() % 2 == 0 {
                     return None;
@@ -6254,13 +6357,14 @@ fn rewrite_defined_name_constants_for_bytecode(
                 })
             }
             crate::Expr::Call(_) => None,
-            crate::Expr::Unary(u) => rewrite_inner(&u.expr, current_sheet, workbook, lexical_scopes)
-                .map(|inner| {
+            crate::Expr::Unary(u) => {
+                rewrite_inner(&u.expr, current_sheet, workbook, lexical_scopes).map(|inner| {
                     crate::Expr::Unary(crate::UnaryExpr {
                         op: u.op,
                         expr: Box::new(inner),
                     })
-                }),
+                })
+            }
             crate::Expr::Postfix(p) => {
                 rewrite_inner(&p.expr, current_sheet, workbook, lexical_scopes).map(|inner| {
                     crate::Expr::Postfix(crate::PostfixExpr {
@@ -6278,11 +6382,13 @@ fn rewrite_defined_name_constants_for_bytecode(
                 }
                 let left = rewrite_inner(&b.left, current_sheet, workbook, lexical_scopes);
                 let right = rewrite_inner(&b.right, current_sheet, workbook, lexical_scopes);
-                (left.is_some() || right.is_some()).then_some(crate::Expr::Binary(crate::BinaryExpr {
-                    op: b.op,
-                    left: Box::new(left.unwrap_or_else(|| (*b.left).clone())),
-                    right: Box::new(right.unwrap_or_else(|| (*b.right).clone())),
-                }))
+                (left.is_some() || right.is_some()).then_some(crate::Expr::Binary(
+                    crate::BinaryExpr {
+                        op: b.op,
+                        left: Box::new(left.unwrap_or_else(|| (*b.left).clone())),
+                        right: Box::new(right.unwrap_or_else(|| (*b.right).clone())),
+                    },
+                ))
             }
             crate::Expr::Array(arr) => {
                 let mut changed = false;
@@ -6326,7 +6432,12 @@ pub trait ExternalValueProvider: Send + Sync {
 pub trait ExternalDataProvider: Send + Sync {
     fn rtd(&self, prog_id: &str, server: &str, topics: &[String]) -> Value;
     fn cube_value(&self, connection: &str, tuples: &[String]) -> Value;
-    fn cube_member(&self, connection: &str, member_expression: &str, caption: Option<&str>) -> Value;
+    fn cube_member(
+        &self,
+        connection: &str,
+        member_expression: &str,
+        caption: Option<&str>,
+    ) -> Value;
     fn cube_member_property(
         &self,
         connection: &str,
@@ -6412,9 +6523,7 @@ fn bytecode_value_to_engine(value: bytecode::Value) -> Value {
                 values.push(match v {
                     bytecode::Value::Array(_)
                     | bytecode::Value::Range(_)
-                    | bytecode::Value::MultiRange(_) => {
-                        Value::Error(ErrorKind::Value)
-                    }
+                    | bytecode::Value::MultiRange(_) => Value::Error(ErrorKind::Value),
                     other => bytecode_value_to_engine(other),
                 });
             }
@@ -6665,7 +6774,8 @@ impl BytecodeColumnCache {
                         // surfaced. Don't build a cache that would otherwise treat them as empty/NaN.
                         continue;
                     }
-                    if resolved.rows() > crate::bytecode::runtime::BYTECODE_SPARSE_RANGE_ROW_THRESHOLD
+                    if resolved.rows()
+                        > crate::bytecode::runtime::BYTECODE_SPARSE_RANGE_ROW_THRESHOLD
                     {
                         // Avoid allocating huge columnar buffers for sparse ranges like `A:A`. The
                         // bytecode runtime can compute aggregates over these ranges by iterating the
@@ -6896,11 +7006,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
             return bytecode::Value::Error(bytecode::ErrorKind::Ref);
         }
         let (rows, cols) = self.bounds_on_sheet(sheet);
-        if coord.row < 0
-            || coord.col < 0
-            || coord.row >= rows
-            || coord.col >= cols
-        {
+        if coord.row < 0 || coord.col < 0 || coord.row >= rows || coord.col >= cols {
             return bytecode::Value::Error(bytecode::ErrorKind::Ref);
         }
         let addr = CellAddr {
@@ -6926,7 +7032,12 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         self.column_slice_impl(col, row_start, row_end, self.slice_mode)
     }
 
-    fn column_slice_strict_numeric(&self, col: i32, row_start: i32, row_end: i32) -> Option<&[f64]> {
+    fn column_slice_strict_numeric(
+        &self,
+        col: i32,
+        row_start: i32,
+        row_end: i32,
+    ) -> Option<&[f64]> {
         self.column_slice_impl(col, row_start, row_end, ColumnSliceMode::StrictNumeric)
     }
 
@@ -7259,7 +7370,10 @@ fn bytecode_expr_is_eligible_inner(
         scopes: &[HashMap<Arc<str>, BytecodeLocalBindingKind>],
         name: &Arc<str>,
     ) -> Option<BytecodeLocalBindingKind> {
-        scopes.iter().rev().find_map(|scope| scope.get(name).copied())
+        scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied())
     }
 
     fn infer_binding_kind(
@@ -7277,9 +7391,9 @@ fn bytecode_expr_is_eligible_inner(
                 _ => BytecodeLocalBindingKind::Scalar,
             },
             bytecode::Expr::CellRef(_) => BytecodeLocalBindingKind::Scalar,
-            bytecode::Expr::RangeRef(_) | bytecode::Expr::MultiRangeRef(_) | bytecode::Expr::SpillRange(_) => {
-                BytecodeLocalBindingKind::Range
-            }
+            bytecode::Expr::RangeRef(_)
+            | bytecode::Expr::MultiRangeRef(_)
+            | bytecode::Expr::SpillRange(_) => BytecodeLocalBindingKind::Range,
             bytecode::Expr::NameRef(name) => {
                 local_binding_kind(scopes, name).unwrap_or(BytecodeLocalBindingKind::Scalar)
             }
@@ -7291,8 +7405,9 @@ fn bytecode_expr_is_eligible_inner(
                 let left_kind = infer_binding_kind(left, scopes);
                 let right_kind = infer_binding_kind(right, scopes);
                 match (left_kind, right_kind) {
-                    (BytecodeLocalBindingKind::Range, _)
-                    | (_, BytecodeLocalBindingKind::Range) => BytecodeLocalBindingKind::Range,
+                    (BytecodeLocalBindingKind::Range, _) | (_, BytecodeLocalBindingKind::Range) => {
+                        BytecodeLocalBindingKind::Range
+                    }
                     (BytecodeLocalBindingKind::ArrayLiteral, _)
                     | (_, BytecodeLocalBindingKind::ArrayLiteral) => {
                         BytecodeLocalBindingKind::ArrayLiteral
@@ -7356,7 +7471,12 @@ fn bytecode_expr_is_eligible_inner(
         bytecode::Expr::MultiRangeRef(_) => allow_range,
         bytecode::Expr::Unary { op, expr } => match op {
             bytecode::ast::UnaryOp::Plus | bytecode::ast::UnaryOp::Neg => {
-                bytecode_expr_is_eligible_inner(expr, allow_range, allow_array_literals, lexical_scopes)
+                bytecode_expr_is_eligible_inner(
+                    expr,
+                    allow_range,
+                    allow_array_literals,
+                    lexical_scopes,
+                )
             }
             // Implicit intersection is only defined for references (ranges) in the bytecode VM.
             // Keep array literals ineligible so `@{...}` falls back to the AST evaluator.
@@ -7378,33 +7498,39 @@ fn bytecode_expr_is_eligible_inner(
                     | bytecode::ast::BinaryOp::Le
                     | bytecode::ast::BinaryOp::Gt
                     | bytecode::ast::BinaryOp::Ge
-            ) && bytecode_expr_is_eligible_inner(left, allow_range, allow_array_literals, lexical_scopes)
-                && bytecode_expr_is_eligible_inner(right, allow_range, allow_array_literals, lexical_scopes)
+            ) && bytecode_expr_is_eligible_inner(
+                left,
+                allow_range,
+                allow_array_literals,
+                lexical_scopes,
+            ) && bytecode_expr_is_eligible_inner(
+                right,
+                allow_range,
+                allow_array_literals,
+                lexical_scopes,
+            )
         }
         bytecode::Expr::FuncCall { func, args } => match func {
             bytecode::ast::Function::If => {
                 if args.len() < 2 || args.len() > 3 {
                     return false;
                 }
-                args.iter().all(|arg| {
-                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
-                })
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::Choose => {
                 if args.len() < 2 {
                     return false;
                 }
-                args.iter().all(|arg| {
-                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
-                })
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::Ifs => {
                 if args.len() < 2 || args.len() % 2 != 0 {
                     return false;
                 }
-                args.iter().all(|arg| {
-                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
-                })
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::And
             | bytecode::ast::Function::Or
@@ -7420,9 +7546,8 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 2 {
                     return false;
                 }
-                args.iter().all(|arg| {
-                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
-                })
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::IsError | bytecode::ast::Function::IsNa => {
                 if args.len() != 1 {
@@ -7436,14 +7561,17 @@ fn bytecode_expr_is_eligible_inner(
                     return false;
                 }
                 let has_default = (args.len() - 1) % 2 != 0;
-                let pairs_end = if has_default { args.len() - 1 } else { args.len() };
+                let pairs_end = if has_default {
+                    args.len() - 1
+                } else {
+                    args.len()
+                };
                 let pairs = &args[1..pairs_end];
                 if pairs.len() < 2 || pairs.len() % 2 != 0 {
                     return false;
                 }
-                args.iter().all(|arg| {
-                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
-                })
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::Let => {
                 if args.len() < 3 || args.len() % 2 == 0 {
@@ -7600,7 +7728,10 @@ fn bytecode_expr_is_eligible_inner(
                     bytecode::Expr::Literal(bytecode::Value::Array(_)) => true,
                     bytecode::Expr::NameRef(name) => matches!(
                         local_binding_kind(lexical_scopes, name),
-                        Some(BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::ArrayLiteral)
+                        Some(
+                            BytecodeLocalBindingKind::Range
+                                | BytecodeLocalBindingKind::ArrayLiteral
+                        )
                     ),
                     _ => false,
                 };
@@ -7675,8 +7806,10 @@ fn bytecode_expr_is_eligible_inner(
                 // `lookup_value` is a scalar argument, so Excel applies implicit intersection when
                 // it is provided as a range reference. Allow range values here and let the runtime
                 // perform implicit intersection (matching the AST evaluator's `eval_scalar_arg`).
-                let lookup_ok = bytecode_expr_is_eligible_inner(&args[0], true, false, lexical_scopes);
-                let index_ok = bytecode_expr_is_eligible_inner(&args[2], false, false, lexical_scopes);
+                let lookup_ok =
+                    bytecode_expr_is_eligible_inner(&args[0], true, false, lexical_scopes);
+                let index_ok =
+                    bytecode_expr_is_eligible_inner(&args[2], false, false, lexical_scopes);
                 let range_lookup_ok = if args.len() == 4 {
                     bytecode_expr_is_eligible_inner(&args[3], false, false, lexical_scopes)
                 } else {
@@ -7702,7 +7835,8 @@ fn bytecode_expr_is_eligible_inner(
                     _ => false,
                 };
                 // `lookup_value` is scalar and uses implicit intersection when passed a range.
-                let lookup_ok = bytecode_expr_is_eligible_inner(&args[0], true, false, lexical_scopes);
+                let lookup_ok =
+                    bytecode_expr_is_eligible_inner(&args[0], true, false, lexical_scopes);
                 let match_type_ok = if args.len() == 3 {
                     bytecode_expr_is_eligible_inner(&args[2], false, false, lexical_scopes)
                 } else {
@@ -7720,31 +7854,36 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 3 && args.len() != 4 {
                     return false;
                 }
-                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::Price | bytecode::ast::Function::Yield => {
                 if args.len() != 6 && args.len() != 7 {
                     return false;
                 }
-                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::Duration | bytecode::ast::Function::MDuration => {
                 if args.len() != 5 && args.len() != 6 {
                     return false;
                 }
-                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::Accrintm => {
                 if args.len() != 4 && args.len() != 5 {
                     return false;
                 }
-                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::Accrint => {
                 if !(6..=8).contains(&args.len()) {
                     return false;
                 }
-                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::Disc
             | bytecode::ast::Function::PriceDisc
@@ -7754,13 +7893,15 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 4 && args.len() != 5 {
                     return false;
                 }
-                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::PriceMat | bytecode::ast::Function::YieldMat => {
                 if args.len() != 5 && args.len() != 6 {
                     return false;
                 }
-                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::TbillEq
             | bytecode::ast::Function::TbillPrice
@@ -7768,7 +7909,8 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 3 {
                     return false;
                 }
-                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::OddFPrice | bytecode::ast::Function::OddFYield => {
                 if args.len() != 8 && args.len() != 9 {
@@ -7831,16 +7973,12 @@ fn bytecode_expr_is_eligible_inner(
                     args[1],
                     bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
                 );
-                let match_mode_ok = args
-                    .get(2)
-                    .map_or(true, |arg| {
-                        bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
-                    });
-                let search_mode_ok = args
-                    .get(3)
-                    .map_or(true, |arg| {
-                        bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
-                    });
+                let match_mode_ok = args.get(2).map_or(true, |arg| {
+                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                });
+                let search_mode_ok = args.get(3).map_or(true, |arg| {
+                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                });
                 lookup_ok && lookup_array_ok && match_mode_ok && search_mode_ok
             }
             bytecode::ast::Function::XLookup => {
@@ -7864,27 +8002,21 @@ fn bytecode_expr_is_eligible_inner(
                     }
                     _ => false,
                 };
-                let if_not_found_ok = args
-                    .get(3)
-                    .map_or(true, |arg| {
-                        bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
-                    });
-                let match_mode_ok = args
-                    .get(4)
-                    .map_or(true, |arg| {
-                        bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
-                    });
-                let search_mode_ok = args
-                    .get(5)
-                    .map_or(true, |arg| {
-                        bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
-                    });
+                let if_not_found_ok = args.get(3).map_or(true, |arg| {
+                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                });
+                let match_mode_ok = args.get(4).map_or(true, |arg| {
+                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                });
+                let search_mode_ok = args.get(5).map_or(true, |arg| {
+                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                });
                 lookup_ok
                     && lookup_array_ok
                     && return_array_ok
                     && if_not_found_ok
-                     && match_mode_ok
-                     && search_mode_ok
+                    && match_mode_ok
+                    && search_mode_ok
             }
             bytecode::ast::Function::Unknown(_) => false,
         },
@@ -8965,9 +9097,10 @@ fn walk_calc_expr(
                             .then(|| cur)
                     };
 
-                    if let (Some(intersected), Some(sheets)) =
-                        (intersected, resolve_sheet_span(sheet, current_cell.sheet, workbook))
-                    {
+                    if let (Some(intersected), Some(sheets)) = (
+                        intersected,
+                        resolve_sheet_span(sheet, current_cell.sheet, workbook),
+                    ) {
                         for sheet_id in sheets {
                             precedents.insert(Precedent::Cell(CellId::new(
                                 sheet_id_for_graph(sheet_id),
@@ -9447,7 +9580,10 @@ mod tests {
         };
 
         let run = |engine: &mut Engine, ctx: &crate::eval::RecalcContext| {
-            let levels = engine.calc_graph.calc_levels_for_dirty().expect("calc levels");
+            let levels = engine
+                .calc_graph
+                .calc_levels_for_dirty()
+                .expect("calc levels");
             let _ = engine.recalculate_levels(
                 levels,
                 RecalcMode::SingleThreaded,
@@ -9470,7 +9606,10 @@ mod tests {
         )
         .unwrap() as f64;
 
-        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(base_1900));
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A1"),
+            Value::Number(base_1900)
+        );
         assert_eq!(
             engine.get_cell_value("Sheet1", "A2"),
             Value::Number(base_1900 + seconds / 86_400.0)
@@ -9486,7 +9625,10 @@ mod tests {
         )
         .unwrap() as f64;
 
-        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(base_1904));
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A1"),
+            Value::Number(base_1904)
+        );
         assert_eq!(
             engine.get_cell_value("Sheet1", "A2"),
             Value::Number(base_1904 + seconds / 86_400.0)
@@ -9628,7 +9770,8 @@ mod tests {
             addr: b1,
         };
         let tasks = vec![(key_b1, cell_b1.clone())];
-        let column_cache = BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
+        let column_cache =
+            BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
         assert!(
             !column_cache
                 .by_sheet
@@ -9782,8 +9925,14 @@ mod tests {
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
         );
-        let key_b1 = CellKey { sheet: sheet1_id, addr: b1 };
-        let key_b2 = CellKey { sheet: sheet1_id, addr: b2 };
+        let key_b1 = CellKey {
+            sheet: sheet1_id,
+            addr: b1,
+        };
+        let key_b2 = CellKey {
+            sheet: sheet1_id,
+            addr: b2,
+        };
         let tasks = vec![(key_b1, cell_b1.clone()), (key_b2, cell_b2.clone())];
         let column_cache =
             BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
@@ -9828,12 +9977,8 @@ mod tests {
                 ("Sheet3", [7.0, 8.0, 9.0]),
             ] {
                 engine.set_cell_value(sheet, "A1", values[0]).unwrap();
-                engine
-                    .set_cell_value(sheet, "A500000", values[1])
-                    .unwrap();
-                engine
-                    .set_cell_value(sheet, "A1048576", values[2])
-                    .unwrap();
+                engine.set_cell_value(sheet, "A500000", values[1]).unwrap();
+                engine.set_cell_value(sheet, "A1048576", values[2]).unwrap();
             }
 
             engine
@@ -9986,9 +10131,7 @@ mod tests {
     #[test]
     fn bytecode_compile_report_allows_range_expressions() {
         let mut engine = Engine::new();
-        engine
-            .set_cell_formula("Sheet1", "A1", "=A2:A3")
-            .unwrap();
+        engine.set_cell_formula("Sheet1", "A1", "=A2:A3").unwrap();
 
         let report = engine.bytecode_compile_report(10);
         assert_eq!(report.len(), 0);
@@ -10144,7 +10287,10 @@ mod tests {
 
         let report = engine.bytecode_compile_report(10);
         assert_eq!(report.len(), 1);
-        assert_eq!(report[0].reason, BytecodeCompileReason::ExceedsRangeCellLimit);
+        assert_eq!(
+            report[0].reason,
+            BytecodeCompileReason::ExceedsRangeCellLimit
+        );
     }
 
     #[test]
@@ -10299,7 +10445,10 @@ mod tests {
         let seg = &col.segments[0];
         assert_eq!(seg.row_start, 0);
 
-        assert!(seg.values[0].is_nan(), "rich value should not write a numeric slot");
+        assert!(
+            seg.values[0].is_nan(),
+            "rich value should not write a numeric slot"
+        );
         assert_eq!(seg.values[1], 3.0);
 
         assert_eq!(seg.blocked_rows_strict, vec![0]);
@@ -10312,9 +10461,7 @@ mod tests {
     #[test]
     fn bytecode_column_cache_ignores_ranges_used_only_for_implicit_intersection() {
         let mut engine = Engine::new();
-        engine
-            .set_cell_formula("Sheet1", "B1", "=@A1:A10")
-            .unwrap();
+        engine.set_cell_formula("Sheet1", "B1", "=@A1:A10").unwrap();
 
         assert_eq!(
             engine.bytecode_program_count(),
@@ -10374,7 +10521,13 @@ mod tests {
                 .map(|s| (s.row_count, s.col_count))
                 .unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS))
         };
-        let ast = compile_canonical_expr(&parsed.expr, sheet_id, addr, &mut resolve_sheet, &mut sheet_dims);
+        let ast = compile_canonical_expr(
+            &parsed.expr,
+            sheet_id,
+            addr,
+            &mut resolve_sheet,
+            &mut sheet_dims,
+        );
 
         let key = CellKey {
             sheet: sheet_id,
@@ -10432,12 +10585,18 @@ mod tests {
         };
         assert!(
             matches!(
-                engine_bc.workbook.get_cell(key).and_then(|c| c.compiled.as_ref()),
+                engine_bc
+                    .workbook
+                    .get_cell(key)
+                    .and_then(|c| c.compiled.as_ref()),
                 Some(CompiledFormula::Bytecode(_))
             ),
             "expected compiled formula to take the bytecode path"
         );
-        let levels = engine_bc.calc_graph.calc_levels_for_dirty().expect("calc levels");
+        let levels = engine_bc
+            .calc_graph
+            .calc_levels_for_dirty()
+            .expect("calc levels");
         let _ = engine_bc.recalculate_levels(
             levels,
             RecalcMode::SingleThreaded,
@@ -10451,13 +10610,18 @@ mod tests {
         // Bytecode-disabled engine (AST-only).
         let mut engine_ast = Engine::new();
         engine_ast.set_bytecode_enabled(false);
-        engine_ast.set_cell_formula("Sheet1", addr, formula).unwrap();
+        engine_ast
+            .set_cell_formula("Sheet1", addr, formula)
+            .unwrap();
         assert_eq!(
             engine_ast.bytecode_program_count(),
             0,
             "bytecode-disabled engine should not compile programs"
         );
-        let levels = engine_ast.calc_graph.calc_levels_for_dirty().expect("calc levels");
+        let levels = engine_ast
+            .calc_graph
+            .calc_levels_for_dirty()
+            .expect("calc levels");
         let _ = engine_ast.recalculate_levels(
             levels,
             RecalcMode::SingleThreaded,
@@ -10497,12 +10661,18 @@ mod tests {
         };
         assert!(
             matches!(
-                engine_bc.workbook.get_cell(key).and_then(|c| c.compiled.as_ref()),
+                engine_bc
+                    .workbook
+                    .get_cell(key)
+                    .and_then(|c| c.compiled.as_ref()),
                 Some(CompiledFormula::Bytecode(_))
             ),
             "expected compiled formula to take the bytecode path"
         );
-        let levels = engine_bc.calc_graph.calc_levels_for_dirty().expect("calc levels");
+        let levels = engine_bc
+            .calc_graph
+            .calc_levels_for_dirty()
+            .expect("calc levels");
         let _ = engine_bc.recalculate_levels(
             levels,
             RecalcMode::SingleThreaded,
@@ -10515,13 +10685,18 @@ mod tests {
         // Bytecode-disabled engine (AST-only).
         let mut engine_ast = Engine::new();
         engine_ast.set_bytecode_enabled(false);
-        engine_ast.set_cell_formula("Sheet1", addr, formula).unwrap();
+        engine_ast
+            .set_cell_formula("Sheet1", addr, formula)
+            .unwrap();
         assert_eq!(
             engine_ast.bytecode_program_count(),
             0,
             "bytecode-disabled engine should not compile programs"
         );
-        let levels = engine_ast.calc_graph.calc_levels_for_dirty().expect("calc levels");
+        let levels = engine_ast
+            .calc_graph
+            .calc_levels_for_dirty()
+            .expect("calc levels");
         let _ = engine_ast.recalculate_levels(
             levels,
             RecalcMode::SingleThreaded,
@@ -10774,18 +10949,23 @@ mod tests {
     #[test]
     fn implicit_intersection_range_dependencies_point_to_intersected_cell() {
         let mut engine = Engine::new();
-        engine
-            .set_cell_formula("Sheet1", "B2", "=@A1:A3")
-            .unwrap();
+        engine.set_cell_formula("Sheet1", "B2", "=@A1:A3").unwrap();
 
         let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
         let b2 = parse_a1("B2").unwrap();
-        let key = CellKey { sheet: sheet_id, addr: b2 };
+        let key = CellKey {
+            sheet: sheet_id,
+            addr: b2,
+        };
 
         let precedents = engine.calc_graph.precedents_of(cell_id_from_key(key));
         assert_eq!(
             precedents,
-            vec![Precedent::Cell(CellId::new(sheet_id_for_graph(sheet_id), 1, 0))],
+            vec![Precedent::Cell(CellId::new(
+                sheet_id_for_graph(sheet_id),
+                1,
+                0
+            ))],
             "=@A1:A3 in row 2 should only depend on A2"
         );
     }

@@ -127,9 +127,11 @@ impl<'a> CompileCtx<'a> {
                         .instrs
                         .push(Instruction::new(OpCode::LoadLocal, info.idx, 0));
                     if !allow_range && info.kind == LocalKind::RefSingle {
-                        self.program
-                            .instrs
-                            .push(Instruction::new(OpCode::ImplicitIntersection, 0, 0));
+                        self.program.instrs.push(Instruction::new(
+                            OpCode::ImplicitIntersection,
+                            0,
+                            0,
+                        ));
                     }
                 } else {
                     // Bytecode evaluation does not currently resolve defined names; treat as `#NAME?`.
@@ -148,18 +150,21 @@ impl<'a> CompileCtx<'a> {
                     UnaryOp::Plus | UnaryOp::Neg => self.compile_expr_inner(expr, false),
                 }
                 match op {
-                    UnaryOp::Plus => self
-                        .program
-                        .instrs
-                        .push(Instruction::new(OpCode::UnaryPlus, 0, 0)),
-                    UnaryOp::Neg => self
-                        .program
-                        .instrs
-                        .push(Instruction::new(OpCode::UnaryNeg, 0, 0)),
-                    UnaryOp::ImplicitIntersection => self
-                        .program
-                        .instrs
-                        .push(Instruction::new(OpCode::ImplicitIntersection, 0, 0)),
+                    UnaryOp::Plus => {
+                        self.program
+                            .instrs
+                            .push(Instruction::new(OpCode::UnaryPlus, 0, 0))
+                    }
+                    UnaryOp::Neg => {
+                        self.program
+                            .instrs
+                            .push(Instruction::new(OpCode::UnaryNeg, 0, 0))
+                    }
+                    UnaryOp::ImplicitIntersection => self.program.instrs.push(Instruction::new(
+                        OpCode::ImplicitIntersection,
+                        0,
+                        0,
+                    )),
                 }
             }
             Expr::Binary { op, left, right } => {
@@ -190,11 +195,9 @@ impl<'a> CompileCtx<'a> {
                     self.compile_expr_inner(&args[0], false);
                     let jump_idx = self.program.instrs.len();
                     // Patched below: a=false_target, b=end_target.
-                    self.program.instrs.push(Instruction::new(
-                        OpCode::JumpIfFalseOrError,
-                        0,
-                        0,
-                    ));
+                    self.program
+                        .instrs
+                        .push(Instruction::new(OpCode::JumpIfFalseOrError, 0, 0));
 
                     // TRUE branch.
                     self.compile_expr_inner(&args[1], false);
@@ -219,11 +222,8 @@ impl<'a> CompileCtx<'a> {
                     }
 
                     let end_target = self.program.instrs.len() as u32;
-                    self.program.instrs[jump_idx] = Instruction::new(
-                        OpCode::JumpIfFalseOrError,
-                        false_target,
-                        end_target,
-                    );
+                    self.program.instrs[jump_idx] =
+                        Instruction::new(OpCode::JumpIfFalseOrError, false_target, end_target);
                     self.program.instrs[jump_end_idx] =
                         Instruction::new(OpCode::Jump, end_target, 0);
                 }
@@ -248,11 +248,9 @@ impl<'a> CompileCtx<'a> {
                     // it without evaluating the fallback.
                     self.compile_expr_inner(&args[0], false);
                     let jump_idx = self.program.instrs.len();
-                    self.program.instrs.push(Instruction::new(
-                        OpCode::JumpIfNotNaError,
-                        0,
-                        0,
-                    ));
+                    self.program
+                        .instrs
+                        .push(Instruction::new(OpCode::JumpIfNotNaError, 0, 0));
 
                     // #N/A fallback branch (only evaluated if arg0 is #N/A).
                     self.compile_expr_inner(&args[1], false);
@@ -399,9 +397,17 @@ impl<'a> CompileCtx<'a> {
         }
 
         let has_default = (args.len() - 1) % 2 != 0;
-        let pairs_end = if has_default { args.len() - 1 } else { args.len() };
+        let pairs_end = if has_default {
+            args.len() - 1
+        } else {
+            args.len()
+        };
         let pairs = &args[1..pairs_end];
-        let default = if has_default { Some(&args[args.len() - 1]) } else { None };
+        let default = if has_default {
+            Some(&args[args.len() - 1])
+        } else {
+            None
+        };
 
         if pairs.len() < 2 || pairs.len() % 2 != 0 {
             self.push_error_const(ErrorKind::Value);
@@ -448,9 +454,7 @@ impl<'a> CompileCtx<'a> {
 
             // Compare discriminant == case value.
             self.compile_expr(&pair[0]);
-            self.program
-                .instrs
-                .push(Instruction::new(OpCode::Eq, 0, 0));
+            self.program.instrs.push(Instruction::new(OpCode::Eq, 0, 0));
 
             let jump_idx = self.program.instrs.len();
             // Patched below: a=next_case_target, b=end_target (for error propagation).
@@ -493,9 +497,7 @@ impl<'a> CompileCtx<'a> {
         // syntactically omitted argument from a blank cell value.
         if matches!(arg, Expr::Literal(Value::Missing)) {
             let idx = self.program.consts.len() as u32;
-            self.program
-                .consts
-                .push(ConstValue::Value(Value::Missing));
+            self.program.consts.push(ConstValue::Value(Value::Missing));
             self.program
                 .instrs
                 .push(Instruction::new(OpCode::PushConst, idx, 0));
@@ -537,12 +539,12 @@ impl<'a> CompileCtx<'a> {
             _ => false,
         };
 
-        let allow_range = if matches!(func, Function::And | Function::Or) && matches!(arg, Expr::CellRef(_))
-        {
-            false
-        } else {
-            allow_range
-        };
+        let allow_range =
+            if matches!(func, Function::And | Function::Or) && matches!(arg, Expr::CellRef(_)) {
+                false
+            } else {
+                allow_range
+            };
 
         self.compile_expr_inner(arg, allow_range);
     }

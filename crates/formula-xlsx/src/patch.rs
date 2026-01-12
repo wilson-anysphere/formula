@@ -1720,6 +1720,9 @@ fn patch_cell_element(
     let t_tag = prefixed_tag(prefix_str, "t");
 
     let patch_value = if clear_value { None } else { patch_value };
+    let drop_vm = update_value
+        && matches!(&existing.value, ExistingCellValue::Error(e) if e.trim() == "#VALUE!")
+        && !matches!(patch_value, Some(CellValue::Error(err)) if err.as_str() == "#VALUE!");
     let (new_t, body_kind) = if update_value {
         cell_representation_for_patch(
             patch_value,
@@ -1746,6 +1749,7 @@ fn patch_cell_element(
         match attr.key.as_ref() {
             b"s" if style_override.is_some() => continue,
             b"t" if update_value => continue,
+            b"vm" if drop_vm => continue,
             b"r" => has_r = true,
             _ => {}
         }
@@ -2080,21 +2084,11 @@ fn cell_representation_for_patch(
         }
         CellValue::Entity(entity) => {
             let degraded = CellValue::String(entity.display_value.clone());
-            cell_representation_for_patch(
-                Some(&degraded),
-                formula,
-                existing_t,
-                shared_strings,
-            )
+            cell_representation_for_patch(Some(&degraded), formula, existing_t, shared_strings)
         }
         CellValue::Record(record) => {
             let degraded = CellValue::String(record.to_string());
-            cell_representation_for_patch(
-                Some(&degraded),
-                formula,
-                existing_t,
-                shared_strings,
-            )
+            cell_representation_for_patch(Some(&degraded), formula, existing_t, shared_strings)
         }
         CellValue::RichText(rich) => {
             if let Some(existing_t) = existing_t {

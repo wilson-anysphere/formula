@@ -382,6 +382,36 @@ fn eval_ast_inner(
                     // Engine behavior: missing false branch defaults to FALSE (not blank).
                     return Value::Bool(false);
                 }
+                Function::Choose => {
+                    if args.len() < 2 {
+                        return Value::Error(ErrorKind::Value);
+                    }
+                    let idx_val =
+                        eval_ast_inner(&args[0], grid, sheet_id, base, locale, lexical_scopes);
+                    let idx = match coerce_to_i64(&idx_val) {
+                        Ok(i) => i,
+                        Err(e) => return Value::Error(e),
+                    };
+                    // CHOOSE is 1-indexed.
+                    if idx < 1 {
+                        return Value::Error(ErrorKind::Value);
+                    }
+                    let idx_usize = match usize::try_from(idx) {
+                        Ok(i) => i,
+                        Err(_) => return Value::Error(ErrorKind::Value),
+                    };
+                    if idx_usize >= args.len() {
+                        return Value::Error(ErrorKind::Value);
+                    }
+                    return eval_ast_inner(
+                        &args[idx_usize],
+                        grid,
+                        sheet_id,
+                        base,
+                        locale,
+                        lexical_scopes,
+                    );
+                }
                 Function::Ifs => {
                     if args.len() % 2 != 0 {
                         return Value::Error(ErrorKind::Value);
@@ -2399,7 +2429,9 @@ fn fn_tbillyield(args: &[Value]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    excel_result_number(crate::functions::financial::tbillyield(settlement, maturity, pr))
+    excel_result_number(crate::functions::financial::tbillyield(
+        settlement, maturity, pr,
+    ))
 }
 
 fn fn_tbilleq(args: &[Value]) -> Value {
@@ -6333,7 +6365,10 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         Err(e) => return Value::Error(ErrorKind::from(e)),
     };
 
-    let idx = match match_pos.checked_sub(1).and_then(|v| usize::try_from(v).ok()) {
+    let idx = match match_pos
+        .checked_sub(1)
+        .and_then(|v| usize::try_from(v).ok())
+    {
         Some(v) if v < lookup_len => v,
         _ => return Value::Error(ErrorKind::Value),
     };
