@@ -515,7 +515,9 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc
                 .or_default()
                 .push(
                     WorksheetCellPatch::new(worksheet_part.clone(), cell_ref, value, formula)
-                        .with_xf_index(xf_index),
+                        .with_xf_index(xf_index)
+                        .with_vm(patch.vm_override())
+                        .with_cm(patch.cm_override()),
                 );
         }
     }

@@ -1,7 +1,11 @@
 use std::io::{Cursor, Read, Write};
+use std::collections::HashMap;
 
 use formula_model::{CellRef, CellValue};
-use formula_xlsx::{CellPatch, PackageCellPatch, WorkbookCellPatches, XlsxPackage};
+use formula_xlsx::{
+    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides, CellPatch, PackageCellPatch,
+    WorkbookCellPatches, XlsxPackage,
+};
 use zip::ZipArchive;
 
 fn build_minimal_xlsx(sheet_xml: &str) -> Vec<u8> {
@@ -232,5 +236,38 @@ fn in_memory_cell_patches_preserve_vm_on_style_only_updates() -> Result<(), Box<
     let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap())?;
     assert_eq!(cell_attr(out_xml, "A1", "vm"), Some("1".to_string()));
     assert_eq!(cell_attr(out_xml, "A1", "s"), Some("1".to_string()));
+    Ok(())
+}
+
+#[test]
+fn streaming_workbook_cell_patches_with_part_overrides_support_vm_overrides(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData>
+    <row r="1"><c r="A1" vm="1" cm="7"><v>1</v></c></row>
+  </sheetData>
+</worksheet>"#;
+    let bytes = build_minimal_xlsx(worksheet_xml);
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("A1")?,
+        CellPatch::set_value(CellValue::Number(1.0)).with_vm(2),
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
+        Cursor::new(bytes),
+        &mut out,
+        &patches,
+        &HashMap::new(),
+    )?;
+
+    let out_xml = sheet1_xml(out.get_ref());
+    assert_eq!(cell_attr(&out_xml, "A1", "vm"), Some("2".to_string()));
+    assert_eq!(cell_attr(&out_xml, "A1", "cm"), Some("7".to_string()));
     Ok(())
 }
