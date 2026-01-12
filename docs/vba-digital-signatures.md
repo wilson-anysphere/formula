@@ -260,10 +260,11 @@ bytes are MD5, and asserts that binding verification still succeeds.
 
 #### §2.4.2.1 ContentNormalizedData (v1)
 
-`ContentNormalizedData` is the v1 transcript for module source + some reference data.
+`ContentNormalizedData` is the v1 transcript for module source + selected project metadata / reference
+record data.
 
 Transcript construction (as defined by MS-OVBA pseudocode; see also
-`formula_vba::content_normalized_data` in `crates/formula-vba/src/contents_hash.rs:25`):
+`formula_vba::content_normalized_data` in `crates/formula-vba/src/contents_hash.rs`):
 
 1. Read the `VBA/dir` stream.
 2. Decompress it using the MS-OVBA `CompressedContainer` algorithm (§2.4.1).
@@ -273,13 +274,17 @@ Transcript construction (as defined by MS-OVBA pseudocode; see also
    - `data: [u8; len]`
 4. Initialize `ContentNormalizedData = []`.
 5. As you scan records in order:
-   - For each **`REFERENCEREGISTERED`** record (`id == 0x000D`), append the record `data` bytes
-     verbatim to `ContentNormalizedData`.
-   - For each **`REFERENCEPROJECT`** record (`id == 0x000E`), append a *normalized* byte sequence:
-     1. Parse `LibidAbsolute` and `LibidRelative` as `u32le length || bytes`.
-     2. Parse `MajorVersion` as `u32le` and `MinorVersion` as `u16le`.
-     3. Build `TempBuffer = LibidAbsolute || LibidRelative || MajorVersion || MinorVersion`.
-     4. Append bytes from `TempBuffer` up to (but not including) the first `0x00` byte.
+    - For each **`PROJECTNAME.ProjectName`** record (`id == 0x0004`), append the record `data` bytes
+      verbatim to `ContentNormalizedData` (**in `VBA/dir` record order**).
+    - For each **`PROJECTCONSTANTS.Constants`** record (`id == 0x000C`), append the record `data`
+      bytes verbatim to `ContentNormalizedData` (**in `VBA/dir` record order**).
+    - For each **`REFERENCEREGISTERED`** record (`id == 0x000D`), append the record `data` bytes
+      verbatim to `ContentNormalizedData`.
+    - For each **`REFERENCEPROJECT`** record (`id == 0x000E`), append a *normalized* byte sequence:
+      1. Parse `LibidAbsolute` and `LibidRelative` as `u32le length || bytes`.
+      2. Parse `MajorVersion` as `u32le` and `MinorVersion` as `u16le`.
+      3. Build `TempBuffer = LibidAbsolute || LibidRelative || MajorVersion || MinorVersion`.
+      4. Append bytes from `TempBuffer` up to (but not including) the first `0x00` byte.
    - For each module (as described by the module record groups in `VBA/dir`), locate the module
      stream name (`MODULESTREAMNAME` / `MODULENAME`) and `MODULETEXTOFFSET`. The **module ordering**
      is the order of the module groups in `VBA/dir`, not alphabetical and not OLE directory order.
@@ -297,23 +302,41 @@ Transcript construction (as defined by MS-OVBA pseudocode; see also
 
 The resulting concatenated byte sequence is `ContentNormalizedData`.
 
+Tests in this repo:
+[`crates/formula-vba/tests/contents_hash.rs`](../crates/formula-vba/tests/contents_hash.rs)
+exercises record inclusion/order (including `PROJECTNAME`/`PROJECTCONSTANTS`), reference normalization,
+module ordering, and module source normalization.
+
 #### §2.4.2.2 FormsNormalizedData
 
 `FormsNormalizedData` is a transcript over “designer” streams (UserForms, etc).
 
 Transcript construction (see also `formula_vba::forms_normalized_data` in
-`crates/formula-vba/src/normalized_data.rs:17`):
+`crates/formula-vba/src/normalized_data.rs`):
 
-1. Enumerate all OLE streams that live under a **root-level storage** that is:
-   - not the `VBA` storage, and
-   - not a `\x05DigitalSignature*` storage.
-2. Recursively include streams in nested storages under those designer roots.
-3. Sort streams lexicographically by full OLE path (e.g. `UserForm1/Child/X` before `UserForm1/Y`).
-4. Initialize `FormsNormalizedData = []`.
-5. For each stream in that sorted order:
-   1. Append the stream’s raw bytes.
-   2. Pad with `0x00` bytes up to a multiple of **1023 bytes** (MS-OVBA hashes designer data in
-      1023-byte blocks and zero-pads the final partial block).
+1. Read the `PROJECT` stream (text) and discover designer modules by extracting every `BaseClass=...`
+   line (MS-OVBA §2.3.1.7). Each `BaseClass` value is a *module identifier* for a designer/UserForm
+   module.
+2. Read and decompress `VBA/dir`, then use its module record groups to map each `BaseClass` module
+   identifier to the module’s `MODULESTREAMNAME`. (`formula-vba` matches by name, falling back to an
+   ASCII case-insensitive comparison.)
+3. Treat that `MODULESTREAMNAME` as the name of the **root-level designer storage** (MS-OVBA §2.2.10
+   requires that such a storage exists at the OLE root).
+4. For each discovered designer storage (deduplicated if `PROJECT` contains duplicates):
+   1. Traverse the storage recursively. To approximate MS-OVBA’s “stored order” in a deterministic
+      way (because our CFB/OLE library does not expose raw sibling ordering), `formula-vba` sorts each
+      storage’s immediate children by **case-insensitive entry name** (tie-breaking by the original
+      name), then processes them depth-first.
+   2. For each stream encountered, append its bytes in **1023-byte blocks**:
+      - Split the stream bytes into chunks of up to 1023 bytes.
+      - For each chunk, append exactly 1023 bytes: the chunk bytes followed by `0x00` padding for the
+        remainder of the block.
+      (So a stream of length `n` contributes `1023 * ceil(n/1023)` bytes; the final partial block is
+      zero-padded.)
+
+Tests in this repo:
+[`crates/formula-vba/tests/forms_normalized_data.rs`](../crates/formula-vba/tests/forms_normalized_data.rs)
+covers the 1023-byte padding behavior and deterministic traversal ordering.
 
 #### §2.4.2.3 Content Hash (v1)
 
@@ -344,10 +367,23 @@ Transcript construction (MS-OVBA §2.4.2.5):
 
 1. Read and decompress `VBA/dir` as in §2.4.2.1.
 2. Parse it as a sequence of `(id, len, data)` records (same physical format as v1).
-3. Build a module list from the module record groups in `VBA/dir` (same ordering rule as v1: the
-   stored order in the dir stream).
-4. Construct `V3ContentNormalizedData` by concatenating the spec-specified record bytes and module
-   bytes in the order described by §2.4.2.5.
+3. Append the v3-included reference record payload bytes from `VBA/dir`:
+   - v1 reference types:
+     - **`REFERENCEREGISTERED`** (`0x000D`): append raw `data` bytes
+     - **`REFERENCEPROJECT`** (`0x000E`): append normalized bytes (same TempBuffer + “copy until NUL”
+       rule as §2.4.2.1)
+   - additional v3 reference types (raw `data` bytes):
+     - **`REFERENCECONTROL`** (`0x002F`)
+     - **`REFERENCEEXTENDED`** (`0x0030`)
+     - **`REFERENCEORIGINAL`** (`0x0033`)
+4. For each module record group (in `VBA/dir` stored order), append **module metadata bytes before
+   the normalized source**:
+   1. `MODULENAME` (`0x0019`) record `data` bytes
+   2. `MODULESTREAMNAME` (`0x001A`) record `data` bytes, with the trailing reserved `u16` trimmed when
+      present (many files store `MODULESTREAMNAME || 0x0000`)
+   3. `MODULETYPE` (`0x0021`) record `data` bytes
+   4. Then append the module’s normalized source bytes (same newline + `Attribute` stripping rules as
+      §2.4.2.1).
 
 The main point for implementers: this is **not** just “`ContentNormalizedData` hashed with a stronger
 algorithm”. v3 defines a distinct transcript (`V3ContentNormalizedData`) and `DigitalSignatureExt`
@@ -364,6 +400,11 @@ Repo status:
 - Binding logic in `crates/formula-vba/src/signature.rs` treats `\x05DigitalSignatureExt` as a v3
   signature stream and compares its signed digest bytes against the computed v3 project digest
   (hashing v3 `ProjectNormalizedData` with the `DigestInfo` algorithm OID; typically SHA-256, 32 bytes).
+
+Tests in this repo:
+[`crates/formula-vba/tests/contents_hash_v3.rs`](../crates/formula-vba/tests/contents_hash_v3.rs)
+exercises v3 reference record inclusion, module metadata inclusion, module ordering, and end-to-end
+SHA-256 digest computation.
 
 #### §2.4.2.6 ProjectNormalizedData (the hashed transcript)
 
