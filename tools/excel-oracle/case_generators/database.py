@@ -92,6 +92,20 @@ def generate(
         output_cell="J1",
     )
 
+    # Computed criteria header may be any label that does not match a database field name.
+    add_case(
+        cases,
+        prefix="database_dsum_computed",
+        tags=["database", "DSUM", "computed-criteria"],
+        formula='=DSUM(A1:D4,"Salary",F1:F2)',
+        inputs=[
+            *db_table_inputs,
+            CellInput("F1", "Criteria"),
+            CellInput("F2", formula="=C2>30"),
+        ],
+        output_cell="J1",
+    )
+
     # Error propagation: a formula error for any record row should propagate out of DSUM.
     add_case(
         cases,

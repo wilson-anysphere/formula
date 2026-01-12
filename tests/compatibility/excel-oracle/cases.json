@@ -31616,6 +31616,90 @@
           "value": 1200
         },
         {
+          "cell": "F1",
+          "value": "Criteria"
+        },
+        {
+          "cell": "F2",
+          "formula": "=C2>30"
+        }
+      ],
+      "tags": [
+        "database",
+        "DSUM",
+        "computed-criteria"
+      ],
+      "id": "database_dsum_computed_7c13191a1e32"
+    },
+    {
+      "formula": "=DSUM(A1:D4,\"Salary\",F1:F2)",
+      "outputCell": "J1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Name"
+        },
+        {
+          "cell": "B1",
+          "value": "Dept"
+        },
+        {
+          "cell": "C1",
+          "value": "Age"
+        },
+        {
+          "cell": "D1",
+          "value": "Salary"
+        },
+        {
+          "cell": "A2",
+          "value": "Alice"
+        },
+        {
+          "cell": "B2",
+          "value": "Sales"
+        },
+        {
+          "cell": "C2",
+          "value": 30
+        },
+        {
+          "cell": "D2",
+          "value": 1000
+        },
+        {
+          "cell": "A3",
+          "value": "Bob"
+        },
+        {
+          "cell": "B3",
+          "value": "Sales"
+        },
+        {
+          "cell": "C3",
+          "value": 35
+        },
+        {
+          "cell": "D3",
+          "value": 1500
+        },
+        {
+          "cell": "A4",
+          "value": "Carol"
+        },
+        {
+          "cell": "B4",
+          "value": "HR"
+        },
+        {
+          "cell": "C4",
+          "value": 28
+        },
+        {
+          "cell": "D4",
+          "value": 1200
+        },
+        {
           "cell": "F2",
           "formula": "=1/(C2-35)>0"
         }
