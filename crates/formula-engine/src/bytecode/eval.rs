@@ -630,6 +630,34 @@ mod tests {
     }
 
     #[test]
+    fn vm_choose_index_error_propagates_without_evaluating_choices() {
+        let origin = CellCoord::new(0, 0);
+        let expr = super::super::parse_formula("=CHOOSE(1/0, A1, 7)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let locale = crate::LocaleConfig::en_us();
+
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Error(super::super::value::ErrorKind::Div0));
+        assert_eq!(grid.reads(), 0, "CHOOSE should not evaluate choices when index is an error");
+    }
+
+    #[test]
+    fn vm_choose_coerces_fractional_index() {
+        let origin = CellCoord::new(0, 0);
+        // Excel truncates CHOOSE indices to integers: 1.9 selects the first value.
+        let expr = super::super::parse_formula("=CHOOSE(1.9, 7, 8)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = super::super::grid::ColumnarGrid::new(1, 1);
+        let locale = crate::LocaleConfig::en_us();
+
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Number(7.0));
+    }
+
+    #[test]
     fn vm_choose_out_of_range_returns_value_error_without_evaluating_choices() {
         let origin = CellCoord::new(0, 0);
         // Index 3 is out of range; the choice expressions should not be evaluated.
