@@ -254,6 +254,66 @@ fn project_normalized_data_ignores_workspace_section_from_project_stream() {
 }
 
 #[test]
+fn project_normalized_data_missing_vba_dir_stream() {
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"Name=\"VBAProject\"\r\n")
+            .expect("write PROJECT");
+    }
+
+    let vba_bin = ole.into_inner().into_inner();
+    let err = project_normalized_data(&vba_bin).expect_err("expected MissingStream");
+    match err {
+        ParseError::MissingStream("VBA/dir") => {}
+        other => panic!("expected MissingStream(\"VBA/dir\"), got {other:?}"),
+    }
+}
+
+#[test]
+fn project_normalized_data_dir_truncated_record_header() {
+    // One valid record followed by <6 leftover bytes so the next record header is truncated.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        // PROJECTSYSKIND
+        push_record(&mut out, 0x0001, &1u32.to_le_bytes());
+        out.extend_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0xEE]); // 5 bytes (truncated header)
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let err = project_normalized_data(&vba_bin).expect_err("expected dir parse error");
+    match err {
+        ParseError::Dir(DirParseError::Truncated) => {}
+        other => panic!("expected Dir(Truncated), got {other:?}"),
+    }
+}
+
+#[test]
+fn project_normalized_data_dir_bad_record_length_beyond_buffer() {
+    // Header claims `len=10`, but only 1 payload byte is present.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        out.extend_from_slice(&0x0001u16.to_le_bytes()); // PROJECTSYSKIND
+        out.extend_from_slice(&10u32.to_le_bytes());
+        out.extend_from_slice(b"X"); // insufficient payload
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let err = project_normalized_data(&vba_bin).expect_err("expected dir parse error");
+    match err {
+        ParseError::Dir(DirParseError::BadRecordLength { id, len }) => {
+            assert_eq!(id, 0x0001);
+            assert_eq!(len, 10);
+        }
+        other => panic!("expected Dir(BadRecordLength), got {other:?}"),
+    }
+}
+
+#[test]
 fn project_normalized_data_v3_missing_vba_dir_stream() {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
