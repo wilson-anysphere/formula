@@ -1683,6 +1683,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       typeof queuedInvoke === "function" || typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
 
     const zoomDisabled = !app.supportsZoom();
+    const outlineDisabled = app.getGridMode() === "shared";
     const disabledById = {
       ...(isEditing
         ? {
@@ -1735,6 +1736,16 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "view.zoom.zoom": zoomDisabled,
       "view.zoom.zoom100": zoomDisabled,
       "view.zoom.zoomToSelection": zoomDisabled,
+      ...(outlineDisabled
+        ? {
+            // Shared-grid mode does not support outline groups / hidden rows/cols yet.
+            "data.outline.group": true,
+            "data.outline.ungroup": true,
+            "data.outline.subtotal": true,
+            "data.outline.showDetail": true,
+            "data.outline.hideDetail": true,
+          }
+        : null),
     };
 
     setRibbonUiState({
