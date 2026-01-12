@@ -154,6 +154,60 @@ test("clipboard provider: rich MIME handling", async (t) => {
     );
   });
 
+  await t.test("web read falls back to readText when rich read throws", async () => {
+    await withGlobals(
+      {
+        __TAURI__: undefined,
+        navigator: {
+          clipboard: {
+            async read() {
+              throw new Error("permission denied");
+            },
+            async readText() {
+              return "fallback text";
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.deepEqual(content, { text: "fallback text" });
+      }
+    );
+  });
+
+  await t.test("web write falls back to writeText when rich write throws", async () => {
+    /** @type {string[]} */
+    const writeTextCalls = [];
+
+    class MockClipboardItem {
+      constructor() {}
+    }
+
+    await withGlobals(
+      {
+        __TAURI__: undefined,
+        ClipboardItem: MockClipboardItem,
+        navigator: {
+          clipboard: {
+            async write() {
+              throw new Error("write not allowed");
+            },
+            async writeText(text) {
+              writeTextCalls.push(text);
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: "plain" });
+        assert.deepEqual(writeTextCalls, ["plain"]);
+      }
+    );
+  });
+
   await t.test("tauri provider merges invoke('read_clipboard') results without clobbering web fields", async () => {
     await withGlobals(
       {
