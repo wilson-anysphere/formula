@@ -125,6 +125,25 @@ fn price_supports_zero_yield() {
 }
 
 #[test]
+fn price_scales_coupon_payment_by_redemption() {
+    // With settlement on a coupon date and yld=0, PRICE reduces to redemption + coupon_payment
+    // (clean == dirty, since accrued interest A=0). Excel defines coupon_payment as
+    // redemption*rate/frequency.
+    let system = ExcelDateSystem::EXCEL_1900;
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2021, 1, 1), system).unwrap(); // next semiannual coupon date
+
+    let rate = 0.10;
+    let yld = 0.0;
+    let redemption = 105.0;
+    let frequency = 2;
+
+    let expected = redemption + redemption * rate / (frequency as f64);
+    let actual = price(settlement, maturity, rate, yld, redemption, frequency, 0, system).unwrap();
+    assert_close(actual, expected, 1e-12);
+}
+
+#[test]
 fn price_basis_2_and_3_use_fixed_coupon_period_length() {
     // Construct a zero-coupon bond so the price depends only on the time-to-maturity exponent.
     // For basis 2/3 Excel uses a fixed coupon-period length E (360/freq or 365/freq), while DSC

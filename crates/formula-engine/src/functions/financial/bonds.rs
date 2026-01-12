@@ -233,7 +233,9 @@ pub fn price(
     }
 
     let freq = frequency as f64;
-    let coupon_payment = 100.0 * rate / freq;
+    // Excel models coupon payments as a fraction of the redemption/face value.
+    // This matches the conventions used by the odd-coupon bond functions (ODDF*/ODDL*).
+    let coupon_payment = redemption * rate / freq;
 
     let schedule = coupon_schedule(settlement, maturity, frequency, basis, system)?;
     let (dirty, _deriv_sum, _g) =
@@ -281,7 +283,7 @@ pub fn yield_rate(
     }
 
     let freq = frequency as f64;
-    let coupon_payment = 100.0 * rate / freq;
+    let coupon_payment = redemption * rate / freq;
 
     let schedule = coupon_schedule(settlement, maturity, frequency, basis, system)?;
 
