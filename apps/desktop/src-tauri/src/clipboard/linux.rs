@@ -95,11 +95,12 @@ mod gtk_backend {
             let _ = tx.send(res);
         });
 
-        rx.recv().map_err(|_| {
-            ClipboardError::OperationFailed(
-                "failed to receive result from GTK main thread".to_string(),
-            )
-        })?
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .map_err(|_| {
+                ClipboardError::OperationFailed(
+                    "timed out waiting for GTK main thread clipboard operation".to_string(),
+                )
+            })?
     }
 
     fn ensure_gtk() -> Result<(), ClipboardError> {
