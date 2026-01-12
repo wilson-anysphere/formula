@@ -195,3 +195,75 @@ fn print_settings_update_existing_defined_names_preserves_prefix(
 
     Ok(())
 }
+
+#[test]
+fn print_settings_inserts_into_self_closing_defined_names() -> Result<(), Box<dyn std::error::Error>>
+{
+    // Excel sometimes writes an empty `<definedNames/>` element instead of omitting it. When we need
+    // to add print settings, the writer must *expand* the self-closing tag rather than inserting a
+    // second `<definedNames>` block (the schema only allows one).
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:sheets>
+    <x:sheet name="Sheet1" sheetId="1" rel:id="rId1"/>
+  </x:sheets>
+  <x:definedNames/>
+</x:workbook>"#;
+
+    let original = build_prefixed_workbook_xlsx(workbook_xml);
+    let settings = read_workbook_print_settings(&original)?;
+    assert_eq!(settings.sheets.len(), 1);
+    assert_eq!(settings.sheets[0].print_area, None);
+
+    let mut updated_settings = settings.clone();
+    updated_settings.sheets[0].print_area = Some(vec![CellRange {
+        start_row: 1,
+        end_row: 1,
+        start_col: 1,
+        end_col: 1,
+    }]);
+
+    let rewritten = write_workbook_print_settings(&original, &updated_settings)?;
+
+    let reread = read_workbook_print_settings(&rewritten)?;
+    assert_eq!(
+        reread.sheets[0].print_area.as_deref(),
+        Some(
+            &[CellRange {
+                start_row: 1,
+                end_row: 1,
+                start_col: 1,
+                end_col: 1
+            }][..]
+        )
+    );
+
+    let mut zip = zip::ZipArchive::new(Cursor::new(&rewritten))?;
+    let mut workbook_file = zip.by_name("xl/workbook.xml")?;
+    let mut rewritten_workbook_xml = String::new();
+    workbook_file.read_to_string(&mut rewritten_workbook_xml)?;
+
+    let doc = roxmltree::Document::parse(&rewritten_workbook_xml)?;
+    let defined_names_count = doc
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "definedNames")
+        .count();
+    assert_eq!(
+        defined_names_count, 1,
+        "expected exactly one <definedNames> element, got {defined_names_count} in:\n{rewritten_workbook_xml}"
+    );
+
+    assert!(
+        rewritten_workbook_xml.contains("<x:definedNames")
+            && rewritten_workbook_xml.contains("<x:definedName"),
+        "expected prefixed definedNames/definedName, got:\n{rewritten_workbook_xml}"
+    );
+    assert!(
+        !rewritten_workbook_xml.contains("<definedNames")
+            && !rewritten_workbook_xml.contains("<definedName"),
+        "should not introduce unprefixed definedNames/definedName, got:\n{rewritten_workbook_xml}"
+    );
+
+    Ok(())
+}

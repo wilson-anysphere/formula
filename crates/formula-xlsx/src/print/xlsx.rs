@@ -290,12 +290,20 @@ fn parse_workbook_rels(rels_xml: &[u8]) -> Result<HashMap<String, String>, Print
     let mut map = HashMap::new();
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) if e.local_name().as_ref().eq_ignore_ascii_case(b"Relationship") => {
+            Event::Start(e)
+                if e.local_name()
+                    .as_ref()
+                    .eq_ignore_ascii_case(b"Relationship") =>
+            {
                 if let Some((id, target)) = parse_relationship(&e)? {
                     map.insert(id, target);
                 }
             }
-            Event::Empty(e) if e.local_name().as_ref().eq_ignore_ascii_case(b"Relationship") => {
+            Event::Empty(e)
+                if e.local_name()
+                    .as_ref()
+                    .eq_ignore_ascii_case(b"Relationship") =>
+            {
                 if let Some((id, target)) = parse_relationship(&e)? {
                     map.insert(id, target);
                 }
@@ -366,12 +374,16 @@ fn parse_worksheet_print_settings(
             Event::End(e) if e.local_name().as_ref() == b"rowBreaks" => in_row_breaks = false,
             Event::Start(e) if e.local_name().as_ref() == b"colBreaks" => in_col_breaks = true,
             Event::End(e) if e.local_name().as_ref() == b"colBreaks" => in_col_breaks = false,
-            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"brk" && in_row_breaks => {
+            Event::Start(e) | Event::Empty(e)
+                if e.local_name().as_ref() == b"brk" && in_row_breaks =>
+            {
                 if let Some(id) = parse_break_id(&e)? {
                     manual_breaks.row_breaks_after.insert(id);
                 }
             }
-            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"brk" && in_col_breaks => {
+            Event::Start(e) | Event::Empty(e)
+                if e.local_name().as_ref() == b"brk" && in_col_breaks =>
+            {
                 if let Some(id) = parse_break_id(&e)? {
                     manual_breaks.col_breaks_after.insert(id);
                 }
@@ -541,6 +553,33 @@ fn update_workbook_xml(
                 writer.write_event(event)?;
             }
 
+            Event::Empty(ref e) if e.local_name().as_ref() == b"definedNames" => {
+                // Some producers (including Excel) serialize an empty `<definedNames/>` element
+                // instead of omitting it entirely. If we need to insert new defined names, expand
+                // the empty element rather than inserting a second `<definedNames>` block.
+                seen_defined_names = true;
+
+                if edits.values().any(|e| matches!(e, DefinedNameEdit::Set(_))) {
+                    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                    for ((name, local_sheet_id), edit) in edits {
+                        if let DefinedNameEdit::Set(value) = edit {
+                            let defined_name_tag =
+                                crate::xml::prefixed_tag(workbook_prefix.as_deref(), "definedName");
+                            write_defined_name(
+                                &mut writer,
+                                defined_name_tag.as_str(),
+                                name,
+                                *local_sheet_id,
+                                value,
+                            )?;
+                        }
+                    }
+                    writer.write_event(Event::End(BytesEnd::new(tag.as_str())))?;
+                } else {
+                    writer.write_event(event)?;
+                }
+            }
             Event::Start(ref e) if e.local_name().as_ref() == b"definedNames" => {
                 in_defined_names = true;
                 seen_defined_names = true;
@@ -555,14 +594,22 @@ fn update_workbook_xml(
                         if let DefinedNameEdit::Set(value) = edit {
                             let tag =
                                 crate::xml::prefixed_tag(workbook_prefix.as_deref(), "definedName");
-                            write_defined_name(&mut writer, tag.as_str(), name, *local_sheet_id, value)?;
+                            write_defined_name(
+                                &mut writer,
+                                tag.as_str(),
+                                name,
+                                *local_sheet_id,
+                                value,
+                            )?;
                         }
                     }
                 }
                 in_defined_names = false;
                 writer.write_event(event)?;
             }
-            Event::Start(ref e) if in_defined_names && e.local_name().as_ref() == b"definedName" => {
+            Event::Start(ref e)
+                if in_defined_names && e.local_name().as_ref() == b"definedName" =>
+            {
                 let (name, local_sheet_id) = parse_defined_name_key(e)?;
                 if let (Some(name), Some(local_sheet_id)) = (name, local_sheet_id) {
                     let key = (name.clone(), local_sheet_id);
@@ -587,7 +634,35 @@ fn update_workbook_xml(
                 }
                 writer.write_event(event)?;
             }
-            Event::End(ref e) if skipping_defined_name && e.local_name().as_ref() == b"definedName" => {
+            Event::Empty(ref e)
+                if in_defined_names && e.local_name().as_ref() == b"definedName" =>
+            {
+                let (name, local_sheet_id) = parse_defined_name_key(e)?;
+                if let (Some(name), Some(local_sheet_id)) = (name, local_sheet_id) {
+                    let key = (name.clone(), local_sheet_id);
+                    if let Some(edit) = edits.get(&key) {
+                        applied.insert(key);
+                        match edit {
+                            DefinedNameEdit::Set(value) => {
+                                // Expand the self-closing tag to allow inserting text content.
+                                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                                writer.write_event(Event::Start(e.to_owned()))?;
+                                writer.write_event(Event::Text(BytesText::new(value)))?;
+                                writer.write_event(Event::End(BytesEnd::new(tag.as_str())))?;
+                            }
+                            DefinedNameEdit::Remove => {
+                                // Skip.
+                            }
+                        }
+                        buf.clear();
+                        continue;
+                    }
+                }
+                writer.write_event(event)?;
+            }
+            Event::End(ref e)
+                if skipping_defined_name && e.local_name().as_ref() == b"definedName" =>
+            {
                 if let Some(key) = current_defined_key.take() {
                     if matches!(edits.get(&key), Some(DefinedNameEdit::Set(_))) {
                         writer.write_event(Event::End(e.to_owned()))?;
@@ -608,7 +683,13 @@ fn update_workbook_xml(
                 writer.write_event(Event::Start(BytesStart::new(defined_names_tag.as_str())))?;
                 for ((name, local_sheet_id), edit) in edits {
                     if let DefinedNameEdit::Set(value) = edit {
-                        write_defined_name(&mut writer, defined_name_tag.as_str(), name, *local_sheet_id, value)?;
+                        write_defined_name(
+                            &mut writer,
+                            defined_name_tag.as_str(),
+                            name,
+                            *local_sheet_id,
+                            value,
+                        )?;
                     }
                 }
                 writer.write_event(Event::End(BytesEnd::new(defined_names_tag.as_str())))?;
@@ -739,14 +820,20 @@ fn update_worksheet_xml(
             Event::Start(ref e) if e.local_name().as_ref() == b"pageMargins" => {
                 seen_page_margins = true;
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                writer.write_event(build_page_margins_event(tag.as_str(), &settings.page_setup.margins)?)?;
+                writer.write_event(build_page_margins_event(
+                    tag.as_str(),
+                    &settings.page_setup.margins,
+                )?)?;
                 skip_tag = Some(b"pageMargins");
                 skip_depth = 0;
             }
             Event::Empty(ref e) if e.local_name().as_ref() == b"pageMargins" => {
                 seen_page_margins = true;
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                writer.write_event(build_page_margins_event(tag.as_str(), &settings.page_setup.margins)?)?;
+                writer.write_event(build_page_margins_event(
+                    tag.as_str(),
+                    &settings.page_setup.margins,
+                )?)?;
             }
             Event::Start(ref e) if e.local_name().as_ref() == b"pageSetup" => {
                 seen_page_setup = true;
@@ -818,18 +905,23 @@ fn update_worksheet_xml(
             }
             Event::End(ref e) if e.local_name().as_ref() == b"worksheet" => {
                 if !seen_sheet_pr && settings.page_setup.scaling.is_fit_to() {
-                    let sheet_pr_tag = crate::xml::prefixed_tag(worksheet_prefix.as_deref(), "sheetPr");
+                    let sheet_pr_tag =
+                        crate::xml::prefixed_tag(worksheet_prefix.as_deref(), "sheetPr");
                     writer.write_event(Event::Start(BytesStart::new(sheet_pr_tag.as_str())))?;
                     write_page_setup_pr(&mut writer, worksheet_prefix.as_deref(), true)?;
                     writer.write_event(Event::End(BytesEnd::new(sheet_pr_tag.as_str())))?;
                 }
                 if !seen_page_margins {
                     let tag = crate::xml::prefixed_tag(worksheet_prefix.as_deref(), "pageMargins");
-                    writer.write_event(build_page_margins_event(tag.as_str(), &settings.page_setup.margins)?)?;
+                    writer.write_event(build_page_margins_event(
+                        tag.as_str(),
+                        &settings.page_setup.margins,
+                    )?)?;
                 }
                 if !seen_page_setup {
                     let tag = crate::xml::prefixed_tag(worksheet_prefix.as_deref(), "pageSetup");
-                    writer.write_event(build_page_setup_event(tag.as_str(), &settings.page_setup)?)?;
+                    writer
+                        .write_event(build_page_setup_event(tag.as_str(), &settings.page_setup)?)?;
                 }
                 if !seen_row_breaks && !settings.manual_page_breaks.row_breaks_after.is_empty() {
                     write_row_breaks(
@@ -874,7 +966,9 @@ fn update_page_setup_pr_event(
     fit_to_page: bool,
 ) -> Result<Event<'static>, PrintError> {
     let tag = match event {
-        Event::Start(e) | Event::Empty(e) => String::from_utf8_lossy(e.name().as_ref()).into_owned(),
+        Event::Start(e) | Event::Empty(e) => {
+            String::from_utf8_lossy(e.name().as_ref()).into_owned()
+        }
         _ => unreachable!(),
     };
     let mut start = BytesStart::new(tag.as_str()).into_owned();
@@ -917,7 +1011,10 @@ fn write_page_setup_pr(
     Ok(())
 }
 
-fn build_page_margins_event(tag: &str, margins: &PageMargins) -> Result<Event<'static>, PrintError> {
+fn build_page_margins_event(
+    tag: &str,
+    margins: &PageMargins,
+) -> Result<Event<'static>, PrintError> {
     let left = margins.left.to_string();
     let right = margins.right.to_string();
     let top = margins.top.to_string();
