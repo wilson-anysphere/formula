@@ -1965,11 +1965,11 @@ if (
     };
 
     extensionSpreadsheetApi.openWorkbook = async (path: string) => {
-      await openWorkbookFromPath(String(path));
+      await openWorkbookFromPath(String(path), { notifyExtensions: false });
     };
 
     extensionSpreadsheetApi.createWorkbook = async () => {
-      await handleNewWorkbook();
+      await handleNewWorkbook({ notifyExtensions: false });
     };
 
     extensionSpreadsheetApi.saveWorkbook = async () => {
@@ -1981,7 +1981,7 @@ if (
     };
 
     extensionSpreadsheetApi.closeWorkbook = async () => {
-      await handleNewWorkbook();
+      await handleNewWorkbook({ notifyExtensions: false });
     };
   }
 
@@ -5014,7 +5014,10 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   app.refresh();
 }
 
-async function openWorkbookFromPath(path: string): Promise<void> {
+async function openWorkbookFromPath(
+  path: string,
+  options: { notifyExtensions?: boolean } = {},
+): Promise<void> {
   if (!tauriBackend) return;
   if (typeof path !== "string" || path.trim() === "") return;
   const ok = await confirmDiscardDirtyState("open another workbook");
@@ -5049,10 +5052,12 @@ async function openWorkbookFromPath(path: string): Promise<void> {
 
     activeWorkbook = await tauriBackend.openWorkbook(path);
     await loadWorkbookIntoDocument(activeWorkbook);
-    try {
-      extensionHostManagerForE2e?.host.openWorkbook(activeWorkbook.path ?? activeWorkbook.origin_path ?? path);
-    } catch {
-      // Ignore extension host errors; workbook open should still succeed.
+    if (options.notifyExtensions !== false) {
+      try {
+        extensionHostManagerForE2e?.host.openWorkbook(activeWorkbook.path ?? activeWorkbook.origin_path ?? path);
+      } catch {
+        // Ignore extension host errors; workbook open should still succeed.
+      }
     }
     activePanelWorkbookId = activeWorkbook.path ?? activeWorkbook.origin_path ?? path;
     syncTitlebar();
@@ -5193,7 +5198,7 @@ async function handleSaveAsPath(
   rerenderLayout?.();
 }
 
-async function handleNewWorkbook(): Promise<void> {
+async function handleNewWorkbook(options: { notifyExtensions?: boolean } = {}): Promise<void> {
   if (!tauriBackend) return;
   const ok = await confirmDiscardDirtyState("create a new workbook");
   if (!ok) return;
@@ -5226,10 +5231,12 @@ async function handleNewWorkbook(): Promise<void> {
 
     activeWorkbook = await tauriBackend.newWorkbook();
     await loadWorkbookIntoDocument(activeWorkbook);
-    try {
-      extensionHostManagerForE2e?.host.openWorkbook(activeWorkbook.path ?? activeWorkbook.origin_path);
-    } catch {
-      // Ignore extension host errors; new workbook should still succeed.
+    if (options.notifyExtensions !== false) {
+      try {
+        extensionHostManagerForE2e?.host.openWorkbook(activeWorkbook.path ?? activeWorkbook.origin_path);
+      } catch {
+        // Ignore extension host errors; new workbook should still succeed.
+      }
     }
     activePanelWorkbookId = nextPanelWorkbookId;
     syncTitlebar();
