@@ -85,9 +85,16 @@ if (-not ($pathEntries -contains $cargoBinDir)) {
 }
 
 # Concurrency defaults: keep Rust builds stable on high-core-count multi-agent hosts.
-$jobsRaw = if ($env:FORMULA_CARGO_JOBS) { $env:FORMULA_CARGO_JOBS } elseif ($env:CARGO_BUILD_JOBS) { $env:CARGO_BUILD_JOBS } else { "4" }
+#
+# Prefer explicit overrides, but default to a conservative job count when unset. On very
+# high core-count hosts, linking (lld) can spawn many threads per link step; combining that
+# with Cargo-level parallelism can exceed sandbox process/thread limits and cause flaky
+# "Resource temporarily unavailable" failures.
+$cpuCount = [Environment]::ProcessorCount
+$defaultJobsInt = if ($cpuCount -ge 64) { 2 } else { 4 }
+$jobsRaw = if ($env:FORMULA_CARGO_JOBS) { $env:FORMULA_CARGO_JOBS } elseif ($env:CARGO_BUILD_JOBS) { $env:CARGO_BUILD_JOBS } else { $defaultJobsInt.ToString() }
 $jobsInt = 0
-if (-not [int]::TryParse($jobsRaw, [ref]$jobsInt) -or $jobsInt -lt 1) { $jobsInt = 4 }
+if (-not [int]::TryParse($jobsRaw, [ref]$jobsInt) -or $jobsInt -lt 1) { $jobsInt = $defaultJobsInt }
 $jobs = $jobsInt.ToString()
 
 $env:CARGO_BUILD_JOBS = $jobs
