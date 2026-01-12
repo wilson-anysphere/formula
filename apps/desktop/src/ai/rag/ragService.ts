@@ -275,7 +275,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
 
     const run = (async () => {
       throwIfAborted(signal);
-      const rag = await getRag();
+      const rag = await awaitWithAbort(getRag(), signal);
       const versionToIndex = currentVersion();
       const workbook = workbookFromSpreadsheetApi({
         spreadsheet,
@@ -290,11 +290,13 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
     })();
 
     indexPromise = run;
-    try {
-      await run;
-    } finally {
-      if (indexPromise === run) indexPromise = null;
-    }
+    run
+      .finally(() => {
+        if (indexPromise === run) indexPromise = null;
+      })
+      .catch(() => {});
+
+    await awaitWithAbort(run, signal);
   }
 
   async function getContextManager(): Promise<ContextManager> {
@@ -320,7 +322,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
       );
     }
 
-    const rag = await getRag();
+    const rag = await awaitWithAbort(getRag(), signal);
 
     const hasDlp = Boolean(params.dlp);
 

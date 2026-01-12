@@ -156,15 +156,16 @@ export async function indexWorkbook(params) {
   throwIfAborted(signal);
 
   if (toUpsert.length) {
-    await awaitWithAbort(
-      vectorStore.upsert(
-        toUpsert.map((r, i) => ({
-          id: r.id,
-          vector: vectors[i],
-          metadata: r.metadata,
-        }))
-      ),
-      signal
+    // Avoid aborting while awaiting persistence. Upserts are stateful; if we were to
+    // reject early here, callers could start a new indexing run while the underlying
+    // store is still writing.
+    throwIfAborted(signal);
+    await vectorStore.upsert(
+      toUpsert.map((r, i) => ({
+        id: r.id,
+        vector: vectors[i],
+        metadata: r.metadata,
+      }))
     );
   }
   throwIfAborted(signal);
@@ -173,7 +174,13 @@ export async function indexWorkbook(params) {
   const staleIds = existingForWorkbook
     .map((r) => r.id)
     .filter((id) => !currentIds.has(id));
-  if (staleIds.length) await awaitWithAbort(vectorStore.delete(staleIds), signal);
+  if (staleIds.length) {
+    // Avoid aborting while awaiting persistence. Deletes are stateful; if we were to
+    // reject early here, callers could start a new indexing run while the underlying
+    // store is still writing.
+    throwIfAborted(signal);
+    await vectorStore.delete(staleIds);
+  }
   throwIfAborted(signal);
 
   return {

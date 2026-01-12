@@ -178,4 +178,46 @@ describe("createDesktopRagService (embedder config)", () => {
       await service.dispose();
     }
   });
+
+  it("aborts while awaiting initial RAG initialization", async () => {
+    const controller = new DocumentController();
+    const spreadsheet = new DocumentControllerSpreadsheetApi(controller);
+
+    let resolveRag: (value: any) => void = () => {};
+    const ragDeferred = new Promise<any>((resolve) => {
+      resolveRag = resolve;
+    });
+
+    const service = createDesktopRagService({
+      documentController: controller,
+      workbookId: "wb_rag_init_abort",
+      createRag: async () => ragDeferred,
+    });
+
+    const abortController = new AbortController();
+
+    const promise = service.buildWorkbookContextFromSpreadsheetApi({
+      spreadsheet,
+      workbookId: "wb_rag_init_abort",
+      query: "hello",
+      signal: abortController.signal,
+    });
+
+    // Let the build reach the awaited getRag() call.
+    await Promise.resolve();
+    abortController.abort();
+
+    await expect(promise).rejects.toMatchObject({ name: "AbortError" });
+
+    // Resolve the deferred rag so dispose doesn't hang.
+    resolveRag({
+      vectorStore: { close: async () => {} },
+      contextManager: {
+        buildWorkbookContextFromSpreadsheetApi: async () => ({ promptContext: "", retrieved: [], indexStats: null }),
+      },
+      indexWorkbook: async () => ({ indexed: 0 }),
+    });
+
+    await service.dispose();
+  });
 });
