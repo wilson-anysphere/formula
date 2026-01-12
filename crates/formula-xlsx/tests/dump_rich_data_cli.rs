@@ -11,6 +11,7 @@ fn build_synthetic_rich_data_xlsx_impl(
     include_rich_value_part: bool,
     include_metadata: bool,
     include_rd_rich_value_parts: bool,
+    include_hyperlink: bool,
 ) -> Vec<u8> {
     let rich_value_override = if include_rich_value_part {
         r#"  <Override PartName="/xl/richData/richValue.xml" ContentType="application/vnd.ms-excel.richvalue+xml"/>
@@ -84,14 +85,29 @@ fn build_synthetic_rich_data_xlsx_impl(
         rd_rich_value_rels = rd_rich_value_rels
     );
 
-    let sheet1_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    let sheet1_xml = if include_hyperlink {
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1">
+      <c r="A1" vm="1"><v>0</v></c>
+    </row>
+  </sheetData>
+  <hyperlinks>
+    <hyperlink ref="A1" r:id="rId1"/>
+  </hyperlinks>
+</worksheet>"#
+    } else {
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheetData>
     <row r="1">
       <c r="A1" vm="1"><v>0</v></c>
     </row>
   </sheetData>
-</worksheet>"#;
+</worksheet>"#
+    };
 
     // vm=1 (1-based) -> futureMetadata bk 0 -> rv index 0.
     let metadata_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -184,6 +200,16 @@ fn build_synthetic_rich_data_xlsx_impl(
     zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
     zip.write_all(sheet1_xml.as_bytes()).unwrap();
 
+    if include_hyperlink {
+        let sheet1_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com" TargetMode="External"/>
+</Relationships>"#;
+        zip.start_file("xl/worksheets/_rels/sheet1.xml.rels", options)
+            .unwrap();
+        zip.write_all(sheet1_rels.as_bytes()).unwrap();
+    }
+
     if include_metadata {
         zip.start_file("xl/metadata.xml", options).unwrap();
         zip.write_all(metadata_xml.as_bytes()).unwrap();
@@ -220,19 +246,23 @@ fn build_synthetic_rich_data_xlsx_impl(
 }
 
 fn build_synthetic_rich_data_xlsx() -> Vec<u8> {
-    build_synthetic_rich_data_xlsx_impl(true, true, false)
+    build_synthetic_rich_data_xlsx_impl(true, true, false, false)
 }
 
 fn build_synthetic_rich_data_xlsx_without_rich_value_part() -> Vec<u8> {
-    build_synthetic_rich_data_xlsx_impl(false, true, false)
+    build_synthetic_rich_data_xlsx_impl(false, true, false, false)
 }
 
 fn build_synthetic_rich_data_xlsx_without_metadata() -> Vec<u8> {
-    build_synthetic_rich_data_xlsx_impl(false, false, false)
+    build_synthetic_rich_data_xlsx_impl(false, false, false, false)
 }
 
 fn build_synthetic_rich_data_xlsx_with_rd_rich_value_parts() -> Vec<u8> {
-    build_synthetic_rich_data_xlsx_impl(false, true, true)
+    build_synthetic_rich_data_xlsx_impl(false, true, true, false)
+}
+
+fn build_synthetic_rich_data_xlsx_with_hyperlink() -> Vec<u8> {
+    build_synthetic_rich_data_xlsx_impl(true, true, false, true)
 }
 
 #[test]
@@ -385,6 +415,52 @@ fn dump_rich_data_cli_extracts_cell_images_and_writes_manifest(
     assert_eq!(cols[5], "0");
     assert_eq!(cols[6], "-");
     assert_eq!(cols[7], "-");
+
+    Ok(())
+}
+
+#[test]
+fn dump_rich_data_cli_extracts_cell_images_with_hyperlink(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_synthetic_rich_data_xlsx_with_hyperlink();
+    let dir = tempdir()?;
+    let path = dir.path().join("fixture.xlsx");
+    std::fs::write(&path, bytes)?;
+
+    let out_dir = dir.path().join("out");
+
+    let bin = env!("CARGO_BIN_EXE_dump_rich_data");
+    let output = Command::new(bin)
+        .arg(&path)
+        .arg("--extract-cell-images-out")
+        .arg(&out_dir)
+        .output()?;
+    assert!(
+        output.status.success(),
+        "dump_rich_data failed: status={:?} stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let manifest_path = out_dir.join("manifest.tsv");
+    let manifest = std::fs::read_to_string(&manifest_path)?;
+    let mut lines = manifest.lines();
+
+    let header = lines.next().unwrap_or_default();
+    assert_eq!(
+        header,
+        "sheet\tcell\tbytes\tfile\timage_part\tcalc_origin\talt_text\thyperlink"
+    );
+
+    let row = lines.next().unwrap_or_default();
+    let cols: Vec<&str> = row.split('\t').collect();
+    assert_eq!(cols.len(), 8, "unexpected manifest row: {row}");
+
+    assert_eq!(cols[0], "Sheet1");
+    assert_eq!(cols[1], "A1");
+    assert_eq!(cols[3], "Sheet1_A1.png");
+    assert_eq!(cols[4], "xl/media/image1.png");
+    assert_eq!(cols[7], "https://example.com");
 
     Ok(())
 }
