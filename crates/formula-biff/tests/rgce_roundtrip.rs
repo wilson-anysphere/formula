@@ -108,3 +108,21 @@ fn rgce_roundtrip_discount_securities_and_tbill_functions() {
         assert_eq!(normalize(formula), normalize(&decoded));
     }
 }
+
+#[test]
+fn rgce_roundtrip_modern_error_literals() {
+    for (code, lit) in [
+        (0x2C, "#SPILL!"),
+        (0x2D, "#CALC!"),
+        (0x2E, "#FIELD!"),
+        (0x2F, "#CONNECT!"),
+        (0x30, "#BLOCKED!"),
+        (0x31, "#UNKNOWN!"),
+    ] {
+        let rgce = encode_rgce(lit).expect("encode");
+        assert_eq!(rgce, vec![0x1C, code], "encode {lit}");
+
+        let decoded = decode_rgce(&rgce).expect("decode");
+        assert_eq!(decoded, lit, "decode code={code:#04x}");
+    }
+}

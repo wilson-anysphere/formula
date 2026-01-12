@@ -140,6 +140,23 @@ fn decodes_ptgerr_known_code() {
 }
 
 #[test]
+fn decodes_ptgerr_modern_codes() {
+    for (code, lit) in [
+        (0x2C, "#SPILL!"),
+        (0x2D, "#CALC!"),
+        (0x2E, "#FIELD!"),
+        (0x2F, "#CONNECT!"),
+        (0x30, "#BLOCKED!"),
+        (0x31, "#UNKNOWN!"),
+    ] {
+        let rgce = [0x1C, code]; // PtgErr
+        let decoded = decode_formula_rgce(&rgce);
+        assert_eq!(decoded.text.as_deref(), Some(lit), "code={code:#04x}");
+        assert!(decoded.warnings.is_empty(), "code={code:#04x}");
+    }
+}
+
+#[test]
 fn decodes_ptgerr_unknown_code_without_aborting() {
     let rgce = [0x1C, 0xFF]; // PtgErr unknown/extended code
     let decoded = decode_formula_rgce(&rgce);

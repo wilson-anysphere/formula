@@ -1221,7 +1221,7 @@ fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Work
 mod tests {
     use super::xlsb_error_code_to_model_error;
     use super::xlsb_to_model_workbook;
-    use formula_model::{CellRef, DateSystem, ErrorValue};
+    use formula_model::{CellRef, CellValue, DateSystem, ErrorValue};
     use std::path::Path;
 
     #[test]
@@ -1254,6 +1254,112 @@ mod tests {
         let wb = crate::xlsb::XlsbWorkbook::open(fixture_path).expect("open xlsb fixture");
         let model = xlsb_to_model_workbook(&wb).expect("convert to model");
         assert_eq!(model.date_system, DateSystem::Excel1904);
+    }
+
+    #[test]
+    fn xlsb_to_model_maps_biff12_error_codes() {
+        // Patch an existing XLSB fixture in-place (at the worksheet record level) so we can test
+        // both value cells (`BrtCellBoolErr`) and cached formula results (`BrtFmlaError`).
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../formula-xlsb/tests/fixtures/simple.xlsb"
+        ));
+        let wb = crate::xlsb::XlsbWorkbook::open(fixture_path).expect("open xlsb fixture");
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let patched_path = dir.path().join("errors.xlsb");
+
+        let mut edits = Vec::new();
+        let base_row = 50u32;
+        for (i, (code, expected)) in [
+            (0x00, ErrorValue::Null),
+            (0x07, ErrorValue::Div0),
+            (0x0F, ErrorValue::Value),
+            (0x17, ErrorValue::Ref),
+            (0x1D, ErrorValue::Name),
+            (0x24, ErrorValue::Num),
+            (0x2A, ErrorValue::NA),
+            (0x2B, ErrorValue::GettingData),
+            (0x2C, ErrorValue::Spill),
+            (0x2D, ErrorValue::Calc),
+            (0x2E, ErrorValue::Field),
+            (0x2F, ErrorValue::Connect),
+            (0x30, ErrorValue::Blocked),
+            (0x31, ErrorValue::Unknown),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let row = base_row + i as u32;
+
+            // Plain error value.
+            edits.push(crate::xlsb::CellEdit {
+                row,
+                col: 0,
+                new_value: crate::xlsb::CellValue::Error(code),
+                new_formula: None,
+                new_rgcb: None,
+                shared_string_index: None,
+            });
+
+            // Formula that evaluates to the error literal as a constant (PtgErr).
+            edits.push(crate::xlsb::CellEdit {
+                row,
+                col: 1,
+                new_value: crate::xlsb::CellValue::Error(code),
+                new_formula: Some(vec![0x1C, code]),
+                new_rgcb: None,
+                shared_string_index: None,
+            });
+
+            // Validate after conversion.
+            let _ = expected;
+        }
+
+        wb.save_with_cell_edits(&patched_path, 0, &edits)
+            .expect("save patched xlsb");
+
+        let patched = crate::xlsb::XlsbWorkbook::open(&patched_path).expect("open patched xlsb");
+        let model = xlsb_to_model_workbook(&patched).expect("convert to model");
+        let sheet = model.sheet_by_name("Sheet1").expect("Sheet1 missing");
+
+        for (i, (_code, expected)) in [
+            (0x00, ErrorValue::Null),
+            (0x07, ErrorValue::Div0),
+            (0x0F, ErrorValue::Value),
+            (0x17, ErrorValue::Ref),
+            (0x1D, ErrorValue::Name),
+            (0x24, ErrorValue::Num),
+            (0x2A, ErrorValue::NA),
+            (0x2B, ErrorValue::GettingData),
+            (0x2C, ErrorValue::Spill),
+            (0x2D, ErrorValue::Calc),
+            (0x2E, ErrorValue::Field),
+            (0x2F, ErrorValue::Connect),
+            (0x30, ErrorValue::Blocked),
+            (0x31, ErrorValue::Unknown),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let row = base_row + i as u32;
+            assert_eq!(
+                sheet.value(CellRef::new(row, 0)),
+                CellValue::Error(expected),
+                "value cell row={row} expected={expected}"
+            );
+            assert_eq!(
+                sheet.value(CellRef::new(row, 1)),
+                CellValue::Error(expected),
+                "formula cached value row={row} expected={expected}"
+            );
+
+            // Formula text should also round-trip through decode (no leading '=').
+            let formula = sheet
+                .formula(CellRef::new(row, 1))
+                .expect("formula cell should have formula text");
+            assert_eq!(formula, expected.as_str());
+        }
     }
 
     #[test]
@@ -1291,6 +1397,12 @@ mod tests {
             (0x24, ErrorValue::Num),
             (0x2A, ErrorValue::NA),
             (0x2B, ErrorValue::GettingData),
+            (0x2C, ErrorValue::Spill),
+            (0x2D, ErrorValue::Calc),
+            (0x2E, ErrorValue::Field),
+            (0x2F, ErrorValue::Connect),
+            (0x30, ErrorValue::Blocked),
+            (0x31, ErrorValue::Unknown),
         ] {
             assert_eq!(
                 xlsb_error_code_to_model_error(code),

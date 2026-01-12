@@ -295,6 +295,12 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
                     0x24 => "#NUM!",
                     0x2A => "#N/A",
                     0x2B => "#GETTING_DATA",
+                    0x2C => "#SPILL!",
+                    0x2D => "#CALC!",
+                    0x2E => "#FIELD!",
+                    0x2F => "#CONNECT!",
+                    0x30 => "#BLOCKED!",
+                    0x31 => "#UNKNOWN!",
                     _ => return Err(DecodeRgceError::UnsupportedToken { ptg }),
                 };
                 stack.push(ExprFragment::new(text.to_string()));
@@ -746,6 +752,12 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                 "#NUM!" => 0x24,
                 "#N/A" => 0x2A,
                 "#GETTING_DATA" => 0x2B,
+                "#SPILL!" => 0x2C,
+                "#CALC!" => 0x2D,
+                "#FIELD!" => 0x2E,
+                "#CONNECT!" => 0x2F,
+                "#BLOCKED!" => 0x30,
+                "#UNKNOWN!" => 0x31,
                 _ => return Err(EncodeRgceError::InvalidErrorLiteral(raw.clone())),
             };
             out.push(0x1C); // PtgErr

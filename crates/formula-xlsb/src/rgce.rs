@@ -6,7 +6,7 @@
 //! The encoder is intentionally small-scope: it supports enough of Excel's formula language to
 //! round-trip common patterns while we build out full compatibility.
 
-use crate::errors::xlsb_error_literal;
+use crate::errors::{xlsb_error_code_from_literal, xlsb_error_literal};
 use crate::format::push_column_label;
 use crate::formula_text::escape_excel_string_literal;
 use crate::workbook_context::{NameScope, WorkbookContext};
@@ -1617,34 +1617,6 @@ fn escape_excel_string(value: &str) -> String {
     out
 }
 
-fn error_literal(code: u8) -> Option<&'static str> {
-    match code {
-        0x00 => Some("#NULL!"),
-        0x07 => Some("#DIV/0!"),
-        0x0F => Some("#VALUE!"),
-        0x17 => Some("#REF!"),
-        0x1D => Some("#NAME?"),
-        0x24 => Some("#NUM!"),
-        0x2A => Some("#N/A"),
-        0x2B => Some("#GETTING_DATA"),
-        _ => None,
-    }
-}
-
-fn error_code_from_literal(literal: &str) -> Option<u8> {
-    match literal.trim().to_ascii_uppercase().as_str() {
-        "#NULL!" => Some(0x00),
-        "#DIV/0!" => Some(0x07),
-        "#VALUE!" => Some(0x0F),
-        "#REF!" => Some(0x17),
-        "#NAME?" => Some(0x1D),
-        "#NUM!" => Some(0x24),
-        "#N/A" => Some(0x2A),
-        "#GETTING_DATA" => Some(0x2B),
-        _ => None,
-    }
-}
-
 fn decode_array_constant(
     rgcb: &[u8],
     pos: &mut usize,
@@ -1735,7 +1707,7 @@ fn decode_array_constant(
                     let code_offset = i;
                     let code = rgcb[i];
                     i += 1;
-                    match error_literal(code) {
+                    match xlsb_error_literal(code) {
                         Some(lit) => col_texts.push(lit.to_string()),
                         None => {
                             if let Some(warnings) = warnings.as_deref_mut() {
@@ -2092,11 +2064,12 @@ pub fn encode_rgce_with_context_ast_in_sheet(
 #[cfg(feature = "write")]
 mod encode_ast {
     use super::{
-        error_code_from_literal, ptg_with_class, ArrayConst, ArrayElem, CellCoord, EncodeError,
-        EncodedRgce, PtgClass, WorkbookContext, COL_INDEX_MASK, COL_RELATIVE_MASK, PTG_AREA,
-        PTG_AREA3D, PTG_FUNCVAR, PTG_NAME, PTG_NAMEX, PTG_REF, PTG_REF3D, PTG_SPILL, PTG_UMINUS,
-        PTG_UPLUS, ROW_RELATIVE_MASK,
+        ptg_with_class, ArrayConst, ArrayElem, CellCoord, EncodeError, EncodedRgce, PtgClass,
+        WorkbookContext, COL_INDEX_MASK, COL_RELATIVE_MASK, PTG_AREA, PTG_AREA3D, PTG_FUNCVAR,
+        PTG_NAME, PTG_NAMEX, PTG_REF, PTG_REF3D, PTG_SPILL, PTG_UMINUS, PTG_UPLUS,
+        ROW_RELATIVE_MASK,
     };
+    use crate::errors::xlsb_error_code_from_literal;
 
     use formula_engine as fe;
 
@@ -2210,7 +2183,7 @@ mod encode_ast {
                 rgce.push(u8::from(*b));
             }
             fe::Expr::Error(raw) => {
-                let code = error_code_from_literal(raw).ok_or_else(|| {
+                let code = xlsb_error_code_from_literal(raw).ok_or_else(|| {
                     EncodeError::Parse(format!("unsupported error literal: {raw}"))
                 })?;
                 rgce.push(PTG_ERR);
@@ -3257,7 +3230,7 @@ mod encode_ast {
             fe::Expr::String(s) => Ok(ArrayElem::Str(s.clone())),
             fe::Expr::Boolean(b) => Ok(ArrayElem::Bool(*b)),
             fe::Expr::Error(raw) => {
-                let code = error_code_from_literal(raw).ok_or_else(|| {
+                let code = xlsb_error_code_from_literal(raw).ok_or_else(|| {
                     EncodeError::Parse(format!("unsupported error literal: {raw}"))
                 })?;
                 Ok(ArrayElem::Error(code))
@@ -4022,7 +3995,7 @@ impl<'a> FormulaParser<'a> {
             self.next_char();
         }
         let raw = &self.input[start..self.pos];
-        error_code_from_literal(raw).ok_or_else(|| format!("unknown error literal: {raw}"))
+        xlsb_error_code_from_literal(raw).ok_or_else(|| format!("unknown error literal: {raw}"))
     }
 
     fn parse_ident_or_ref(&mut self) -> Result<Expr, String> {
