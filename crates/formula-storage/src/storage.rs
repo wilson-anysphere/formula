@@ -1609,35 +1609,40 @@ impl Storage {
 
     pub fn latest_change(&self, sheet_id: Uuid) -> Result<Option<ChangeLogEntry>> {
         let conn = self.conn.lock().expect("storage mutex poisoned");
-        let row = conn
-            .query_row(
-                r#"
-                SELECT id, sheet_id, user_id, operation, target, old_value, new_value
-                FROM change_log
-                WHERE sheet_id = ?1
-                ORDER BY id DESC
-                LIMIT 1
-                "#,
-                params![sheet_id.to_string()],
-                |r| {
-                    let sheet_id: String = r.get(1)?;
-                    let target_raw: Option<String> = r.get::<_, Option<String>>(4).ok().flatten();
-                    let old_value_raw: Option<String> = r.get::<_, Option<String>>(5).ok().flatten();
-                    let new_value_raw: Option<String> = r.get::<_, Option<String>>(6).ok().flatten();
-                    Ok(ChangeLogEntry {
-                        id: r.get(0)?,
-                        sheet_id: Uuid::parse_str(&sheet_id)
-                            .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                        user_id: r.get::<_, Option<String>>(2).ok().flatten(),
-                        operation: r.get::<_, String>(3).unwrap_or_default(),
-                        target: parse_optional_json_value(target_raw).unwrap_or(JsonValue::Null),
-                        old_value: parse_optional_json_value(old_value_raw).unwrap_or(JsonValue::Null),
-                        new_value: parse_optional_json_value(new_value_raw).unwrap_or(JsonValue::Null),
-                    })
-                },
-            )
-            .optional()?;
-        Ok(row)
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, sheet_id, user_id, operation, target, old_value, new_value
+            FROM change_log
+            WHERE sheet_id = ?1
+            ORDER BY id DESC
+            "#,
+        )?;
+        let mut rows = stmt.query(params![sheet_id.to_string()])?;
+        while let Some(row) = rows.next()? {
+            let Ok(id) = row.get::<_, i64>(0) else {
+                continue;
+            };
+            let Ok(sheet_id_raw) = row.get::<_, String>(1) else {
+                continue;
+            };
+            let Ok(sheet_id) = Uuid::parse_str(&sheet_id_raw).map_err(|_| rusqlite::Error::InvalidQuery)
+            else {
+                continue;
+            };
+            let target_raw: Option<String> = row.get::<_, Option<String>>(4).ok().flatten();
+            let old_value_raw: Option<String> = row.get::<_, Option<String>>(5).ok().flatten();
+            let new_value_raw: Option<String> = row.get::<_, Option<String>>(6).ok().flatten();
+            return Ok(Some(ChangeLogEntry {
+                id,
+                sheet_id,
+                user_id: row.get::<_, Option<String>>(2).ok().flatten(),
+                operation: row.get::<_, String>(3).unwrap_or_default(),
+                target: parse_optional_json_value(target_raw).unwrap_or(JsonValue::Null),
+                old_value: parse_optional_json_value(old_value_raw).unwrap_or(JsonValue::Null),
+                new_value: parse_optional_json_value(new_value_raw).unwrap_or(JsonValue::Null),
+            }));
+        }
+        Ok(None)
     }
 
     pub fn apply_cell_changes(&self, changes: &[CellChange]) -> Result<()> {
