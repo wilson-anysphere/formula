@@ -333,6 +333,7 @@ impl<'a> CompileCtx<'a> {
         self.compile_expr_inner(&args[last], allow_range);
         self.lexical_scopes.pop();
     }
+
     fn alloc_temp_local(&mut self, label: &'static str) -> u32 {
         self.alloc_local(Arc::from(label))
     }
