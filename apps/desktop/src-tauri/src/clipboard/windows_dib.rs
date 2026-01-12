@@ -1,8 +1,13 @@
-//! PNG <-> CF_DIBV5 conversion helpers.
+//! PNG <-> CF_DIB / CF_DIBV5 conversion helpers.
 //!
-//! CF_DIBV5 is a Windows clipboard format containing a `BITMAPV5HEADER` followed by pixel data.
+//! CF_DIB (BITMAPINFOHEADER) and CF_DIBV5 (BITMAPV5HEADER) are Windows clipboard formats containing a
+//! bitmap header followed by pixel data.
+//!
 //! For interoperability with apps that don't understand the registered "PNG" clipboard format
-//! (notably some Office apps), we write both formats.
+//! (notably some Office apps), we write both DIB flavors:
+//! - **CF_DIBV5**: top-down (negative height), BGRA, preserves alpha.
+//! - **CF_DIB**: bottom-up (positive height), 32bpp BI_RGB, forces opaque alpha for compatibility
+//!   with consumers that treat the 4th byte as padding (BGRX).
 //!
 //! This module is platform-neutral: it operates on bytes only and does not call Win32 APIs.
 
