@@ -5052,6 +5052,7 @@ export class SpreadsheetApp {
     if (this.handleShowFormulasShortcut(e)) return;
     if (this.handleAuditingShortcut(e)) return;
     if (this.handleClipboardShortcut(e)) return;
+    if (this.handleAutoSumShortcut(e)) return;
 
     // Editing
     if (e.key === "F2") {
@@ -5262,6 +5263,58 @@ export class SpreadsheetApp {
     this.renderSelection();
     this.updateStatus();
     if (didScroll) this.refresh("scroll");
+  }
+
+  private handleAutoSumShortcut(e: KeyboardEvent): boolean {
+    if (!e.altKey) return false;
+    if (e.code !== "Equal") return false;
+    // Avoid hijacking Ctrl/Cmd-modified shortcuts.
+    if (e.ctrlKey || e.metaKey) return false;
+
+    // Only trigger when not actively editing.
+    if (this.formulaBar?.isEditing() || this.formulaEditCell) return false;
+
+    e.preventDefault();
+    this.autoSumSelection();
+    return true;
+  }
+
+  private autoSumSelection(): void {
+    const range = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0];
+    if (!range) return;
+
+    const target = this.autoSumTargetCell(range);
+    if (!target) return;
+
+    const formula = `=SUM(${rangeToA1(range)})`;
+    this.document.setCellInput(this.sheetId, target, formula, { label: "AutoSum" });
+    this.activateCell({ row: target.row, col: target.col });
+    this.refresh();
+  }
+
+  private autoSumTargetCell(range: Range): CellCoord | null {
+    const inBounds = (cell: CellCoord): boolean =>
+      cell.row >= 0 && cell.col >= 0 && cell.row < this.limits.maxRows && cell.col < this.limits.maxCols;
+
+    const isSingleCol = range.startCol === range.endCol;
+    const isSingleRow = range.startRow === range.endRow;
+
+    if (isSingleCol) {
+      const below = { row: range.endRow + 1, col: range.startCol };
+      return inBounds(below) ? below : null;
+    }
+
+    if (isSingleRow) {
+      const right = { row: range.startRow, col: range.endCol + 1 };
+      return inBounds(right) ? right : null;
+    }
+
+    const diag = { row: range.endRow + 1, col: range.endCol + 1 };
+    if (inBounds(diag)) return diag;
+
+    // Fall back to a cell directly below the selected range.
+    const below = { row: range.endRow + 1, col: range.endCol };
+    return inBounds(below) ? below : null;
   }
 
   private handleClipboardShortcut(e: KeyboardEvent): boolean {
