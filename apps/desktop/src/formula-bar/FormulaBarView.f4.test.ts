@@ -32,6 +32,42 @@ describe("FormulaBarView F4 absolute reference toggle", () => {
     host.remove();
   });
 
+  it("cycles absolute modes correctly on repeated F4 presses", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=A1";
+    // Caret between A and 1.
+    view.textarea.setSelectionRange(2, 2);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
+    expect(view.textarea.value).toBe("=$A$1");
+    expect(view.textarea.selectionStart).toBe(4);
+    expect(view.textarea.selectionEnd).toBe(4);
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
+    expect(view.textarea.value).toBe("=A$1");
+    expect(view.textarea.selectionStart).toBe(3);
+    expect(view.textarea.selectionEnd).toBe(3);
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
+    expect(view.textarea.value).toBe("=$A1");
+    expect(view.textarea.selectionStart).toBe(3);
+    expect(view.textarea.selectionEnd).toBe(3);
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
+    expect(view.textarea.value).toBe("=A1");
+    expect(view.textarea.selectionStart).toBe(2);
+    expect(view.textarea.selectionEnd).toBe(2);
+
+    host.remove();
+  });
+
   it("does not toggle non-formula text", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
