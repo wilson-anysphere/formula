@@ -440,8 +440,8 @@ mod tests {
     <bk><rc t="2" v="1"/></bk>
     <!-- Wrong metadata type; should be ignored. -->
     <bk><rc t="1" v="0"/></bk>
-    <!-- Out-of-bounds v; should be ignored. -->
-    <bk><rc t="2" v="2"/></bk>
+    <!-- Out-of-bounds v (even considering 1-based `v` indexing); should be ignored. -->
+    <bk><rc t="2" v="3"/></bk>
   </valueMetadata>
 </metadata>
 "#;
@@ -483,8 +483,8 @@ mod tests {
     <bk><rc t="1" v="1"/></bk>
     <!-- Wrong metadata type; should be ignored. -->
     <bk><rc t="0" v="0"/></bk>
-    <!-- Out-of-bounds v; should be ignored. -->
-    <bk><rc t="1" v="2"/></bk>
+    <!-- Out-of-bounds v (even considering 1-based `v` indexing); should be ignored. -->
+    <bk><rc t="1" v="3"/></bk>
   </valueMetadata>
 </metadata>
 "#;
