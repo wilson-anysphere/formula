@@ -138,6 +138,8 @@ Network access is mediated at two layers:
 - **Marketplace:** `MarketplaceClient` prefers Rust IPC (`marketplace_search`, `marketplace_get_extension`,
   `marketplace_download_package`) when running under Tauri with an absolute `http(s)` base URL. In other contexts it
   falls back to `fetch(...)`.
+- Note: these Rust IPC commands (`network_fetch`, `marketplace_*`) also enforce **main-window + trusted app origin** checks
+  via `apps/desktop/src-tauri/src/ipc_origin.rs` (defense-in-depth).
 
 Rust IPC implementations live in `apps/desktop/src-tauri/src/commands.rs`.
 

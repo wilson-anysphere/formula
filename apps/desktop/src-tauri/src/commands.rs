@@ -4206,8 +4206,16 @@ fn apply_request_init(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn network_fetch(url: String, init: Option<JsonValue>) -> Result<NetworkFetchResult, String> {
+pub async fn network_fetch(
+    window: tauri::WebviewWindow,
+    url: String,
+    init: Option<JsonValue>,
+) -> Result<NetworkFetchResult, String> {
     use reqwest::Method;
+
+    ipc_origin::ensure_main_window(window.label(), "network access", ipc_origin::Verb::Is)?;
+    let origin_url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&origin_url, "network access", ipc_origin::Verb::Is)?;
 
     let parsed_url = reqwest::Url::parse(&url).map_err(|e| format!("Invalid url: {e}"))?;
     match parsed_url.scheme() {
@@ -4296,7 +4304,14 @@ fn parse_marketplace_base_url(base_url: &str) -> Result<reqwest::Url, String> {
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn marketplace_search(args: MarketplaceSearchArgs) -> Result<JsonValue, String> {
+pub async fn marketplace_search(
+    window: tauri::WebviewWindow,
+    args: MarketplaceSearchArgs,
+) -> Result<JsonValue, String> {
+    ipc_origin::ensure_main_window(window.label(), "marketplace access", ipc_origin::Verb::Is)?;
+    let origin_url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&origin_url, "marketplace access", ipc_origin::Verb::Is)?;
+
     let mut url = parse_marketplace_base_url(&args.base_url)?;
     {
         let mut segments = url
@@ -4358,8 +4373,13 @@ pub struct MarketplaceGetExtensionArgs {
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn marketplace_get_extension(
+    window: tauri::WebviewWindow,
     args: MarketplaceGetExtensionArgs,
 ) -> Result<Option<JsonValue>, String> {
+    ipc_origin::ensure_main_window(window.label(), "marketplace access", ipc_origin::Verb::Is)?;
+    let origin_url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&origin_url, "marketplace access", ipc_origin::Verb::Is)?;
+
     let mut url = parse_marketplace_base_url(&args.base_url)?;
     {
         let mut segments = url
@@ -4413,9 +4433,14 @@ pub struct MarketplaceDownloadPayload {
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn marketplace_download_package(
+    window: tauri::WebviewWindow,
     args: MarketplaceDownloadArgs,
 ) -> Result<Option<MarketplaceDownloadPayload>, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    ipc_origin::ensure_main_window(window.label(), "marketplace access", ipc_origin::Verb::Is)?;
+    let origin_url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&origin_url, "marketplace access", ipc_origin::Verb::Is)?;
 
     let mut url = parse_marketplace_base_url(&args.base_url)?;
     {
