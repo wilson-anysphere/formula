@@ -324,15 +324,6 @@ const sheetNameResolver: SheetNameResolver = {
   },
 };
 
-// Cursor desktop no longer supports user-provided LLM settings, but legacy builds
-// persisted provider + API keys in localStorage. Best-effort purge on startup so
-// we don't leave stale secrets behind.
-try {
-  purgeLegacyDesktopLLMSettings();
-} catch {
-  // ignore
-}
-
 // Exposed to Playwright tests via `window.__formulaExtensionHostManager`.
 let extensionHostManagerForE2e: DesktopExtensionHostManager | null = null;
 let sharedContextMenu: ContextMenu | null = null;
