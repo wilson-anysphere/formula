@@ -779,6 +779,25 @@ fn vlookup_propagates_spill_range_errors_in_table_array_and_compiles_to_bytecode
 }
 
 #[test]
+fn xmatch_and_xlookup_propagate_spill_range_errors_and_compile_to_bytecode_backend() {
+    let mut sheet = TestSheet::new();
+
+    // A1 is not a spill origin, so `A1#` is a `#REF!` error. XMATCH/XLOOKUP should propagate it
+    // from their lookup_array / return_array arguments.
+    sheet.set("A1", 1.0);
+
+    let base_programs = sheet.bytecode_program_count();
+    sheet.set_formula("B1", "=XMATCH(1, A1#)");
+    sheet.set_formula("B2", "=XLOOKUP(1, A1#, A1#)");
+
+    assert_eq!(sheet.bytecode_program_count(), base_programs + 2);
+
+    sheet.recalculate();
+    assert_eq!(sheet.get("B1"), Value::Error(ErrorKind::Ref));
+    assert_eq!(sheet.get("B2"), Value::Error(ErrorKind::Ref));
+}
+
+#[test]
 fn match_and_vlookup_approximate_treat_blanks_like_zero_or_empty_string() {
     let mut sheet = TestSheet::new();
 
