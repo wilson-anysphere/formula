@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use formula_model::{
-    indexed_color_argb, Alignment, Border, BorderEdge, BorderStyle, CalculationMode, Color, DateSystem,
-    Fill, FillPattern, Font, HorizontalAlignment, Protection, Style, TabColor, VerticalAlignment,
-    WorkbookProtection, WorkbookWindow, WorkbookWindowState,
+    indexed_color_argb, Alignment, Border, BorderEdge, BorderStyle, CalculationMode, Color,
+    DateSystem, Fill, FillPattern, Font, HorizontalAlignment, Protection, Style, TabColor,
+    VerticalAlignment, WorkbookProtection, WorkbookWindow, WorkbookWindowState,
 };
 
 use super::{records, strings, BiffVersion};

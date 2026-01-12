@@ -47,6 +47,8 @@ const RECORD_HLINK: u16 = 0x01B8;
 const RECORD_WSBOOL: u16 = 0x0081;
 const RECORD_ROW: u16 = 0x0208;
 const RECORD_COLINFO: u16 = 0x007D;
+const RECORD_FILTERMODE: u16 = 0x009B;
+const RECORD_AUTOFILTERINFO: u16 = 0x009D;
 const RECORD_OBJPROTECT: u16 = 0x0063;
 const RECORD_SCENPROTECT: u16 = 0x00DD;
 
@@ -2377,7 +2379,6 @@ fn build_defined_name_calamine_workbook_stream_with_sheet_name(sheet_name: &str)
     // Patch BoundSheet offset.
     globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
         .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
-
     globals.extend_from_slice(&sheet);
     globals
 }
@@ -4868,6 +4869,11 @@ fn build_autofilter_workbook_stream() -> Vec<u8> {
 
     // A1: a single General cell so calamine populates a range for the sheet.
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_general, 1.0));
+
+    // AUTOFILTERINFO: cEntries = 3 (A..C).
+    push_record(&mut sheet, RECORD_AUTOFILTERINFO, &3u16.to_le_bytes());
+    // FILTERMODE: present (no payload).
+    push_record(&mut sheet, RECORD_FILTERMODE, &[]);
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
 
