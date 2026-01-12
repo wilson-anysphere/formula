@@ -564,6 +564,15 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 _ => EvalValue::Scalar(Value::Error(ErrorKind::Name)),
             },
             Expr::NameRef(nref) => self.eval_name_ref(nref),
+            Expr::FieldAccess { base, field } => {
+                let base = self.deref_eval_value_dynamic(self.eval_value(base));
+                let Some(field_key) = parse_field_access_key(field) else {
+                    return EvalValue::Scalar(Value::Error(ErrorKind::Value));
+                };
+                EvalValue::Scalar(elementwise_unary(&base, |elem| {
+                    eval_field_access(elem, &field_key)
+                }))
+            }
             Expr::SpillRange(inner) => {
                 match self.eval_value(inner) {
                     EvalValue::Scalar(Value::Error(e)) => EvalValue::Scalar(Value::Error(e)),
@@ -1837,6 +1846,75 @@ fn elementwise_unary(value: &Value, f: impl Fn(&Value) -> Value) -> Value {
             Value::Array(Array::new(arr.rows, arr.cols, arr.iter().map(f).collect()))
         }
         other => f(other),
+    }
+}
+
+fn parse_field_access_key(raw: &str) -> Option<String> {
+    fn unescape_doubled_quote(raw: &str, quote: char) -> Option<String> {
+        let mut out = String::with_capacity(raw.len());
+        let mut chars = raw.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == quote {
+                if chars.peek() == Some(&quote) {
+                    chars.next();
+                    out.push(quote);
+                } else {
+                    return None;
+                }
+            } else {
+                out.push(ch);
+            }
+        }
+        Some(out)
+    }
+
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    // The canonical parser preserves bracket-quoted fields as the literal substring inside
+    // `[...]` (including the brackets). Strip exactly one outer bracket pair here.
+    let raw = if raw.starts_with('[') && raw.ends_with(']') && raw.len() >= 2 {
+        let inner = &raw[1..raw.len() - 1];
+        // Match Excel's structured-ref escaping style (`]]` means a literal `]`).
+        inner.replace("]]", "]")
+    } else {
+        raw.to_string()
+    };
+
+    let raw = raw.trim();
+    if raw.starts_with('"') && raw.ends_with('"') && raw.len() >= 2 {
+        return unescape_doubled_quote(&raw[1..raw.len() - 1], '"');
+    }
+    if raw.starts_with('\'') && raw.ends_with('\'') && raw.len() >= 2 {
+        return unescape_doubled_quote(&raw[1..raw.len() - 1], '\'');
+    }
+
+    Some(raw.to_string())
+}
+
+fn eval_field_access(value: &Value, field_key: &str) -> Value {
+    fn map_lookup<'a>(map: &'a std::collections::HashMap<String, Value>, key: &str) -> Option<&'a Value> {
+        if let Some(v) = map.get(key) {
+            return Some(v);
+        }
+        let folded = crate::value::casefold(key);
+        map.iter()
+            .find(|(k, _)| crate::value::casefold(k) == folded)
+            .map(|(_, v)| v)
+    }
+
+    match value {
+        Value::Error(e) => Value::Error(*e),
+        Value::Entity(entity) => map_lookup(&entity.fields, field_key)
+            .cloned()
+            .unwrap_or(Value::Error(ErrorKind::Field)),
+        Value::Record(record) => map_lookup(&record.fields, field_key)
+            .cloned()
+            .unwrap_or(Value::Error(ErrorKind::Field)),
+        // Field access on a non-rich value yields `#FIELD!`.
+        _ => Value::Error(ErrorKind::Field),
     }
 }
 

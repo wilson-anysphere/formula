@@ -7991,6 +7991,19 @@ fn walk_expr_flags(
                 lexical_scopes,
             );
         }
+        Expr::FieldAccess { base, .. } => {
+            walk_expr_flags(
+                base,
+                current_cell,
+                workbook,
+                names,
+                volatile,
+                thread_safe,
+                dynamic_deps,
+                visiting_names,
+                lexical_scopes,
+            );
+        }
         Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
             walk_expr_flags(
                 left,
@@ -8356,6 +8369,14 @@ fn walk_external_expr(
             }
             visiting_names.remove(&visit_key);
         }
+        Expr::FieldAccess { base, .. } => walk_external_expr(
+            base,
+            current_cell,
+            workbook,
+            precedents,
+            visiting_names,
+            lexical_scopes,
+        ),
         Expr::Unary { expr, .. }
         | Expr::Postfix { expr, .. }
         | Expr::ImplicitIntersection(expr)
@@ -8690,6 +8711,18 @@ fn walk_calc_expr(
             }
             walk_calc_expr(
                 inner,
+                current_cell,
+                tables_by_sheet,
+                workbook,
+                spills,
+                precedents,
+                visiting_names,
+                lexical_scopes,
+            );
+        }
+        Expr::FieldAccess { base, .. } => {
+            walk_calc_expr(
+                base,
                 current_cell,
                 tables_by_sheet,
                 workbook,

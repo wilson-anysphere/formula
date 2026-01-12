@@ -200,6 +200,7 @@ fn excel_oracle_corpus_covers_nonvolatile_function_catalog() {
 
 fn collect_unknown_function_calls(expr: &eval::Expr<String>, unknown: &mut BTreeSet<String>) {
     match expr {
+        eval::Expr::FieldAccess { base, .. } => collect_unknown_function_calls(base, unknown),
         eval::Expr::FunctionCall { name, args, .. } => {
             if functions::lookup_function(name).is_none() {
                 unknown.insert(normalize_function_call_name(name));
@@ -241,6 +242,7 @@ fn collect_unknown_function_calls(expr: &eval::Expr<String>, unknown: &mut BTree
 
 fn collect_function_calls(expr: &eval::Expr<String>, called: &mut BTreeSet<String>) {
     match expr {
+        eval::Expr::FieldAccess { base, .. } => collect_function_calls(base, called),
         eval::Expr::FunctionCall { name, args, .. } => {
             called.insert(normalize_function_call_name(name));
             for arg in args {

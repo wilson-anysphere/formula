@@ -46,13 +46,9 @@ fn lower_expr(expr: &crate::Expr) -> ParsedExpr {
             sheet: lower_sheet_reference(&r.workbook, &r.sheet),
             name: r.name.clone(),
         }),
-        crate::Expr::FieldAccess(access) => Expr::FunctionCall {
-            name: "_FIELDACCESS".to_string(),
-            original_name: "_FIELDACCESS".to_string(),
-            args: vec![
-                lower_expr(access.base.as_ref()),
-                Expr::Text(access.field.clone()),
-            ],
+        crate::Expr::FieldAccess(access) => Expr::FieldAccess {
+            base: Box::new(lower_expr(access.base.as_ref())),
+            field: access.field.clone(),
         },
 
         crate::Expr::CellRef(r) => lower_cell_ref(r)

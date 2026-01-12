@@ -52,13 +52,9 @@ pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<S
             sheet: lower_sheet_reference(&r.workbook, &r.sheet),
             name: r.name.clone(),
         }),
-        crate::Expr::FieldAccess(access) => Expr::FunctionCall {
-            name: "_FIELDACCESS".to_string(),
-            original_name: "_FIELDACCESS".to_string(),
-            args: vec![
-                lower_expr(access.base.as_ref(), origin),
-                Expr::Text(access.field.clone()),
-            ],
+        crate::Expr::FieldAccess(access) => Expr::FieldAccess {
+            base: Box::new(lower_expr(access.base.as_ref(), origin)),
+            field: access.field.clone(),
         },
         crate::Expr::CellRef(r) => {
             let sheet = lower_sheet_reference(&r.workbook, &r.sheet);
@@ -439,19 +435,15 @@ fn compile_expr_inner(
                 name: r.name.clone(),
             })
         }
-        crate::Expr::FieldAccess(access) => Expr::FunctionCall {
-            name: "_FIELDACCESS".to_string(),
-            original_name: "_FIELDACCESS".to_string(),
-            args: vec![
-                compile_expr_inner(
-                    access.base.as_ref(),
-                    current_sheet,
-                    current_cell,
-                    resolve_sheet,
-                    sheet_dimensions,
-                ),
-                Expr::Text(access.field.clone()),
-            ],
+        crate::Expr::FieldAccess(access) => Expr::FieldAccess {
+            base: Box::new(compile_expr_inner(
+                access.base.as_ref(),
+                current_sheet,
+                current_cell,
+                resolve_sheet,
+                sheet_dimensions,
+            )),
+            field: access.field.clone(),
         },
         crate::Expr::CellRef(r) => {
             let sheet =

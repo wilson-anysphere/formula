@@ -98,6 +98,14 @@ pub enum Expr<S> {
     CellRef(CellRef<S>),
     RangeRef(RangeRef<S>),
     StructuredRef(crate::structured_refs::StructuredRef),
+    /// Postfix field access on a scalar value, e.g. `A1.Price` or `A1.["Change%"]`.
+    ///
+    /// This is currently intended for Excel "entity" / rich value fields. The `field` string is
+    /// preserved exactly from the canonical parser (excluding the leading dot).
+    FieldAccess {
+        base: Box<Expr<S>>,
+        field: String,
+    },
     Unary {
         op: UnaryOp,
         expr: Box<Expr<S>>,
@@ -168,6 +176,10 @@ impl<S: Clone> Expr<S> {
                 end: r.end,
             }),
             Expr::StructuredRef(r) => Expr::StructuredRef(r.clone()),
+            Expr::FieldAccess { base, field } => Expr::FieldAccess {
+                base: Box::new(base.map_sheets(f)),
+                field: field.clone(),
+            },
             Expr::Unary { op, expr } => Expr::Unary {
                 op: *op,
                 expr: Box::new(expr.map_sheets(f)),

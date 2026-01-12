@@ -1,6 +1,8 @@
 use formula_engine::eval::CellAddr;
 use formula_engine::{Engine, PrecedentNode, Value};
 use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
+use formula_engine::value::EntityValue;
+use std::collections::HashMap;
 
 #[test]
 fn precedents_and_dependents_queries_work() {
@@ -96,6 +98,43 @@ fn dirty_dependency_path_explains_why_cell_is_dirty() {
     assert!(!engine.is_dirty("Sheet1", "A3"));
     assert!(engine.dirty_dependency_path("Sheet1", "A3").is_none());
     assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(41.0));
+}
+
+#[test]
+fn field_access_dependencies_include_base_cell() {
+    let mut engine = Engine::new();
+
+    let mut fields = HashMap::new();
+    fields.insert("Price".to_string(), Value::Number(123.0));
+
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Entity(EntityValue::with_fields("Apple Inc.", fields)),
+        )
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=A1.Price")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(123.0));
+
+    assert_eq!(
+        engine.precedents("Sheet1", "B1").unwrap(),
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 0 }
+        }]
+    );
+    assert_eq!(
+        engine.dependents("Sheet1", "A1").unwrap(),
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 1 }
+        }]
+    );
 }
 
 #[test]
