@@ -439,28 +439,31 @@ async function renderSearchResults({
                     }
                   }
 
-                   if (extensionHostManager?.syncInstalledExtensions) {
-                     await extensionHostManager.syncInstalledExtensions();
-                     } else if (extensionHostManager) {
-                       await extensionHostManager.reloadExtension(item.id);
-                     }
-                     updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
-                     const recordVersion = record?.version != null ? String(record.version) : "";
-                     const didUpdate = Boolean(installedVersion && recordVersion && recordVersion !== installedVersion);
-                     const wasNoOpUpdate = Boolean(shouldTryUpdate && installedVersion && recordVersion === installedVersion);
-                     actions.textContent = isEngineMismatch && wasNoOpUpdate ? "No compatible update" : didUpdate ? "Updated" : "Repaired";
-                     if (isEngineMismatch && wasNoOpUpdate) {
-                       tryShowToast("No compatible update", "warning");
-                     }
-                     tryNotifyExtensionsChanged();
-                     await renderSearchResults({
-                       container,
-                       marketplaceClient,
-                       extensionManager,
-                       extensionHostManager,
-                       query,
-                       transientStatusById,
-                     });
+                  if (extensionHostManager?.syncInstalledExtensions) {
+                    await extensionHostManager.syncInstalledExtensions();
+                  } else if (extensionHostManager) {
+                    await extensionHostManager.reloadExtension(item.id);
+                  }
+
+                  updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
+
+                  const recordVersion = record?.version != null ? String(record.version) : "";
+                  const didUpdate = Boolean(installedVersion && recordVersion && recordVersion !== installedVersion);
+                  const wasNoOpUpdate = Boolean(shouldTryUpdate && installedVersion && recordVersion === installedVersion);
+                  actions.textContent = isEngineMismatch && wasNoOpUpdate ? "No compatible update" : didUpdate ? "Updated" : "Repaired";
+                  if (isEngineMismatch && wasNoOpUpdate) {
+                    tryShowToast("No compatible update", "warning");
+                  }
+
+                  tryNotifyExtensionsChanged();
+                  await renderSearchResults({
+                    container,
+                    marketplaceClient,
+                    extensionManager,
+                    extensionHostManager,
+                    query,
+                    transientStatusById,
+                  });
                 } catch (error) {
                   // eslint-disable-next-line no-console
                   console.error(error);
