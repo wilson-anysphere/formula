@@ -140,6 +140,13 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1
 
 This subset corresponds to the cases tagged `odd_coupon_validation` in the canonical corpus.
 
+To regenerate the derived odd-coupon subset corpora (boundary + validation) from the canonical
+corpus, run:
+
+```bash
+python tools/excel-oracle/regenerate_subset_corpora.py
+```
+
 Note: this subset corpus reuses the **canonical case IDs** from `tests/compatibility/excel-oracle/cases.json`,
 so you can map results back to the full corpus by `caseId` (useful when updating/pinning datasets).
 
