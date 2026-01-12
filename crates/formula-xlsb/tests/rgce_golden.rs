@@ -30,6 +30,8 @@ struct CaseContext {
     extern_sheets: Vec<ExternSheetEntry>,
     #[serde(default)]
     workbook_names: Vec<WorkbookNameEntry>,
+    #[serde(default)]
+    sheet_names: Vec<SheetNameEntry>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -41,6 +43,13 @@ struct ExternSheetEntry {
 
 #[derive(Debug, Deserialize)]
 struct WorkbookNameEntry {
+    name: String,
+    index: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct SheetNameEntry {
+    sheet: String,
     name: String,
     index: u32,
 }
@@ -114,6 +123,9 @@ fn rgce_golden_cases_decode_exactly() {
         for entry in &case.ctx.workbook_names {
             ctx.add_workbook_name(entry.name.clone(), entry.index);
         }
+        for entry in &case.ctx.sheet_names {
+            ctx.add_sheet_name(entry.sheet.clone(), entry.name.clone(), entry.index);
+        }
 
         let base = case
             .base
@@ -134,4 +146,3 @@ fn rgce_golden_cases_decode_exactly() {
         assert_eq!(decoded, case.expected, "case {} (line {})", case.name, idx + 1);
     }
 }
-
