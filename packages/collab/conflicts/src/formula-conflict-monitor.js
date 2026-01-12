@@ -71,10 +71,11 @@ import { tryEvaluateFormula } from "./formula-eval.js";
  * clears are written as `cell.set("formula", null)` (not `cell.delete("formula")`)
  * so Yjs creates an Item that later overwrites can reference via `origin`.
  *
- * Likewise, when value conflict detection is enabled (`mode: "formula+value"`),
- * value writes clear formulas via `cell.set("formula", null)` so later formula
- * writes can causally reference the clear via `Item.origin`. This also allows us
- * to detect true formula-vs-value content conflicts deterministically.
+  * Likewise, value writes clear formulas via `cell.set("formula", null)` (not
+  * `cell.delete("formula")`) so later formula writes can causally reference the
+  * clear via `Item.origin`. This is required even when running in formula-only
+  * mode so other collaborators (who may have `mode: "formula+value"` enabled)
+  * can deterministically reason about concurrent formula-vs-value edits.
  */
 export class FormulaConflictMonitor {
   /**
@@ -198,13 +199,11 @@ export class FormulaConflictMonitor {
 
     this.doc.transact(() => {
       cell.set("value", nextValue);
-      if (this.includeValueConflicts) {
-        // Store a null marker rather than deleting so subsequent formula writes
-        // can causally reference this clear via Item.origin.
-        cell.set("formula", null);
-      } else {
-        cell.delete("formula");
-      }
+      // Store a null marker rather than deleting so subsequent formula writes
+      // can causally reference this clear via Item.origin. Yjs map deletes do
+      // not create a new Item, which makes cross-client delete-vs-overwrite
+      // concurrency ambiguous.
+      cell.set("formula", null);
       cell.set("modified", ts);
       cell.set("modifiedBy", this.localUserId);
     }, this.origin);
