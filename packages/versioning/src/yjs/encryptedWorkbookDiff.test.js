@@ -87,6 +87,43 @@ test("diffYjsWorkbookSnapshots: encrypted cell moves are detected via encrypted 
   assert.equal(sheetDiff.removed.length, 0);
 });
 
+test("diffYjsWorkbookSnapshots: encrypted moves work across legacy cell key encodings", () => {
+  const enc = { v: 1, alg: "AES-256-GCM", keyId: "k1", ivBase64: "iv", tagBase64: "tag", ciphertextBase64: "ct" };
+
+  const doc = createWorkbookDoc();
+  const cells = doc.getMap("cells");
+
+  doc.transact(() => {
+    const cell = new Y.Map();
+    cell.set("enc", enc);
+    // Store under a legacy key encoding.
+    cells.set("Sheet1:0,0", cell);
+  });
+
+  const beforeSnapshot = Y.encodeStateAsUpdate(doc);
+
+  doc.transact(() => {
+    cells.delete("Sheet1:0,0");
+    const moved = new Y.Map();
+    moved.set("enc", enc);
+    // Store under canonical key encoding at a new coordinate.
+    cells.set("Sheet1:0:1", moved);
+  });
+
+  const afterSnapshot = Y.encodeStateAsUpdate(doc);
+  const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  const sheetDiff = diff.cellsBySheet.find((entry) => entry.sheetId === "Sheet1")?.diff;
+  assert.ok(sheetDiff);
+
+  assert.equal(sheetDiff.moved.length, 1);
+  assert.deepEqual(sheetDiff.moved[0].oldLocation, { row: 0, col: 0 });
+  assert.deepEqual(sheetDiff.moved[0].newLocation, { row: 0, col: 1 });
+  assert.equal(sheetDiff.moved[0].encrypted, true);
+  assert.equal(sheetDiff.moved[0].keyId, "k1");
+  assert.equal(sheetDiff.added.length, 0);
+  assert.equal(sheetDiff.removed.length, 0);
+});
+
 test("diffYjsWorkbookSnapshots: encrypted format-only changes are classified as formatOnly", () => {
   const enc = { v: 1, alg: "AES-256-GCM", keyId: "k1", ivBase64: "iv", tagBase64: "tag", ciphertextBase64: "ct" };
 
