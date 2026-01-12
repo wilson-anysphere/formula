@@ -45,6 +45,24 @@ test("binder: large-rectangle format syncs via range runs without per-cell mater
 
     assert.equal(docB.getCellFormat("Sheet1", "A5000")?.font?.bold, true);
 
+    // Ensure the binder stored the compressed formatting in `sheets[*].formatRunsByCol`
+    // (not legacy `view.formatRunsByCol`) and that it stores *formats* (style objects),
+    // not local style ids.
+    const sheetEntry = sheets.get(0);
+    assert.ok(sheetEntry instanceof Y.Map);
+    const formatRunsByCol = sheetEntry.get("formatRunsByCol");
+    assert.ok(formatRunsByCol instanceof Y.Map, "expected Sheet1.formatRunsByCol to be a Y.Map");
+
+    const col0Runs = formatRunsByCol.get("0");
+    assert.ok(Array.isArray(col0Runs) && col0Runs.length > 0, "expected serialized runs for col 0");
+    assert.equal(col0Runs[0]?.styleId, undefined);
+    assert.equal(col0Runs[0]?.format?.font?.bold, true);
+
+    const col25Runs = formatRunsByCol.get("25");
+    assert.ok(Array.isArray(col25Runs) && col25Runs.length > 0, "expected serialized runs for col 25");
+    assert.equal(col25Runs[0]?.styleId, undefined);
+    assert.equal(col25Runs[0]?.format?.font?.bold, true);
+
     // No per-cell materialization should occur for the range formatting (it lives on sheet metadata).
     assert.equal(cells.size, 0);
     assert.equal(docB.model?.sheets?.get?.("Sheet1")?.cells?.size ?? 0, 0);
@@ -54,4 +72,3 @@ test("binder: large-rectangle format syncs via range runs without per-cell mater
     ydoc.destroy();
   }
 });
-
