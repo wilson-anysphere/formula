@@ -140,6 +140,36 @@ test("diffDocumentWorkbookSnapshots reports formatOnly edits when default format
   assert.deepEqual(sheet1Diff.formatOnly[0].cell, { row: 0, col: 0 });
 });
 
+test("diffDocumentWorkbookSnapshots prefers explicit sheetOrder when present", () => {
+  // The `sheets` array order is not authoritative when `sheetOrder` is present.
+  // This matches newer DocumentController snapshots, which encode a redundant
+  // `sheetOrder` field for robustness even if the `sheets` array is manipulated.
+  const beforeSnapshot = encodeSnapshot({
+    schemaVersion: 1,
+    sheetOrder: ["sheet2", "sheet1"],
+    // Intentionally not matching `sheetOrder`.
+    sheets: [
+      { id: "sheet1", name: "Sheet1", cells: [] },
+      { id: "sheet2", name: "Sheet2", cells: [] },
+    ],
+  });
+
+  const afterSnapshot = encodeSnapshot({
+    schemaVersion: 1,
+    sheetOrder: ["sheet1", "sheet2"],
+    sheets: [
+      { id: "sheet1", name: "Sheet1", cells: [] },
+      { id: "sheet2", name: "Sheet2", cells: [] },
+    ],
+  });
+
+  const diff = diffDocumentWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  assert.deepEqual(diff.sheets.added, []);
+  assert.deepEqual(diff.sheets.removed, []);
+  assert.deepEqual(diff.sheets.renamed, []);
+  assert.deepEqual(diff.sheets.moved, [{ id: "sheet2", beforeIndex: 0, afterIndex: 1 }]);
+});
+
 test("diffDocumentWorkbookSnapshots reports formatOnly edits for column-default formatting (DocumentController snapshots)", () => {
   const doc = new DocumentController();
   doc.setCellValue("Sheet1", "A1", "x");
