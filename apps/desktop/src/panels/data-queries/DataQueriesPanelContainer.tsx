@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { CredentialManager, httpScope, normalizeScopes, oauth2Scope, randomId, type Query } from "@formula/power-query";
 
-import { oauthBroker } from "../../power-query/oauthBroker.js";
+import { matchesRedirectUri, oauthBroker } from "../../power-query/oauthBroker.js";
 import { createPowerQueryRefreshStateStore } from "../../power-query/refreshStateStore.js";
 import { loadOAuth2ProviderConfigs, saveOAuth2ProviderConfigs, type OAuth2ProviderConfig } from "../../power-query/oauthProviders.ts";
 import { deriveQueryListRows, reduceQueryRuntimeState, type QueryRuntimeState } from "../../power-query/queryRuntime.ts";
@@ -759,6 +759,10 @@ export function DataQueriesPanelContainer(props: Props) {
     if (typeof window === "undefined" || typeof window.prompt !== "function") return;
     const redirectUrl = window.prompt(`Paste the full redirect URL (starts with ${pendingPkce.redirectUri})`, "");
     if (!redirectUrl) return;
+    if (!matchesRedirectUri(pendingPkce.redirectUri, redirectUrl)) {
+      setGlobalError(`Redirect URL does not match expected redirect URI (${pendingPkce.redirectUri}).`);
+      return;
+    }
     oauthBroker.resolveRedirect(pendingPkce.redirectUri, redirectUrl);
   }, [pendingPkce]);
 
