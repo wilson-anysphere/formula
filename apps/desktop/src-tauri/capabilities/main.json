@@ -10,13 +10,14 @@
         { "event": "close-prep" },
         { "event": "close-requested" },
         { "event": "file-dropped" },
+        { "event": "open-file" },
         { "event": "tray-open" },
         { "event": "tray-new" },
         { "event": "tray-quit" },
         { "event": "shortcut-quick-open" },
         { "event": "shortcut-command-palette" },
-        { "event": "update-check-already-running" },
         { "event": "update-check-started" },
+        { "event": "update-check-already-running" },
         { "event": "update-not-available" },
         { "event": "update-check-error" },
         { "event": "update-available" }
@@ -24,7 +25,12 @@
     },
     {
       "identifier": "event:allow-emit",
-      "allow": [{ "event": "close-prep-done" }, { "event": "close-handled" }, { "event": "updater-ui-ready" }]
+      "allow": [
+        { "event": "close-prep-done" },
+        { "event": "close-handled" },
+        { "event": "open-file-ready" },
+        { "event": "updater-ui-ready" }
+      ]
     },
     "dialog:allow-open",
     "dialog:allow-save",
