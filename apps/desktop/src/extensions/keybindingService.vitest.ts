@@ -4,6 +4,7 @@ import { CommandRegistry } from "./commandRegistry.js";
 import { ContextKeyService } from "./contextKeys.js";
 import { KeybindingService } from "./keybindingService.js";
 import { parseKeybinding } from "./keybindings.js";
+import { builtinKeybindings } from "../commands/builtinKeybindings.js";
 
 function makeKeydownEvent(opts: {
   key: string;
@@ -325,6 +326,26 @@ describe("KeybindingService", () => {
 
     // Simulate a non-US layout where the physical Digit4 key does not produce "$" for the chord.
     const event = makeKeydownEvent({ key: "4", code: "Digit4", ctrlKey: true, shiftKey: true });
+    const handled = await service.dispatchKeydown(event);
+
+    expect(handled).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("matches AutoSum on layouts where '=' requires Shift (Alt+Shift+Equal)", async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const run = vi.fn();
+    commandRegistry.registerBuiltinCommand("edit.autoSum", "AutoSum", run);
+
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
+    service.setBuiltinKeybindings(builtinKeybindings.filter((kb) => kb.command === "edit.autoSum"));
+
+    // Simulate a layout where pressing the physical Equal key requires Shift to reach "=".
+    // KeybindingService requires Shift to match exactly, so we should still resolve to AutoSum.
+    const event = makeKeydownEvent({ key: "+", code: "Equal", altKey: true, shiftKey: true });
     const handled = await service.dispatchKeydown(event);
 
     expect(handled).toBe(true);

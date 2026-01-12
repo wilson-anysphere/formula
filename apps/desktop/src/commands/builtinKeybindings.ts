@@ -259,6 +259,17 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: WHEN_SPREADSHEET_READY,
   },
   {
+    // Some keyboard layouts require Shift to produce "=". SpreadsheetApp's legacy handler
+    // matches via `KeyboardEvent.code === "Equal"` and does not require Shift to be absent.
+    //
+    // KeybindingService matches modifier sets exactly, so add an explicit Shift variant to
+    // keep Excel-compatible AutoSum behavior across layouts.
+    command: "edit.autoSum",
+    key: "alt+shift+=",
+    mac: "option+shift+=",
+    when: null,
+  },
+  {
     command: "format.toggleBold",
     key: "ctrl+b",
     mac: "cmd+b",
