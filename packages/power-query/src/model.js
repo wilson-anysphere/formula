@@ -215,6 +215,10 @@
  *   // When provided, this must contain one comparer per join key and overrides
  *   // `comparer`.
  *   comparers?: Array<{ comparer: string; caseSensitive?: boolean }> | null;
+ *   // Optional join algorithm hint (Power Query `JoinAlgorithm.*`).
+ *   //
+ *   // This does not affect the result shape, but is preserved for round-tripping.
+ *   joinAlgorithm?: string | null;
  *   // Join key columns on the left-hand input.
  *   //
  *   // Must be the same length as `rightKeys` and contain at least one entry.

@@ -866,10 +866,16 @@ function compileTableOperation(ctx, fnName, expr, schema) {
       const joinType = compileJoinKind(ctx, joinKindExpr);
 
       // Power Query's full signature supports optional join algorithm + comparer
-      // arguments. The algorithm does not affect results, so we ignore it. When a
-      // comparer is provided we apply it to the join key equality semantics.
+      // arguments. The join algorithm does not affect results, but we preserve it
+      // for round-tripping. When a comparer is provided we apply it to the join
+      // key equality semantics.
       const algorithmOrComparerExpr = isNested ? (expr.args[6] ?? null) : (expr.args[5] ?? null);
       const explicitComparerExpr = isNested ? (expr.args[7] ?? null) : (expr.args[6] ?? null);
+
+      let joinAlgorithm = null;
+      if (algorithmOrComparerExpr && !isComparerExpr(ctx, algorithmOrComparerExpr)) {
+        joinAlgorithm = compileJoinAlgorithm(ctx, algorithmOrComparerExpr);
+      }
 
       let comparerExpr = explicitComparerExpr;
       if (!comparerExpr && algorithmOrComparerExpr && isComparerExpr(ctx, algorithmOrComparerExpr)) {
@@ -888,6 +894,7 @@ function compileTableOperation(ctx, fnName, expr, schema) {
             rightKeys,
             joinMode: isNested ? "nested" : "flat",
             ...(newColumnName != null ? { newColumnName } : null),
+            ...(joinAlgorithm != null ? { joinAlgorithm } : null),
             ...(comparerSpec?.comparer != null ? { comparer: comparerSpec.comparer } : null),
             ...(comparerSpec?.comparers != null ? { comparers: comparerSpec.comparers } : null),
           },
@@ -1323,6 +1330,41 @@ function compileJoinKind(ctx, expr) {
     if (lower === "fullouter") return "full";
   }
   ctx.error(expr, "Unsupported join kind (expected JoinKind.Inner/LeftOuter/RightOuter/FullOuter)");
+}
+
+/**
+ * @param {CompilerContext} ctx
+ * @param {MExpression} expr
+ * @returns {string | null}
+ */
+function compileJoinAlgorithm(ctx, expr) {
+  const value = evaluateConstant(ctx, expr);
+  if (value == null) return null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    switch (Math.trunc(value)) {
+      case 0:
+        return "dynamic";
+      case 1:
+        return "sortMerge";
+      case 2:
+        return "leftHash";
+      case 3:
+        return "rightHash";
+      case 4:
+        return "pairwiseHash";
+      default:
+        break;
+    }
+  }
+  if (typeof value === "string") {
+    const lower = value.toLowerCase();
+    if (lower === "dynamic") return "dynamic";
+    if (lower === "sortmerge") return "sortMerge";
+    if (lower === "lefthash") return "leftHash";
+    if (lower === "righthash") return "rightHash";
+    if (lower === "pairwisehash") return "pairwiseHash";
+  }
+  ctx.error(expr, "Unsupported join algorithm (expected JoinAlgorithm.Dynamic/SortMerge/LeftHash/RightHash/PairwiseHash)");
 }
 
 /**

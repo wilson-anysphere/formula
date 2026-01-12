@@ -595,6 +595,58 @@ in
   ]);
 });
 
+test("m_language execution: Table.Join accepts JoinAlgorithm constants", async () => {
+  const sales = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Sales"},
+    {1, 100},
+    {2, 200}
+  })
+in
+  Source
+`,
+    { id: "q_sales_join_alg", name: "Sales" },
+  );
+
+  const targets = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Target"},
+    {2, "B"}
+  })
+in
+  Source
+`,
+    { id: "q_targets_join_alg", name: "Targets" },
+  );
+
+  const joinQuery = compileMToQuery(
+    `
+let
+  Sales = Query.Reference("q_sales_join_alg"),
+  Targets = Query.Reference("q_targets_join_alg"),
+  #"Merged Queries" = Table.Join(Sales, {"Id"}, Targets, {"Id"}, JoinKind.LeftOuter, JoinAlgorithm.LeftHash)
+in
+  #"Merged Queries"
+`,
+    { id: "q_join_alg", name: "Join algorithm" },
+  );
+
+  assert.equal(joinQuery.steps[0]?.operation.type, "merge");
+  assert.equal(joinQuery.steps[0]?.operation.joinAlgorithm, "leftHash");
+
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(joinQuery, { queries: { q_sales_join_alg: sales, q_targets_join_alg: targets } }, {});
+  assert.deepEqual(result.toGrid(), [
+    ["Id", "Sales", "Target"],
+    [1, 100, null],
+    [2, 200, "B"],
+  ]);
+});
+
 test("m_language execution: JoinKind/Comparer constants can be bound in let expressions", async () => {
   const left = compileMToQuery(
     `

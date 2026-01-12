@@ -339,6 +339,20 @@ function joinComparerToM(comparer) {
 }
 
 /**
+ * @param {string} algorithm
+ * @returns {string}
+ */
+function joinAlgorithmToM(algorithm) {
+  const normalized = algorithm.trim().toLowerCase();
+  if (normalized === "dynamic") return "JoinAlgorithm.Dynamic";
+  if (normalized === "sortmerge") return "JoinAlgorithm.SortMerge";
+  if (normalized === "lefthash") return "JoinAlgorithm.LeftHash";
+  if (normalized === "righthash") return "JoinAlgorithm.RightHash";
+  if (normalized === "pairwisehash") return "JoinAlgorithm.PairwiseHash";
+  return valueToM(algorithm);
+}
+
+/**
  * @param {Array<{ comparer: string; caseSensitive?: boolean } | null | undefined>} comparers
  * @returns {string}
  */
@@ -553,22 +567,26 @@ function operationToM(operation, inputName) {
       const joinMode = operation.joinMode ?? "flat";
       const joinKind = joinTypeToM(operation.joinType);
       const right = `Query.Reference(${escapeMString(operation.rightQuery)})`;
-      const comparerArg = (() => {
-        if (Array.isArray(operation.comparers) && operation.comparers.length > 0) {
-          return `, null, ${joinComparerListToM(operation.comparers)}`;
-        }
-        if (operation.comparer != null) {
-          return `, null, ${joinComparerToM(operation.comparer)}`;
-        }
-        return "";
-      })();
+      const comparerExpr =
+        Array.isArray(operation.comparers) && operation.comparers.length > 0
+          ? joinComparerListToM(operation.comparers)
+          : operation.comparer != null
+            ? joinComparerToM(operation.comparer)
+            : null;
+      const joinAlgorithmExpr = typeof operation.joinAlgorithm === "string" && operation.joinAlgorithm ? joinAlgorithmToM(operation.joinAlgorithm) : null;
+
+      let optionalArgs = "";
+      if (joinAlgorithmExpr || comparerExpr) {
+        optionalArgs += `, ${joinAlgorithmExpr ?? "null"}`;
+        if (comparerExpr) optionalArgs += `, ${comparerExpr}`;
+      }
       if (joinMode === "nested") {
         if (typeof operation.newColumnName !== "string") {
           throw new Error("Nested join requires newColumnName");
         }
-        return `Table.NestedJoin(${inputName}, ${valueToM(leftKeys)}, ${right}, ${valueToM(rightKeys)}, ${escapeMString(operation.newColumnName)}, ${joinKind}${comparerArg})`;
+        return `Table.NestedJoin(${inputName}, ${valueToM(leftKeys)}, ${right}, ${valueToM(rightKeys)}, ${escapeMString(operation.newColumnName)}, ${joinKind}${optionalArgs})`;
       }
-      return `Table.Join(${inputName}, ${valueToM(leftKeys)}, ${right}, ${valueToM(rightKeys)}, ${joinKind}${comparerArg})`;
+      return `Table.Join(${inputName}, ${valueToM(leftKeys)}, ${right}, ${valueToM(rightKeys)}, ${joinKind}${optionalArgs})`;
     }
     case "expandTableColumn": {
       const cols = operation.columns == null ? "null" : valueToM(operation.columns);
