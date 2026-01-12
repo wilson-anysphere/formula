@@ -126,6 +126,24 @@ test("browser PermissionManager: clears corrupted persisted JSON (invalid permis
   assert.equal(storage.getItem(storageKey), null);
 });
 
+test("browser PermissionManager: removes empty \"{}\" store key on load", async () => {
+  const { PermissionManager } = await importBrowserPermissionManager();
+
+  const storage = createMemoryStorage();
+  const storageKey = "formula.test.permissions.empty";
+  storage.setItem(storageKey, "{}");
+
+  const pm = new PermissionManager({
+    storage,
+    storageKey,
+    prompt: async () => true
+  });
+
+  assert.deepEqual(await pm.getGrantedPermissions("pub.ext"), {});
+  // The empty store should be removed so storage stays clean.
+  assert.equal(storage.getItem(storageKey), null);
+});
+
 test("browser PermissionManager: revokePermissions removes persisted grants for a single extension", async () => {
   const { PermissionManager } = await importBrowserPermissionManager();
 

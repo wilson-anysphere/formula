@@ -152,3 +152,41 @@ test("browser LocalStorageExtensionStorage clears corrupted persisted JSON (inva
   // Corrupted JSON should be removed during load so subsequent accesses start clean.
   assert.equal(storage.getItem(storageKey), null);
 });
+
+test("browser LocalStorageExtensionStorage removes empty \"{}\" records on load", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  const storage = createMemoryStorage();
+  const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", {
+    value: storage,
+    configurable: true,
+    writable: true
+  });
+
+  t.after(() => {
+    try {
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, "localStorage", originalDescriptor);
+        return;
+      }
+      delete globalThis.localStorage;
+    } catch {
+      // ignore
+    }
+  });
+
+  const extensionId = "pub.ext";
+  const storageKey = `formula.extensionHost.storage.${extensionId}`;
+  storage.setItem(storageKey, "{}");
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => true
+  });
+
+  const extension = { id: extensionId };
+  assert.equal(await host._executeApi("storage", "get", ["foo"], extension), undefined);
+  assert.equal(storage.getItem(storageKey), null);
+});
