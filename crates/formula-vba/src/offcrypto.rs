@@ -319,7 +319,20 @@ fn looks_like_pkcs7_signed_data(bytes: &[u8]) -> bool {
         Some(v) => v,
         None => return false,
     };
-    oid_bytes == SIGNED_DATA_OID
+    if oid_bytes != SIGNED_DATA_OID {
+        return false;
+    }
+
+    // Ensure the ContentInfo.content field is present and is `[0] EXPLICIT ...` (0xA0).
+    let after_oid = match rest.get(hdr2_len + oid_len..) {
+        Some(v) => v,
+        None => return false,
+    };
+    let (tag3, _len3, _hdr3_len) = match ber_header(after_oid) {
+        Some(v) => v,
+        None => return false,
+    };
+    tag3.tag_byte == 0xA0
 }
 
 #[cfg(test)]
