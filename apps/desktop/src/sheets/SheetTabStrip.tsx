@@ -123,25 +123,6 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
     return true;
   };
 
-  const openSheetTabContextMenu = (sheetId: string, anchor: { x: number; y: number }, options: { focusFirst?: boolean }) => {
-    const sheet = store.getById(sheetId);
-    if (!sheet) return;
-
-    const items: ContextMenuItem[] = [
-      {
-        type: "item",
-        label: "Rename",
-        onSelect: () => {
-          setEditingSheetId(sheet.id);
-          setDraftName(sheet.name);
-          setRenameError(null);
-        },
-      },
-    ];
-
-    tabContextMenu.open({ x: anchor.x, y: anchor.y, items, focusFirst: options.focusFirst });
-  };
-
   const moveSheet = (sheetId: string, dropTarget: Parameters<typeof computeWorkbookSheetMoveIndex>[0]["dropTarget"]) => {
     const all = store.listAll();
     const toIndex = computeWorkbookSheetMoveIndex({ sheets: all, fromSheetId: sheetId, dropTarget });
@@ -171,6 +152,21 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
     setEditingSheetId(sheet.id);
     setDraftName(sheet.name);
     setRenameError(null);
+  };
+
+  const openSheetTabContextMenu = (sheetId: string, anchor: { x: number; y: number }, options: { focusFirst?: boolean }) => {
+    const sheet = store.getById(sheetId);
+    if (!sheet) return;
+
+    const items: ContextMenuItem[] = [
+      {
+        type: "item",
+        label: "Rename",
+        onSelect: () => beginRenameWithGuard(sheet),
+      },
+    ];
+
+    tabContextMenu.open({ x: anchor.x, y: anchor.y, items, focusFirst: options.focusFirst });
   };
 
   const updateScrollButtons = useCallback(() => {
@@ -274,10 +270,14 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
 
               const isContextMenuKey = (e.shiftKey && e.key === "F10") || e.key === "ContextMenu" || e.code === "ContextMenu";
               if (isContextMenuKey) {
-                const sheetId = target.dataset.sheetId;
-                if (!sheetId) return;
                 e.preventDefault();
                 e.stopPropagation();
+                const sheetId = target.dataset.sheetId;
+                if (!sheetId) return;
+                if (editingSheetId && editingSheetId !== sheetId) {
+                  const ok = commitRename(editingSheetId);
+                  if (!ok) return;
+                }
                 lastContextMenuTabRef.current = target;
                 const rect = target.getBoundingClientRect();
                 openSheetTabContextMenu(sheetId, { x: rect.left + rect.width / 2, y: rect.bottom }, { focusFirst: true });
@@ -359,6 +359,10 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
             onContextMenu={(e) => {
               e.preventDefault();
               e.stopPropagation();
+              if (editingSheetId && editingSheetId !== sheet.id) {
+                const ok = commitRename(editingSheetId);
+                if (!ok) return;
+              }
               lastContextMenuTabRef.current = e.currentTarget;
               openSheetTabContextMenu(sheet.id, { x: e.clientX, y: e.clientY }, { focusFirst: false });
             }}
