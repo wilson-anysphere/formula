@@ -150,21 +150,24 @@ End Sub
         .find(|s| matches!(s, Stmt::With { .. }))
         .expect("with present");
     let Stmt::With { body, .. } = with_stmt else { unreachable!() };
+    fn is_offset_assignment(stmt: &Stmt) -> bool {
+        let Stmt::Assign { target, .. } = stmt else {
+            return false;
+        };
+        let Expr::Member { object, .. } = target else {
+            return false;
+        };
+        let Expr::Call { callee, .. } = &**object else {
+            return false;
+        };
+        let Expr::Member { member, .. } = &**callee else {
+            return false;
+        };
+        member.eq_ignore_ascii_case("offset")
+    }
     let offset_assign = body
         .iter()
-        .find(|s| match s {
-            Stmt::Assign { target, .. } => match target {
-                Expr::Member { object, .. } => match &**object {
-                    Expr::Call { callee, .. } => match &**callee {
-                        Expr::Member { member, .. } => member.eq_ignore_ascii_case("offset"),
-                        _ => false,
-                    },
-                    _ => false,
-                },
-                _ => false,
-            },
-            _ => false,
-        })
+        .find(|s| is_offset_assignment(s))
         .expect("Offset assignment inside with");
     let Stmt::Assign { target, .. } = offset_assign else { unreachable!() };
     let Expr::Member { object, .. } = target else { panic!("expected member assign") };
