@@ -3438,6 +3438,81 @@ fn bytecode_backend_tbill_numeric_text_respects_value_locale() {
 }
 
 #[test]
+fn bytecode_backend_discount_securities_numeric_text_respects_value_locale() {
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+
+    // Use ISO date text to avoid locale-dependent date order ambiguity; focus this test on numeric
+    // text coercion ("," decimal separator under de-DE).
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            r#"=PRICEDISC("2020-01-01","2020-12-31","0,05",100)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            r#"=PRICEDISC("2020-01-01","2020-12-31",0.05,100)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            r#"=DISC("2020-01-01","2020-12-31","97,5",100)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A4",
+            r#"=DISC("2020-01-01","2020-12-31",97.5,100)"#,
+        )
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 4);
+    assert_eq!(stats.compiled, 4);
+    assert_eq!(stats.fallback, 0);
+
+    engine.recalculate_single_threaded();
+
+    let Value::Number(pd_text) = engine.get_cell_value("Sheet1", "A1") else {
+        panic!("expected PRICEDISC with numeric text to return a number");
+    };
+    let Value::Number(pd_num) = engine.get_cell_value("Sheet1", "A2") else {
+        panic!("expected PRICEDISC with numeric literals to return a number");
+    };
+    assert!(
+        (pd_text - pd_num).abs() <= 1e-12,
+        "expected PRICEDISC numeric text coercion to match numeric literals; got {pd_text} vs {pd_num}"
+    );
+
+    let Value::Number(d_text) = engine.get_cell_value("Sheet1", "A3") else {
+        panic!("expected DISC with numeric text to return a number");
+    };
+    let Value::Number(d_num) = engine.get_cell_value("Sheet1", "A4") else {
+        panic!("expected DISC with numeric literals to return a number");
+    };
+    assert!(
+        (d_text - d_num).abs() <= 1e-12,
+        "expected DISC numeric text coercion to match numeric literals; got {d_text} vs {d_num}"
+    );
+
+    for (formula, cell) in [
+        (r#"=PRICEDISC("2020-01-01","2020-12-31","0,05",100)"#, "A1"),
+        (r#"=PRICEDISC("2020-01-01","2020-12-31",0.05,100)"#, "A2"),
+        (r#"=DISC("2020-01-01","2020-12-31","97,5",100)"#, "A3"),
+        (r#"=DISC("2020-01-01","2020-12-31",97.5,100)"#, "A4"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_standard_bond_basis_0_and_4_use_different_day_counts() {
     let mut engine = Engine::new();
 
