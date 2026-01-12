@@ -1,4 +1,5 @@
 use chrono::NaiveDateTime;
+use formula_model::ErrorValue;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -12,6 +13,8 @@ pub enum CellValue {
     Number(f64),
     Text(String),
     Bool(bool),
+    /// Excel error value (including extended error set, e.g. `#GETTING_DATA`, `#FIELD!`).
+    Error(ErrorValue),
     DateTime(NaiveDateTime),
 }
 

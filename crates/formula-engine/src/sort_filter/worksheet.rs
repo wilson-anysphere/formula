@@ -212,7 +212,7 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
         ModelCellValue::Number(n) => CellValue::Number(*n),
         ModelCellValue::String(s) => CellValue::Text(s.clone()),
         ModelCellValue::Boolean(b) => CellValue::Bool(*b),
-        ModelCellValue::Error(err) => CellValue::Text(err.to_string()),
+        ModelCellValue::Error(err) => CellValue::Error(*err),
         ModelCellValue::RichText(rt) => CellValue::Text(rt.plain_text().to_string()),
         ModelCellValue::Array(_) => CellValue::Blank,
         ModelCellValue::Spill(_) => CellValue::Blank,

@@ -402,6 +402,7 @@ fn cell_to_string(cell: &CellValue) -> String {
         CellValue::Number(n) => n.to_string(),
         CellValue::Text(s) => s.clone(),
         CellValue::Bool(b) => b.to_string(),
+        CellValue::Error(err) => err.to_string(),
         CellValue::DateTime(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
     }
 }
@@ -441,7 +442,7 @@ fn coerce_number(cell: &CellValue) -> Option<f64> {
         CellValue::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         CellValue::Text(s) => parse_number(s),
         CellValue::DateTime(dt) => Some(datetime_to_excel_serial_1900(*dt)),
-        CellValue::Blank => None,
+        CellValue::Error(_) | CellValue::Blank => None,
     }
 }
 

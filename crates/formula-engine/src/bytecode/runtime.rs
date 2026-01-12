@@ -969,11 +969,6 @@ fn or_range(
 }
 
 fn format_number_general(n: f64) -> String {
-    // Match the engine's number-to-text coercion semantics used by the AST evaluator (Excel's
-    // "General" format), including locale-specific decimal separator.
-    //
-    // This avoids divergence in bytecode-eligible formulas like `=CONCAT(1.5)` under `de-DE`,
-    // which Excel formats as `1,5`.
     let options = FormatOptions {
         locale: thread_value_locale().separators,
         date_system: match thread_date_system() {
@@ -984,6 +979,11 @@ fn format_number_general(n: f64) -> String {
         },
     };
 
+    // Match the engine's number-to-text coercion semantics used by the AST evaluator (Excel's
+    // "General" format), including locale-specific decimal separators.
+    //
+    // This avoids divergence in bytecode-eligible formulas like `=CONCAT(1.5)` under `de-DE`,
+    // which Excel formats as `1,5`.
     formula_format::format_value(FmtValue::Number(n), None, &options).text
 }
 

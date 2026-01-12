@@ -1,5 +1,6 @@
 use crate::sort_filter::types::{CellValue, HeaderOption, RangeData};
 use chrono::{NaiveDate, NaiveDateTime, Timelike};
+use formula_model::ErrorValue;
 use std::cmp::Ordering;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +46,7 @@ enum SortKeyValue {
     DateTime(NaiveDateTime),
     Text(String),
     Bool(bool),
+    Error(ErrorValue),
 }
 
 impl SortKeyValue {
@@ -53,7 +55,8 @@ impl SortKeyValue {
             SortKeyValue::Number(_) | SortKeyValue::DateTime(_) => 0,
             SortKeyValue::Text(_) => 1,
             SortKeyValue::Bool(_) => 2,
-            SortKeyValue::Blank => 3,
+            SortKeyValue::Error(_) => 3,
+            SortKeyValue::Blank => 4,
         }
     }
 
@@ -127,6 +130,7 @@ fn compare_key_value(a: &SortKeyValue, b: &SortKeyValue, key: &SortKey) -> Order
 
     let ord = match (a, b) {
         (SortKeyValue::Blank, SortKeyValue::Blank) => Ordering::Equal,
+        (SortKeyValue::Error(a), SortKeyValue::Error(b)) => a.code().cmp(&b.code()),
         (SortKeyValue::Text(a), SortKeyValue::Text(b)) => a.cmp(b),
         (SortKeyValue::Bool(a), SortKeyValue::Bool(b)) => a.cmp(b),
         _ => {
@@ -237,6 +241,12 @@ fn detect_header_row(
 }
 
 fn detect_key_value(cell: &CellValue, key: &SortKey) -> SortKeyValue {
+    match cell {
+        CellValue::Blank => return SortKeyValue::Blank,
+        CellValue::Error(err) => return SortKeyValue::Error(*err),
+        _ => {}
+    }
+
     match key.value_type {
         SortValueType::Text => {
             SortKeyValue::Text(fold_text(cell_to_string(cell), key.case_sensitive))
@@ -250,8 +260,8 @@ fn detect_key_value(cell: &CellValue, key: &SortKey) -> SortKeyValue {
             None => SortKeyValue::Text(fold_text(cell_to_string(cell), key.case_sensitive)),
         },
         SortValueType::Auto => {
-            if matches!(cell, CellValue::Blank) {
-                return SortKeyValue::Blank;
+            if let CellValue::Bool(b) = cell {
+                return SortKeyValue::Bool(*b);
             }
 
             if let Some(n) = coerce_number(cell) {
@@ -261,7 +271,6 @@ fn detect_key_value(cell: &CellValue, key: &SortKey) -> SortKeyValue {
                 return SortKeyValue::DateTime(dt);
             }
             match cell {
-                CellValue::Bool(b) => SortKeyValue::Bool(*b),
                 _ => SortKeyValue::Text(fold_text(cell_to_string(cell), key.case_sensitive)),
             }
         }
@@ -290,6 +299,7 @@ fn cell_to_string(cell: &CellValue) -> String {
         }
         CellValue::Text(s) => s.clone(),
         CellValue::Bool(b) => b.to_string(),
+        CellValue::Error(err) => err.to_string(),
         CellValue::DateTime(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
     }
 }
@@ -347,10 +357,9 @@ fn parse_datetime(text: &str) -> Option<NaiveDateTime> {
 fn coerce_number(cell: &CellValue) -> Option<f64> {
     match cell {
         CellValue::Number(n) => Some(*n),
-        CellValue::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         CellValue::Text(s) => parse_number(s),
         CellValue::DateTime(dt) => Some(datetime_to_excel_serial_1900(*dt)),
-        CellValue::Blank => None,
+        CellValue::Bool(_) | CellValue::Error(_) | CellValue::Blank => None,
     }
 }
 
@@ -386,6 +395,7 @@ fn identity_permutation(row_count: usize) -> RowPermutation {
 mod tests {
     use super::*;
     use crate::sort_filter::types::{CellValue, RangeRef};
+    use formula_model::ErrorValue;
     use pretty_assertions::assert_eq;
 
     fn range(rows: Vec<Vec<CellValue>>) -> RangeData {
@@ -524,5 +534,81 @@ mod tests {
 
         assert_eq!(data.rows[0][0], CellValue::Text("Amount".into()));
         assert_eq!(data.rows[1][0], CellValue::Number(2.0));
+    }
+
+    #[test]
+    fn mixed_types_sort_places_errors_after_booleans() {
+        let mut data = range(vec![
+            vec![CellValue::Text("Val".into())],
+            vec![CellValue::Bool(true)],
+            vec![CellValue::Error(ErrorValue::Div0)],
+            vec![CellValue::Bool(false)],
+            vec![CellValue::Number(1.0)],
+            vec![CellValue::Text("a".into())],
+            vec![CellValue::Blank],
+        ]);
+
+        let spec = SortSpec {
+            header: HeaderOption::HasHeader,
+            keys: vec![SortKey {
+                column: 0,
+                order: SortOrder::Ascending,
+                value_type: SortValueType::Auto,
+                case_sensitive: false,
+            }],
+        };
+
+        sort_range(&mut data, &spec);
+
+        assert_eq!(
+            data.rows
+                .iter()
+                .skip(1)
+                .map(|r| r[0].clone())
+                .collect::<Vec<_>>(),
+            vec![
+                CellValue::Number(1.0),
+                CellValue::Text("a".into()),
+                CellValue::Bool(false),
+                CellValue::Bool(true),
+                CellValue::Error(ErrorValue::Div0),
+                CellValue::Blank,
+            ]
+        );
+    }
+
+    #[test]
+    fn extended_errors_sort_by_excel_error_code() {
+        let mut data = range(vec![
+            vec![CellValue::Text("Val".into())],
+            vec![CellValue::Error(ErrorValue::Field)],
+            vec![CellValue::Error(ErrorValue::GettingData)],
+            vec![CellValue::Error(ErrorValue::Div0)],
+        ]);
+
+        let spec = SortSpec {
+            header: HeaderOption::HasHeader,
+            keys: vec![SortKey {
+                column: 0,
+                order: SortOrder::Ascending,
+                value_type: SortValueType::Auto,
+                case_sensitive: false,
+            }],
+        };
+
+        sort_range(&mut data, &spec);
+
+        assert_eq!(
+            data.rows
+                .iter()
+                .skip(1)
+                .map(|r| r[0].clone())
+                .collect::<Vec<_>>(),
+            vec![
+                CellValue::Error(ErrorValue::Div0),
+                CellValue::Error(ErrorValue::GettingData),
+                CellValue::Error(ErrorValue::Field),
+            ]
+        );
     }
 }
