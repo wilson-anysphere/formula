@@ -158,12 +158,13 @@ fn coup_functions_apply_end_of_month_schedule_when_maturity_is_month_end_basis_1
 }
 
 #[test]
-fn coupdays_basis_4_uses_fixed_360_over_frequency() {
+fn coupdays_basis_4_uses_fixed_360_over_frequency_and_preserves_additivity() {
     let system = ExcelDateSystem::EXCEL_1900;
 
-    // For basis=4 (European 30E/360), the day-count method is European DAYS360, but Excel models the
-    // coupon period length `E` returned by COUPDAYS as `360/frequency` (constant). This means it can
-    // differ from European `DAYS360(PCD, NCD, TRUE)` for end-of-month schedules involving February.
+    // For basis=4 (European 30E/360), the day-count method is European DAYS360, but Excel models
+    // the coupon period length `E` returned by COUPDAYS as `360/frequency` (constant). This means
+    // it can differ from European `DAYS360(PCD, NCD, TRUE)` for end-of-month schedules involving
+    // February.
     //
     // Semiannual schedule, maturity=2021-02-28 => PCD=2020-08-31, NCD=2021-02-28.
     // European `DAYS360(2020-08-31, 2021-02-28, TRUE) = 178` (not 180 = 360/frequency).
@@ -176,12 +177,12 @@ fn coupdays_basis_4_uses_fixed_360_over_frequency() {
     assert_eq!(coupncd(settlement, maturity, 2, 4, system).unwrap(), expected_ncd);
     assert_eq!(coupnum(settlement, maturity, 2, 4, system).unwrap(), 1.0);
 
-    let european_days_between =
-        date_time::days360(expected_pcd, expected_ncd, true, system).unwrap() as f64;
-    assert_eq!(european_days_between, 178.0);
+    assert_eq!(
+        date_time::days360(expected_pcd, expected_ncd, true, system).unwrap() as f64,
+        178.0
+    );
 
     let expected_days = 360.0 / 2.0;
-
     let expected_daybs =
         date_time::days360(expected_pcd, settlement, true, system).unwrap() as f64;
     assert_eq!(expected_daybs, 75.0);
@@ -355,6 +356,8 @@ fn builtins_coup_day_counts_handle_eom_and_leap_day_schedules() {
     assert_number(&sheet.eval("=COUPDAYS(A1,A2,2,2)"), 180.0);
     assert_number(&sheet.eval("=COUPDAYS(A1,A2,2,3)"), 182.5);
     assert_number(&sheet.eval("=COUPDAYS(A1,A2,2,4)"), 180.0);
+    assert_number(&sheet.eval("=COUPDAYBS(A1,A2,2,4)"), 1.0);
+    assert_number(&sheet.eval("=COUPDAYSNC(A1,A2,2,4)"), 179.0);
     assert_number(&sheet.eval("=COUPNUM(A1,A2,2,2)"), 1.0);
     assert_number(&sheet.eval("=COUPNUM(A1,A2,2,3)"), 1.0);
     assert_number(&sheet.eval("=COUPNUM(A1,A2,2,4)"), 1.0);
@@ -373,6 +376,8 @@ fn builtins_coup_day_counts_handle_eom_and_leap_day_schedules() {
     assert_number(&sheet.eval("=COUPDAYS(B1,B2,4,2)"), 90.0);
     assert_number(&sheet.eval("=COUPDAYS(B1,B2,4,3)"), 91.25);
     assert_number(&sheet.eval("=COUPDAYS(B1,B2,4,4)"), 90.0);
+    assert_number(&sheet.eval("=COUPDAYBS(B1,B2,4,4)"), 2.0);
+    assert_number(&sheet.eval("=COUPDAYSNC(B1,B2,4,4)"), 88.0);
     assert_number(&sheet.eval("=COUPNUM(B1,B2,4,2)"), 1.0);
     assert_number(&sheet.eval("=COUPNUM(B1,B2,4,3)"), 1.0);
     assert_number(&sheet.eval("=COUPNUM(B1,B2,4,4)"), 1.0);
