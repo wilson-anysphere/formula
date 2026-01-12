@@ -3649,6 +3649,10 @@ fn odd_coupon_bond_functions_reject_non_finite_numeric_inputs() {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
+    match sheet.eval("=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),A1,0.05,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
 
     // NaN in yield.
     match sheet.eval("=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,A2,100,1,0)") {
@@ -3658,6 +3662,14 @@ fn odd_coupon_bond_functions_reject_non_finite_numeric_inputs() {
 
     // Infinity in redemption.
     match sheet.eval("=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,A1,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval("=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,A1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval("=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,1,A2)") {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
