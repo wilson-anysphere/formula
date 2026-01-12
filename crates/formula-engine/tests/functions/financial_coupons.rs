@@ -119,3 +119,39 @@ fn builtins_support_date_strings_and_default_basis() {
         ymd_to_serial(ExcelDate::new(2024, 1, 1), ExcelDateSystem::EXCEL_1900).unwrap() as f64;
     assert_number(&pcd, expected_pcd);
 }
+
+#[test]
+fn coup_functions_apply_end_of_month_schedule_when_maturity_is_month_end_basis_1() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Maturity at month-end but not the 31st: Excel pins coupon dates to month-end when maturity
+    // is EOM. This affects basis=1 because COUPDAYS uses the actual day-count between coupon dates.
+    //
+    // Quarterly schedule, maturity=2020-04-30 => PCD=2020-01-31, NCD=2020-04-30.
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 2, 15), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2020, 4, 30), system).unwrap();
+    let expected_pcd = ymd_to_serial(ExcelDate::new(2020, 1, 31), system).unwrap();
+    let expected_ncd = maturity;
+
+    assert_eq!(couppcd(settlement, maturity, 4, 1, system).unwrap(), expected_pcd);
+    assert_eq!(coupncd(settlement, maturity, 4, 1, system).unwrap(), expected_ncd);
+    assert_eq!(coupnum(settlement, maturity, 4, 1, system).unwrap(), 1.0);
+
+    assert_eq!(coupdaybs(settlement, maturity, 4, 1, system).unwrap(), 15.0);
+    assert_eq!(coupdaysnc(settlement, maturity, 4, 1, system).unwrap(), 75.0);
+    assert_eq!(coupdays(settlement, maturity, 4, 1, system).unwrap(), 90.0);
+
+    // Semiannual schedule, maturity=2021-02-28 => PCD=2020-08-31, NCD=2021-02-28.
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 11, 15), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2021, 2, 28), system).unwrap();
+    let expected_pcd = ymd_to_serial(ExcelDate::new(2020, 8, 31), system).unwrap();
+    let expected_ncd = maturity;
+
+    assert_eq!(couppcd(settlement, maturity, 2, 1, system).unwrap(), expected_pcd);
+    assert_eq!(coupncd(settlement, maturity, 2, 1, system).unwrap(), expected_ncd);
+    assert_eq!(coupnum(settlement, maturity, 2, 1, system).unwrap(), 1.0);
+
+    assert_eq!(coupdaybs(settlement, maturity, 2, 1, system).unwrap(), 76.0);
+    assert_eq!(coupdaysnc(settlement, maturity, 2, 1, system).unwrap(), 105.0);
+    assert_eq!(coupdays(settlement, maturity, 2, 1, system).unwrap(), 181.0);
+}
