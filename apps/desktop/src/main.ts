@@ -7500,7 +7500,11 @@ async function generateSheetPdfBytes(invoke: TauriInvoke): Promise<{ sheetId: st
 
 function showPrintPreviewDialogModal(args: { bytes: Uint8Array; filename: string; autoPrint?: boolean }): void {
   const dialog = document.createElement("dialog");
-  dialog.className = "print-preview-dialog";
+  // `data-keybinding-barrier` prevents global spreadsheet keybindings from firing while the
+  // user is interacting with the modal (e.g. Cmd+P should not re-trigger Print).
+  dialog.className = "dialog print-preview-dialog";
+  dialog.dataset.keybindingBarrier = "true";
+  dialog.setAttribute("aria-label", "Print Preview");
 
   const container = document.createElement("div");
   dialog.appendChild(container);
@@ -7532,6 +7536,34 @@ function showPrintPreviewDialogModal(args: { bytes: Uint8Array; filename: string
   dialog.addEventListener("cancel", (e) => {
     e.preventDefault();
     dialog.close();
+  });
+
+  // Trap Tab navigation within the modal so focus doesn't escape back to the grid/ribbon.
+  dialog.addEventListener("keydown", (event) => {
+    if (event.key !== "Tab") return;
+    const focusables = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((el) => el.getAttribute("aria-hidden") !== "true");
+    if (focusables.length === 0) return;
+    const first = focusables[0]!;
+    const last = focusables[focusables.length - 1]!;
+    const active = document.activeElement as HTMLElement | null;
+    if (!active) return;
+
+    if (event.shiftKey) {
+      if (active === first) {
+        event.preventDefault();
+        last.focus();
+      }
+      return;
+    }
+
+    if (active === last) {
+      event.preventDefault();
+      first.focus();
+    }
   });
 
   dialog.showModal();
