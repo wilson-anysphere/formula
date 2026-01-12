@@ -3575,7 +3575,11 @@ export class SpreadsheetApp {
 
   goTo(reference: string): void {
     try {
-      const currentSheetName = this.resolveSheetDisplayNameById(this.sheetId);
+      // `parseGoTo` needs a sheet token it can round-trip through the workbook lookup.
+      // Use the stable id here so unqualified A1 references ("A1") still work even if
+      // display-name -> id resolution is temporarily unavailable (e.g. during sheet
+      // rename propagation).
+      const currentSheetName = this.sheetId;
       const { sheetName: qualifiedSheetName } = splitSheetQualifier(reference);
       const parsed = parseGoTo(reference, { workbook: this.searchWorkbook, currentSheetName });
       if (parsed.type !== "range") return;
