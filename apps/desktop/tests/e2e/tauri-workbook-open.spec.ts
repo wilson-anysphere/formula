@@ -191,6 +191,60 @@ test.describe("tauri workbook integration", () => {
     await expect(switcher.locator("option")).toHaveText(["Sheet1", "Sheet2", "Sheet3"]);
   });
 
+  test("unhide via the tab strip background context menu persists through the tauri backend", async ({ page }) => {
+    await page.addInitScript(installTauriStubForTests, {
+      sheets: [
+        { id: "Sheet1", name: "Sheet1", visibility: "visible" },
+        { id: "Sheet2", name: "Sheet2", visibility: "hidden" },
+      ],
+    });
+
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
+    });
+
+    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
+
+    // Open the tab strip background menu (Excel-like "Unhide..." entry point).
+    await page.evaluate(() => {
+      const strip = document.querySelector<HTMLElement>("#sheet-tabs .sheet-tabs");
+      if (!strip) throw new Error("Missing sheet tab strip");
+      const rect = strip.getBoundingClientRect();
+      strip.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + rect.width - 4,
+          clientY: rect.top + rect.height / 2,
+        }),
+      );
+    });
+
+    const menu = page.getByTestId("sheet-tab-context-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Unhide…" }).click();
+    await page.getByTestId("quick-pick").getByRole("button", { name: "Sheet2" }).click();
+
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            ((window as any).__tauriInvokeCalls ?? []).filter(
+              (c: any) => c?.cmd === "set_sheet_visibility" && c?.args?.sheet_id === "Sheet2" && c?.args?.visibility === "visible",
+            ).length,
+        ),
+      )
+      .toBe(1);
+  });
+
   test("drag reordering visible tabs calls move_sheet with absolute indices (including hidden sheets)", async ({ page }) => {
     await page.addInitScript(installTauriStubForTests, {
       sheets: [

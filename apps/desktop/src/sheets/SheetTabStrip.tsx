@@ -599,7 +599,19 @@ export function SheetTabStrip({
               { placeHolder: "Unhide Sheet" },
             );
             if (!selected) return;
+            try {
+              await onPersistSheetVisibility?.(selected, "visible");
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              onError?.(message);
+              return;
+            }
+
             store.unhide(selected);
+            // Keep the currently active sheet active (Excel-like), but re-trigger activation so
+            // consumers (e.g. main.ts focus restoration) can reconcile if the active sheet was
+            // previously hidden due to inconsistent metadata.
+            onActivateSheet(activeSheetIdRef.current);
           } catch (err) {
             onError?.(err instanceof Error ? err.message : String(err));
           }
