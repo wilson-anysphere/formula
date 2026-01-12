@@ -5098,7 +5098,7 @@ if (
       let mount = panelMounts.get(panelId);
       if (!mount) {
         const container = document.createElement("div");
-        container.className = "dock-panel__mount panel-mount--fill-column";
+        container.className = "dock-panel__mount panel-mount--fill-column panel-body__container";
         const mounted = mountScriptEditorPanel({ workbook: scriptingWorkbook, container });
         mount = { container, dispose: mounted.dispose };
         panelMounts.set(panelId, mount);
@@ -5113,7 +5113,7 @@ if (
       let mount = panelMounts.get(panelId);
       if (!mount) {
         const container = document.createElement("div");
-        container.className = "dock-panel__mount panel-mount--fill-column";
+        container.className = "dock-panel__mount panel-mount--fill-column panel-body__container";
         container.textContent = "Loading Python runtime…";
 
         let disposed = false;
@@ -5129,16 +5129,16 @@ if (
         import("./panels/python/pythonPanelMount.js")
           .then(({ mountPythonPanel }) => {
             if (disposed) return;
-             const mounted = mountPythonPanel({
-               doc: app.getDocument(),
-               container,
-               workbookId,
-               invoke: queuedInvoke ?? undefined,
-               drainBackendSync,
-               getActiveSheetId: () => app.getCurrentSheetId(),
-               getSelection: () => {
-                 const ranges = app.getSelectionRanges();
-                 const first = ranges[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
+            const mounted = mountPythonPanel({
+              doc: app.getDocument(),
+              container,
+              workbookId,
+              invoke: queuedInvoke ?? undefined,
+              drainBackendSync,
+              getActiveSheetId: () => app.getCurrentSheetId(),
+              getSelection: () => {
+                const ranges = app.getSelectionRanges();
+                const first = ranges[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
                 return {
                   sheet_id: app.getCurrentSheetId(),
                   start_row: first.startRow,
