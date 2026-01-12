@@ -73,14 +73,14 @@ This document tracks every Excel feature and our implementation status. Features
 | RADIANS | ⬜ | |
 | RAND | ⬜ | Volatile |
 | RANDBETWEEN | ⬜ | Volatile |
-| RANDARRAY | ⬜ | Dynamic array |
+| RANDARRAY | ✅ | Dynamic array |
 | ROMAN | ⬜ | |
 | ROUND | ⬜ | |
 | ROUNDDOWN | ⬜ | |
 | ROUNDUP | ⬜ | |
 | SEC | ⬜ | |
 | SECH | ⬜ | |
-| SEQUENCE | ⬜ | Dynamic array |
+| SEQUENCE | ✅ | Dynamic array |
 | SERIESSUM | ⬜ | |
 | SIGN | ⬜ | |
 | SIN | ⬜ | |
@@ -113,11 +113,11 @@ This document tracks every Excel feature and our implementation status. Features
 | COLUMNS | ⬜ | |
 | DROP | ✅ | Dynamic array |
 | EXPAND | ✅ | Dynamic array |
-| FILTER | ⬜ | Dynamic array, critical |
+| FILTER | ✅ | Dynamic array, critical |
 | FORMULATEXT | ⬜ | |
 | GETPIVOTDATA | ✅ | MVP: supports tabular pivot outputs (limited layouts) |
 | HLOOKUP | ✅ | Includes wildcard exact match + approximate modes |
-| HSTACK | ⬜ | Dynamic array |
+| HSTACK | ✅ | Dynamic array |
 | HYPERLINK | ⬜ | |
 | INDEX | ✅ | |
 | INDIRECT | ⬜ | Volatile, complex |
@@ -127,17 +127,17 @@ This document tracks every Excel feature and our implementation status. Features
 | ROW | ⬜ | |
 | ROWS | ⬜ | |
 | RTD | ⬜ | Real-time data |
-| SORT | ⬜ | Dynamic array |
-| SORTBY | ⬜ | Dynamic array |
+| SORT | ✅ | Dynamic array |
+| SORTBY | ✅ | Dynamic array |
 | TAKE | ✅ | Dynamic array |
-| TOCOL | ⬜ | Dynamic array |
-| TOROW | ⬜ | Dynamic array |
+| TOCOL | ✅ | Dynamic array |
+| TOROW | ✅ | Dynamic array |
 | TRANSPOSE | ⬜ | |
-| UNIQUE | ⬜ | Dynamic array, critical |
+| UNIQUE | ✅ | Dynamic array, critical |
 | VLOOKUP | ✅ | Includes wildcard exact match + approximate modes |
-| VSTACK | ⬜ | Dynamic array |
-| WRAPCOLS | ⬜ | Dynamic array |
-| WRAPROWS | ⬜ | Dynamic array |
+| VSTACK | ✅ | Dynamic array |
+| WRAPCOLS | ✅ | Dynamic array |
+| WRAPROWS | ✅ | Dynamic array |
 | XLOOKUP | ✅ | Supports match_mode/search_mode + 2D return_array spilling |
 | XMATCH | ✅ | Supports match_mode/search_mode + binary search modes |
 
@@ -194,8 +194,8 @@ This document tracks every Excel feature and our implementation status. Features
 | Function | Status | Notes |
 |----------|--------|-------|
 | AND | ⬜ | |
-| BYCOL | ⬜ | Lambda helper |
-| BYROW | ⬜ | Lambda helper |
+| BYCOL | ✅ | Lambda helper |
+| BYROW | ✅ | Lambda helper |
 | FALSE | ⬜ | |
 | IF | ✅ | Most used function |
 | IFERROR | ✅ | |
@@ -203,12 +203,12 @@ This document tracks every Excel feature and our implementation status. Features
 | IFS | ⬜ | Multiple conditions |
 | LAMBDA | ⬜ | User-defined functions |
 | LET | ⬜ | Variable binding |
-| MAKEARRAY | ⬜ | Lambda helper |
-| MAP | ⬜ | Lambda helper |
+| MAKEARRAY | ✅ | Lambda helper |
+| MAP | ✅ | Lambda helper |
 | NOT | ⬜ | |
 | OR | ⬜ | |
-| REDUCE | ⬜ | Lambda helper |
-| SCAN | ⬜ | Lambda helper |
+| REDUCE | ✅ | Lambda helper |
+| SCAN | ✅ | Lambda helper |
 | SWITCH | ⬜ | |
 | TRUE | ⬜ | |
 | XOR | ⬜ | |
