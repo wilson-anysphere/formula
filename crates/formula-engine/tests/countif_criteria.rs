@@ -49,6 +49,21 @@ fn countif_blank_criteria() {
 }
 
 #[test]
+fn countif_blank_criteria_equal_empty_string_literal_counts_blanks() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", "").unwrap();
+    // A3 left unset (blank).
+
+    // A criteria string of `=""` should match blank cells (same as `""` / `"="`).
+    // Build it via concatenation to avoid hard-to-read quoting.
+    assert_eq!(
+        eval(&mut engine, r#"=COUNTIF(A1:A3, "="&""""&"""")"#),
+        Value::Number(2.0)
+    );
+}
+
+#[test]
 fn countif_error_criteria_counts_errors_and_criteria_errors_propagate() {
     let mut engine = Engine::new();
     engine
@@ -223,6 +238,19 @@ fn countif_reference_union_dedupes_overlaps() {
 
     assert_eq!(
         eval(&mut engine, "=COUNTIF((A1:A2,A2:A3), 1)"),
+        Value::Number(3.0)
+    );
+}
+
+#[test]
+fn countif_reference_union_blank_criteria_equal_empty_string_counts_missing_cells() {
+    let mut engine = Engine::new();
+    // A1/A3 left unset (blank).
+    engine.set_cell_value("Sheet1", "A2", "").unwrap();
+
+    // Criteria is the string `=""`, built via concatenation.
+    assert_eq!(
+        eval(&mut engine, r#"=COUNTIF((A1:A2,A2:A3), "="&""""&"""")"#),
         Value::Number(3.0)
     );
 }

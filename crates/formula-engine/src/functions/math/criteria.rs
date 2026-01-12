@@ -258,6 +258,28 @@ fn parse_criteria_string(
         };
     }
 
+    // Excel criteria strings allow quoting the RHS as a text literal, e.g. `="foo"` or `=""`.
+    // Treat quoted RHS values as text (bypassing number/date parsing). This matters for blank
+    // criteria: `=""` should match blank cells (equivalent to `""` / `"="`).
+    if let Some(text_literal) = parse_criteria_rhs_text_literal(rhs_trimmed) {
+        if text_literal.is_empty() {
+            return match op {
+                CriteriaOp::Eq | CriteriaOp::Ne => Ok(Criteria {
+                    op,
+                    rhs: CriteriaRhs::Blank,
+                    number_locale,
+                }),
+                _ => Err(ErrorKind::Value),
+            };
+        }
+
+        return Ok(Criteria {
+            op,
+            rhs: CriteriaRhs::Text(TextCriteria::new(&text_literal)),
+            number_locale,
+        });
+    }
+
     if let Some(err) = parse_error_kind(rhs_trimmed) {
         return Ok(Criteria {
             op,
@@ -294,6 +316,43 @@ fn parse_criteria_string(
         rhs: CriteriaRhs::Text(TextCriteria::new(rhs_str)),
         number_locale,
     })
+}
+
+/// Parse a quoted text literal in a criteria RHS.
+///
+/// In Excel, criteria strings can include a quoted RHS (e.g. `="foo"` or `<>""`). The quoting
+/// uses Excel string escaping rules where `""` represents a literal `"`.
+///
+/// Returns `None` when `raw` is not a quoted literal or contains invalid escaping.
+fn parse_criteria_rhs_text_literal(raw: &str) -> Option<String> {
+    if raw.len() < 2 {
+        return None;
+    }
+    let mut chars = raw.chars();
+    if chars.next()? != '"' {
+        return None;
+    }
+    if raw.chars().last()? != '"' {
+        return None;
+    }
+
+    let inner = &raw[1..raw.len() - 1];
+    let mut out = String::new();
+    let mut it = inner.chars().peekable();
+    while let Some(ch) = it.next() {
+        if ch == '"' {
+            if matches!(it.peek(), Some('"')) {
+                it.next();
+                out.push('"');
+            } else {
+                // Unescaped quote inside the quoted literal.
+                return None;
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    Some(out)
 }
 
 fn split_op(raw: &str) -> (CriteriaOp, &str) {
