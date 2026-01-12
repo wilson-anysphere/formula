@@ -101,6 +101,29 @@ test("applyState removes sheets that are not present in the snapshot", () => {
   assert.deepEqual(doc.getSheetIds(), ["OnlySheet"]);
 });
 
+test("encodeState/applyState preserves sheet insertion order", () => {
+  const doc = new DocumentController();
+  // Sheets are created lazily on first access. Create them in a non-sorted order.
+  doc.getCell("Sheet2", "A1");
+  doc.getCell("Sheet1", "A1");
+  assert.deepEqual(doc.getSheetIds(), ["Sheet2", "Sheet1"]);
+
+  const snapshot = doc.encodeState();
+
+  const restored = new DocumentController();
+  restored.applyState(snapshot);
+  assert.deepEqual(restored.getSheetIds(), ["Sheet2", "Sheet1"]);
+
+  // Also ensure applyState can reorder an existing controller to match the snapshot.
+  const differentOrder = new DocumentController();
+  differentOrder.getCell("Sheet1", "A1");
+  differentOrder.getCell("Sheet2", "A1");
+  assert.deepEqual(differentOrder.getSheetIds(), ["Sheet1", "Sheet2"]);
+
+  differentOrder.applyState(snapshot);
+  assert.deepEqual(differentOrder.getSheetIds(), ["Sheet2", "Sheet1"]);
+});
+
 test("update event fires on edits and undo/redo", () => {
   const doc = new DocumentController();
   let updates = 0;

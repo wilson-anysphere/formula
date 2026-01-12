@@ -1861,7 +1861,9 @@ export class DocumentController {
    * @returns {Uint8Array}
    */
   encodeState() {
-    const sheetIds = Array.from(this.model.sheets.keys()).sort();
+    // Preserve sheet insertion order so sheet tab reordering can survive snapshot roundtrips.
+    // (Sorting here would destroy workbook navigation order.)
+    const sheetIds = Array.from(this.model.sheets.keys());
     const sheets = sheetIds.map((id) => {
       const sheet = this.model.sheets.get(id);
       const view = sheet?.view ? cloneSheetViewState(sheet.view) : emptySheetViewState();
@@ -2084,6 +2086,20 @@ export class DocumentController {
 
     for (const sheetId of removedSheetIds) {
       this.model.sheets.delete(sheetId);
+    }
+
+    // Match the sheet Map iteration order to the snapshot ordering so sheet tab order
+    // roundtrips through encodeState/applyState (including when restoring onto an
+    // existing DocumentController instance).
+    const orderedSheetIds = Array.from(nextSheets.keys());
+    if (orderedSheetIds.length > 0) {
+      for (const sheetId of orderedSheetIds) {
+        const sheet = this.model.sheets.get(sheetId);
+        if (!sheet) continue;
+        // Re-insert to update insertion order without changing sheet identity.
+        this.model.sheets.delete(sheetId);
+        this.model.sheets.set(sheetId, sheet);
+      }
     }
 
     this.#emitHistory();
