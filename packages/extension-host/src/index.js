@@ -731,6 +731,7 @@ class ExtensionHost {
    */
   async resetExtensionState(extensionId) {
     const id = String(extensionId);
+    if (!id || id === "." || id === "..") return;
 
     // Best-effort: do not fail uninstall flows because persistence is unavailable.
     try {
@@ -741,10 +742,12 @@ class ExtensionHost {
 
     try {
       const store = await this._loadExtensionStorage();
-      if (!store || typeof store !== "object" || Array.isArray(store)) return;
-      if (!Object.prototype.hasOwnProperty.call(store, id)) return;
-      delete store[id];
-      await this._saveExtensionStorage(store);
+      if (store && typeof store === "object" && !Array.isArray(store)) {
+        if (Object.prototype.hasOwnProperty.call(store, id)) {
+          delete store[id];
+          await this._saveExtensionStorage(store);
+        }
+      }
     } catch {
       // ignore
     }

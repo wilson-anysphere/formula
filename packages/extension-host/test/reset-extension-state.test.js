@@ -58,3 +58,50 @@ test("resetExtensionState removes permissions, extension storage, and extension-
   await assert.rejects(() => fs.stat(dataDir), /ENOENT/);
 });
 
+test("resetExtensionState removes extension-data dirs even when extension has no storage.json entry", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-reset-state-missing-storage-"));
+  const permissionsStoragePath = path.join(dir, "permissions.json");
+  const extensionStoragePath = path.join(dir, "storage.json");
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath,
+    extensionStoragePath,
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose().catch(() => {});
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+  });
+
+  const extensionId = "test.ext";
+
+  // Seed persistence files without an entry for the extension.
+  await fs.writeFile(
+    permissionsStoragePath,
+    JSON.stringify({ [extensionId]: { "ui.commands": true }, other: { clipboard: true } }, null, 2),
+    "utf8"
+  );
+  await fs.writeFile(extensionStoragePath, JSON.stringify({ other: { baz: 1 } }, null, 2), "utf8");
+
+  // Seed the extension-data folder provisioned by the host (created on load, but we can
+  // simulate it here).
+  const dataDir = path.join(dir, "extension-data", extensionId);
+  await fs.mkdir(path.join(dataDir, "globalStorage"), { recursive: true });
+  await fs.mkdir(path.join(dataDir, "workspaceStorage"), { recursive: true });
+
+  await host.resetExtensionState(extensionId);
+
+  // permissions.json entry removed
+  const permissions = JSON.parse(await fs.readFile(permissionsStoragePath, "utf8"));
+  assert.equal(permissions[extensionId], undefined);
+  assert.deepEqual(permissions.other, { clipboard: true });
+
+  // storage.json should be preserved since the extension never wrote an entry.
+  const storage = JSON.parse(await fs.readFile(extensionStoragePath, "utf8"));
+  assert.deepEqual(storage, { other: { baz: 1 } });
+
+  // extension-data directory removed
+  await assert.rejects(() => fs.stat(dataDir), /ENOENT/);
+});
