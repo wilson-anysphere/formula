@@ -23,9 +23,9 @@ pub use dir::{DirParseError, DirStream, ModuleRecord, ModuleType};
 pub use ole::{OleError, OleFile};
 pub use project_digest::{compute_vba_project_digest, DigestAlg};
 pub use signature::{
-    extract_signer_certificate_info, parse_vba_digital_signature, verify_vba_digital_signature,
-    SignatureError, VbaDigitalSignature, VbaSignatureBinding, VbaSignatureVerification,
-    VbaSignerCertificateInfo,
+    extract_signer_certificate_info, list_vba_digital_signatures, parse_vba_digital_signature,
+    verify_vba_digital_signature, SignatureError, VbaDigitalSignature, VbaDigitalSignatureStream,
+    VbaSignatureBinding, VbaSignatureVerification, VbaSignerCertificateInfo,
 };
 
 use std::collections::BTreeMap;

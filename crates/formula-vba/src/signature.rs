@@ -59,6 +59,29 @@ pub enum VbaSignatureBinding {
     Unknown,
 }
 
+/// Result of inspecting an individual VBA digital signature stream.
+///
+/// Unlike [`VbaDigitalSignature`] (which is used by the single-signature helper APIs),
+/// this type is designed for enumerating *all* signature streams that may be present in
+/// a `vbaProject.bin`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VbaDigitalSignatureStream {
+    /// OLE stream path the signature was loaded from.
+    pub stream_path: String,
+    /// Best-effort signer certificate subject (e.g. `CN=...`), if found.
+    pub signer_subject: Option<String>,
+    /// Raw signature stream bytes.
+    pub signature: Vec<u8>,
+    /// Verification state (best-effort).
+    pub verification: VbaSignatureVerification,
+    /// Best-effort DigestInfo algorithm OID extracted from Authenticode's
+    /// `SpcIndirectDataContent` (if present).
+    pub signed_digest_algorithm_oid: Option<String>,
+    /// Best-effort DigestInfo digest extracted from Authenticode's
+    /// `SpcIndirectDataContent` (if present).
+    pub signed_digest: Option<Vec<u8>>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VbaSignatureVerification {
     /// Signature is present and the PKCS#7/CMS blob verifies successfully.
@@ -110,6 +133,52 @@ pub fn extract_signer_certificate_info(signature_blob: &[u8]) -> Option<VbaSigne
     }
 
     None
+}
+
+/// Enumerate and inspect *all* VBA digital signature streams found in a `vbaProject.bin`.
+///
+/// Excel stores VBA project signatures in one of the `\u{0005}DigitalSignature*` streams
+/// (see MS-OVBA). Some files may contain multiple signature streams (e.g. legacy and
+/// SHA-2-era formats). This API exposes each stream independently.
+///
+/// Streams are returned in deterministic Excel-like order (newest stream first; see
+/// `signature_path_rank`).
+pub fn list_vba_digital_signatures(
+    vba_project_bin: &[u8],
+) -> Result<Vec<VbaDigitalSignatureStream>, SignatureError> {
+    let mut ole = OleFile::open(vba_project_bin)?;
+    let streams = ole.list_streams()?;
+
+    let mut candidates = streams
+        .into_iter()
+        .filter(|path| path.split('/').any(is_signature_component))
+        .collect::<Vec<_>>();
+
+    candidates.sort_by(|a, b| signature_path_rank(a).cmp(&signature_path_rank(b)).then(a.cmp(b)));
+
+    let mut out = Vec::new();
+    for path in candidates {
+        let signature = ole.read_stream_opt(&path)?.unwrap_or_default();
+        let signer_subject = extract_first_certificate_subject(&signature);
+        let verification = verify_signature_blob(&signature);
+
+        let (signed_digest_algorithm_oid, signed_digest) =
+            match crate::authenticode::extract_vba_signature_signed_digest(&signature) {
+                Ok(Some(digest)) => (Some(digest.digest_algorithm_oid), Some(digest.digest)),
+                Ok(None) | Err(_) => (None, None),
+            };
+
+        out.push(VbaDigitalSignatureStream {
+            stream_path: path,
+            signer_subject,
+            signature,
+            verification,
+            signed_digest_algorithm_oid,
+            signed_digest,
+        });
+    }
+
+    Ok(out)
 }
 
 /// Best-effort detection + parsing of a VBA digital signature.

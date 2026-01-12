@@ -3,7 +3,8 @@
 use std::io::{Cursor, Write};
 
 use formula_vba::{
-    extract_signer_certificate_info, verify_vba_digital_signature, VbaSignatureVerification,
+    extract_signer_certificate_info, list_vba_digital_signatures, verify_vba_digital_signature,
+    VbaSignatureVerification,
 };
 
 const TEST_KEY_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
@@ -178,6 +179,114 @@ fn build_vba_project_bin_with_signature(signature_blob: Option<&[u8]>) -> Vec<u8
         Some(sig) => build_vba_project_bin_with_signature_streams(&[("\u{0005}DigitalSignature", sig)]),
         None => build_vba_project_bin_with_signature_streams(&[]),
     }
+}
+
+fn der_encode_len(len: usize) -> Vec<u8> {
+    if len < 128 {
+        return vec![len as u8];
+    }
+    let mut bytes = Vec::new();
+    let mut n = len;
+    while n > 0 {
+        bytes.push((n & 0xFF) as u8);
+        n >>= 8;
+    }
+    bytes.reverse();
+    let mut out = Vec::with_capacity(1 + bytes.len());
+    out.push(0x80 | (bytes.len() as u8));
+    out.extend_from_slice(&bytes);
+    out
+}
+
+fn der_tlv(tag: u8, value: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.push(tag);
+    out.extend_from_slice(&der_encode_len(value.len()));
+    out.extend_from_slice(value);
+    out
+}
+
+fn der_oid(oid: &str) -> Vec<u8> {
+    let parts = oid
+        .split('.')
+        .filter(|p| !p.is_empty())
+        .map(|p| p.parse::<u32>().expect("valid OID component"))
+        .collect::<Vec<_>>();
+    assert!(parts.len() >= 2, "OID must have at least two components");
+    let first = parts[0];
+    let second = parts[1];
+    assert!(first <= 2, "invalid OID first component");
+    if first < 2 {
+        assert!(second < 40, "invalid OID second component");
+    }
+
+    fn encode_subid(mut n: u32) -> Vec<u8> {
+        let mut chunks = Vec::new();
+        chunks.push((n & 0x7F) as u8);
+        n >>= 7;
+        while n > 0 {
+            chunks.push(((n & 0x7F) as u8) | 0x80);
+            n >>= 7;
+        }
+        chunks.reverse();
+        chunks
+    }
+
+    let mut encoded = Vec::new();
+    encoded.extend_from_slice(&encode_subid(first * 40 + second));
+
+    for &n in &parts[2..] {
+        encoded.extend_from_slice(&encode_subid(n));
+    }
+
+    der_tlv(0x06, &encoded)
+}
+
+fn der_null() -> Vec<u8> {
+    vec![0x05, 0x00]
+}
+
+fn der_sequence(contents: &[u8]) -> Vec<u8> {
+    der_tlv(0x30, contents)
+}
+
+fn der_octet_string(bytes: &[u8]) -> Vec<u8> {
+    der_tlv(0x04, bytes)
+}
+
+fn make_spc_indirect_data_content(digest_algorithm_oid: &str, digest: &[u8]) -> Vec<u8> {
+    // Minimal SpcIndirectDataContent:
+    //   SEQUENCE {
+    //     data SEQUENCE { type OID },
+    //     messageDigest SEQUENCE {
+    //       digestAlgorithm SEQUENCE { algorithm OID, parameters NULL },
+    //       digest OCTET STRING
+    //     }
+    //   }
+    let spc_data = {
+        let mut out = Vec::new();
+        out.extend_from_slice(&der_oid("1.2.3.4"));
+        der_sequence(&out)
+    };
+
+    let digest_info = {
+        let alg_id = {
+            let mut out = Vec::new();
+            out.extend_from_slice(&der_oid(digest_algorithm_oid));
+            out.extend_from_slice(&der_null());
+            der_sequence(&out)
+        };
+
+        let mut out = Vec::new();
+        out.extend_from_slice(&alg_id);
+        out.extend_from_slice(&der_octet_string(digest));
+        der_sequence(&out)
+    };
+
+    let mut out = Vec::new();
+    out.extend_from_slice(&spc_data);
+    out.extend_from_slice(&digest_info);
+    der_sequence(&out)
 }
 
 #[test]
@@ -393,4 +502,63 @@ fn prefers_digital_signature_ext_over_ex_when_both_verify() {
         sig.stream_path
     );
     assert_eq!(sig.signature, ext);
+}
+
+#[test]
+fn lists_all_signature_streams_and_extracts_digest_info_per_stream() {
+    // Use a deterministic digest so we can assert exact output.
+    let digest_algorithm_oid = "2.16.840.1.101.3.4.2.1"; // sha256
+    let digest = (0u8..32u8).collect::<Vec<u8>>();
+    let spc = make_spc_indirect_data_content(digest_algorithm_oid, &digest);
+
+    let valid = make_pkcs7_signed_message(&spc);
+    let mut invalid = valid.clone();
+    let last = invalid.len().saturating_sub(1);
+    invalid[last] ^= 0xFF;
+
+    let vba = build_vba_project_bin_with_signature_streams(&[
+        ("\u{0005}DigitalSignature", &invalid),
+        ("\u{0005}DigitalSignatureEx", &valid),
+    ]);
+
+    let sigs = list_vba_digital_signatures(&vba).expect("signature enumeration should succeed");
+    assert_eq!(sigs.len(), 2, "expected two signature streams");
+
+    // Deterministic Excel-like ordering: DigitalSignatureEx is preferred over the legacy
+    // DigitalSignature stream.
+    assert!(
+        sigs[0].stream_path.ends_with("\u{0005}DigitalSignatureEx"),
+        "unexpected first stream path: {}",
+        sigs[0].stream_path
+    );
+    assert!(
+        sigs[1].stream_path.ends_with("\u{0005}DigitalSignature"),
+        "unexpected second stream path: {}",
+        sigs[1].stream_path
+    );
+
+    assert_eq!(sigs[0].verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sigs[1].verification, VbaSignatureVerification::SignedInvalid);
+
+    assert!(
+        sigs[0]
+            .signer_subject
+            .as_deref()
+            .is_some_and(|s| s.contains("Formula VBA Test")),
+        "expected signer subject to mention test CN, got: {:?}",
+        sigs[0].signer_subject
+    );
+
+    for sig in &sigs {
+        assert_eq!(
+            sig.signed_digest_algorithm_oid.as_deref(),
+            Some(digest_algorithm_oid),
+            "expected per-stream digest algorithm OID"
+        );
+        assert_eq!(
+            sig.signed_digest.as_deref(),
+            Some(digest.as_slice()),
+            "expected per-stream digest bytes"
+        );
+    }
 }
