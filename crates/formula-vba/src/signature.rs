@@ -2,11 +2,9 @@ use thiserror::Error;
 
 use crate::{
     authenticode::extract_vba_signature_signed_digest,
-    compute_vba_project_digest,
-    compute_vba_project_digest_v3,
     contents_hash::content_normalized_data,
-    DigestAlg,
     normalized_data::forms_normalized_data,
+    project_digest::{compute_vba_project_digest, compute_vba_project_digest_v3, DigestAlg},
     OleError,
     OleFile,
 };
@@ -396,8 +394,7 @@ pub fn parse_vba_digital_signature(
             .then(a.cmp(b))
     });
     let chosen = candidates.into_iter().next().expect("candidates non-empty");
-    let stream_kind =
-        signature_path_stream_kind(&chosen).unwrap_or(VbaSignatureStreamKind::Unknown);
+    let stream_kind = signature_path_stream_kind(&chosen).unwrap_or(VbaSignatureStreamKind::Unknown);
     let signature = ole.read_stream_opt(&chosen)?.unwrap_or_else(|| Vec::new());
 
     let signer_subject = extract_first_certificate_subject(&signature);
@@ -1390,7 +1387,6 @@ pub fn verify_vba_project_signature_binding(
                 Err(_) => continue,
             }
         }
-
         let Some(content_hash_md5) = content_hash_md5 else {
             continue;
         };

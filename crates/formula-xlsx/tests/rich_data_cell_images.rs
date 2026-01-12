@@ -47,10 +47,19 @@ fn build_rich_image_xlsx(
   </extLst>
 </metadata>"#;
 
+    let rich_value_types_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<richValueTypes xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <richValueType id="0">
+    <property name="dummy" t="i"/>
+    <property name="image" t="rel"/>
+  </richValueType>
+</richValueTypes>"#;
+
     let rich_value_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <richValue xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <rv>
-    <v t="rel">0</v>
+  <rv s="0">
+    <v>123</v>
+    <v>0</v>
   </rv>
 </richValue>"#;
 
@@ -88,6 +97,10 @@ fn build_rich_image_xlsx(
         zip.start_file("xl/metadata.xml", options).unwrap();
         zip.write_all(metadata_xml.as_bytes()).unwrap();
     }
+
+    zip.start_file("xl/richData/richValueTypes.xml", options)
+        .unwrap();
+    zip.write_all(rich_value_types_xml.as_bytes()).unwrap();
 
     zip.start_file("xl/richData/richValue.xml", options).unwrap();
     zip.write_all(rich_value_xml.as_bytes()).unwrap();

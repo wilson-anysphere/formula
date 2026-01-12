@@ -395,6 +395,15 @@ fn parse_rich_value_parts_rel_indices(
     let mut out: HashMap<u32, u32> = HashMap::new();
     let mut global_idx: u32 = 0;
 
+    // Optional optimization: when present, `richValueTypes.xml` describes the schema of each rich
+    // value type and which property corresponds to a relationship (e.g. an image).
+    //
+    // This is best-effort: malformed/unexpected schemas are ignored and we fall back to the
+    // heuristic `<v t="rel">` / first-numeric parsing.
+    let rich_value_types = pkg
+        .part("xl/richData/richValueTypes.xml")
+        .and_then(parse_rich_value_types_xml_best_effort);
+
     for part_name in part_names {
         let Some(bytes) = pkg.part(part_name) else {
             continue;
@@ -412,7 +421,7 @@ fn parse_rich_value_parts_rel_indices(
             .descendants()
             .filter(|n| n.is_element() && n.tag_name().name() == "rv")
         {
-            if let Some(rel_idx) = parse_rv_rel_index(rv) {
+            if let Some(rel_idx) = parse_rv_rel_index(rv, rich_value_types.as_ref()) {
                 out.insert(global_idx, rel_idx);
             }
             global_idx = global_idx.saturating_add(1);
@@ -422,7 +431,175 @@ fn parse_rich_value_parts_rel_indices(
     Ok(out)
 }
 
-fn parse_rv_rel_index(rv: roxmltree::Node<'_, '_>) -> Option<u32> {
+#[derive(Debug, Clone)]
+struct RichValueTypePropertyDescriptor {
+    name: Option<String>,
+    kind: Option<String>,
+    position: usize,
+}
+
+fn parse_rich_value_types_xml_best_effort(
+    bytes: &[u8],
+) -> Option<HashMap<u32, Vec<RichValueTypePropertyDescriptor>>> {
+    let xml = std::str::from_utf8(bytes).ok()?;
+    let doc = roxmltree::Document::parse(xml).ok()?;
+
+    // Prefer explicit `<rvType>`/`<richValueType>` nodes, but fall back to `*Type` elements under
+    // a `*Types` ancestor.
+    let mut type_nodes: Vec<roxmltree::Node<'_, '_>> = doc
+        .descendants()
+        .filter(|n| n.is_element())
+        .filter(|n| {
+            let name = n.tag_name().name();
+            name.eq_ignore_ascii_case("rvType") || name.eq_ignore_ascii_case("richValueType")
+        })
+        .collect();
+
+    if type_nodes.is_empty() {
+        type_nodes = doc
+            .descendants()
+            .filter(|n| n.is_element())
+            .filter(|n| {
+                let name = n.tag_name().name();
+                if !name.to_ascii_lowercase().ends_with("type") {
+                    return false;
+                }
+                n.parent_element()
+                    .is_some_and(|p| p.tag_name().name().to_ascii_lowercase().ends_with("types"))
+            })
+            .collect();
+    }
+
+    if type_nodes.is_empty() {
+        return None;
+    }
+
+    let mut out: HashMap<u32, Vec<RichValueTypePropertyDescriptor>> = HashMap::new();
+    let mut next_fallback_idx: u32 = 0;
+    for ty in type_nodes {
+        let idx =
+            parse_node_numeric_attr(ty, &["id", "i", "idx", "s"]).unwrap_or_else(|| {
+                let idx = next_fallback_idx;
+                next_fallback_idx = next_fallback_idx.wrapping_add(1);
+                idx
+            });
+
+        let prop_container = ty
+            .children()
+            .find(|n| {
+                n.is_element()
+                    && matches!(
+                        n.tag_name().name().to_ascii_lowercase().as_str(),
+                        "props" | "properties" | "fields"
+                    )
+            })
+            .unwrap_or(ty);
+
+        let prop_nodes: Vec<roxmltree::Node<'_, '_>> = prop_container
+            .children()
+            .filter(|n| n.is_element() && looks_like_rich_value_type_property_def(*n))
+            .collect();
+        if prop_nodes.is_empty() {
+            continue;
+        }
+
+        let mut props = Vec::with_capacity(prop_nodes.len());
+        for (position, prop) in prop_nodes.into_iter().enumerate() {
+            let name = find_node_attr_value(prop, &["name", "n", "id", "key", "k", "pid", "propId"]);
+            let kind = find_node_attr_value(prop, &["t", "type", "kind", "vt", "valType"]);
+            props.push(RichValueTypePropertyDescriptor { name, kind, position });
+        }
+        out.insert(idx, props);
+    }
+
+    if out.is_empty() { None } else { Some(out) }
+}
+
+fn parse_rv_rel_index_with_schema(
+    rv: roxmltree::Node<'_, '_>,
+    rich_value_types: Option<&HashMap<u32, Vec<RichValueTypePropertyDescriptor>>>,
+) -> Option<u32> {
+    let rich_value_types = rich_value_types?;
+    let type_idx = parse_node_numeric_attr(rv, &["s", "t", "type"])?;
+    let schema = rich_value_types.get(&type_idx)?;
+    let rel_prop = schema.iter().find(|d| descriptor_is_relationship(d))?;
+
+    // Schema positions refer to the `<v>` children of `<rv>` in order.
+    let v_children: Vec<_> = rv
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "v")
+        .collect();
+    let v = v_children.get(rel_prop.position)?;
+    let text = v.text()?.trim();
+    text.parse::<u32>().ok()
+}
+
+fn descriptor_is_relationship(desc: &RichValueTypePropertyDescriptor) -> bool {
+    let kind = desc.kind.as_deref().unwrap_or_default().to_ascii_lowercase();
+    if kind == "rel" || kind == "relationship" {
+        return true;
+    }
+
+    let name = desc.name.as_deref().unwrap_or_default().to_ascii_lowercase();
+    if name == "rel" || name == "relationship" {
+        return true;
+    }
+
+    // Some schemas might use a property key like `image`/`img` for media relationships.
+    name.contains("image") || name.contains("img")
+}
+
+fn local_name(name: &str) -> &str {
+    name.rsplit_once(':').map(|(_, local)| local).unwrap_or(name)
+}
+
+fn parse_node_numeric_attr(node: roxmltree::Node<'_, '_>, keys: &[&str]) -> Option<u32> {
+    for attr in node.attributes() {
+        let k = local_name(attr.name());
+        if keys.iter().any(|key| k.eq_ignore_ascii_case(key)) {
+            if let Ok(v) = attr.value().trim().parse::<u32>() {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
+fn find_node_attr_value(node: roxmltree::Node<'_, '_>, keys: &[&str]) -> Option<String> {
+    for attr in node.attributes() {
+        let k = local_name(attr.name());
+        if keys.iter().any(|key| k.eq_ignore_ascii_case(key)) {
+            return Some(attr.value().to_string());
+        }
+    }
+    None
+}
+
+fn looks_like_rich_value_type_property_def(node: roxmltree::Node<'_, '_>) -> bool {
+    // Typical property nodes have either a name/id or a type/kind attribute. We treat this as a
+    // heuristic so we don't accidentally include container nodes like `<props>`.
+    for attr in node.attributes() {
+        if matches!(
+            local_name(attr.name()).to_ascii_lowercase().as_str(),
+            "t" | "type" | "kind" | "name" | "n" | "id" | "key" | "k" | "pid" | "propid"
+        ) {
+            return true;
+        }
+    }
+    false
+}
+
+fn parse_rv_rel_index(
+    rv: roxmltree::Node<'_, '_>,
+    rich_value_types: Option<&HashMap<u32, Vec<RichValueTypePropertyDescriptor>>>,
+) -> Option<u32> {
+    // If we can infer the rich value type schema, prefer schema-driven selection of the
+    // relationship-index field. This avoids picking the wrong `<v>` when the rich value has
+    // multiple numeric properties.
+    if let Some(rel_idx) = parse_rv_rel_index_with_schema(rv, rich_value_types) {
+        return Some(rel_idx);
+    }
+
     // The exact richValue schema depends on the rich value type. For cell images, the relationship
     // index seems to appear as a `<v>` whose text is a u32.
     let v_elems: Vec<_> = rv
