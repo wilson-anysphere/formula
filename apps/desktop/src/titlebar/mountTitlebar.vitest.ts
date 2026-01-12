@@ -31,8 +31,12 @@ describe("mountTitlebar", () => {
     // so the rendered titlebar isn't nested inside another styled titlebar element.
     expect(container.classList.contains("formula-titlebar")).toBe(false);
 
+    const titlebarRoot = container.querySelector<HTMLElement>(".formula-titlebar--component");
+    expect(titlebarRoot).toBeInstanceOf(HTMLDivElement);
+    expect(titlebarRoot?.getAttribute("role")).toBe("banner");
+    expect(titlebarRoot?.getAttribute("aria-label")).toBe("Titlebar");
+
     expect(container.querySelector(".formula-titlebar")).toBeInstanceOf(HTMLDivElement);
-    expect(container.querySelector(".formula-titlebar--component")).toBeInstanceOf(HTMLDivElement);
 
     const dragRegion = container.querySelector<HTMLElement>(".formula-titlebar__drag-region");
     expect(dragRegion).toBeTruthy();
@@ -47,6 +51,9 @@ describe("mountTitlebar", () => {
     expect(container.querySelector('[aria-label="Maximize window"]')).toBeInstanceOf(HTMLButtonElement);
 
     // Actions exist with aria labels.
+    const actionsToolbar = container.querySelector<HTMLElement>(".formula-titlebar__actions");
+    expect(actionsToolbar?.getAttribute("role")).toBe("toolbar");
+    expect(actionsToolbar?.getAttribute("aria-label")).toBe("Titlebar actions");
     expect(container.querySelector('[aria-label="Share document"]')).toBeInstanceOf(HTMLButtonElement);
     expect(container.querySelector('[aria-label="Open comments"]')).toBeInstanceOf(HTMLButtonElement);
 
