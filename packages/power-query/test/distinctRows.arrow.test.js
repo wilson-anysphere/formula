@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { arrowTableFromColumns } from "../../data-io/src/index.js";
-
 import { ArrowTableAdapter } from "../src/arrowTable.js";
 import { DataTable } from "../src/table.js";
 import { applyOperation } from "../src/steps.js";
@@ -14,7 +12,47 @@ function gridDatesToIso(grid) {
   return grid.map((row) => row.map((cell) => (cell instanceof Date ? cell.toISOString() : cell)));
 }
 
-test("distinctRows matches across DataTable and Arrow backends (Dates)", (t) => {
+/**
+ * Build a minimal Arrow-like table object sufficient for `ArrowTableAdapter`.
+ *
+ * This keeps the test independent of the optional `apache-arrow` dependency by
+ * avoiding `arrowTableFromColumns`.
+ *
+ * @param {Record<string, unknown[]>} columns
+ * @param {Record<string, string>} typeHints
+ */
+function makeFakeArrowTable(columns, typeHints) {
+  const names = Object.keys(columns);
+  const rowCount = Math.max(0, ...names.map((name) => columns[name]?.length ?? 0));
+
+  return {
+    numRows: rowCount,
+    schema: {
+      fields: names.map((name) => ({
+        name,
+        type: { toString: () => typeHints[name] ?? "Utf8" },
+      })),
+    },
+    getChildAt: (index) => {
+      const name = names[index];
+      const values = columns[name] ?? [];
+      return {
+        length: rowCount,
+        get: (rowIndex) => values[rowIndex],
+      };
+    },
+    slice: (start, end) => {
+      /** @type {Record<string, unknown[]>} */
+      const sliced = {};
+      for (const name of names) {
+        sliced[name] = (columns[name] ?? []).slice(start, end);
+      }
+      return makeFakeArrowTable(sliced, typeHints);
+    },
+  };
+}
+
+test("distinctRows matches across DataTable and Arrow backends (Dates)", () => {
   const d1 = new Date("2020-01-01T00:00:00.000Z");
   const d1b = new Date("2020-01-01T00:00:00.000Z");
   const d2 = new Date("2020-01-02T00:00:00.000Z");
@@ -33,24 +71,17 @@ test("distinctRows matches across DataTable and Arrow backends (Dates)", (t) => 
     { hasHeaders: true, inferTypes: true },
   );
 
-  let arrowTable;
-  try {
-    arrowTable = new ArrowTableAdapter(
-      arrowTableFromColumns({
+  const ms1 = d1.getTime();
+  const ms2 = d2.getTime();
+  const arrowTable = new ArrowTableAdapter(
+    makeFakeArrowTable(
+      {
         Id: [1, 1, 1, 1, 2, 2],
-        When: [d1, d1b, d2, d2b, d1b, d1],
-      }),
-    );
-  } catch (err) {
-    // `apache-arrow` is an optional dependency in some environments (e.g. agent sandboxes).
-    // When it isn't installed, Arrow-backed tests should be skipped instead of failing.
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("optional 'apache-arrow'")) {
-      t.skip(message);
-      return;
-    }
-    throw err;
-  }
+        When: [ms1, ms1, ms2, ms2, ms1, ms1],
+      },
+      { Id: "Int32", When: "Date64" },
+    ),
+  );
 
   const op = { type: "distinctRows", columns: null };
   const expectedIso = [
