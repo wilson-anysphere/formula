@@ -173,7 +173,9 @@ fn decode_with_encoding(bytes: &[u8], encoding: &'static Encoding) -> String {
         // Same heuristic as `dir` strings: if many high bytes are NUL, treat as UTF-16LE.
         let total = bytes.len() / 2;
         let nul_high = bytes.iter().skip(1).step_by(2).filter(|&&b| b == 0).count();
-        if nul_high >= total / 2 {
+        // Use a ceiling half threshold. For very short inputs (e.g. 2 bytes), `total / 2` is 0 and
+        // would incorrectly classify any 2-byte MBCS string as UTF-16LE.
+        if nul_high * 2 >= total {
             let (cow, _) = UTF_16LE.decode_without_bom_handling(bytes);
             return cow.into_owned();
         }

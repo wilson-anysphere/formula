@@ -601,6 +601,52 @@ fn content_normalized_data_decodes_module_stream_name_using_dir_codepage() {
 }
 
 #[test]
+fn content_normalized_data_does_not_mistake_two_byte_ascii_module_name_for_utf16le() {
+    // Regression test for our UTF-16LE detection heuristic: a 2-byte MBCS/ASCII name like "AB"
+    // must not be treated as UTF-16LE (which would decode as a single unrelated code unit and
+    // break module stream lookup).
+    let module_name = "AB";
+    let module_code = "Option Explicit\r\n";
+    let module_container = compress_container(module_code.as_bytes());
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        // PROJECTCODEPAGE (u16 LE)
+        push_record(&mut out, 0x0003, &1252u16.to_le_bytes());
+
+        // MODULENAME / MODULESTREAMNAME
+        push_record(&mut out, 0x0019, module_name.as_bytes());
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(module_name.as_bytes());
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+
+        // MODULETYPE + MODULETEXTOFFSET
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let stream_path = format!("VBA/{module_name}");
+        let mut s = ole.create_stream(&stream_path).expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+    assert_eq!(normalized, module_code.as_bytes());
+}
+
+#[test]
 fn content_normalized_data_finds_module_source_without_text_offset_using_signature_scan() {
     // Ensure we exercise the same "scan for compressed container signature" fallback that the
     // module parser uses when `MODULETEXTOFFSET` (0x0031) is absent.
