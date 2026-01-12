@@ -5494,8 +5494,7 @@ mountRibbon(ribbonReactRoot, {
         );
         return;
       case "home.font.strikethrough":
-        applyToSelection("Strikethrough", (sheetId, ranges) => {
-          const doc = app.getDocument();
+        applyFormattingToSelection("Strikethrough", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { font: { strike: pressed } }, { label: "Strikethrough" });
           }
@@ -5642,7 +5641,7 @@ mountRibbon(ribbonReactRoot, {
         }
       })();
       if (!fontName) return;
-      applyToSelection("Font", (sheetId, ranges) => {
+      applyFormattingToSelection("Font", (doc, sheetId, ranges) => {
         for (const range of ranges) {
           doc.setRangeFormat(sheetId, range, { font: { name: fontName } }, { label: "Font" });
         }
@@ -6298,21 +6297,21 @@ mountRibbon(ribbonReactRoot, {
         applyFormattingToSelection("Align right", (doc, sheetId, ranges) => setHorizontalAlign(doc, sheetId, ranges, "right"));
         return;
       case "home.alignment.orientation.angleCounterclockwise":
-        applyToSelection("Text orientation", (sheetId, ranges) => {
+        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 45 } }, { label: "Text orientation" });
           }
         });
         return;
       case "home.alignment.orientation.angleClockwise":
-        applyToSelection("Text orientation", (sheetId, ranges) => {
+        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { alignment: { textRotation: -45 } }, { label: "Text orientation" });
           }
         });
         return;
       case "home.alignment.orientation.verticalText":
-        applyToSelection("Text orientation", (sheetId, ranges) => {
+        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             // Excel/OOXML uses 255 as a sentinel for vertical text (stacked).
             doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 255 } }, { label: "Text orientation" });
@@ -6320,14 +6319,14 @@ mountRibbon(ribbonReactRoot, {
         });
         return;
       case "home.alignment.orientation.rotateUp":
-        applyToSelection("Text orientation", (sheetId, ranges) => {
+        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 90 } }, { label: "Text orientation" });
           }
         });
         return;
       case "home.alignment.orientation.rotateDown":
-        applyToSelection("Text orientation", (sheetId, ranges) => {
+        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { alignment: { textRotation: -90 } }, { label: "Text orientation" });
           }
