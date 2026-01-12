@@ -4553,6 +4553,9 @@ export class SpreadsheetApp {
       fallback: resolveCssVar("--text-secondary", { fallback: commentIndicatorColor }),
     });
 
+    // Avoid allocating per-cell `{row,col}` objects in the legacy renderer.
+    const coordScratch = { row: 0, col: 0 };
+
     const renderCellRegion = (options: {
       clipX: number;
       clipY: number;
@@ -4596,7 +4599,9 @@ export class SpreadsheetApp {
         const row = rows[visualRow]!;
         for (let visualCol = 0; visualCol < cols.length; visualCol++) {
           const col = cols[visualCol]!;
-          const state = this.document.getCell(this.sheetId, { row, col }) as {
+          coordScratch.row = row;
+          coordScratch.col = col;
+          const state = this.document.getCell(this.sheetId, coordScratch) as {
             value: unknown;
             formula: string | null;
           };
@@ -4610,9 +4615,9 @@ export class SpreadsheetApp {
             if (this.showFormulas) {
               rich = { text: state.formula, runs: [] };
             } else {
-              const computed = this.getCellComputedValue({ row, col });
+              const computed = this.getCellComputedValue(coordScratch);
               if (computed != null) {
-                rich = { text: this.formatCellValueForDisplay({ row, col }, computed), runs: [] };
+                rich = { text: this.formatCellValueForDisplay(coordScratch, computed), runs: [] };
                 if (typeof computed === "string" && computed.startsWith("#")) {
                   color = errorTextColor;
                 }
@@ -4621,7 +4626,7 @@ export class SpreadsheetApp {
           } else if (isRichTextValue(state.value)) {
             rich = state.value;
           } else if (state.value != null) {
-            rich = { text: this.formatCellValueForDisplay({ row, col }, state.value as any), runs: [] };
+            rich = { text: this.formatCellValueForDisplay(coordScratch, state.value as any), runs: [] };
           }
 
           if (!rich || rich.text === "") continue;
@@ -7643,6 +7648,7 @@ export class SpreadsheetApp {
 
   private autoSumSelection(): void {
     const sheetId = this.sheetId;
+    const coordScratch = { row: 0, col: 0 };
 
     const normalizeRange = (range: Range): Range => ({
       startRow: Math.min(range.startRow, range.endRow),
@@ -7652,7 +7658,9 @@ export class SpreadsheetApp {
     });
 
     const getCellState = (row: number, col: number): { value: unknown; formula: string | null } | null => {
-      const state = this.document.getCell(sheetId, { row, col }) as { value: unknown; formula: string | null };
+      coordScratch.row = row;
+      coordScratch.col = col;
+      const state = this.document.getCell(sheetId, coordScratch) as { value: unknown; formula: string | null };
       return state ?? null;
     };
 
@@ -7729,7 +7737,9 @@ export class SpreadsheetApp {
       const state = getCellState(row, col);
       if (!state) return false;
       if (state.formula != null) {
-        const computed = this.getCellComputedValue({ row, col });
+        coordScratch.row = row;
+        coordScratch.col = col;
+        const computed = this.getCellComputedValue(coordScratch);
         return typeof computed === "number" && Number.isFinite(computed);
       }
       return coerceNumber(state.value) != null;
@@ -8007,6 +8017,8 @@ export class SpreadsheetApp {
       return Number.isInteger(n) && n >= 0 ? n : 0;
     };
 
+    const coordScratch = { row: 0, col: 0 };
+
     const styleIdForRowInRuns = (runs: unknown, row: number): number => {
       if (!Array.isArray(runs) || runs.length === 0) return 0;
       let lo = 0;
@@ -8029,7 +8041,9 @@ export class SpreadsheetApp {
       // Prefer a public tuple helper if present (some controller implementations expose these).
       if (typeof docAny.getCellFormatStyleIds === "function") {
         try {
-          const tuple = docAny.getCellFormatStyleIds(this.sheetId, { row, col });
+          coordScratch.row = row;
+          coordScratch.col = col;
+          const tuple = docAny.getCellFormatStyleIds(this.sheetId, coordScratch);
           if (Array.isArray(tuple) && tuple.length >= 4) {
             const normalized =
               tuple.length >= 5
@@ -8074,7 +8088,9 @@ export class SpreadsheetApp {
     for (let row = range.startRow; row <= range.endRow; row += 1) {
       const outRow: Array<{ value: unknown; formula: string | null; styleId: number }> = [];
       for (let col = range.startCol; col <= range.endCol; col += 1) {
-        const cell = this.document.getCell(this.sheetId, { row, col }) as {
+        coordScratch.row = row;
+        coordScratch.col = col;
+        const cell = this.document.getCell(this.sheetId, coordScratch) as {
           value: unknown;
           formula: string | null;
           styleId: number;
@@ -8090,10 +8106,9 @@ export class SpreadsheetApp {
             styleId = 0;
           } else {
             const effectiveStyle = (() => {
-              const coord = { row, col };
-              if (typeof docAny.getCellFormat === "function") return docAny.getCellFormat(this.sheetId, coord);
-              if (typeof docAny.getEffectiveCellStyle === "function") return docAny.getEffectiveCellStyle(this.sheetId, coord);
-              if (typeof docAny.getCellStyle === "function") return docAny.getCellStyle(this.sheetId, coord);
+              if (typeof docAny.getCellFormat === "function") return docAny.getCellFormat(this.sheetId, coordScratch);
+              if (typeof docAny.getEffectiveCellStyle === "function") return docAny.getEffectiveCellStyle(this.sheetId, coordScratch);
+              if (typeof docAny.getCellStyle === "function") return docAny.getCellStyle(this.sheetId, coordScratch);
               return this.document.styleTable.get(baseStyleId);
             })();
 
