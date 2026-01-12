@@ -95,11 +95,11 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
       // window `load` event. Under heavy load, waiting for `load` can occasionally hang
       // (e.g. if a long-lived request prevents the event from firing).
       await page.goto(path, { waitUntil: "domcontentloaded" });
-      await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 60_000 });
+      await page.waitForFunction(() => Boolean(window.__formulaApp), undefined, { timeout: 60_000 });
       // `__formulaApp` is assigned early in `main.ts` so tests can still introspect failures,
       // but that means we need to explicitly wait for the app to settle before interacting.
       await page.evaluate(async ({ waitForIdle, idleTimeoutMs }) => {
-        const app = (window as any).__formulaApp;
+        const app = window.__formulaApp as any;
         if (!waitForIdle) return;
         if (app && typeof app.whenIdle === "function") {
           if (typeof idleTimeoutMs === "number" && idleTimeoutMs > 0) {
@@ -172,9 +172,9 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
 export async function waitForDesktopReady(page: Page): Promise<void> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 60_000 });
+      await page.waitForFunction(() => Boolean(window.__formulaApp), undefined, { timeout: 60_000 });
       await page.evaluate(async () => {
-        const app = (window as any).__formulaApp;
+        const app = window.__formulaApp as any;
         if (app && typeof app.whenIdle === "function") {
           await app.whenIdle();
         }
