@@ -301,6 +301,60 @@ test("BrowserExtensionHost: activation timeout terminates worker and allows rest
   assert.equal(host._extensions.get(extensionId).active, true);
 });
 
+test("BrowserExtensionHost: activation errors preserve name/code", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  const scenarios = [
+    {
+      onPostMessage(msg, worker) {
+        if (msg?.type === "init") return;
+        if (msg?.type === "activate") {
+          worker.emitMessage({
+            type: "activate_error",
+            id: msg.id,
+            error: { message: "boom", name: "BoomError", code: "BOOM" }
+          });
+        }
+      }
+    }
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.activation-error-metadata";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "activation-error-metadata",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: ["onStartupFinished"],
+      permissions: []
+    }
+  });
+
+  await assert.rejects(() => host.startup(), (err) => {
+    assert.equal(err?.name, "BoomError");
+    assert.equal(err?.code, "BOOM");
+    assert.equal(err?.message, "boom");
+    return true;
+  });
+});
+
 test("BrowserExtensionHost: command timeout terminates worker, rejects in-flight requests, and restarts", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
