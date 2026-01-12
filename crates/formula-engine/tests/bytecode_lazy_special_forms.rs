@@ -70,6 +70,38 @@ fn bytecode_eval_ast_choose_is_lazy() {
 }
 
 #[test]
+fn bytecode_choose_nan_index_is_value_error_and_does_not_evaluate_choices() {
+    // NaN should coerce to an invalid CHOOSE index (0) and yield #VALUE!, without evaluating any
+    // choice expressions.
+    //
+    // This is a regression test for implementations that normalize via INT(index) + comparisons:
+    // Excel-style comparisons treat NaN as "equal" for ordering purposes, which can incorrectly
+    // select a branch.
+    let origin = CellCoord::new(0, 0);
+    // (1E308*1E308)/(1E308*1E308) = INF/INF = NaN in f64.
+    let expr = bytecode::parse_formula(
+        "=CHOOSE((1E308*1E308)/(1E308*1E308), A2, 7)",
+        origin,
+    )
+    .expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("choose_nan_index"), &expr);
+
+    let grid = PanicGrid {
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::Value));
+}
+
+#[test]
 fn bytecode_ifs_is_lazy() {
     // IFS(TRUE, 7, <unused_cond>, 8) must not evaluate the second condition/value pair.
     let origin = CellCoord::new(0, 0);
