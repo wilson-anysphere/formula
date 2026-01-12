@@ -516,9 +516,9 @@ At the worksheet level, this shows up as additional attributes on the `<c>` (cel
 - `vm="…"`, the **value metadata index**
 - `cm="…"`, the **cell metadata index**
 
-These are integer indices into metadata tables stored at the workbook level (Excel-produced files
-commonly use **1-based** indices for `vm`, but **0-based** also appears in the wild; treat `vm`/`cm` as
-opaque and preserve them exactly).
+These are integer indices into metadata tables stored at the workbook level. In this repo we observe
+both **1-based** (real Excel fixtures) and **0-based** (synthetic fixtures) `vm` indexing, so treat
+`vm`/`cm` as opaque and preserve them exactly.
 
 Example cell carrying rich/linked metadata:
 

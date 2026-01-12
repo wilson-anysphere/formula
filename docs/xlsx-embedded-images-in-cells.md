@@ -178,7 +178,7 @@ Interpretation of the important fields (based on observed behavior/structure):
 * `metadataTypes/metadataType name="XLRICHVALUE"` declares a metadata “type” used for Rich Values.
 * `valueMetadata` is the per-cell table indexed by the cell’s `vm="…"`.
 * `<rc t="1" v="0"/>`:
-  * `t="1"` points at the `XLRICHVALUE` metadata type (again: appears **1-based**).
+  * `t="1"` points at the `XLRICHVALUE` metadata type (in this fixture, `rc/@t` is **1-based**).
   * `v="0"` points at a Rich Value binding that ultimately selects **rich value index 0** in `xl/richData/rdrichvalue.xml`.
 
 ## 4) `xl/richData/rdrichvaluestructure.xml`: `_localImage` schema + keys
