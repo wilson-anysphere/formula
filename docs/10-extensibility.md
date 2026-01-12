@@ -1318,13 +1318,20 @@ to the app-level CSP (`apps/desktop/src-tauri/tauri.conf.json`, `connect-src`).
    location.reload();
    ```
 
-5. Open the Marketplace panel and install:
+5. Open the Marketplace panel and install your extension:
+
+   - Prefer the ribbon: **View → Panels → Marketplace** (this also ensures the extension host runtime is booted).
+   - Or open it by id via DevTools:
 
    ```js
    window.dispatchEvent(new CustomEvent("formula:open-panel", { detail: { panelId: "marketplace" } }));
    ```
 
+   Search for your extension id and click **Install**.
+
 6. Open the **Extensions** panel to see installed extensions and run contributed commands/panels.
+
+   - Ribbon: **Home → Panels → Extensions** (recommended; this triggers the lazy extension host boot)
 
 Notes:
 
