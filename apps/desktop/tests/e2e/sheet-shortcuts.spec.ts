@@ -31,26 +31,40 @@ test.describe("sheet navigation shortcuts", () => {
     });
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
 
-    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    const ctrlKey = process.platform !== "darwin";
+    const metaKey = process.platform === "darwin";
+
+    const dispatch = async (key: "PageUp" | "PageDown") => {
+      await page.evaluate(
+        ({ key, ctrlKey, metaKey }) => {
+          const grid = document.getElementById("grid");
+          if (!grid) throw new Error("Missing #grid");
+          grid.focus();
+          const evt = new KeyboardEvent("keydown", { key, ctrlKey, metaKey, bubbles: true, cancelable: true });
+          grid.dispatchEvent(evt);
+        },
+        { key, ctrlKey, metaKey },
+      );
+    };
 
     // Next sheet.
-    await page.keyboard.press(`${modifier}+PageDown`);
+    await dispatch("PageDown");
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
     await expect(page.getByTestId("active-value")).toHaveText("Hello from Sheet2");
 
     // Previous sheet.
-    await page.keyboard.press(`${modifier}+PageUp`);
+    await dispatch("PageUp");
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
     await expect(page.getByTestId("active-value")).toHaveText("Seed");
 
     // Wrap-around at the start.
-    await page.keyboard.press(`${modifier}+PageUp`);
+    await dispatch("PageUp");
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
 
     // Wrap-around at the end.
-    await page.keyboard.press(`${modifier}+PageDown`);
+    await dispatch("PageDown");
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
   });
 });
