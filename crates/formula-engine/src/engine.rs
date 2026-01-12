@@ -2980,7 +2980,14 @@ impl Engine {
             rewrite_defined_name_constants_for_bytecode(expr_after_structured, key.sheet, &self.workbook);
         let expr_to_lower = rewritten_names.as_ref().unwrap_or(expr_after_structured);
         let expr = bytecode::lower_canonical_expr(expr_to_lower, origin_ast, key.sheet, &mut resolve_sheet)
-            .map_err(BytecodeCompileReason::LowerError)?;
+            .map_err(|e| match e {
+                // The lowering layer uses `Unsupported` as a catch-all for expression shapes the
+                // bytecode backend doesn't implement. Surface these as `IneligibleExpr` so compile
+                // reports can distinguish "missing implementation" from structural lowering errors
+                // like cross-sheet references.
+                bytecode::LowerError::Unsupported => BytecodeCompileReason::IneligibleExpr,
+                other => BytecodeCompileReason::LowerError(other),
+            })?;
         if !bytecode_expr_is_eligible(&expr) {
             return Err(BytecodeCompileReason::IneligibleExpr);
         }

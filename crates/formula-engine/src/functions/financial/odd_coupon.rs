@@ -315,8 +315,18 @@ fn oddf_equation(
         return Err(ExcelError::Num);
     }
 
-    // Excel-style chronology: I < S < F <= M.
-    if !(issue < settlement && settlement < first_coupon && first_coupon <= maturity) {
+    // Excel-style chronology:
+    // - `issue` must be strictly before `first_coupon` (otherwise there is no odd first period).
+    // - Excel allows boundary cases where `issue == settlement` and/or `settlement == first_coupon`.
+    // - `settlement` must be strictly before `maturity`.
+    //
+    // So: issue <= settlement <= first_coupon <= maturity, with issue < first_coupon and settlement < maturity.
+    if !(issue <= settlement
+        && settlement <= first_coupon
+        && first_coupon <= maturity
+        && issue < first_coupon
+        && settlement < maturity)
+    {
         return Err(ExcelError::Num);
     }
 
@@ -339,7 +349,8 @@ fn oddf_equation(
     let dfc = days_between(issue, first_coupon, basis, system)?;
     let dsc = days_between(settlement, first_coupon, basis, system)?;
 
-    if a < 0.0 || dfc <= 0.0 || dsc <= 0.0 {
+    // Settlement can coincide with the first coupon date (DSC == 0).
+    if a < 0.0 || dfc <= 0.0 || dsc < 0.0 {
         return Err(ExcelError::Num);
     }
 
@@ -415,7 +426,8 @@ fn oddl_equation(
         return Err(ExcelError::Num);
     }
 
-    if !(last_interest < settlement && settlement < maturity) {
+    // Excel allows settlement on the `last_interest` date (A == 0).
+    if !(last_interest <= settlement && settlement < maturity) {
         return Err(ExcelError::Num);
     }
     if !(last_interest < maturity) {

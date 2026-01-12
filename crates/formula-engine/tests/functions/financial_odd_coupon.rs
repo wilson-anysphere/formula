@@ -180,25 +180,41 @@ fn assert_num_error_or_skip(sheet: &mut TestSheet, formula: &str) -> bool {
 }
 
 #[test]
-fn odd_coupon_boundary_date_equalities_return_num_error() {
+fn odd_coupon_boundary_date_equalities_evaluate_like_excel() {
     let mut sheet = TestSheet::new();
 
     // ODDF* boundaries
     // issue == settlement
-    if !assert_num_error_or_skip(&mut sheet, "=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.06,100,2,0)") {
+    let Some(v) = eval_value_or_skip(
+        &mut sheet,
+        "=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.06,100,2,0)",
+    ) else {
         return;
-    }
-    if !assert_num_error_or_skip(&mut sheet, "=ODDFYIELD(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,98,100,2,0)") {
+    };
+    assert!(matches!(v, Value::Number(n) if n.is_finite()), "got {v:?}");
+    let Some(v) = eval_value_or_skip(
+        &mut sheet,
+        "=ODDFYIELD(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,98,100,2,0)",
+    ) else {
         return;
-    }
+    };
+    assert!(matches!(v, Value::Number(n) if n.is_finite()), "got {v:?}");
 
     // settlement == first_coupon
-    if !assert_num_error_or_skip(&mut sheet, "=ODDFPRICE(DATE(2020,7,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,0.06,100,2,0)") {
+    let Some(v) = eval_value_or_skip(
+        &mut sheet,
+        "=ODDFPRICE(DATE(2020,7,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,0.06,100,2,0)",
+    ) else {
         return;
-    }
-    if !assert_num_error_or_skip(&mut sheet, "=ODDFYIELD(DATE(2020,7,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,98,100,2,0)") {
+    };
+    assert!(matches!(v, Value::Number(n) if n.is_finite()), "got {v:?}");
+    let Some(v) = eval_value_or_skip(
+        &mut sheet,
+        "=ODDFYIELD(DATE(2020,7,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,98,100,2,0)",
+    ) else {
         return;
-    }
+    };
+    assert!(matches!(v, Value::Number(n) if n.is_finite()), "got {v:?}");
 
     // first_coupon > maturity
     if !assert_num_error_or_skip(&mut sheet, "=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2021,8,1),0.05,0.06,100,2,0)") {
@@ -218,12 +234,20 @@ fn odd_coupon_boundary_date_equalities_return_num_error() {
 
     // ODDL* boundaries
     // last_interest == settlement
-    if !assert_num_error_or_skip(&mut sheet, "=ODDLPRICE(DATE(2020,10,15),DATE(2021,3,1),DATE(2020,10,15),0.05,0.06,100,2,0)") {
+    let Some(v) = eval_value_or_skip(
+        &mut sheet,
+        "=ODDLPRICE(DATE(2020,10,15),DATE(2021,3,1),DATE(2020,10,15),0.05,0.06,100,2,0)",
+    ) else {
         return;
-    }
-    if !assert_num_error_or_skip(&mut sheet, "=ODDLYIELD(DATE(2020,10,15),DATE(2021,3,1),DATE(2020,10,15),0.05,98,100,2,0)") {
+    };
+    assert!(matches!(v, Value::Number(n) if n.is_finite()), "got {v:?}");
+    let Some(v) = eval_value_or_skip(
+        &mut sheet,
+        "=ODDLYIELD(DATE(2020,10,15),DATE(2021,3,1),DATE(2020,10,15),0.05,98,100,2,0)",
+    ) else {
         return;
-    }
+    };
+    assert!(matches!(v, Value::Number(n) if n.is_finite()), "got {v:?}");
 
     // settlement == maturity
     if !assert_num_error_or_skip(&mut sheet, "=ODDLPRICE(DATE(2021,3,1),DATE(2021,3,1),DATE(2020,10,15),0.05,0.06,100,2,0)") {

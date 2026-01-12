@@ -1397,10 +1397,8 @@ fn xor_array(a: &ArrayValue, acc: &mut bool) -> Option<ErrorKind> {
     for v in a.iter() {
         match v {
             Value::Error(e) => return Some(*e),
+            Value::Number(n) if n.is_nan() => {}
             Value::Number(n) => {
-                if n.is_nan() {
-                    continue;
-                }
                 *acc ^= *n != 0.0;
             }
             Value::Bool(b) => {

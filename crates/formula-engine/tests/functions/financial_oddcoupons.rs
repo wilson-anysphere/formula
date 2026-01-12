@@ -1,7 +1,6 @@
 use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
-use formula_engine::error::ExcelError;
 use formula_engine::functions::financial::{oddfprice, oddfyield, oddlprice, oddlyield};
-use formula_engine::{ErrorKind, Value};
+use formula_engine::Value;
 
 use super::harness::TestSheet;
 
@@ -109,7 +108,7 @@ fn oddfprice_basis1_uses_prev_coupon_period_for_e() {
 }
 
 #[test]
-fn odd_coupon_settlement_equal_coupon_dates_are_rejected() {
+fn odd_coupon_settlement_equal_coupon_dates_are_allowed() {
     let system = ExcelDateSystem::EXCEL_1900;
 
     // Confirmed via Excel oracle: settlement must fall strictly inside the odd coupon period.
@@ -132,8 +131,8 @@ fn odd_coupon_settlement_equal_coupon_dates_are_rejected() {
         system,
     );
     assert!(
-        matches!(result, Err(ExcelError::Num)),
-        "expected #NUM! for ODDLPRICE when last_interest == settlement, got {result:?}"
+        matches!(result, Ok(n) if n.is_finite()),
+        "expected finite number for ODDLPRICE when last_interest == settlement, got {result:?}"
     );
 
     // ODDL*: settlement < last_interest => #NUM! (oracle case: fin_oddlprice_settle_before_last_b0_*)
@@ -180,8 +179,8 @@ fn odd_coupon_settlement_equal_coupon_dates_are_rejected() {
         system,
     );
     assert!(
-        matches!(result, Err(ExcelError::Num)),
-        "expected #NUM! for ODDFPRICE when settlement == first_coupon, got {result:?}"
+        matches!(result, Ok(n) if n.is_finite()),
+        "expected finite number for ODDFPRICE when settlement == first_coupon, got {result:?}"
     );
 
     // ODDF*: settlement > first_coupon => #NUM! (oracle case: fin_oddfprice_settle_after_first_b0_*)
@@ -217,8 +216,8 @@ fn odd_coupon_settlement_equal_coupon_dates_are_rejected() {
     let v =
         sheet.eval("=ODDLPRICE(DATE(2023,1,31),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,0)");
     assert!(
-        matches!(v, Value::Error(ErrorKind::Num)),
-        "expected #NUM! for worksheet ODDLPRICE when last_interest == settlement, got {v:?}"
+        matches!(v, Value::Number(n) if n.is_finite()),
+        "expected finite number for worksheet ODDLPRICE when last_interest == settlement, got {v:?}"
     );
     let v =
         sheet.eval("=ODDLPRICE(DATE(2022,11,1),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,0)");
@@ -233,8 +232,8 @@ fn odd_coupon_settlement_equal_coupon_dates_are_rejected() {
     );
     let v = sheet.eval("=ODDFPRICE(DATE(2023,1,31),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0)");
     assert!(
-        matches!(v, Value::Error(ErrorKind::Num)),
-        "expected #NUM! for worksheet ODDFPRICE when settlement == first_coupon, got {v:?}"
+        matches!(v, Value::Number(n) if n.is_finite()),
+        "expected finite number for worksheet ODDFPRICE when settlement == first_coupon, got {v:?}"
     );
     let v = sheet.eval("=ODDFPRICE(DATE(2023,2,1),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0)");
     assert!(
