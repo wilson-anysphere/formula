@@ -183,7 +183,7 @@ impl RTreeObject for CellIndexEntry {
 }
 
 /// An incremental dependency graph with Excel-style range-node optimization.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct DependencyGraph {
     /// Formula cells and their precedents.
     cells: HashMap<CellId, CellNode>,
@@ -208,12 +208,37 @@ pub struct DependencyGraph {
 
     calc_chain: Vec<CellId>,
     calc_chain_valid: bool,
+
+    /// Maximum number of nodes `mark_dirty` is allowed to visit before it falls back to
+    /// a "full recalc" by marking all formula cells dirty (Excel-style behavior).
+    dirty_mark_limit: usize,
 }
 
 impl DependencyGraph {
+    /// Excel-like dependency propagation threshold before falling back to full-recalc mode.
+    pub const DEFAULT_DIRTY_MARK_LIMIT: usize = 65_536;
+
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create a graph with a custom dirty propagation limit.
+    ///
+    /// This is primarily intended for tests.
+    #[must_use]
+    pub fn with_dirty_mark_limit(limit: usize) -> Self {
+        Self {
+            dirty_mark_limit: limit,
+            ..Self::default()
+        }
+    }
+
+    /// Set the dirty propagation limit.
+    ///
+    /// This is primarily intended for tests.
+    pub fn set_dirty_mark_limit(&mut self, limit: usize) {
+        self.dirty_mark_limit = limit;
     }
 
     /// Returns counts useful for asserting the internal representation in tests.
@@ -436,11 +461,21 @@ impl DependencyGraph {
     /// If `cell` is not a tracked formula cell it is treated as an input; the cell itself is not added to
     /// the dirty set, but its dependents still are.
     pub fn mark_dirty(&mut self, cell: CellId) {
+        // If we already marked all formula cells dirty, further propagation is unnecessary.
+        if self.dirty.len() == self.cells.len() {
+            return;
+        }
+
         let mut queue = VecDeque::new();
         let mut seen = HashSet::new();
 
         queue.push_back(cell);
         seen.insert(cell);
+
+        if seen.len() > self.dirty_mark_limit {
+            self.mark_all_formula_cells_dirty();
+            return;
+        }
 
         while let Some(cur) = queue.pop_front() {
             // If `cur` is a formula cell and was already dirty, we can stop exploring through it:
@@ -449,22 +484,45 @@ impl DependencyGraph {
                 continue;
             }
 
+            let mut exceeded_limit = false;
+
             if let Some(dependents) = self.cell_dependents.get(&cur) {
                 for &dep in dependents {
                     if seen.insert(dep) {
+                        if seen.len() > self.dirty_mark_limit {
+                            exceeded_limit = true;
+                            break;
+                        }
                         queue.push_back(dep);
                     }
                 }
+            }
+
+            if exceeded_limit {
+                self.mark_all_formula_cells_dirty();
+                return;
             }
 
             for range_id in self.range_nodes_containing_cell(cur) {
                 if let Some(range_node) = self.range_nodes.get(&range_id) {
                     for &dep in &range_node.dependents {
                         if seen.insert(dep) {
+                            if seen.len() > self.dirty_mark_limit {
+                                exceeded_limit = true;
+                                break;
+                            }
                             queue.push_back(dep);
                         }
                     }
                 }
+                if exceeded_limit {
+                    break;
+                }
+            }
+
+            if exceeded_limit {
+                self.mark_all_formula_cells_dirty();
+                return;
             }
         }
     }
@@ -1106,6 +1164,36 @@ impl DependencyGraph {
             if let Some(range_node) = self.range_nodes.get_mut(&range_id) {
                 range_node.member_formula_cells = range_node.member_formula_cells.saturating_sub(1);
             }
+        }
+    }
+
+    fn mark_all_formula_cells_dirty(&mut self) {
+        if self.dirty.len() == self.cells.len() {
+            return;
+        }
+
+        self.dirty.reserve(self.cells.len().saturating_sub(self.dirty.len()));
+        self.dirty.extend(self.cells.keys().copied());
+    }
+}
+
+impl Default for DependencyGraph {
+    fn default() -> Self {
+        Self {
+            cells: HashMap::new(),
+            cell_dependents: HashMap::new(),
+            range_nodes: HashMap::new(),
+            range_ids: HashMap::new(),
+            next_range_id: 0,
+            range_index: HashMap::new(),
+            cell_index: HashMap::new(),
+            dirty: HashSet::new(),
+            volatile_roots: HashSet::new(),
+            volatile_closure: HashSet::new(),
+            volatile_closure_valid: false,
+            calc_chain: Vec::new(),
+            calc_chain_valid: false,
+            dirty_mark_limit: Self::DEFAULT_DIRTY_MARK_LIMIT,
         }
     }
 }
