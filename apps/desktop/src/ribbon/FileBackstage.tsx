@@ -146,9 +146,11 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
     if (event.key !== "Tab") return;
     const panel = panelRef.current;
     if (!panel) return;
-    const focusables = Array.from(panel.querySelectorAll<HTMLElement>("button:not([disabled]), [href], input, select, textarea, [tabindex]")).filter(
-      (el) => el.getAttribute("aria-hidden") !== "true" && !el.hasAttribute("disabled"),
-    );
+    const focusables = Array.from(
+      panel.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((el) => el.getAttribute("aria-hidden") !== "true");
     if (focusables.length === 0) return;
     const first = focusables[0]!;
     const last = focusables[focusables.length - 1]!;
