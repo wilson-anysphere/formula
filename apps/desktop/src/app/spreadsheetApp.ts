@@ -3211,6 +3211,14 @@ export class SpreadsheetApp {
 
   private onSharedPointerMove(e: PointerEvent): void {
     if (!this.sharedGrid) return;
+    const target = e.target as HTMLElement | null;
+    if (target) {
+      if (this.vScrollbarTrack.contains(target) || this.hScrollbarTrack.contains(target) || target.closest(".outline-toggle")) {
+        this.clearSharedHoverCellCache();
+        this.hideCommentTooltip();
+        return;
+      }
+    }
     if (this.commentsPanelVisible) {
       this.hideCommentTooltip();
       return;
