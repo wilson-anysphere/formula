@@ -35,7 +35,7 @@ const RDRICHVALUE_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone
   <rv s="0">
     <v>0</v>
     <v>6</v>
-    <v>Example alt text</v>
+    <v>Example<![CDATA[Alt]]>Text</v>
   </rv>
 </rvData>
 "#;
@@ -50,7 +50,15 @@ const RICH_VALUE_REL_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standal
 const RICH_VALUE_REL_RELS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1"
-                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                 Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                 Target="../media/image1.png"/>
+</Relationships>
+"#;
+
+const RICH_VALUE_REL_RELS_XML_NON_IMAGE: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
                 Target="../media/image1.png"/>
 </Relationships>
 "#;
@@ -120,6 +128,69 @@ fn extracts_embedded_image_from_cell_vm_metadata_richdata_schema() {
     assert_eq!(image.cell, CellRef::from_a1("B2").unwrap());
     assert_eq!(image.image_target, "xl/media/image1.png");
     assert_eq!(image.bytes, png_bytes);
-    assert_eq!(image.alt_text.as_deref(), Some("Example alt text"));
+    assert_eq!(image.alt_text.as_deref(), Some("ExampleAltText"));
     assert!(!image.decorative);
+}
+
+#[test]
+fn skips_rich_value_relationships_that_are_not_images() {
+    let png_bytes = STANDARD
+        .decode(PNG_1X1_TRANSPARENT_B64)
+        .expect("decode png base64");
+
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet.write_number(1, 1, 1.0).unwrap(); // B2
+    let xlsx_bytes = workbook.save_to_buffer().unwrap();
+
+    let mut pkg = XlsxPackage::from_bytes(&xlsx_bytes).unwrap();
+
+    // Patch the worksheet cell to include the `vm` attribute expected by Excel's rich value schema.
+    let sheet_part = "xl/worksheets/sheet1.xml";
+    let mut sheet_xml = String::from_utf8(pkg.part(sheet_part).unwrap().to_vec()).unwrap();
+    sheet_xml = sheet_xml.replacen(r#"r="B2""#, r#"r="B2" vm="1""#, 1);
+    pkg.set_part(sheet_part, sheet_xml.into_bytes());
+
+    // Add the rich value parts + image payload, but intentionally mark the relationship as a
+    // *non-image* relationship type.
+    pkg.set_part("xl/metadata.xml", METADATA_XML.as_bytes().to_vec());
+    pkg.set_part(
+        "xl/richData/rdrichvalue.xml",
+        RDRICHVALUE_XML.as_bytes().to_vec(),
+    );
+    pkg.set_part(
+        "xl/richData/richValueRel.xml",
+        RICH_VALUE_REL_XML.as_bytes().to_vec(),
+    );
+    pkg.set_part(
+        "xl/richData/_rels/richValueRel.xml.rels",
+        RICH_VALUE_REL_RELS_XML_NON_IMAGE.as_bytes().to_vec(),
+    );
+    pkg.set_part("xl/media/image1.png", png_bytes);
+
+    // Wire up the workbook relationships to the new parts (they are discovered via `workbook.xml.rels`).
+    let rels_part = "xl/_rels/workbook.xml.rels";
+    let mut rels_xml = String::from_utf8(pkg.part(rels_part).unwrap().to_vec()).unwrap();
+    let insert_idx = rels_xml
+        .rfind("</Relationships>")
+        .expect("closing Relationships tag");
+    rels_xml.insert_str(
+        insert_idx,
+        r#"
+  <Relationship Id="rId1000" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata" Target="metadata.xml"/>
+  <Relationship Id="rId1001" Type="http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue" Target="richData/rdrichvalue.xml"/>
+  <Relationship Id="rId1002" Type="http://schemas.microsoft.com/office/2022/10/relationships/richValueRel" Target="richData/richValueRel.xml"/>
+"#,
+    );
+    pkg.set_part(rels_part, rels_xml.into_bytes());
+
+    // Round-trip through ZIP writer to ensure the extractor works on a real package.
+    let bytes = pkg.write_to_bytes().unwrap();
+    let pkg = XlsxPackage::from_bytes(&bytes).unwrap();
+
+    let images = extract_embedded_images(&pkg).unwrap();
+    assert!(
+        images.is_empty(),
+        "expected extractor to ignore non-image relationship types"
+    );
 }
