@@ -172,3 +172,45 @@ fn index_reference_slices_spill_when_used_as_formula_result() {
     assert_eq!(engine.get_cell_value("Sheet1", "L3"), Value::Number(200.0));
     assert_eq!(engine.get_cell_value("Sheet1", "M3"), Value::Number(300.0));
 }
+
+#[test]
+fn index_array_slices_spill_when_used_as_formula_result() {
+    let mut engine = Engine::new();
+
+    // Column slice spills vertically.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=INDEX({1,2,3;4,5,6},0,2)")
+        .unwrap();
+    // Row slice spills horizontally.
+    engine
+        .set_cell_formula("Sheet1", "D1", "=INDEX({1,2,3;4,5,6},2,0)")
+        .unwrap();
+    // Default column_num is 1, so row_num=0 returns the first column.
+    engine
+        .set_cell_formula("Sheet1", "G1", "=INDEX({1,2,3;4,5,6},0)")
+        .unwrap();
+
+    engine.recalculate();
+
+    // {1,2,3;4,5,6} column 2 -> {2;5}
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("A1 spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("A2").unwrap());
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(5.0));
+
+    // {1,2,3;4,5,6} row 2 -> {4,5,6}
+    let (start, end) = engine.spill_range("Sheet1", "D1").expect("D1 spill range");
+    assert_eq!(start, parse_a1("D1").unwrap());
+    assert_eq!(end, parse_a1("F1").unwrap());
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F1"), Value::Number(6.0));
+
+    // {1,2,3;4,5,6} row_num=0 defaults to col 1 -> {1;4}
+    let (start, end) = engine.spill_range("Sheet1", "G1").expect("G1 spill range");
+    assert_eq!(start, parse_a1("G1").unwrap());
+    assert_eq!(end, parse_a1("G2").unwrap());
+    assert_eq!(engine.get_cell_value("Sheet1", "G1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G2"), Value::Number(4.0));
+}
