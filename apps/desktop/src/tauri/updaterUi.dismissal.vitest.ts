@@ -87,6 +87,30 @@ describe("tauri/updaterUi dismissal persistence", () => {
     expect(Number(localStorage.getItem(DISMISSED_AT_KEY))).toBeGreaterThan(0);
   }, TEST_TIMEOUT_MS);
 
+  it("clears stored dismissal when the user initiates an update download", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const { handleUpdaterEvent } = await loadUpdaterUi();
+
+    // Pre-existing "Later" dismissal for the same version should remain until the user acts.
+    localStorage.setItem(DISMISSED_VERSION_KEY, "1.2.3");
+    localStorage.setItem(DISMISSED_AT_KEY, String(Date.now()));
+
+    await handleUpdaterEvent("update-available", { source: "manual", version: "1.2.3", body: "Notes" });
+
+    expect(localStorage.getItem(DISMISSED_VERSION_KEY)).toBe("1.2.3");
+    expect(localStorage.getItem(DISMISSED_AT_KEY)).toBeTruthy();
+
+    // The updater API is intentionally not stubbed: clearing the suppression state should happen
+    // immediately when the user clicks "Download" (even if the download can't start).
+    const download = document.querySelector<HTMLButtonElement>('[data-testid="updater-download"]');
+    expect(download).toBeTruthy();
+    download!.click();
+
+    expect(localStorage.getItem(DISMISSED_VERSION_KEY)).toBeNull();
+    expect(localStorage.getItem(DISMISSED_AT_KEY)).toBeNull();
+  }, TEST_TIMEOUT_MS);
+
   it("suppresses startup prompts for a recently-dismissed version, but manual checks still show", async () => {
     const { handleUpdaterEvent } = await loadUpdaterUi();
     const notifications = await import("./notifications");
