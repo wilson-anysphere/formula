@@ -204,7 +204,7 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
 
   if (!binPath || !existsSync(binPath)) {
     throw new Error(
-      `Desktop binary not found (bin=${String(binPath)}). Build it via cargo tauri build and/or set FORMULA_DESKTOP_BIN.`,
+      `Desktop binary not found (bin=${String(binPath)}). Build it via (cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build) and/or set FORMULA_DESKTOP_BIN.`,
     );
   }
 
