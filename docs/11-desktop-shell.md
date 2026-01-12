@@ -597,6 +597,10 @@ JS provider contract (normalized API):
 - Read: `provider.read()` → `{ text?: string, html?: string, rtf?: string, imagePng?: Uint8Array, pngBase64?: string }`
 - Write: `provider.write({ text, html?, rtf?, imagePng?, pngBase64? })` → `void`
 
+Note: `pngBase64` is a legacy/internal escape hatch. The preferred JS-facing image field is `imagePng`
+(`Uint8Array`). The provider will generally decode any native `pngBase64` payload into `imagePng` before
+returning it to callers.
+
 Tauri wire contract (internal, used only for `__TAURI__.core.invoke`):
 
 - Read: `invoke("clipboard_read")` → `{ text?: string, html?: string, rtf?: string, pngBase64?: string }`
@@ -607,7 +611,7 @@ Tauri wire contract (internal, used only for `__TAURI__.core.invoke`):
 Provider return shape:
 
 - `createClipboardProvider().read()` returns a merged `ClipboardContent` that may include either/both:
-  - `pngBase64: string` (native/Rust clipboard path), and/or
+  - `pngBase64: string` (legacy/internal; only preserved when base64 decoding fails), and/or
   - `imagePng: Uint8Array` (Web Clipboard API `image/png` path)
 
 Image wire format:
