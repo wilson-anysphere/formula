@@ -15,6 +15,19 @@ function loadJwt(): JwtModule {
 
 const RoleSchema = z.enum(["owner", "admin", "editor", "commenter", "viewer"]);
 
+function parseStringArray(value: unknown): string[] {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (Array.isArray(parsed)) value = parsed;
+    } catch {
+      // fall through
+    }
+  }
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+}
+
 const SyncJwtClaimsSchema = z
   .object({
     sub: z.string().uuid(),
@@ -136,9 +149,10 @@ export async function introspectSyncToken(
   if (claims.apiKeyId) {
     const apiKeyRes = await db.query(
       `
-        SELECT org_id, created_by, revoked_at
-        FROM api_keys
-        WHERE id = $1
+        SELECT ak.org_id, ak.created_by, ak.revoked_at, os.allowed_auth_methods
+        FROM api_keys ak
+        JOIN org_settings os ON os.org_id = ak.org_id
+        WHERE ak.id = $1
         LIMIT 1
       `,
       [claims.apiKeyId]
@@ -147,7 +161,12 @@ export async function introspectSyncToken(
       return { active: false, reason: "api_key_not_found", userId, orgId, role };
     }
 
-    const apiKey = apiKeyRes.rows[0] as { org_id: string; created_by: string; revoked_at: Date | null };
+    const apiKey = apiKeyRes.rows[0] as {
+      org_id: string;
+      created_by: string;
+      revoked_at: Date | null;
+      allowed_auth_methods: unknown;
+    };
     if (apiKey.created_by !== userId) {
       return { active: false, reason: "api_key_user_mismatch", userId, orgId, role };
     }
@@ -156,6 +175,11 @@ export async function introspectSyncToken(
     }
     if (apiKey.revoked_at) {
       return { active: false, reason: "api_key_revoked", userId, orgId, role };
+    }
+
+    const allowedAuthMethods = parseStringArray(apiKey.allowed_auth_methods);
+    if (!allowedAuthMethods.includes("api_key")) {
+      return { active: false, reason: "auth_method_not_allowed", userId, orgId, role };
     }
   }
 

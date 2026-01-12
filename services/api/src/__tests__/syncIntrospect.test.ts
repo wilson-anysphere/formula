@@ -392,4 +392,92 @@ describe("internal sync token introspection", () => {
     },
     15_000
   );
+
+  it(
+    "rejects introspection for API-key issued tokens when API keys are disabled",
+    async () => {
+      const register = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "api-key-disabled-introspect@example.com",
+          password: "password1234",
+          name: "API Key Disabled User",
+          orgName: "API Key Disabled Org"
+        }
+      });
+      expect(register.statusCode).toBe(200);
+      const cookie = extractCookie(register.headers["set-cookie"]);
+      const registerBody = register.json() as any;
+      const orgId = registerBody.organization.id as string;
+      const userId = registerBody.user.id as string;
+
+      const allowApiKeys = await app.inject({
+        method: "PATCH",
+        url: `/orgs/${orgId}/settings`,
+        headers: { cookie },
+        payload: { allowedAuthMethods: ["password", "api_key"] }
+      });
+      expect(allowApiKeys.statusCode).toBe(200);
+
+      const createDoc = await app.inject({
+        method: "POST",
+        url: "/docs",
+        headers: { cookie },
+        payload: { orgId, title: "API Key Disabled Doc" }
+      });
+      expect(createDoc.statusCode).toBe(200);
+      const docId = (createDoc.json() as any).document.id as string;
+
+      const createKey = await app.inject({
+        method: "POST",
+        url: `/orgs/${orgId}/api-keys`,
+        headers: { cookie },
+        payload: { name: "ci" }
+      });
+      expect(createKey.statusCode).toBe(200);
+      const keyBody = createKey.json() as any;
+      const apiKeyId = keyBody.apiKey.id as string;
+      const apiKeyToken = keyBody.key as string;
+
+      const syncTokenRes = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/sync-token`,
+        headers: { authorization: `Bearer ${apiKeyToken}` }
+      });
+      expect(syncTokenRes.statusCode).toBe(200);
+      const syncToken = (syncTokenRes.json() as any).token as string;
+
+      const decoded = jwt.verify(syncToken, config.syncTokenSecret, {
+        audience: "formula-sync"
+      }) as any;
+      expect(decoded).toMatchObject({ sub: userId, docId, orgId, apiKeyId });
+
+      const disableApiKeys = await app.inject({
+        method: "PATCH",
+        url: `/orgs/${orgId}/settings`,
+        headers: { cookie },
+        payload: { allowedAuthMethods: ["password"] }
+      });
+      expect(disableApiKeys.statusCode).toBe(200);
+
+      const introspectRes = await app.inject({
+        method: "POST",
+        url: "/internal/sync/introspect",
+        headers: { "x-internal-admin-token": config.internalAdminToken! },
+        payload: { token: syncToken, docId }
+      });
+      expect(introspectRes.statusCode).toBe(200);
+      expect(introspectRes.json()).toMatchObject({
+        ok: false,
+        active: false,
+        error: "forbidden",
+        reason: "auth_method_not_allowed",
+        userId,
+        orgId,
+        role: "owner"
+      });
+    },
+    15_000
+  );
 });
