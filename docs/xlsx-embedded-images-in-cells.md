@@ -5,15 +5,10 @@ This document records a **concrete OOXML parts + relationship chain** for **embe
 
 The schema described below was confirmed by inspecting both:
 
-- a minimal `.xlsx` generated using `rust_xlsxwriter`, and
-- the real Excel-generated fixture workbook `fixtures/xlsx/basic/image-in-cell.xlsx`.
+* the real Excel-generated fixture workbook `fixtures/xlsx/basic/image-in-cell.xlsx` (notes in `fixtures/xlsx/basic/image-in-cell.md`), and
+* a minimal `.xlsx` generated using `rust_xlsxwriter` (see `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs`).
 
 It is recorded here so future engine/model work can round-trip these files without treating them as “mysterious metadata”.
-
-The same overall `xl/metadata.xml` + `xl/richData/rd*` + `richValueRel` shape is also present in the real
-Excel-generated fixture workbook:
-
-- `fixtures/xlsx/basic/image-in-cell.xlsx` (see `fixtures/xlsx/basic/image-in-cell.md`)
 
 See also (broader context + variant coverage):
 
@@ -28,9 +23,6 @@ Related in-repo references:
   * `fixtures/xlsx/basic/image-in-cell.md`
 * Preservation/regression test that generates a “Place in Cell” workbook via `rust_xlsxwriter`:
   * `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs`
-
-The same overall wiring (worksheet error cell + `metadata.xml` + `xl/richData/rd*` + `richValueRel` →
-`xl/media/*`) is also present in the Excel-produced fixture `fixtures/xlsx/basic/image-in-cell.xlsx`.
 
 ## High-level mapping chain (cell → image bytes)
 
