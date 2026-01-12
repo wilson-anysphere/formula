@@ -2,18 +2,19 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { ContextMenu, type ContextMenuItem } from "../menus/contextMenu.js";
 import { normalizeExcelColorToCss } from "../shared/colors.js";
+import { resolveCssVar } from "../theme/cssVars.js";
 import * as nativeDialogs from "../tauri/nativeDialogs";
 import { validateSheetName, type SheetMeta, type TabColor, type WorkbookSheetStore } from "./workbookSheetStore";
 import { computeWorkbookSheetMoveIndex } from "./sheetReorder";
 
-const SHEET_TAB_COLOR_PALETTE: Array<{ label: string; rgb: string }> = [
-  { label: "Red", rgb: "#ff0000" },
-  { label: "Orange", rgb: "#ff9900" },
-  { label: "Yellow", rgb: "#ffff00" },
-  { label: "Green", rgb: "#00b050" },
-  { label: "Blue", rgb: "#0070c0" },
-  { label: "Purple", rgb: "#7030a0" },
-  { label: "Gray", rgb: "#7f7f7f" },
+const SHEET_TAB_COLOR_PALETTE: Array<{ label: string; token: string; fallbackCss: string }> = [
+  { label: "Red", token: "--sheet-tab-red", fallbackCss: "red" },
+  { label: "Orange", token: "--sheet-tab-orange", fallbackCss: "orange" },
+  { label: "Yellow", token: "--sheet-tab-yellow", fallbackCss: "yellow" },
+  { label: "Green", token: "--sheet-tab-green", fallbackCss: "green" },
+  { label: "Blue", token: "--sheet-tab-blue", fallbackCss: "blue" },
+  { label: "Purple", token: "--sheet-tab-purple", fallbackCss: "purple" },
+  { label: "Gray", token: "--sheet-tab-gray", fallbackCss: "gray" },
 ];
 
 type Props = {
@@ -352,19 +353,22 @@ export function SheetTabStrip({
             },
           },
           { type: "separator" },
-          ...SHEET_TAB_COLOR_PALETTE.map((entry) => ({
-            type: "item" as const,
-            label: entry.label,
-            leading: { type: "swatch" as const, color: entry.rgb },
-            onSelect: () => {
-              try {
-                store.setTabColor(sheet.id, { rgb: entry.rgb });
-              } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
-                onError?.(message);
-              }
-            },
-          })),
+          ...SHEET_TAB_COLOR_PALETTE.map((entry) => {
+            const rgb = resolveCssVar(entry.token, { fallback: entry.fallbackCss });
+            return {
+              type: "item" as const,
+              label: entry.label,
+              leading: { type: "swatch" as const, color: rgb },
+              onSelect: () => {
+                try {
+                  store.setTabColor(sheet.id, { rgb });
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : String(err);
+                  onError?.(message);
+                }
+              },
+            };
+          }),
         ],
       },
     ];
