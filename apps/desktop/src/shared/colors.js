@@ -36,6 +36,11 @@ export function normalizeExcelColorToCss(input) {
   // `{ auto: true }` is context-dependent ("automatic") and cannot be resolved here.
   if (input.auto === true) return undefined;
 
+  // DocumentController + desktop sheet metadata store represent tab colors as `{ rgb }`.
+  if (typeof input.rgb === "string") {
+    return normalizeExcelColorStringToCss(input.rgb);
+  }
+
   // `{ indexed: number }`
   if (typeof input.indexed === "number" && Number.isFinite(input.indexed)) {
     const idx = input.indexed;
