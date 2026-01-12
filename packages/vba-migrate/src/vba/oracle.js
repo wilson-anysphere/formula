@@ -168,6 +168,12 @@ async function ensureBuilt({ repoRoot, binPath }) {
         // Default to disabling any configured wrapper unless the user explicitly overrides it.
         RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
         RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
+        // Cargo config can also be controlled via `CARGO_BUILD_RUSTC_WRAPPER`; set these so a
+        // global config doesn't unexpectedly re-enable a flaky wrapper.
+        CARGO_BUILD_RUSTC_WRAPPER:
+          process.env.CARGO_BUILD_RUSTC_WRAPPER ?? process.env.RUSTC_WRAPPER ?? "",
+        CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER:
+          process.env.CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER ?? process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
       };
 
       let useCargoAgent = false;

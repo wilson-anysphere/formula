@@ -112,6 +112,12 @@ const raw = await run(cargoCommand, cargoArgs, {
     // Default to disabling any configured wrapper unless the user explicitly sets one.
     RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
     RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
+    // Cargo config can also be set via `CARGO_BUILD_RUSTC_WRAPPER`; include it so we reliably
+    // override global config (and avoid flaky sccache wrappers) when the caller didn't opt in.
+    CARGO_BUILD_RUSTC_WRAPPER:
+      process.env.CARGO_BUILD_RUSTC_WRAPPER ?? process.env.RUSTC_WRAPPER ?? "",
+    CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER:
+      process.env.CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER ?? process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
   },
 });
 

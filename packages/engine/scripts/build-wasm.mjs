@@ -258,6 +258,12 @@ const wasmPackEnv = {
   ...childEnv,
   RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
   RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
+  // Cargo config can also be controlled via `CARGO_BUILD_RUSTC_WRAPPER` env vars; set these so
+  // we reliably override any global config (e.g. `build.rustc-wrapper=sccache`) when callers
+  // didn't explicitly opt in.
+  CARGO_BUILD_RUSTC_WRAPPER: process.env.CARGO_BUILD_RUSTC_WRAPPER ?? process.env.RUSTC_WRAPPER ?? "",
+  CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER:
+    process.env.CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER ?? process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
 };
 
 function isPositiveIntegerString(value) {

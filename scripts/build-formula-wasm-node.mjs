@@ -174,6 +174,13 @@ function buildWithWasmPack() {
     RAYON_NUM_THREADS: rayonThreads,
     RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
     RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
+    // Cargo can also read wrapper settings via `CARGO_BUILD_RUSTC_WRAPPER`. Set it explicitly so
+    // a global Cargo config (`build.rustc-wrapper`) cannot accidentally re-enable a flaky wrapper
+    // when `RUSTC_WRAPPER` is unset.
+    CARGO_BUILD_RUSTC_WRAPPER:
+      process.env.CARGO_BUILD_RUSTC_WRAPPER ?? process.env.RUSTC_WRAPPER ?? "",
+    CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER:
+      process.env.CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER ?? process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
   };
 
   const res = canUseRunLimited
