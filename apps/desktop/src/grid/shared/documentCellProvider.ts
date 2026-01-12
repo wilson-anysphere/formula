@@ -76,7 +76,7 @@ export class DocumentCellProvider implements CellProvider {
       colCount: number;
       showFormulas: () => boolean;
       getComputedValue: (cell: { row: number; col: number }) => string | number | boolean | null;
-      getCommentMeta?: (cellRef: string) => { resolved: boolean } | null;
+      getCommentMeta?: (row: number, col: number) => { resolved: boolean } | null;
     }
   ) {
     // Caches cover cell metadata + value formatting work. Keep each sheet bounded to
@@ -414,16 +414,18 @@ export class DocumentCellProvider implements CellProvider {
       }
     }
 
-    const comment = (() => {
-      const metaProvider = this.options.getCommentMeta;
-      if (!metaProvider) return null;
-      const cellRef = `${toColumnName(docCol)}${docRow + 1}`;
-      const meta = metaProvider(cellRef);
-      if (!meta) return null;
-      return { resolved: meta.resolved };
-    })();
+    const metaProvider = this.options.getCommentMeta;
+    const meta = metaProvider ? metaProvider(docRow, docCol) : null;
 
-    const cell: CellData = richText ? { row, col, value, richText, style, comment } : { row, col, value, style, comment };
+    // Only attach comment metadata when present to avoid per-cell allocations
+    // and keep CellData objects lean for fast scrolling.
+    const cell: CellData = richText
+      ? meta
+        ? { row, col, value, richText, style, comment: { resolved: meta.resolved } }
+        : { row, col, value, richText, style }
+      : meta
+        ? { row, col, value, style, comment: { resolved: meta.resolved } }
+        : { row, col, value, style };
     cache.set(key, cell);
     return cell;
   }

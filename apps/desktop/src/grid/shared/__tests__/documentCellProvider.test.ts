@@ -2,13 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import { DocumentCellProvider } from "../documentCellProvider.js";
 
-type CellState = { value: unknown; formula: string | null };
+type CellState = { value: unknown; formula: string | null; styleId?: number };
 
 function createProvider(options: {
   getSheetId: () => string;
   getCell: (sheetId: string, coord: { row: number; col: number }) => CellState | null;
   headerRows?: number;
   headerCols?: number;
+  getCommentMeta?: (row: number, col: number) => { resolved: boolean } | null;
 }) {
   const headerRows = options.headerRows ?? 1;
   const headerCols = options.headerCols ?? 1;
@@ -25,6 +26,7 @@ function createProvider(options: {
     colCount: headerCols + 10,
     showFormulas: () => false,
     getComputedValue: () => null,
+    getCommentMeta: options.getCommentMeta,
   });
 
   return { provider, doc };
@@ -160,4 +162,30 @@ describe("DocumentCellProvider (shared grid)", () => {
     provider.getCell(1, 1);
     expect(doc.getCell).toHaveBeenCalledTimes(2);
   });
+
+  it("looks up comment metadata by numeric coords (no A1 string conversion)", () => {
+    const getCommentMeta = vi.fn((row: number, col: number) => {
+      if (row === 0 && col === 0) return { resolved: false };
+      return null;
+    });
+
+    const { provider } = createProvider({
+      getSheetId: () => "sheet-1",
+      getCell: () => ({ value: "hello", formula: null }),
+      getCommentMeta,
+    });
+
+    // Grid (1,1) maps to document (0,0) when header rows/cols are enabled.
+    const withComment = provider.getCell(1, 1);
+    expect(withComment).not.toBeNull();
+    expect(getCommentMeta).toHaveBeenCalledWith(0, 0);
+    expect(withComment).toMatchObject({ comment: { resolved: false } });
+
+    // Grid (2,2) maps to document (1,1); our meta provider returns null there.
+    const withoutComment = provider.getCell(2, 2);
+    expect(withoutComment).not.toBeNull();
+    expect(getCommentMeta).toHaveBeenCalledWith(1, 1);
+    expect("comment" in (withoutComment as any)).toBe(false);
+  });
 });
+

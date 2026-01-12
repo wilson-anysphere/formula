@@ -386,6 +386,7 @@ export class SpreadsheetApp {
   private sharedGrid: DesktopSharedGrid | null = null;
   private sharedProvider: DocumentCellProvider | null = null;
   private readonly commentMeta = new Map<string, { resolved: boolean }>();
+  private readonly commentMetaByCoord = new Map<number, { resolved: boolean }>();
   private sharedGridSelectionSyncInProgress = false;
   private sharedGridZoom = 1;
   private readonly sharedGridAxisCols = new Set<number>();
@@ -881,7 +882,7 @@ export class SpreadsheetApp {
         colCount: this.limits.maxCols + headerCols,
         showFormulas: () => this.showFormulas,
         getComputedValue: (cell) => this.getCellComputedValue(cell),
-        getCommentMeta: (cellRef) => this.commentMeta.get(cellRef) ?? null
+        getCommentMeta: (row, col) => this.commentMetaByCoord.get(row * 16_384 + col) ?? null
       });
 
       this.sharedGrid = new DesktopSharedGrid({
@@ -2962,15 +2963,25 @@ export class SpreadsheetApp {
   private reindexCommentCells(): void {
     this.commentCells.clear();
     this.commentMeta.clear();
+    this.commentMetaByCoord.clear();
     for (const comment of this.commentManager.listAll()) {
-      this.commentCells.add(comment.cellRef);
-      const existing = this.commentMeta.get(comment.cellRef);
-      if (!existing) {
-        this.commentMeta.set(comment.cellRef, { resolved: Boolean(comment.resolved) });
-      } else {
+      const cellRef = comment.cellRef;
+      this.commentCells.add(cellRef);
+
+      const resolved = Boolean(comment.resolved);
+
+      const existing = this.commentMeta.get(cellRef);
+      if (!existing) this.commentMeta.set(cellRef, { resolved });
+      else {
         // Treat the cell as resolved only if all comment threads on the cell are resolved.
-        existing.resolved = existing.resolved && Boolean(comment.resolved);
+        existing.resolved = existing.resolved && resolved;
       }
+
+      const coord = parseA1(cellRef);
+      const coordKey = coord.row * 16_384 + coord.col;
+      const existingCoord = this.commentMetaByCoord.get(coordKey);
+      if (!existingCoord) this.commentMetaByCoord.set(coordKey, { resolved });
+      else existingCoord.resolved = existingCoord.resolved && resolved;
     }
 
     // The shared renderer caches cell metadata, so comment indicator updates require a provider invalidation.
