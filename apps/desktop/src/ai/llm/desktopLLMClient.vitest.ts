@@ -77,4 +77,21 @@ describe("purgeLegacyDesktopLLMSettings", () => {
     expect(window.localStorage.getItem(completionPrefix + "localModelName")).toBeNull();
     expect(window.localStorage.getItem(completionPrefix + "localModelBaseUrl")).toBeNull();
   });
+
+  it("does not throw when the localStorage accessor throws (Node 25+)", () => {
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("localStorage not available");
+      },
+    });
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("localStorage not available");
+      },
+    });
+
+    expect(() => purgeLegacyDesktopLLMSettings()).not.toThrow();
+  });
 });
