@@ -507,12 +507,44 @@
 .command-palette__item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
   padding: 8px 10px;
   border-radius: 10px;
   color: var(--text-primary);
   cursor: default;
+}
+
+.command-palette__item-icon {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.command-palette__item-icon--function {
+  background: var(--success-bg);
+  color: var(--success);
+  font-weight: 600;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+  font-size: 10px;
+}
+
+.command-palette__item-right {
+  margin-left: auto;
+  display: inline-flex;
 }
 
 .command-palette__item-main {

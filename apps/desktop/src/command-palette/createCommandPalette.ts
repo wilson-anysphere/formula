@@ -634,6 +634,10 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
         li.setAttribute("role", "option");
         li.setAttribute("aria-selected", globalIndex === selectedIndex ? "true" : "false");
 
+        const icon = document.createElement("div");
+        icon.className = "command-palette__item-icon command-palette__item-icon--function";
+        icon.textContent = "Σ";
+
         const main = document.createElement("div");
         main.className = "command-palette__item-main";
 
@@ -664,6 +668,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
           main.appendChild(signature);
         }
 
+        li.appendChild(icon);
         li.appendChild(main);
 
         li.addEventListener("mousedown", (e) => {
