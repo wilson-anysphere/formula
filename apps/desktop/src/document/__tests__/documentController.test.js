@@ -214,6 +214,35 @@ test("setRangeFormat for full-height columns does not materialize 1M cell entrie
   assert.deepEqual(doc.getCellFormat("Sheet1", "A1048576"), { font: { bold: true } });
 });
 
+test("setRangeFormat for full-width rows does not materialize 16k cell entries", () => {
+  const doc = new DocumentController();
+
+  doc.setRangeFormat("Sheet1", "A2:XFD2", { font: { italic: true } });
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.cells.size, 0);
+  assert.equal(sheet.rowStyleIds.size, 1);
+
+  // Deep row formatting applies even when the cell is empty.
+  assert.equal(doc.getCell("Sheet1", "Z2").styleId, 0);
+  assert.deepEqual(doc.getCellFormat("Sheet1", "Z2"), { font: { italic: true } });
+
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 1,
+    endRow: 1,
+    startCol: 0,
+    endCol: 16_383,
+  });
+
+  // Undo/redo works for row-level formatting.
+  doc.undo();
+  assert.deepEqual(doc.getCellFormat("Sheet1", "Z2"), {});
+
+  doc.redo();
+  assert.deepEqual(doc.getCellFormat("Sheet1", "Z2"), { font: { italic: true } });
+});
+
 test("getUsedRange maintains separate content and format bounds", () => {
   const doc = new DocumentController();
 
