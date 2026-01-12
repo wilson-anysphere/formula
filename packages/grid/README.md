@@ -125,6 +125,19 @@ When the grid container is focused, `CanvasGrid` supports spreadsheet-like navig
 - Ctrl/Cmd+click adds a new selection range (multi-range selection); Shift+click/drag extends the active range without clearing others.
 - Header rows/cols (as defined by `headerRows`/`headerCols`) are styled using the `headerBg`/`headerText` theme tokens.
 
+## Resizing + auto-fit (double-click)
+
+When `enableResize` is enabled, `CanvasGrid` supports Excel-like row/column resizing:
+
+- **Drag** a row/column header boundary to resize.
+- **Double-click** (mouse) / **double-tap** (touch) a row/column header boundary to **auto-fit** to content.
+
+To persist user-driven size changes (including auto-fit), provide:
+
+- `onAxisSizeChange?: (change: GridAxisSizeChange) => void`
+
+`GridAxisSizeChange.size` is reported in **CSS pixels at the current zoom** (matching `GridApi.setRowHeight` / `setColWidth`). If you persist sizes as zoom-independent “base” sizes, divide by `change.zoom` before storing.
+
 ## `GridApi` (React)
 
 Pass `apiRef` to `CanvasGrid` to obtain an imperative API:
