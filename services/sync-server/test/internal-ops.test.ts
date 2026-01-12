@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -58,6 +59,95 @@ async function expectWsUpgradeStatus(
     ws.on("error", (err) => {
       if (finished) return;
       reject(err);
+    });
+  });
+}
+
+async function rawHttpStatus(opts: { host: string; port: number; request: string }): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    const socket = net.connect(opts.port, opts.host);
+    socket.setTimeout(5_000);
+
+    socket.on("timeout", () => {
+      socket.destroy();
+      reject(new Error("Timed out waiting for response"));
+    });
+    socket.on("error", reject);
+
+    socket.on("connect", () => {
+      socket.write(opts.request);
+    });
+
+    let buffer = "";
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      buffer += chunk;
+      const headerEnd = buffer.indexOf("\r\n\r\n");
+      if (headerEnd < 0) return;
+
+      const header = buffer.slice(0, headerEnd);
+      const statusLine = header.split("\r\n")[0] ?? "";
+      const match = statusLine.match(/^HTTP\/1\.1\s+(\d+)/i);
+      if (!match) {
+        socket.destroy();
+        reject(new Error(`Unexpected response: ${statusLine}`));
+        return;
+      }
+
+      socket.destroy();
+      resolve(Number(match[1]));
+    });
+  });
+}
+
+async function rawWebSocketUpgradeStatus(opts: {
+  host: string;
+  port: number;
+  pathWithQuery: string;
+}): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    const socket = net.connect(opts.port, opts.host);
+    socket.setTimeout(5_000);
+
+    socket.on("timeout", () => {
+      socket.destroy();
+      reject(new Error("Timed out waiting for upgrade response"));
+    });
+    socket.on("error", reject);
+
+    socket.on("connect", () => {
+      const key = randomBytes(16).toString("base64");
+      const request = [
+        `GET ${opts.pathWithQuery} HTTP/1.1`,
+        `Host: ${opts.host}:${opts.port}`,
+        "Upgrade: websocket",
+        "Connection: Upgrade",
+        `Sec-WebSocket-Key: ${key}`,
+        "Sec-WebSocket-Version: 13",
+        "",
+        "",
+      ].join("\r\n");
+      socket.write(request);
+    });
+
+    let buffer = "";
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      buffer += chunk;
+      const headerEnd = buffer.indexOf("\r\n\r\n");
+      if (headerEnd < 0) return;
+
+      const header = buffer.slice(0, headerEnd);
+      const statusLine = header.split("\r\n")[0] ?? "";
+      const match = statusLine.match(/^HTTP\/1\.1\s+(\d+)/i);
+      if (!match) {
+        socket.destroy();
+        reject(new Error(`Unexpected response: ${statusLine}`));
+        return;
+      }
+
+      socket.destroy();
+      resolve(Number(match[1]));
     });
   });
 }
@@ -267,4 +357,60 @@ test("purge rejects doc ids that exceed the server's maximum length", async (t) 
 
   assert.equal(res.status, 414);
   assert.deepEqual(await res.json(), { error: "doc_id_too_long" });
+});
+
+test("purge handles dot-segment doc ids without URL normalization", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
+
+  const server = await startSyncServer({
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_INTERNAL_ADMIN_TOKEN: "admin-token",
+    },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  // URL parsers normalize `.`/`..` segments, but y-websocket treats doc names as
+  // raw path strings. The internal purge endpoint should do the same so operators
+  // can purge maliciously crafted doc ids.
+  const docName = "..";
+  const docKey = createHash("sha256").update(docName).digest("hex");
+  const persistedPath = path.join(dataDir, `${docKey}.yjs`);
+  await writeFile(persistedPath, "dummy");
+  assert.equal(await fileExists(persistedPath), true);
+
+  const purgeStatus = await rawHttpStatus({
+    host: "127.0.0.1",
+    port: server.port,
+    request: [
+      `DELETE /internal/docs/${docName} HTTP/1.1`,
+      `Host: 127.0.0.1:${server.port}`,
+      "Connection: close",
+      "x-internal-admin-token: admin-token",
+      "",
+      "",
+    ].join("\r\n"),
+  });
+  assert.equal(purgeStatus, 200);
+
+  await waitForCondition(async () => !(await fileExists(persistedPath)), 10_000);
+
+  const tombstonesRaw = await readFile(path.join(dataDir, "tombstones.json"), "utf8");
+  const tombstones = JSON.parse(tombstonesRaw) as any;
+  assert.equal(tombstones.schemaVersion, 1);
+  assert.ok(typeof tombstones.tombstones === "object" && tombstones.tombstones !== null);
+  assert.ok(Object.prototype.hasOwnProperty.call(tombstones.tombstones, docKey));
+
+  const wsStatus = await rawWebSocketUpgradeStatus({
+    host: "127.0.0.1",
+    port: server.port,
+    pathWithQuery: `/${docName}?token=test-token`,
+  });
+  assert.equal(wsStatus, 410);
 });

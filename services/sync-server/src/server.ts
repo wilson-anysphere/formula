@@ -81,6 +81,19 @@ function pickIp(req: IncomingMessage, trustProxy: boolean): string {
   return req.socket.remoteAddress ?? "unknown";
 }
 
+function rawPathnameFromUrl(requestUrl: string): string {
+  const queryIndex = requestUrl.indexOf("?");
+  const withoutQuery = queryIndex === -1 ? requestUrl : requestUrl.slice(0, queryIndex);
+
+  const schemeIndex = withoutQuery.indexOf("://");
+  if (schemeIndex !== -1) {
+    const pathIndex = withoutQuery.indexOf("/", schemeIndex + 3);
+    return pathIndex === -1 ? "/" : withoutQuery.slice(pathIndex);
+  }
+
+  return withoutQuery;
+}
+
 function rawDataByteLength(raw: WebSocket.RawData): number {
   if (typeof raw === "string") return Buffer.byteLength(raw);
   if (Array.isArray(raw)) {
@@ -961,9 +974,9 @@ export function createSyncServer(
         return;
       }
 
-      const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
+      const pathname = rawPathnameFromUrl(req.url);
 
-      if (req.method === "GET" && url.pathname === "/metrics") {
+      if (req.method === "GET" && pathname === "/metrics") {
         if (!config.metrics.public) {
           sendText(res, 404, "not_found", "text/plain; charset=utf-8");
           return;
@@ -973,7 +986,7 @@ export function createSyncServer(
         return;
       }
 
-      if (req.method === "GET" && url.pathname === "/readyz") {
+      if (req.method === "GET" && pathname === "/readyz") {
         if (!dataDirLock) {
           sendJson(res, 503, {
             status: "not_ready",
@@ -989,7 +1002,7 @@ export function createSyncServer(
         return;
       }
 
-      if (req.method === "GET" && url.pathname === "/healthz") {
+      if (req.method === "GET" && pathname === "/healthz") {
         const snapshot = connectionTracker.snapshot();
         sendJson(res, 200, {
           status: "ok",
@@ -1002,7 +1015,7 @@ export function createSyncServer(
         return;
       }
 
-      if (url.pathname.startsWith("/internal/")) {
+      if (pathname.startsWith("/internal/")) {
         req.resume();
 
         if (!config.internalAdminToken) {
@@ -1022,13 +1035,13 @@ export function createSyncServer(
           return;
         }
 
-        if (req.method === "GET" && url.pathname === "/internal/metrics") {
+        if (req.method === "GET" && pathname === "/internal/metrics") {
           const body = await metrics.metricsText();
           sendText(res, 200, body, metrics.registry.contentType);
           return;
         }
 
-        if (req.method === "GET" && url.pathname === "/internal/stats") {
+        if (req.method === "GET" && pathname === "/internal/stats") {
           const backend = persistenceBackend ?? config.persistence.backend;
           const persistedDocBlobsCount =
             backend === "file"
@@ -1062,7 +1075,7 @@ export function createSyncServer(
           return;
         }
 
-        if (req.method === "POST" && url.pathname === "/internal/retention/sweep") {
+        if (req.method === "POST" && pathname === "/internal/retention/sweep") {
           // Always run the tombstone sweep. For file persistence this prunes
           // tombstones + deletes any `.yjs` blobs that should never be served
           // again. For LevelDB it is best-effort (we only delete docs whose
@@ -1089,12 +1102,12 @@ export function createSyncServer(
           return;
         }
 
-        if (req.method === "DELETE" && url.pathname.startsWith("/internal/docs/")) {
+        if (req.method === "DELETE" && pathname.startsWith("/internal/docs/")) {
           const ip = pickIp(req, config.trustProxy);
           let docName: string;
           try {
             docName = decodeURIComponent(
-              url.pathname.slice("/internal/docs/".length)
+              pathname.slice("/internal/docs/".length)
             );
           } catch {
             logger.warn({ ip, reason: "invalid_doc_name" }, "internal_doc_purge_rejected");
@@ -1164,7 +1177,8 @@ export function createSyncServer(
   wss.on("connection", (ws, req) => {
     const ip = pickIp(req, config.trustProxy);
     // Match y-websocket docName extraction (no normalization/decoding).
-    const docName = (req.url ?? "/").slice(1).split("?")[0];
+    const pathName = rawPathnameFromUrl(req.url ?? "/");
+    const docName = pathName.startsWith("/") ? pathName.slice(1) : pathName;
     const persistedName = persistedDocNameForLeveldb(docName);
     const active = activeSocketsByDoc.get(docName) ?? new Set<WebSocket>();
     active.add(ws);
@@ -1352,7 +1366,8 @@ export function createSyncServer(
         }
 
         // Match y-websocket docName extraction (no normalization/decoding).
-        const docName = req.url.slice(1).split("?")[0];
+        const pathName = rawPathnameFromUrl(req.url);
+        const docName = pathName.startsWith("/") ? pathName.slice(1) : pathName;
         if (!docName) {
           sendUpgradeRejection(socket, 400, "Missing document id");
           return;
