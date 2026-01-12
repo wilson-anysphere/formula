@@ -326,6 +326,40 @@ test("clipboard provider: rich MIME handling", async (t) => {
     );
   });
 
+  await t.test("tauri provider prefers tauri readText over web readText fallback", async () => {
+    /** @type {number} */
+    let webReadTextCalls = 0;
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          clipboard: {
+            async readText() {
+              return "tauri text";
+            },
+          },
+        },
+        navigator: {
+          clipboard: {
+            async read() {
+              throw new Error("permission denied");
+            },
+            async readText() {
+              webReadTextCalls += 1;
+              return "web text";
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.deepEqual(content, { text: "tauri text" });
+        assert.equal(webReadTextCalls, 0);
+      }
+    );
+  });
+
   await t.test("tauri provider write calls invoke('write_clipboard') for rich payloads", async () => {
     const imageBytes = Uint8Array.from([9, 8, 7]);
 
