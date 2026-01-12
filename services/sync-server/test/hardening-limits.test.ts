@@ -221,3 +221,36 @@ test("rate limits messages per document", async (t) => {
 
   assert.equal(await close, 1013);
 });
+
+test("disables ws maxPayload when SYNC_SERVER_MAX_MESSAGE_BYTES is 0", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-limit-disabled-"));
+
+  const server = await startSyncServer({
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_MAX_MESSAGE_BYTES: "0",
+    },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const doc = new Y.Doc();
+  const provider = new WebsocketProvider(server.wsUrl, "limit-disabled-doc", doc, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: "test-token" },
+  });
+  t.after(() => {
+    provider.destroy();
+    doc.destroy();
+  });
+
+  // If `ws` maxPayload were set to 0, even the initial sync messages would be
+  // rejected before reaching our application-level guards.
+  await waitForProviderSync(provider);
+});
