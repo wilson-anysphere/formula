@@ -133,7 +133,11 @@ test.describe("comments", () => {
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
 
-    await menu.getByRole("button", { name: "Add Comment" }).click();
+    const expectedShortcut = process.platform === "darwin" ? "⇧F2" : "Shift+F2";
+    const addComment = menu.getByRole("button", { name: "Add Comment" });
+    await expect(addComment.locator('span[aria-hidden="true"]')).toHaveText(expectedShortcut);
+
+    await addComment.click();
 
     await expect(page.getByTestId("comments-panel")).toBeVisible();
     await expect(page.getByTestId("new-comment-input")).toBeFocused();
