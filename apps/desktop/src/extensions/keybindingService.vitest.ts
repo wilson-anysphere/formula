@@ -93,13 +93,22 @@ describe("KeybindingService", () => {
     );
 
     const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
-    service.setExtensionKeybindings([{ extensionId: "ext", command: "ext.stealCopy", key: "ctrl+c", mac: null, when: null }]);
+    service.setExtensionKeybindings([
+      { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+c", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealPasteSpecial", key: "ctrl+shift+v", mac: null, when: null },
+    ]);
 
     const event = makeKeydownEvent({ key: "c", ctrlKey: true });
     const handled = await service.dispatchKeydown(event);
 
     expect(handled).toBe(false);
     expect(event.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    const event2 = makeKeydownEvent({ key: "v", ctrlKey: true, shiftKey: true });
+    const handled2 = await service.dispatchKeydown(event2);
+    expect(handled2).toBe(false);
+    expect(event2.defaultPrevented).toBe(false);
     expect(extRun).not.toHaveBeenCalled();
   });
 
