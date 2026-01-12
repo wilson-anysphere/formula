@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DocumentController } from "../../document/documentController.js";
 
 import { ToolExecutor, PreviewEngine } from "../../../../../packages/ai-tools/src/index.js";
+import { workbookFromSpreadsheetApi } from "../../../../../packages/ai-rag/src/index.js";
 import { DLP_ACTION } from "../../../../../packages/security/dlp/src/actions.js";
 import { CLASSIFICATION_SCOPE } from "../../../../../packages/security/dlp/src/selectors.js";
 
@@ -241,14 +242,12 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(api.getLastUsedRow("Sheet1")).toBe(5);
   });
 
-  it("includes supported formatting-only cells in listNonEmptyCells()", () => {
+  it("does not include formatting-only cells in listNonEmptyCells()", () => {
     const controller = new DocumentController();
     controller.setRangeFormat("Sheet1", "A1", { font: { bold: true } }, { label: "Bold" });
 
     const api = new DocumentControllerSpreadsheetApi(controller);
-    expect(api.listNonEmptyCells("Sheet1")).toEqual([
-      { address: { sheet: "Sheet1", row: 1, col: 1 }, cell: { value: null, format: { bold: true } } }
-    ]);
+    expect(api.listNonEmptyCells("Sheet1")).toEqual([]);
   });
 
   it("does not call exportSheetForSemanticDiff for listNonEmptyCells() or getLastUsedRow()", () => {
@@ -264,16 +263,14 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("supports legacy flat CellFormat keys stored in DocumentController styles", () => {
+  it("ignores legacy flat CellFormat keys stored in DocumentController styles for listNonEmptyCells()", () => {
     const controller = new DocumentController();
     // Simulate the pre-fix adapter behavior that wrote ai-tools CellFormat objects directly
     // into the DocumentController style table (flat keys like `bold`).
     controller.setRangeFormat("Sheet1", "A1", { bold: true, background_color: "#FFFFFF00" }, { label: "Legacy bold" });
 
     const api = new DocumentControllerSpreadsheetApi(controller);
-    expect(api.listNonEmptyCells("Sheet1")).toEqual([
-      { address: { sheet: "Sheet1", row: 1, col: 1 }, cell: { value: null, format: { bold: true, background_color: "#FFFFFF00" } } }
-    ]);
+    expect(api.listNonEmptyCells("Sheet1")).toEqual([]);
   });
 
   it("returns effective (layered) formatting for getCell() even when cellState.styleId is 0", () => {
@@ -337,6 +334,42 @@ describe("DocumentControllerSpreadsheetApi", () => {
 
     const after = controller.getCell("Sheet1", "A1").value as any;
     expect(after?.text).toBe("Rich Bold");
+  });
+
+  it("returns values & formulas compatible with workbookFromSpreadsheetApi (and clones object values)", () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "A1", "Hello");
+    controller.setCellFormula("Sheet1", "B2", "SUM(A1:A1)");
+    controller.setCellValue("Sheet1", "C3", {
+      text: "Rich Bold",
+      runs: [{ start: 0, end: 4, style: { bold: true } }]
+    });
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const workbook = workbookFromSpreadsheetApi({ spreadsheet: api as any, workbookId: "wb-doc" });
+    const sheet = workbook.sheets.find((s) => s.name === "Sheet1");
+    expect(sheet).toBeTruthy();
+    if (!sheet) throw new Error("Missing sheet");
+
+    expect(sheet.cells.get("0,0")).toEqual({ value: "Hello", formula: null });
+    expect(sheet.cells.get("1,1")).toEqual({ value: null, formula: "=SUM(A1:A1)" });
+
+    const c3 = sheet.cells.get("2,2");
+    expect(c3?.value).toMatchObject({ text: "Rich Bold" });
+    // Ensure mutating the returned workbook does not mutate the document.
+    (c3 as any).value.text = "Mutated";
+    expect((controller.getCell("Sheet1", "C3").value as any)?.text).toBe("Rich Bold");
+  });
+
+  it("does not call exportSheetForSemanticDiff from listNonEmptyCells()", () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "A1", 1);
+    const spy = vi.spyOn(controller, "exportSheetForSemanticDiff");
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    api.listNonEmptyCells("Sheet1");
+
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it("applies per-cell formatting provided to writeRange()", () => {
@@ -597,7 +630,7 @@ describe("DocumentControllerSpreadsheetApi", () => {
         }
       ],
       api,
-      { default_sheet: "Sheet1" }
+      { default_sheet: "Sheet1", max_tool_range_cells: 2_000_000 }
     );
 
     expect(preview.summary.total_changes).toBe(1);
@@ -609,7 +642,7 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(preview.changes[0]?.cell).toBe("Sheet1!A1");
   });
 
-  it("detects formatting-only changes in PreviewEngine diffs", async () => {
+  it("does not include formatting-only changes in PreviewEngine diffs", async () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", 10);
 
@@ -624,13 +657,15 @@ describe("DocumentControllerSpreadsheetApi", () => {
         }
       ],
       api,
-      { default_sheet: "Sheet1" }
+      { default_sheet: "Sheet1", max_tool_range_cells: 2_000_000 }
     );
 
-    expect(preview.summary.total_changes).toBe(1);
-    expect(preview.summary.modifies).toBe(1);
+    // listNonEmptyCells is optimized for value/formula indexing and omits formatting-only
+    // cells, so PreviewEngine diffs will not surface pure formatting changes when used
+    // with this adapter.
+    expect(preview.summary.total_changes).toBe(0);
+    // Approval is still based on tool-reported edit sizes, even if the cell-level diff is empty.
     expect(preview.requires_approval).toBe(true);
-    expect(preview.changes[0]?.cell).toBe("Sheet1!A1");
 
     // Ensure the preview simulation didn't mutate the live controller.
     expect(controller.getCell("Sheet1", "A1").styleId).toBe(0);

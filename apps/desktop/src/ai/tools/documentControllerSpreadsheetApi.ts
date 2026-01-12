@@ -353,12 +353,17 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
       const sheetModel = this.controller.model.sheets.get(sheetId);
       if (!sheetModel?.cells) continue;
       for (const [key, cellState] of sheetModel.cells.entries()) {
+        if (!cellState) continue;
+        const value = cellState.value ?? null;
+        const formula = cellState.formula ?? null;
+        if (value == null && formula == null) continue;
         const { row, col } = parseControllerCellKey(key);
-        const cell = toCellData(this.controller, sheetId, { row, col }, cellState);
-        if (isCellEmpty(cell)) continue;
         entries.push({
           address: { sheet: displayName, row: row + 1, col: col + 1 },
-          cell
+          cell: {
+            value: value != null && typeof value === "object" ? cloneCellValue(value) : value,
+            ...(formula != null ? { formula } : {})
+          }
         });
       }
     }
