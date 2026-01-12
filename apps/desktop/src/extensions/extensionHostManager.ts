@@ -76,7 +76,6 @@ export class DesktopExtensionHostManager {
         if (typeof override === "function") {
           return await override(req);
         }
-
         // The built-in `formula.e2e-events` extension is only used by our Playwright suite to
         // validate the formula.events bridge. It should never block the desktop UI (or other
         // extensions) on an interactive permission prompt.
@@ -86,7 +85,6 @@ export class DesktopExtensionHostManager {
         // `onStartupFinished`.
         const extensionId = typeof (req as any)?.extensionId === "string" ? String((req as any).extensionId) : "";
         if (extensionId === "formula.e2e-events") return true;
-
         // Fall back to the real desktop prompt UI (persists via PermissionManager).
         return await basePrompt(req as any);
       });

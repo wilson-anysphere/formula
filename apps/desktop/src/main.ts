@@ -4935,6 +4935,7 @@ if (
     panelRegistry,
     extensionPanelBridge: extensionPanelBridge ?? undefined,
     extensionHostManager,
+    ensureExtensionsLoaded,
     onExecuteExtensionCommand: executeExtensionCommand,
     onOpenExtensionPanel: openExtensionPanel,
     onSyncExtensions: () => {

@@ -86,6 +86,28 @@ test.describe("formula.events desktop wiring", () => {
     });
 
     await gotoDesktop(page);
+    // Avoid permission prompts from the Sample Hello extension when activating its panel.
+    // This test is focused on event wiring, not the permission UI flow.
+    await page.evaluate(() => {
+      const key = "formula.extensionHost.permissions";
+      const extensionId = "formula.sample-hello";
+      const existing = (() => {
+        try {
+          const raw = localStorage.getItem(key);
+          return raw ? JSON.parse(raw) : {};
+        } catch {
+          return {};
+        }
+      })();
+      existing[extensionId] = {
+        ...(existing[extensionId] ?? {}),
+        "ui.commands": true,
+        "ui.panels": true,
+        "cells.read": true,
+        "cells.write": true,
+      };
+      localStorage.setItem(key, JSON.stringify(existing));
+    });
 
     // Pre-grant the permissions required for the built-in Sample Hello extension to activate and
     // create its contributed panel without blocking on an interactive permission prompt.

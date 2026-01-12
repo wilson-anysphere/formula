@@ -392,7 +392,10 @@ test.describe("Extensions permissions UI", () => {
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       await expect(page.getByTestId(`extension-card-${extensionId}`)).toBeVisible();
+      // When no permissions have been granted yet, the UI should show declared permissions as
+      // "not granted" with disabled revoke controls.
       await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("not granted");
+      await expect(page.getByTestId(`revoke-permission-${extensionId}-network`)).toBeDisabled();
 
       // Grant permissions (ui.commands + network) by running fetchText once.
       await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
@@ -608,7 +611,7 @@ test.describe("Extensions permissions UI", () => {
       });
     });
 
-    await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+    await openExtensionsPanel(page);
     await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
     await expect(page.getByTestId(`permission-row-${extensionId}-clipboard`)).toContainText("not granted");

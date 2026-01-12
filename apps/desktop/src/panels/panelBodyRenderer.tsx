@@ -374,6 +374,11 @@ export interface PanelBodyRendererOptions {
   panelRegistry?: PanelRegistry;
   extensionPanelBridge?: ExtensionPanelBridge;
   extensionHostManager?: DesktopExtensionHostManager;
+  /**
+   * Load the lazy extension host (used by built-in UI panels that want to show extension
+   * contributions even when opened via layout restoration rather than an explicit command).
+   */
+  ensureExtensionsLoaded?: () => Promise<void>;
   onExecuteExtensionCommand?: (commandId: string, ...args: any[]) => Promise<unknown> | void;
   onOpenExtensionPanel?: (panelId: string) => void;
   onSyncExtensions?: () => void;
@@ -532,6 +537,11 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     }
 
     if (panelId === PanelIds.EXTENSIONS && options.extensionHostManager && options.onExecuteExtensionCommand && options.onOpenExtensionPanel) {
+      // Extensions are lazy-loaded. If the Extensions panel is restored from persisted layout
+      // (rather than opened via the ribbon command), we still want it to trigger loading.
+      void options.ensureExtensionsLoaded?.().catch(() => {
+        // Best-effort: keep the panel UI responsive even if extensions fail to load.
+      });
       makeBodyFillAvailableHeight(body);
       const marketplaceManager = (() => {
         try {

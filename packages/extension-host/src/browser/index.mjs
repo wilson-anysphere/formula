@@ -802,9 +802,20 @@ class BrowserExtensionHost {
       }
     }
 
+    // Activate any extensions that depend on this view, but always emit the view activation
+    // event to the broader runtime so already-running extensions can observe it.
+    //
+    // This mirrors other workbook/sheet/selection events which are broadcast to active
+    // extensions, and avoids a single failing extension activation preventing other
+    // extensions from receiving the `viewActivated` signal.
     for (const extension of targets) {
-      if (!extension.active) {
+      if (extension.active) continue;
+      try {
+        // eslint-disable-next-line no-await-in-loop
         await this._activateExtension(extension, activationEvent);
+      } catch {
+        // Ignore activation failures so the view event can still be delivered to other
+        // running extensions.
       }
     }
 

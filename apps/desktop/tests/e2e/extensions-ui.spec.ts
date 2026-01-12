@@ -2,8 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { gotoDesktop, openExtensionsPanel, waitForDesktopReady } from "./helpers";
 
-async function grantSampleHelloPermissions(page: Page): Promise<void> {
-  await page.evaluate(() => {
+async function grantSampleHelloPermissions(page: Page, extra: Record<string, boolean> = {}): Promise<void> {
+  await page.evaluate((extra) => {
     // E2E stability: auto-accept any permission prompts so modal dialogs don't
     // intercept pointer events during UI interactions.
     (window as any).__formulaPermissionPrompt = () => true;
@@ -29,10 +29,13 @@ async function grantSampleHelloPermissions(page: Page): Promise<void> {
       network: true,
       clipboard: true,
       storage: true,
+      // Spread after the defaults so callers can grant additional permissions (e.g. clipboard)
+      // without needing to repeat the baseline set used across most tests.
+      ...(extra ?? {}),
     };
 
     localStorage.setItem(key, JSON.stringify(existing));
-  });
+  }, extra);
 }
 
 test.describe("Extensions UI integration", () => {
@@ -651,6 +654,24 @@ test.describe("Extensions UI integration", () => {
     await page.locator("#grid").click({ button: "right", position: { x: 100, y: 40 } });
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
+
+    await page.waitForFunction(() => Boolean((window as any).__formulaExtensionHostManager?.ready), undefined, {
+      timeout: 30_000,
+    });
+    const extensionLoadError = await page.evaluate(() => {
+      const manager = (window as any).__formulaExtensionHostManager;
+      const error = manager?.error;
+      if (!error) return null;
+      return {
+        message: typeof error?.message === "string" ? error.message : String(error),
+        stack: typeof error?.stack === "string" ? error.stack : null,
+      };
+    });
+    if (extensionLoadError) {
+      throw new Error(
+        `Extension host failed to load during context menu open: ${extensionLoadError.message}\n${extensionLoadError.stack ?? ""}`,
+      );
+    }
 
     // Extension contributions should appear once the lazy-loaded extension host finishes
     // initializing.
