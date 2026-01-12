@@ -2074,30 +2074,63 @@ export class QueryEngine {
       }
 
       if (source.type === "parquet" && connector.readBinaryStream) {
-        /** @type {Uint8Array[]} */
-        const chunks = [];
-        for await (const chunk of connector.readBinaryStream(source.path, { signal: options.signal })) {
-          throwIfAborted(options.signal);
-          if (chunk) chunks.push(chunk);
+        let canUseArrow = true;
+        if (connector.readParquetTable) {
+          // Avoid reading the entire file into memory when we can fall back to a row-backed
+          // parquet adapter and the Arrow stack isn't available.
+          try {
+            const { arrowTableFromColumns } = await loadDataIoModule();
+            arrowTableFromColumns({ __probe: [1] });
+          } catch (err) {
+            if (isOptionalArrowDependencyError(err) || isModuleNotFoundError(err)) {
+              canUseArrow = false;
+            } else {
+              throw err;
+            }
+          }
         }
-        const handle = new Blob(chunks);
-        throwIfAborted(options.signal);
-        const { parquetFileToArrowTable } = await loadDataIoModule();
-        const arrowTable = await parquetFileToArrowTable(handle, source.options);
-        const table = new ArrowTableAdapter(arrowTable);
-        this.setTableSourceIds(table, [getSourceIdForQuerySource(source) ?? source.path]);
-        const meta = {
-          refreshedAt: new Date(state.now()),
-          sourceTimestamp: sourceState.sourceTimestamp,
-          etag: sourceState.etag,
-          sourceKey,
-          schema: { columns: table.columns, inferred: true },
-          rowCount: table.rowCount,
-          rowCountEstimate: table.rowCount,
-          provenance: { kind: "file", path: source.path, format: "parquet" },
-        };
-        options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
-        return { table, meta, sources: [meta] };
+
+        if (canUseArrow) {
+          try {
+            /** @type {Uint8Array[]} */
+            const chunks = [];
+            for await (const chunk of connector.readBinaryStream(source.path, { signal: options.signal })) {
+              throwIfAborted(options.signal);
+              if (chunk) chunks.push(chunk);
+            }
+            const handle = new Blob(chunks);
+            throwIfAborted(options.signal);
+            const { parquetFileToArrowTable } = await loadDataIoModule();
+            const arrowTable = await parquetFileToArrowTable(handle, source.options);
+            const table = new ArrowTableAdapter(arrowTable);
+            this.setTableSourceIds(table, [getSourceIdForQuerySource(source) ?? source.path]);
+            const meta = {
+              refreshedAt: new Date(state.now()),
+              sourceTimestamp: sourceState.sourceTimestamp,
+              etag: sourceState.etag,
+              sourceKey,
+              schema: { columns: table.columns, inferred: true },
+              rowCount: table.rowCount,
+              rowCountEstimate: table.rowCount,
+              provenance: { kind: "file", path: source.path, format: "parquet" },
+            };
+            options.onProgress?.({
+              type: "source:complete",
+              queryId: Array.from(callStack).at(-1) ?? "<unknown>",
+              sourceType: source.type,
+            });
+            return { table, meta, sources: [meta] };
+          } catch (err) {
+            // Arrow/parquet support is optional. If the Arrow stack isn't available, fall back
+            // to the row-backed `readParquetTable` adapter (via `FileConnector.execute`).
+            if (!isOptionalArrowDependencyError(err) && !isModuleNotFoundError(err)) {
+              throw err;
+            }
+            if (!connector.readParquetTable) {
+              throw err;
+            }
+          }
+        }
       }
 
       const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });

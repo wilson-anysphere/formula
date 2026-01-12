@@ -32,6 +32,13 @@ function collectBatches(batches) {
 }
 
 test("Parquet sources fall back to readParquetTable when Arrow/Parquet support is unavailable", async () => {
+  let parquetAvailable = true;
+  try {
+    await arrowTableToParquet(arrowTableFromColumns({ __probe: new Int32Array([1]) }));
+  } catch {
+    parquetAvailable = false;
+  }
+
   let readParquetCalled = false;
 
   const engine = new QueryEngine({
@@ -59,9 +66,11 @@ test("Parquet sources fall back to readParquetTable when Arrow/Parquet support i
 
   if (result instanceof ArrowTableAdapter) {
     assert.equal(readParquetCalled, false);
+    assert.equal(parquetAvailable, true);
   } else {
     assert.ok(result instanceof DataTable);
     assert.equal(readParquetCalled, true);
+    assert.equal(parquetAvailable, false);
   }
 });
 
@@ -103,4 +112,53 @@ test("executeQueryStreamingNonMaterializing can stream Parquet via readParquetTa
 
   assert.deepEqual(collectBatches(batches), EXPECTED_GRID);
   assert.equal(readParquetCalled, !parquetAvailable);
+});
+
+test("Parquet sources fall back to readParquetTable when only readBinaryStream is available", async () => {
+  let parquetAvailable = true;
+  try {
+    await arrowTableToParquet(arrowTableFromColumns({ __probe: new Int32Array([1]) }));
+  } catch {
+    parquetAvailable = false;
+  }
+
+  let readParquetCalled = false;
+
+  const engine = new QueryEngine({
+    fileAdapter: {
+      readBinaryStream: async function* (p) {
+        const bytes = new Uint8Array(await readFile(p));
+        // Emit at least two chunks so we cover the streaming code path.
+        const mid = Math.floor(bytes.length / 2);
+        yield bytes.slice(0, mid);
+        yield bytes.slice(mid);
+      },
+      readParquetTable: async () => {
+        readParquetCalled = true;
+        return DataTable.fromGrid(EXPECTED_GRID, { hasHeaders: true, inferTypes: true });
+      },
+    },
+  });
+
+  const result = await engine.executeQuery(
+    {
+      id: "q_parquet_fallback_stream_bytes",
+      name: "Parquet Fallback Stream Bytes",
+      source: { type: "parquet", path: PARQUET_FIXTURE, options: { batchSize: 2 } },
+      steps: [],
+    },
+    {},
+    {},
+  );
+
+  assert.deepEqual(result.toGrid(), EXPECTED_GRID);
+
+  if (result instanceof ArrowTableAdapter) {
+    assert.equal(readParquetCalled, false);
+    assert.equal(parquetAvailable, true);
+  } else {
+    assert.ok(result instanceof DataTable);
+    assert.equal(readParquetCalled, true);
+    assert.equal(parquetAvailable, false);
+  }
 });
