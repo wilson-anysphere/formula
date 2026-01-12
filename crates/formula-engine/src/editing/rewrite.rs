@@ -1881,7 +1881,7 @@ mod tests {
             &edit,
         );
         assert!(changed);
-        assert_eq!(out, "=A2.[Unit Price]");
+        assert_eq!(out, r#"=A2.["Unit Price"]"#);
     }
 
     #[test]

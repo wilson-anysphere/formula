@@ -237,7 +237,6 @@ mod tests {
         let program = cache.get_or_compile(&expr);
         let empty_grid = crate::bytecode::ColumnarGrid::new(1, 1);
         let now_utc = chrono::Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
-
         // Set a non-default locale on this thread so we can verify `RecalcEngine::recalc` uses its
         // own deterministic eval context rather than inheriting ambient thread-local state.
         let _outer_guard = crate::bytecode::runtime::set_thread_eval_context(

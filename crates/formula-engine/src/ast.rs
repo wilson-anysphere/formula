@@ -355,10 +355,10 @@ pub enum Expr {
     ColRef(ColRef),
     RowRef(RowRef),
     StructuredRef(StructuredRef),
-    /// Field access on a base expression, e.g. `A1.Price` or `A1.[Market Cap]`.
+    /// Field access on a base expression, e.g. `A1.Price` or `A1.["Market Cap"]`.
     ///
-    /// The `field` string is preserved as-is from the input, and should not include the leading
-    /// dot. For bracket-quoted fields, `field` includes the brackets (e.g. `[Market Cap]`).
+    /// The `field` string is the unescaped field name (it does not include the leading `.` or any
+    /// surrounding brackets/quotes).
     FieldAccess(FieldAccessExpr),
     Array(ArrayLiteral),
     FunctionCall(FunctionCall),
@@ -432,7 +432,7 @@ impl Expr {
             Expr::Unary(_) => 70,
             Expr::Postfix(_) => 60,
             Expr::Call(_) => 90,
-            Expr::FieldAccess(_) => 95,
+            Expr::FieldAccess(_) => 90,
             _ => 100,
         }
     }
@@ -469,11 +469,6 @@ impl Expr {
             Expr::ColRef(r) => r.fmt(out, opts)?,
             Expr::RowRef(r) => r.fmt(out, opts)?,
             Expr::StructuredRef(r) => r.fmt(out, opts)?,
-            Expr::FieldAccess(access) => {
-                access.base.fmt(out, opts, Some(my_prec))?;
-                out.push('.');
-                out.push_str(&access.field);
-            }
             Expr::Array(arr) => arr.fmt(out, opts)?,
             Expr::FunctionCall(call) => call.fmt(out, opts)?,
             Expr::Call(call) => {
@@ -494,6 +489,26 @@ impl Expr {
                     }
                 }
                 out.push(')');
+            }
+            Expr::FieldAccess(fa) => {
+                fa.base.fmt(out, opts, Some(my_prec))?;
+                out.push('.');
+                if is_field_ident_safe(&fa.field) {
+                    out.push_str(&fa.field);
+                } else {
+                    out.push('[');
+                    out.push('"');
+                    for ch in fa.field.chars() {
+                        if ch == '"' {
+                            out.push('"');
+                            out.push('"');
+                        } else {
+                            out.push(ch);
+                        }
+                    }
+                    out.push('"');
+                    out.push(']');
+                }
             }
             Expr::Unary(u) => {
                 out.push_str(u.op.as_str());
@@ -523,11 +538,11 @@ impl Expr {
             }
             Expr::Unary(u) => u.expr.contains_union(),
             Expr::Postfix(p) => p.expr.contains_union(),
-            Expr::FieldAccess(access) => access.base.contains_union(),
             Expr::FunctionCall(call) => call.args.iter().any(Expr::contains_union),
             Expr::Call(call) => {
                 call.callee.contains_union() || call.args.iter().any(Expr::contains_union)
             }
+            Expr::FieldAccess(fa) => fa.base.contains_union(),
             Expr::Array(arr) => arr.rows.iter().flatten().any(Expr::contains_union),
             _ => false,
         }
@@ -1187,6 +1202,30 @@ fn is_valid_ident(ident: &str) -> bool {
         return false;
     }
     chars.all(is_ident_cont_char)
+}
+
+fn is_field_ident_safe(field: &str) -> bool {
+    let mut chars = field.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+
+    // The lexer treats TRUE/FALSE as booleans rather than identifiers.
+    if field.eq_ignore_ascii_case("TRUE") || field.eq_ignore_ascii_case("FALSE") {
+        return false;
+    }
+
+    let valid_start = matches!(first, '$' | '_' | '\\' | 'A'..='Z' | 'a'..='z')
+        || (!first.is_ascii() && first.is_alphabetic());
+    if !valid_start {
+        return false;
+    }
+
+    chars.all(|c| {
+        c != '.'
+            && (matches!(c, '$' | '_' | '\\' | 'A'..='Z' | 'a'..='z' | '0'..='9')
+                || (!c.is_ascii() && c.is_alphanumeric()))
+    })
 }
 
 fn is_ident_cont_char(c: char) -> bool {

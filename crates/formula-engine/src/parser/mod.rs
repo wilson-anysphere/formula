@@ -1446,8 +1446,8 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            // Field access expressions: `expr.field` / `expr.[field name]`.
-            let field_bp = 95;
+            // Postfix field access: `expr.Field` / `expr.["Field Name"]`.
+            let field_bp = 90;
             if matches!(self.peek_kind(), TokenKind::Dot) && field_bp >= min_bp {
                 lhs = self.parse_field_access(lhs)?;
                 continue;
@@ -1585,8 +1585,8 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            // Field access expressions: `expr.field` / `expr.[field name]`.
-            let field_bp = 95;
+            // Postfix field access: `expr.Field` / `expr.["Field Name"]`.
+            let field_bp = 90;
             if matches!(self.peek_kind(), TokenKind::Dot) && field_bp >= min_bp {
                 lhs = self.parse_field_access_best_effort(lhs);
                 continue;
@@ -2726,173 +2726,131 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_field_access(&mut self, base: Expr) -> Result<Expr, ParseError> {
+        let dot_span = self.current_span();
         self.expect(TokenKind::Dot)?;
         self.skip_trivia();
 
-        let field = match self.peek_kind() {
-            TokenKind::LBracket => {
-                let open_span = self.current_span();
-                self.next(); // '['
-
-                let mut depth: i32 = 1;
-                let mut field_end: Option<usize> = None;
-                while depth > 0 {
-                    match self.peek_kind() {
-                        TokenKind::LBracket => {
-                            depth += 1;
-                            self.next();
-                        }
-                        TokenKind::RBracket => {
-                            // Excel escapes `]` inside brackets as `]]` for structured references,
-                            // which can also appear in field names.
-                            if depth == 1
-                                && matches!(
-                                    self.tokens.get(self.pos + 1).map(|t| &t.kind),
-                                    Some(TokenKind::RBracket)
-                                )
-                            {
-                                self.next();
-                                self.next();
-                                continue;
-                            }
-
-                            let close_span = self.current_span();
-                            self.next();
-                            depth -= 1;
-                            if depth == 0 {
-                                field_end = Some(close_span.end);
-                            }
-                        }
-                        TokenKind::Eof => {
-                            return Err(ParseError::new(
-                                "Unterminated field access",
-                                self.current_span(),
-                            ));
-                        }
-                        _ => {
-                            self.next();
-                        }
-                    }
-                }
-
-                let field_end =
-                    field_end.expect("loop should set field_end when depth reaches zero");
-                self.src[open_span.start..field_end].to_string()
-            }
-            TokenKind::Ident(_)
-            | TokenKind::QuotedIdent(_)
-            | TokenKind::Cell(_)
-            | TokenKind::R1C1Cell(_)
-            | TokenKind::R1C1Row(_)
-            | TokenKind::R1C1Col(_) => {
-                let span = self.current_span();
+        match self.peek_kind() {
+            TokenKind::Ident(name) => {
+                let name = name.clone();
                 self.next();
-                self.src[span.start..span.end].to_string()
-            }
-            _ => {
-                return Err(ParseError::new(
-                    "Expected field name after `.`",
-                    self.current_span(),
-                ));
-            }
-        };
 
-        Ok(Expr::FieldAccess(FieldAccessExpr {
-            base: Box::new(base),
-            field,
-        }))
+                let mut expr = base;
+                for part in name.split('.') {
+                    if part.is_empty() {
+                        return Err(ParseError::new("Expected field name", dot_span));
+                    }
+                    expr = Expr::FieldAccess(FieldAccessExpr {
+                        base: Box::new(expr),
+                        field: part.to_string(),
+                    });
+                }
+                Ok(expr)
+            }
+            TokenKind::LBracket => {
+                self.expect(TokenKind::LBracket)?;
+                let raw_inner = match self.peek_kind() {
+                    TokenKind::Ident(raw) => {
+                        let raw = raw.clone();
+                        self.next();
+                        raw
+                    }
+                    TokenKind::RBracket => String::new(),
+                    _ => {
+                        return Err(ParseError::new(
+                            "Expected field selector",
+                            self.current_span(),
+                        ));
+                    }
+                };
+                self.expect(TokenKind::RBracket)?;
+
+                let field = parse_field_selector_from_brackets(&raw_inner, dot_span)?;
+                Ok(Expr::FieldAccess(FieldAccessExpr {
+                    base: Box::new(base),
+                    field,
+                }))
+            }
+            _ => Err(ParseError::new("Expected field selector", dot_span)),
+        }
     }
 
     fn parse_field_access_best_effort(&mut self, base: Expr) -> Expr {
+        let dot_span = self.current_span();
         if let Err(e) = self.expect(TokenKind::Dot) {
             self.record_error(e);
             return base;
         }
-        self.skip_trivia();
 
-        let field = match self.peek_kind() {
+        self.skip_trivia();
+        match self.peek_kind() {
+            TokenKind::Ident(name) => {
+                let name = name.clone();
+                self.next();
+
+                let mut expr = base;
+                for part in name.split('.') {
+                    if part.is_empty() {
+                        self.record_error(ParseError::new("Expected field name", dot_span));
+                        break;
+                    }
+                    expr = Expr::FieldAccess(FieldAccessExpr {
+                        base: Box::new(expr),
+                        field: part.to_string(),
+                    });
+                }
+                expr
+            }
             TokenKind::LBracket => {
-                let open_span = self.current_span();
                 self.next(); // '['
 
-                let mut depth: i32 = 1;
-                let mut field_end: Option<usize> = None;
-                while depth > 0 {
-                    match self.peek_kind() {
-                        TokenKind::LBracket => {
-                            depth += 1;
-                            self.next();
-                        }
-                        TokenKind::RBracket => {
-                            if depth == 1
-                                && matches!(
-                                    self.tokens.get(self.pos + 1).map(|t| &t.kind),
-                                    Some(TokenKind::RBracket)
-                                )
-                            {
-                                self.next();
-                                self.next();
-                                continue;
-                            }
+                let raw_inner = match self.peek_kind() {
+                    TokenKind::Ident(raw) => {
+                        let raw = raw.clone();
+                        self.next();
+                        raw
+                    }
+                    _ => String::new(),
+                };
 
-                            let close_span = self.current_span();
-                            self.next();
-                            depth -= 1;
-                            if depth == 0 {
-                                field_end = Some(close_span.end);
-                            }
-                        }
-                        TokenKind::Eof => {
-                            self.record_error(ParseError::new(
-                                "Unterminated field access",
-                                self.current_span(),
-                            ));
-                            field_end = Some(self.src.len());
-                            break;
-                        }
-                        _ => {
-                            self.next();
-                        }
+                self.skip_trivia();
+                if matches!(self.peek_kind(), TokenKind::RBracket) {
+                    self.next();
+                } else {
+                    self.record_error(ParseError::new(
+                        "Unterminated field selector",
+                        self.current_span(),
+                    ));
+                    // Attempt to resync by consuming until ']' or EOF.
+                    while !matches!(self.peek_kind(), TokenKind::RBracket | TokenKind::Eof) {
+                        self.next();
+                    }
+                    if matches!(self.peek_kind(), TokenKind::RBracket) {
+                        self.next();
                     }
                 }
 
-                let end = field_end.unwrap_or_else(|| self.src.len());
-                self.src[open_span.start..end].to_string()
-            }
-            TokenKind::Ident(_)
-            | TokenKind::QuotedIdent(_)
-            | TokenKind::Cell(_)
-            | TokenKind::R1C1Cell(_)
-            | TokenKind::R1C1Row(_)
-            | TokenKind::R1C1Col(_) => {
-                let span = self.current_span();
-                self.next();
-                self.src[span.start..span.end].to_string()
-            }
-            TokenKind::Eof | TokenKind::ArgSep | TokenKind::RParen => {
-                self.record_error(ParseError::new(
-                    "Expected field name after `.`",
-                    self.current_span(),
-                ));
-                String::new()
+                let field = match parse_field_selector_from_brackets(&raw_inner, dot_span) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        self.record_error(e);
+                        raw_inner.trim().to_string()
+                    }
+                };
+
+                Expr::FieldAccess(FieldAccessExpr {
+                    base: Box::new(base),
+                    field,
+                })
             }
             _ => {
-                self.record_error(ParseError::new(
-                    "Expected field name after `.`",
-                    self.current_span(),
-                ));
-                // Consume one token to avoid loops.
-                if !matches!(self.peek_kind(), TokenKind::Eof) {
-                    self.next();
-                }
-                String::new()
+                self.record_error(ParseError::new("Expected field selector", dot_span));
+                Expr::FieldAccess(FieldAccessExpr {
+                    base: Box::new(base),
+                    field: String::new(),
+                })
             }
-        };
-
-        Expr::FieldAccess(FieldAccessExpr {
-            base: Box::new(base),
-            field,
-        })
+        }
     }
 
     fn parse_array_literal(&mut self) -> Result<Expr, ParseError> {
@@ -3158,6 +3116,35 @@ impl<'a> Parser<'a> {
             .map(|t| t.span)
             .unwrap_or_else(|| Span::new(self.src.len(), self.src.len()))
     }
+}
+
+fn parse_field_selector_from_brackets(raw_inner: &str, span: Span) -> Result<String, ParseError> {
+    let trimmed = raw_inner.trim();
+    if trimmed.starts_with('"') && trimmed.ends_with('"') {
+        // Excel string literal escaping: `""` within the quoted string represents a literal `"`.
+        return unescape_excel_string_literal(trimmed)
+            .ok_or_else(|| ParseError::new("Invalid string literal", span));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn unescape_excel_string_literal(raw: &str) -> Option<String> {
+    let inner = raw.strip_prefix('"')?.strip_suffix('"')?;
+    let mut out = String::new();
+    let mut chars = inner.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '"' {
+            if chars.peek() == Some(&'"') {
+                chars.next();
+                out.push('"');
+            } else {
+                return None;
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    Some(out)
 }
 
 fn infix_binding_power(op: BinaryOp) -> (u8, u8) {
