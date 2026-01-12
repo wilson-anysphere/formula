@@ -464,6 +464,8 @@ DLP policies are stored at two levels:
 - **Org policy**: `org_dlp_policies` (per organization)
 - **Document overrides**: `document_dlp_policies` (per document), applied only when the effective org policy allows overrides.
 
+If an organization has no `org_dlp_policies` row, `services/api` falls back to a built-in default policy so DLP remains enforceable even before an explicit org configuration is stored.
+
 The backend exposes a policy evaluation endpoint for clients to understand whether an action is permitted:
 
 - `POST /docs/:docId/dlp/evaluate` (requires document read permission)
