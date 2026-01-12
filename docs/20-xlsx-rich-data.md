@@ -438,7 +438,7 @@ For images-in-cell, the `<rv>` payload includes (at minimum) some reference to a
   <!-- rv[5] (selected by xlrd:rvb i="5") -->
   <rv t="image">
     <!-- Synthetic payload: relationship-slot index = 0 -->
-    <v>0</v>
+    <v kind="rel">0</v>
   </rv>
 </rvData>
 ```
@@ -503,12 +503,12 @@ Even before full rich-data editing is implemented, round-trip compatibility need
 
 1. **More `<rv>` payload variants**
    - This repo confirms two concrete encodings:
-     - `richValue.xml` variant: `<rv t="image"><v>0</v></rv>` (0 = relationship-slot index) with
-       `richValueRel.xml` root `<richValueRel xmlns="…/2017/richdata2">`.
-     - `rdRichValue*` variant: `rdrichvalue.xml` `<rv><v>…</v><v>…</v></rv>` interpreted via
-       `rdrichvaluestructure.xml`, with the relationship slot index in the key
-       `_rvRel:LocalImageIdentifier`, and `richValueRel.xml` root
-       `<richValueRels xmlns="…/2022/richvaluerel">`.
+      - `richValue.xml` variant: `<rv t="image"><v kind="rel">0</v></rv>` (0 = relationship-slot index) with
+        `richValueRel.xml` root `<richValueRel xmlns="…/2017/richdata2">`.
+      - `rdRichValue*` variant: `rdrichvalue.xml` `<rv><v>…</v><v>…</v></rv>` interpreted via
+        `rdrichvaluestructure.xml`, with the relationship slot index in the key
+        `_rvRel:LocalImageIdentifier`, and `richValueRel.xml` root
+        `<richValueRels xmlns="…/2022/richvaluerel">`.
    - Other Excel builds may emit additional fields/structures; preserve unknown subtrees.
 2. **Multi-part `richValue*.xml` behavior**
    - When does Excel split into `richValue1.xml`, `richValue2.xml`, etc.?

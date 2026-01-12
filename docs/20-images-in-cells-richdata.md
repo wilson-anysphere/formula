@@ -892,7 +892,7 @@ Two variants are observed in-repo:
   <!-- Rich value index is typically the 0-based order of <rv> records (unless an explicit id/index is provided). -->
   <rv s="0" t="image">
     <!-- Relationship index (0-based) into richValueRel.xml -->
-    <v>0</v>
+    <v kind="rel">0</v>
   </rv>
 </rvData>
 ```
@@ -916,7 +916,7 @@ Other builds may:
 
 * split values across `xl/richData/richValue1.xml`, `richValue2.xml`, ...
 * include an explicit global index attribute on `<rv>` (e.g. `i="…"`, `id="…"`, `idx="…"`)
-* include multiple `<v>` members, with types indicated by attributes like `t="rel"` / `t="r"` / etc.
+* include multiple `<v>` members, with types indicated by attributes like `kind="rel"` and/or `t="rel"` / `t="r"` / etc.
 
 Notes:
 

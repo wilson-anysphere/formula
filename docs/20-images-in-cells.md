@@ -635,9 +635,10 @@ Common file names (Excel version-dependent; treat as “expected shape”, not a
 
 Workbooks that include these parts may declare content types in `[Content_Types].xml`.
 
-In this repo, some fixtures rely on `<Default Extension="xml" ContentType="application/xml"/>` for
-`xl/metadata.xml` and `xl/richData/*` (no explicit overrides), while others include explicit overrides.
-Implementations should preserve whatever is in the source workbook.
+In this repo, the fixtures that include `xl/metadata.xml` and/or `xl/richData/*` include explicit
+`<Override>` entries for those parts. However, in the wild some workbooks may rely on
+`<Default Extension="xml" ContentType="application/xml"/>` instead. Implementations should preserve
+whatever is in the source workbook.
 
 Independently of overrides for `.xml` parts, image payloads under `xl/media/*` still require appropriate
 image MIME defaults (e.g. `png` → `image/png`) for interoperability.
