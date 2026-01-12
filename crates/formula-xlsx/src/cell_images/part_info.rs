@@ -197,13 +197,12 @@ fn parse_cell_images_image_relationships(
         {
             continue;
         }
-
-        if !rel.type_uri.eq_ignore_ascii_case(IMAGE_REL_TYPE) {
+        if rel.type_uri != IMAGE_REL_TYPE {
             continue;
         }
 
-        let target_part = resolve_target(cell_images_part, &rel.target);
-        out.insert(rel.id, target_part);
+        let target = resolve_target(cell_images_part, &rel.target);
+        out.insert(rel.id, target);
     }
 
     Ok(out)
