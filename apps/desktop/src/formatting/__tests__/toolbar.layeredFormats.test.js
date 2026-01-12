@@ -120,7 +120,9 @@ test("toggleBold on a full-column selection treats a single conflicting cell ove
 test("toggleBold toggles OFF for large rectangles formatted via range runs (no per-cell scan)", () => {
   const doc = new DocumentController();
 
-  const hugeRect = "A1:C100000"; // 300k cells -> range-run layer
+  // Keep this below the UI formatting apply guard (100k cells) while still exceeding
+  // the range-run threshold (50k cells) so the formatting is stored in runs, not cells.
+  const hugeRect = "A1:C20000"; // 60k cells -> range-run layer
   doc.setRangeFormat("Sheet1", hugeRect, { font: { bold: true } });
 
   const sheet = doc.model.sheets.get("Sheet1");
@@ -247,7 +249,8 @@ test("toggleBold reads full-sheet formatting from the sheet layer (no per-cell s
 test("toggleWrap toggles OFF for large rectangles formatted via range runs (no per-cell scan)", () => {
   const doc = new DocumentController();
 
-  const hugeRect = "A1:C100000"; // 300k cells -> range-run layer
+  // 60k cells -> range-run layer (see comment above).
+  const hugeRect = "A1:C20000";
   doc.setRangeFormat("Sheet1", hugeRect, { alignment: { wrapText: true } });
 
   const sheet = doc.model.sheets.get("Sheet1");
