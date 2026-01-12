@@ -144,18 +144,23 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
 
     if part_name is None:
         # Prefer the smallest numeric suffix (treat empty suffix as 0), with a stable tie-breaker.
-        scored: list[tuple[int, str, str]] = []
+        scored: list[tuple[int, int, int, str, str]] = []
         for n in candidates:
-            m = cellimages_part_re.match(posixpath.basename(n.replace("\\", "/")))
+            normalized = n.replace("\\", "/")
+            m = cellimages_part_re.match(posixpath.basename(normalized))
             if not m:
                 continue
             suffix_str = m.group(1) or ""
             suffix_num = int(suffix_str) if suffix_str else 0
-            scored.append((suffix_num, n.casefold(), n))
+            # Prefer parts directly under `xl/` (mirrors the most common Excel layout) before
+            # deeper `xl/**/` variants if multiple parts share the same numeric suffix.
+            direct_under_xl = 0 if posixpath.dirname(normalized).casefold() == "xl" else 1
+            path_depth = normalized.count("/")
+            scored.append((suffix_num, direct_under_xl, path_depth, n.casefold(), n))
         if not scored:
             return None
         scored.sort()
-        part_name = scored[0][2]
+        part_name = scored[0][4]
 
     content_type: str | None = None
     content_types_name = _find_zip_entry_case_insensitive(zip_names, "[Content_Types].xml")

@@ -363,8 +363,8 @@ def _make_xlsx_with_cell_images_duplicate_basename_workbook_targets_root() -> by
     - `xl/cellimages/cellimages1.xml` (folder layout)
 
     `workbook.xml.rels` targets `cellimages1.xml`, which resolves to `xl/cellimages1.xml`
-    and exists in the package. Triage should *not* incorrectly attach the workbook rel type
-    to the folder-layout part if it happens to be selected.
+    and exists in the package. Triage should prefer the root part when multiple candidates
+    share the same numeric suffix.
     """
 
     buf = io.BytesIO()
@@ -660,16 +660,10 @@ class TriageCellImagesTests(unittest.TestCase):
         self.assertIn("cell_images", report)
 
         cell_images = report["cell_images"]
-        if cell_images["part_name"] == "xl/cellimages1.xml":
-            self.assertEqual(
-                cell_images["workbook_rel_type"], "http://example.com/relationships/cellImages-root"
-            )
-        else:
-            # If triage selects the folder-layout part, workbook.xml.rels still targets the root
-            # part (which exists). We should not incorrectly apply the workbook relationship type
-            # based solely on basename.
-            self.assertEqual(cell_images["part_name"], "xl/cellimages/cellimages1.xml")
-            self.assertIsNone(cell_images["workbook_rel_type"])
+        self.assertEqual(cell_images["part_name"], "xl/cellimages1.xml")
+        self.assertEqual(
+            cell_images["workbook_rel_type"], "http://example.com/relationships/cellImages-root"
+        )
 
     def test_triage_counts_embed_rids_outside_blips(self) -> None:
         import tools.corpus.triage as triage_mod
