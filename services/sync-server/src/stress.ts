@@ -279,20 +279,30 @@ async function startSyncServer(opts: {
       ...limitsEnv,
       ...maxMessageBytesEnv,
     },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-
-  child.stdout.on("data", (d) => {
-    stdout += d.toString();
-    stdout = stdout.slice(-50_000);
-  });
-  child.stderr.on("data", (d) => {
-    stderr += d.toString();
-    stderr = stderr.slice(-50_000);
+    // Use a piped stdin so the return type matches `ChildProcessWithoutNullStreams`
+    // (and so the stress harness typechecks under `tsc`).
+    stdio: ["pipe", "pipe", "pipe"],
   });
 
   const proc = child;
   if (!proc) throw new Error("Failed to spawn sync-server process");
+
+  // We never write to stdin; close it to avoid keeping the child process alive
+  // unnecessarily on some platforms.
+  try {
+    proc.stdin.end();
+  } catch {
+    // ignore
+  }
+
+  proc.stdout.on("data", (d) => {
+    stdout += d.toString();
+    stdout = stdout.slice(-50_000);
+  });
+  proc.stderr.on("data", (d) => {
+    stderr += d.toString();
+    stderr = stderr.slice(-50_000);
+  });
 
   try {
     await waitForServerReady(httpUrl, 30_000);
@@ -588,7 +598,10 @@ Examples:
 
       const createdAt = Date.now();
       const provider = new WebsocketProvider(server.wsUrl, docId, doc, {
-        WebSocketPolyfill: WebSocket,
+        // y-websocket's typing expects a DOM-like WebSocket interface. We run the
+        // stress harness in Node using `ws`, so cast through `any` to avoid
+        // pulling in DOM lib types just for this script.
+        WebSocketPolyfill: WebSocket as any,
         disableBc: true,
         params: { token },
       });
@@ -608,20 +621,23 @@ Examples:
       clients.push(client);
 
       let lastWs: WebSocket | null = null;
-      provider.on("status", (event: { status: "connected" | "disconnected" }) => {
-        if (event.status === "connected") {
-          if (client.connectedAtMs === null) client.connectedAtMs = Date.now();
-          const ws = (provider as unknown as { ws?: WebSocket }).ws;
-          if (ws && ws !== lastWs) {
+      provider.on(
+        "status",
+        (event: { status: "connected" | "disconnected" | "connecting" }) => {
+          if (event.status === "connected") {
+            if (client.connectedAtMs === null) client.connectedAtMs = Date.now();
+            const ws = (provider as unknown as { ws?: WebSocket }).ws;
+            if (ws && ws !== lastWs) {
             lastWs = ws;
             ws.on("close", (code: number) => {
               closeCodes.set(code, (closeCodes.get(code) ?? 0) + 1);
             });
           }
-        } else {
-          disconnectedCountByClient.set(i, (disconnectedCountByClient.get(i) ?? 0) + 1);
+          } else {
+            disconnectedCountByClient.set(i, (disconnectedCountByClient.get(i) ?? 0) + 1);
+          }
         }
-      });
+      );
 
       provider.on("sync", (isSynced: boolean) => {
         if (isSynced && client.syncedAtMs === null) {
@@ -699,9 +715,9 @@ Examples:
             cell = new Y.Map();
             cells.set(cellKey, cell);
           }
-          (cell as Y.Map<unknown>).set("value", `${client.userId}:${opIndex}`);
-          (cell as Y.Map<unknown>).set("modifiedBy", client.userId);
-          (cell as Y.Map<unknown>).set("ts", Date.now());
+          (cell as import("yjs").Map<unknown>).set("value", `${client.userId}:${opIndex}`);
+          (cell as import("yjs").Map<unknown>).set("modifiedBy", client.userId);
+          (cell as import("yjs").Map<unknown>).set("ts", Date.now());
 
           // Optional reserved roots exercise.
           if (Math.random() < RESERVED_ROOT_FRACTION) {
