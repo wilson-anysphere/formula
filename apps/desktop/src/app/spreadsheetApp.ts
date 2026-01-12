@@ -81,7 +81,11 @@ import { DesktopSharedGrid, type DesktopSharedGridCallbacks } from "../grid/shar
 import { openExternalHyperlink } from "../hyperlinks/openExternal.js";
 import * as nativeDialogs from "../tauri/nativeDialogs.js";
 import { shellOpen } from "../tauri/shellOpen.js";
-import { applyFillCommitToDocumentController, applyFillCommitToDocumentControllerWithFormulaRewrite } from "../fill/applyFillCommit";
+import {
+  applyFillCommitToDocumentController,
+  applyFillCommitToDocumentControllerWithFormulaRewrite,
+  computeFillEditsForDocumentControllerWithFormulaRewrite,
+} from "../fill/applyFillCommit";
 import type { CellRange as FillEngineRange, FillMode as FillHandleMode } from "@formula/fill-engine";
 import { bindSheetViewToCollabSession, type SheetViewBinder } from "../collab/sheetViewBinder";
 import { loadCollabConnectionForWorkbook } from "../sharing/collabConnectionStore.js";
@@ -7783,9 +7787,9 @@ export class SpreadsheetApp {
       return this.getCellComputedValue(fillCoordScratch) as any;
     };
 
-    // When possible, prefer engine-backed formula shifting for the fill shortcut. To keep undo
-    // semantics simple (and avoid holding a DocumentController batch open across `await`s), we
-    // currently use the engine rewrite path only for the common single-range case.
+    // When possible, prefer engine-backed formula shifting for the fill shortcut. For multi-range
+    // selections we compute all edits (async) first, then apply them in a single DocumentController
+    // batch so the operation remains one undo step.
     if (wasm && operations.length === 1) {
       const op = operations[0]!;
       const task = applyFillCommitToDocumentControllerWithFormulaRewrite({
@@ -7810,6 +7814,65 @@ export class SpreadsheetApp {
               mode: "formulas",
               getCellComputedValue,
             });
+          } finally {
+            this.document.endBatch();
+          }
+        })
+        .finally(() => {
+          this.refresh();
+          this.focus();
+        });
+      this.idle.track(task);
+      return;
+    }
+
+    if (wasm && operations.length > 1) {
+      const task = (async () => {
+        const coordScratch = { row: 0, col: 0 };
+        const edits: Array<{ row: number; col: number; value: unknown }> = [];
+
+        for (const op of operations) {
+          const computed = await computeFillEditsForDocumentControllerWithFormulaRewrite({
+            document: this.document,
+            sheetId: this.sheetId,
+            sourceRange: op.sourceRange,
+            targetRange: op.targetRange,
+            mode: "formulas",
+            getCellComputedValue,
+            rewriteFormulasForCopyDelta: (requests) => wasm.rewriteFormulasForCopyDelta(requests),
+          });
+          for (const edit of computed) {
+            edits.push(edit);
+          }
+        }
+
+        if (edits.length === 0) return;
+
+        this.document.beginBatch({ label });
+        try {
+          for (const edit of edits) {
+            coordScratch.row = edit.row;
+            coordScratch.col = edit.col;
+            this.document.setCellInput(this.sheetId, coordScratch, edit.value);
+          }
+        } finally {
+          this.document.endBatch();
+        }
+      })()
+        .catch(() => {
+          // Fall back to legacy fill behavior if the worker is unavailable.
+          this.document.beginBatch({ label });
+          try {
+            for (const op of operations) {
+              applyFillCommitToDocumentController({
+                document: this.document,
+                sheetId: this.sheetId,
+                sourceRange: op.sourceRange,
+                targetRange: op.targetRange,
+                mode: "formulas",
+                getCellComputedValue,
+              });
+            }
           } finally {
             this.document.endBatch();
           }

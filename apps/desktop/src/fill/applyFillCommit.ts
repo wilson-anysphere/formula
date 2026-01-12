@@ -1,4 +1,11 @@
-import { computeFillEdits, type CellRange, type CellScalar, type FillMode, type FillSourceCell } from "@formula/fill-engine";
+import {
+  computeFillEdits,
+  type CellRange,
+  type CellScalar,
+  type FillEdit,
+  type FillMode,
+  type FillSourceCell,
+} from "@formula/fill-engine";
 
 import type { DocumentController } from "../document/documentController.js";
 
@@ -123,11 +130,38 @@ export async function applyFillCommitToDocumentControllerWithFormulaRewrite(
     label?: string;
   }
 ): Promise<{ editsApplied: number }> {
+  const { document: doc, sheetId } = options;
+
+  const edits = await computeFillEditsForDocumentControllerWithFormulaRewrite(options);
+  if (edits.length === 0) return { editsApplied: 0 };
+
+  // Avoid allocating a fresh `{row,col}` object for every cell visit during fills.
+  const coordScratch = { row: 0, col: 0 };
+
+  doc.beginBatch({ label: options.label ?? "Fill" });
+  try {
+    for (const edit of edits) {
+      coordScratch.row = edit.row;
+      coordScratch.col = edit.col;
+      doc.setCellInput(sheetId, coordScratch, edit.value);
+    }
+  } finally {
+    doc.endBatch();
+  }
+
+  return { editsApplied: edits.length };
+}
+
+export async function computeFillEditsForDocumentControllerWithFormulaRewrite(
+  options: ApplyFillCommitOptions & {
+    rewriteFormulasForCopyDelta: (requests: RewriteFormulasForCopyDeltaRequest[]) => Promise<string[]>;
+  }
+): Promise<FillEdit[]> {
   const { document: doc, sheetId, sourceRange, targetRange, mode, canWriteCell, getCellComputedValue } = options;
 
   const height = Math.max(0, sourceRange.endRow - sourceRange.startRow);
   const width = Math.max(0, sourceRange.endCol - sourceRange.startCol);
-  if (height === 0 || width === 0) return { editsApplied: 0 };
+  if (height === 0 || width === 0) return [];
 
   // Avoid allocating a fresh `{row,col}` object for every cell visit during fills.
   const coordScratch = { row: 0, col: 0 };
@@ -160,7 +194,12 @@ export async function applyFillCommitToDocumentControllerWithFormulaRewrite(
   }
 
   const { edits } = computeFillEdits({ sourceRange, targetRange, sourceCells, mode, canWriteCell });
-  if (edits.length === 0) return { editsApplied: 0 };
+  if (edits.length === 0) return [];
+
+  // Only rewrite formula fills (not "fill formulas as values" copy mode).
+  if (mode === "copy") {
+    return edits;
+  }
 
   // Patch formula edits using engine rewrite semantics.
   //
@@ -212,16 +251,5 @@ export async function applyFillCommitToDocumentControllerWithFormulaRewrite(
     // Ignore rewrite failures and fall back to the best-effort fill-engine result.
   }
 
-  doc.beginBatch({ label: options.label ?? "Fill" });
-  try {
-    for (const edit of edits) {
-      coordScratch.row = edit.row;
-      coordScratch.col = edit.col;
-      doc.setCellInput(sheetId, coordScratch, edit.value);
-    }
-  } finally {
-    doc.endBatch();
-  }
-
-  return { editsApplied: edits.length };
+  return edits;
 }

@@ -84,7 +84,9 @@ describe("ToolExecutor range size limits", () => {
 
     expect(result.ok).toBe(true);
     expect(result.tool).toBe("apply_formatting");
-    if (!result.ok) throw new Error(`Expected apply_formatting to succeed: ${result.error?.message ?? "unknown error"}`);
+    if (!result.ok || result.tool !== "apply_formatting") {
+      throw new Error(`Expected apply_formatting to succeed: ${result.error?.message ?? "unknown error"}`);
+    }
     expect(result.data?.formatted_cells).toBe(0);
     expect(api.formatCalls).toBe(1);
     // Ensure we still don't materialize cell grids for formatting operations.
