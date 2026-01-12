@@ -20,6 +20,16 @@ fn spill_operator_hash_expands_spill_range_in_functions() {
         .set_cell_formula("Sheet1", "D2", "=SUM(C2#)")
         .unwrap();
 
+    // Ensure spill-range formulas compile to bytecode (no AST fallback).
+    let report = engine.bytecode_compile_report(usize::MAX);
+    for addr in ["C1", "D1", "D2"] {
+        let cell = parse_a1(addr).unwrap();
+        assert!(
+            !report.iter().any(|e| e.addr == cell),
+            "expected {addr} to compile to bytecode (report={report:?})"
+        );
+    }
+
     engine.recalculate_single_threaded();
 
     assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(6.0));
@@ -36,6 +46,17 @@ fn spill_operator_hash_spills_again_when_used_as_formula_result() {
 
     // Referencing a spill range as a top-level formula returns an array, which should spill.
     engine.set_cell_formula("Sheet1", "E1", "=C1#").unwrap();
+
+    // Ensure the spill-range reference compiles to bytecode.
+    let report = engine.bytecode_compile_report(usize::MAX);
+    for addr in ["C1", "E1"] {
+        let cell = parse_a1(addr).unwrap();
+        assert!(
+            !report.iter().any(|e| e.addr == cell),
+            "expected {addr} to compile to bytecode (report={report:?})"
+        );
+    }
+
     engine.recalculate_single_threaded();
 
     let (start, end) = engine.spill_range("Sheet1", "E1").expect("spill range");
@@ -52,6 +73,15 @@ fn spill_operator_hash_on_non_spill_origin_returns_ref() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
     engine.set_cell_formula("Sheet1", "B1", "=A1#").unwrap();
+
+    // `A1#` should be bytecode-eligible even though it returns `#REF!` at runtime.
+    let report = engine.bytecode_compile_report(usize::MAX);
+    let b1 = parse_a1("B1").unwrap();
+    assert!(
+        !report.iter().any(|e| e.addr == b1),
+        "expected B1 to compile to bytecode (report={report:?})"
+    );
+
     engine.recalculate_single_threaded();
 
     assert_eq!(
