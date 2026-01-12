@@ -109,6 +109,25 @@ fn countif_reference_union_counts_blanks_across_non_overlapping_areas() {
 }
 
 #[test]
+fn countblank_reference_union_dedupes_overlaps() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A2", 1.0);
+
+    // Union covers A1:A3 with an overlap at A2.
+    assert_number(&sheet.eval("=COUNTBLANK((A1:A2,A2:A3))"), 2.0);
+}
+
+#[test]
+fn countblank_reference_union_counts_blanks_across_non_overlapping_areas() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("C2", 2.0);
+
+    // (A1:A2,C1:C2) is 4 cells total, 2 non-blank => 2 blanks.
+    assert_number(&sheet.eval("=COUNTBLANK((A1:A2,C1:C2))"), 2.0);
+}
+
+#[test]
 fn round_variants() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=ROUND(2.5,0)"), 3.0);
