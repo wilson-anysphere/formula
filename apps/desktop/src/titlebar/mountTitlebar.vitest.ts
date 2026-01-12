@@ -109,6 +109,8 @@ describe("mountTitlebar", () => {
       });
     });
 
+    expect(container.querySelector(".formula-titlebar__actions")).toBeNull();
+
     const closeButton = container.querySelector<HTMLButtonElement>('[aria-label="Close window"]');
     const minimizeButton = container.querySelector<HTMLButtonElement>('[aria-label="Minimize window"]');
     const maximizeButton = container.querySelector<HTMLButtonElement>('[aria-label="Maximize window"]');
