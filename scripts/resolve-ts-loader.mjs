@@ -45,6 +45,10 @@ export async function resolve(specifier, context, defaultResolve) {
     return await defaultResolve(specifier, context, defaultResolve);
   } catch (err) {
     if (!isPathLike(specifier)) throw err;
+    // Only fall back for missing modules; other resolution errors (like invalid exports)
+    // should be surfaced to the caller.
+    const code = /** @type {any} */ (err)?.code;
+    if (code !== "ERR_MODULE_NOT_FOUND") throw err;
 
     const { base, suffix } = splitSpecifier(specifier);
 
@@ -95,11 +99,17 @@ export async function resolve(specifier, context, defaultResolve) {
 }
 
 export async function load(url, context, defaultLoad) {
-  if (url.endsWith(".ts") || url.endsWith(".tsx")) {
-    const source = await readFile(new URL(url), "utf8");
-    const isTsx = url.endsWith(".tsx");
+  // `url` may include a query/hash; use the pathname to decide file type, and read
+  // the on-disk file URL without the suffix.
+  const urlObj = new URL(url);
+  const pathname = urlObj.pathname;
+  if (pathname.endsWith(".ts") || pathname.endsWith(".tsx")) {
+    urlObj.search = "";
+    urlObj.hash = "";
+    const source = await readFile(urlObj, "utf8");
+    const isTsx = pathname.endsWith(".tsx");
     const result = ts.transpileModule(source, {
-      fileName: new URL(url).pathname,
+      fileName: pathname,
       compilerOptions: {
         module: ts.ModuleKind.ESNext,
         target: ts.ScriptTarget.ES2022,
