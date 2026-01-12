@@ -18,8 +18,8 @@ async function waitForCondition(predicate, timeoutMs = 2_000, intervalMs = 5) {
 function findSheetEntry(ydoc, sheetId) {
   const sheets = ydoc.getArray("sheets");
   for (const entry of sheets.toArray()) {
-    if (!entry || typeof entry.get !== "function") continue;
-    if (entry.get("id") === sheetId) return entry;
+    const id = entry?.get?.("id") ?? entry?.id;
+    if (id === sheetId) return entry;
   }
   return null;
 }
@@ -37,7 +37,7 @@ test("binder: DocumentController→Yjs syncs sheet view state (freeze panes + ro
 
     await waitForCondition(() => {
       const entry = findSheetEntry(ydoc, "Sheet1");
-      const view = entry?.get("view");
+      const view = entry?.get?.("view") ?? entry?.view;
       return (
         view?.frozenRows === 2 &&
         view?.frozenCols === 3 &&
@@ -48,7 +48,7 @@ test("binder: DocumentController→Yjs syncs sheet view state (freeze panes + ro
 
     const entry = findSheetEntry(ydoc, "Sheet1");
     assert.ok(entry, "expected a Yjs sheets entry for Sheet1");
-    assert.deepEqual(entry.get("view"), {
+    assert.deepEqual(entry.get?.("view") ?? entry.view, {
       frozenRows: 2,
       frozenCols: 3,
       colWidths: { "0": 120 },
@@ -56,8 +56,66 @@ test("binder: DocumentController→Yjs syncs sheet view state (freeze panes + ro
     });
 
     // Binder should not write legacy top-level frozen rows/cols.
-    assert.equal(entry.get("frozenRows"), undefined);
-    assert.equal(entry.get("frozenCols"), undefined);
+    assert.equal(entry.get?.("frozenRows") ?? entry.frozenRows, undefined);
+    assert.equal(entry.get?.("frozenCols") ?? entry.frozenCols, undefined);
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+  }
+});
+
+test("binder: DocumentController→Yjs upgrades existing plain-object sheet entries when writing view state", async () => {
+  const ydoc = new Y.Doc();
+  const sheets = ydoc.getArray("sheets");
+  ydoc.transact(() => {
+    sheets.push([{ id: "Sheet1", name: "Sheet1" }]);
+  });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({ ydoc, documentController, defaultSheetId: "Sheet1" });
+
+  try {
+    documentController.setFrozen("Sheet1", 2, 0);
+
+    await waitForCondition(() => {
+      if (sheets.length !== 1) return false;
+      const entry = sheets.get(0);
+      if (!entry || typeof entry.get !== "function") return false;
+      const view = entry.get("view");
+      return entry.get("id") === "Sheet1" && view?.frozenRows === 2 && view?.frozenCols === 0;
+    });
+
+    assert.equal(sheets.length, 1);
+    const entry = sheets.get(0);
+    assert.ok(entry instanceof Y.Map, "expected sheet entry to be upgraded to a Y.Map");
+    assert.deepEqual(entry.get("view"), { frozenRows: 2, frozenCols: 0 });
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+  }
+});
+
+test("binder: hydrates sheet view state from plain-object Yjs sheet entries", async () => {
+  const ydoc = new Y.Doc();
+  const sheets = ydoc.getArray("sheets");
+  ydoc.transact(() => {
+    sheets.push([{ id: "Sheet1", name: "Sheet1", view: { frozenRows: 1, frozenCols: 2, colWidths: { "0": 111 } } }]);
+  });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({ ydoc, documentController, defaultSheetId: "Sheet1" });
+
+  try {
+    await waitForCondition(() => {
+      const view = documentController.getSheetView("Sheet1");
+      return view.frozenRows === 1 && view.frozenCols === 2 && view.colWidths?.["0"] === 111;
+    });
+
+    assert.deepEqual(documentController.getSheetView("Sheet1"), {
+      frozenRows: 1,
+      frozenCols: 2,
+      colWidths: { "0": 111 },
+    });
   } finally {
     binder.destroy();
     ydoc.destroy();
@@ -97,7 +155,14 @@ test("binder: Yjs→DocumentController syncs sheet view state (initial hydration
       () => {
         const entry = findSheetEntry(ydoc, "Sheet1");
         assert.ok(entry, "expected Sheet1 entry");
-        entry.set("view", { frozenRows: 0, frozenCols: 2, rowHeights: { "10": 55 } });
+        if (typeof entry.set === "function") {
+          entry.set("view", { frozenRows: 0, frozenCols: 2, rowHeights: { "10": 55 } });
+        } else {
+          const sheets = ydoc.getArray("sheets");
+          const idx = sheets.toArray().findIndex((e) => (e?.get?.("id") ?? e?.id) === "Sheet1");
+          sheets.delete(idx, 1);
+          sheets.insert(idx, [{ id: "Sheet1", name: "Sheet1", view: { frozenRows: 0, frozenCols: 2, rowHeights: { "10": 55 } } }]);
+        }
       },
       remoteOrigin,
     );
@@ -152,4 +217,3 @@ test("binder: local sheet view changes do not echo back as external changes", as
     ydoc.destroy();
   }
 });
-

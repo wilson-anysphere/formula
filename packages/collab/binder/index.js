@@ -20,6 +20,10 @@ function stableStringify(value) {
   return `{${entries.join(",")}}`;
 }
 
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 function isYText(value) {
   if (!value || typeof value !== "object") return false;
   if (value.constructor?.name === "YText") return true;
@@ -141,6 +145,16 @@ function normalizeSheetViewState(view) {
 
 function emptySheetViewState() {
   return { frozenRows: 0, frozenCols: 0 };
+}
+
+function getYMap(value) {
+  if (!value || typeof value !== "object") return null;
+  // eslint-disable-next-line no-prototype-builtins
+  if (value.constructor?.name !== "YMap") return null;
+  if (typeof value.get !== "function") return null;
+  if (typeof value.set !== "function") return null;
+  if (typeof value.delete !== "function") return null;
+  return value;
 }
 
 function getYMapCell(cellData) {
@@ -660,24 +674,44 @@ export function bindYjsToDocumentController(options) {
    * @returns {{ frozenRows: number, frozenCols: number, colWidths?: Record<string, number>, rowHeights?: Record<string, number> }}
    */
   function readSheetViewFromYjsSheetEntry(sheetEntry) {
-    if (!sheetEntry || typeof sheetEntry.get !== "function") return emptySheetViewState();
+    const sheetMap = getYMap(sheetEntry);
+    if (sheetMap) {
+      // Canonical format (BranchService):
+      //   sheetMap.set("view", { frozenRows, frozenCols, colWidths?, rowHeights? })
+      const rawView = sheetMap.get("view");
+      if (rawView !== undefined) {
+        const json = yjsValueToJson(rawView);
+        return normalizeSheetViewState(json);
+      }
 
-    // Canonical format (BranchService):
-    //   sheetMap.set("view", { frozenRows, frozenCols, colWidths?, rowHeights? })
-    const rawView = sheetEntry.get("view");
-    if (rawView !== undefined) {
-      const json = yjsValueToJson(rawView);
-      return normalizeSheetViewState(json);
+      // Back-compat: legacy top-level frozen rows/cols.
+      const frozenRows = sheetMap.get("frozenRows");
+      const frozenCols = sheetMap.get("frozenCols");
+      if (frozenRows !== undefined || frozenCols !== undefined) {
+        return normalizeSheetViewState({
+          frozenRows: yjsValueToJson(frozenRows) ?? 0,
+          frozenCols: yjsValueToJson(frozenCols) ?? 0,
+        });
+      }
+
+      return emptySheetViewState();
     }
 
-    // Back-compat: legacy top-level frozen rows/cols.
-    const frozenRows = sheetEntry.get("frozenRows");
-    const frozenCols = sheetEntry.get("frozenCols");
-    if (frozenRows !== undefined || frozenCols !== undefined) {
-      return normalizeSheetViewState({
-        frozenRows: yjsValueToJson(frozenRows) ?? 0,
-        frozenCols: yjsValueToJson(frozenCols) ?? 0,
-      });
+    // Some workflows/tests (and some historical docs) may store sheet entries as
+    // plain objects inside the Y.Array rather than Y.Maps. Treat those as
+    // read-only metadata and hydrate view state from them.
+    if (isRecord(sheetEntry)) {
+      const rawView = sheetEntry.view;
+      if (rawView !== undefined) {
+        const json = yjsValueToJson(rawView);
+        return normalizeSheetViewState(json);
+      }
+
+      const frozenRows = sheetEntry.frozenRows;
+      const frozenCols = sheetEntry.frozenCols;
+      if (frozenRows !== undefined || frozenCols !== undefined) {
+        return normalizeSheetViewState({ frozenRows, frozenCols });
+      }
     }
 
     return emptySheetViewState();
@@ -685,14 +719,14 @@ export function bindYjsToDocumentController(options) {
 
   /**
    * @param {string} sheetId
-   * @returns {any | null}
+   * @returns {{ index: number, entry: any } | null}
    */
   function findYjsSheetEntryById(sheetId) {
     if (!sheetId) return null;
-    for (const entry of sheets.toArray()) {
-      if (!entry || typeof entry.get !== "function") continue;
-      const id = coerceString(entry.get("id"));
-      if (id === sheetId) return entry;
+    for (let i = 0; i < sheets.length; i += 1) {
+      const entry = sheets.get(i);
+      const id = coerceString(entry?.get?.("id") ?? entry?.id);
+      if (id === sheetId) return { index: i, entry };
     }
     return null;
   }
@@ -711,8 +745,8 @@ export function bindYjsToDocumentController(options) {
     for (const sheetId of changedSheetIds) {
       if (!sheetId) continue;
 
-      const entry = findYjsSheetEntryById(sheetId);
-      const after = readSheetViewFromYjsSheetEntry(entry);
+      const found = findYjsSheetEntryById(sheetId);
+      const after = readSheetViewFromYjsSheetEntry(found?.entry);
       const before = documentController.getSheetView(sheetId);
 
       if (stableStringify(before) === stableStringify(after)) continue;
@@ -778,8 +812,7 @@ export function bindYjsToDocumentController(options) {
     const changed = new Set();
 
     for (const entry of sheets.toArray()) {
-      if (!entry || typeof entry.get !== "function") continue;
-      const id = coerceString(entry.get("id"));
+      const id = coerceString(entry?.get?.("id") ?? entry?.id);
       if (!id) continue;
       changed.add(id);
     }
@@ -888,7 +921,7 @@ export function bindYjsToDocumentController(options) {
       const path = event?.path;
       if (Array.isArray(path) && typeof path[0] === "number") {
         const entry = sheets.get(path[0]);
-        const id = entry && typeof entry.get === "function" ? coerceString(entry.get("id")) : null;
+        const id = coerceString(entry?.get?.("id") ?? entry?.id);
         if (id) changed.add(id);
         continue;
       }
@@ -898,8 +931,7 @@ export function bindYjsToDocumentController(options) {
 
     if (needsFullScan) {
       for (const entry of sheets.toArray()) {
-        if (!entry || typeof entry.get !== "function") continue;
-        const id = coerceString(entry.get("id"));
+        const id = coerceString(entry?.get?.("id") ?? entry?.id);
         if (id) changed.add(id);
       }
     }
@@ -1075,15 +1107,42 @@ export function bindYjsToDocumentController(options) {
       for (const item of prepared) {
         const { sheetId, view } = item;
 
-        let entry = findYjsSheetEntryById(sheetId);
-        if (!entry) {
-          entry = new Y.Map();
-          entry.set("id", sheetId);
-          entry.set("name", sheetId);
-          sheets.push([entry]);
+        const found = findYjsSheetEntryById(sheetId);
+
+        let sheetMap = getYMap(found?.entry);
+        if (!sheetMap) {
+          sheetMap = new Y.Map();
+          sheetMap.set("id", sheetId);
+
+          const name = coerceString(found?.entry?.get?.("name") ?? found?.entry?.name) ?? sheetId;
+          sheetMap.set("name", name);
+
+          // If an existing entry was stored as a plain object, preserve any unknown
+          // metadata keys by copying them into the new Y.Map.
+          if (isRecord(found?.entry)) {
+            const keys = Object.keys(found.entry).sort();
+            for (const key of keys) {
+              if (key === "id" || key === "name" || key === "view" || key === "frozenRows" || key === "frozenCols") {
+                continue;
+              }
+              const value = found.entry[key];
+              try {
+                sheetMap.set(key, structuredClone(value));
+              } catch {
+                sheetMap.set(key, value);
+              }
+            }
+          }
+
+          if (found) {
+            sheets.delete(found.index, 1);
+            sheets.insert(found.index, [sheetMap]);
+          } else {
+            sheets.push([sheetMap]);
+          }
         }
 
-        entry.set("view", view);
+        sheetMap.set("view", view);
       }
     };
 
