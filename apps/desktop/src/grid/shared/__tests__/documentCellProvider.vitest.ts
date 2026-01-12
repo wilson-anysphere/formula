@@ -565,6 +565,48 @@ describe("DocumentCellProvider formatting integration", () => {
     expect(getCellSpy).toHaveBeenCalledTimes(3);
   });
 
+  it("keeps other columns cached when invalidating multiple full-height columns", () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", "colA");
+    doc.setCellValue("Sheet1", "P1", "colP");
+
+    const headerRows = 1;
+    const headerCols = 1;
+    // 6000 rows x 10 columns = 60k cells (>50k direct-eviction threshold). This would previously
+    // clear the entire sheet cache because the invalidation isn't "thin enough" (width > 4).
+    const docRows = 6000;
+    const docCols = 20;
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows,
+      headerCols,
+      rowCount: docRows + headerRows,
+      colCount: docCols + headerCols,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const getCellSpy = vi.spyOn(doc, "getCell");
+
+    // Prime cache for a touched column and an untouched column (same row).
+    expect(provider.getCell(headerRows + 0, headerCols + 0)?.value).toBe("colA");
+    expect(provider.getCell(headerRows + 0, headerCols + 15)?.value).toBe("colP");
+    expect(getCellSpy).toHaveBeenCalledTimes(2);
+
+    // Invalidate columns 0-9 across all rows (doc range).
+    provider.invalidateDocCells({ startRow: 0, endRow: docRows, startCol: 0, endCol: 10 });
+
+    // Touched column should be refetched...
+    expect(provider.getCell(headerRows + 0, headerCols + 0)?.value).toBe("colA");
+    expect(getCellSpy).toHaveBeenCalledTimes(3);
+
+    // ...but untouched column should stay cached.
+    expect(provider.getCell(headerRows + 0, headerCols + 15)?.value).toBe("colP");
+    expect(getCellSpy).toHaveBeenCalledTimes(3);
+  });
+
   it("keeps other rows cached when invalidating multiple full-width rows", () => {
     const doc = new DocumentController();
     doc.setCellValue("Sheet1", "A1", "row1");

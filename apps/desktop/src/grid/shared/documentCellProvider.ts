@@ -451,13 +451,18 @@ export class DocumentCellProvider implements CellProvider {
     const width = Math.max(0, gridRange.endCol - gridRange.startCol);
     const cellCount = height * width;
     const sheetId = this.options.getSheetId();
-    // For large invalidations, prefer evicting just the touched cells when the dirty
-    // region is "thin" (e.g. a single formatted row across all columns) to avoid
-    // nuking the entire sheet cache.
-    const maxDirectEvictions = 50_000;
-    const shouldEvictDirectly =
-      cellCount <= 1000 || (cellCount <= maxDirectEvictions && (height <= 4 || width <= 4));
     const cache = this.sheetCaches.get(sheetId);
+
+    // Strategy:
+    // - Small regions: delete each affected cell key directly.
+    // - Stripe-like regions (few rows or few columns) that may cover enormous sheet area:
+    //   scan the bounded LRU cache and evict only matching entries.
+    // - Everything else: clear the active sheet cache (still bounded) to avoid expensive iteration.
+    const maxDirectEvictions = 50_000;
+    const maxAxisSpanForKeyScan = 64;
+    const shouldEvictDirectly = cellCount <= maxDirectEvictions;
+    const shouldScanKeys = !shouldEvictDirectly && (height <= maxAxisSpanForKeyScan || width <= maxAxisSpanForKeyScan);
+
     if (cache) {
       if (shouldEvictDirectly) {
         for (let r = gridRange.startRow; r < gridRange.endRow; r++) {
@@ -466,10 +471,7 @@ export class DocumentCellProvider implements CellProvider {
             cache.delete(base + c);
           }
         }
-      } else if (width <= 4 || height <= 4) {
-        // Full-height column invalidations (e.g. formatting an entire column) can span millions of
-        // rows. Iterating every coordinate is too expensive, but our cache is bounded, so we can
-        // evict matching entries by scanning keys.
+      } else if (shouldScanKeys) {
         for (const key of cache.keys()) {
           const row = Math.floor(key / CACHE_KEY_COL_STRIDE);
           const col = key - row * CACHE_KEY_COL_STRIDE;
@@ -478,9 +480,6 @@ export class DocumentCellProvider implements CellProvider {
           cache.delete(key);
         }
       } else {
-        // If the range is large, clear the active sheet cache to avoid spending too much
-        // time iterating keys. Keep other sheet caches intact; large formatting edits are
-        // typically scoped to one sheet (and `subscribe` filters by sheetId).
         this.sheetCaches.delete(sheetId);
         if (this.lastSheetId === sheetId) {
           this.lastSheetId = null;
@@ -488,9 +487,6 @@ export class DocumentCellProvider implements CellProvider {
         }
       }
     } else if (!shouldEvictDirectly) {
-      // If the range is large, clear the active sheet cache to avoid spending too much
-      // time iterating keys. Keep other sheet caches intact; large formatting edits are
-      // typically scoped to one sheet (and `subscribe` filters by sheetId).
       this.sheetCaches.delete(sheetId);
       if (this.lastSheetId === sheetId) {
         this.lastSheetId = null;
