@@ -206,7 +206,8 @@ export class KeybindingService {
       /**
        * Keybinding chords that extensions should never be allowed to claim.
        *
-       * Defaults to reserving common clipboard chords + Ctrl/Cmd+Shift+P.
+       * Defaults to reserving a set of core UX shortcuts (cancel/activation keys,
+       * clipboard chords, command palette/quick open, core file shortcuts, etc).
        */
       reservedShortcuts?: string[];
       platform?: "mac" | "other";

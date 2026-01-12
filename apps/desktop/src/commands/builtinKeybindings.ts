@@ -35,6 +35,12 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     mac: "cmd+n",
     when: "focus.inTextInput == false",
   },
+  // Some environments emit both Ctrl+Meta for a single chord (remote desktop / VM keyboard setups).
+  {
+    command: "workbench.newWorkbook",
+    key: "ctrl+cmd+n",
+    when: "focus.inTextInput == false",
+  },
   {
     // Some environments emit both Ctrl+Meta for a single chord (remote desktop / VM keyboard setups).
     command: "workbench.newWorkbook",
