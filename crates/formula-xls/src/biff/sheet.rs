@@ -449,4 +449,25 @@ mod tests {
         let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
         assert_eq!(xfs.get(&CellRef::new(0, 0)).copied(), Some(7));
     }
+
+    #[test]
+    fn sheet_cell_xf_scan_stops_on_truncated_record() {
+        let sheet_bof = record(0x0809, &[0u8; 16]);
+
+        // NUMBER cell at (0,0) with xf=7.
+        let mut number_payload = vec![0u8; 14];
+        number_payload[0..2].copy_from_slice(&0u16.to_le_bytes());
+        number_payload[2..4].copy_from_slice(&0u16.to_le_bytes());
+        number_payload[4..6].copy_from_slice(&7u16.to_le_bytes());
+        let number_record = record(0x0203, &number_payload);
+
+        let mut truncated = Vec::new();
+        truncated.extend_from_slice(&0x0001u16.to_le_bytes());
+        truncated.extend_from_slice(&4u16.to_le_bytes());
+        truncated.extend_from_slice(&[1, 2]); // missing 2 bytes
+
+        let stream = [sheet_bof, number_record, truncated].concat();
+        let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
+        assert_eq!(xfs.get(&CellRef::new(0, 0)).copied(), Some(7));
+    }
 }
