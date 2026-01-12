@@ -372,8 +372,10 @@ const sheetNameResolver: SheetNameResolver = {
 // Exposed to Playwright tests via `window.__formulaExtensionHostManager`.
 let extensionHostManagerForE2e: DesktopExtensionHostManager | null = null;
 let sharedContextMenu: ContextMenu | null = null;
-// Secondary grid view (split view) is wired only when the split-pane DOM scaffold exists.
-// Keep a module-scoped reference so file/close commands can commit edits from the secondary pane.
+// Split-view secondary pane wiring is initialized lazily once the layout scaffolding is present.
+// Keep a module-scoped reference so file commands (open/save/close) can commit edits from the
+// secondary pane without crashing in runtimes where split view is not initialized
+// (e.g. Playwright, minimal DOM).
 let secondaryGridView: SecondaryGridView | null = null;
 
 type SheetActivatedEvent = { sheet: { id: string; name: string } };
@@ -8074,13 +8076,10 @@ mountRibbon(ribbonReactRoot, {
         toggleDockPanel(PanelIds.PYTHON);
         return;
       case "open-marketplace-panel": {
-        // Marketplace uses the extension host runtime for install/load actions; ensure it is started.
-        const ensure = ensureExtensionsLoadedRef?.();
-        if (ensure) {
-          void ensure.catch(() => {
-            // Best-effort; opening the panel should still work even if extension load fails.
-          });
-        }
+        // Opening the Marketplace panel should not eagerly start the extension host; users can
+        // browse/search/install extensions without spinning up the extension runtime. Extensions
+        // are loaded lazily when the user opens the Extensions panel or executes an extension
+        // command (see `ensureExtensionsLoaded()`).
         toggleDockPanel(PanelIds.MARKETPLACE);
         return;
       }
@@ -8096,7 +8095,10 @@ mountRibbon(ribbonReactRoot, {
           .catch(() => {
             // ignore; panel open/close should still work
           });
-        toggleDockPanel(PanelIds.EXTENSIONS);
+        // "Open Extensions" should be idempotent: if the panel is already open (for example,
+        // restored from layout persistence after a reload), focus it instead of toggling
+        // it closed. Closing remains available via the panel's close control.
+        ribbonLayoutController?.openPanel(PanelIds.EXTENSIONS);
         return;
       }
       case "open-vba-migrate-panel":
@@ -8785,17 +8787,10 @@ async function openWorkbookFromPath(
     await loadWorkbookIntoDocument(activeWorkbook);
     if (options.notifyExtensions !== false) {
       try {
-        // Prefer broadcasting the workbook snapshot as computed by the extension host, which will
-        // incorporate any `spreadsheetApi.getActiveWorkbook()` metadata (name/path) instead of
-        // relying on the host stub's filename inference.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const host = (extensionHostManagerForE2e as any)?.host;
-        if (host && typeof host._getActiveWorkbook === "function" && typeof host._broadcastEvent === "function") {
-          const workbook = await host._getActiveWorkbook();
-          host._broadcastEvent("workbookOpened", { workbook });
-        } else {
-          extensionHostManagerForE2e?.host.openWorkbook(activeWorkbook.path ?? activeWorkbook.origin_path ?? path);
-        }
+        // User-initiated workbook opens (file dropped, open-file IPC, etc) bypass the extension API
+        // layer, so manually notify the BrowserExtensionHost so `formula.events.onWorkbookOpened`
+        // fires for any active extensions.
+        extensionHostManagerForE2e?.host.openWorkbook(activeWorkbook.path ?? activeWorkbook.origin_path ?? path);
       } catch {
         // Ignore extension host errors; workbook open should still succeed.
       }
@@ -9020,14 +9015,9 @@ async function handleNewWorkbook(
     await loadWorkbookIntoDocument(activeWorkbook);
     if (options.notifyExtensions !== false) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const host = (extensionHostManagerForE2e as any)?.host;
-        if (host && typeof host._getActiveWorkbook === "function" && typeof host._broadcastEvent === "function") {
-          const workbook = await host._getActiveWorkbook();
-          host._broadcastEvent("workbookOpened", { workbook });
-        } else {
-          extensionHostManagerForE2e?.host.openWorkbook(activeWorkbook.path ?? activeWorkbook.origin_path);
-        }
+        // See `openWorkbookFromPath`: new workbook is user-driven (not via extension API), so
+        // notify the extension host directly.
+        extensionHostManagerForE2e?.host.openWorkbook(activeWorkbook.path ?? activeWorkbook.origin_path ?? null);
       } catch {
         // Ignore extension host errors; new workbook should still succeed.
       }

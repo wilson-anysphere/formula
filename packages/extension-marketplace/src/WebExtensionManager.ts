@@ -686,9 +686,10 @@ export class WebExtensionManager {
     const db = await openDb();
     try {
       const tx = db.transaction([STORE_INSTALLED], "readonly");
+      const done = txDone(tx);
       const store = tx.objectStore(STORE_INSTALLED);
       const records = (await requestToPromise(store.getAll())) as InstalledExtensionRecord[];
-      await txDone(tx);
+      await done;
       return records;
     } finally {
       db.close();
@@ -699,9 +700,10 @@ export class WebExtensionManager {
     const db = await openDb();
     try {
       const tx = db.transaction([STORE_INSTALLED], "readonly");
+      const done = txDone(tx);
       const store = tx.objectStore(STORE_INSTALLED);
       const record = (await requestToPromise(store.get(String(id)))) as InstalledExtensionRecord | undefined;
-      await txDone(tx);
+      await done;
       return record ?? null;
     } finally {
       db.close();
@@ -937,6 +939,7 @@ export class WebExtensionManager {
     const db = await openDb();
     try {
       const tx = db.transaction([STORE_INSTALLED, STORE_PACKAGES], "readwrite");
+      const done = txDone(tx);
       const installedStore = tx.objectStore(STORE_INSTALLED);
       const packagesStore = tx.objectStore(STORE_PACKAGES);
 
@@ -959,7 +962,7 @@ export class WebExtensionManager {
         packagesStore.delete(`${id}@${prev.version}`);
       }
 
-      await txDone(tx);
+      await done;
     } finally {
       db.close();
     }
@@ -1438,10 +1441,11 @@ export class WebExtensionManager {
     const db = await openDb();
     try {
       const tx = db.transaction([STORE_PACKAGES], "readonly");
+      const done = txDone(tx);
       const store = tx.objectStore(STORE_PACKAGES);
       const key = `${id}@${version}`;
       const record = (await requestToPromise(store.get(key))) as StoredPackageRecord | undefined;
-      await txDone(tx);
+      await done;
       return record ?? null;
     } finally {
       db.close();
@@ -1519,8 +1523,9 @@ export class WebExtensionManager {
     const db = await openDb();
     try {
       const tx = db.transaction([STORE_PACKAGES], "readwrite");
+      const done = txDone(tx);
       tx.objectStore(STORE_PACKAGES).put({ ...pkg, packageSha256: packageSha256.trim().toLowerCase() });
-      await txDone(tx);
+      await done;
     } finally {
       db.close();
     }
@@ -1530,6 +1535,7 @@ export class WebExtensionManager {
     const db = await openDb();
     try {
       const tx = db.transaction([STORE_INSTALLED], "readwrite");
+      const done = txDone(tx);
       const store = tx.objectStore(STORE_INSTALLED);
       store.put({
         ...installed,
@@ -1537,7 +1543,7 @@ export class WebExtensionManager {
         corruptedAt: new Date().toISOString(),
         corruptedReason: String(reason || "unknown error")
       });
-      await txDone(tx);
+      await done;
     } finally {
       db.close();
     }

@@ -272,6 +272,14 @@ export class DesktopExtensionHostManager {
     this._loadedBuiltIns.set(extensionId, { mainUrl, revoke });
   }
 
+  /**
+   * Notify subscribers that extension contributions may have changed (e.g. after
+   * installing/uninstalling an extension).
+   */
+  notifyDidChange(): void {
+    this.emit();
+  }
+
   getContributedCommands(): any[] {
     return this.host.getContributedCommands();
   }

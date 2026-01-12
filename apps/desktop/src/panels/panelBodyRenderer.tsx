@@ -440,19 +440,45 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     if (!marketplaceExtensionHostManager) {
       marketplaceExtensionHostManager = {
         syncInstalledExtensions: async () => {
+          // Preserve the desktop "lazy-load extensions" behavior: allow users to install
+          // extensions without immediately starting the extension host.
+          if (options.extensionHostManager && !options.extensionHostManager.ready) return;
           const manager = marketplaceExtensionManager!;
           await manager.loadAllInstalled().catch(() => {});
+          try {
+            options.extensionHostManager?.notifyDidChange();
+          } catch {
+            // ignore
+          }
         },
         reloadExtension: async (id: string) => {
+          if (options.extensionHostManager && !options.extensionHostManager.ready) return;
           const manager = marketplaceExtensionManager!;
-          if (manager.isLoaded(id)) {
-            await manager.unload(id);
+          try {
+            if (manager.isLoaded(id)) {
+              await manager.unload(id);
+            }
+            await manager.loadInstalled(id);
+          } finally {
+            try {
+              options.extensionHostManager?.notifyDidChange();
+            } catch {
+              // ignore
+            }
           }
-          await manager.loadInstalled(id);
         },
         unloadExtension: async (id: string) => {
+          if (options.extensionHostManager && !options.extensionHostManager.ready) return;
           const manager = marketplaceExtensionManager!;
-          await manager.unload(id);
+          try {
+            await manager.unload(id);
+          } finally {
+            try {
+              options.extensionHostManager?.notifyDidChange();
+            } catch {
+              // ignore
+            }
+          }
         },
       };
     }

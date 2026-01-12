@@ -1008,7 +1008,21 @@ class BrowserExtensionHost {
   }
 
   async resetPermissions(extensionId) {
-    return this._permissionManager.resetPermissions(String(extensionId));
+    const id = String(extensionId);
+    await this._permissionManager.resetPermissions(id);
+
+    // Resetting an extension's permissions should take effect immediately.
+    //
+    // Many permissions (e.g. `ui.commands`) are requested during activation when the extension
+    // registers commands/panels. If the worker stays alive after a reset, the extension won't
+    // re-run its activation path and therefore won't re-request permissions. Restart the worker
+    // so future command/view activations behave like a fresh load.
+    const extension = this._extensions.get(id);
+    if (extension?.worker) {
+      this._terminateWorker(extension, { reason: "permissions_reset", cause: null });
+    } else if (extension) {
+      extension.active = false;
+    }
   }
 
   async resetAllPermissions() {

@@ -34,6 +34,9 @@ function el(tag, attrs = {}, children = []) {
   for (const [key, value] of Object.entries(attrs)) {
     if (value === undefined || value === null) continue;
     if (key === "className") node.className = value;
+    else if (key === "dataset" && value && typeof value === "object") {
+      for (const [k, v] of Object.entries(value)) node.dataset[k] = String(v);
+    }
     else if (key.startsWith("on") && typeof value === "function") node.addEventListener(key.slice(2).toLowerCase(), value);
     else node.setAttribute(key, String(value));
   }
@@ -157,7 +160,7 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
   container.textContent = "Searching…";
   const results = await marketplaceClient.search({ q: query, limit: 25, offset: 0 });
 
-  const list = el("div", { className: "marketplace-results" });
+  const list = el("div", { className: "marketplace-results", dataset: { testid: "marketplace-results" } });
 
   const detailsById = new Map();
   await Promise.all(
@@ -231,7 +234,7 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
 
     const policy = describePolicy(details, extensionManager?.scanPolicy);
 
-    const row = el("div", { className: "marketplace-result" }, [
+    const row = el("div", { className: "marketplace-result", dataset: { testid: `marketplace-result-${item.id}` } }, [
       el("div", { className: "title" }, [document.createTextNode(`${item.displayName} (${item.id})`)]),
       el("div", { className: "desc" }, [document.createTextNode(item.description || "")]),
       badges,
@@ -251,6 +254,7 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
           "button",
           {
             disabled: policy.blocked ? "true" : undefined,
+            dataset: { testid: `marketplace-install-${item.id}` },
             onClick: async () => {
               actions.textContent = "Installing…";
               try {
@@ -291,13 +295,14 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
                 } else if (extensionHostManager) {
                   await extensionHostManager.reloadExtension(item.id);
                 }
-                updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
-                actions.textContent = "Installed";
-                tryNotifyExtensionsChanged();
-              } catch (error) {
-                // eslint-disable-next-line no-console
-                console.error(error);
-                tryShowToast(String(error?.message ?? error), "error");
+                 updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
+                 actions.textContent = "Installed";
+                 tryNotifyExtensionsChanged();
+                 await renderSearchResults({ container, marketplaceClient, extensionManager, extensionHostManager, query });
+               } catch (error) {
+                 // eslint-disable-next-line no-console
+                 console.error(error);
+                 tryShowToast(String(error?.message ?? error), "error");
                 actions.textContent = `Error: ${String(error?.message ?? error)}`;
               }
             },
@@ -306,7 +311,7 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
         ),
       );
     } else {
-      const metaParts = [];
+      const metaParts = ["Installed"];
       if (installed.version) metaParts.push(`v${installed.version}`);
       if (installed.scanStatus) metaParts.push(`scan=${installed.scanStatus}`);
       if (installed.signingKeyId) metaParts.push(`key=${installed.signingKeyId}`);
@@ -368,6 +373,7 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
         el(
           "button",
           {
+            dataset: { testid: `marketplace-uninstall-${item.id}` },
             onClick: async () => {
               actions.textContent = "Uninstalling…";
               try {
@@ -382,13 +388,14 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
 
                 const storage = getDefaultSeedStoreStorage();
                 if (storage) removeSeedPanelsForExtension(storage, item.id);
-
-                actions.textContent = "Uninstalled";
-                tryNotifyExtensionsChanged();
-              } catch (error) {
-                // eslint-disable-next-line no-console
-                console.error(error);
-                tryShowToast(String(error?.message ?? error), "error");
+ 
+                 actions.textContent = "Uninstalled";
+                 tryNotifyExtensionsChanged();
+                 await renderSearchResults({ container, marketplaceClient, extensionManager, extensionHostManager, query });
+               } catch (error) {
+                 // eslint-disable-next-line no-console
+                 console.error(error);
+                 tryShowToast(String(error?.message ?? error), "error");
                 actions.textContent = `Error: ${String(error?.message ?? error)}`;
               }
             },
@@ -401,6 +408,7 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
         el(
           "button",
           {
+            dataset: { testid: `marketplace-update-${item.id}` },
             onClick: async () => {
               actions.textContent = "Checking…";
               try {
@@ -430,14 +438,15 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
                 } else if (extensionHostManager) {
                   await extensionHostManager.reloadExtension(item.id);
                 }
-
-                updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
-                actions.textContent = "Updated";
-                tryNotifyExtensionsChanged();
-              } catch (error) {
-                // eslint-disable-next-line no-console
-                console.error(error);
-                tryShowToast(String(error?.message ?? error), "error");
+ 
+                 updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
+                 actions.textContent = "Updated";
+                 tryNotifyExtensionsChanged();
+                 await renderSearchResults({ container, marketplaceClient, extensionManager, extensionHostManager, query });
+               } catch (error) {
+                 // eslint-disable-next-line no-console
+                 console.error(error);
+                 tryShowToast(String(error?.message ?? error), "error");
                 actions.textContent = `Error: ${String(error?.message ?? error)}`;
               }
             },
@@ -461,12 +470,17 @@ export function createMarketplacePanel({
   extensionManager,
   extensionHostManager,
 }) {
-  const queryInput = el("input", { type: "search", placeholder: "Search extensions…" });
+  const queryInput = el("input", {
+    type: "search",
+    placeholder: "Search extensions…",
+    dataset: { testid: "marketplace-search-input" },
+  });
   const resultsContainer = el("div", { className: "results" });
 
   const searchButton = el(
     "button",
     {
+      dataset: { testid: "marketplace-search-button" },
       onClick: async () => {
         await renderSearchResults({
           container: resultsContainer,

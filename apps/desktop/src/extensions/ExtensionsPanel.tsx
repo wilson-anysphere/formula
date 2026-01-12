@@ -376,7 +376,9 @@ export function ExtensionsPanel({
                             <span>{perm}</span>
                             <span className="extensions-panel__permission-declared">{declared ? "declared" : "not declared"}</span>
                           </div>
-                          <div className="extensions-panel__permission-subtitle">{subtitle}</div>
+                          <div className="extensions-panel__permission-subtitle" data-testid={`permission-${ext.id}-${perm}`}>
+                            {subtitle}
+                          </div>
                         </div>
 
                         <button
