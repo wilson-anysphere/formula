@@ -6,6 +6,18 @@ use crate::{
     ReferenceStyle, RowRef, SheetRef, Span, StructuredRef, UnaryExpr, UnaryOp,
 };
 
+/// Excel formula limits enforced by this parser.
+///
+/// These are primarily intended to:
+/// - match Excel compatibility constraints
+/// - prevent pathological formulas from consuming excessive CPU/memory or overflowing the Rust
+///   stack during parsing/evaluation
+///
+/// Reference: `instructions/core-engine.md`.
+const EXCEL_MAX_FORMULA_CHARS: usize = 8_192;
+const EXCEL_MAX_TOKENIZED_BYTES: usize = 16_384;
+const EXCEL_MAX_NESTED_CALLS: usize = 64;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenKind {
     Number(String),
@@ -81,6 +93,18 @@ pub struct R1C1ColToken {
 }
 
 pub fn parse_formula(formula: &str, opts: ParseOptions) -> Result<Ast, ParseError> {
+    // Excel's formula display limit is 8,192 characters. We count Unicode scalar values (`char`)
+    // rather than bytes to behave reasonably for non-ASCII formulas.
+    let char_len = formula.chars().count();
+    if char_len > EXCEL_MAX_FORMULA_CHARS {
+        return Err(ParseError::new(
+            format!(
+                "Formula exceeds Excel's {EXCEL_MAX_FORMULA_CHARS}-character limit (got {char_len})"
+            ),
+            Span::new(0, formula.len()),
+        ));
+    }
+
     let (has_equals, expr_src, span_offset) = if let Some(rest) = formula.strip_prefix('=') {
         (true, rest, 1)
     } else {
@@ -95,6 +119,27 @@ pub fn parse_formula(formula: &str, opts: ParseOptions) -> Result<Ast, ParseErro
     parser
         .expect(TokenKind::Eof)
         .map_err(|e| e.add_offset(span_offset))?;
+
+    // Excel also enforces a 16,384-byte limit on the internal tokenized form of a formula.
+    //
+    // We do not implement Excel's BIFF ptg serializer here, but we *approximate* the tokenized
+    // size using a deterministic, conservative per-AST-node byte estimate derived from common ptg
+    // sizes (e.g. numbers are 3 or 9 bytes, cell refs ~5 bytes, operators ~1 byte).
+    //
+    // This provides a practical guard against formulas that are short in text form but expand to
+    // a very large internal representation (e.g. thousands of numeric literals).
+    let estimated_bytes = estimate_tokenized_bytes(&expr);
+    if estimated_bytes > EXCEL_MAX_TOKENIZED_BYTES {
+        return Err(
+            ParseError::new(
+                format!(
+                    "Formula exceeds Excel's {EXCEL_MAX_TOKENIZED_BYTES}-byte tokenized limit (estimated {estimated_bytes} bytes)"
+                ),
+                Span::new(0, expr_src.len()),
+            )
+            .add_offset(span_offset),
+        );
+    }
 
     let mut ast = Ast::new(has_equals, expr);
     if let Some(origin) = opts.normalize_relative_to {
@@ -134,6 +179,20 @@ pub fn parse_formula_partial(formula: &str, opts: ParseOptions) -> PartialParse 
     } else {
         (false, formula, 0)
     };
+
+    let char_len = formula.chars().count();
+    if char_len > EXCEL_MAX_FORMULA_CHARS {
+        return PartialParse {
+            ast: Ast::new(has_equals, Expr::Missing),
+            error: Some(ParseError::new(
+                format!(
+                    "Formula exceeds Excel's {EXCEL_MAX_FORMULA_CHARS}-character limit (got {char_len})"
+                ),
+                Span::new(0, formula.len()),
+            )),
+            context: ParseContext::default(),
+        };
+    }
 
     let tokens = match lex(expr_src, &opts) {
         Ok(t) => t,
@@ -1328,6 +1387,8 @@ struct Parser<'a> {
     tokens: Vec<Token>,
     pos: usize,
     func_stack: Vec<(String, usize)>,
+    call_depth: usize,
+    group_depth: usize,
     first_error: Option<ParseError>,
 }
 
@@ -1338,6 +1399,8 @@ impl<'a> Parser<'a> {
             tokens,
             pos: 0,
             func_stack: Vec::new(),
+            call_depth: 0,
+            group_depth: 0,
             first_error: None,
         }
     }
@@ -1560,11 +1623,24 @@ impl<'a> Parser<'a> {
                 Expr::Error(e)
             }
             TokenKind::LParen => {
+                if self.group_depth >= EXCEL_MAX_NESTED_CALLS {
+                    self.record_error(ParseError::new(
+                        format!(
+                            "Expression nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"
+                        ),
+                        self.current_span(),
+                    ));
+                    // Consume the '(' to avoid infinite loops.
+                    self.next();
+                    return Expr::Missing;
+                }
                 self.next();
+                self.group_depth += 1;
                 let expr = self.parse_expression_best_effort(0);
                 if let Err(e) = self.expect(TokenKind::RParen) {
                     self.record_error(e);
                 }
+                self.group_depth = self.group_depth.saturating_sub(1);
                 expr
             }
             TokenKind::LBrace => self.parse_array_literal_best_effort(),
@@ -1637,10 +1713,7 @@ impl<'a> Parser<'a> {
                         } else {
                             SheetRef::SheetRange { start, end }
                         };
-                        Some((
-                            workbook,
-                            sheet_ref,
-                        ))
+                        Some((workbook, sheet_ref))
                     } else {
                         self.pos = save_pos;
                         None
@@ -1754,11 +1827,24 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_function_call_best_effort(&mut self, name: String) -> Expr {
+        if self.call_depth >= EXCEL_MAX_NESTED_CALLS {
+            self.record_error(ParseError::new(
+                format!("Function nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"),
+                self.current_span(),
+            ));
+            // Consume the `(` (if present) to make progress and avoid deep recursion.
+            if matches!(self.peek_kind(), TokenKind::LParen) {
+                self.next();
+            }
+            return Expr::Missing;
+        }
+
         if let Err(e) = self.expect(TokenKind::LParen) {
             self.record_error(e);
             return Expr::Missing;
         }
 
+        self.call_depth += 1;
         self.func_stack.push((name.clone(), 0));
         let mut args = Vec::new();
 
@@ -1823,18 +1909,33 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Expr::FunctionCall(FunctionCall {
+        let out = Expr::FunctionCall(FunctionCall {
             name: FunctionName::new(name),
             args,
-        })
+        });
+        self.call_depth = self.call_depth.saturating_sub(1);
+        out
     }
 
     fn parse_call_best_effort(&mut self, callee: Expr) -> Expr {
+        if self.call_depth >= EXCEL_MAX_NESTED_CALLS {
+            self.record_error(ParseError::new(
+                format!("Function nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"),
+                self.current_span(),
+            ));
+            // Consume the `(` (if present) to make progress and avoid deep recursion.
+            if matches!(self.peek_kind(), TokenKind::LParen) {
+                self.next();
+            }
+            return Expr::Missing;
+        }
+
         if let Err(e) = self.expect(TokenKind::LParen) {
             self.record_error(e);
             return Expr::Missing;
         }
 
+        self.call_depth += 1;
         let mut args = Vec::new();
 
         loop {
@@ -1885,10 +1986,12 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Expr::Call(CallExpr {
+        let out = Expr::Call(CallExpr {
             callee: Box::new(callee),
             args,
-        })
+        });
+        self.call_depth = self.call_depth.saturating_sub(1);
+        out
     }
 
     fn parse_array_literal_best_effort(&mut self) -> Expr {
@@ -2029,10 +2132,23 @@ impl<'a> Parser<'a> {
                 Ok(Expr::Error(e))
             }
             TokenKind::LParen => {
+                if self.group_depth >= EXCEL_MAX_NESTED_CALLS {
+                    return Err(ParseError::new(
+                        format!(
+                            "Expression nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"
+                        ),
+                        self.current_span(),
+                    ));
+                }
                 self.next();
-                let expr = self.parse_expression(0)?;
-                self.expect(TokenKind::RParen)?;
-                Ok(expr)
+                self.group_depth += 1;
+                let result = (|| {
+                    let expr = self.parse_expression(0)?;
+                    self.expect(TokenKind::RParen)?;
+                    Ok(expr)
+                })();
+                self.group_depth = self.group_depth.saturating_sub(1);
+                result
             }
             TokenKind::LBrace => self.parse_array_literal(),
             TokenKind::LBracket => self.parse_bracket_start(),
@@ -2070,7 +2186,10 @@ impl<'a> Parser<'a> {
                 if matches!(self.peek_kind(), TokenKind::Colon) {
                     self.next();
                     self.skip_trivia();
-                    if !matches!(self.peek_kind(), TokenKind::Ident(_) | TokenKind::QuotedIdent(_)) {
+                    if !matches!(
+                        self.peek_kind(),
+                        TokenKind::Ident(_) | TokenKind::QuotedIdent(_)
+                    ) {
                         self.pos = save_pos;
                         (None, None)
                     } else {
@@ -2088,10 +2207,7 @@ impl<'a> Parser<'a> {
                             } else {
                                 SheetRef::SheetRange { start, end }
                             };
-                            (
-                                workbook,
-                                Some(sheet_ref),
-                            )
+                            (workbook, Some(sheet_ref))
                         }
                     }
                 } else if matches!(self.peek_kind(), TokenKind::Bang) {
@@ -2279,90 +2395,116 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_function_call(&mut self, name: String) -> Result<Expr, ParseError> {
+        if self.call_depth >= EXCEL_MAX_NESTED_CALLS {
+            return Err(ParseError::new(
+                format!("Function nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"),
+                self.current_span(),
+            ));
+        }
+
         self.expect(TokenKind::LParen)?;
+        self.call_depth += 1;
         self.func_stack.push((name.clone(), 0));
-        let mut args = Vec::new();
-        self.skip_trivia();
-        if matches!(self.peek_kind(), TokenKind::RParen) {
-            self.next();
-        } else {
-            loop {
-                self.skip_trivia();
-                if matches!(self.peek_kind(), TokenKind::ArgSep) {
-                    // Missing argument.
-                    args.push(Expr::Missing);
-                } else {
-                    let arg = self.parse_expression(0)?;
-                    args.push(arg);
-                }
-                self.skip_trivia();
-                match self.peek_kind() {
-                    TokenKind::ArgSep => {
-                        self.next();
-                        if let Some((_n, idx)) = self.func_stack.last_mut() {
-                            *idx += 1;
+        let result = (|| {
+            let mut args = Vec::new();
+            self.skip_trivia();
+            if matches!(self.peek_kind(), TokenKind::RParen) {
+                self.next();
+            } else {
+                loop {
+                    self.skip_trivia();
+                    if matches!(self.peek_kind(), TokenKind::ArgSep) {
+                        // Missing argument.
+                        args.push(Expr::Missing);
+                    } else {
+                        let arg = self.parse_expression(0)?;
+                        args.push(arg);
+                    }
+                    self.skip_trivia();
+                    match self.peek_kind() {
+                        TokenKind::ArgSep => {
+                            self.next();
+                            if let Some((_n, idx)) = self.func_stack.last_mut() {
+                                *idx += 1;
+                            }
+                            continue;
                         }
-                        continue;
-                    }
-                    TokenKind::RParen => {
-                        self.next();
-                        break;
-                    }
-                    _ => {
-                        return Err(ParseError::new(
-                            "Expected argument separator or `)`",
-                            self.current_span(),
-                        ));
+                        TokenKind::RParen => {
+                            self.next();
+                            break;
+                        }
+                        _ => {
+                            return Err(ParseError::new(
+                                "Expected argument separator or `)`",
+                                self.current_span(),
+                            ));
+                        }
                     }
                 }
             }
-        }
+            Ok(Expr::FunctionCall(FunctionCall {
+                name: FunctionName::new(name),
+                args,
+            }))
+        })();
+
         self.func_stack.pop();
-        Ok(Expr::FunctionCall(FunctionCall {
-            name: FunctionName::new(name),
-            args,
-        }))
+        self.call_depth = self.call_depth.saturating_sub(1);
+        result
     }
 
     fn parse_call(&mut self, callee: Expr) -> Result<Expr, ParseError> {
+        if self.call_depth >= EXCEL_MAX_NESTED_CALLS {
+            return Err(ParseError::new(
+                format!("Function nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"),
+                self.current_span(),
+            ));
+        }
+
         self.expect(TokenKind::LParen)?;
-        let mut args = Vec::new();
-        self.skip_trivia();
-        if matches!(self.peek_kind(), TokenKind::RParen) {
-            self.next();
-        } else {
-            loop {
-                self.skip_trivia();
-                if matches!(self.peek_kind(), TokenKind::ArgSep) {
-                    // Missing argument.
-                    args.push(Expr::Missing);
-                } else {
-                    let arg = self.parse_expression(0)?;
-                    args.push(arg);
-                }
-                self.skip_trivia();
-                match self.peek_kind() {
-                    TokenKind::ArgSep => {
-                        self.next();
-                        continue;
+        self.call_depth += 1;
+        let result = (|| {
+            let mut args = Vec::new();
+            self.skip_trivia();
+            if matches!(self.peek_kind(), TokenKind::RParen) {
+                self.next();
+            } else {
+                loop {
+                    self.skip_trivia();
+                    if matches!(self.peek_kind(), TokenKind::ArgSep) {
+                        // Missing argument.
+                        args.push(Expr::Missing);
+                    } else {
+                        let arg = self.parse_expression(0)?;
+                        args.push(arg);
                     }
-                    TokenKind::RParen => {
-                        self.next();
-                        break;
-                    }
-                    _ => {
-                        return Err(ParseError::new(
-                            "Expected argument separator or `)`",
-                            self.current_span(),
-                        ));
+                    self.skip_trivia();
+                    match self.peek_kind() {
+                        TokenKind::ArgSep => {
+                            self.next();
+                            continue;
+                        }
+                        TokenKind::RParen => {
+                            self.next();
+                            break;
+                        }
+                        _ => {
+                            return Err(ParseError::new(
+                                "Expected argument separator or `)`",
+                                self.current_span(),
+                            ));
+                        }
                     }
                 }
             }
-        }
-        Ok(Expr::Call(CallExpr {
-            callee: Box::new(callee),
-            args,
-        }))
+            Ok(Expr::Call(CallExpr {
+                callee: Box::new(callee),
+                args,
+            }))
+        })();
+
+        self.call_depth = self.call_depth.saturating_sub(1);
+        result
     }
 
     fn parse_array_literal(&mut self) -> Result<Expr, ParseError> {
@@ -2749,4 +2891,151 @@ fn split_sheet_span_name(name: &str) -> Option<(String, String)> {
         return None;
     }
     Some((start.to_string(), end.to_string()))
+}
+
+fn estimate_tokenized_bytes(expr: &Expr) -> usize {
+    // Approximate the size of Excel's internal token stream (ptg) for a parsed AST.
+    //
+    // This is intentionally not a perfect model of Excel's serialized formula format. It is a
+    // stable, deterministic estimate used only for enforcing the 16,384-byte limit and protecting
+    // against pathological formulas.
+    //
+    // Note: this function is written iteratively (rather than recursively) to avoid overflowing
+    // the Rust stack on formulas that produce deep left-associated ASTs near Excel's size limits.
+    let mut total = 0usize;
+    let mut stack: Vec<&Expr> = vec![expr];
+
+    while let Some(node) = stack.pop() {
+        match node {
+            Expr::Number(raw) => total = total.saturating_add(estimate_number_token_bytes(raw)),
+            Expr::String(s) => {
+                // BIFF8 `ptgStr` is: token byte + cch (1) + flags (1) + character data.
+                // Excel stores strings in a compressed/uncompressed unicode form; we conservatively
+                // assume 2 bytes per character.
+                total = total
+                    .saturating_add(3usize.saturating_add(s.chars().count().saturating_mul(2)));
+            }
+            Expr::Boolean(_) => total = total.saturating_add(2),
+            Expr::Error(_) => total = total.saturating_add(2),
+            Expr::NameRef(_) => total = total.saturating_add(5),
+            Expr::CellRef(r) => {
+                // 3D/external refs are larger than local refs; approximate with a small bump.
+                total = total.saturating_add(if r.workbook.is_some() || r.sheet.is_some() {
+                    7
+                } else {
+                    5
+                });
+            }
+            Expr::ColRef(r) => {
+                // Full-column references are represented as areas.
+                total = total.saturating_add(if r.workbook.is_some() || r.sheet.is_some() {
+                    11
+                } else {
+                    9
+                });
+            }
+            Expr::RowRef(r) => {
+                // Full-row references are represented as areas.
+                total = total.saturating_add(if r.workbook.is_some() || r.sheet.is_some() {
+                    11
+                } else {
+                    9
+                });
+            }
+            Expr::StructuredRef(_) => total = total.saturating_add(5),
+            Expr::Array(arr) => {
+                // Arrays carry inline data; approximate by summing element sizes plus a small header.
+                total = total.saturating_add(4);
+                for el in arr.rows.iter().flatten() {
+                    stack.push(el);
+                }
+            }
+            Expr::FunctionCall(call) => {
+                // `ptgFuncVar`: token + argc + func id
+                total = total.saturating_add(4);
+                for arg in &call.args {
+                    stack.push(arg);
+                }
+            }
+            Expr::Call(call) => {
+                // Treat anonymous/lambda calls similarly to function calls.
+                total = total.saturating_add(4);
+                stack.push(call.callee.as_ref());
+                for arg in &call.args {
+                    stack.push(arg);
+                }
+            }
+            Expr::Unary(u) => {
+                total = total.saturating_add(1);
+                stack.push(u.expr.as_ref());
+            }
+            Expr::Postfix(p) => {
+                total = total.saturating_add(1);
+                stack.push(p.expr.as_ref());
+            }
+            Expr::Binary(b) => {
+                // `:` ranges with static operands can be represented as a single area token.
+                if b.op == BinaryOp::Range && can_collapse_range_operands(&b.left, &b.right) {
+                    // Area size depends on whether the reference is 3D/external.
+                    let has_sheet = match (b.left.as_ref(), b.right.as_ref()) {
+                        (Expr::CellRef(l), Expr::CellRef(r)) => {
+                            l.workbook.is_some()
+                                || l.sheet.is_some()
+                                || r.workbook.is_some()
+                                || r.sheet.is_some()
+                        }
+                        (Expr::ColRef(l), Expr::ColRef(r)) => {
+                            l.workbook.is_some()
+                                || l.sheet.is_some()
+                                || r.workbook.is_some()
+                                || r.sheet.is_some()
+                        }
+                        (Expr::RowRef(l), Expr::RowRef(r)) => {
+                            l.workbook.is_some()
+                                || l.sheet.is_some()
+                                || r.workbook.is_some()
+                                || r.sheet.is_some()
+                        }
+                        _ => false,
+                    };
+                    total = total.saturating_add(if has_sheet { 11 } else { 9 });
+                } else {
+                    total = total.saturating_add(1);
+                    stack.push(b.left.as_ref());
+                    stack.push(b.right.as_ref());
+                }
+            }
+            Expr::Missing => total = total.saturating_add(1),
+        }
+    }
+
+    total
+}
+
+fn can_collapse_range_operands(left: &Expr, right: &Expr) -> bool {
+    // Only collapse simple reference spans (e.g. `A1:B2`, `A:A`, `1:1`). More complex ranges
+    // like `OFFSET(...):A1` must remain as operand + operand + range operator.
+    matches!(
+        (left, right),
+        (Expr::CellRef(_), Expr::CellRef(_))
+            | (Expr::ColRef(_), Expr::ColRef(_))
+            | (Expr::RowRef(_), Expr::RowRef(_))
+    )
+}
+
+fn estimate_number_token_bytes(raw: &str) -> usize {
+    // Excel may store small integer literals (0..=65535) as `ptgInt` (3 bytes) instead of
+    // `ptgNum` (9 bytes). This improves the fidelity of our token-size estimate for formulas that
+    // are dense with numeric literals.
+    //
+    // We only treat the literal as an integer if it consists solely of ASCII digits (no decimal
+    // point/exponent), since unary `-` is tokenized separately.
+    if raw.as_bytes().iter().all(|b| matches!(b, b'0'..=b'9')) {
+        if let Ok(v) = raw.parse::<u32>() {
+            if v <= u16::MAX as u32 {
+                return 3;
+            }
+        }
+    }
+    9
 }
