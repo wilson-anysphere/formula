@@ -5508,6 +5508,39 @@ mod tests {
     }
 
     #[test]
+    fn set_sheet_visibility_allows_very_hidden_and_persists_in_storage() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+
+        let mut state = AppState::new();
+        state
+            .load_workbook_persistent(workbook, WorkbookPersistenceLocation::InMemory)
+            .expect("load persistent workbook");
+
+        state
+            .set_sheet_visibility("Sheet2", SheetVisibility::VeryHidden)
+            .expect("set Sheet2 visibility");
+
+        let info = state.workbook_info().expect("workbook info");
+        let sheet2 = info
+            .sheets
+            .iter()
+            .find(|s| s.id == "Sheet2")
+            .expect("Sheet2 exists");
+        assert_eq!(sheet2.visibility, SheetVisibility::VeryHidden);
+
+        let storage = state.persistent_storage().expect("storage");
+        let workbook_id = state.persistent_workbook_id().expect("workbook id");
+        let sheets = storage.list_sheets(workbook_id).expect("list sheets");
+        let sheet2 = sheets.iter().find(|s| s.name == "Sheet2").expect("Sheet2");
+        assert_eq!(
+            sheet2.visibility,
+            formula_storage::SheetVisibility::VeryHidden
+        );
+    }
+
+    #[test]
     fn set_sheet_tab_color_rejects_non_rgb_updates() {
         let mut workbook = Workbook::new_empty(None);
         workbook.add_sheet("Sheet1".to_string());
