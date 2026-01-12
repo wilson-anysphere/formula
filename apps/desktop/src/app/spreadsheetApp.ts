@@ -8273,11 +8273,17 @@ export class SpreadsheetApp {
       let address = typeof ref.address === "string" ? ref.address : undefined;
 
       // Support "Sheet1!A1" style addresses if a sheet name was embedded.
-      if (address && address.includes("!")) {
-        const [maybeSheet, cell] = address.split("!", 2);
-        if (maybeSheet && cell) {
-          sheetId = this.resolveSheetIdByName(maybeSheet) ?? maybeSheet;
-          address = cell;
+      if (address) {
+        // Use the last `!` so sheet-qualified refs with `!` in the sheet id (unlikely but possible)
+        // still parse correctly (matches other A1 parsing in the codebase).
+        const bang = address.lastIndexOf("!");
+        if (bang >= 0) {
+          const maybeSheet = address.slice(0, bang);
+          const cell = address.slice(bang + 1);
+          if (maybeSheet && cell) {
+            sheetId = this.resolveSheetIdByName(maybeSheet) ?? maybeSheet;
+            address = cell;
+          }
         }
       }
 
@@ -8329,11 +8335,17 @@ export class SpreadsheetApp {
       let address = typeof ref.address === "string" ? ref.address : undefined;
 
       // Support "Sheet1!A1" style addresses if a sheet name was embedded.
-      if (address && address.includes("!")) {
-        const [maybeSheet, cell] = address.split("!", 2);
-        if (maybeSheet && cell) {
-          sheetId = this.resolveSheetIdByName(maybeSheet) ?? maybeSheet;
-          address = cell;
+      if (address) {
+        // Use the last `!` so sheet-qualified refs with `!` in the sheet id (unlikely but possible)
+        // still parse correctly (matches other A1 parsing in the codebase).
+        const bang = address.lastIndexOf("!");
+        if (bang >= 0) {
+          const maybeSheet = address.slice(0, bang);
+          const cell = address.slice(bang + 1);
+          if (maybeSheet && cell) {
+            sheetId = this.resolveSheetIdByName(maybeSheet) ?? maybeSheet;
+            address = cell;
+          }
         }
       }
 
