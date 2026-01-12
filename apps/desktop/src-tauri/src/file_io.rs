@@ -430,6 +430,13 @@ fn is_encrypted_ooxml_workbook(path: &Path) -> std::io::Result<bool> {
 }
 
 pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
+    if let Ok(true) = is_encrypted_ooxml_workbook(path) {
+        anyhow::bail!(
+            "encrypted workbook not supported: workbook `{}` is password-protected/encrypted; remove password protection in Excel and try again",
+            path.display()
+        );
+    }
+
     let extension = path
         .extension()
         .and_then(|s| s.to_str())
@@ -440,12 +447,6 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
     }
 
     if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm")) {
-        if let Ok(true) = is_encrypted_ooxml_workbook(path) {
-            anyhow::bail!(
-                "encrypted workbook not supported: workbook `{}` is password-protected/encrypted; remove password protection in Excel and try again",
-                path.display()
-            );
-        }
         let origin_xlsx_bytes = Arc::<[u8]>::from(
             std::fs::read(path).with_context(|| format!("read workbook bytes {:?}", path))?,
         );
@@ -908,12 +909,6 @@ pub fn read_parquet_blocking(path: &Path) -> anyhow::Result<Workbook> {
 }
 
 fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
-    if let Ok(true) = is_encrypted_ooxml_workbook(path) {
-        anyhow::bail!(
-            "encrypted workbook not supported: workbook `{}` is password-protected/encrypted; remove password protection in Excel and try again",
-            path.display()
-        );
-    }
     let wb = XlsbWorkbook::open(path).with_context(|| format!("open xlsb workbook {:?}", path))?;
 
     let date_system = if wb.workbook_properties().date_system_1904 {
@@ -2009,7 +2004,6 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
     #[test]
     fn read_xlsx_blocking_errors_on_encrypted_ooxml_container() {
         let tmp = tempfile::tempdir().expect("temp dir");
-        let path = tmp.path().join("encrypted.xlsx");
 
         let cursor = Cursor::new(Vec::new());
         let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -2018,14 +2012,18 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
         ole.create_stream("EncryptedPackage")
             .expect("create EncryptedPackage stream");
         let bytes = ole.into_inner().into_inner();
-        std::fs::write(&path, bytes).expect("write encrypted fixture");
 
-        let err = read_xlsx_blocking(&path).expect_err("expected encrypted workbook to error");
-        let msg = err.to_string().to_lowercase();
-        assert!(
-            msg.contains("encrypted") || msg.contains("password"),
-            "expected error message to mention encryption/password protection, got: {msg}"
-        );
+        for filename in ["encrypted.xlsx", "encrypted.xls"] {
+            let path = tmp.path().join(filename);
+            std::fs::write(&path, &bytes).expect("write encrypted fixture");
+
+            let err = read_xlsx_blocking(&path).expect_err("expected encrypted workbook to error");
+            let msg = err.to_string().to_lowercase();
+            assert!(
+                msg.contains("encrypted") || msg.contains("password"),
+                "expected error message to mention encryption/password protection, got: {msg}"
+            );
+        }
     }
 
     fn find_xlsb_cell_record(
