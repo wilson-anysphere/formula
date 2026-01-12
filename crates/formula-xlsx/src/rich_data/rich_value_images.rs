@@ -90,7 +90,8 @@ impl XlsxPackage {
                 continue;
             };
 
-            let Some(target_part) = openxml::resolve_relationship_target(self, &entry.source_part, rel_id)?
+            let Some(target_part) =
+                openxml::resolve_relationship_target(self, &entry.source_part, rel_id)?
             else {
                 out.warnings.push(RichValueWarning::MissingRelationship {
                     index: rv_index,
