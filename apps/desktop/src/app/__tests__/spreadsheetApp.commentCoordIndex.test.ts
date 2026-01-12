@@ -1,3 +1,7 @@
+/**
+ * @vitest-environment jsdom
+ */
+
 import { describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../spreadsheetApp";
@@ -36,4 +40,3 @@ describe("SpreadsheetApp.reindexCommentCells", () => {
     expect(invalidateAll).toHaveBeenCalledTimes(1);
   });
 });
-
