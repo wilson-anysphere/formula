@@ -1443,8 +1443,8 @@ fn build_shared_strings_xml(
                     }
                 }
                 CellValue::Record(record) => {
-                    let display = record.to_string();
-                    let text = display.as_str();
+                    let text = record.to_string();
+                    let text_str = text.as_str();
                     ref_count += 1;
                     if meta
                         .and_then(|m| m.value_kind.clone())
@@ -1453,16 +1453,16 @@ fn build_shared_strings_xml(
                             _ => None,
                         })
                         .and_then(|idx| doc.shared_strings.get(idx as usize))
-                        .map(|rt| rt.text.as_str() == text)
+                        .map(|rt| rt.text.as_str() == text_str)
                         .unwrap_or(false)
                     {
                         continue;
                     }
 
-                    let key = SharedStringKey::plain(text);
+                    let key = SharedStringKey::plain(text_str);
                     if !lookup.contains_key(&key) {
                         let new_index = table.len() as u32;
-                        table.push(RichText::new(text.to_string()));
+                        table.push(RichText::new(text));
                         lookup.insert(key, new_index);
                     }
                 }
@@ -3506,22 +3506,22 @@ fn shared_string_index(
                 .unwrap_or(0)
         }
         CellValue::Record(record) => {
-            let display = record.to_string();
-            let text = display.as_str();
+            let text = record.to_string();
+            let text_str = text.as_str();
             if let Some(meta) = meta {
                 if let Some(CellValueKind::SharedString { index }) = &meta.value_kind {
                     if doc
                         .shared_strings
                         .get(*index as usize)
                         .map(|rt| rt.text.as_str())
-                        == Some(text)
+                        == Some(text_str)
                     {
                         return *index;
                     }
                 }
             }
             shared_lookup
-                .get(&SharedStringKey::plain(text))
+                .get(&SharedStringKey::plain(text_str))
                 .copied()
                 .unwrap_or(0)
         }

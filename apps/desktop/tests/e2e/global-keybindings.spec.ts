@@ -10,6 +10,30 @@ test.describe("global keybindings", () => {
 
     const primary = process.platform === "darwin" ? "Meta" : "Control";
 
+    // Pre-grant permissions needed for the built-in Sample Hello extension to activate so the
+    // extension keybinding can be exercised without an interactive modal prompt.
+    await page.evaluate(() => {
+      const extensionId = "formula.sample-hello";
+      const key = "formula.extensionHost.permissions";
+      const existing = (() => {
+        try {
+          const raw = localStorage.getItem(key);
+          return raw ? JSON.parse(raw) : {};
+        } catch {
+          return {};
+        }
+      })();
+
+      existing[extensionId] = {
+        ...(existing[extensionId] ?? {}),
+        "ui.commands": true,
+        "cells.read": true,
+        "cells.write": true,
+      };
+
+      localStorage.setItem(key, JSON.stringify(existing));
+    });
+
     // Ensure the grid has focus.
     await page.locator("#grid").click();
 

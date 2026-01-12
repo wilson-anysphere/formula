@@ -87,6 +87,29 @@ test.describe("formula.events desktop wiring", () => {
 
     await gotoDesktop(page);
 
+    // Pre-grant the permissions required for the built-in Sample Hello extension to activate and
+    // create its contributed panel without blocking on an interactive permission prompt.
+    await page.evaluate(() => {
+      const extensionId = "formula.sample-hello";
+      const key = "formula.extensionHost.permissions";
+      const existing = (() => {
+        try {
+          const raw = localStorage.getItem(key);
+          return raw ? JSON.parse(raw) : {};
+        } catch {
+          return {};
+        }
+      })();
+
+      existing[extensionId] = {
+        ...(existing[extensionId] ?? {}),
+        "ui.commands": true,
+        "ui.panels": true,
+      };
+
+      localStorage.setItem(key, JSON.stringify(existing));
+    });
+
     // Ensure the extension host is loaded (deferred until Extensions panel is opened).
     await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
     await expect(page.getByTestId("panel-extensions")).toBeVisible();

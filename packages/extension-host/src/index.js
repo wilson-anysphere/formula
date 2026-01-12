@@ -355,8 +355,11 @@ class ExtensionHost {
       if (!extension.active) {
         await this._activateExtension(extension, activationEvent);
       }
-      this._sendEventToExtension(extension, "viewActivated", { viewId });
     }
+
+    // Match the browser host behavior: view activation is broadcast to all loaded extensions
+    // (active listeners can filter by viewId).
+    this._broadcastEvent("viewActivated", { viewId });
   }
 
   async activateCustomFunction(functionName) {

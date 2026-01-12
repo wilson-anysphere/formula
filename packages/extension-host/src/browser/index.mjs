@@ -760,8 +760,12 @@ class BrowserExtensionHost {
       if (!extension.active) {
         await this._activateExtension(extension, activationEvent);
       }
-      this._sendEventToExtension(extension, "viewActivated", { viewId });
     }
+
+    // `formula.events.onViewActivated` should behave like other event channels: once the
+    // host knows a view is active, broadcast it to every loaded extension so any active
+    // listeners can react (e.g. analytics, syncing, etc).
+    this._broadcastEvent("viewActivated", { viewId });
   }
 
   async activateCustomFunction(functionName) {
