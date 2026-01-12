@@ -773,7 +773,7 @@ Partially known (fixture-driven details still recommended):
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
   - Also observed in [`fixtures/xlsx/rich-data/images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx):
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
-  - Observed in [`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`](../fixtures/xlsx/basic/image-in-cell-richdata.xlsx):
+  - Observed in the **synthetic** fixture [`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`](../fixtures/xlsx/basic/image-in-cell-richdata.xlsx):
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
   - Observed in [`fixtures/xlsx/basic/image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx):
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata"`
@@ -813,11 +813,11 @@ Partially known (fixture-driven details still recommended):
 - RichData relationship indirection (images referenced via `richValueRel.xml`):
   - `xl/richData/_rels/richValueRel.xml.rels` is expected to contain standard image relationships:
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
-  - Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` and the unit test
+  - Observed in the **synthetic** fixture `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` and the unit test
     `crates/formula-xlsx/tests/rich_data_cell_images.rs`.
   - Workbook → richData relationships (Type URIs are Microsoft-specific and versioned). Observed in this repo:
-    - `http://schemas.microsoft.com/office/2017/06/relationships/richValue` (fixture: `image-in-cell-richdata.xlsx`)
-    - `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel` (fixture: `image-in-cell-richdata.xlsx`)
+    - `http://schemas.microsoft.com/office/2017/06/relationships/richValue` (synthetic fixture: `image-in-cell-richdata.xlsx`)
+    - `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel` (synthetic fixture: `image-in-cell-richdata.xlsx`)
     - `http://schemas.microsoft.com/office/2017/relationships/richValue` (fixture: [`images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx) via `xl/_rels/metadata.xml.rels`)
     - `http://schemas.microsoft.com/office/2017/relationships/richValueRel` (fixture: [`images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx) via `xl/_rels/metadata.xml.rels`)
     - `http://schemas.microsoft.com/office/2017/relationships/richValueTypes` (fixture: [`images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx) via `xl/_rels/metadata.xml.rels`)
