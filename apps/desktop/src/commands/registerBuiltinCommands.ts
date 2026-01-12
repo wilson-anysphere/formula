@@ -13,8 +13,21 @@ export function registerBuiltinCommands(params: {
   layoutController: LayoutController;
   ensureExtensionsLoaded?: (() => Promise<void>) | null;
   onExtensionsLoaded?: (() => void) | null;
+  /**
+   * Optional source of truth for the current visible sheet order (e.g. the UI's sheet store).
+   * When provided, sheet navigation commands (Ctrl/Cmd+PgUp/PgDn) use this list so they match
+   * the order the user sees in the tab strip.
+   */
+  getVisibleSheetIds?: (() => string[]) | null;
 }): void {
-  const { commandRegistry, app, layoutController, ensureExtensionsLoaded = null, onExtensionsLoaded = null } = params;
+  const {
+    commandRegistry,
+    app,
+    layoutController,
+    ensureExtensionsLoaded = null,
+    onExtensionsLoaded = null,
+    getVisibleSheetIds = null,
+  } = params;
 
   const toggleDockPanel = (panelId: string) => {
     const placement = getPanelPlacement(layoutController.layout, panelId);
@@ -23,6 +36,9 @@ export function registerBuiltinCommands(params: {
   };
 
   const listVisibleSheetIds = (): string[] => {
+    const fromUi = getVisibleSheetIds?.() ?? [];
+    if (fromUi.length > 0) return fromUi;
+
     const ids = app.getDocument().getSheetIds();
     // DocumentController materializes sheets lazily; mimic the UI fallback behavior so
     // navigation commands are stable even before any edits occur.

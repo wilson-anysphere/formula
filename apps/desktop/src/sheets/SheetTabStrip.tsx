@@ -28,7 +28,10 @@ export function SheetTabStrip({ workbook, activeSheetId, onActivateSheet }: Prop
         userSelect: "none",
       }}
       onKeyDown={(e) => {
-        if (!e.ctrlKey) return;
+        if (e.defaultPrevented) return;
+        const primary = e.ctrlKey || e.metaKey;
+        if (!primary) return;
+        if (e.shiftKey || e.altKey) return;
         if (e.key !== "PageUp" && e.key !== "PageDown") return;
         e.preventDefault();
 

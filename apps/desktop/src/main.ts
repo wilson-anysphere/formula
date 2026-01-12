@@ -2074,6 +2074,7 @@ if (
     commandRegistry,
     app,
     layoutController,
+    getVisibleSheetIds: () => workbookSheetStore.listVisible().map((sheet) => sheet.id),
     ensureExtensionsLoaded: () => ensureExtensionsLoadedRef?.() ?? Promise.resolve(),
     onExtensionsLoaded: () => {
       updateKeybindingsRef?.();
