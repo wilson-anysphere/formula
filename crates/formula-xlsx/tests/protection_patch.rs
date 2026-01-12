@@ -1,31 +1,14 @@
 use std::io::{Cursor, Read, Write};
 
-use formula_model::SheetProtection;
+use formula_model::{SheetProtection, WorkbookProtection};
 use formula_xlsx::{load_from_bytes, read_workbook_model_from_bytes};
 use zip::ZipArchive;
 
-fn build_minimal_protected_xlsx() -> Vec<u8> {
-    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
- xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <x:workbookPr/>
-  <x:workbookProtection lockStructure="1" workbookPassword="83AF"/>
-  <x:sheets>
-    <x:sheet name="Sheet1" sheetId="1" r:id="rId1"/>
-  </x:sheets>
-</x:workbook>"#;
-
+fn build_minimal_xlsx(workbook_xml: &str, sheet_xml: &str) -> Vec<u8> {
     let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
 </Relationships>"#;
-
-    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
- xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <x:sheetData/>
-  <x:sheetProtection sheet="1" password="CBEB"/>
-</x:worksheet>"#;
 
     let cursor = Cursor::new(Vec::new());
     let mut zip = zip::ZipWriter::new(cursor);
@@ -43,6 +26,27 @@ fn build_minimal_protected_xlsx() -> Vec<u8> {
     zip.write_all(sheet_xml.as_bytes()).unwrap();
 
     zip.finish().unwrap().into_inner()
+}
+
+fn build_minimal_protected_xlsx() -> Vec<u8> {
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:workbookPr/>
+  <x:workbookProtection lockStructure="1" workbookPassword="83AF"/>
+  <x:sheets>
+    <x:sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </x:sheets>
+</x:workbook>"#;
+
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:sheetData/>
+  <x:sheetProtection sheet="1" password="CBEB"/>
+</x:worksheet>"#;
+
+    build_minimal_xlsx(workbook_xml, sheet_xml)
 }
 
 fn read_part(bytes: &[u8], part: &str) -> Result<String, Box<dyn std::error::Error>> {
@@ -92,3 +96,84 @@ fn patches_workbook_and_sheet_protection_on_save() -> Result<(), Box<dyn std::er
     Ok(())
 }
 
+#[test]
+fn removes_workbook_protection_when_cleared() -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_minimal_protected_xlsx();
+    let mut doc = load_from_bytes(&bytes)?;
+
+    doc.workbook.workbook_protection = WorkbookProtection::default();
+
+    let out = doc.save_to_vec()?;
+    let roundtrip = read_workbook_model_from_bytes(&out)?;
+    assert_eq!(roundtrip.workbook_protection, WorkbookProtection::default());
+
+    let workbook_xml = read_part(&out, "xl/workbook.xml")?;
+    roxmltree::Document::parse(&workbook_xml)?;
+    assert!(
+        !workbook_xml.contains("workbookProtection"),
+        "expected `<workbookProtection>` removal, got:\n{workbook_xml}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn inserts_workbook_and_sheet_protection_when_missing() -> Result<(), Box<dyn std::error::Error>> {
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:workbookPr/>
+  <x:sheets>
+    <x:sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </x:sheets>
+</x:workbook>"#;
+
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:sheetData/>
+  <x:autoFilter ref="A1:A1"/>
+</x:worksheet>"#;
+
+    let bytes = build_minimal_xlsx(workbook_xml, sheet_xml);
+    let mut doc = load_from_bytes(&bytes)?;
+
+    doc.workbook.workbook_protection.lock_structure = true;
+    doc.workbook.workbook_protection.password_hash = Some(0x1234);
+
+    let sheet = &mut doc.workbook.sheets[0];
+    sheet.sheet_protection.enabled = true;
+    sheet.sheet_protection.password_hash = Some(0xABCD);
+    sheet.sheet_protection.select_locked_cells = false;
+
+    let expected_workbook_protection = doc.workbook.workbook_protection.clone();
+    let expected_sheet_protection = doc.workbook.sheets[0].sheet_protection.clone();
+
+    let out = doc.save_to_vec()?;
+    let roundtrip = read_workbook_model_from_bytes(&out)?;
+
+    assert_eq!(roundtrip.workbook_protection, expected_workbook_protection);
+    assert_eq!(roundtrip.sheets[0].sheet_protection, expected_sheet_protection);
+
+    let workbook_xml = read_part(&out, "xl/workbook.xml")?;
+    roxmltree::Document::parse(&workbook_xml)?;
+    let wb_prot = workbook_xml
+        .find("<x:workbookProtection")
+        .expect("workbookProtection inserted");
+    let sheets = workbook_xml.find("<x:sheets").expect("sheets exists");
+    assert!(wb_prot < sheets, "expected workbookProtection before sheets");
+
+    let sheet_xml = read_part(&out, "xl/worksheets/sheet1.xml")?;
+    roxmltree::Document::parse(&sheet_xml)?;
+    let sheet_prot = sheet_xml
+        .find("<x:sheetProtection")
+        .expect("sheetProtection inserted");
+    let sheet_data = sheet_xml.find("<x:sheetData").expect("sheetData exists");
+    let auto_filter = sheet_xml.find("<x:autoFilter").expect("autoFilter exists");
+    assert!(
+        sheet_data < sheet_prot && sheet_prot < auto_filter,
+        "expected sheetProtection after sheetData and before autoFilter, got:\n{sheet_xml}"
+    );
+
+    Ok(())
+}
