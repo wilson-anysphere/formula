@@ -3261,11 +3261,35 @@ mountRibbon(ribbonRoot, {
       })();
 
       if (borderPatch) {
-        applyToSelection("Borders", (sheetId, ranges) => {
-          for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, borderPatch, { label: "Borders" });
-          }
-        });
+        applyToSelection(
+          "Borders",
+          (sheetId, ranges) => {
+            for (const range of ranges) {
+              const startRow = range.start.row;
+              const endRow = range.end.row;
+              const startCol = range.start.col;
+              const endCol = range.end.col;
+
+              const targetRange = (() => {
+                switch (kind) {
+                  case "bottom":
+                    return { start: { row: endRow, col: startCol }, end: { row: endRow, col: endCol } };
+                  case "top":
+                    return { start: { row: startRow, col: startCol }, end: { row: startRow, col: endCol } };
+                  case "left":
+                    return { start: { row: startRow, col: startCol }, end: { row: endRow, col: startCol } };
+                  case "right":
+                    return { start: { row: startRow, col: endCol }, end: { row: endRow, col: endCol } };
+                  default:
+                    return range;
+                }
+              })();
+
+              doc.setRangeFormat(sheetId, targetRange, borderPatch, { label: "Borders" });
+            }
+          },
+          { forceBatch: true },
+        );
       }
       return;
     }
