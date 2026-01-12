@@ -131,10 +131,19 @@ mod gtk_backend {
             let Some(data) = clipboard.wait_for_contents(&atom) else {
                 continue;
             };
-            let bytes = data.data();
-            if bytes.len() > max_bytes {
+            // `SelectionData::data()` copies the payload into a new Vec. Check the length first so
+            // we don't duplicate huge clipboard contents in Rust memory.
+            let len = data.length();
+            if len <= 0 {
                 continue;
             }
+            let Ok(len) = usize::try_from(len) else {
+                continue;
+            };
+            if len > max_bytes {
+                continue;
+            }
+            let bytes = data.data();
             if let Some(s) = bytes_to_utf8(&bytes) {
                 return Some(s);
             }
@@ -149,8 +158,19 @@ mod gtk_backend {
     ) -> Option<String> {
         let atom = gdk::Atom::intern(target);
         let data = clipboard.wait_for_contents(&atom)?;
+        // Avoid copying large clipboard payloads into a second buffer.
+        let len = data.length();
+        if len <= 0 {
+            return None;
+        }
+        let Ok(len) = usize::try_from(len) else {
+            return None;
+        };
+        if len > max_bytes {
+            return None;
+        }
         let bytes = data.data();
-        if bytes.is_empty() || bytes.len() > max_bytes {
+        if bytes.is_empty() {
             None
         } else {
             Some(STANDARD.encode(bytes))
