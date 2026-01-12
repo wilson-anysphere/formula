@@ -772,6 +772,173 @@ test.describe("BrowserExtensionHost", () => {
     expect(result.clipboardText).toBe(marker);
   });
 
+  test("clipboard.writeText is blocked when Restricted data is received via events.onCellChanged", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await gotoDesktop(page);
+
+    const clipboardSupport = await page.evaluate(async () => {
+      if (!globalThis.isSecureContext) return { supported: false, reason: "not a secure context" };
+      if (!navigator.clipboard?.readText || !navigator.clipboard?.writeText) {
+        return { supported: false, reason: "navigator.clipboard.readText/writeText not available" };
+      }
+
+      try {
+        const marker = `__formula_clipboard_probe__${Math.random().toString(16).slice(2)}`;
+        await navigator.clipboard.writeText(marker);
+        const echoed = await navigator.clipboard.readText();
+        return { supported: echoed === marker, reason: echoed === marker ? null : `mismatch: ${echoed}` };
+      } catch (err: any) {
+        return { supported: false, reason: String(err?.message ?? err) };
+      }
+    });
+
+    test.skip(!clipboardSupport.supported, `Clipboard APIs are blocked: ${clipboardSupport.reason ?? ""}`);
+
+    const marker = `__formula_clipboard_marker__${Math.random().toString(16).slice(2)}`;
+
+    const result = await page.evaluate(
+      async ({ marker }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const app: any = (window as any).__formulaApp;
+        if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const hostManager: any = (window as any).__formulaExtensionHostManager;
+        if (!hostManager) throw new Error("Missing window.__formulaExtensionHostManager (desktop runtime)");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const host: any = (window as any).__formulaExtensionHost;
+        if (!host) throw new Error("Missing window.__formulaExtensionHost (desktop runtime)");
+
+        // Ensure extension permission prompts are non-interactive in e2e.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (globalThis as any).__formulaPermissionPrompt = async () => true;
+
+        // Clear pre-existing toasts so the test can assert on the new DLP error.
+        document.getElementById("toast-root")?.replaceChildren();
+
+        const doc = app.getDocument();
+        const sheetId = app.getCurrentSheetId();
+
+        // Seed a non-restricted value; we'll update A1 after the extension starts so it receives
+        // a cellChanged event with Restricted coordinates.
+        doc.setCellValue(sheetId, { row: 0, col: 0 }, "Initial"); // A1
+
+        const docIdParam = new URL(window.location.href).searchParams.get("docId");
+        const docId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docIdParam : null;
+        const workbookId = docId ?? "local-workbook";
+
+        // Mark A1 as Restricted so DLP blocks clipboard.copy and extension clipboard.writeText.
+        try {
+          const key = `dlp:classifications:${workbookId}`;
+          localStorage.setItem(
+            key,
+            JSON.stringify([
+              {
+                selector: {
+                  scope: "range",
+                  documentId: workbookId,
+                  sheetId,
+                  range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } },
+                },
+                classification: { level: "Restricted", labels: [] },
+                updatedAt: new Date().toISOString(),
+              },
+            ]),
+          );
+        } catch {
+          // ignore localStorage failures; test will fail if DLP isn't applied.
+        }
+
+        await navigator.clipboard.writeText(marker);
+
+        // Ensure the desktop extension host is fully started (built-ins loaded + startup hooks run).
+        await hostManager.loadBuiltInExtensions();
+
+        // Load an extension that only reads values via `events.onCellChanged` and then writes them
+        // to the system clipboard.
+        const extensionId = `formula-test.event-taint-cell-${Math.random().toString(16).slice(2)}`;
+        const commandId = "eventTaint.copyCellToClipboard";
+
+        const shimSource = `
+          const api = globalThis[Symbol.for("formula.extensionApi.api")];
+          if (!api) throw new Error("Missing Formula extension API runtime");
+          export const clipboard = api.clipboard;
+          export const commands = api.commands;
+          export const events = api.events;
+        `;
+        const shimUrl = URL.createObjectURL(new Blob([shimSource], { type: "text/javascript" }));
+
+        const extensionSource = `
+          import * as formula from ${JSON.stringify(shimUrl)};
+          let last = "";
+          let notify = null;
+          const nextEvent = () => new Promise((resolve) => { notify = resolve; });
+          let pending = nextEvent();
+          export async function activate(context) {
+            formula.events.onCellChanged((e) => {
+              if (e?.row === 0 && e?.col === 0) {
+                last = e?.value == null ? "" : String(e.value);
+                if (notify) notify();
+                notify = null;
+              }
+            });
+            context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(commandId)}, async () => {
+              await Promise.race([
+                pending,
+                new Promise((_r, reject) => setTimeout(() => reject(new Error("Timed out waiting for cellChanged")), 5000)),
+              ]);
+              return await formula.clipboard.writeText(last);
+            }));
+          }
+          export default { activate };
+        `;
+        const mainUrl = URL.createObjectURL(new Blob([extensionSource], { type: "text/javascript" }));
+
+        await host.loadExtension({
+          extensionId,
+          extensionPath: "memory://event-taint-cell/",
+          manifest: {
+            name: "event-taint-cell",
+            publisher: "formula-test",
+            version: "1.0.0",
+            engines: { formula: "^1.0.0" },
+            activationEvents: ["onStartupFinished"],
+            contributes: { commands: [{ command: commandId, title: "Copy cell (event taint)" }] },
+            permissions: ["clipboard", "ui.commands"],
+          },
+          mainUrl,
+        });
+        await host.startupExtension(extensionId);
+
+        // Trigger a cellChanged event after the extension starts.
+        doc.setCellValue(sheetId, { row: 0, col: 0 }, "Secret"); // A1
+
+        let errorMessage = "";
+        try {
+          await host.executeCommand(commandId);
+        } catch (err: any) {
+          errorMessage = String(err?.message ?? err);
+        }
+
+        const clipboardText = await navigator.clipboard.readText();
+
+        URL.revokeObjectURL(shimUrl);
+        URL.revokeObjectURL(mainUrl);
+
+        return { errorMessage, clipboardText };
+      },
+      { marker },
+    );
+
+    const toastRoot = page.getByTestId("toast-root");
+    const toast = toastRoot.getByTestId("toast").last();
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText(/clipboard copy is blocked|data loss prevention/i);
+    await expect(toast).toContainText("Restricted");
+
+    expect(result.errorMessage).toContain("Clipboard copy is blocked");
+    expect(result.clipboardText).toBe(marker);
+  });
+
   test("denied network permission blocks fetch in the browser host", async ({ page }) => {
     await gotoDesktop(page);
 
