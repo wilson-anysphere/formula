@@ -311,6 +311,11 @@ if [[ -n "${explicit_jobs}" ]]; then
   if [[ -z "${orig_rayon_num_threads}" && -z "${orig_formula_rayon_num_threads}" ]]; then
     export RAYON_NUM_THREADS="${jobs}"
   fi
+  # Keep Make/CMake build scripts in sync with the chosen -j level when MAKEFLAGS is not explicitly
+  # configured (common case: agent-init defaulted it to just `-j4`).
+  if [[ -z "${MAKEFLAGS:-}" || "${MAKEFLAGS}" =~ ^-j[0-9]+$ ]]; then
+    export MAKEFLAGS="-j${jobs}"
+  fi
 fi
 
 # For test runs, cap RUST_TEST_THREADS to avoid spawning hundreds of threads
@@ -330,6 +335,9 @@ if [[ "${subcommand}" == "test" && -z "${caller_jobs_env}" ]]; then
   export CARGO_BUILD_JOBS="${jobs}"
   if [[ -z "${orig_rayon_num_threads}" && -z "${orig_formula_rayon_num_threads}" ]]; then
     export RAYON_NUM_THREADS="${jobs}"
+  fi
+  if [[ -z "${MAKEFLAGS:-}" || "${MAKEFLAGS}" =~ ^-j[0-9]+$ ]]; then
+    export MAKEFLAGS="-j${jobs}"
   fi
 fi
 
