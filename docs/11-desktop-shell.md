@@ -188,8 +188,8 @@ update the relevant allowlists in `capabilities/main.json`.
 
 When adding a new Rust `#[tauri::command]` invoked from the frontend, also update the invoke allowlists in:
 
-- `apps/desktop/src-tauri/capabilities/main.json` (`core:allow-invoke`)
-- `apps/desktop/src-tauri/permissions/allow-invoke.json`
+- `apps/desktop/src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission; guardrailed by `src-tauri/tests/tauri_ipc_allowlist.rs`)
+- `apps/desktop/src-tauri/capabilities/main.json` (`core:allow-invoke`; must match frontend `invoke("...")` usage, guardrailed by `capabilitiesPermissions.vitest.ts`)
 
 This is guardrailed by `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`, which ensures the allowlists
 match actual frontend `invoke("...")` usage.
