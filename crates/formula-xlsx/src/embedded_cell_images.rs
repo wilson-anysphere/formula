@@ -610,18 +610,31 @@ fn parse_rich_value_rel_image_targets(
         if rel.type_uri != REL_TYPE_IMAGE {
             continue;
         }
-        let target = strip_fragment(&rel.target);
-        if target.is_empty() {
+        let target_raw = strip_uri_suffixes(&rel.target);
+        if target_raw.is_empty() {
             continue;
         }
-        let target = target.strip_prefix("./").unwrap_or(target);
+        // Be resilient to invalid/unescaped Windows-style path separators so we can match the
+        // nonstandard-but-observed `media/` and `xl/` prefixes consistently.
+        let target_cow: std::borrow::Cow<'_, str> = if target_raw.contains('\\') {
+            std::borrow::Cow::Owned(target_raw.replace('\\', "/"))
+        } else {
+            std::borrow::Cow::Borrowed(target_raw)
+        };
+        let target = target_cow.as_ref().trim_start_matches("./");
         // Some producers emit `Target="media/image1.png"` (relative to `xl/`) rather than the more
         // common `Target="../media/image1.png"` (relative to `xl/richData/`). Make a best-effort
         // guess for this case.
         let resolved = if target.starts_with("media/") {
-            format!("xl/{target}")
+            // Resolve relative to `xl/` rather than `xl/richData/`, while still applying URI
+            // normalization (fragment/query stripping and dot-segment resolution).
+            resolve_target("xl/workbook.xml", target)
         } else if target.starts_with("xl/") {
-            target.to_string()
+            // Treat `xl/...` targets as absolute part names (some producers omit the leading `/`).
+            let mut absolute = String::with_capacity(target.len() + 1);
+            absolute.push('/');
+            absolute.push_str(target);
+            resolve_target(source_part, &absolute)
         } else {
             resolve_target(source_part, target)
         };
@@ -630,11 +643,10 @@ fn parse_rich_value_rel_image_targets(
     Ok(out)
 }
 
-fn strip_fragment(target: &str) -> &str {
-    target
-        .split_once('#')
-        .map(|(base, _)| base)
-        .unwrap_or(target)
+fn strip_uri_suffixes(target: &str) -> &str {
+    let target = target.trim();
+    let target = target.split_once('#').map(|(base, _)| base).unwrap_or(target);
+    target.split_once('?').map(|(base, _)| base).unwrap_or(target)
 }
 
 fn parse_sheet_vm_image_cells(sheet_xml: &[u8]) -> Result<Vec<(CellRef, u32)>, XlsxError> {
