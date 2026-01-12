@@ -41,6 +41,18 @@ fn image_in_cell_fixture_has_expected_rich_value_parts() {
         "fixture unexpectedly contains xl/cellimages.xml; update test expectations"
     );
 
+    // Confirm this is an Excel-produced workbook (not a synthetic fixture).
+    let mut app_props = String::new();
+    archive
+        .by_name("docProps/app.xml")
+        .expect("docProps/app.xml")
+        .read_to_string(&mut app_props)
+        .expect("read docProps/app.xml");
+    assert!(
+        app_props.contains("<Application>Microsoft Excel</Application>"),
+        "expected docProps/app.xml Application=Microsoft Excel, got: {app_props}"
+    );
+
     // workbook.xml.rels should link the metadata + richData parts at the workbook level.
     let mut workbook_rels = String::new();
     archive
@@ -110,4 +122,3 @@ fn image_in_cell_fixture_has_expected_rich_value_parts() {
         );
     }
 }
-

@@ -10,6 +10,15 @@ See also:
 - [`docs/20-images-in-cells-richdata.md`](../../../docs/20-images-in-cells-richdata.md) — RichData (`richValue*` / `rdrichvalue*`) tables + index-base notes
 - [`docs/xlsx-embedded-images-in-cells.md`](../../../docs/xlsx-embedded-images-in-cells.md) — concrete schema walkthrough (relationships, content types, `_localImage` keys, etc.)
 
+## Provenance: confirm this file was saved by Excel
+
+`docProps/app.xml` contains:
+
+```xml
+<Application>Microsoft Excel</Application>
+<AppVersion>16.0300</AppVersion>
+```
+
 ## ZIP part inventory (relevant parts only)
 
 Output of:
