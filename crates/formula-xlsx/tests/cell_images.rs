@@ -129,3 +129,79 @@ fn cell_images_import_tolerates_parent_media_targets() {
         png_bytes
     );
 }
+
+#[test]
+fn cell_images_import_discovers_nested_cellimages_parts() {
+    // 1x1 transparent PNG (same as `drawings_roundtrip.rs`).
+    let png_bytes = base64::engine::general_purpose::STANDARD
+        .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/58HAQUBAO3+2NoAAAAASUVORK5CYII=")
+        .expect("valid base64 png");
+
+    let parts: BTreeMap<String, Vec<u8>> = [
+        (
+            "xl/subdir/cellimages.xml".to_string(),
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cx:cellImages xmlns:cx="http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages"
+               xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+               xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <xdr:pic>
+    <xdr:nvPicPr>
+      <xdr:cNvPr id="1" name="Picture 1"/>
+      <xdr:cNvPicPr/>
+    </xdr:nvPicPr>
+    <xdr:blipFill>
+      <a:blip r:embed="rId1"/>
+    </xdr:blipFill>
+  </xdr:pic>
+</cx:cellImages>
+"#
+            .to_vec(),
+        ),
+        (
+            "xl/subdir/_rels/cellimages.xml.rels".to_string(),
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>
+"#
+            .to_vec(),
+        ),
+        ("xl/media/image1.png".to_string(), png_bytes.clone()),
+    ]
+    .into_iter()
+    .collect();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut writer = ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    for (name, bytes) in parts {
+        writer.start_file(name, options).unwrap();
+        writer.write_all(&bytes).unwrap();
+    }
+
+    let bytes = writer.finish().unwrap().into_inner();
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("load fixture");
+
+    let mut workbook = formula_model::Workbook::new();
+    let parsed =
+        CellImages::parse_from_parts(pkg.parts_map(), &mut workbook).expect("parse cell images");
+
+    assert_eq!(parsed.parts.len(), 1);
+    assert_eq!(parsed.parts[0].path, "xl/subdir/cellimages.xml");
+    assert_eq!(
+        parsed.parts[0].rels_path,
+        "xl/subdir/_rels/cellimages.xml.rels"
+    );
+    assert_eq!(parsed.parts[0].images.len(), 1);
+
+    assert_eq!(
+        workbook
+            .images
+            .get(&ImageId::new("image1.png"))
+            .expect("image stored")
+            .bytes,
+        png_bytes
+    );
+}

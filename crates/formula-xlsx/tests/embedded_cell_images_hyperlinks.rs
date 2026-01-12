@@ -13,8 +13,10 @@ fn embedded_cell_image_includes_hyperlink_target() {
     let mut workbook = Workbook::new();
     let worksheet = workbook.add_worksheet();
 
-    let mut image = Image::new_from_buffer(&png_bytes).expect("image from buffer");
-    image.set_url("http://example.com");
+    let image = Image::new_from_buffer(&png_bytes)
+        .expect("image from buffer")
+        .set_url("http://example.com")
+        .expect("set image url");
     worksheet
         .embed_image(0, 0, &image)
         .expect("embed image into A1");
@@ -37,4 +39,3 @@ fn embedded_cell_image_includes_hyperlink_target() {
         })
     );
 }
-

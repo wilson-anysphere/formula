@@ -204,12 +204,17 @@ fn is_cell_images_part(path: &str) -> bool {
     let Some(rest) = path.strip_prefix("xl/") else {
         return false;
     };
-    if rest.contains('/') {
-        // workbook-level parts live directly under `xl/` (not in `xl/worksheets/`, etc.).
+    let Some(file_name) = rest.rsplit('/').next() else {
         return false;
-    }
-    let lower = rest.to_ascii_lowercase();
-    lower.starts_with("cellimages") && lower.ends_with(".xml")
+    };
+    let lower = file_name.to_ascii_lowercase();
+    let Some(stem) = lower.strip_suffix(".xml") else {
+        return false;
+    };
+    let Some(suffix) = stem.strip_prefix("cellimages") else {
+        return false;
+    };
+    suffix.is_empty() || suffix.chars().all(|c| c.is_ascii_digit())
 }
 
 fn parse_cell_images_part(
