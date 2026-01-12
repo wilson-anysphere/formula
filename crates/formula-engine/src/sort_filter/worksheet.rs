@@ -380,10 +380,10 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                     .get("value")
                                     .and_then(|v| v.as_str())
                                     .map(|s| CellValue::Text(s.to_string())),
-                                 "boolean" => display_value
-                                     .get("value")
-                                     .and_then(|v| v.as_bool())
-                                     .map(CellValue::Bool),
+                                "boolean" => display_value
+                                    .get("value")
+                                    .and_then(|v| v.as_bool())
+                                    .map(CellValue::Bool),
                                 "error" => display_value
                                     .get("value")
                                     .and_then(|v| v.as_str())
@@ -394,11 +394,12 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                         CellValue::Error(err)
                                     }),
                                 "image" => {
-                                    let alt_text = display_value.get("value").and_then(|value| {
-                                        value
-                                            .get("altText")
-                                            .or_else(|| value.get("alt_text"))
-                                            .and_then(|v| v.as_str())
+                                    let alt_text = display_value
+                                        .get("value")
+                                        .and_then(|v| {
+                                            v.get("altText")
+                                                .or_else(|| v.get("alt_text"))
+                                                .and_then(|v| v.as_str())
                                     });
                                     let display =
                                         alt_text.filter(|s| !s.is_empty()).unwrap_or("[Image]");
@@ -431,9 +432,9 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                  _ => None,
                              };
 
-                             if parsed.is_some() {
-                                 return parsed;
-                             }
+                            if parsed.is_some() {
+                                return parsed;
+                            }
                         }
                     }
                 }
