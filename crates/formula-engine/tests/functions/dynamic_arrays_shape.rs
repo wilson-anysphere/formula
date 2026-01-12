@@ -306,3 +306,42 @@ fn take_and_drop_return_calc_when_result_is_empty() {
         Value::Error(ErrorKind::Calc)
     );
 }
+
+#[test]
+fn shape_functions_accept_xlfn_prefix() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "C1", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 4.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 5.0).unwrap();
+    engine.set_cell_value("Sheet1", "C2", 6.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 7.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 8.0).unwrap();
+    engine.set_cell_value("Sheet1", "C3", 9.0).unwrap();
+
+    // TAKE/DROP are stored with `_xlfn.` in file formats for forward compatibility, but the engine
+    // should accept the prefixed names for evaluation.
+    engine
+        .set_cell_formula("Sheet1", "E1", "=_xlfn.TAKE(A1:C3,1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D1", "=_xlfn.DROP(A1:A3)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "E1").expect("spill range");
+    assert_eq!(start, parse_a1("E1").unwrap());
+    assert_eq!(end, parse_a1("G1").unwrap());
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G1"), Value::Number(3.0));
+
+    let (start, end) = engine.spill_range("Sheet1", "D1").expect("spill range");
+    assert_eq!(start, parse_a1("D1").unwrap());
+    assert_eq!(end, parse_a1("D3").unwrap());
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D3"), Value::Number(7.0));
+}
