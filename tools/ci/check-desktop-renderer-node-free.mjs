@@ -106,8 +106,9 @@ function lineAndColumnForIndex(sourceText, index) {
 }
 
 function isBannedImport(specifier) {
-  if (specifier.startsWith("node:")) return true;
-  return BANNED_MODULE_SPECIFIERS.has(specifier);
+  const cleaned = stripQueryAndHash(specifier);
+  if (cleaned.startsWith("node:")) return true;
+  return BANNED_MODULE_SPECIFIERS.has(cleaned);
 }
 
 function stripQueryAndHash(specifier) {
