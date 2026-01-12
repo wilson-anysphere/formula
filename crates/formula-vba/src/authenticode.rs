@@ -109,6 +109,11 @@ pub(crate) fn locate_pkcs7_signed_data_bounds(signature_stream: &[u8]) -> Option
         return Some((info.pkcs7_offset, info.pkcs7_len));
     }
 
+    // When scanning, prefer the *last* plausible SignedData ContentInfo in the stream.
+    //
+    // Real-world VBA signature streams can contain multiple PKCS#7 blobs (notably a PKCS#7
+    // certificate store followed by the actual signature). The signature payload typically comes
+    // last, so selecting the final candidate avoids treating the cert store as the signature.
     let mut best: Option<(usize, usize)> = None;
     for offset in 0..signature_stream.len() {
         if signature_stream[offset] != 0x30 {

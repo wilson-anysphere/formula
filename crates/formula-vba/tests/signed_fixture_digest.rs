@@ -1,9 +1,9 @@
 use std::io::Read;
 
-#[cfg(not(target_arch = "wasm32"))]
-use formula_vba::{verify_vba_digital_signature, VbaSignatureBinding, VbaSignatureVerification};
-
-use formula_vba::{extract_vba_signature_signed_digest, parse_vba_digital_signature};
+use formula_vba::{
+    extract_vba_signature_signed_digest, list_vba_digital_signatures, parse_vba_digital_signature,
+    verify_vba_digital_signature, VbaSignatureBinding, VbaSignatureVerification,
+};
 
 fn load_fixture_vba_bin() -> Vec<u8> {
     let fixture_path = concat!(
@@ -122,15 +122,69 @@ fn verifies_signature_even_when_digsig_header_is_corrupt() {
 }
 
 #[test]
-#[cfg(not(target_arch = "wasm32"))]
 fn verifies_signed_vba_fixture_signature_and_reports_binding_mismatch() {
     let vba_bin = load_fixture_vba_bin();
     let sig = verify_vba_digital_signature(&vba_bin)
         .expect("signature verification should succeed")
         .expect("signature should be present");
 
+    #[cfg(not(target_arch = "wasm32"))]
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    #[cfg(target_arch = "wasm32")]
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedButUnverified);
+
     // The fixture embeds a synthetic digest value; it is not intended to match the computed digest
     // of the fixture's project streams.
     assert_eq!(sig.binding, VbaSignatureBinding::NotBound);
+}
+
+#[test]
+fn lists_signature_stream_and_reports_digsig_pkcs7_location() {
+    let vba_bin = load_fixture_vba_bin();
+    let sigs = list_vba_digital_signatures(&vba_bin).expect("signature enumeration should succeed");
+    assert_eq!(sigs.len(), 1);
+
+    let sig = &sigs[0];
+    assert!(
+        sig.stream_path.contains("DigitalSignature"),
+        "expected DigitalSignature stream, got {}",
+        sig.stream_path
+    );
+
+    let signature_stream = &sig.signature;
+    assert_ne!(signature_stream.first(), Some(&0x30));
+    assert!(signature_stream.len() >= 12);
+
+    let cb_signature = u32::from_le_bytes(signature_stream[0..4].try_into().unwrap()) as usize;
+    let cb_cert_store = u32::from_le_bytes(signature_stream[4..8].try_into().unwrap()) as usize;
+    let cch_project_name =
+        u32::from_le_bytes(signature_stream[8..12].try_into().unwrap()) as usize;
+    let project_name_bytes = cch_project_name * 2;
+
+    let expected_pkcs7_offset = 12 + project_name_bytes + cb_cert_store;
+
+    assert_eq!(
+        sig.pkcs7_offset,
+        Some(expected_pkcs7_offset),
+        "expected DigSigInfoSerialized pkcs7_offset"
+    );
+    assert_eq!(
+        sig.pkcs7_len,
+        Some(cb_signature),
+        "expected DigSigInfoSerialized pkcs7_len"
+    );
+
+    assert_eq!(
+        sig.signed_digest_algorithm_oid.as_deref(),
+        Some("2.16.840.1.101.3.4.2.1")
+    );
+    assert_eq!(
+        sig.signed_digest.as_deref(),
+        Some((0u8..32).collect::<Vec<_>>().as_slice())
+    );
+
+    #[cfg(not(target_arch = "wasm32"))]
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    #[cfg(target_arch = "wasm32")]
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedButUnverified);
 }
