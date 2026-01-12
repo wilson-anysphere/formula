@@ -301,6 +301,33 @@ fn discount_security_functions_validate_additional_constraints() {
         )
         .unwrap();
 
+    // TBILL* price must be positive (#NUM! if discount implies non-positive price).
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A7",
+            "=TBILLPRICE(DATE(2020,1,1),DATE(2020,12,31),1)",
+        )
+        .unwrap();
+
+    // TBILLEQ requires a positive price factor as well.
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A8",
+            "=TBILLEQ(DATE(2020,1,1),DATE(2020,12,31),1)",
+        )
+        .unwrap();
+
+    // TBILLYIELD requires a strictly positive price.
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A9",
+            "=TBILLYIELD(DATE(2020,1,1),DATE(2020,7,1),0)",
+        )
+        .unwrap();
+
     engine.recalculate();
 
     assert_eq!(
@@ -325,6 +352,18 @@ fn discount_security_functions_validate_additional_constraints() {
     );
     assert_eq!(
         engine.get_cell_value("Sheet1", "A6"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A7"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A8"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A9"),
         Value::Error(ErrorKind::Num)
     );
 }
