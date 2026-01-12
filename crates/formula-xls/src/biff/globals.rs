@@ -2032,6 +2032,72 @@ mod tests {
     }
 
     #[test]
+    fn window1_hidden_maps_to_minimized_state() {
+        // fHidden corresponds to Excel's View -> Window -> Hide. We treat it as a minimized window
+        // state because `formula_model` does not currently distinguish hidden vs minimized.
+        let mut payload = [0u8; 18];
+        payload[0..2].copy_from_slice(&111i16.to_le_bytes()); // xWn
+        payload[2..4].copy_from_slice(&222i16.to_le_bytes()); // yWn
+        payload[4..6].copy_from_slice(&333u16.to_le_bytes()); // dxWn
+        payload[6..8].copy_from_slice(&444u16.to_le_bytes()); // dyWn
+        payload[8..10].copy_from_slice(&WINDOW1_GRBIT_HIDDEN.to_le_bytes()); // grbit
+
+        let stream = [
+            record(RECORD_WINDOW1, &payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(
+            globals.workbook_window,
+            Some(WorkbookWindow {
+                x: Some(111),
+                y: Some(222),
+                width: Some(333),
+                height: Some(444),
+                state: Some(WorkbookWindowState::Minimized)
+            })
+        );
+        assert!(
+            globals.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            globals.warnings
+        );
+    }
+
+    #[test]
+    fn window1_maximized_maps_to_maximized_state() {
+        let mut payload = [0u8; 18];
+        payload[0..2].copy_from_slice(&100i16.to_le_bytes()); // xWn
+        payload[2..4].copy_from_slice(&200i16.to_le_bytes()); // yWn
+        payload[4..6].copy_from_slice(&300u16.to_le_bytes()); // dxWn
+        payload[6..8].copy_from_slice(&400u16.to_le_bytes()); // dyWn
+        payload[8..10].copy_from_slice(&WINDOW1_GRBIT_MAXIMIZED.to_le_bytes()); // grbit
+
+        let stream = [
+            record(RECORD_WINDOW1, &payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(
+            globals.workbook_window,
+            Some(WorkbookWindow {
+                x: Some(100),
+                y: Some(200),
+                width: Some(300),
+                height: Some(400),
+                state: Some(WorkbookWindowState::Maximized)
+            })
+        );
+        assert!(
+            globals.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            globals.warnings
+        );
+    }
+
+    #[test]
     fn workbook_protection_warns_on_truncated_protect_but_continues() {
         // PROTECT record with a 1-byte payload (too short for u16).
         let stream = [
