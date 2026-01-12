@@ -1406,7 +1406,7 @@ export class SpreadsheetApp {
       // used by AI chart creation.
       this.chartStore.createChart({
         chart_type: "bar",
-        data_range: "Sheet1!A2:B5",
+        data_range: "A2:B5",
         title: "Example Chart"
       });
     }
