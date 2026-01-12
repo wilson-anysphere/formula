@@ -38,4 +38,10 @@ export type RegisterFindReplaceShortcutsParams = {
   mount?: HTMLElement;
 };
 
-export function registerFindReplaceShortcuts(params: RegisterFindReplaceShortcutsParams): any;
+export type FindReplaceShortcutDialogs = {
+  findDialog: HTMLDialogElement;
+  replaceDialog: HTMLDialogElement;
+  goToDialog: HTMLDialogElement;
+};
+
+export function registerFindReplaceShortcuts(params: RegisterFindReplaceShortcutsParams): FindReplaceShortcutDialogs;
