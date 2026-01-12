@@ -234,6 +234,54 @@ fn coupdays_basis_4_uses_fixed_360_over_frequency_and_preserves_additivity() {
 }
 
 #[test]
+fn coupdays_basis_4_quarterly_eom_february_diverges_from_european_days360() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Same idea as `coupdays_basis_4_uses_fixed_360_over_frequency_and_preserves_additivity`,
+    // but for a quarterly schedule:
+    //
+    // Quarterly schedule, maturity=2021-02-28 => PCD=2020-11-30, NCD=2021-02-28.
+    //
+    // European `DAYS360(2020-11-30, 2021-02-28, TRUE) = 88` (not 90 = 360/frequency).
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 12, 15), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2021, 2, 28), system).unwrap();
+    let expected_pcd = ymd_to_serial(ExcelDate::new(2020, 11, 30), system).unwrap();
+    let expected_ncd = maturity;
+
+    assert_eq!(couppcd(settlement, maturity, 4, 4, system).unwrap(), expected_pcd);
+    assert_eq!(coupncd(settlement, maturity, 4, 4, system).unwrap(), expected_ncd);
+    assert_eq!(coupnum(settlement, maturity, 4, 4, system).unwrap(), 1.0);
+
+    assert_eq!(
+        date_time::days360(expected_pcd, expected_ncd, true, system).unwrap() as f64,
+        88.0
+    );
+
+    let expected_days = 360.0 / 4.0;
+    let expected_daybs =
+        date_time::days360(expected_pcd, settlement, true, system).unwrap() as f64;
+    assert_eq!(expected_daybs, 15.0);
+
+    let expected_daysnc = expected_days - expected_daybs;
+    assert_eq!(expected_daysnc, 75.0);
+
+    let days = coupdays(settlement, maturity, 4, 4, system).unwrap();
+    let daybs = coupdaybs(settlement, maturity, 4, 4, system).unwrap();
+    let daysnc = coupdaysnc(settlement, maturity, 4, 4, system).unwrap();
+
+    assert_eq!(days, expected_days);
+    assert_eq!(daybs, expected_daybs);
+    assert_eq!(daysnc, expected_daysnc);
+    assert_eq!(daysnc, days - daybs);
+
+    // For basis=4, DSC is computed as `E - A` and is not always equal to DAYS360(settlement, NCD).
+    let european_days_settlement_to_ncd =
+        date_time::days360(settlement, expected_ncd, true, system).unwrap() as f64;
+    assert_eq!(european_days_settlement_to_ncd, 73.0);
+    assert_ne!(daysnc, european_days_settlement_to_ncd);
+}
+
+#[test]
 fn coup_schedule_eom_maturity_clamps_previous_coupon_date() {
     let system = ExcelDateSystem::EXCEL_1900;
     // Maturity is EOM; stepping back 6 months must clamp (Mar 31 -> Sep 30).
