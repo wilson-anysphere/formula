@@ -549,7 +549,11 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
       renderReactPanel(
         panelId,
         body,
-        <DataQueriesPanelContainer getDocumentController={options.getDocumentController} workbookId={options.workbookId} />,
+        <DataQueriesPanelContainer
+          key={workbookId ?? "default"}
+          getDocumentController={options.getDocumentController}
+          workbookId={workbookId}
+        />,
       );
       return;
     }
