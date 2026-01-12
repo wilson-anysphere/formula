@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use formula_model::{
     Alignment, Border, BorderEdge, BorderStyle, CalculationMode, Color, DateSystem, Fill,
     FillPattern, Font, HorizontalAlignment, Protection, Style, TabColor, VerticalAlignment,
-    WorkbookProtection,
+    WorkbookProtection, WorkbookWindow, WorkbookWindowState,
 };
 
 use super::{records, strings, BiffVersion};
@@ -59,6 +59,11 @@ const RECORD_NAME: u16 = 0x0018;
 
 // XF type/protection flags: bit 2 is fStyle in BIFF5/8.
 const XF_FLAG_STYLE: u16 = 0x0004;
+
+// WINDOW1.grbit option flags [MS-XLS 2.4.346].
+//
+// Bit 1 (`fIconic`) indicates the workbook window is minimized.
+const WINDOW1_GRBIT_ICONIC: u16 = 0x0002;
 
 fn strip_embedded_nuls(s: &mut String) {
     if s.contains('\0') {
@@ -153,6 +158,7 @@ pub(crate) struct BiffWorkbookGlobals {
     pub(crate) calculate_before_save: Option<bool>,
     pub(crate) workbook_protection: WorkbookProtection,
     pub(crate) active_tab_index: Option<u16>,
+    pub(crate) workbook_window: Option<WorkbookWindow>,
     formats: HashMap<u16, String>,
     palette: Vec<u32>,
     fonts: Vec<BiffFont>,
@@ -179,6 +185,7 @@ impl Default for BiffWorkbookGlobals {
             calculate_before_save: None,
             workbook_protection: WorkbookProtection::default(),
             active_tab_index: None,
+            workbook_window: None,
             formats: HashMap::new(),
             palette: Vec::new(),
             fonts: Vec::new(),
@@ -783,8 +790,63 @@ pub(crate) fn parse_biff_workbook_globals(
             }
             // WINDOW1 [MS-XLS 2.4.346]
             RECORD_WINDOW1 => {
-                // iTabCur is a 0-based active sheet tab index stored at offset 10.
                 // Payload layout (BIFF8): xWn, yWn, dxWn, dyWn, grbit, iTabCur, ...
+                //
+                // We treat window metadata as best-effort: malformed/truncated records produce
+                // warnings but do not fail globals parsing.
+
+                // Window geometry/state.
+                if out.workbook_window.is_none() {
+                    if data.len() < 8 {
+                        out.warnings.push(format!(
+                            "WINDOW1 record too short to read window geometry at offset {} (len={})",
+                            record.offset,
+                            data.len()
+                        ));
+                    } else {
+                        // x/y are signed; dx/dy are unsigned.
+                        let x = i16::from_le_bytes([data[0], data[1]]) as i32;
+                        let y = i16::from_le_bytes([data[2], data[3]]) as i32;
+                        let width = u16::from_le_bytes([data[4], data[5]]) as u32;
+                        let height = u16::from_le_bytes([data[6], data[7]]) as u32;
+
+                        let state = if data.len() < 10 {
+                            out.warnings.push(format!(
+                                "WINDOW1 record too short to read window state flags at offset {} (len={})",
+                                record.offset,
+                                data.len()
+                            ));
+                            None
+                        } else {
+                            let grbit = u16::from_le_bytes([data[8], data[9]]);
+                            Some(if (grbit & WINDOW1_GRBIT_ICONIC) != 0 {
+                                WorkbookWindowState::Minimized
+                            } else {
+                                WorkbookWindowState::Normal
+                            })
+                        };
+
+                        // Some `.xls` writers emit an all-zero WINDOW1 record. Treat that as
+                        // missing metadata so we don't persist a meaningless 0x0 window.
+                        let is_empty = x == 0
+                            && y == 0
+                            && width == 0
+                            && height == 0
+                            && matches!(state, None | Some(WorkbookWindowState::Normal));
+
+                        if !is_empty {
+                            out.workbook_window = Some(WorkbookWindow {
+                                x: Some(x),
+                                y: Some(y),
+                                width: Some(width),
+                                height: Some(height),
+                                state,
+                            });
+                        }
+                    }
+                }
+
+                // iTabCur is a 0-based active sheet tab index stored at offset 10.
                 if data.len() < 12 {
                     out.warnings
                         .push("WINDOW1 record too short to read active tab index".to_string());

@@ -294,6 +294,7 @@ fn import_xls_path_with_biff_reader(
             }
             out.workbook_protection = std::mem::take(&mut globals.workbook_protection);
             workbook_active_tab = globals.active_tab_index;
+            out.view.window = globals.workbook_window.take();
             warnings.extend(globals.warnings.drain(..).map(ImportWarning::new));
             sheet_tab_colors = Some(std::mem::take(&mut globals.sheet_tab_colors));
 

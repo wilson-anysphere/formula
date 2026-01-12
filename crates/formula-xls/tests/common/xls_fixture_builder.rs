@@ -520,6 +520,22 @@ pub fn build_view_state_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture that includes a non-default workbook window geometry/state in the
+/// workbook-global `WINDOW1` record.
+pub fn build_workbook_window_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_workbook_window_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture that contains sheet-scoped built-in defined names (`NAME` records).
 ///
 /// This is used to validate that the importer maps BIFF8 built-in name ids to the expected
@@ -3348,6 +3364,16 @@ fn window1_with_active_tab(active_tab: u16) -> [u8; 18] {
     out
 }
 
+fn window1_with_geometry(x: i16, y: i16, dx: u16, dy: u16, grbit: u16) -> [u8; 18] {
+    let mut out = window1();
+    out[0..2].copy_from_slice(&x.to_le_bytes());
+    out[2..4].copy_from_slice(&y.to_le_bytes());
+    out[4..6].copy_from_slice(&dx.to_le_bytes());
+    out[6..8].copy_from_slice(&dy.to_le_bytes());
+    out[8..10].copy_from_slice(&grbit.to_le_bytes());
+    out
+}
+
 fn scl(num: u16, denom: u16) -> [u8; 4] {
     let mut out = [0u8; 4];
     out[0..2].copy_from_slice(&num.to_le_bytes());
@@ -3469,6 +3495,58 @@ fn build_view_state_workbook_stream() -> Vec<u8> {
         .copy_from_slice(&(sheet2_offset as u32).to_le_bytes());
     globals.extend_from_slice(&sheet2);
 
+    globals
+}
+
+fn build_workbook_window_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+
+    // WINDOW1 window geometry/state.
+    let x: i16 = 120;
+    let y: i16 = 240;
+    let width: u16 = 800;
+    let height: u16 = 600;
+    let grbit: u16 = 0x0002; // fIconic (minimized)
+    push_record(
+        &mut globals,
+        RECORD_WINDOW1,
+        &window1_with_geometry(x, y, width, height, grbit),
+    );
+
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table (style XFs only).
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF (required by some readers).
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Sheet1");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // Worksheet substream: minimal with DIMENSIONS + WINDOW2.
+    let sheet_offset = globals.len();
+    let sheet = build_empty_sheet_stream(xf_general);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
     globals
 }
 
@@ -3607,7 +3685,6 @@ fn ptg_area(rw_first: u16, rw_last: u16, col_first: u16, col_last: u16) -> Vec<u
     out.extend_from_slice(&col_last.to_le_bytes());
     out
 }
-
 fn window2() -> [u8; 18] {
     // WINDOW2 record payload (BIFF8). Most fields can be zero for our fixtures.
     let mut out = [0u8; 18];
