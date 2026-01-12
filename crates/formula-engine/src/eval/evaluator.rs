@@ -104,6 +104,19 @@ impl DependencyTrace {
 pub trait ValueResolver {
     fn sheet_exists(&self, sheet_id: usize) -> bool;
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value;
+    /// Resolve a sheet id back to its display name.
+    ///
+    /// This is used by worksheet information functions like `CELL("address")`.
+    /// Resolvers that do not track sheet display names can return `None`.
+    fn sheet_name(&self, _sheet_id: usize) -> Option<&str> {
+        None
+    }
+    /// Return the stored formula text for a cell (including the leading `=`), if available.
+    ///
+    /// This is used by `CELL("contents")` and future formula-text functions.
+    fn get_cell_formula(&self, _sheet_id: usize, _addr: CellAddr) -> Option<&str> {
+        None
+    }
     /// Resolve a value from an external workbook reference like `[Book.xlsx]Sheet1!A1`.
     ///
     /// The `sheet` key is the canonical bracketed form (`"[Book.xlsx]Sheet1"`).
@@ -1423,6 +1436,17 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
     fn current_cell_addr(&self) -> CellAddr {
         self.ctx.current_cell
+    }
+
+    fn sheet_name(&self, sheet_id: usize) -> Option<&str> {
+        self.resolver.sheet_name(sheet_id)
+    }
+
+    fn get_cell_formula(&self, sheet_id: &FnSheetId, addr: CellAddr) -> Option<&str> {
+        match sheet_id {
+            FnSheetId::Local(id) => self.resolver.get_cell_formula(*id, addr),
+            FnSheetId::External(_) => None,
+        }
     }
 
     fn resolve_sheet_name(&self, name: &str) -> Option<usize> {

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T07:18:34.230134202Z",
+  "generatedAt": "2026-01-12T07:21:37.049938564Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "fcddbeeb36049ae52011874573d20745f5f4099796c485fef40753f504f87339",
-    "count": 1512
+    "sha256": "b7b4e8029911225c33ba533305def614f6ce289a0ff3f749aa678d72a1ecbdf6",
+    "count": 1519
   },
   "results": [
     {
@@ -15545,6 +15545,76 @@
       },
       "address": "C1",
       "displayText": "#N/A"
+    },
+    {
+      "caseId": "cell_ec5b5f1aab76",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "$A$1"
+      },
+      "address": "C1",
+      "displayText": "$A$1"
+    },
+    {
+      "caseId": "cell_15da988d1ad5",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 10.0
+      },
+      "address": "C1",
+      "displayText": "10"
+    },
+    {
+      "caseId": "cell_119ce54a404a",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0
+      },
+      "address": "C1",
+      "displayText": "0"
+    },
+    {
+      "caseId": "cell_3a5bd2bd9a1a",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "b"
+      },
+      "address": "C1",
+      "displayText": "b"
+    },
+    {
+      "caseId": "cell_7ecbeca8ca2c",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 5.0
+      },
+      "address": "C1",
+      "displayText": "5"
+    },
+    {
+      "caseId": "info_a9b3a1d887c8",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "Automatic"
+      },
+      "address": "C1",
+      "displayText": "Automatic"
+    },
+    {
+      "caseId": "info_ffe59ed06a96",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#VALUE!"
+      },
+      "address": "C1",
+      "displayText": "#VALUE!"
     },
     {
       "caseId": "lambda_let_541b4e7b019e",

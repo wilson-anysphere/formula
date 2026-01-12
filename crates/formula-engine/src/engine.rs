@@ -4707,6 +4707,7 @@ struct Snapshot {
     sheets: HashSet<SheetId>,
     sheet_names_by_id: Vec<String>,
     values: HashMap<CellKey, Value>,
+    formulas: HashMap<CellKey, String>,
     /// Stable ordering of stored cell keys (sheet, row, col) for deterministic sparse iteration.
     ///
     /// The evaluator's `iter_reference_cells` prefers iterating stored cells when the backend
@@ -4731,6 +4732,7 @@ impl Snapshot {
         let sheets: HashSet<SheetId> = (0..workbook.sheets.len()).collect();
         let sheet_names_by_id = workbook.sheet_names.clone();
         let mut values = HashMap::new();
+        let mut formulas = HashMap::new();
         let mut ordered_cells = BTreeSet::new();
         for (sheet_id, sheet) in workbook.sheets.iter().enumerate() {
             for (addr, cell) in &sheet.cells {
@@ -4739,6 +4741,9 @@ impl Snapshot {
                     addr: *addr,
                 };
                 values.insert(key, cell.value.clone());
+                if let Some(formula) = cell.formula.as_ref() {
+                    formulas.insert(key, formula.clone());
+                }
                 ordered_cells.insert(key);
             }
         }
@@ -4802,6 +4807,7 @@ impl Snapshot {
             sheets,
             sheet_names_by_id,
             values,
+            formulas,
             ordered_cells,
             spill_end_by_origin,
             spill_origin_by_cell,
@@ -4826,6 +4832,16 @@ impl Snapshot {
 impl crate::eval::ValueResolver for Snapshot {
     fn sheet_exists(&self, sheet_id: usize) -> bool {
         self.sheets.contains(&sheet_id)
+    }
+
+    fn sheet_name(&self, sheet_id: usize) -> Option<&str> {
+        self.sheet_names_by_id.get(sheet_id).map(|s| s.as_str())
+    }
+
+    fn get_cell_formula(&self, sheet_id: usize, addr: CellAddr) -> Option<&str> {
+        self.formulas
+            .get(&CellKey { sheet: sheet_id, addr })
+            .map(|s| s.as_str())
     }
 
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value {

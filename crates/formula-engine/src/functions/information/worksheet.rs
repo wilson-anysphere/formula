@@ -1,0 +1,198 @@
+use crate::eval::{parse_a1, CellAddr};
+use crate::functions::{FunctionContext, Reference, SheetId};
+use crate::{ErrorKind, Value};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InfoType {
+    Recalc,
+    System,
+    Directory,
+    NumFile,
+    Origin,
+    OSVersion,
+    Release,
+}
+
+fn parse_info_type(key: &str) -> Option<InfoType> {
+    match key.trim().to_ascii_lowercase().as_str() {
+        "recalc" => Some(InfoType::Recalc),
+        "system" => Some(InfoType::System),
+        "directory" => Some(InfoType::Directory),
+        "numfile" => Some(InfoType::NumFile),
+        "origin" => Some(InfoType::Origin),
+        "osversion" => Some(InfoType::OSVersion),
+        "release" => Some(InfoType::Release),
+        _ => None,
+    }
+}
+
+/// Excel INFO(type_text) worksheet information function.
+pub fn info(_ctx: &dyn FunctionContext, type_text: &str) -> Value {
+    let Some(info_type) = parse_info_type(type_text) else {
+        // Unrecognized type_text.
+        return Value::Error(ErrorKind::Value);
+    };
+
+    match info_type {
+        // Deterministic & commonly used values.
+        InfoType::Recalc => Value::Text("Automatic".to_string()),
+        InfoType::System => Value::Text("pcdos".to_string()),
+        // Known Excel keys that this engine does not currently expose.
+        InfoType::Directory | InfoType::NumFile | InfoType::Origin | InfoType::OSVersion | InfoType::Release => {
+            Value::Error(ErrorKind::NA)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CellInfoType {
+    Address,
+    Col,
+    Row,
+    Contents,
+    Type,
+    Unsupported,
+}
+
+fn parse_cell_info_type(key: &str) -> Option<CellInfoType> {
+    match key.trim().to_ascii_lowercase().as_str() {
+        "address" => Some(CellInfoType::Address),
+        "col" => Some(CellInfoType::Col),
+        "row" => Some(CellInfoType::Row),
+        "contents" => Some(CellInfoType::Contents),
+        "type" => Some(CellInfoType::Type),
+        // Valid Excel keys that are not implemented yet.
+        "color" | "filename" | "format" | "parentheses" | "prefix" | "protect" | "width" => {
+            Some(CellInfoType::Unsupported)
+        }
+        _ => None,
+    }
+}
+
+fn is_ident_cont_char(c: char) -> bool {
+    matches!(c, '$' | '_' | '\\' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9')
+}
+
+fn quote_sheet_name(name: &str) -> String {
+    if name.is_empty() {
+        return String::new();
+    }
+
+    let starts_like_number = matches!(name.chars().next(), Some('0'..='9' | '.'));
+    let starts_like_r1c1 = matches!(name.chars().next(), Some('R' | 'r' | 'C' | 'c'))
+        && matches!(name.chars().nth(1), Some('0'..='9' | '['));
+    let looks_like_a1 = parse_a1(name).is_ok();
+    let needs_quote = starts_like_number
+        || starts_like_r1c1
+        || looks_like_a1
+        || name.chars().any(|c| !is_ident_cont_char(c));
+
+    if !needs_quote {
+        return name.to_string();
+    }
+
+    let escaped = name.replace('\'', "''");
+    format!("'{escaped}'")
+}
+
+fn abs_a1(addr: CellAddr) -> String {
+    let a1 = addr.to_a1();
+    let split = a1
+        .find(|c: char| c.is_ascii_digit())
+        .unwrap_or(a1.len());
+    let (col, row) = a1.split_at(split);
+    format!("${col}${row}")
+}
+
+/// Excel CELL(info_type, [reference]) worksheet information function.
+pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Reference>) -> Value {
+    let info_type = info_type.trim();
+    if info_type.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let Some(info_type) = parse_cell_info_type(info_type) else {
+        return Value::Error(ErrorKind::Value);
+    };
+    if matches!(info_type, CellInfoType::Unsupported) {
+        return Value::Error(ErrorKind::NA);
+    }
+
+    let reference = reference.unwrap_or_else(|| Reference {
+        sheet_id: SheetId::Local(ctx.current_sheet_id()),
+        start: ctx.current_cell_addr(),
+        end: ctx.current_cell_addr(),
+    });
+    let reference = reference.normalized();
+    let addr = reference.start;
+
+    match info_type {
+        CellInfoType::Address => {
+            let abs = abs_a1(addr);
+            let include_sheet = match &reference.sheet_id {
+                SheetId::Local(id) => *id != ctx.current_sheet_id(),
+                SheetId::External(_) => true,
+            };
+            if !include_sheet {
+                return Value::Text(abs);
+            }
+
+            let sheet_name = match &reference.sheet_id {
+                SheetId::Local(id) => ctx.sheet_name(*id).map(|s| s.to_string()),
+                SheetId::External(key) => Some(key.clone()),
+            };
+
+            match sheet_name {
+                Some(name) if !name.is_empty() => {
+                    Value::Text(format!("{}!{abs}", quote_sheet_name(&name)))
+                }
+                _ => Value::Text(abs),
+            }
+        }
+        CellInfoType::Col => Value::Number((addr.col + 1) as f64),
+        CellInfoType::Row => Value::Number((addr.row + 1) as f64),
+        CellInfoType::Contents => {
+            let cell_ref = Reference {
+                sheet_id: reference.sheet_id.clone(),
+                start: addr,
+                end: addr,
+            };
+            ctx.record_reference(&cell_ref);
+
+            if let Some(formula) = ctx.get_cell_formula(&cell_ref.sheet_id, addr) {
+                let mut out = formula.to_string();
+                if !out.trim_start().starts_with('=') {
+                    out.insert(0, '=');
+                }
+                return Value::Text(out);
+            }
+
+            match ctx.get_cell_value(&cell_ref.sheet_id, addr) {
+                // Excel treats a blank cell as 0 when returning its contents.
+                Value::Blank => Value::Number(0.0),
+                other => other,
+            }
+        }
+        CellInfoType::Type => {
+            let cell_ref = Reference {
+                sheet_id: reference.sheet_id.clone(),
+                start: addr,
+                end: addr,
+            };
+            ctx.record_reference(&cell_ref);
+
+            if ctx.get_cell_formula(&cell_ref.sheet_id, addr).is_some() {
+                return Value::Text("v".to_string());
+            }
+
+            let code = match ctx.get_cell_value(&cell_ref.sheet_id, addr) {
+                Value::Blank => "b",
+                Value::Text(_) => "l",
+                _ => "v",
+            };
+            Value::Text(code.to_string())
+        }
+        CellInfoType::Unsupported => Value::Error(ErrorKind::NA),
+    }
+}
+

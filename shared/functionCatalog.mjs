@@ -320,6 +320,17 @@ export default {
       ]
     },
     {
+      "name": "CELL",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "text",
+        "any"
+      ]
+    },
+    {
       "name": "CHOOSE",
       "min_args": 2,
       "max_args": 255,
@@ -1286,6 +1297,16 @@ export default {
       "arg_types": [
         "text",
         "bool"
+      ]
+    },
+    {
+      "name": "INFO",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "text"
       ]
     },
     {

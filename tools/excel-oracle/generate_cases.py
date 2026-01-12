@@ -2079,6 +2079,23 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="t", tags=["info", "T"], formula="=T(1)")
     _add_case(cases, prefix="t", tags=["info", "T"], formula="=T(NA())")
 
+    # INFO / CELL (worksheet introspection)
+    _add_case(cases, prefix="cell", tags=["info", "CELL"], formula='=CELL("address",A1)')
+    _add_case(cases, prefix="cell", tags=["info", "CELL"], formula='=CELL("row",A10)')
+    _add_case(cases, prefix="cell", tags=["info", "CELL"], formula='=CELL("col",C1)')
+    _add_case(cases, prefix="cell", tags=["info", "CELL"], formula='=CELL("type",A1)')
+    _add_case(
+        cases,
+        prefix="cell",
+        tags=["info", "CELL"],
+        formula='=CELL("contents",A1)',
+        inputs=[CellInput("A1", 5)],
+        description="CELL(\"contents\") returns the value for constant cells",
+    )
+
+    _add_case(cases, prefix="info", tags=["info", "INFO"], formula='=INFO("recalc")')
+    _add_case(cases, prefix="info", tags=["info", "INFO", "error"], formula='=INFO("no_such_key")')
+
     # ------------------------------------------------------------------
     # LET / LAMBDA + higher-order array functions (Excel 365+)
     # ------------------------------------------------------------------

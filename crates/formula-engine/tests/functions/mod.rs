@@ -26,6 +26,7 @@ mod hof;
 mod harness;
 mod information;
 mod information_worksheet;
+mod info_cell;
 mod lambda_let;
 mod index_reference;
 mod logical;

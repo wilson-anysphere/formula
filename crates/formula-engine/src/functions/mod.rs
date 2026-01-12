@@ -39,6 +39,7 @@ mod builtins_database;
 mod builtins_dynamic_arrays;
 mod builtins_dynamic_array_textsplit;
 mod builtins_information;
+mod builtins_information_worksheet;
 mod builtins_lambda;
 mod builtins_logical_constants;
 mod builtins_logical;
@@ -163,6 +164,22 @@ pub trait FunctionContext {
     fn date_system(&self) -> ExcelDateSystem;
     fn current_sheet_id(&self) -> usize;
     fn current_cell_addr(&self) -> CellAddr;
+    /// Resolve a sheet id back to its display name.
+    ///
+    /// This is used by worksheet information functions like `CELL("address")`.
+    fn sheet_name(&self, _sheet_id: usize) -> Option<&str> {
+        None
+    }
+    /// Convenience wrapper around [`FunctionContext::sheet_name`] for the current sheet.
+    fn current_sheet_name(&self) -> Option<&str> {
+        self.sheet_name(self.current_sheet_id())
+    }
+    /// Returns the stored formula text for a cell (including the leading `=`), if available.
+    ///
+    /// This is used by worksheet information functions like `CELL("contents")`.
+    fn get_cell_formula(&self, _sheet_id: &SheetId, _addr: CellAddr) -> Option<&str> {
+        None
+    }
     fn resolve_sheet_name(&self, _name: &str) -> Option<usize> {
         None
     }
