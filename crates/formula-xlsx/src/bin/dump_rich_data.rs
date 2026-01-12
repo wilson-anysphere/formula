@@ -15,6 +15,10 @@ use formula_xlsx::cell_images::CellImages;
 #[cfg(not(target_arch = "wasm32"))]
 use formula_xlsx::metadata::parse_metadata_xml;
 #[cfg(not(target_arch = "wasm32"))]
+use formula_xlsx::openxml;
+#[cfg(not(target_arch = "wasm32"))]
+use formula_xlsx::rich_data::{rich_value, rich_value_rel};
+#[cfg(not(target_arch = "wasm32"))]
 use formula_xlsx::{parse_value_metadata_vm_to_rich_value_index_map, XlsxPackage};
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -159,14 +163,31 @@ fn dump_metadata(pkg: &XlsxPackage) -> Option<HashMap<u32, u32>> {
     }
 
     match parse_value_metadata_vm_to_rich_value_index_map(&bytes) {
-        Ok(mut map) => {
-            if map.is_empty() {
+        Ok(primary) => {
+            if primary.is_empty() {
                 println!("  vm -> rich_value_index: (none resolved)");
-                return Some(map);
+                return Some(primary);
+            }
+
+            // Excel's `vm` appears in the wild as both 0-based and 1-based. To be tolerant, insert
+            // both the original key and its 0-based equivalent.
+            let primary_len = primary.len();
+            let mut map: HashMap<u32, u32> = HashMap::with_capacity(primary_len.saturating_mul(2));
+            for (vm, rv) in primary {
+                map.entry(vm).or_insert(rv);
+                if vm > 0 {
+                    map.entry(vm - 1).or_insert(rv);
+                }
             }
 
             println!("  vm -> rich_value_index ({}):", map.len());
-            let mut entries: Vec<(u32, u32)> = map.drain().collect();
+            if map.len() != primary_len {
+                println!(
+                    "    (tolerant mapping includes both vm and vm-1 keys; primary entries: {primary_len})"
+                );
+            }
+
+            let mut entries: Vec<(u32, u32)> = map.iter().map(|(vm, rv)| (*vm, *rv)).collect();
             entries.sort_by_key(|(vm, _)| *vm);
 
             let max = 50usize;
@@ -178,7 +199,7 @@ fn dump_metadata(pkg: &XlsxPackage) -> Option<HashMap<u32, u32>> {
                 println!("    vm {vm} -> rv {rv}");
             }
 
-            Some(entries.into_iter().collect())
+            Some(map)
         }
         Err(err) => {
             println!("  vm -> rich_value_index: (failed to resolve: {err})");
@@ -276,7 +297,7 @@ fn scan_worksheet_vm_cm_usage(pkg: &XlsxPackage) -> VmCmUsage {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(e))
                 | Ok(quick_xml::events::Event::Empty(e)) => {
-                    if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"c") {
+                    if openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"c") {
                         sheet_total_cells += 1;
                         let mut has_vm = false;
                         let mut has_cm = false;
@@ -285,7 +306,7 @@ fn scan_worksheet_vm_cm_usage(pkg: &XlsxPackage) -> VmCmUsage {
                                 Ok(attr) => attr,
                                 Err(_) => continue,
                             };
-                            let key = local_name(attr.key.as_ref());
+                            let key = openxml::local_name(attr.key.as_ref());
                             if !key.eq_ignore_ascii_case(b"vm") && !key.eq_ignore_ascii_case(b"cm") {
                                 continue;
                             }
@@ -401,13 +422,13 @@ fn dump_rich_data_graph(pkg: &XlsxPackage) -> Result<(), Box<dyn Error>> {
     println!("richData part graph (relationships):");
 
     for part in rich_parts {
-        let rels_part = rels_part_name(part);
-        let Some(rels_bytes) = pkg.part(&rels_part) else {
+        let rels_part = openxml::rels_part_name(part);
+        let Some((_rels_name, rels_bytes)) = find_part_case_insensitive(pkg, &rels_part) else {
             println!("  {part}: (no rels part)");
             continue;
         };
 
-        let relationships = match parse_relationships(rels_bytes) {
+        let relationships = match openxml::parse_relationships(&rels_bytes) {
             Ok(r) => r,
             Err(err) => {
                 println!("  {part}: (failed to parse rels: {err})");
@@ -430,7 +451,7 @@ fn dump_rich_data_graph(pkg: &XlsxPackage) -> Result<(), Box<dyn Error>> {
                 println!("    {} [{}] -> {} (external)", rel.id, rel.type_uri, rel.target);
                 continue;
             }
-            let resolved = resolve_target(part, &rel.target);
+            let resolved = openxml::resolve_target(part, &rel.target);
             println!(
                 "    {} [{}] -> {} (resolved: {})",
                 rel.id, rel.type_uri, rel.target, resolved
@@ -531,18 +552,19 @@ fn dump_vm_cell_mappings(
         loop {
             match reader.read_event_into(&mut buf) {
                 Ok(quick_xml::events::Event::Start(e))
-                    if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"sheetData") =>
+                    if openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"sheetData") =>
                 {
                     in_sheet_data = true;
                 }
                 Ok(quick_xml::events::Event::End(e))
-                    if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"sheetData") =>
+                    if openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"sheetData") =>
                 {
                     in_sheet_data = false;
                 }
                 Ok(quick_xml::events::Event::Start(e))
                 | Ok(quick_xml::events::Event::Empty(e))
-                    if in_sheet_data && local_name(e.name().as_ref()).eq_ignore_ascii_case(b"c") =>
+                    if in_sheet_data
+                        && openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"c") =>
                 {
                     let mut r: Option<String> = None;
                     let mut vm: Option<u32> = None;
@@ -550,7 +572,7 @@ fn dump_vm_cell_mappings(
                         let Ok(attr) = attr else {
                             continue;
                         };
-                        let key = local_name(attr.key.as_ref());
+                        let key = openxml::local_name(attr.key.as_ref());
                         let Ok(value) = attr.unescape_value() else {
                             continue;
                         };
@@ -591,9 +613,34 @@ fn dump_vm_cell_mappings(
 
     rows.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
 
-    let rv_to_rel_values: BTreeMap<u32, Vec<u32>> = find_part_case_insensitive(pkg, "xl/richData/richValue.xml")
-        .and_then(|(_name, bytes)| extract_rich_value_record_rel_values(&bytes).ok())
-        .unwrap_or_default();
+    let mut rich_value_parts: Vec<&str> = pkg
+        .part_names()
+        .filter(|name| rich_value_part_sort_key(name).is_some())
+        .collect();
+    rich_value_parts.sort_by(|a, b| {
+        rich_value_part_sort_key(a)
+            .cmp(&rich_value_part_sort_key(b))
+            .then_with(|| a.cmp(b))
+    });
+
+    // Best-effort table of rich value index -> first "relationship index" payload found in the
+    // rich value record.
+    let mut rv_to_rel_values: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
+    let mut rv_idx: u32 = 0;
+    for part_name in rich_value_parts {
+        let Some(bytes) = pkg.part(part_name) else {
+            continue;
+        };
+        let Ok(rel_indices) = rich_value::parse_rich_value_relationship_indices(bytes) else {
+            continue;
+        };
+        for rel_idx in rel_indices {
+            if let Some(rel_idx) = rel_idx {
+                rv_to_rel_values.insert(rv_idx, vec![rel_idx as u32]);
+            }
+            rv_idx = rv_idx.saturating_add(1);
+        }
+    }
 
     println!();
     println!("vm cell mappings (sheet, cell, vm -> rv -> target):");
@@ -674,23 +721,95 @@ fn expand_cellimages_target(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn rich_value_part_sort_key(part_name: &str) -> Option<(u8, u32)> {
+    let normalized = part_name.strip_prefix('/').unwrap_or(part_name);
+    let lower = normalized.to_ascii_lowercase();
+    if !lower.starts_with("xl/richdata/") || !lower.ends_with(".xml") {
+        return None;
+    }
+
+    let file = lower.rsplit('/').next()?;
+    let stem = file.strip_suffix(".xml")?;
+
+    // See `crates/formula-xlsx/src/rich_data/mod.rs` for richer logic. This is a minimal
+    // best-effort sorter for the debug CLI.
+    let (family, suffix) = if let Some(rest) = stem.strip_prefix("richvalue") {
+        (0u8, rest)
+    } else if let Some(rest) = stem.strip_prefix("rdrichvalue") {
+        (1u8, rest)
+    } else {
+        return None;
+    };
+
+    let idx = if suffix.is_empty() {
+        0
+    } else if suffix.chars().all(|c| c.is_ascii_digit()) {
+        suffix.parse::<u32>().ok()?
+    } else {
+        return None;
+    };
+
+    Some((family, idx))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn resolve_rich_value_targets(pkg: &XlsxPackage) -> Result<BTreeMap<u32, Vec<String>>, Box<dyn Error>> {
     let mut out: BTreeMap<u32, Vec<String>> = BTreeMap::new();
 
-    if let Some((part_name, bytes)) = find_part_case_insensitive(pkg, "xl/richData/richValue.xml") {
-        let rels_part = rels_part_name(&part_name);
-        let rels = pkg
-            .part(&rels_part)
-            .map(parse_relationships)
-            .transpose()?
-            .unwrap_or_default();
-        let rel_by_id: HashMap<String, Relationship> =
-            rels.into_iter().map(|r| (r.id.clone(), r)).collect();
+    // Scan all `xl/richData/richValue*.xml` parts (and forward-compatible variants like
+    // `rdrichvalue*.xml`) in numeric order.
+    let mut rich_value_parts: Vec<&str> = pkg
+        .part_names()
+        .filter(|name| rich_value_part_sort_key(name).is_some())
+        .collect();
+    rich_value_parts.sort_by(|a, b| {
+        rich_value_part_sort_key(a)
+            .cmp(&rich_value_part_sort_key(b))
+            .then_with(|| a.cmp(b))
+    });
 
-        if let Ok(rv_ids) = extract_rich_value_record_rids(&bytes) {
-            for (rv, rids) in rv_ids {
-                for rid in rids {
-                    if let Some(rel) = rel_by_id.get(&rid) {
+    // Track the per-rich-value relationship index so we can resolve via `richValueRel.xml` later.
+    let mut rel_indices_by_rv: Vec<Option<usize>> = Vec::new();
+
+    let mut rv_base: u32 = 0;
+    for part_name in rich_value_parts {
+        let Some(bytes) = pkg.part(part_name) else {
+            continue;
+        };
+
+        let part_rel_indices = match rich_value::parse_rich_value_relationship_indices(bytes) {
+            Ok(v) => v,
+            Err(err) => {
+                println!("  warning: failed to parse rich value indices in {part_name}: {err}");
+                continue;
+            }
+        };
+        let part_rv_count = part_rel_indices.len() as u32;
+
+        // Resolve any embedded relationship IDs (e.g. `r:embed="rIdN"`) via this part's `.rels`
+        // file, if present.
+        let rels_part = openxml::rels_part_name(part_name);
+        let rel_by_id: HashMap<String, openxml::Relationship> =
+            if let Some((_rels_name, rels_bytes)) = find_part_case_insensitive(pkg, &rels_part) {
+                match openxml::parse_relationships(&rels_bytes) {
+                    Ok(rels) => rels.into_iter().map(|r| (r.id.clone(), r)).collect(),
+                    Err(err) => {
+                        println!("  warning: failed to parse {rels_part}: {err}");
+                        HashMap::new()
+                    }
+                }
+            } else {
+                HashMap::new()
+            };
+
+        if !rel_by_id.is_empty() {
+            if let Ok(rv_ids) = extract_rich_value_record_rids(bytes) {
+                for (local_rv, rids) in rv_ids {
+                    let rv = rv_base.saturating_add(local_rv);
+                    for rid in rids {
+                        let Some(rel) = rel_by_id.get(&rid) else {
+                            continue;
+                        };
                         if rel
                             .target_mode
                             .as_deref()
@@ -698,46 +817,93 @@ fn resolve_rich_value_targets(pkg: &XlsxPackage) -> Result<BTreeMap<u32, Vec<Str
                         {
                             continue;
                         }
-                        let resolved = resolve_target(&part_name, &rel.target);
-                        out.entry(rv).or_default().push(resolved);
+                        out.entry(rv)
+                            .or_default()
+                            .push(openxml::resolve_target(part_name, &rel.target));
                     }
                 }
             }
         }
+
+        rel_indices_by_rv.extend(part_rel_indices);
+        rv_base = rv_base.saturating_add(part_rv_count);
     }
 
-    // Some workbooks appear to store relationship IDs in `richValueRel.xml` instead of directly
-    // in `richValue.xml`. Treat the nth discovered rid in that file as `rv=n` as a best-effort
-    // fallback.
-    if let Some((part_name, bytes)) = find_part_case_insensitive(pkg, "xl/richData/richValueRel.xml") {
-        let rels_part = rels_part_name(&part_name);
-        let rels = pkg
-            .part(&rels_part)
-            .map(parse_relationships)
-            .transpose()?
-            .unwrap_or_default();
-        let rel_by_id: HashMap<String, Relationship> =
-            rels.into_iter().map(|r| (r.id.clone(), r)).collect();
+    // Resolve relationship indices via `xl/richData/richValueRel.xml` when present.
+    if !rel_indices_by_rv.is_empty() {
+        if let Some((rel_part_name, rel_xml_bytes)) =
+            find_part_case_insensitive(pkg, "xl/richData/richValueRel.xml")
+        {
+            let rel_id_table = match rich_value_rel::parse_rich_value_rel_table(&rel_xml_bytes) {
+                Ok(v) => v,
+                Err(err) => {
+                    println!("  warning: failed to parse {rel_part_name}: {err}");
+                    Vec::new()
+                }
+            };
 
-        if let Ok(rids) = extract_relationship_ids_in_order(&bytes) {
-            for (idx, rid) in rids.into_iter().enumerate() {
-                let rv = idx as u32;
-                if out.get(&rv).is_some() {
-                    // Prefer direct `richValue.xml` resolution when available.
-                    continue;
-                }
-                let Some(rel) = rel_by_id.get(&rid) else {
-                    continue;
-                };
-                if rel
-                    .target_mode
-                    .as_deref()
-                    .is_some_and(|m| m.trim().eq_ignore_ascii_case("External"))
+            let rels_part = openxml::rels_part_name(&rel_part_name);
+            let targets_by_id: HashMap<String, String> =
+                if let Some((_rels_name, rels_bytes)) = find_part_case_insensitive(pkg, &rels_part)
                 {
-                    continue;
+                    match openxml::parse_relationships(&rels_bytes) {
+                        Ok(rels) => {
+                            let mut out = HashMap::new();
+                            for rel in rels {
+                                if rel
+                                    .target_mode
+                                    .as_deref()
+                                    .is_some_and(|m| m.trim().eq_ignore_ascii_case("External"))
+                                {
+                                    continue;
+                                }
+                                let resolved = openxml::resolve_target(&rel_part_name, &rel.target);
+                                out.insert(rel.id, resolved);
+                            }
+                            out
+                        }
+                        Err(err) => {
+                            println!("  warning: failed to parse {rels_part}: {err}");
+                            HashMap::new()
+                        }
+                    }
+                } else {
+                    HashMap::new()
+                };
+
+            if !rel_id_table.is_empty() && !targets_by_id.is_empty() {
+                for (rv_idx, rel_idx) in rel_indices_by_rv.iter().enumerate() {
+                    let Some(rel_idx) = rel_idx else {
+                        continue;
+                    };
+                    let Some(rid) = rel_id_table.get(*rel_idx) else {
+                        continue;
+                    };
+                    if rid.is_empty() {
+                        continue;
+                    }
+                    if let Some(target) = targets_by_id.get(rid) {
+                        out.entry(rv_idx as u32).or_default().push(target.clone());
+                    }
                 }
-                let resolved = resolve_target(&part_name, &rel.target);
-                out.entry(rv).or_default().push(resolved);
+
+                // If `richValue.xml` did not contain explicit relationship indices, Excel-like
+                // producers sometimes implicitly align rich value record indices with
+                // `richValueRel.xml` relationship indices. As a best-effort fallback, if we didn't
+                // resolve anything above, assume `rv == rel_idx`.
+                if out.is_empty() && rel_indices_by_rv.iter().all(|v| v.is_none()) {
+                    for rv_idx in 0..rel_indices_by_rv.len() {
+                        let Some(rid) = rel_id_table.get(rv_idx) else {
+                            continue;
+                        };
+                        if rid.is_empty() {
+                            continue;
+                        }
+                        if let Some(target) = targets_by_id.get(rid) {
+                            out.entry(rv_idx as u32).or_default().push(target.clone());
+                        }
+                    }
+                }
             }
         }
     }
@@ -757,7 +923,7 @@ fn extract_rich_value_record_rids(bytes: &[u8]) -> Result<BTreeMap<u32, Vec<Stri
 
     let rv_nodes: Vec<roxmltree::Node<'_, '_>> = doc
         .descendants()
-        .filter(|n| n.is_element() && n.tag_name().name() == "rv")
+        .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rv"))
         .collect();
     if rv_nodes.is_empty() {
         return Ok(BTreeMap::new());
@@ -782,81 +948,6 @@ fn extract_rich_value_record_rids(bytes: &[u8]) -> Result<BTreeMap<u32, Vec<Stri
 
         if !rids.is_empty() {
             out.insert(idx as u32, rids);
-        }
-    }
-
-    Ok(out)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn extract_rich_value_record_rel_values(
-    bytes: &[u8],
-) -> Result<BTreeMap<u32, Vec<u32>>, Box<dyn Error>> {
-    let xml = std::str::from_utf8(bytes)?;
-    let doc = roxmltree::Document::parse(xml)?;
-
-    let rv_nodes: Vec<roxmltree::Node<'_, '_>> = doc
-        .descendants()
-        .filter(|n| n.is_element() && n.tag_name().name() == "rv")
-        .collect();
-    if rv_nodes.is_empty() {
-        return Ok(BTreeMap::new());
-    }
-
-    let mut out: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
-    for (idx, rv_node) in rv_nodes.into_iter().enumerate() {
-        let mut rels: Vec<u32> = Vec::new();
-        for node in rv_node.descendants() {
-            if !node.is_element() {
-                continue;
-            }
-            if node.tag_name().name() != "v" {
-                continue;
-            }
-            let kind = node.attribute("kind").unwrap_or_default();
-            if !kind.eq_ignore_ascii_case("rel") {
-                continue;
-            }
-            let Some(text) = node.text() else {
-                continue;
-            };
-            if let Ok(value) = text.trim().parse::<u32>() {
-                rels.push(value);
-            }
-        }
-
-        rels.sort();
-        rels.dedup();
-        if !rels.is_empty() {
-            out.insert(idx as u32, rels);
-        }
-    }
-
-    Ok(out)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn extract_relationship_ids_in_order(bytes: &[u8]) -> Result<Vec<String>, Box<dyn Error>> {
-    let xml = std::str::from_utf8(bytes)?;
-    let doc = roxmltree::Document::parse(xml)?;
-
-    let mut out: Vec<String> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-
-    for node in doc.descendants().filter(|n| n.is_element()) {
-        // Take at most one relationship ID per element to preserve the most likely ordering.
-        let mut found: Option<&str> = None;
-        for attr in node.attributes() {
-            if looks_like_rid(attr.value()) {
-                found = Some(attr.value());
-                break;
-            }
-        }
-
-        if let Some(rid) = found {
-            if seen.insert(rid.to_string()) {
-                out.push(rid.to_string());
-            }
         }
     }
 
@@ -910,113 +1001,4 @@ fn find_part_case_insensitive(pkg: &XlsxPackage, desired: &str) -> Option<(Strin
         }
     }
     None
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug, Clone)]
-struct Relationship {
-    id: String,
-    type_uri: String,
-    target: String,
-    target_mode: Option<String>,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn parse_relationships(xml: &[u8]) -> Result<Vec<Relationship>, Box<dyn Error>> {
-    let mut reader = quick_xml::Reader::from_reader(Cursor::new(xml));
-    reader.config_mut().trim_text(true);
-    let mut buf = Vec::new();
-    let mut relationships = Vec::new();
-
-    loop {
-        match reader.read_event_into(&mut buf)? {
-            quick_xml::events::Event::Start(start) | quick_xml::events::Event::Empty(start) => {
-                if local_name(start.name().as_ref()).eq_ignore_ascii_case(b"Relationship") {
-                    let mut id = None;
-                    let mut target = None;
-                    let mut type_uri = None;
-                    let mut target_mode = None;
-                    for attr in start.attributes().with_checks(false) {
-                        let attr = attr?;
-                        let key = local_name(attr.key.as_ref());
-                        let value = attr.unescape_value()?.into_owned();
-                        if key.eq_ignore_ascii_case(b"Id") {
-                            id = Some(value);
-                        } else if key.eq_ignore_ascii_case(b"Target") {
-                            target = Some(value);
-                        } else if key.eq_ignore_ascii_case(b"Type") {
-                            type_uri = Some(value);
-                        } else if key.eq_ignore_ascii_case(b"TargetMode") {
-                            target_mode = Some(value);
-                        }
-                    }
-                    if let (Some(id), Some(target), Some(type_uri)) = (id, target, type_uri) {
-                        relationships.push(Relationship {
-                            id,
-                            target,
-                            type_uri,
-                            target_mode,
-                        });
-                    }
-                }
-            }
-            quick_xml::events::Event::Eof => break,
-            _ => {}
-        }
-        buf.clear();
-    }
-
-    Ok(relationships)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn rels_part_name(part_name: &str) -> String {
-    let (dir, file) = part_name.rsplit_once('/').unwrap_or(("", part_name));
-    if dir.is_empty() {
-        format!("_rels/{file}.rels")
-    } else {
-        format!("{dir}/_rels/{file}.rels")
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn resolve_target(base_part: &str, target: &str) -> String {
-    let (target, is_absolute) = match target.strip_prefix('/') {
-        Some(target) => (target, true),
-        None => (target, false),
-    };
-    let base_dir = if is_absolute {
-        ""
-    } else {
-        base_part
-            .rsplit_once('/')
-            .map(|(dir, _)| dir)
-            .unwrap_or("")
-    };
-
-    let mut components: Vec<&str> = if base_dir.is_empty() {
-        Vec::new()
-    } else {
-        base_dir.split('/').collect()
-    };
-
-    for segment in target.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                components.pop();
-            }
-            _ => components.push(segment),
-        }
-    }
-
-    components.join("/")
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn local_name(name: &[u8]) -> &[u8] {
-    match name.iter().rposition(|b| *b == b':') {
-        Some(idx) => &name[idx + 1..],
-        None => name,
-    }
 }
