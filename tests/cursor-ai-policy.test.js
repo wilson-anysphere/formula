@@ -62,6 +62,19 @@ test("cursor AI policy guard fails when forbidden provider strings are present (
   }
 });
 
+test("cursor AI policy guard fails when forbidden provider strings are present in file paths", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-path-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "packages/openai/src/index.js", "export const x = 1;\n");
+
+    const result = await runPolicyApi(tmpRoot, { maxViolations: 1 });
+    assert.equal(result.ok, false);
+    assert.equal(result.violations[0]?.ruleId, "path-openai");
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("cursor AI policy guard fails when OpenAI appears in non-test source files (even without imports)", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-openai-source-fail-"));
   try {
@@ -370,6 +383,38 @@ test(
       const result = await runPolicyApi(tmpRoot, { maxViolations: 1 });
       assert.equal(result.ok, false);
       assert.equal(result.violations.length, 1);
+      assert.equal(result.violations[0]?.ruleId, "symlink");
+    } finally {
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "cursor AI policy guard rejects tracked symlinks in a large git repo (git grep path)",
+  { skip: !HAS_GIT || process.platform === "win32" },
+  async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-git-large-symlink-fail-"));
+    try {
+      // Ensure we cross the `GIT_GREP_MIN_FILES` threshold so the policy guard uses
+      // its git-grep fast path (as it does in the real repo).
+      const extraFileCount = 199;
+      const manyDir = path.join(tmpRoot, "packages", "example", "src", "many");
+      await fs.mkdir(manyDir, { recursive: true });
+      for (let i = 0; i < extraFileCount; i += 1) {
+        await fs.writeFile(path.join(manyDir, `file-${i}.js`), "export const x = 1;\n", "utf8");
+      }
+
+      const linkPath = path.join(tmpRoot, "packages", "example", "src", "link");
+      await fs.symlink("does-not-exist", linkPath);
+
+      const init = spawnSync("git", ["init"], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(init.status, 0, init.stderr);
+      const add = spawnSync("git", ["add", "."], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(add.status, 0, add.stderr);
+
+      const result = await runPolicyApi(tmpRoot, { maxViolations: 1 });
+      assert.equal(result.ok, false);
       assert.equal(result.violations[0]?.ruleId, "symlink");
     } finally {
       await fs.rm(tmpRoot, { recursive: true, force: true });
