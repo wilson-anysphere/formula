@@ -771,31 +771,26 @@ export class WorkbookContextBuilder {
         : "";
 
     // `stableJsonStringify` already sorts object keys deterministically.
-    // Pretty-print for human readability in system prompts + snapshot/debug ergonomics.
-    const stablePrettyJson = (value: unknown): string => {
-      const stable = stableJsonStringify(value);
-      try {
-        return JSON.stringify(JSON.parse(stable), null, 2);
-      } catch {
-        return stable;
-      }
-    };
+    // Keep the prompt context JSON compact (minified) for:
+    // - Smaller prompts (more room for relevant workbook data).
+    // - Easier machine parsing (systems can reliably scan for `"kind":"selection"`, etc).
+    const stableCompactJson = (value: unknown): string => stableJsonStringify(value);
 
     const sections = [
       {
         key: "workbook_summary",
         priority: priorities.workbook_summary,
-        text: `Workbook summary:\n${stablePrettyJson(workbookSummary)}`,
+        text: `Workbook summary:\n${stableCompactJson(workbookSummary)}`,
       },
       {
         key: "sheet_schemas",
         priority: priorities.sheet_schemas,
-        text: `Sheet schemas (schema-first):\n${stablePrettyJson(sheets)}`,
+        text: `Sheet schemas (schema-first):\n${stableCompactJson(sheets)}`,
       },
       {
         key: "data_blocks",
         priority: priorities.data_blocks,
-        text: blocks.length ? `Sampled data blocks:\n${stablePrettyJson(blocks)}` : "",
+        text: blocks.length ? `Sampled data blocks:\n${stableCompactJson(blocks)}` : "",
       },
       {
         key: "retrieved",
@@ -807,7 +802,7 @@ export class WorkbookContextBuilder {
         priority: priorities.attachments,
         text:
           Array.isArray(params.ragResult?.attachments) && params.ragResult.attachments.length
-            ? `Attachments:\n${stablePrettyJson(params.ragResult.attachments)}`
+            ? `Attachments:\n${stableCompactJson(params.ragResult.attachments)}`
             : "",
       },
     ].filter((s) => s.text);
