@@ -2281,6 +2281,120 @@ mod tests {
     }
 
     #[test]
+    fn ptg_refn3d_preserves_absolute_relative_flags() {
+        let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+        let base = CellCoord::new(5, 5);
+
+        // Row is relative (+1), column is absolute (C => 2).
+        let row_raw = 1u16;
+        let col_field = encode_col_field(2, false, true);
+        let rgce = [
+            0x3E, // PtgRefN3d
+            0x00, 0x00, // ixti
+            row_raw.to_le_bytes()[0],
+            row_raw.to_le_bytes()[1],
+            col_field.to_le_bytes()[0],
+            col_field.to_le_bytes()[1],
+        ];
+
+        let decoded = decode_biff8_rgce_with_base(&rgce, &ctx, Some(base));
+        assert_eq!(decoded.text, "Sheet1!$C7");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_print_area_parseable("Sheet1", &decoded.text);
+    }
+
+    #[test]
+    fn ptg_refn3d_col_out_of_range_emits_ref_error() {
+        let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // base at max BIFF column index, then offset +1.
+        let base = CellCoord::new(0, BIFF8_MAX_COL0 as u32);
+        let row_raw = 0u16;
+        let col_field = encode_col_field(1, true, true);
+        let rgce = [
+            0x3E, // PtgRefN3d
+            0x00, 0x00, // ixti
+            row_raw.to_le_bytes()[0],
+            row_raw.to_le_bytes()[1],
+            col_field.to_le_bytes()[0],
+            col_field.to_le_bytes()[1],
+        ];
+
+        let decoded = decode_biff8_rgce_with_base(&rgce, &ctx, Some(base));
+        assert_eq!(decoded.text, "#REF!");
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("PtgRefN3d")),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("col_off=1")),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn ptg_arean3d_col_out_of_range_emits_ref_error() {
+        let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // base at max BIFF column index, then offset +1 in the second corner.
+        let base = CellCoord::new(0, BIFF8_MAX_COL0 as u32);
+        let row_first_raw = 0u16;
+        let row_last_raw = 0u16;
+        let col_first_field = encode_col_field(0, true, true);
+        let col_last_field = encode_col_field(1, true, true);
+        let rgce = [
+            0x3F, // PtgAreaN3d
+            0x00, 0x00, // ixti
+            row_first_raw.to_le_bytes()[0],
+            row_first_raw.to_le_bytes()[1],
+            row_last_raw.to_le_bytes()[0],
+            row_last_raw.to_le_bytes()[1],
+            col_first_field.to_le_bytes()[0],
+            col_first_field.to_le_bytes()[1],
+            col_last_field.to_le_bytes()[0],
+            col_last_field.to_le_bytes()[1],
+        ];
+
+        let decoded = decode_biff8_rgce_with_base(&rgce, &ctx, Some(base));
+        assert_eq!(decoded.text, "#REF!");
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("PtgAreaN3d")),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("col2_off=1")),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn decodes_ptg_ref3d_with_missing_sheet_to_placeholder_sheet_name() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
