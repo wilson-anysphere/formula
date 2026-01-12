@@ -266,6 +266,14 @@ class CellFormattingDemoProvider implements CellProvider {
       fontWeight: "600"
     });
 
+    put(17, 4, "Rotated 90°", {
+      rotationDeg: 90,
+      textAlign: "center",
+      verticalAlign: "middle",
+      fill: "rgba(14, 101, 235, 0.12)",
+      fontWeight: "600"
+    });
+
     // Vertical alignment (top/middle/bottom).
     put(18, 1, "Top\naligned", { verticalAlign: "top", textAlign: "center", fill: "rgba(148, 163, 184, 0.06)" });
     put(18, 2, "Middle\naligned", { verticalAlign: "middle", textAlign: "center", fill: "rgba(148, 163, 184, 0.06)" });
@@ -280,6 +288,11 @@ class CellFormattingDemoProvider implements CellProvider {
       wrapMode: "word",
       textAlign: "start",
       direction: "auto"
+    });
+    put(19, 3, "RTL (end-align): שלום world 123", {
+      wrapMode: "word",
+      textAlign: "end",
+      direction: "rtl"
     });
 
     // ---------------------------------------------------------------------------------------------
@@ -403,6 +416,7 @@ export function CellFormattingDemo(): React.ReactElement {
     api.setColWidth(1, 160);
     api.setColWidth(2, 220);
     api.setColWidth(3, 180);
+    api.setColWidth(4, 140);
   }, []);
 
   return (
