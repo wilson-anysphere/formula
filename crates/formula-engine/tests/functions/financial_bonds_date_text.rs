@@ -244,29 +244,24 @@ fn bond_date_text_coercion_respects_workbook_date_system() {
     sheet.set_date_system(ExcelDateSystem::Excel1904);
 
     // Under Excel 1904 date system, coercing date text must yield the same serial as DATE(...).
-    let Some(v) = eval_or_skip(
+    if let Some(v) = eval_or_skip(
         &mut sheet,
         r#"=COUPDAYS("2024-06-15","2025-01-01",2,0)-COUPDAYS(DATE(2024,6,15),DATE(2025,1,1),2,0)"#,
-    ) else {
-        return;
-    };
-    assert_number(&v, 0.0);
-
-    let Some(v) = eval_or_skip(
+    ) {
+        assert_number(&v, 0.0);
+    }
+    if let Some(v) = eval_or_skip(
         &mut sheet,
         r#"=ACCRINTM("2020-01-01","2020-07-01",0.1,1000,0)-ACCRINTM(DATE(2020,1,1),DATE(2020,7,1),0.1,1000,0)"#,
-    ) else {
-        return;
-    };
-    assert_number(&v, 0.0);
-
-    let Some(v) = eval_or_skip(
+    ) {
+        assert_number(&v, 0.0);
+    }
+    if let Some(v) = eval_or_skip(
         &mut sheet,
         r#"=YIELD("2008-02-15","2017-11-15",0.0575,95.04287,100,2,0)-YIELD(DATE(2008,2,15),DATE(2017,11,15),0.0575,95.04287,100,2,0)"#,
-    ) else {
-        return;
-    };
-    assert_number(&v, 0.0);
+    ) {
+        assert_number(&v, 0.0);
+    }
 }
 
 #[test]
@@ -275,11 +270,10 @@ fn bond_date_text_coercion_is_locale_stable_for_iso_strings() {
     sheet.set_value_locale(ValueLocaleConfig::de_de());
 
     // ISO-like date strings should remain parseable regardless of the value locale.
-    let Some(v) = eval_or_skip(
+    if let Some(v) = eval_or_skip(
         &mut sheet,
         r#"=COUPDAYS("2024-06-15","2025-01-01",2,0)-COUPDAYS(DATE(2024,6,15),DATE(2025,1,1),2,0)"#,
-    ) else {
-        return;
-    };
-    assert_number(&v, 0.0);
+    ) {
+        assert_number(&v, 0.0);
+    }
 }
