@@ -105,9 +105,9 @@ fn values_equal_for_lookup(ctx: &LookupContext, lookup_value: &Value, candidate:
             } else {
                 parse_value_text(
                     trimmed,
-                    ValueLocaleConfig::en_us(),
-                    Utc::now(),
-                    ExcelDateSystem::EXCEL_1900,
+                    ctx.value_locale,
+                    ctx.now_utc,
+                    ctx.date_system,
                 )
                 .is_ok_and(|parsed| parsed == *a)
             }
@@ -119,9 +119,9 @@ fn values_equal_for_lookup(ctx: &LookupContext, lookup_value: &Value, candidate:
             } else {
                 parse_value_text(
                     trimmed,
-                    ValueLocaleConfig::en_us(),
-                    Utc::now(),
-                    ExcelDateSystem::EXCEL_1900,
+                    ctx.value_locale,
+                    ctx.now_utc,
+                    ctx.date_system,
                 )
                 .is_ok_and(|parsed| parsed == *a)
             }
@@ -928,11 +928,45 @@ pub fn lookup_array(lookup_value: &Value, array: &crate::value::Array) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::{EntityValue, RecordValue};
 
     #[test]
     fn xmatch_matches_numeric_text_via_value_parsing() {
         let array = vec![Value::from("1,234.5")];
         assert_eq!(xmatch(&Value::Number(1234.5), &array).unwrap(), 1);
+    }
+
+    #[test]
+    fn xmatch_matches_numeric_entity_display_using_value_locale() {
+        // Regression test: number vs entity display parsing must use the workbook value locale.
+        let array = vec![Value::Entity(EntityValue::new("1,5"))];
+        let pos = xmatch_with_modes_with_locale(
+            &Value::Number(1.5),
+            &array,
+            MatchMode::Exact,
+            SearchMode::FirstToLast,
+            ValueLocaleConfig::de_de(),
+            ExcelDateSystem::EXCEL_1900,
+            Utc::now(),
+        )
+        .unwrap();
+        assert_eq!(pos, 1);
+    }
+
+    #[test]
+    fn xmatch_matches_numeric_record_display_using_value_locale() {
+        let array = vec![Value::Record(RecordValue::new("1,5"))];
+        let pos = xmatch_with_modes_with_locale(
+            &Value::Number(1.5),
+            &array,
+            MatchMode::Exact,
+            SearchMode::FirstToLast,
+            ValueLocaleConfig::de_de(),
+            ExcelDateSystem::EXCEL_1900,
+            Utc::now(),
+        )
+        .unwrap();
+        assert_eq!(pos, 1);
     }
 
     #[test]

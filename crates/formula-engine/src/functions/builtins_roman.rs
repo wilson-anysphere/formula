@@ -70,11 +70,10 @@ inventory::submit! {
 fn arabic_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(text, |text| {
-        let text = text.coerce_to_string()?;
+        let text = text.coerce_to_string_with_ctx(ctx)?;
         match crate::functions::math::arabic(&text) {
             Ok(n) => Ok(Value::Number(n as f64)),
             Err(e) => Err(excel_error_kind(e)),
         }
     })
 }
-

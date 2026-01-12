@@ -131,7 +131,7 @@ fn hyperlink_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         None => link_location,
     };
 
-    match display.coerce_to_string() {
+    match display.coerce_to_string_with_ctx(ctx) {
         Ok(s) => Value::Text(s),
         Err(e) => Value::Error(e),
     }

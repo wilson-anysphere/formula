@@ -272,6 +272,18 @@ fn hyperlink_returns_friendly_name_or_link_location() {
 }
 
 #[test]
+fn hyperlink_respects_value_locale_for_numeric_text_coercion() {
+    let mut sheet = TestSheet::new();
+    sheet.set_value_locale(ValueLocaleConfig::de_de());
+
+    assert_eq!(sheet.eval("=HYPERLINK(1.5)"), Value::Text("1,5".to_string()));
+    assert_eq!(
+        sheet.eval("=HYPERLINK(\"https://example.com\",1.5)"),
+        Value::Text("1,5".to_string())
+    );
+}
+
+#[test]
 fn left_right_mid_len() {
     let mut sheet = TestSheet::new();
     assert_eq!(
