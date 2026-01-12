@@ -79,6 +79,12 @@ fn error_type_returns_excel_codes_for_all_errors() {
 }
 
 #[test]
+fn error_kind_from_code_accepts_na_exclamation_alias() {
+    assert_eq!(ErrorKind::from_code("#N/A!"), Some(ErrorKind::NA));
+    assert_eq!(ErrorKind::from_code("  #n/a!  "), Some(ErrorKind::NA));
+}
+
+#[test]
 fn non_classic_errors_propagate_through_arithmetic_in_bytecode() {
     let mut engine = Engine::new();
     engine.set_bytecode_enabled(true);
@@ -96,4 +102,3 @@ fn non_classic_errors_propagate_through_arithmetic_in_bytecode() {
         Value::Error(ErrorKind::Field)
     );
 }
-

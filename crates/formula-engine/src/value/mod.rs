@@ -151,7 +151,7 @@ impl ErrorKind {
         if raw.eq_ignore_ascii_case("#NUM!") {
             return Some(ErrorKind::Num);
         }
-        if raw.eq_ignore_ascii_case("#N/A") {
+        if raw.eq_ignore_ascii_case("#N/A") || raw.eq_ignore_ascii_case("#N/A!") {
             return Some(ErrorKind::NA);
         }
         if raw.eq_ignore_ascii_case("#GETTING_DATA") {

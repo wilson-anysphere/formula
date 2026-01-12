@@ -438,21 +438,11 @@ fn encode_scalar_text_input(text: &str) -> String {
     }
 
     let candidate = JsonValue::String(text.to_string());
-    if is_formula_input(&candidate) || parse_error_kind_literal(text).is_some() {
+    if is_formula_input(&candidate) || ErrorKind::from_code(text).is_some() {
         format!("'{text}")
     } else {
         text.to_string()
     }
-}
-
-fn parse_error_kind_literal(value: &str) -> Option<ErrorKind> {
-    let trimmed = value.trim();
-    let trimmed = if trimmed.eq_ignore_ascii_case("#N/A!") {
-        "#N/A"
-    } else {
-        trimmed
-    };
-    ErrorKind::from_code(trimmed)
 }
 fn json_to_engine_value(value: &JsonValue) -> EngineValue {
     match value {
@@ -466,7 +456,7 @@ fn json_to_engine_value(value: &JsonValue) -> EngineValue {
                 return EngineValue::Text(rest.to_string());
             }
 
-            if let Some(kind) = parse_error_kind_literal(s) {
+            if let Some(kind) = ErrorKind::from_code(s) {
                 return EngineValue::Error(kind);
             }
 
