@@ -187,6 +187,22 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
     let header = &header[..n];
 
     if header.len() >= OLE_MAGIC.len() && header[..OLE_MAGIC.len()] == OLE_MAGIC {
+        // OLE compound files can either be legacy `.xls` BIFF workbooks, or Office-encrypted
+        // OOXML packages (e.g. password-protected `.xlsx`) that wrap the real workbook in an
+        // `EncryptedPackage` stream.
+        //
+        // We don't support decryption here; detect and return a user-friendly error.
+        file.rewind().map_err(|source| Error::DetectIo {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        if let Ok(mut ole) = cfb::CompoundFile::open(file) {
+            if stream_exists(&mut ole, "EncryptionInfo") && stream_exists(&mut ole, "EncryptedPackage") {
+                return Err(Error::EncryptedWorkbook {
+                    path: path.to_path_buf(),
+                });
+            }
+        }
         return Ok(WorkbookFormat::Xls);
     }
     if header.len() >= 4 && header[..4] == *b"PAR1" {
@@ -283,6 +299,18 @@ fn looks_like_text_csv(sample: &[u8]) -> bool {
     // error (`CsvImportError::EmptyInput`) if needed.
     if sample.is_empty() {
         return true;
+    }
+
+    // If the sample doesn't contain any obvious CSV markers (delimiter/line breaks), don't treat
+    // it as CSV. This keeps format detection conservative for arbitrary plaintext files.
+    //
+    // Single-cell CSV files (no delimiters, no newlines) are still supported when the extension
+    // is explicitly `.csv`.
+    if !sample
+        .iter()
+        .any(|&b| matches!(b, b',' | b';' | b'\t' | b'\n' | b'\r'))
+    {
+        return false;
     }
 
     // Reject obvious binary: NUL bytes or disallowed control characters.
@@ -433,6 +461,10 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
                     break;
                 } else if normalized.eq_ignore_ascii_case("xl/vbaProject.bin") {
                     has_vba_project = true;
+                }
+
+                if has_workbook_xml && has_vba_project {
+                    break;
                 }
             }
 

@@ -1040,17 +1040,22 @@ impl Engine {
             let deps = CellDeps::new(calc_vec).volatile(volatile);
             self.calc_graph.update_cell_dependencies(cell_id, deps);
 
-            let (compiled_formula, bytecode_compile_reason) =
-                match self.try_compile_bytecode(&parsed.expr, key, volatile, thread_safe, dynamic_deps) {
-                    Ok(program) => (
-                        CompiledFormula::Bytecode(BytecodeFormula {
-                            ast: compiled_ast.clone(),
-                            program,
-                        }),
-                        None,
-                    ),
-                    Err(reason) => (CompiledFormula::Ast(compiled_ast), Some(reason)),
-                };
+            let (compiled_formula, bytecode_compile_reason) = match self.try_compile_bytecode(
+                &parsed.expr,
+                key,
+                volatile,
+                thread_safe,
+                dynamic_deps,
+            ) {
+                Ok(program) => (
+                    CompiledFormula::Bytecode(BytecodeFormula {
+                        ast: compiled_ast.clone(),
+                        program,
+                    }),
+                    None,
+                ),
+                Err(reason) => (CompiledFormula::Ast(compiled_ast), Some(reason)),
+            };
 
             if let Some(cell) = self
                 .workbook

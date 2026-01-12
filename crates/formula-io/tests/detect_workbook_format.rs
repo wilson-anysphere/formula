@@ -1,0 +1,113 @@
+use std::io::Cursor;
+use std::path::PathBuf;
+
+use formula_io::{detect_workbook_format, Error, WorkbookFormat};
+
+fn fixture_path(rel: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures").join(rel)
+}
+
+fn xlsb_fixture_path(rel: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../formula-xlsb/tests/fixtures")
+        .join(rel)
+}
+
+fn xls_fixture_path(rel: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../formula-xls/tests/fixtures")
+        .join(rel)
+}
+
+fn encrypted_ooxml_bytes() -> Vec<u8> {
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_stream("EncryptionInfo")
+        .expect("create EncryptionInfo stream");
+    ole.create_stream("EncryptedPackage")
+        .expect("create EncryptedPackage stream");
+    ole.into_inner().into_inner()
+}
+
+#[test]
+fn detects_xlsx() {
+    let path = fixture_path("xlsx/basic/basic.xlsx");
+    assert_eq!(
+        detect_workbook_format(&path).expect("detect"),
+        WorkbookFormat::Xlsx
+    );
+}
+
+#[test]
+fn detects_xlsm() {
+    let path = fixture_path("xlsx/macros/basic.xlsm");
+    assert_eq!(
+        detect_workbook_format(&path).expect("detect"),
+        WorkbookFormat::Xlsm
+    );
+}
+
+#[test]
+fn detects_xlsb() {
+    let path = xlsb_fixture_path("simple.xlsb");
+    assert_eq!(
+        detect_workbook_format(&path).expect("detect"),
+        WorkbookFormat::Xlsb
+    );
+}
+
+#[test]
+fn detects_xls() {
+    let path = xls_fixture_path("basic.xls");
+    assert_eq!(
+        detect_workbook_format(&path).expect("detect"),
+        WorkbookFormat::Xls
+    );
+}
+
+#[test]
+fn detects_csv_by_extension() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("data.csv");
+    std::fs::write(&path, "col1,col2\n1,hello\n").expect("write csv");
+    assert_eq!(
+        detect_workbook_format(&path).expect("detect"),
+        WorkbookFormat::Csv
+    );
+}
+
+#[test]
+fn detects_parquet_by_magic() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("data.parquet");
+    std::fs::write(&path, b"PAR1\x00\x00\x00\x00").expect("write parquet header");
+    assert_eq!(
+        detect_workbook_format(&path).expect("detect"),
+        WorkbookFormat::Parquet
+    );
+}
+
+#[test]
+fn detects_unknown_format() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("data.bin");
+    std::fs::write(&path, b"not a workbook").expect("write file");
+    assert_eq!(
+        detect_workbook_format(&path).expect("detect"),
+        WorkbookFormat::Unknown
+    );
+}
+
+#[test]
+fn detects_encrypted_ooxml_container() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("encrypted.xlsx");
+    std::fs::write(&path, encrypted_ooxml_bytes()).expect("write encrypted fixture");
+
+    let err = detect_workbook_format(&path).expect_err("expected encrypted workbook to error");
+    assert!(
+        matches!(err, Error::EncryptedWorkbook { .. }),
+        "expected Error::EncryptedWorkbook, got {err:?}"
+    );
+}
+
