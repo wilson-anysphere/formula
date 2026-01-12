@@ -430,11 +430,9 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
               data-testid="ribbon-tab-menu-toggle"
               ref={tabMenuButtonRef}
               onClick={() => {
-                setTabMenuOpen((prev) => {
-                  const next = !prev;
-                  if (next) setFlyoutOpen(false);
-                  return next;
-                });
+                const next = !tabMenuOpen;
+                if (next) setFlyoutOpen(false);
+                setTabMenuOpen(next);
               }}
               onKeyDown={(event) => {
                 if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
