@@ -163,6 +163,16 @@ Notes:
 | `t="b"` | Boolean | 0 or 1 |
 | `t="e"` | Error | Error string (#VALUE!, etc.) |
 
+### Images in Cells (`IMAGE()` / “Place in Cell”)
+
+Newer Excel builds can store **images as cell values** (“Place in Cell” pictures, and the `IMAGE()`
+function) using additional OOXML parts (`xl/cellimages.xml`, `xl/metadata.xml`, `xl/richData/*`) and
+worksheet cell attributes like `c/@vm` and `c/@cm`.
+
+This is distinct from legacy “floating” images stored under `xl/drawings/*`.
+
+**Detail spec:** [20-images-in-cells.md](./20-images-in-cells.md)
+
 ### Formula Storage
 
 ```xml
