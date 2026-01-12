@@ -35,7 +35,9 @@ workbook.xlsx (ZIP archive)
 │   │   ├── rdrichvalue.xml
 │   │   ├── rdrichvaluestructure.xml
 │   │   ├── rdrichvaluetypes.xml
-│   │   └── richValueRel.xml     # Indirection to rich-value relationships (e.g. images)
+│   │   ├── richValueRel.xml     # Indirection to rich-value relationships (e.g. images)
+│   │   └── _rels/
+│   │       └── richValueRel.xml.rels  # richValueRel -> xl/media/* (image binaries)
 │   ├── theme/
 │   │   └── theme1.xml           # Color/font theme
 │   ├── worksheets/
