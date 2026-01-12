@@ -118,23 +118,30 @@ fn extracts_in_cell_images_with_future_metadata_indirection() {
     let metadata_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
-   <metadataTypes>
-     <metadataType name="XLRICHVALUE"/>
-   </metadataTypes>
-   <futureMetadata name="XLRICHVALUE">
-     <bk>
-       <extLst>
-         <ext uri="{DUMMY}">
-           <xlrd:rvb i="0"/>
-         </ext>
-       </extLst>
-     </bk>
-   </futureMetadata>
-   <valueMetadata>
-     <bk>
-       <rc t="1" v="0"/>
-     </bk>
-   </valueMetadata>
+    <metadataTypes>
+      <metadataType name="XLRICHVALUE"/>
+    </metadataTypes>
+    <!-- Unrelated rvb to ensure resolution uses metadataTypes/futureMetadata instead of scanning
+         all rvb entries in document order. -->
+    <extLst>
+      <ext uri="{DUMMY}">
+        <xlrd:rvb i="999"/>
+      </ext>
+    </extLst>
+    <futureMetadata name="XLRICHVALUE">
+      <bk>
+        <extLst>
+          <ext uri="{DUMMY}">
+            <xlrd:rvb i="0"/>
+          </ext>
+        </extLst>
+      </bk>
+    </futureMetadata>
+    <valueMetadata>
+      <bk>
+        <rc t="0" v="0"/>
+      </bk>
+    </valueMetadata>
 </metadata>"#;
 
     let bytes = build_rich_data_package(metadata_xml);

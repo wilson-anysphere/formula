@@ -7,7 +7,8 @@
 //! 2. `xl/metadata.xml` contains `<valueMetadata>` with a list of `<bk>` records. The `vm` value is
 //!    a 1-based index into this list.
 //! 3. Each `<valueMetadata><bk>` contains `<rc t="T" v="V"/>` where `t` is the 1-based index of
-//!    `XLRICHVALUE` in `<metadataTypes>`, and `v` is a 0-based index into
+//!    `XLRICHVALUE` in `<metadataTypes>` (Excel has been observed to emit both 0-based and 1-based
+//!    indices here), and `v` is a 0-based index into
 //!    `<futureMetadata name="XLRICHVALUE">`'s `<bk>` list.
 //! 4. Each `<futureMetadata><bk>` contains an extension element (commonly `xlrd:rvb`) with an
 //!    `i="N"` attribute. This is the 0-based index into `xl/richData/richValue.xml`.
@@ -36,7 +37,7 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
     let xml = std::str::from_utf8(metadata_xml)?;
     let doc = Document::parse(xml)?;
 
-    let Some(xlrichvalue_t) = find_metadata_type_index(&doc, "XLRICHVALUE") else {
+    let Some(xlrichvalue_type_idx) = find_metadata_type_index(&doc, "XLRICHVALUE") else {
         return Ok(HashMap::new());
     };
 
@@ -46,10 +47,22 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
         return Ok(HashMap::new());
     }
 
-    Ok(parse_value_metadata_mappings(&doc, xlrichvalue_t, &future_bk_indices))
+    // Excel has been observed to encode `rc/@t` as either 0-based or 1-based indices into the
+    // `<metadataTypes>` list. Accept both for robustness.
+    let Ok(xlrichvalue_t_zero_based) = u32::try_from(xlrichvalue_type_idx) else {
+        return Ok(HashMap::new());
+    };
+    let xlrichvalue_t_one_based = xlrichvalue_t_zero_based.saturating_add(1);
+
+    Ok(parse_value_metadata_mappings(
+        &doc,
+        xlrichvalue_t_zero_based,
+        xlrichvalue_t_one_based,
+        &future_bk_indices,
+    ))
 }
 
-fn find_metadata_type_index(doc: &Document<'_>, name: &str) -> Option<u32> {
+fn find_metadata_type_index(doc: &Document<'_>, name: &str) -> Option<usize> {
     let metadata_types = doc
         .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "metadataTypes")?;
@@ -64,8 +77,7 @@ fn find_metadata_type_index(doc: &Document<'_>, name: &str) -> Option<u32> {
         };
 
         if mt_name.eq_ignore_ascii_case(name) {
-            // `t` is 1-based.
-            return Some((idx + 1) as u32);
+            return Some(idx);
         }
     }
 
@@ -99,7 +111,8 @@ fn parse_future_rich_value_indices(doc: &Document<'_>, name: &str) -> Vec<Option
 
 fn parse_value_metadata_mappings(
     doc: &Document<'_>,
-    xlrichvalue_t: u32,
+    xlrichvalue_t_zero_based: u32,
+    xlrichvalue_t_one_based: u32,
     future_bk_indices: &[Option<u32>],
 ) -> HashMap<u32, u32> {
     let Some(value_metadata) = doc
@@ -121,7 +134,9 @@ fn parse_value_metadata_mappings(
         let rc = bk.descendants().find(|n| {
             n.is_element()
                 && n.tag_name().name() == "rc"
-                && n.attribute("t").and_then(|t| t.parse::<u32>().ok()) == Some(xlrichvalue_t)
+                && n.attribute("t")
+                    .and_then(|t| t.parse::<u32>().ok())
+                    .is_some_and(|t| t == xlrichvalue_t_zero_based || t == xlrichvalue_t_one_based)
         });
 
         let Some(rc) = rc else {
@@ -193,4 +208,3 @@ mod tests {
         assert_eq!(map.len(), 2);
     }
 }
-
