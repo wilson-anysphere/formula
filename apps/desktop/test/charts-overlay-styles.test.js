@@ -92,3 +92,27 @@ test("shared-grid overlay stacking uses CSS classes (no zIndex inline styles)", 
   assert.ok(!text.includes('selectionCanvas.style.zIndex = "3"'));
   assert.ok(!text.includes('outlineLayer.style.zIndex = "4"'));
 });
+
+test("SpreadsheetApp assigns semantic layer classes to grid canvases + chart overlay", async () => {
+  const spreadsheetAppPath = path.join(desktopRoot, "src/app/spreadsheetApp.ts");
+  const text = await readFile(spreadsheetAppPath, "utf8");
+
+  // Canvases/layers should be tagged with role-ish classes so CSS can target them
+  // without relying on DOM insertion order.
+  assert.match(text, /gridCanvas\.className\s*=\s*"grid-canvas grid-canvas--base"/);
+  assert.match(text, /referenceCanvas\.className\s*=\s*"grid-canvas grid-canvas--content"/);
+  assert.match(text, /auditingCanvas\.className\s*=\s*"grid-canvas grid-canvas--auditing"/);
+  assert.match(text, /selectionCanvas\.className\s*=\s*"grid-canvas grid-canvas--selection"/);
+  assert.match(text, /presenceCanvas\.className\s*=\s*"grid-canvas grid-canvas--presence"/);
+
+  assert.match(text, /chartLayer\.className\s*=\s*"chart-layer chart-layer--overlay"/);
+});
+
+test("SecondaryGridView assigns semantic layer classes to shared-grid canvases", async () => {
+  const secondaryGridPath = path.join(desktopRoot, "src/grid/splitView/secondaryGridView.ts");
+  const text = await readFile(secondaryGridPath, "utf8");
+
+  assert.match(text, /gridCanvas\.className\s*=\s*"grid-canvas grid-canvas--base"/);
+  assert.match(text, /contentCanvas\.className\s*=\s*"grid-canvas grid-canvas--content"/);
+  assert.match(text, /selectionCanvas\.className\s*=\s*"grid-canvas grid-canvas--selection"/);
+});
