@@ -29,7 +29,7 @@ When a workbook contains at least one RichData value (including images-in-cell),
 ```
 xl/
   richData/
-    richValue.xml              # or: rdrichvalue.xml
+    richValue.xml              # or: richValues.xml (naming varies); or: rdrichvalue.xml
     richValueRel.xml
     richValueTypes.xml        # optional (not present in all workbooks); or: rdRichValueTypes.xml
     richValueStructure.xml    # optional (not present in all workbooks); or: rdrichvaluestructure.xml
@@ -51,6 +51,8 @@ Notes:
     `richValueTypes.xml` and `richValueStructure.xml`.
 * File naming varies across producers (and even across Excel builds):
   * “Excel-like” naming: `richValue.xml`, `richValueTypes.xml`, `richValueStructure.xml`
+  * Plural “richValues” naming (observed in tests; not currently observed in the Excel fixtures in this repo):
+    * `richValues.xml`, `richValues1.xml`, ...
   * “rdRichValue” naming (observed in the real Excel fixture `fixtures/xlsx/basic/image-in-cell.xlsx`
     and in `rust_xlsxwriter` output in this repo):
     * `rdrichvalue.xml`
@@ -909,7 +911,7 @@ Two variants are observed in-repo:
 
 Other builds may:
 
-* split values across `xl/richData/richValue1.xml`, `richValue2.xml`, ...
+* split values across `xl/richData/richValue1.xml`, `richValue2.xml`, ... (or the plural `richValues1.xml` / `richValues2.xml` naming variant)
   * Formula treats these as a single logical stream ordered by numeric suffix (see
     `crates/formula-xlsx/tests/rich_value_part_numeric_suffix_order.rs`).
 * include an explicit global index attribute on `<rv>` (e.g. `i="…"`, `id="…"`, `idx="…"`)

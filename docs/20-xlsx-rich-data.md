@@ -46,7 +46,7 @@ xl/
 │   └── sheetN.xml                      # Cell has vm="…"
 ├── metadata.xml                        # Value metadata indexed by vm
 └── richData/
-    ├── richValue.xml / richValue1.xml  # Rich values (<rv>), indexed by metadata (schema varies)
+    ├── richValue.xml / richValue1.xml  # Rich values (<rv>), indexed by metadata (schema varies; some producers use `richValues*.xml`)
     ├── richValueTypes.xml              # Optional (type id -> structure id)
     ├── richValueStructure.xml          # Optional (field layout)
     ├── rdrichvalue.xml                 # rdRichValue variant rich values (<rv> + positional <v> fields)
@@ -101,11 +101,11 @@ At a high level:
 sheetN.xml: <c vm="VM_INDEX">…</c>
   └─> xl/metadata.xml: valueMetadata[VM_INDEX]   (vm can be 0-based or 1-based; treat as opaque)
          └─> RV_INDEX (resolved best-effort; in this repo’s fixtures: rc/@v -> <futureMetadata name="XLRICHVALUE"> -> <xlrd:rvb i="..."/>)
-                └─> xl/richData/richValue*.xml (or xl/richData/rdrichvalue.xml): <rv> entry at RV_INDEX
-                       └─> (image payload references REL_SLOT_INDEX)
-                             └─> xl/richData/richValueRel.xml: <rel> at REL_SLOT_INDEX => r:id="rIdX"
-                                   └─> xl/richData/_rels/richValueRel.xml.rels: Relationship Id="rIdX"
-                                        └─> Target="../media/imageY.png" => xl/media/imageY.png bytes
+                 └─> xl/richData/richValue*.xml / richValues*.xml (or xl/richData/rdrichvalue.xml): <rv> entry at RV_INDEX
+                        └─> (image payload references REL_SLOT_INDEX)
+                              └─> xl/richData/richValueRel.xml: <rel> at REL_SLOT_INDEX => r:id="rIdX"
+                                    └─> xl/richData/_rels/richValueRel.xml.rels: Relationship Id="rIdX"
+                                         └─> Target="../media/imageY.png" => xl/media/imageY.png bytes
 ```
 
 ### Indexing notes (practical assumptions)
@@ -119,8 +119,9 @@ sheetN.xml: <c vm="VM_INDEX">…</c>
   - In all images-in-cell fixtures in this repo, we observed the `futureMetadata`/`rvb` variant where
     `rc/@v` indexes into the `futureMetadata` table and `xlrd:rvb/@i` is the rich value index.
   - Other schemas may exist in the wild; treat metadata as opaque and preserve unknown tables/attributes.
-- `richValue*.xml` can be **split across multiple parts** (`richValue.xml`, `richValue1.xml`, …). The `RV_INDEX` should be interpreted as a **global index across the concatenated `<rv>` streams** in part order.
-  - Formula interprets part order using **numeric-suffix ordering** (`richValue.xml` then `richValue1.xml`, `richValue2.xml`, …), which is enforced by
+- `richValue*.xml` (and the `richValues*.xml` naming variant) can be **split across multiple parts**
+  (e.g. `richValue.xml`, `richValue1.xml`, … or `richValues.xml`, `richValues1.xml`, …). The `RV_INDEX` should be interpreted as a **global index across the concatenated `<rv>` streams** in part order.
+  - Formula interprets part order using **numeric-suffix ordering** within a given family (`richValue.xml` then `richValue1.xml`, …; similarly for `richValues.xml` then `richValues1.xml`, …), which is enforced by
     `crates/formula-xlsx/tests/rich_value_part_numeric_suffix_order.rs`.
   - Open question (Excel): the exact ordering rules Excel uses when multiple parts exist (lexicographic vs numeric suffix). Treat the writer as
     “preserve existing parts” and avoid renumbering unless the mapping is rebuilt holistically.
@@ -525,7 +526,7 @@ Even before full rich-data editing is implemented, round-trip compatibility need
         - `richValueRel.xml` root: `<richValueRels xmlns="…/2022/richvaluerel">`
    - Other Excel builds may emit additional fields/structures; preserve unknown subtrees.
 2. **Multi-part `richValue*.xml` behavior**
-   - When does Excel split into `richValue1.xml`, `richValue2.xml`, etc.?
+   - When does Excel split into `richValue1.xml`, `richValue2.xml`, etc. (and/or the plural `richValues1.xml`, `richValues2.xml` variant)?
    - Are indices global across all parts? (Assumed yes.)
 3. **Namespace URIs / extension GUIDs**
    - Real fixtures use the `xlrd` prefix with namespace `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata`
