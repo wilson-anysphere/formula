@@ -3470,6 +3470,15 @@ if (
       {
         type: "item",
         label: t("menu.clearContents"),
+        enabled: (() => {
+          if (!allowEditCommands) return false;
+          // Prefer disabling the action when it would be a no-op for the common case
+          // (single-cell selection). For multi-cell selections we keep it enabled
+          // since efficiently checking for any non-empty cells would require scanning.
+          const isSingleCell = contextKeys.get("isSingleCell") === true;
+          if (!isSingleCell) return true;
+          return contextKeys.get("cellHasValue") === true;
+        })(),
         shortcut:
           getPrimaryCommandKeybindingDisplay("edit.clearContents", commandKeybindingDisplayIndex) ?? (isMac ? "⌫" : "Del"),
         onSelect: () => executeBuiltinCommand("edit.clearContents"),
