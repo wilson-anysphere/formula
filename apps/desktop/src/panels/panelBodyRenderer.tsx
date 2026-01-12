@@ -413,6 +413,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
         syncInstalledExtensions: () => Promise<void>;
         reloadExtension: (id: string) => Promise<void>;
         unloadExtension: (id: string) => Promise<void>;
+        resetExtensionState: (id: string) => Promise<void>;
       }
     | null = null;
 
@@ -480,6 +481,16 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
             } catch {
               // ignore
             }
+          }
+        },
+        resetExtensionState: async (id: string) => {
+          // Clearing persisted state (permissions + storage) should be possible even when the
+          // extension host has not been started yet. This keeps Marketplace uninstall behavior
+          // consistent with a clean slate reinstall.
+          try {
+            await (options.extensionHostManager?.host as any)?.resetExtensionState?.(id);
+          } catch {
+            // Best-effort: state cleanup should not block uninstall.
           }
         },
       };

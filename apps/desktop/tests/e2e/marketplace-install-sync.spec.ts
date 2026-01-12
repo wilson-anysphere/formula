@@ -428,15 +428,19 @@ export async function activate(context) {
       }, { extensionId });
 
       expect(persistedState.storage).toBeNull();
+      expect(persistedState.permissions?.[extensionId]).toBeUndefined();
+      expect(persistedState.permissions?.["formula.e2e-events"]).toBeTruthy();
+      // Contributed panel seeds may exist for built-in extensions (e.g. sample-hello) even when
+      // the marketplace-installed extension is removed. Ensure this uninstall cleaned up only
+      // the removed extension's seed entries.
       if (persistedState.seeds != null) {
         const seeds = JSON.parse(String(persistedState.seeds));
         expect(seeds?.[panelId]).toBeUndefined();
         for (const seed of Object.values(seeds ?? {})) {
-          expect((seed as any)?.extensionId).not.toBe(extensionId);
+          const owner = typeof (seed as any)?.extensionId === "string" ? String((seed as any).extensionId) : "";
+          expect(owner).not.toBe(extensionId);
         }
       }
-      expect(persistedState.permissions?.[extensionId]).toBeUndefined();
-      expect(persistedState.permissions?.["formula.e2e-events"]).toBeTruthy();
       expect(persistedState.dbState).toEqual({ installedPresent: false, packagesCount: 0 });
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
