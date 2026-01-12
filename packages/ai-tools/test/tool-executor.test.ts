@@ -373,6 +373,43 @@ describe("ToolExecutor", () => {
     expect(workbook.getCell(parseA1Cell("Sheet1!B1")).formula).toBe("=A1*10");
   });
 
+  it("apply_formatting accepts camelCase format field aliases from docs examples", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { default_sheet: "Sheet1" });
+
+    const result = await executor.execute({
+      name: "apply_formatting",
+      parameters: {
+        range: "A1",
+        format: {
+          bold: true,
+          italic: true,
+          fontSize: 16,
+          fontColor: "#FF00FF00",
+          backgroundColor: "#FFFFFF00",
+          numberFormat: "$#,##0.00",
+          horizontalAlign: "center",
+        },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("apply_formatting");
+    if (!result.ok || result.tool !== "apply_formatting") throw new Error("Unexpected tool result");
+    expect(result.data?.range).toBe("Sheet1!A1");
+    expect(result.data?.formatted_cells).toBe(1);
+
+    expect(workbook.getCell(parseA1Cell("Sheet1!A1")).format).toEqual({
+      bold: true,
+      italic: true,
+      font_size: 16,
+      font_color: "#FF00FF00",
+      background_color: "#FFFFFF00",
+      number_format: "$#,##0.00",
+      horizontal_align: "center",
+    });
+  });
+
   it("returns validation_error for invalid A1 references", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);
