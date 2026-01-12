@@ -2,12 +2,17 @@
  * @vitest-environment jsdom
  */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as ui from "../../extensions/ui";
+import { setLocale, t } from "../../i18n/index.js";
 import { handleUpdaterEvent, installUpdaterUi } from "../updaterUi";
 
 describe("updaterUi (events)", () => {
+  beforeEach(() => {
+    setLocale("en-US");
+  });
+
   afterEach(() => {
     try {
       vi.runOnlyPendingTimers();
@@ -43,7 +48,7 @@ describe("updaterUi (events)", () => {
     expect(toastSpy).toHaveBeenCalledTimes(1);
 
     const toast = document.querySelector('[data-testid="toast"]');
-    expect(toast?.textContent).toContain("up to date");
+    expect(toast?.textContent).toBe(t("updater.upToDate"));
 
     expect(show.mock.invocationCallOrder[0]).toBeLessThan(toastSpy.mock.invocationCallOrder[0]);
     expect(setFocus.mock.invocationCallOrder[0]).toBeLessThan(toastSpy.mock.invocationCallOrder[0]);
@@ -89,7 +94,7 @@ describe("updaterUi (events)", () => {
     expect(toastSpy).toHaveBeenCalledTimes(1);
 
     const toast = document.querySelector('[data-testid="toast"]');
-    expect(toast?.textContent).toContain("Already checking");
+    expect(toast?.textContent).toBe(t("updater.alreadyChecking"));
 
     expect(show.mock.invocationCallOrder[0]).toBeLessThan(toastSpy.mock.invocationCallOrder[0]);
     expect(setFocus.mock.invocationCallOrder[0]).toBeLessThan(toastSpy.mock.invocationCallOrder[0]);
@@ -143,6 +148,6 @@ describe("updaterUi (events)", () => {
 
     const toasts = document.querySelectorAll('[data-testid="toast"]');
     expect(toasts).toHaveLength(2);
-    expect(toasts[1]?.textContent).toContain("up to date");
+    expect(toasts[1]?.textContent).toBe(t("updater.upToDate"));
   });
 });

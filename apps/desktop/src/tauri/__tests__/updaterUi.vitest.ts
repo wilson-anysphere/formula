@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { registerAppQuitHandlers } from "../appQuit";
+import { setLocale, t } from "../../i18n/index.js";
 
 const mocks = vi.hoisted(() => {
   return {
@@ -15,6 +16,10 @@ vi.mock("../updater", () => ({
 }));
 
 describe("updater restart", () => {
+  beforeEach(() => {
+    setLocale("en-US");
+  });
+
   afterEach(() => {
     registerAppQuitHandlers(null);
     mocks.installUpdateAndRestart.mockReset();
@@ -107,6 +112,6 @@ describe("updater restart", () => {
     const toast = document.querySelector<HTMLElement>('[data-testid="toast"]');
     expect(toast).not.toBeNull();
     expect(toast?.dataset.type).toBe("error");
-    expect(toast?.textContent).toBe("Failed to restart to install the update.");
+    expect(toast?.textContent).toBe(t("updater.restartFailed"));
   });
 });

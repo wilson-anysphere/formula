@@ -1,4 +1,5 @@
 import { showToast } from "../extensions/ui.js";
+import { t } from "../i18n/index.js";
 
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -90,10 +91,10 @@ export async function checkForUpdatesFromCommandPalette(source: UpdateCheckSourc
   const invoke = getTauriInvoke();
   if (!invoke) {
     try {
-      showToast("Update checks are only available in the desktop app.");
+      showToast(t("updater.desktopOnly"));
     } catch (err) {
       // Avoid crashing lightweight embedders/tests that don't render a toast root.
-      console.warn("Update checks are only available in the desktop app.", err);
+      console.warn(t("updater.desktopOnly"), err);
     }
     return;
   }

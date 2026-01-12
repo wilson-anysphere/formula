@@ -1,4 +1,5 @@
 import { showToast } from "../extensions/ui.js";
+import { t, tWithVars } from "../i18n/index.js";
 
 import { requestAppRestart } from "./appQuit";
 import { shellOpen } from "./shellOpen";
@@ -52,7 +53,9 @@ type UpdaterUpdate = {
 
 type DialogElements = {
   dialog: HTMLDialogElement;
+  title: HTMLElement;
   version: HTMLElement;
+  releaseNotesTitle: HTMLElement;
   body: HTMLElement;
   status: HTMLElement;
   progressWrap: HTMLElement;
@@ -279,6 +282,23 @@ function extractNumber(value: unknown): number | null {
   return Number.isFinite(num) ? num : null;
 }
 
+function errorMessage(err: unknown): string {
+  if (typeof err === "string") return err;
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object" && "message" in err) {
+    try {
+      return String((err as any).message);
+    } catch {
+      // fall through
+    }
+  }
+  try {
+    return String(err);
+  } catch {
+    return t("updater.unknownError");
+  }
+}
+
 function ensureUpdateDialog(): DialogElements {
   if (updateDialog) return updateDialog;
 
@@ -290,16 +310,22 @@ function ensureUpdateDialog(): DialogElements {
 
   const title = document.createElement("div");
   title.className = "dialog__title";
-  title.textContent = "Update available";
+  title.textContent = t("updater.updateAvailableTitle");
 
   const version = document.createElement("div");
   version.dataset.testid = "updater-version";
   version.style.fontWeight = "600";
 
+  const releaseNotesTitle = document.createElement("div");
+  releaseNotesTitle.dataset.testid = "updater-release-notes-title";
+  releaseNotesTitle.style.marginTop = "10px";
+  releaseNotesTitle.style.fontWeight = "600";
+  releaseNotesTitle.textContent = t("updater.releaseNotes");
+
   const body = document.createElement("pre");
   body.dataset.testid = "updater-body";
   body.style.whiteSpace = "pre-wrap";
-  body.style.margin = "10px 0 0";
+  body.style.margin = "6px 0 0";
   body.style.maxHeight = "240px";
   body.style.overflow = "auto";
 
@@ -336,22 +362,22 @@ function ensureUpdateDialog(): DialogElements {
 
   const laterBtn = document.createElement("button");
   laterBtn.type = "button";
-  laterBtn.textContent = "Later";
+  laterBtn.textContent = t("updater.later");
   laterBtn.dataset.testid = "updater-later";
 
   const viewVersionsBtn = document.createElement("button");
   viewVersionsBtn.type = "button";
-  viewVersionsBtn.textContent = "Open release page";
+  viewVersionsBtn.textContent = t("updater.openReleasePage");
   viewVersionsBtn.dataset.testid = "updater-view-versions";
 
   const downloadBtn = document.createElement("button");
   downloadBtn.type = "button";
-  downloadBtn.textContent = "Download";
+  downloadBtn.textContent = t("updater.download");
   downloadBtn.dataset.testid = "updater-download";
 
   const restartBtn = document.createElement("button");
   restartBtn.type = "button";
-  restartBtn.textContent = "Restart now";
+  restartBtn.textContent = t("updater.restartNow");
   restartBtn.dataset.testid = "updater-restart";
   restartBtn.style.display = "none";
 
@@ -362,6 +388,7 @@ function ensureUpdateDialog(): DialogElements {
 
   dialog.appendChild(title);
   dialog.appendChild(version);
+  dialog.appendChild(releaseNotesTitle);
   dialog.appendChild(body);
   dialog.appendChild(status);
   dialog.appendChild(progressWrap);
@@ -415,7 +442,9 @@ function ensureUpdateDialog(): DialogElements {
 
   updateDialog = {
     dialog,
+    title,
     version,
+    releaseNotesTitle,
     body,
     status,
     progressWrap,
@@ -434,30 +463,34 @@ function renderUpdateDialog(): void {
   const els = ensureUpdateDialog();
   const info = updateInfo;
 
-  els.version.textContent = info ? `Version ${info.version}` : "";
+  els.title.textContent = t("updater.updateAvailableTitle");
+  els.version.textContent = info ? tWithVars("updater.updateAvailableMessage", { version: info.version }) : "";
   els.body.textContent = info?.body ? info.body : "";
+  els.releaseNotesTitle.textContent = t("updater.releaseNotes");
+  els.releaseNotesTitle.style.display = info?.body ? "" : "none";
 
   els.laterBtn.disabled = downloadInFlight;
   els.viewVersionsBtn.disabled = downloadInFlight;
   els.downloadBtn.disabled = downloadInFlight || !!downloadedUpdate;
-  els.downloadBtn.textContent = downloadInFlight ? "Downloading…" : "Download";
+  els.laterBtn.textContent = t("updater.later");
+  els.viewVersionsBtn.textContent = t("updater.openReleasePage");
+  els.downloadBtn.textContent = downloadInFlight ? t("updater.downloading") : t("updater.download");
 
   const readyToInstall = !!downloadedUpdate && !downloadInFlight;
   els.restartBtn.style.display = readyToInstall ? "" : "none";
   els.restartBtn.disabled = false;
 
   if (downloadInFlight) {
-    els.status.textContent = "Downloading update…";
+    els.status.textContent = t("updater.downloadInProgress");
     els.progressWrap.style.display = "";
     renderProgress();
   } else if (lastUpdateError) {
     els.progressWrap.style.display = "none";
-    els.status.textContent =
-      downloadedUpdate
-        ? `Update failed to install automatically.\n\nDownload manually from the release page, or try restarting again.\n\n${lastUpdateError}`
-        : `Update failed to download.\n\nDownload manually from the release page.\n\n${lastUpdateError}`;
+    els.status.textContent = downloadedUpdate
+      ? tWithVars("updater.installFailedWithMessage", { message: lastUpdateError })
+      : tWithVars("updater.downloadFailedWithMessage", { message: lastUpdateError });
   } else if (downloadedUpdate) {
-    els.status.textContent = "Update ready to install. Restart now?";
+    els.status.textContent = `${t("updater.downloadComplete")} ${t("updater.restartToInstall")}`;
     els.progressWrap.style.display = "none";
   } else {
     els.status.textContent = "";
@@ -465,24 +498,20 @@ function renderUpdateDialog(): void {
   }
 
   if (lastUpdateError) {
-    els.viewVersionsBtn.textContent = "Download manually";
+    els.viewVersionsBtn.textContent = t("updater.downloadManually");
     els.viewVersionsBtn.style.background = "var(--accent)";
     els.viewVersionsBtn.style.borderColor = "var(--accent-border)";
     els.viewVersionsBtn.style.color = "var(--text-on-accent)";
     els.viewVersionsBtn.style.fontWeight = "700";
   } else {
-    els.viewVersionsBtn.textContent = "Open release page";
+    els.viewVersionsBtn.textContent = t("updater.openReleasePage");
     els.viewVersionsBtn.style.background = "";
     els.viewVersionsBtn.style.borderColor = "";
     els.viewVersionsBtn.style.color = "";
     els.viewVersionsBtn.style.fontWeight = "";
   }
-
-  if (readyToInstall && !getRelaunchOrNull()) {
-    els.restartBtn.textContent = "Quit now";
-  } else {
-    els.restartBtn.textContent = "Restart now";
-  }
+  els.restartBtn.textContent =
+    readyToInstall && !getRelaunchOrNull() ? t("updater.quitNow") : t("updater.restartNow");
 }
 
 function renderProgress(): void {
@@ -508,7 +537,7 @@ function renderProgress(): void {
 
   // Unknown total size; show an indeterminate progress bar.
   els.progressBar.removeAttribute("value");
-  els.progressText.textContent = "Downloading…";
+  els.progressText.textContent = t("updater.downloading");
 }
 
 function updateProgress(progress: UpdaterDownloadProgress): void {
@@ -548,7 +577,7 @@ async function startUpdateDownload(): Promise<void> {
   const updater = getUpdaterApiOrNull();
   if (!updater) {
     console.warn("Updater API not available; cannot download update.");
-    lastUpdateError = "Auto-updater is unavailable in this build.";
+    lastUpdateError = t("updater.unavailable");
     showToast(lastUpdateError, "error");
     renderUpdateDialog();
     try {
@@ -570,7 +599,7 @@ async function startUpdateDownload(): Promise<void> {
   try {
     const update = await updater.check();
     if (!update) {
-      throw new Error("Update no longer available");
+      throw new Error(t("updater.updateNoLongerAvailable"));
     }
     await update.download((progress) => {
       try {
@@ -582,8 +611,8 @@ async function startUpdateDownload(): Promise<void> {
     downloadedUpdate = update;
   } catch (err) {
     console.error("Update download failed:", err);
-    lastUpdateError = String(err);
-    showToast(lastUpdateError, "error");
+    lastUpdateError = errorMessage(err);
+    showToast(tWithVars("updater.errorWithMessage", { message: lastUpdateError }), "error");
     try {
       ensureUpdateDialog().viewVersionsBtn.focus();
     } catch {
@@ -630,21 +659,21 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
     case "update-check-already-running": {
       if (source === "manual") {
         setManualUpdateCheckFollowUp(true);
-        showToast("Already checking for updates…", "info");
+        showToast(t("updater.alreadyChecking"), "info");
       }
       break;
     }
     case "update-check-started": {
       if (source === "manual") {
         setManualUpdateCheckFollowUp(false);
-        showToast("Checking for updates…", "info");
+        showToast(t("updater.checking"), "info");
       }
       break;
     }
     case "update-not-available": {
       if (shouldSurfaceToast) {
         setManualUpdateCheckFollowUp(false);
-        showToast("You're up to date.", "info");
+        showToast(t("updater.upToDate"), "info");
       }
       break;
     }
@@ -656,8 +685,8 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
           ? payload.error
           : typeof payload?.message === "string" && payload.message.trim() !== ""
             ? payload.message
-            : "Unknown error";
-      showToast(message, "error");
+            : t("updater.unknownError");
+      showToast(tWithVars("updater.errorWithMessage", { message }), "error");
       break;
     }
     case "update-available": {
@@ -715,7 +744,7 @@ export async function restartToInstallUpdate(): Promise<boolean> {
           await installUpdateAndRestart();
         }
       } catch (err) {
-        lastUpdateError = String(err);
+        lastUpdateError = errorMessage(err);
         throw err;
       }
 
@@ -728,6 +757,6 @@ export async function restartToInstallUpdate(): Promise<boolean> {
         }
       }
     },
-    beforeQuitErrorToast: "Failed to restart to install the update.",
+    beforeQuitErrorToast: t("updater.restartFailed"),
   });
 }
