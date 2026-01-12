@@ -1312,6 +1312,9 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         }
       }
 
+      // Clicking anywhere other than a resize handle breaks the double-click sequence.
+      lastResizeClickRef.current = null;
+
       if (interactionModeRef.current === "default") {
         const source = renderer.getSelectionRange();
         const handleRect = renderer.getFillHandleRect();
@@ -1646,22 +1649,62 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
             const prevRange = renderer.getSelectionRange();
 
             const point = getViewportPoint(event);
-            const picked = renderer.pickCellAt(point.x, point.y);
-            if (picked) {
-              const { rowCount, colCount } = renderer.scroll.getCounts();
-              const viewport = renderer.scroll.getViewportState();
-              const headerRows = headerRowsRef.current;
-              const headerCols = headerColsRef.current;
-              const dataStartRow = headerRows >= rowCount ? 0 : headerRows;
-              const dataStartCol = headerCols >= colCount ? 0 : headerCols;
 
-              const isCornerHeader =
-                headerRows > 0 && headerCols > 0 && picked.row < headerRows && picked.col < headerCols;
-              const isColumnHeader = headerRows > 0 && picked.row < headerRows && picked.col >= headerCols;
-              const isRowHeader = headerCols > 0 && picked.col < headerCols && picked.row >= headerRows;
+            const resizeHit = enableResizeRef.current ? getResizeHit(point.x, point.y) : null;
+            if (resizeHit) {
+              const ts = nowMs();
+              const last = lastResizeClickRef.current;
 
-              if (isCornerHeader || isColumnHeader || isRowHeader) {
-                const currentSelection = renderer.getSelection();
+              if (last && last.hit.kind === resizeHit.kind && last.hit.index === resizeHit.index && ts - last.time <= DOUBLE_CLICK_MS) {
+                lastResizeClickRef.current = null;
+
+                const prevSize =
+                  resizeHit.kind === "col"
+                    ? renderer.getColWidth(resizeHit.index)
+                    : renderer.getRowHeight(resizeHit.index);
+                const defaultSize =
+                  resizeHit.kind === "col" ? renderer.scroll.cols.defaultSize : renderer.scroll.rows.defaultSize;
+
+                const nextSize =
+                  resizeHit.kind === "col"
+                    ? renderer.autoFitCol(resizeHit.index, { maxWidth: AUTO_FIT_MAX_COL_WIDTH })
+                    : renderer.autoFitRow(resizeHit.index, { maxHeight: AUTO_FIT_MAX_ROW_HEIGHT });
+                syncScrollbars();
+
+                if (nextSize !== prevSize) {
+                  onAxisSizeChangeRef.current?.({
+                    kind: resizeHit.kind,
+                    index: resizeHit.index,
+                    size: nextSize,
+                    previousSize: prevSize,
+                    defaultSize,
+                    zoom: zoomRef.current,
+                    source: "autoFit"
+                  });
+                }
+              } else {
+                lastResizeClickRef.current = { time: ts, hit: resizeHit };
+              }
+            } else {
+              // Touch taps outside resize handles break the double-tap sequence.
+              lastResizeClickRef.current = null;
+
+              const picked = renderer.pickCellAt(point.x, point.y);
+              if (picked) {
+                const { rowCount, colCount } = renderer.scroll.getCounts();
+                const viewport = renderer.scroll.getViewportState();
+                const headerRows = headerRowsRef.current;
+                const headerCols = headerColsRef.current;
+                const dataStartRow = headerRows >= rowCount ? 0 : headerRows;
+                const dataStartCol = headerCols >= colCount ? 0 : headerCols;
+
+                const isCornerHeader =
+                  headerRows > 0 && headerCols > 0 && picked.row < headerRows && picked.col < headerCols;
+                const isColumnHeader = headerRows > 0 && picked.row < headerRows && picked.col >= headerCols;
+                const isRowHeader = headerCols > 0 && picked.col < headerCols && picked.row >= headerRows;
+
+                if (isCornerHeader || isColumnHeader || isRowHeader) {
+                  const currentSelection = renderer.getSelection();
 
                 if (isCornerHeader) {
                   const range: CellRange = {
@@ -1722,6 +1765,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
               ) {
                 onSelectionRangeChangeRef.current?.(nextRange);
               }
+            }
             }
           }
         }

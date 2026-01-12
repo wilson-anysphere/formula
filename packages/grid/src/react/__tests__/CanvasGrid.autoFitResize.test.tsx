@@ -11,7 +11,7 @@ import type { CellProvider } from "../../model/CellProvider";
 
 function createPointerEvent(
   type: string,
-  options: { clientX: number; clientY: number; pointerId: number }
+  options: { clientX: number; clientY: number; pointerId: number; pointerType?: string }
 ): Event {
   const PointerEventCtor = (window as unknown as { PointerEvent?: typeof PointerEvent }).PointerEvent;
   if (PointerEventCtor) {
@@ -21,7 +21,8 @@ function createPointerEvent(
       clientX: options.clientX,
       clientY: options.clientY,
       buttons: 1,
-      pointerId: options.pointerId
+      pointerId: options.pointerId,
+      pointerType: options.pointerType
     } as PointerEventInit);
   }
 
@@ -33,6 +34,7 @@ function createPointerEvent(
     buttons: 1
   });
   Object.defineProperty(event, "pointerId", { value: options.pointerId });
+  if (options.pointerType) Object.defineProperty(event, "pointerType", { value: options.pointerType });
   return event;
 }
 
@@ -142,6 +144,87 @@ describe("CanvasGrid resize auto-fit interactions", () => {
 
     const after = api!.getColWidth(1);
     expect(after).not.toBe(before);
+
+    expect(onAxisSizeChange).toHaveBeenCalledTimes(1);
+    expect(onAxisSizeChange.mock.calls[0]?.[0]).toMatchObject({
+      kind: "col",
+      index: 1,
+      source: "autoFit"
+    });
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
+  it("double tapping a header resize boundary auto-fits the column on touch", async () => {
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (col === 1 && row === 1) return { row, col, value: "This is a long cell value" };
+        if (row === 0 && col === 1) return { row, col, value: "A" };
+        if (row === 1 && col === 0) return { row, col, value: 1 };
+        return null;
+      }
+    };
+
+    const apiRef = React.createRef<GridApi>();
+    const onAxisSizeChange = vi.fn<(change: GridAxisSizeChange) => void>();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={provider}
+          rowCount={20}
+          colCount={10}
+          defaultRowHeight={10}
+          defaultColWidth={50}
+          frozenRows={1}
+          frozenCols={1}
+          enableResize
+          apiRef={apiRef}
+          onAxisSizeChange={onAxisSizeChange}
+        />
+      );
+    });
+
+    const api = apiRef.current;
+    expect(api).toBeTruthy();
+
+    const before = api!.getColWidth(1);
+
+    const colARect = api!.getCellRect(0, 1);
+    expect(colARect).not.toBeNull();
+
+    const boundaryX = colARect!.x + colARect!.width;
+    const boundaryY = colARect!.y + colARect!.height / 2;
+
+    const selectionCanvas = host.querySelector('[data-testid="canvas-grid-selection"]') as HTMLCanvasElement;
+    expect(selectionCanvas).toBeTruthy();
+
+    await act(async () => {
+      selectionCanvas.dispatchEvent(
+        createPointerEvent("pointerdown", { clientX: boundaryX, clientY: boundaryY, pointerId: 1, pointerType: "touch" })
+      );
+      selectionCanvas.dispatchEvent(
+        createPointerEvent("pointerup", { clientX: boundaryX, clientY: boundaryY, pointerId: 1, pointerType: "touch" })
+      );
+      selectionCanvas.dispatchEvent(
+        createPointerEvent("pointerdown", { clientX: boundaryX, clientY: boundaryY, pointerId: 1, pointerType: "touch" })
+      );
+      selectionCanvas.dispatchEvent(
+        createPointerEvent("pointerup", { clientX: boundaryX, clientY: boundaryY, pointerId: 1, pointerType: "touch" })
+      );
+    });
+
+    const after = api!.getColWidth(1);
+    expect(after).not.toBe(before);
+    // Touch resize-handle taps should not select cells.
+    expect(api!.getSelection()).toBeNull();
 
     expect(onAxisSizeChange).toHaveBeenCalledTimes(1);
     expect(onAxisSizeChange.mock.calls[0]?.[0]).toMatchObject({
