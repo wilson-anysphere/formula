@@ -230,7 +230,8 @@
 }
 
 .ribbon-button__icon svg,
-.ribbon-dropdown__icon svg {
+.ribbon-dropdown__icon svg,
+.ribbon-backstage__icon svg {
   display: block;
 }
 
@@ -471,6 +472,23 @@
   gap: 4px;
 }
 
+.ribbon-backstage__item-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ribbon-backstage__icon {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+}
+
 .ribbon-backstage__item {
   width: 100%;
   display: flex;
@@ -487,7 +505,7 @@
 }
 
 .ribbon-backstage__item:hover:not(:disabled) {
-  background: var(--bg-secondary);
+  background: var(--bg-hover);
 }
 
 .ribbon-backstage__item:disabled {

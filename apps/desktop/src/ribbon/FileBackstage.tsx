@@ -1,6 +1,7 @@
 import React from "react";
 
 import type { RibbonFileActions } from "./ribbonSchema.js";
+import { getRibbonIcon } from "../ui/icons/ribbonIconMap.js";
 
 export interface FileBackstageProps {
   open: boolean;
@@ -9,6 +10,7 @@ export interface FileBackstageProps {
 }
 
 type BackstageItem = {
+  iconId: string;
   label: string;
   hint: string;
   ariaKeyShortcuts: string;
@@ -50,6 +52,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
   const items = React.useMemo<BackstageItem[]>(
     () => [
       {
+        iconId: "file.new.new",
         label: "New Workbook",
         hint: shortcut("N"),
         ariaKeyShortcuts: ariaShortcut("N"),
@@ -58,6 +61,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.newWorkbook,
       },
       {
+        iconId: "file.open.open",
         label: "Open…",
         hint: shortcut("O"),
         ariaKeyShortcuts: ariaShortcut("O"),
@@ -66,6 +70,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.openWorkbook,
       },
       {
+        iconId: "file.save.save",
         label: "Save",
         hint: shortcut("S"),
         ariaKeyShortcuts: ariaShortcut("S"),
@@ -74,6 +79,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.saveWorkbook,
       },
       {
+        iconId: "file.save.saveAs",
         label: "Save As…",
         hint: shortcut("S", { shift: true }),
         ariaKeyShortcuts: ariaShortcut("S", { shift: true }),
@@ -82,6 +88,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.saveWorkbookAs,
       },
       {
+        iconId: "file.print.print",
         label: "Print…",
         hint: shortcut("P"),
         ariaKeyShortcuts: ariaShortcut("P"),
@@ -90,6 +97,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.print,
       },
       {
+        iconId: "file.print.pageSetup",
         label: "Page Setup…",
         hint: "",
         ariaKeyShortcuts: "",
@@ -98,6 +106,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.pageSetup,
       },
       {
+        iconId: "file.options.close",
         label: "Close Window",
         hint: shortcut("W"),
         ariaKeyShortcuts: ariaShortcut("W"),
@@ -106,6 +115,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.closeWindow,
       },
       {
+        iconId: "file.options.close",
         label: "Quit",
         hint: shortcut("Q"),
         ariaKeyShortcuts: ariaShortcut("Q"),
@@ -225,7 +235,17 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
                   item.onInvoke?.();
                 }}
               >
-                <span className="ribbon-backstage__label">{item.label}</span>
+                <span className="ribbon-backstage__item-main">
+                  {(() => {
+                    const IconComponent = getRibbonIcon(item.iconId);
+                    return IconComponent ? (
+                      <span className="ribbon-backstage__icon" aria-hidden="true">
+                        <IconComponent width="100%" height="100%" />
+                      </span>
+                    ) : null;
+                  })()}
+                  <span className="ribbon-backstage__label">{item.label}</span>
+                </span>
                 <span className="ribbon-backstage__hint">{item.hint}</span>
               </button>
             );
