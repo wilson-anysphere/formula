@@ -86,7 +86,11 @@ pub struct ClipboardWritePayload {
 }
 
 impl ClipboardWritePayload {
-    pub fn validate(&self) -> Result<(), ClipboardError> {
+    fn validate_with_limits(
+        &self,
+        max_rich_text_bytes: usize,
+        max_image_bytes: usize,
+    ) -> Result<(), ClipboardError> {
         if self.text.is_none() && self.html.is_none() && self.rtf.is_none() && self.png_base64.is_none() {
             return Err(ClipboardError::InvalidPayload(
                 "must include at least one of text, html, rtf, pngBase64".to_string(),
@@ -94,17 +98,17 @@ impl ClipboardWritePayload {
         }
 
         if let Some(html) = self.html.as_deref() {
-            if html.as_bytes().len() > MAX_RICH_TEXT_BYTES {
+            if html.as_bytes().len() > max_rich_text_bytes {
                 return Err(ClipboardError::InvalidPayload(format!(
-                    "html exceeds maximum size ({MAX_RICH_TEXT_BYTES} bytes)"
+                    "html exceeds maximum size ({max_rich_text_bytes} bytes)"
                 )));
             }
         }
 
         if let Some(rtf) = self.rtf.as_deref() {
-            if rtf.as_bytes().len() > MAX_RICH_TEXT_BYTES {
+            if rtf.as_bytes().len() > max_rich_text_bytes {
                 return Err(ClipboardError::InvalidPayload(format!(
-                    "rtf exceeds maximum size ({MAX_RICH_TEXT_BYTES} bytes)"
+                    "rtf exceeds maximum size ({max_rich_text_bytes} bytes)"
                 )));
             }
         }
@@ -112,14 +116,18 @@ impl ClipboardWritePayload {
         if let Some(png_base64) = self.png_base64.as_deref() {
             if !png_base64.trim().is_empty() {
                 let decoded_len = estimate_base64_decoded_len(png_base64).unwrap_or(usize::MAX);
-                if decoded_len > MAX_IMAGE_BYTES {
+                if decoded_len > max_image_bytes {
                     return Err(ClipboardError::InvalidPayload(format!(
-                        "pngBase64 exceeds maximum size ({MAX_IMAGE_BYTES} bytes)"
+                        "pngBase64 exceeds maximum size ({max_image_bytes} bytes)"
                     )));
                 }
             }
         }
         Ok(())
+    }
+
+    pub fn validate(&self) -> Result<(), ClipboardError> {
+        self.validate_with_limits(MAX_RICH_TEXT_BYTES, MAX_IMAGE_BYTES)
     }
 }
 
@@ -290,6 +298,25 @@ mod tests {
         let err = payload.validate().expect_err("expected size check to fail");
         match err {
             ClipboardError::InvalidPayload(msg) => assert!(msg.contains("rtf exceeds maximum size")),
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_rejects_oversized_png_base64() {
+        let payload = ClipboardWritePayload {
+            text: Some("hello".to_string()),
+            html: None,
+            rtf: None,
+            // "AAAA" decodes to 3 bytes.
+            png_base64: Some("AAAA".to_string()),
+        };
+
+        let err = payload
+            .validate_with_limits(MAX_RICH_TEXT_BYTES, 2)
+            .expect_err("expected size check to fail");
+        match err {
+            ClipboardError::InvalidPayload(msg) => assert!(msg.contains("pngBase64 exceeds maximum size")),
             other => panic!("unexpected error: {other:?}"),
         }
     }
