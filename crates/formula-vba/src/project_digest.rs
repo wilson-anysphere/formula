@@ -16,16 +16,10 @@ use crate::{
 ///
 /// Notes:
 /// - For legacy VBA signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`), Office
-///   stores 16-byte **MD5** binding digest bytes even when `DigestInfo.digestAlgorithm` advertises
-///   SHA-256 (MS-OSHARED §4.3). In practice, digest *length* is often a more reliable indicator than
-///   the OID for these variants.
-/// - For v3 (`\x05DigitalSignatureExt`), MS-OVBA defines `ContentsHashV3` as a **SHA-256** over the
-///   v3 `ProjectNormalizedData` transcript; this is typically the binding digest bytes stored in the
-///   signature. Some producers emit inconsistent `DigestInfo` algorithm OIDs; verifiers should
-///   compare digest bytes rather than relying on the OID.
-/// - Other algorithms are supported for debugging/out-of-spec inputs; callers verifying
-///   Office-produced signatures should typically use `DigestAlg::Md5` for v1/v2 binding and
-///   `DigestAlg::Sha256` for v3 binding.
+///   stores a 16-byte **MD5** digest for binding even when `DigestInfo.digestAlgorithm` indicates
+///   SHA-256 (MS-OSHARED §4.3).
+/// - For v3 signature streams (`\x05DigitalSignatureExt`), the digest algorithm can vary and often
+///   matches the `DigestInfo` OID (SHA-256 is common).
 ///
 /// https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,7 +28,7 @@ pub enum DigestAlg {
     Md5,
     /// SHA-1 (supported for debugging/tests; not expected for Office-produced VBA signature binding).
     Sha1,
-    /// SHA-256 (32 bytes). Spec-correct for v3 `ContentsHashV3` signature binding.
+    /// SHA-256 (commonly observed for `\x05DigitalSignatureExt` binding digests).
     Sha256,
 }
 
@@ -104,28 +98,18 @@ pub fn compute_vba_project_digest(
     Ok(hasher.finalize())
 }
 
-/// Compute a digest for v3 (`\x05DigitalSignatureExt`) signature binding.
+/// Compute a digest over `formula-vba`'s current v3 binding transcript for a `vbaProject.bin`.
 ///
-/// This is computed over the v3 `ProjectNormalizedData` transcript produced by
-/// [`project_normalized_data_v3_transcript`], which incorporates:
-/// - filtered `PROJECT` stream properties (excluding keys like `ID`, `Document`, `DocModule`,
-///   `CMG`, `DPB`, `GC`, and other protection-related fields; ignoring the `[Workspace]` section)
+/// This hashes the transcript produced by [`project_normalized_data_v3_transcript`], which currently
+/// concatenates:
+/// - filtered `PROJECT` stream lines (excluding keys like `ID`, `Document`, `CMG`, `DPB`, `GC`)
 /// - `V3ContentNormalizedData`
 /// - `FormsNormalizedData`
 ///
-/// Spec reference:
+/// Important: this is **best-effort** and is not a spec-accurate implementation of the MS-OVBA v3
+/// `ContentBuffer` definition (`V3ContentNormalizedData || ProjectNormalizedData`).
 ///
-/// MS-OVBA §2.4.2.7 defines `ContentsHashV3` (the binding value for `DigitalSignatureExt`) as:
-///
-/// `ContentsHashV3 = SHA-256(ProjectNormalizedData)`
-///
-/// Where `ProjectNormalizedData` is the deterministic transcript produced by
-/// [`crate::project_normalized_data_v3_transcript`] (filtered `PROJECT` stream properties ||
-/// `V3ContentNormalizedData` || `FormsNormalizedData`).
-///
-/// This helper accepts `alg` for debugging/compatibility checks; callers verifying Office-produced
-/// v3 VBA signatures should typically use `DigestAlg::Sha256` (or [`crate::contents_hash_v3`] for
-/// the spec-defined digest).
+/// The transcript is hashed using the requested `alg` (MD5/SHA-1/SHA-256).
 pub fn compute_vba_project_digest_v3(
     vba_project_bin: &[u8],
     alg: DigestAlg,

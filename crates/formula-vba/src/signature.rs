@@ -72,13 +72,14 @@ pub struct VbaDigitalSignature {
     /// Whether the signature is bound to the VBA project via the MS-OVBA digest ("Contents Hash")
     /// mechanism (`ContentsHashV3` for `DigitalSignatureExt`).
     ///
-    /// Notes:
-    /// - For legacy signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`), Office
-    ///   uses **16-byte MD5** binding digest bytes per MS-OSHARED §4.3 even when
-    ///   `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256.
-    /// - For v3 (`DigitalSignatureExt`), Office uses MS-OVBA `ContentsHashV3` (SHA-256; commonly 32
-    ///   bytes) over v3 `ProjectNormalizedData`. The `DigestInfo` algorithm OID is not authoritative
-    ///   for binding (some producers emit inconsistent OIDs); binding compares digest bytes.
+    /// Note: per MS-OSHARED §4.3, Office uses **16-byte MD5** binding digest bytes for legacy VBA
+    /// signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`) even when
+    /// `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256.
+    ///
+    /// For the v3 `\x05DigitalSignatureExt` variant, signatures commonly embed a 32-byte SHA-256
+    /// binding digest over an MS-OVBA v3 transcript (but producers can vary). `formula-vba` treats
+    /// v3 binding as best-effort and currently compares the signed digest to
+    /// [`crate::contents_hash_v3`].
     pub binding: VbaSignatureBinding,
 }
 
@@ -107,16 +108,13 @@ pub struct VbaDigitalSignatureBound {
 
 /// Best-effort debug information for MS-OVBA Contents Hash binding verification.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct VbaProjectDigestDebugInfo {
+    pub struct VbaProjectDigestDebugInfo {
     /// OID from `DigestInfo.digestAlgorithm.algorithm` (if found).
     ///
-    /// Note: this OID is not authoritative for binding:
-    /// - v1/v2: Office uses 16-byte MD5 digest bytes per MS-OSHARED §4.3 even when the OID indicates
-    ///   SHA-256.
-    /// - v3: binding compares the signed digest bytes to `ContentsHashV3` (SHA-256) regardless of
-    ///   the OID (some producers emit inconsistent OIDs).
-    ///
-    /// We still surface the OID for debugging/UI display.
+    /// Note: for legacy VBA signature streams (`DigitalSignature` / `DigitalSignatureEx`), this OID
+    /// is not authoritative for binding; Office uses 16-byte MD5 digest bytes per MS-OSHARED §4.3
+    /// even when the OID indicates SHA-256. For v3 (`DigitalSignatureExt`), the OID is surfaced for
+    /// debugging/UI display (SHA-256 is common, but not universal).
     pub hash_algorithm_oid: Option<String>,
     /// Human-readable name for the hash algorithm (best-effort).
     pub hash_algorithm_name: Option<String>,
@@ -461,6 +459,8 @@ pub fn verify_vba_digital_signature_bound(
 
         match signature.stream_kind {
             VbaSignatureStreamKind::DigitalSignatureExt => {
+                // Best-effort: compute the v3 binding digest using the SHA-256 helper and compare it
+                // to the signed digest bytes.
                 if let Ok(computed) = crate::contents_hash_v3(vba_project_bin) {
                     debug.computed_digest = Some(computed.clone());
                     if signature.verification == VbaSignatureVerification::SignedVerified {
@@ -817,12 +817,13 @@ pub fn verify_vba_digital_signature_with_trust(
 /// Verify whether a VBA signature blob is bound to the given `vbaProject.bin` payload via the
 /// MS-OVBA "Contents Hash" mechanism.
 ///
-/// Excel associates each `\x05DigitalSignature*` stream name with a specific MS-OVBA
-/// contents-hash transcript:
-/// - `\x05DigitalSignature`    → ContentsHashV1 (MD5 over `ContentNormalizedData`)
-/// - `\x05DigitalSignatureEx`  → ContentsHashV2 (Agile Content Hash; MD5 over
-///   `ContentNormalizedData || FormsNormalizedData`)
-/// - `\x05DigitalSignatureExt` → ContentsHashV3 (SHA-256 over v3 `ProjectNormalizedData`)
+/// Excel associates each `\x05DigitalSignature*` stream name with a specific contents-hash
+/// transcript:
+/// - `\x05DigitalSignature`    → legacy Content Hash (MD5 over `ContentNormalizedData`; MS-OSHARED §4.3)
+/// - `\x05DigitalSignatureEx`  → legacy Agile Content Hash (MD5 over
+///                               `ContentNormalizedData || FormsNormalizedData`; MS-OSHARED §4.3)
+/// - `\x05DigitalSignatureExt` → MS-OVBA v3 transcript; `formula-vba` currently compares the signed
+///                               digest bytes to [`crate::contents_hash_v3`] (SHA-256 helper)
 ///
 /// When the stream path is unknown or ambiguous, this uses a conservative fallback: it computes
 /// every supported contents-hash version that could plausibly match the signed digest length and

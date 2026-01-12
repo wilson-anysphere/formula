@@ -14,19 +14,19 @@ struct ModuleUnicodePresence {
     module_docstring: bool,
 }
 
-/// Build a dir-record-only v3 project/module metadata transcript derived from selected `VBA/dir`
-/// records (MS-OVBA §2.4.2.6).
+/// Build a dir-record allowlist transcript of project/module metadata.
 ///
-/// This helper is useful for debugging/spec work, but it does **not** include:
-/// - v3 module source normalization (`V3ContentNormalizedData`), or
-/// - designer storage bytes (`FormsNormalizedData`).
+/// This helper concatenates selected `VBA/dir` record payload bytes in stored order and applies the
+/// ANSI-vs-Unicode selection rules needed for stable hashing.
 ///
-/// For the v3 signature binding transcript used by `ContentsHashV3` / `\x05DigitalSignatureExt`,
-/// use [`crate::project_normalized_data_v3_transcript`].
+/// Important: despite the historical naming, this is **not** MS-OVBA §2.4.2.6
+/// `ProjectNormalizedData` (`NormalizeProjectStream`), which is derived from the textual `PROJECT`
+/// stream.
 ///
-/// For legacy/test helpers and building blocks, see:
-/// - [`crate::project_normalized_data`] (MS-OVBA `ProjectNormalizedData`), and
-/// - [`crate::v3_content_normalized_data`] (MS-OVBA `V3ContentNormalizedData`).
+/// For `formula-vba`'s current v3 signature-binding transcript, use
+/// [`crate::project_normalized_data_v3_transcript`].
+///
+/// For spec-driven v3 building blocks, see [`crate::v3_content_normalized_data`].
 ///
 /// Notes / invariants enforced for hashing:
 /// - Records are processed in the **stored order** from the decompressed `VBA/dir` stream.
@@ -180,8 +180,8 @@ pub fn project_normalized_data_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                 }
             }
 
-            // All other records (references, module offsets, etc.) are excluded from V3
-            // ProjectNormalizedData.
+            // All other records (references, module offsets, etc.) are excluded from this helper's
+            // output.
             _ => {}
         }
     }

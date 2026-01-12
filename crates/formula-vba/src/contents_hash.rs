@@ -32,17 +32,19 @@ const V3_DEFAULT_ATTRIBUTES: [&[u8]; 7] = [
 // MS-OVBA §2.4.2.5: case-insensitive prefix for skipping VB_Name lines.
 const V3_VB_NAME_PREFIX: &[u8] = b"Attribute VB_Name = ";
 
-/// Build the MS-OVBA §2.4.2.6 `ProjectNormalizedData` byte sequence.
+/// Build a `ProjectNormalizedData`-like transcript for a VBA project.
 ///
-/// This transcript is derived from the decompressed `VBA/dir` stream and the optional `PROJECT`
-/// stream. It incorporates:
-/// - selected project information record payload bytes from `VBA/dir`,
-/// - `ProjectProperties` and `HostExtenders` from the `PROJECT` stream, and
-/// - (best-effort) designer storage bytes (`FormsNormalizedData`) referenced by `BaseClass=...`.
+/// Spec note: MS-OVBA §2.4.2.6 defines `ProjectNormalizedData` via `NormalizeProjectStream` over the
+/// textual `PROJECT` stream. This helper additionally incorporates selected project-information
+/// record payload bytes from `VBA/dir` and (best-effort) designer storage bytes
+/// (`FormsNormalizedData`).
 ///
-/// It explicitly ignores the optional `ProjectWorkspace` / `[Workspace]` section in the `PROJECT`
-/// stream (which is intended to be user/machine-local and MUST NOT influence hashing/signature
-/// binding).
+/// It is primarily intended for debugging/tests and should not be treated as a strict
+/// spec-accurate implementation of MS-OVBA §2.4.2.6.
+///
+/// Like the spec pseudocode, it ignores the optional `ProjectWorkspace` / `[Workspace]` section in
+/// the `PROJECT` stream (which is intended to be user/machine-local and MUST NOT influence
+/// hashing/signature binding).
 pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
     // Project information record IDs (MS-OVBA 2.3.4.2.1).
     //
@@ -2210,15 +2212,23 @@ fn append_v3_module(
     Ok(())
 }
 
-/// Build the MS-OVBA §2.4.2 v3 `ProjectNormalizedData` byte sequence for a `vbaProject.bin`.
+/// Build `formula-vba`'s current v3 signature-binding transcript for a `vbaProject.bin`.
+///
+/// Important: despite the name, this is **not** MS-OVBA §2.4.2.6 `ProjectNormalizedData`
+/// (`NormalizeProjectStream`), and the concatenation order does not match MS-OVBA §2.4.2.7
+/// (`ContentBuffer = V3ContentNormalizedData || ProjectNormalizedData`).
+///
+/// Current `formula-vba` transcript (best-effort):
+/// `(filtered PROJECT stream lines) || V3ContentNormalizedData || FormsNormalizedData`.
 ///
 /// Spec reference: MS-OVBA §2.4.2 ("Contents Hash" version 3).
 pub fn project_normalized_data_v3_transcript(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
-    // MS-OVBA v3 binds the signature not just to module content, but also to a filtered subset of
-    // the textual `PROJECT` stream properties (see §2.4.2.6 "ProjectNormalizedData").
+    // Best-effort: normalize/filter the textual `PROJECT` stream. MS-OVBA v3 binds the signature not
+    // just to module content, but also to a filtered subset of the `PROJECT` stream properties (see
+    // §2.4.2.6 "ProjectNormalizedData").
     //
-    // Some `PROJECT` properties MUST be excluded because they are either security-sensitive or
-    // can change without affecting the macro semantics (e.g. CMG/DPB/GC protection fields).
+    // Some `PROJECT` properties MUST be excluded because they are either security-sensitive or can
+    // change without affecting macro semantics (e.g. CMG/DPB/GC protection fields).
     //
     // Additionally, the optional `[Workspace]` section is machine/user-local and MUST NOT influence
     // signature binding, so we stop processing when a non-`[Host Extender Info]` section header is
@@ -2246,8 +2256,8 @@ fn normalize_project_stream_properties_v3(project_stream_bytes: &[u8]) -> Vec<u8
     // Note: we intentionally operate on bytes rather than decoding to UTF-8 so that the
     // transcript preserves MBCS bytes verbatim.
 
-    fn is_excluded_key(key: &[u8]) -> bool {
-        // MS-OVBA §2.4.2.6 exclusions (PROJECT stream properties that MUST NOT contribute).
+fn is_excluded_key(key: &[u8]) -> bool {
+        // Exclusions used by this helper's best-effort transcript.
         key.eq_ignore_ascii_case(b"ID")
             || key.eq_ignore_ascii_case(b"Document")
             || key.eq_ignore_ascii_case(b"DocModule")
@@ -2315,22 +2325,20 @@ fn normalize_project_stream_properties_v3(project_stream_bytes: &[u8]) -> Vec<u8
     out
 }
 
-// NOTE: `normalize_project_stream_properties_v3` intentionally does not share the legacy
+// NOTE: `normalize_project_stream_properties_v3` intentionally does not share the
 // `project_properties_normalized_bytes` / `host_extender_info_normalized_bytes` logic above. Those
-// helpers implement the legacy MS-OVBA `ProjectNormalizedData` transcript, whereas v3 signature
-// binding uses the raw, filtered `PROJECT` stream lines with CRLF-normalized endings.
-
-/// Compute the MS-OVBA §2.4.2.7 `ContentsHashV3` value (SHA-256) over v3 `ProjectNormalizedData`.
+// helpers implement a different (more structured) `PROJECT`-stream normalization, whereas the
+// current v3 binding transcript preserves filtered raw `key=value` lines with CRLF-normalized
+// endings.
+//
+/// Compute a SHA-256 digest over [`project_normalized_data_v3_transcript`]'s transcript.
 ///
-/// `ContentsHashV3 = SHA-256(ProjectNormalizedData)` where:
-/// `ProjectNormalizedData = (filtered PROJECT stream properties) || V3ContentNormalizedData || FormsNormalizedData`.
+/// This is a convenience/helper API: real-world `\x05DigitalSignatureExt` signatures most commonly
+/// use a 32-byte SHA-256 binding digest, but MS-OVBA v3 is defined in terms of hashing a
+/// `ContentBuffer` (`V3ContentNormalizedData || ProjectNormalizedData`) and producers may vary.
 ///
-/// Note: this is the spec-defined digest for `\x05DigitalSignatureExt` binding. The on-disk
-/// `DigestInfo.digestAlgorithm` OID is not authoritative for binding (some producers emit
-/// inconsistent OIDs); verifiers should compare the signed digest bytes to this SHA-256 value.
-///
-/// For debugging/out-of-spec inputs, callers can use [`crate::compute_vba_project_digest_v3`] to
-/// hash the same transcript with other algorithms.
+/// For other algorithms (debugging/out-of-spec), callers can use
+/// [`crate::compute_vba_project_digest_v3`].
 pub fn contents_hash_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
     let normalized = project_normalized_data_v3_transcript(vba_project_bin)?;
     Ok(Sha256::digest(&normalized).to_vec())
