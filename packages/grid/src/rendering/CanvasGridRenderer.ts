@@ -1128,76 +1128,18 @@ export class CanvasGridRenderer {
     const cols = overrides.cols;
     const resetUnspecified = options?.resetUnspecified ?? false;
     const zoom = this.zoom;
-
-    // When we're replacing the full set of overrides (the common case for sheet-view sync),
-    // rebuilding VariableSizeAxis overrides in bulk avoids worst-case O(n^2) prefix sum updates.
-    if (resetUnspecified && (rows || cols)) {
-      const epsilon = 1e-6;
-
-      const mapsEqual = (a: ReadonlyMap<number, number>, b: ReadonlyMap<number, number>): boolean => {
-        if (a.size !== b.size) return false;
-        for (const [key, value] of a) {
-          const other = b.get(key);
-          if (other === undefined) return false;
-          if (Math.abs(other - value) > epsilon) return false;
-        }
-        return true;
-      };
-
-      const normalizeAxis = (axis: "rows" | "cols") => {
-        const sizes = axis === "rows" ? rows : cols;
-        if (!sizes) return null;
-
-        const variableAxis = axis === "rows" ? this.scroll.rows : this.scroll.cols;
-        const assertIndex =
-          axis === "rows" ? (idx: number) => this.assertRowIndex(idx) : (idx: number) => this.assertColIndex(idx);
-        const defaultSize = variableAxis.defaultSize;
-
-        // Normalize into base-unit overrides (zoom=1), excluding defaults.
-        const out = new Map<number, number>();
-        for (const [idx, size] of sizes) {
-          assertIndex(idx);
-          if (!Number.isFinite(size) || size <= 0) {
-            throw new Error(`${axis} size must be a positive finite number, got ${size} for index ${idx}`);
-          }
-          if (Math.abs(size - defaultSize) < epsilon) continue;
-          out.set(idx, size / zoom);
-        }
-        return out;
-      };
-
-      const nextRowsBase = normalizeAxis("rows");
-      const nextColsBase = normalizeAxis("cols");
-
-      const rowChanged = nextRowsBase ? !mapsEqual(this.rowHeightOverridesBase, nextRowsBase) : false;
-      const colChanged = nextColsBase ? !mapsEqual(this.colWidthOverridesBase, nextColsBase) : false;
-      if (!rowChanged && !colChanged) return;
-
-      if (nextRowsBase && rowChanged) {
-        this.rowHeightOverridesBase.clear();
-        const cssOverrides = new Map<number, number>();
-        for (const [idx, baseSize] of nextRowsBase) {
-          this.rowHeightOverridesBase.set(idx, baseSize);
-          cssOverrides.set(idx, baseSize * zoom);
-        }
-        this.scroll.rows.setOverrides(cssOverrides);
-      }
-
-      if (nextColsBase && colChanged) {
-        this.colWidthOverridesBase.clear();
-        const cssOverrides = new Map<number, number>();
-        for (const [idx, baseSize] of nextColsBase) {
-          this.colWidthOverridesBase.set(idx, baseSize);
-          cssOverrides.set(idx, baseSize * zoom);
-        }
-        this.scroll.cols.setOverrides(cssOverrides);
-      }
-
-      this.onAxisSizeChanged();
-      return;
-    }
-
+    const epsilon = 1e-6;
     let changed = false;
+
+    const mapsEqual = (a: ReadonlyMap<number, number>, b: ReadonlyMap<number, number>): boolean => {
+      if (a.size !== b.size) return false;
+      for (const [key, value] of a) {
+        const other = b.get(key);
+        if (other === undefined) return false;
+        if (Math.abs(other - value) > epsilon) return false;
+      }
+      return true;
+    };
 
     const applyAxis = (axis: "rows" | "cols") => {
       const sizes = axis === "rows" ? rows : cols;
@@ -1205,48 +1147,50 @@ export class CanvasGridRenderer {
 
       const baseOverrides = axis === "rows" ? this.rowHeightOverridesBase : this.colWidthOverridesBase;
       const variableAxis = axis === "rows" ? this.scroll.rows : this.scroll.cols;
-      const assertIndex = axis === "rows" ? (idx: number) => this.assertRowIndex(idx) : (idx: number) => this.assertColIndex(idx);
-
-      const epsilon = 1e-6;
-
-      const indices = Array.from(sizes.keys()).sort((a, b) => a - b);
+      const assertIndex =
+        axis === "rows" ? (idx: number) => this.assertRowIndex(idx) : (idx: number) => this.assertColIndex(idx);
       const defaultSize = variableAxis.defaultSize;
 
-      for (const idx of indices) {
+      // Build the next base override map by either starting from scratch or merging into the
+      // current state (when `resetUnspecified` is false).
+      const nextBase = resetUnspecified ? new Map<number, number>() : new Map<number, number>(baseOverrides);
+
+      for (const [idx, size] of sizes) {
         assertIndex(idx);
-        const size = sizes.get(idx);
-        if (size === undefined) continue;
         if (!Number.isFinite(size) || size <= 0) {
           throw new Error(`${axis} size must be a positive finite number, got ${size} for index ${idx}`);
         }
 
-        const isDefault = Math.abs(size - defaultSize) < epsilon;
-        if (isDefault) {
-          if (baseOverrides.has(idx) || variableAxis.getSize(idx) !== defaultSize) {
-            baseOverrides.delete(idx);
-            variableAxis.deleteSize(idx);
-            changed = true;
-          }
+        // Treat "default-sized" entries as a request to clear the override.
+        if (Math.abs(size - defaultSize) < epsilon) {
+          nextBase.delete(idx);
           continue;
         }
 
-        const baseSize = size / zoom;
-        const prevBase = baseOverrides.get(idx);
-        const prevSize = variableAxis.getSize(idx);
-        if (prevBase !== undefined && Math.abs(prevBase - baseSize) < epsilon && Math.abs(prevSize - size) < epsilon) continue;
-
-        baseOverrides.set(idx, baseSize);
-        variableAxis.setSize(idx, size);
-        changed = true;
+        nextBase.set(idx, size / zoom);
       }
+
+      if (mapsEqual(baseOverrides, nextBase)) return;
+
+      // Update persisted base sizes (zoom=1).
+      baseOverrides.clear();
+      for (const [idx, baseSize] of nextBase) {
+        baseOverrides.set(idx, baseSize);
+      }
+
+      // Replace the runtime VariableSizeAxis overrides in bulk using CSS sizes.
+      const cssOverrides = new Map<number, number>();
+      for (const [idx, baseSize] of nextBase) {
+        cssOverrides.set(idx, baseSize * zoom);
+      }
+      variableAxis.setOverrides(cssOverrides);
+      changed = true;
     };
 
     applyAxis("cols");
     applyAxis("rows");
 
-    if (changed) {
-      this.onAxisSizeChanged();
-    }
+    if (changed) this.onAxisSizeChanged();
   }
 
   /**
