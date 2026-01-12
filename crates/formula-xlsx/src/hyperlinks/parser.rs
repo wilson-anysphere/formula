@@ -8,6 +8,8 @@ use crate::XlsxError;
 
 const REL_TYPE_HYPERLINK: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";
+const REL_NS_OFFICEDOC_RELATIONSHIPS: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 #[derive(Clone, Debug)]
 struct Relationship {
@@ -97,15 +99,50 @@ fn parse_hyperlink_element(
     let mut display: Option<String> = None;
     let mut tooltip: Option<String> = None;
 
+    // Namespace prefixes are arbitrary; producers may emit `r:id`, `rel:id`, etc.
+    // Identify the relationship id attribute by local-name (`id`), and (when
+    // possible) confirm the prefix resolves to the OfficeDocument relationships
+    // namespace.
+    let mut ns_by_prefix = BTreeMap::<Vec<u8>, String>::new();
+    for attr in e.attributes() {
+        let attr = attr?;
+        if let Some(prefix) = attr.key.as_ref().strip_prefix(b"xmlns:") {
+            ns_by_prefix.insert(prefix.to_vec(), attr.unescape_value()?.to_string());
+        }
+    }
+
     for attr in e.attributes() {
         let attr = attr?;
         let value = attr.unescape_value()?.to_string();
+
+        if rid.is_none() && attr.key.local_name().as_ref() == b"id" {
+            let name = attr.key.as_ref();
+            let prefix = name
+                .iter()
+                .position(|b| *b == b':')
+                .map(|idx| &name[..idx]);
+            let matches_relationships_namespace = prefix.map_or(true, |prefix| {
+                if prefix == b"xml" {
+                    // `xml:id` belongs to the reserved XML namespace, never OpenXML relationships.
+                    return false;
+                }
+                match ns_by_prefix.get(prefix) {
+                    Some(ns) => ns == REL_NS_OFFICEDOC_RELATIONSHIPS,
+                    None => true, // unknown prefix (often declared on an ancestor), accept by local-name
+                }
+            });
+
+            if matches_relationships_namespace {
+                rid = Some(value);
+                continue;
+            }
+        }
+
         match attr.key.as_ref() {
             b"ref" => reference = Some(value),
             b"location" => location = Some(value),
             b"display" => display = Some(value),
             b"tooltip" => tooltip = Some(value),
-            b"r:id" => rid = Some(value),
             _ => {}
         }
     }
@@ -192,4 +229,3 @@ fn unquote_sheet_name(name: &str) -> String {
     }
     s.to_string()
 }
-
