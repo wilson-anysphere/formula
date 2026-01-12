@@ -8,9 +8,17 @@ import { indexWorkbook } from "../../ai-rag/src/pipeline/indexWorkbook.js";
 import { workbookFromSpreadsheetApi } from "../../ai-rag/src/workbook/fromSpreadsheetApi.js";
 import { DLP_ACTION } from "../../security/dlp/src/actions.js";
 import { evaluatePolicy, DLP_DECISION } from "../../security/dlp/src/policyEngine.js";
-import { CLASSIFICATION_LEVEL, DEFAULT_CLASSIFICATION, maxClassification } from "../../security/dlp/src/classification.js";
-import { effectiveCellClassification, effectiveRangeClassification, normalizeRange } from "../../security/dlp/src/selectors.js";
+import {
+  CLASSIFICATION_LEVEL,
+  DEFAULT_CLASSIFICATION,
+  classificationRank,
+  maxClassification,
+} from "../../security/dlp/src/classification.js";
+import { effectiveRangeClassification, normalizeRange } from "../../security/dlp/src/selectors.js";
 import { DlpViolationError } from "../../security/dlp/src/errors.js";
+
+const DEFAULT_CLASSIFICATION_RANK = classificationRank(CLASSIFICATION_LEVEL.PUBLIC);
+const RESTRICTED_CLASSIFICATION_RANK = classificationRank(CLASSIFICATION_LEVEL.RESTRICTED);
 
 function createAbortError(message = "Aborted") {
   const err = new Error(message);
@@ -172,26 +180,25 @@ export class ContextManager {
       let nextValues;
       if (dlpDecision.decision === DLP_DECISION.REDACT) {
         const index = buildDlpRangeIndex({ documentId: dlp.documentId, sheetId, range: normalizedRange }, records);
+        const maxAllowedRank = dlpDecision.maxAllowed === null ? null : classificationRank(dlpDecision.maxAllowed);
+        const policyAllowsRestrictedContent = Boolean(dlp.policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.allowRestrictedContent);
+        const cellCheck = { index, maxAllowedRank, includeRestrictedContent, policyAllowsRestrictedContent };
+
         // Redact at cell level (deterministic placeholder).
-        nextValues = valuesForContext.map((row, r) =>
-          (row ?? []).map((value, c) => {
-            const classification = effectiveCellClassificationFromIndex(index, {
-              documentId: dlp.documentId,
-              sheetId,
-              row: r,
-              col: c,
-            });
-            const cellDecision = evaluatePolicy({
-              action: DLP_ACTION.AI_CLOUD_PROCESSING,
-              classification,
-              policy: dlp.policy,
-              options: { includeRestrictedContent },
-            });
-            if (cellDecision.decision === DLP_DECISION.ALLOW) return value;
+        nextValues = [];
+        for (let r = 0; r < valuesForContext.length; r++) {
+          const row = valuesForContext[r] ?? [];
+          const nextRow = [];
+          for (let c = 0; c < row.length; c++) {
+            if (isDlpCellAllowedFromIndex(cellCheck, r, c)) {
+              nextRow.push(row[c]);
+              continue;
+            }
             dlpRedactedCells++;
-            return "[REDACTED]";
-          }),
-        );
+            nextRow.push("[REDACTED]");
+          }
+          nextValues.push(nextRow);
+        }
       } else {
         // Preserve the previous behavior of returning fresh row arrays (but skip DLP scans).
         nextValues = valuesForContext.map((row) => (row ?? []).slice());
@@ -846,40 +853,57 @@ function rangesIntersectNormalized(a, b) {
 
 function buildDlpRangeIndex(ref, records) {
   const selectionRange = ref.range;
-  let docClassificationMax = { ...DEFAULT_CLASSIFICATION };
-  let sheetClassificationMax = { ...DEFAULT_CLASSIFICATION };
-  const columnClassificationByIndex = new Map();
-  const cellClassificationByCoord = new Map();
+  const startRow = selectionRange.start.row;
+  const startCol = selectionRange.start.col;
+  const rowCount = selectionRange.end.row - selectionRange.start.row + 1;
+  const colCount = selectionRange.end.col - selectionRange.start.col + 1;
+
+  const rankFromClassification = (classification) => {
+    if (!classification) return DEFAULT_CLASSIFICATION_RANK;
+    if (typeof classification !== "object") {
+      throw new Error("Classification must be an object");
+    }
+    return classificationRank(classification.level);
+  };
+
+  let docRankMax = DEFAULT_CLASSIFICATION_RANK;
+  let sheetRankMax = DEFAULT_CLASSIFICATION_RANK;
+  const columnRankByOffset = new Uint8Array(colCount);
+  let cellRankByOffset = null;
   const rangeRecords = [];
-  const fallbackRecords = [];
+  let rangeRankMax = DEFAULT_CLASSIFICATION_RANK;
 
   for (const record of records || []) {
     if (!record || !record.selector || typeof record.selector !== "object") continue;
     const selector = record.selector;
     if (selector.documentId !== ref.documentId) continue;
 
+    // The per-cell allow/redact decision depends only on the max classification level.
+    // Public records cannot increase the effective rank and are ignored for performance.
+    const recordRank = rankFromClassification(record.classification);
+    if (recordRank <= DEFAULT_CLASSIFICATION_RANK) continue;
+
     switch (selector.scope) {
       case "document": {
-        docClassificationMax = maxClassification(docClassificationMax, record.classification);
+        docRankMax = Math.max(docRankMax, recordRank);
         break;
       }
       case "sheet": {
         if (selector.sheetId === ref.sheetId) {
-          sheetClassificationMax = maxClassification(sheetClassificationMax, record.classification);
+          sheetRankMax = Math.max(sheetRankMax, recordRank);
         }
         break;
       }
       case "column": {
         if (selector.sheetId !== ref.sheetId) break;
         if (typeof selector.columnIndex === "number") {
-          if (selector.columnIndex < selectionRange.start.col || selector.columnIndex > selectionRange.end.col) break;
-          const existing = columnClassificationByIndex.get(selector.columnIndex);
-          columnClassificationByIndex.set(
-            selector.columnIndex,
-            existing ? maxClassification(existing, record.classification) : record.classification,
-          );
+          const colIndex = selector.columnIndex;
+          if (colIndex < selectionRange.start.col || colIndex > selectionRange.end.col) break;
+          const offset = colIndex - startCol;
+          if (recordRank > columnRankByOffset[offset]) columnRankByOffset[offset] = recordRank;
         } else {
-          fallbackRecords.push(record);
+          // Table/columnId selectors require table metadata to evaluate; ContextManager's cell refs
+          // do not include table context, so these selectors cannot apply and are ignored.
         }
         break;
       }
@@ -894,9 +918,14 @@ function buildDlpRangeIndex(ref, records) {
         ) {
           break;
         }
-        const key = `${selector.row},${selector.col}`;
-        const existing = cellClassificationByCoord.get(key);
-        cellClassificationByCoord.set(key, existing ? maxClassification(existing, record.classification) : record.classification);
+        const rowOffset = selector.row - startRow;
+        const colOffset = selector.col - startCol;
+        if (rowOffset < 0 || colOffset < 0 || rowOffset >= rowCount || colOffset >= colCount) break;
+        if (cellRankByOffset === null) {
+          cellRankByOffset = new Uint8Array(rowCount * colCount);
+        }
+        const offset = rowOffset * colCount + colOffset;
+        if (recordRank > cellRankByOffset[offset]) cellRankByOffset[offset] = recordRank;
         break;
       }
       case "range": {
@@ -904,58 +933,93 @@ function buildDlpRangeIndex(ref, records) {
         if (!selector.range) break;
         const normalized = normalizeRange(selector.range);
         if (!rangesIntersectNormalized(normalized, selectionRange)) break;
-        rangeRecords.push({ range: normalized, classification: record.classification });
+        if (recordRank > rangeRankMax) rangeRankMax = recordRank;
+        rangeRecords.push({
+          startRow: normalized.start.row,
+          endRow: normalized.end.row,
+          startCol: normalized.start.col,
+          endCol: normalized.end.col,
+          rank: recordRank,
+        });
         break;
       }
       default: {
-        fallbackRecords.push(record);
+        // Unknown selector scope: ignore.
         break;
       }
     }
   }
 
+  if (rangeRecords.length > 1) {
+    rangeRecords.sort((a, b) => b.rank - a.rank);
+  }
+
   return {
-    docClassificationMax,
-    sheetClassificationMax,
-    columnClassificationByIndex,
-    cellClassificationByCoord,
+    docRankMax,
+    sheetRankMax,
+    startRow,
+    startCol,
+    rowCount,
+    colCount,
+    columnRankByOffset,
+    cellRankByOffset,
     rangeRecords,
-    fallbackRecords,
+    rangeRankMax,
   };
 }
 
-function effectiveCellClassificationFromIndex(index, cellRef) {
-  let classification = { ...DEFAULT_CLASSIFICATION };
+function isDlpCellAllowedFromIndex(params, row0, col0) {
+  const { index, maxAllowedRank, includeRestrictedContent, policyAllowsRestrictedContent } = params;
+  if (maxAllowedRank === null) return false;
 
-  classification = maxClassification(classification, index.docClassificationMax);
-  if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
-    classification = maxClassification(classification, index.sheetClassificationMax);
-  }
+  // If we're explicitly including restricted content and policy allows it, a cell can become
+  // ALLOW even if its classification exceeds `maxAllowed` (evaluatePolicy short-circuits for
+  // Restricted + includeRestrictedContent).
+  const restrictedOverrideAllowed = includeRestrictedContent && policyAllowsRestrictedContent;
+  const canShortCircuitOverThreshold = !restrictedOverrideAllowed;
+  const restrictedAllowed = includeRestrictedContent ? policyAllowsRestrictedContent : maxAllowedRank >= RESTRICTED_CLASSIFICATION_RANK;
 
-  if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
-    const colClassification = index.columnClassificationByIndex.get(cellRef.col);
-    if (colClassification) classification = maxClassification(classification, colClassification);
-  }
+  let rank = index.docRankMax;
+  if (index.sheetRankMax > rank) rank = index.sheetRankMax;
 
-  if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
-    const cellClassification = index.cellClassificationByCoord.get(`${cellRef.row},${cellRef.col}`);
-    if (cellClassification) classification = maxClassification(classification, cellClassification);
-  }
+  if (rank === RESTRICTED_CLASSIFICATION_RANK) return restrictedAllowed;
+  if (canShortCircuitOverThreshold && rank > maxAllowedRank) return false;
 
-  if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
-    for (const record of index.rangeRecords) {
-      if (!cellInNormalizedRange(cellRef, record.range)) continue;
-      classification = maxClassification(classification, record.classification);
-      if (classification.level === CLASSIFICATION_LEVEL.RESTRICTED) break;
+  const colOffset = col0 - index.startCol;
+  const colRank = index.columnRankByOffset[colOffset] ?? DEFAULT_CLASSIFICATION_RANK;
+  if (colRank > rank) rank = colRank;
+
+  if (rank === RESTRICTED_CLASSIFICATION_RANK) return restrictedAllowed;
+  if (canShortCircuitOverThreshold && rank > maxAllowedRank) return false;
+
+  if (index.cellRankByOffset !== null) {
+    const rowOffset = row0 - index.startRow;
+    if (rowOffset >= 0 && rowOffset < index.rowCount && colOffset >= 0 && colOffset < index.colCount) {
+      const offset = rowOffset * index.colCount + colOffset;
+      const cellRank = index.cellRankByOffset[offset] ?? DEFAULT_CLASSIFICATION_RANK;
+      if (cellRank > rank) rank = cellRank;
     }
   }
 
-  if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED && index.fallbackRecords.length > 0) {
-    const fallback = effectiveCellClassification(cellRef, index.fallbackRecords);
-    classification = maxClassification(classification, fallback);
+  if (rank === RESTRICTED_CLASSIFICATION_RANK) return restrictedAllowed;
+  if (canShortCircuitOverThreshold && rank > maxAllowedRank) return false;
+
+  const rangeCanAffectDecision =
+    index.rangeRankMax > maxAllowedRank ||
+    (!restrictedAllowed && index.rangeRankMax === RESTRICTED_CLASSIFICATION_RANK);
+  if (rangeCanAffectDecision && index.rangeRankMax > rank) {
+    for (const record of index.rangeRecords) {
+      if (record.rank <= rank) break;
+      if (row0 < record.startRow || row0 > record.endRow || col0 < record.startCol || col0 > record.endCol) continue;
+      rank = record.rank;
+      if (rank === RESTRICTED_CLASSIFICATION_RANK) return restrictedAllowed;
+      if (canShortCircuitOverThreshold && rank > maxAllowedRank) return false;
+      if (rank === index.rangeRankMax) break;
+    }
   }
 
-  return classification;
+  if (rank === RESTRICTED_CLASSIFICATION_RANK) return restrictedAllowed;
+  return rank <= maxAllowedRank;
 }
 
 function buildDlpDocumentIndex(params) {
