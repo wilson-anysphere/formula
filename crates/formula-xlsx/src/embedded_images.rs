@@ -348,11 +348,14 @@ fn parse_vm_to_rich_value_index(xml: &[u8]) -> Result<HashMap<u32, u32>, XlsxErr
 
     let mut vm_to_rich_value_index: HashMap<u32, u32> = HashMap::new();
     for (bk_idx, rc_records) in value_bk_rc_records.iter().enumerate() {
-        let Some(future_idx) = rc_records
-            .iter()
-            .find(|(t, _)| *t == xlr_type_index)
-            .map(|(_, v)| *v)
-        else {
+        // Excel emits `rc/@t` (metadata type index) as either 0-based *or* 1-based depending on
+        // version/producer. Prefer the 0-based index we derived while parsing `metadataTypes`, but
+        // also accept the 1-based equivalent so we can resolve real Excel files.
+        let xlr_type_index_0 = xlr_type_index;
+        let xlr_type_index_1 = xlr_type_index.saturating_add(1);
+        let Some(future_idx) = rc_records.iter().find_map(|(t, v)| {
+            (*t == xlr_type_index_0 || *t == xlr_type_index_1).then_some(*v)
+        }) else {
             continue;
         };
 
