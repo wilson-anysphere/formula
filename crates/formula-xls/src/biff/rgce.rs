@@ -1481,6 +1481,98 @@ mod tests {
             "warnings={:?}",
             decoded.warnings
         );
+    }
+
+    #[test]
+    fn decodes_sum_1_2_from_ptg_funcvar() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // SUM(1,2):
+        //   PtgInt 1
+        //   PtgInt 2
+        //   PtgFuncVar argc=2 iftab=4 (SUM)
+        let rgce = vec![0x1E, 0x01, 0x00, 0x1E, 0x02, 0x00, 0x22, 0x02, 0x04, 0x00];
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "SUM(1,2)");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_if_true_1_2_from_ptg_funcvar() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // IF(TRUE,1,2):
+        //   PtgBool TRUE
+        //   PtgInt 1
+        //   PtgInt 2
+        //   PtgFuncVar argc=3 iftab=1 (IF)
+        let rgce = vec![
+            0x1D, 0x01, // TRUE
+            0x1E, 0x01, 0x00, // 1
+            0x1E, 0x02, 0x00, // 2
+            0x22, 0x03, 0x01, 0x00, // IF(argc=3)
+        ];
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "IF(TRUE,1,2)");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_abs_neg1_from_ptg_func() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // ABS(-1):
+        //   PtgInt 1
+        //   PtgUminus
+        //   PtgFunc iftab=24 (ABS)
+        let rgce = vec![
+            0x1E, 0x01, 0x00, // 1
+            0x13, // unary minus
+            0x21, 0x18, 0x00, // ABS (iftab 24)
+        ];
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "ABS(-1)");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_sum_sheet1_a1_2_from_ptg_ref3d_and_funcvar() {
+        let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
+        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // SUM(Sheet1!$A$1,2):
+        //   PtgRef3d ixti=0 row=0 col=0 (absolute A1)
+        //   PtgInt 2
+        //   PtgFuncVar argc=2 iftab=4 (SUM)
+        let rgce = vec![
+            0x3A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Sheet1!$A$1 via ixti=0
+            0x1E, 0x02, 0x00, // 2
+            0x22, 0x02, 0x04, 0x00, // SUM(argc=2)
+        ];
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "SUM(Sheet1!$A$1,2)");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
         assert_parseable(&decoded.text);
     }
 
