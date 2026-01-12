@@ -91,7 +91,7 @@ test.describe("extension workbook lifecycle (tauri)", () => {
     await gotoDesktop(page);
     await page.waitForFunction(() => Boolean((window as any).__formulaExtensionHostManager));
 
-    const workbook = await page.evaluate(async () => {
+    const result = await page.evaluate(async () => {
       const mgr: any = (window as any).__formulaExtensionHostManager;
       if (!mgr) throw new Error("Missing window.__formulaExtensionHostManager");
       const host = mgr.host;
@@ -115,11 +115,18 @@ test.describe("extension workbook lifecycle (tauri)", () => {
       const code = `
         export async function activate(context) {
           const formula = globalThis[Symbol.for("formula.extensionApi.api")];
+          const beforeSave = [];
+          const opened = [];
+          context.subscriptions.push(formula.events.onBeforeSave((e) => beforeSave.push(e?.workbook?.path ?? null)));
+          context.subscriptions.push(formula.events.onWorkbookOpened((e) => opened.push(e?.workbook?.path ?? null)));
           context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(commandId)}, async () => {
             await formula.workbook.createWorkbook();
             await formula.workbook.saveAs(${JSON.stringify("/tmp/ext-save.xlsx")});
             const wb = await formula.workbook.getActiveWorkbook();
-            return { name: wb.name, path: wb.path, sheets: wb.sheets, activeSheet: wb.activeSheet };
+            return {
+              workbook: { name: wb.name, path: wb.path, sheets: wb.sheets, activeSheet: wb.activeSheet },
+              events: { beforeSave, opened }
+            };
           }));
         }
         export default { activate };
@@ -143,11 +150,15 @@ test.describe("extension workbook lifecycle (tauri)", () => {
       }
     });
 
-    expect(workbook.path).toBe("/tmp/ext-save.xlsx");
-    expect(workbook.name).toBe("ext-save.xlsx");
-    expect(Array.isArray(workbook.sheets)).toBe(true);
-    expect(workbook.sheets.length).toBeGreaterThan(0);
-    expect(workbook.activeSheet).toEqual({ id: "Sheet1", name: "Sheet1" });
+    expect(result.workbook.path).toBe("/tmp/ext-save.xlsx");
+    expect(result.workbook.name).toBe("ext-save.xlsx");
+    expect(Array.isArray(result.workbook.sheets)).toBe(true);
+    expect(result.workbook.sheets.length).toBeGreaterThan(0);
+    expect(result.workbook.activeSheet).toEqual({ id: "Sheet1", name: "Sheet1" });
+
+    expect(result.events.beforeSave).toEqual(["/tmp/ext-save.xlsx"]);
+    // createWorkbook should emit exactly one workbookOpened for the synthetic new workbook.
+    expect(result.events.opened.length).toBe(1);
 
     const invokes = await page.evaluate(() => (window as any).__tauriInvokes);
     expect(invokes.some((entry: any) => entry?.cmd === "new_workbook")).toBe(true);
@@ -156,4 +167,3 @@ test.describe("extension workbook lifecycle (tauri)", () => {
     ).toBe(true);
   });
 });
-
