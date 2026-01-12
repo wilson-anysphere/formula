@@ -48,3 +48,23 @@ fn imports_biff_hyperlinks_file_unc_path() {
     );
 }
 
+#[test]
+fn imports_biff_hyperlinks_file_unicode_path_prefers_unicode_extension() {
+    let bytes = xls_fixture_builder::build_unicode_file_hyperlink_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("Unicode")
+        .expect("Unicode missing");
+    assert_eq!(sheet.hyperlinks.len(), 1);
+    let link = &sheet.hyperlinks[0];
+
+    assert_eq!(link.range, Range::from_a1("A1").unwrap());
+    assert_eq!(
+        link.target,
+        HyperlinkTarget::ExternalUrl {
+            uri: "file:///C:/foo/%E6%97%A5%E6%9C%AC.txt".to_string()
+        }
+    );
+}

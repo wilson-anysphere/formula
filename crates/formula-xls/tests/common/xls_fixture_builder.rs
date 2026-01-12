@@ -3904,6 +3904,29 @@ pub fn build_unc_file_hyperlink_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a single file hyperlink (`file:`) on `A1` whose
+/// `CLSID_FILE_MONIKER` payload includes a Unicode path extension.
+///
+/// The ANSI segment in this fixture uses the workbook codepage (Windows-1252) but carries UTF-8
+/// bytes for the non-ASCII filename. This ensures the importer prefers the Unicode tail when
+/// present.
+pub fn build_unicode_file_hyperlink_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_hyperlink_workbook_stream(
+        "Unicode",
+        hlink_file_moniker(0, 0, 0, 0, r"C:\foo\日本.txt", "Unicode file", "Unicode tooltip"),
+    );
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a single internal hyperlink on `A1`.
 pub fn build_internal_hyperlink_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_hyperlink_workbook_stream(
