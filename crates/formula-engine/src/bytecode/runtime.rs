@@ -1706,6 +1706,8 @@ pub fn call_function(
         // LET is lowered to bytecode locals by the compiler; it should not be invoked via the
         // generic function-call path (its "name" arguments are not evaluated values).
         Function::Let => Value::Error(ErrorKind::Value),
+        Function::True => fn_true(args),
+        Function::False => fn_false(args),
         Function::If => fn_if(args),
         Function::Choose => fn_choose(args),
         Function::Ifs => fn_ifs(args),
@@ -1796,6 +1798,20 @@ pub fn call_function(
         Function::XLookup => fn_xlookup(args, grid, base),
         Function::Unknown(_) => Value::Error(ErrorKind::Name),
     }
+}
+
+fn fn_true(args: &[Value]) -> Value {
+    if !args.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
+    Value::Bool(true)
+}
+
+fn fn_false(args: &[Value]) -> Value {
+    if !args.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
+    Value::Bool(false)
 }
 
 fn fn_rand(args: &[Value], base: CellCoord) -> Value {

@@ -30,6 +30,8 @@ pub enum BinaryOp {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Function {
     Let,
+    True,
+    False,
     If,
     Choose,
     Ifs,
@@ -127,6 +129,8 @@ impl Function {
         let base = upper.strip_prefix("_XLFN.").unwrap_or(upper.as_str());
         match base {
             "LET" => Function::Let,
+            "TRUE" => Function::True,
+            "FALSE" => Function::False,
             "IF" => Function::If,
             "CHOOSE" => Function::Choose,
             "IFS" => Function::Ifs,
@@ -222,6 +226,8 @@ impl Function {
     pub fn name(&self) -> &str {
         match self {
             Function::Let => "LET",
+            Function::True => "TRUE",
+            Function::False => "FALSE",
             Function::If => "IF",
             Function::Choose => "CHOOSE",
             Function::Ifs => "IFS",
@@ -1060,6 +1066,26 @@ mod tests {
                     Expr::Literal(Value::Missing),
                     Expr::Literal(Value::Missing),
                 ],
+            }
+        );
+    }
+
+    #[test]
+    fn parses_true_false_as_zero_arg_functions() {
+        let origin = CellCoord::new(0, 0);
+
+        assert_eq!(
+            parse_formula("=TRUE()", origin).expect("parse"),
+            Expr::FuncCall {
+                func: Function::True,
+                args: vec![],
+            }
+        );
+        assert_eq!(
+            parse_formula("=FALSE()", origin).expect("parse"),
+            Expr::FuncCall {
+                func: Function::False,
+                args: vec![],
             }
         );
     }
