@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as ui from "../../extensions/ui";
-import { setLocale, t } from "../../i18n/index.js";
+import { setLocale, t, tWithVars } from "../../i18n/index.js";
 import * as notifications from "../notifications";
 import { handleUpdaterEvent, installUpdaterUi } from "../updaterUi";
 
@@ -165,9 +165,10 @@ describe("updaterUi (events)", () => {
     await handleUpdaterEvent("update-available", { source: "startup", version: "1.2.3", body: "Bug fixes" });
 
     expect(notifySpy).toHaveBeenCalledTimes(1);
+    const appName = t("app.title");
     expect(notifySpy).toHaveBeenCalledWith({
-      title: "Update available",
-      body: expect.stringContaining("Formula 1.2.3 is available."),
+      title: t("updater.updateAvailableTitle"),
+      body: tWithVars("updater.systemNotificationBodyWithNotes", { appName, version: "1.2.3", notes: "Bug fixes" }),
     });
     expect(toastSpy).not.toHaveBeenCalled();
   });
@@ -184,7 +185,9 @@ describe("updaterUi (events)", () => {
 
     const dialog = document.querySelector('[data-testid="updater-dialog"]');
     expect(dialog).toBeTruthy();
-    expect(document.querySelector('[data-testid="updater-version"]')?.textContent).toContain("Version 9.9.9");
+    expect(document.querySelector('[data-testid="updater-version"]')?.textContent).toBe(
+      tWithVars("updater.updateAvailableMessage", { version: "9.9.9" }),
+    );
   });
 
   it("surfaces manual check results as toasts", async () => {
