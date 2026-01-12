@@ -4,7 +4,8 @@ pub use workbook_state::{PersistentWorkbookState, WorkbookPersistenceLocation};
 pub use workbook_state::{open_memory_manager, open_storage};
 
 use crate::file_io::{
-    DefinedName as AppDefinedName, Sheet as AppSheet, Table as AppTable, Workbook as AppWorkbook,
+    is_xlsx_family_extension, DefinedName as AppDefinedName, Sheet as AppSheet, Table as AppTable,
+    Workbook as AppWorkbook,
 };
 use crate::atomic_write::write_file_atomic;
 use crate::state::{Cell, CellScalar};
@@ -320,6 +321,11 @@ pub fn write_xlsx_from_storage(
     workbook_meta: &AppWorkbook,
     path: &Path,
 ) -> anyhow::Result<Arc<[u8]>> {
+    let xlsx_date_system = match workbook_meta.date_system {
+        formula_model::DateSystem::Excel1900 => formula_xlsx::DateSystem::V1900,
+        formula_model::DateSystem::Excel1904 => formula_xlsx::DateSystem::V1904,
+    };
+
     let mut model = storage
         .export_model_workbook(workbook_id)
         .context("export workbook from storage")?;
@@ -351,6 +357,10 @@ pub fn write_xlsx_from_storage(
     let wants_power_query = workbook_meta.power_query_xml.is_some();
     let wants_macro_strip = workbook_kind.is_macro_free() && workbook_meta.vba_project_bin.is_some();
     let wants_content_type_enforcement = workbook_kind != formula_xlsx::WorkbookKind::Workbook;
+    let needs_date_system_update = extension
+        .as_deref()
+        .is_some_and(|ext| is_xlsx_family_extension(ext))
+        && matches!(workbook_meta.date_system, formula_model::DateSystem::Excel1904);
 
     if wants_vba
         || wants_preserved_drawings
@@ -358,8 +368,10 @@ pub fn write_xlsx_from_storage(
         || wants_power_query
         || wants_macro_strip
         || wants_content_type_enforcement
+        || needs_date_system_update
     {
-        let mut pkg = formula_xlsx::XlsxPackage::from_bytes(&bytes).context("parse generated xlsx")?;
+        let mut pkg =
+            formula_xlsx::XlsxPackage::from_bytes(&bytes).context("parse generated xlsx")?;
 
         if wants_vba {
             pkg.set_part(
@@ -389,21 +401,30 @@ pub fn write_xlsx_from_storage(
         }
 
         if wants_macro_strip {
-            pkg.remove_vba_project().context("strip macros for macro-free export")?;
+            pkg.remove_vba_project()
+                .context("strip macros for macro-free export")?;
         }
 
         pkg.enforce_workbook_kind(workbook_kind)
             .context("enforce workbook content type")?;
 
+        if needs_date_system_update {
+            pkg.set_workbook_date_system(xlsx_date_system)
+                .context("set workbook date system")?;
+        }
+
         bytes = pkg.write_to_bytes().context("repack xlsx package")?;
     }
 
-    if matches!(
-        extension.as_deref(),
-        Some("xlsx") | Some("xlsm") | Some("xltx") | Some("xltm") | Some("xlam")
-    ) {
-        bytes = formula_xlsx::print::write_workbook_print_settings(&bytes, &workbook_meta.print_settings)
-            .context("write workbook print settings")?;
+    if extension
+        .as_deref()
+        .is_some_and(|ext| is_xlsx_family_extension(ext))
+    {
+        bytes = formula_xlsx::print::write_workbook_print_settings(
+            &bytes,
+            &workbook_meta.print_settings,
+        )
+        .context("write workbook print settings")?;
     }
 
     let bytes = Arc::<[u8]>::from(bytes);

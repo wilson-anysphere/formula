@@ -31,6 +31,13 @@ use crate::macro_trust::compute_macro_fingerprint;
 
 const FORMULA_POWER_QUERY_PART: &str = "xl/formula/power-query.xml";
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+const XLSX_WORKBOOK_CONTENT_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml";
+const XLSM_WORKBOOK_CONTENT_TYPE: &str = "application/vnd.ms-excel.sheet.macroEnabled.main+xml";
+const XLTX_WORKBOOK_CONTENT_TYPE: &str =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml";
+const XLTM_WORKBOOK_CONTENT_TYPE: &str = "application/vnd.ms-excel.template.macroEnabled.main+xml";
+const XLAM_WORKBOOK_CONTENT_TYPE: &str = "application/vnd.ms-excel.addin.macroEnabled.main+xml";
 
 #[derive(Clone, Debug)]
 pub struct Sheet {
@@ -1410,6 +1417,126 @@ pub async fn write_xlsx(
         .map_err(|e| anyhow::anyhow!(e.to_string()))?
 }
 
+pub(crate) fn is_xlsx_family_extension(ext: &str) -> bool {
+    matches!(ext, "xlsx" | "xlsm" | "xltx" | "xltm" | "xlam")
+}
+
+pub(crate) fn is_macro_free_xlsx_extension(ext: &str) -> bool {
+    matches!(ext, "xlsx" | "xltx")
+}
+
+pub(crate) fn is_macro_enabled_xlsx_extension(ext: &str) -> bool {
+    matches!(ext, "xlsm" | "xltm" | "xlam")
+}
+
+pub(crate) fn workbook_main_content_type_for_extension(ext: &str) -> Option<&'static str> {
+    match ext {
+        "xlsx" => Some(XLSX_WORKBOOK_CONTENT_TYPE),
+        "xlsm" => Some(XLSM_WORKBOOK_CONTENT_TYPE),
+        "xltx" => Some(XLTX_WORKBOOK_CONTENT_TYPE),
+        "xltm" => Some(XLTM_WORKBOOK_CONTENT_TYPE),
+        "xlam" => Some(XLAM_WORKBOOK_CONTENT_TYPE),
+        _ => None,
+    }
+}
+
+fn zip_part_exists(bytes: &[u8], part_name: &str) -> bool {
+    let mut cursor = Cursor::new(bytes);
+    let Ok(mut archive) = zip::ZipArchive::new(&mut cursor) else {
+        return false;
+    };
+    let name = part_name.strip_prefix('/').unwrap_or(part_name);
+    let exists = archive.by_name(name).is_ok();
+    exists
+}
+
+fn workbook_override_matches_content_type(content_types_xml: &str, desired: &str) -> bool {
+    let idx = match content_types_xml.find("/xl/workbook.xml") {
+        Some(idx) => idx,
+        None => return false,
+    };
+    let start = match content_types_xml[..idx].rfind('<') {
+        Some(idx) => idx,
+        None => return false,
+    };
+    let end = match content_types_xml[idx..].find('>') {
+        Some(off) => idx + off,
+        None => return false,
+    };
+    content_types_xml[start..=end].contains(desired)
+}
+
+fn patch_workbook_override_content_type(
+    content_types_xml: &str,
+    desired: &str,
+) -> Option<String> {
+    let idx = content_types_xml.find("/xl/workbook.xml")?;
+    let start = content_types_xml[..idx].rfind('<')?;
+    let end = idx + content_types_xml[idx..].find('>')?;
+    let element = &content_types_xml[start..=end];
+    if element.contains(desired) {
+        return None;
+    }
+
+    let (attr_key, quote) = if element.contains("ContentType=\"") {
+        ("ContentType=\"", '"')
+    } else if element.contains("ContentType='") {
+        ("ContentType='", '\'')
+    } else {
+        return None;
+    };
+
+    let key_pos_in_element = element.find(attr_key)?;
+    let attr_start_in_element = key_pos_in_element + attr_key.len();
+    let attr_end_in_element = element[attr_start_in_element..]
+        .find(quote)
+        .map(|off| attr_start_in_element + off)?;
+
+    let attr_start = start + attr_start_in_element;
+    let attr_end = start + attr_end_in_element;
+
+    let mut out = String::with_capacity(content_types_xml.len() + desired.len());
+    out.push_str(&content_types_xml[..attr_start]);
+    out.push_str(desired);
+    out.push_str(&content_types_xml[attr_end..]);
+    Some(out)
+}
+
+pub(crate) fn patch_workbook_main_content_type_in_package(
+    bytes: &[u8],
+    desired: &str,
+) -> anyhow::Result<Option<Vec<u8>>> {
+    let Some(content_types_bytes) = formula_xlsx::read_part_from_reader(
+        Cursor::new(bytes),
+        "[Content_Types].xml",
+    )
+    .ok()
+    .flatten() else {
+        return Ok(None);
+    };
+    let content_types_xml = std::str::from_utf8(&content_types_bytes)
+        .context("parse [Content_Types].xml as utf8")?;
+    let Some(patched_xml) = patch_workbook_override_content_type(content_types_xml, desired) else {
+        return Ok(None);
+    };
+
+    let mut part_overrides: HashMap<String, PartOverride> = HashMap::new();
+    part_overrides.insert(
+        "[Content_Types].xml".to_string(),
+        PartOverride::Replace(patched_xml.into_bytes()),
+    );
+
+    let mut cursor = Cursor::new(Vec::new());
+    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
+        Cursor::new(bytes),
+        &mut cursor,
+        &WorkbookCellPatches::default(),
+        &part_overrides,
+    )
+    .context("patch [Content_Types].xml workbook override content type")?;
+    Ok(Some(cursor.into_inner()))
+}
+
 pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[u8]>> {
     let extension = path
         .extension()
@@ -1533,11 +1660,58 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             }
         }
 
-        let wants_drop_vba = matches!(extension.as_deref(), Some("xlsx") | Some("xltx"))
-            && (workbook.vba_project_bin.is_some() || origin_package_has_macro_content(origin_bytes));
+        let ext = extension.as_deref().unwrap_or_default();
+        let is_xlsx_family = !ext.is_empty() && is_xlsx_family_extension(ext);
+        let desired_workbook_content_type =
+            (!ext.is_empty()).then_some(ext).and_then(workbook_main_content_type_for_extension);
 
-        if patches.is_empty() && !print_settings_changed && !wants_drop_vba && !power_query_changed {
-            write_file_atomic(path, origin_bytes).with_context(|| format!("write workbook {:?}", path))?;
+        let origin_has_vba = zip_part_exists(origin_bytes, "xl/vbaProject.bin");
+        let needs_strip_vba = !ext.is_empty()
+            && is_macro_free_xlsx_extension(ext)
+            && (workbook.vba_project_bin.is_some() || origin_package_has_macro_content(origin_bytes));
+        let needs_inject_vba = !ext.is_empty()
+            && is_macro_enabled_xlsx_extension(ext)
+            && workbook.vba_project_bin.is_some()
+            && !origin_has_vba;
+
+        let needs_workbook_content_type_update = match desired_workbook_content_type {
+            Some(desired) => formula_xlsx::read_part_from_reader(
+                Cursor::new(origin_bytes),
+                "[Content_Types].xml",
+            )
+            .ok()
+            .flatten()
+            .and_then(|bytes| {
+                std::str::from_utf8(&bytes)
+                    .ok()
+                    .map(|xml| !workbook_override_matches_content_type(xml, desired))
+            })
+            .unwrap_or(true),
+            None => false,
+        };
+
+        let needs_date_system_update = is_xlsx_family
+            && matches!(workbook.date_system, WorkbookDateSystem::Excel1904)
+            && formula_xlsx::read_part_from_reader(Cursor::new(origin_bytes), "xl/workbook.xml")
+                .ok()
+                .flatten()
+                .and_then(|bytes| {
+                    std::str::from_utf8(&bytes).ok().map(|xml| {
+                        !xml.contains("date1904=\"1\"") && !xml.contains("date1904='1'")
+                    })
+                })
+                .unwrap_or(true);
+
+        if patches.is_empty()
+            && !print_settings_changed
+            && !power_query_changed
+            && !needs_strip_vba
+            && !needs_inject_vba
+            && !needs_workbook_content_type_update
+            && !needs_date_system_update
+        {
+            write_file_atomic(path, origin_bytes)
+                .with_context(|| format!("write workbook {:?}", path))?;
             return Ok(workbook
                 .origin_xlsx_bytes
                 .as_ref()
@@ -1545,172 +1719,91 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
                 .clone());
         }
 
-        if patches.is_empty() && print_settings_changed && !wants_drop_vba && !power_query_changed {
-            let bytes = write_workbook_print_settings(origin_bytes, &workbook.print_settings)
-                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-
-            let bytes = Arc::<[u8]>::from(bytes);
-            write_file_atomic(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
-            return Ok(bytes);
-        }
-
-        if !wants_drop_vba && power_query_changed {
+        let mut bytes = if patches.is_empty() && !power_query_changed {
+            origin_bytes.to_vec()
+        } else {
             let mut part_overrides: HashMap<String, PartOverride> = HashMap::new();
-            match workbook.power_query_xml.as_ref() {
-                Some(bytes) => {
-                    let override_op = if workbook.original_power_query_xml.is_some() {
-                        PartOverride::Replace(bytes.clone())
-                    } else {
-                        PartOverride::Add(bytes.clone())
-                    };
-                    part_overrides.insert(FORMULA_POWER_QUERY_PART.to_string(), override_op);
-                }
-                None => {
-                    part_overrides.insert(FORMULA_POWER_QUERY_PART.to_string(), PartOverride::Remove);
-                }
-            }
-
-            let mut cursor = Cursor::new(Vec::new());
-            patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
-                Cursor::new(origin_bytes),
-                &mut cursor,
-                &patches,
-                &part_overrides,
-            )
-            .context("apply worksheet cell patches + part overrides (streaming)")?;
-
-            let mut bytes = cursor.into_inner();
-            if print_settings_changed {
-                bytes = write_workbook_print_settings(&bytes, &workbook.print_settings)
-                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            }
-
-            let bytes = Arc::<[u8]>::from(bytes);
-            write_file_atomic(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
-            return Ok(bytes);
-        }
-
-        if !patches.is_empty() && !wants_drop_vba && !power_query_changed {
-            let mut cursor = Cursor::new(Vec::new());
-            patch_xlsx_streaming_workbook_cell_patches(
-                Cursor::new(origin_bytes),
-                &mut cursor,
-                &patches,
-            )
-            .context("apply worksheet cell patches (streaming)")?;
-            let mut bytes = cursor.into_inner();
-            if print_settings_changed {
-                bytes = write_workbook_print_settings(&bytes, &workbook.print_settings)
-                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-            }
-
-            let bytes = Arc::<[u8]>::from(bytes);
-            write_file_atomic(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
-            return Ok(bytes);
-        }
-
-        if wants_drop_vba {
-            let mut bytes = if patches.is_empty() && !power_query_changed {
-                // Fast path: nothing to patch besides macro stripping.
-                let mut cursor = Cursor::new(Vec::new());
-                strip_vba_project_streaming(Cursor::new(origin_bytes), &mut cursor)
-                    .context("strip VBA project (streaming)")?;
-                cursor.into_inner()
-            } else {
-                let mut part_overrides: HashMap<String, PartOverride> = HashMap::new();
-                if power_query_changed {
-                    match workbook.power_query_xml.as_ref() {
-                        Some(bytes) => {
-                            let override_op = if workbook.original_power_query_xml.is_some() {
-                                PartOverride::Replace(bytes.clone())
-                            } else {
-                                PartOverride::Add(bytes.clone())
-                            };
-                            part_overrides.insert(FORMULA_POWER_QUERY_PART.to_string(), override_op);
-                        }
-                        None => {
-                            part_overrides
-                                .insert(FORMULA_POWER_QUERY_PART.to_string(), PartOverride::Remove);
-                        }
+            if power_query_changed {
+                match workbook.power_query_xml.as_ref() {
+                    Some(bytes) => {
+                        let override_op = if workbook.original_power_query_xml.is_some() {
+                            PartOverride::Replace(bytes.clone())
+                        } else {
+                            PartOverride::Add(bytes.clone())
+                        };
+                        part_overrides.insert(FORMULA_POWER_QUERY_PART.to_string(), override_op);
+                    }
+                    None => {
+                        part_overrides
+                            .insert(FORMULA_POWER_QUERY_PART.to_string(), PartOverride::Remove);
                     }
                 }
-
-                // First apply worksheet cell patches + any part overrides, then strip VBA parts.
-                let mut cursor = Cursor::new(Vec::new());
-                if part_overrides.is_empty() {
-                    patch_xlsx_streaming_workbook_cell_patches(
-                        Cursor::new(origin_bytes),
-                        &mut cursor,
-                        &patches,
-                    )
-                    .context("apply worksheet cell patches (streaming)")?;
-                } else {
-                    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
-                        Cursor::new(origin_bytes),
-                        &mut cursor,
-                        &patches,
-                        &part_overrides,
-                    )
-                    .context("apply worksheet cell patches + part overrides (streaming)")?;
-                }
-                let patched = cursor.into_inner();
-
-                let mut stripped = Cursor::new(Vec::new());
-                strip_vba_project_streaming(Cursor::new(patched), &mut stripped)
-                    .context("strip VBA project (streaming)")?;
-                stripped.into_inner()
-            };
-
-            if print_settings_changed {
-                bytes = write_workbook_print_settings(&bytes, &workbook.print_settings)
-                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
             }
 
-            let bytes = Arc::<[u8]>::from(bytes);
-            write_file_atomic(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
-            return Ok(bytes);
-        }
-
-        let mut pkg =
-            XlsxPackage::from_bytes(origin_bytes).context("parse original workbook package")?;
-        if !patches.is_empty() {
-            pkg.apply_cell_patches(&patches)
-                .context("apply worksheet cell patches")?;
-        }
-
-        match workbook.power_query_xml.as_ref() {
-            Some(bytes) => pkg.set_part(FORMULA_POWER_QUERY_PART, bytes.clone()),
-            None => {
-                pkg.parts_map_mut().remove(FORMULA_POWER_QUERY_PART);
+            let mut cursor = Cursor::new(Vec::new());
+            if part_overrides.is_empty() {
+                patch_xlsx_streaming_workbook_cell_patches(
+                    Cursor::new(origin_bytes),
+                    &mut cursor,
+                    &patches,
+                )
+                .context("apply worksheet cell patches (streaming)")?;
+            } else {
+                patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
+                    Cursor::new(origin_bytes),
+                    &mut cursor,
+                    &patches,
+                    &part_overrides,
+                )
+                .context("apply worksheet cell patches + part overrides (streaming)")?;
             }
+
+            cursor.into_inner()
+        };
+
+        if needs_strip_vba {
+            let mut stripped = Cursor::new(Vec::new());
+            strip_vba_project_streaming(Cursor::new(bytes), &mut stripped)
+                .context("strip VBA project (streaming)")?;
+            bytes = stripped.into_inner();
         }
 
-        if wants_drop_vba {
-            pkg.remove_vba_project()
-                .context("remove VBA parts for .xlsx")?;
+        if needs_inject_vba {
+            let mut pkg = XlsxPackage::from_bytes(&bytes)
+                .context("parse workbook package for VBA injection")?;
+            pkg.set_part(
+                "xl/vbaProject.bin",
+                workbook.vba_project_bin.clone().expect("checked is_some"),
+            );
+            bytes = pkg
+                .write_to_bytes()
+                .context("write workbook package with injected VBA")?;
         }
 
-        if matches!(
-            extension.as_deref(),
-            Some("xlsx") | Some("xlsm") | Some("xltx") | Some("xltm") | Some("xlam")
-        )
-            && matches!(workbook.date_system, WorkbookDateSystem::Excel1904)
-        {
+        if needs_date_system_update {
+            let mut pkg = XlsxPackage::from_bytes(&bytes)
+                .context("parse workbook package for date system update")?;
             pkg.set_workbook_date_system(xlsx_date_system)
                 .context("set workbook date system")?;
+            bytes = pkg
+                .write_to_bytes()
+                .context("write workbook package with updated date system")?;
         }
-
-        let mut bytes = pkg
-            .write_to_bytes()
-            .context("write patched workbook package")?;
 
         if print_settings_changed {
             bytes = write_workbook_print_settings(&bytes, &workbook.print_settings)
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         }
 
+        if let Some(desired) = desired_workbook_content_type {
+            if let Some(updated) = patch_workbook_main_content_type_in_package(&bytes, desired)? {
+                bytes = updated;
+            }
+        }
+
         let bytes = Arc::<[u8]>::from(bytes);
-        write_file_atomic(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
+        write_file_atomic(path, bytes.as_ref())
+            .with_context(|| format!("write workbook {:?}", path))?;
         return Ok(bytes);
     }
 
@@ -1721,16 +1814,14 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         .with_context(|| "serialize workbook to buffer")?;
     let mut bytes = cursor.into_inner();
     let wants_vba = workbook.vba_project_bin.is_some()
-        && matches!(
-            extension.as_deref(),
-            Some("xlsm") | Some("xltm") | Some("xlam")
-        );
+        && extension
+            .as_deref()
+            .is_some_and(|ext| is_macro_enabled_xlsx_extension(ext));
     let wants_preserved_drawings = workbook.preserved_drawing_parts.is_some();
     let wants_preserved_pivots = workbook.preserved_pivot_parts.is_some();
-    let needs_date_system_update = matches!(
-        extension.as_deref(),
-        Some("xlsx") | Some("xlsm") | Some("xltx") | Some("xltm") | Some("xlam")
-    )
+    let needs_date_system_update = extension
+        .as_deref()
+        .is_some_and(|ext| is_xlsx_family_extension(ext))
         && matches!(workbook.date_system, WorkbookDateSystem::Excel1904);
     let wants_power_query = workbook.power_query_xml.is_some();
 
@@ -1776,12 +1867,21 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             .context("repack workbook package with preserved parts")?;
     }
 
-    if matches!(
-        extension.as_deref(),
-        Some("xlsx") | Some("xlsm") | Some("xltx") | Some("xltm") | Some("xlam")
-    ) {
+    if extension
+        .as_deref()
+        .is_some_and(|ext| is_xlsx_family_extension(ext))
+    {
         bytes = write_workbook_print_settings(&bytes, &workbook.print_settings)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    }
+
+    if let Some(desired) = extension
+        .as_deref()
+        .and_then(workbook_main_content_type_for_extension)
+    {
+        if let Some(updated) = patch_workbook_main_content_type_in_package(&bytes, desired)? {
+            bytes = updated;
+        }
     }
 
     let bytes = Arc::<[u8]>::from(bytes);
@@ -4820,58 +4920,141 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
     }
 
     #[test]
-    fn saving_xlsm_as_xltx_drops_vba_project() {
+    fn saving_xlsm_as_xltx_xltm_xlam_sets_expected_content_type_and_macro_parts() {
         let fixture_path = Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../../fixtures/xlsx/macros/basic.xlsm"
         ));
         let workbook = read_xlsx_blocking(fixture_path).expect("read fixture workbook");
+        assert!(
+            workbook.vba_project_bin.is_some(),
+            "fixture should contain vbaProject.bin"
+        );
 
         let tmp = tempfile::tempdir().expect("temp dir");
-        let out_path = tmp.path().join("converted.xltx");
-        let _ = write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
 
-        let written_bytes = std::fs::read(&out_path).expect("read written xltx");
-        let written_pkg = XlsxPackage::from_bytes(&written_bytes).expect("parse written package");
+        for (ext, expects_vba, expected_ct) in [
+            ("xltx", false, XLTX_WORKBOOK_CONTENT_TYPE),
+            ("xltm", true, XLTM_WORKBOOK_CONTENT_TYPE),
+            ("xlam", true, XLAM_WORKBOOK_CONTENT_TYPE),
+        ] {
+            let out_path = tmp.path().join(format!("converted.{ext}"));
+            write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
 
-        assert!(
-            written_pkg.vba_project_bin().is_none(),
-            "expected vbaProject.bin to be removed when saving as .xltx"
-        );
+            let written_bytes = std::fs::read(&out_path).expect("read written bytes");
+            let written_pkg =
+                XlsxPackage::from_bytes(&written_bytes).expect("parse written package");
 
-        let ct = std::str::from_utf8(written_pkg.part("[Content_Types].xml").unwrap()).unwrap();
-        assert!(
-            !ct.contains("vbaProject.bin"),
-            "expected [Content_Types].xml to drop vbaProject.bin override"
-        );
-        assert!(
-            !ct.contains("macroEnabled.main+xml"),
-            "expected workbook content type to be converted to a macro-free variant"
-        );
+            assert_eq!(
+                written_pkg.vba_project_bin().is_some(),
+                expects_vba,
+                "expected vbaProject.bin presence to be {expects_vba} for .{ext}"
+            );
 
-        let rels =
-            std::str::from_utf8(written_pkg.part("xl/_rels/workbook.xml.rels").unwrap()).unwrap();
-        assert!(
-            !rels.contains("relationships/vbaProject"),
-            "expected workbook.xml.rels to drop the vbaProject relationship"
-        );
+            let ct = std::str::from_utf8(written_pkg.part("[Content_Types].xml").unwrap())
+                .expect("[Content_Types].xml should be utf8");
+            assert!(
+                workbook_override_matches_content_type(ct, expected_ct),
+                "expected workbook override content type {expected_ct} for .{ext}, got: {ct}"
+            );
 
-        // Ensure macro stripping doesn't perturb unrelated parts.
-        let mut ignore_parts = BTreeSet::new();
-        ignore_parts.insert("xl/vbaProject.bin".to_string());
-        ignore_parts.insert("[Content_Types].xml".to_string());
-        ignore_parts.insert("xl/_rels/workbook.xml.rels".to_string());
-        let options = DiffOptions {
-            ignore_parts,
-            ignore_globs: Vec::new(),
+            if ext == "xltx" {
+                let rels = std::str::from_utf8(
+                    written_pkg.part("xl/_rels/workbook.xml.rels").unwrap(),
+                )
+                .expect("workbook.xml.rels should be utf8");
+                assert!(
+                    !rels.contains("relationships/vbaProject"),
+                    "expected workbook.xml.rels to drop the vbaProject relationship"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn storage_export_supports_xltx_xltm_xlam_macros_content_type_and_print_settings() {
+        use formula_storage::ImportModelWorkbookOptions;
+
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/macros/basic.xlsm"
+        ));
+        let macro_wb = read_xlsx_blocking(fixture_path).expect("read xlsm fixture");
+        let vba = macro_wb
+            .vba_project_bin
+            .clone()
+            .expect("fixture has vbaProject.bin");
+
+        // Create a minimal workbook in storage so we can exercise the storage export path.
+        let mut model = formula_model::Workbook::new();
+        model.add_sheet("Sheet1").expect("add sheet");
+        let storage = formula_storage::Storage::open_in_memory().expect("open in-memory storage");
+        let stored = storage
+            .import_model_workbook(&model, ImportModelWorkbookOptions::new("test"))
+            .expect("import model workbook");
+
+        // App workbook metadata drives VBA + print settings in the export path.
+        let mut workbook_meta = Workbook::new_empty(None);
+        workbook_meta.add_sheet("Sheet1".to_string());
+        workbook_meta.vba_project_bin = Some(vba);
+        workbook_meta.print_settings = WorkbookPrintSettings {
+            sheets: vec![formula_xlsx::print::SheetPrintSettings {
+                sheet_name: "Sheet1".to_string(),
+                print_area: None,
+                print_titles: None,
+                page_setup: formula_xlsx::print::PageSetup {
+                    orientation: formula_xlsx::print::Orientation::Landscape,
+                    ..Default::default()
+                },
+                manual_page_breaks: formula_xlsx::print::ManualPageBreaks::default(),
+            }],
         };
-        let report =
-            diff_workbooks_with_options(fixture_path, &out_path, &options).expect("diff workbooks");
-        assert_eq!(
-            report.count(Severity::Critical),
-            0,
-            "unexpected critical diffs after macro stripping: {report:?}"
-        );
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+
+        for (ext, expects_vba, expected_ct) in [
+            ("xltx", false, XLTX_WORKBOOK_CONTENT_TYPE),
+            ("xltm", true, XLTM_WORKBOOK_CONTENT_TYPE),
+            ("xlam", true, XLAM_WORKBOOK_CONTENT_TYPE),
+        ] {
+            let out_path = tmp.path().join(format!("exported.{ext}"));
+            let bytes = crate::persistence::write_xlsx_from_storage(
+                &storage,
+                stored.id,
+                &workbook_meta,
+                &out_path,
+            )
+            .expect("write xlsx from storage");
+
+            let pkg = XlsxPackage::from_bytes(bytes.as_ref()).expect("parse exported package");
+            assert_eq!(
+                pkg.vba_project_bin().is_some(),
+                expects_vba,
+                "expected vbaProject.bin presence to be {expects_vba} for .{ext}"
+            );
+
+            let ct = std::str::from_utf8(pkg.part("[Content_Types].xml").unwrap())
+                .expect("[Content_Types].xml should be utf8");
+            assert!(
+                workbook_override_matches_content_type(ct, expected_ct),
+                "expected workbook override content type {expected_ct} for .{ext}, got: {ct}"
+            );
+
+            if ext == "xltx" {
+                // Assert print settings were applied for template output (storage export path).
+                let settings =
+                    read_workbook_print_settings(bytes.as_ref()).expect("read workbook print settings");
+                let sheet = settings
+                    .sheets
+                    .iter()
+                    .find(|s| s.sheet_name == "Sheet1")
+                    .expect("Sheet1 print settings present");
+                assert_eq!(
+                    sheet.page_setup.orientation,
+                    formula_xlsx::print::Orientation::Landscape
+                );
+            }
+        }
     }
 
     #[test]
