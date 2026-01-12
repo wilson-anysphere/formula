@@ -198,10 +198,12 @@
 .comment-tooltip {
   position: absolute;
   display: none;
+  left: var(--comment-tooltip-x, 0px);
+  top: var(--comment-tooltip-y, 0px);
   max-width: 260px;
   padding: 8px 10px;
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
+  background: var(--tooltip-bg);
+  color: var(--tooltip-text);
   border: 1px solid var(--border);
   font-size: 12px;
   line-height: 1.4;

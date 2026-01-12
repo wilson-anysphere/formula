@@ -2191,8 +2191,8 @@ export class SpreadsheetApp {
     }
 
     this.commentTooltip.textContent = preview;
-    this.commentTooltip.style.left = `${x + 12}px`;
-    this.commentTooltip.style.top = `${y + 12}px`;
+    this.commentTooltip.style.setProperty("--comment-tooltip-x", `${x + 12}px`);
+    this.commentTooltip.style.setProperty("--comment-tooltip-y", `${y + 12}px`);
     this.commentTooltip.classList.add("comment-tooltip--visible");
   }
 
@@ -4992,8 +4992,8 @@ export class SpreadsheetApp {
     }
 
     this.commentTooltip.textContent = preview;
-    this.commentTooltip.style.left = `${x + 12}px`;
-    this.commentTooltip.style.top = `${y + 12}px`;
+    this.commentTooltip.style.setProperty("--comment-tooltip-x", `${x + 12}px`);
+    this.commentTooltip.style.setProperty("--comment-tooltip-y", `${y + 12}px`);
     this.commentTooltip.classList.add("comment-tooltip--visible");
   }
 
