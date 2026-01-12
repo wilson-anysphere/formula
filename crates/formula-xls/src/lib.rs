@@ -1758,14 +1758,35 @@ fn convert_value(
         Data::Bool(v) => Some((CellValue::Boolean(*v), None)),
         Data::Int(v) => Some((CellValue::Number(*v as f64), None)),
         Data::Float(v) => Some((CellValue::Number(*v), None)),
-        Data::String(v) => Some((CellValue::String(v.clone()), None)),
+        Data::String(v) => {
+            let text = if v.contains('\0') {
+                v.replace('\0', "")
+            } else {
+                v.clone()
+            };
+            Some((CellValue::String(text), None))
+        }
         Data::Error(e) => Some((CellValue::Error(cell_error_to_error_value(e.clone())), None)),
         Data::DateTime(v) => Some((
             CellValue::Number(v.as_f64()),
             date_time_styles.map(|styles| styles.style_for_excel_datetime(v)),
         )),
-        Data::DateTimeIso(v) => Some((CellValue::String(v.clone()), None)),
-        Data::DurationIso(v) => Some((CellValue::String(v.clone()), None)),
+        Data::DateTimeIso(v) => {
+            let text = if v.contains('\0') {
+                v.replace('\0', "")
+            } else {
+                v.clone()
+            };
+            Some((CellValue::String(text), None))
+        }
+        Data::DurationIso(v) => {
+            let text = if v.contains('\0') {
+                v.replace('\0', "")
+            } else {
+                v.clone()
+            };
+            Some((CellValue::String(text), None))
+        }
     }
 }
 
@@ -3074,6 +3095,7 @@ mod tests {
 
     use std::io::Cursor;
 
+    use calamine::Data;
     use calamine::Xls;
 
     const RECORD_BOF: u16 = 0x0809;
@@ -3315,6 +3337,14 @@ mod tests {
             .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
         globals.extend_from_slice(&sheet);
         globals
+    }
+
+    #[test]
+    fn strips_embedded_nuls_from_string_cell_values() {
+        let data = Data::String("Hello\0World".to_string());
+        let (value, style) = convert_value(&data, None).expect("expected value");
+        assert_eq!(value, CellValue::String("HelloWorld".to_string()));
+        assert_eq!(style, None);
     }
 
     fn build_minimal_workbook_stream_with_continued_user_defined_name_string() -> Vec<u8> {
