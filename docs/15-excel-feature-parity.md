@@ -18,7 +18,8 @@ The source of truth for “what the engine currently implements” is:
     **[`crates/formula-engine/tests/function_catalog_sync.rs`](../crates/formula-engine/tests/function_catalog_sync.rs)**.
   - Used by downstream tooling (JS/TS, docs, scripts) without having to compile Rust.
 
-Current implemented function count (from `shared/functionCatalog.json`): **391**
+For a current count snapshot (generated), see [“Current snapshot (counts only)”](#current-snapshot-counts-only)
+below.
 
 Why it’s committed:
 
