@@ -64,20 +64,52 @@ fn looks_like_txo_formatting_runs(fragment: &[u8]) -> bool {
 
     let mut likely_records = 0usize;
     let mut total_records = 0usize;
+    let mut all_plausible = true;
+    let mut is_monotonic = true;
+    let mut prev_pos: usize = 0;
+    let mut first_pos: Option<usize> = None;
     for chunk in fragment.chunks_exact(4) {
         total_records += 1;
         let pos = u16::from_le_bytes([chunk[0], chunk[1]]) as usize;
         let font = u16::from_le_bytes([chunk[2], chunk[3]]) as usize;
-        // Heuristic: formatting runs usually reference character positions and font indices
-        // that fit in a single byte (high bytes are zero) and are within reasonable bounds.
+
+        if first_pos.is_none() {
+            first_pos = Some(pos);
+            prev_pos = pos;
+        } else {
+            is_monotonic &= pos >= prev_pos;
+            prev_pos = pos;
+        }
+
+        if pos > TXO_MAX_TEXT_CHARS || font > 0x0FFF {
+            all_plausible = false;
+        }
+
+        // Primary heuristic: formatting runs often have zero high bytes and small indices.
         if chunk[1] == 0 && chunk[3] == 0 && pos <= TXO_MAX_TEXT_CHARS && font <= 0x0FFF {
             likely_records += 1;
         }
     }
 
-    // Require a majority match so we don't accidentally treat short/odd continued-string
-    // fragments as formatting runs.
-    total_records > 0 && likely_records * 2 >= total_records
+    // Require a majority match so we don't accidentally treat short/odd continued-string fragments
+    // as formatting runs.
+    if total_records > 0 && likely_records * 2 >= total_records {
+        return true;
+    }
+
+    // Secondary heuristic: Some files have many runs with `ich` positions > 255, which means the
+    // high byte is non-zero. In that case, the "zero high byte" heuristic above may fail even
+    // though the payload is still clearly an array of formatting runs.
+    //
+    // Be conservative: require
+    // - plausible ranges for every run record
+    // - monotonic (non-decreasing) `ich` positions
+    // - the first run to start at character position 0 (a common invariant for rich-text runs)
+    if all_plausible && is_monotonic && first_pos == Some(0) {
+        return true;
+    }
+
+    false
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1730,6 +1762,50 @@ mod tests {
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "Hello");
+        assert!(
+            warnings.iter().any(|w| w.contains("truncated text")),
+            "expected truncation warning; warnings={warnings:?}"
+        );
+    }
+
+    #[test]
+    fn does_not_decode_biff8_formatting_runs_with_large_ich_values_as_text_when_cb_runs_is_missing() {
+        // Similar to `does_not_decode_biff8_formatting_runs_as_text_when_cb_runs_is_missing`, but
+        // use a formatting-run payload with multiple entries where most `ich` values exceed 255
+        // (high byte non-zero). The formatting-run detection heuristic should still catch this.
+        const TEXT_LEN: usize = 300;
+        const CCH_TEXT: u16 = 310; // larger than available text chars, so we'd otherwise decode run bytes
+
+        let mut txo_header = vec![0u8; 8];
+        txo_header[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2].copy_from_slice(&CCH_TEXT.to_le_bytes());
+
+        let text_bytes = vec![b'A'; TEXT_LEN];
+
+        // Formatting runs: 3 entries (12 bytes):
+        // - ich=0, ifnt=1
+        // - ich=256, ifnt=1
+        // - ich=300, ifnt=1
+        let runs: [u8; 12] = [
+            0x00, 0x00, 0x01, 0x00, // 0
+            0x00, 0x01, 0x01, 0x00, // 256
+            0x2C, 0x01, 0x01, 0x00, // 300
+        ];
+
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            record(RECORD_TXO, &txo_header),
+            continue_text_compressed_bytes(&text_bytes),
+            record(records::RECORD_CONTINUE, &runs),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "A".repeat(TEXT_LEN));
         assert!(
             warnings.iter().any(|w| w.contains("truncated text")),
             "expected truncation warning; warnings={warnings:?}"
