@@ -187,6 +187,10 @@ export function SheetTabStrip({
     const sheet = store.getById(sheetId);
     if (!sheet) return;
 
+    // Prevent deleting the last visible sheet (we currently have no unhide UI, and
+    // having zero visible sheets would leave the workbook unusable).
+    const canDelete = visibleSheets.length > 1;
+
     const items: ContextMenuItem[] = [
       {
         type: "item",
@@ -196,6 +200,7 @@ export function SheetTabStrip({
       {
         type: "item",
         label: "Delete",
+        enabled: canDelete,
         onSelect: () => deleteSheet(sheet),
       },
     ];
@@ -229,6 +234,10 @@ export function SheetTabStrip({
       if (next && next !== sheet.id) {
         onActivateSheet(next);
       }
+    } else {
+      // If we deleted a non-active sheet, re-focus the current sheet surface so the
+      // user doesn't lose keyboard focus (especially after keyboard-invoked deletes).
+      onActivateSheet(activeSheetId);
     }
 
     try {
