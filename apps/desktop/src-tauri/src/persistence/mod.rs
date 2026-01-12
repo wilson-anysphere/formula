@@ -217,6 +217,7 @@ fn scalar_to_model_value(value: &CellScalar) -> ModelCellValue {
 }
 
 fn model_value_to_scalar(value: &ModelCellValue) -> CellScalar {
+    #[allow(unreachable_patterns)]
     match value {
         ModelCellValue::Empty => CellScalar::Empty,
         ModelCellValue::Number(n) => CellScalar::Number(*n),
@@ -228,6 +229,49 @@ fn model_value_to_scalar(value: &ModelCellValue) -> CellScalar {
         ModelCellValue::Record(record) => CellScalar::Text(record.display.clone()),
         ModelCellValue::Array(arr) => CellScalar::Text(format!("{:?}", arr.data)),
         ModelCellValue::Spill(_) => CellScalar::Error("#SPILL!".to_string()),
+        _ => rich_model_cell_value_to_scalar(value).unwrap_or_else(|| CellScalar::Text(format!("{value:?}"))),
+    }
+}
+
+fn rich_model_cell_value_to_scalar(value: &ModelCellValue) -> Option<CellScalar> {
+    let serialized = serde_json::to_value(value).ok()?;
+    let value_type = serialized.get("type")?.as_str()?;
+
+    match value_type {
+        "entity" => {
+            let display_value = serialized
+                .get("value")?
+                .get("display_value")?
+                .as_str()?
+                .to_string();
+            Some(CellScalar::Text(display_value))
+        }
+        "record" => {
+            let record = serialized.get("value")?;
+            let display_field = record.get("display_field")?.as_str()?;
+            let fields = record.get("fields")?.as_object()?;
+            let display_value = fields.get(display_field)?;
+            let display_value_type = display_value.get("type")?.as_str()?;
+            match display_value_type {
+                "number" => Some(CellScalar::Number(display_value.get("value")?.as_f64()?)),
+                "string" => Some(CellScalar::Text(
+                    display_value.get("value")?.as_str()?.to_string(),
+                )),
+                "boolean" => Some(CellScalar::Bool(display_value.get("value")?.as_bool()?)),
+                "error" => Some(CellScalar::Error(
+                    display_value.get("value")?.as_str()?.to_string(),
+                )),
+                "rich_text" => Some(CellScalar::Text(
+                    display_value
+                        .get("value")?
+                        .get("text")?
+                        .as_str()?
+                        .to_string(),
+                )),
+                _ => Some(CellScalar::Empty),
+            }
+        }
+        _ => None,
     }
 }
 
