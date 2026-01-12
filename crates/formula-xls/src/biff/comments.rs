@@ -118,9 +118,10 @@ fn parse_note_record(data: &[u8], biff: BiffVersion, codepage: u16) -> Option<Pa
     let primary_obj_id = u16::from_le_bytes([data[6], data[7]]);
     let secondary_obj_id = u16::from_le_bytes([data[4], data[5]]);
 
-    let author = strings::parse_biff_short_string(&data[8..], biff, codepage)
+    let mut author = strings::parse_biff_short_string(&data[8..], biff, codepage)
         .map(|(s, _)| s)
         .unwrap_or_default();
+    strip_embedded_nuls(&mut author);
 
     Some(ParsedNote {
         cell: CellRef::new(row, col),
@@ -215,6 +216,7 @@ fn parse_txo_text_biff5(record: &records::LogicalBiffRecord<'_>, codepage: u16) 
         }
     }
 
+    trim_trailing_nuls(&mut out);
     Some(out)
 }
 
@@ -296,7 +298,20 @@ fn parse_txo_text_biff8(record: &records::LogicalBiffRecord<'_>, codepage: u16) 
         }
     }
 
+    trim_trailing_nuls(&mut out);
     Some(out)
+}
+
+fn strip_embedded_nuls(s: &mut String) {
+    if s.contains('\0') {
+        s.retain(|c| c != '\0');
+    }
+}
+
+fn trim_trailing_nuls(s: &mut String) {
+    while s.chars().last() == Some('\0') {
+        s.pop();
+    }
 }
 
 #[cfg(test)]
@@ -398,6 +413,40 @@ mod tests {
         assert_eq!(note.obj_id, 1);
         assert_eq!(note.author, "Alice");
         assert_eq!(note.text, "Hello");
+    }
+
+    #[test]
+    fn strips_embedded_nuls_from_author() {
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Al\0ice"),
+            obj_with_id(1),
+            txo_with_text("Hello"),
+            continue_text_ascii("Hello"),
+            eof(),
+        ]
+        .concat();
+
+        let notes = parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].author, "Alice");
+    }
+
+    #[test]
+    fn trims_trailing_nuls_from_text() {
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_text("Hello\0"),
+            continue_text_ascii("Hello\0"),
+            eof(),
+        ]
+        .concat();
+
+        let notes = parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
     }
 
     #[test]
