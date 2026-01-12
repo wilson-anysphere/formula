@@ -1913,8 +1913,9 @@ fn eval_field_access(value: &Value, field_key: &str) -> Value {
         Value::Record(record) => map_lookup(&record.fields, field_key)
             .cloned()
             .unwrap_or(Value::Error(ErrorKind::Field)),
-        // Field access on a non-rich value yields `#FIELD!`.
-        _ => Value::Error(ErrorKind::Field),
+        // Field access on a non-rich scalar is a type error (matches `_FIELDACCESS` semantics and
+        // Excel's behavior for rich values).
+        _ => Value::Error(ErrorKind::Value),
     }
 }
 
