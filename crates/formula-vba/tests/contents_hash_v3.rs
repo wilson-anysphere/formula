@@ -355,14 +355,15 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
 
     // ---- Expected normalized transcript ----
     //
-    // This test targets `contents_hash_v3`, which computes the MS-OVBA v3 `ContentsHashV3` value:
+    // This test targets `contents_hash_v3`, which currently computes a SHA-256 digest over
+    // `project_normalized_data_v3_transcript` (a `formula-vba`-specific transcript):
     //
-    // `ContentsHashV3 = SHA-256(ProjectNormalizedData)`
-    // `ProjectNormalizedData = (filtered PROJECT stream properties) || V3ContentNormalizedData || FormsNormalizedData`
+    // `digest = SHA-256(project_normalized_data_v3_transcript)`
+    // `project_normalized_data_v3_transcript = (filtered PROJECT stream lines) || V3ContentNormalizedData || FormsNormalizedData`
     //
-    // Note: signature binding verification may use other digest algorithms (inferred from the
-    // signed digest bytes) for robustness; `contents_hash_v3` always computes the spec-defined
-    // SHA-256 digest.
+    // Note: this transcript/order does not match the spec definitions of MS-OVBA §2.4.2.6
+    // `ProjectNormalizedData` or MS-OVBA §2.4.2.7 `ContentBuffer`
+    // (`V3ContentNormalizedData || ProjectNormalizedData`). See `docs/vba-digital-signatures.md`.
     //
     // V3ContentNormalizedData includes (for procedural modules) `MODULETYPE.Id || MODULETYPE.Reserved`
     // followed by LF-normalized module source (Attribute filtering per MS-OVBA §2.4.2.5), and the
@@ -400,14 +401,14 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
         .expect("ProjectNormalizedData v3");
     assert_eq!(
         actual_project_normalized, expected,
-        "expected ProjectNormalizedData v3 transcript bytes to match MS-OVBA §2.4.2"
+        "expected project_normalized_data_v3_transcript bytes to match expected construction"
     );
 
     let actual_digest = contents_hash_v3(&vba_project_bin).expect("ContentsHashV3");
     let expected_digest_from_transcript = Sha256::digest(&expected).to_vec();
     assert_eq!(
         actual_digest, expected_digest_from_transcript,
-        "expected ContentsHashV3 to equal SHA-256(ProjectNormalizedData v3)"
+        "expected contents_hash_v3 to equal SHA-256(project_normalized_data_v3_transcript)"
     );
     // Hard-coded expected digest bytes to keep this test deterministic and to catch
     // accidental transcript changes.
