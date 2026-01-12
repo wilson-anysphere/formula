@@ -1027,13 +1027,13 @@ Important notes:
   - `Agile Content Hash` (MS-OVBA §2.4.2.4), which extends the hash transcript with
     `FormsNormalizedData` (designer/UserForm storages).
   - For the `DigitalSignatureExt` stream variant, Office uses the MS-OVBA §2.4.2 v3 transcript and
-    hashes v3 `ProjectNormalizedData` with SHA-256.
+    computes the **V3 Content Hash** (MS-OVBA §2.4.2.7):
+    `V3ContentHash = MD5(V3ContentNormalizedData || ProjectNormalizedData)`.
   
-  Per MS-OSHARED §4.3, for legacy signature streams (`DigitalSignature` / `DigitalSignatureEx`) the
-  digest bytes embedded in the signature are always **MD5 (16 bytes)** even when the PKCS#7/CMS
-  signature uses SHA-256 and even when `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256 (the
-  OID is informational for v1/v2 binding). For the newest `DigitalSignatureExt` stream, Office uses
-  the MS-OVBA §2.4.2 v3 digest (SHA-256 over v3 `ProjectNormalizedData`).
+  Per MS-OSHARED §4.3, the digest bytes embedded in the signature are always **MD5 (16 bytes)** even
+  when the PKCS#7/CMS signature uses SHA-256 and even when `DigestInfo.digestAlgorithm.algorithm`
+  indicates SHA-256 (the OID is informational for VBA binding). This MD5-always rule applies to all
+  `DigitalSignature*` variants, including `DigitalSignatureExt`.
   
   This binding check is exposed via `formula-vba` as `VbaDigitalSignature::binding`. The desktop
   Trust Center treats a VBA project as "signed" only when the PKCS#7/CMS signature verifies **and**
@@ -1084,12 +1084,11 @@ How to obtain the signed digest for MS-OVBA signature binding:
   - In the detached `content || pkcs7` variant, the detached `content` prefix plays the same role
     as `eContent`.
 - Decode the `SpcIndirectDataContent` / `SpcIndirectDataContentV2` structure and extract its
-  VBA project digest bytes:
+  VBA signature binding digest bytes:
   - `SpcIndirectDataContent`: `messageDigest: DigestInfo.digest`
   - `SpcIndirectDataContentV2`: `SigDataV1Serialized.sourceHash`
-  - digest bytes are expected to be:
-    - 16-byte MD5 for v1/v2 streams (`DigitalSignature` / `DigitalSignatureEx`) per MS-OSHARED §4.3, or
-    - 32-byte SHA-256 for the v3 `DigitalSignatureExt` stream (MS-OVBA §2.4.2)
+  - digest bytes are expected to be a 16-byte MD5 per MS-OSHARED §4.3 (even when the algorithm OID
+    indicates SHA-256).
 
 Binding (best-effort; see MS-OVBA):
 
@@ -1099,11 +1098,12 @@ Binding (best-effort; see MS-OVBA):
 2. For v1/v2 streams, compute the MS-OVBA `Content Hash` = `MD5(ContentNormalizedData)` (MS-OVBA §2.4.2.3)
    and the MS-OVBA `Agile Content Hash` = `MD5(ContentNormalizedData || FormsNormalizedData)` (MS-OVBA §2.4.2.4),
    then compare the signed digest bytes to either digest.
-3. For the v3 `DigitalSignatureExt` stream, compute the MS-OVBA v3 digest (SHA-256 over v3 `ProjectNormalizedData`)
-   and compare it to the signed digest bytes.
+3. For the v3 `DigitalSignatureExt` stream, compute the MS-OVBA **V3 Content Hash**
+   `V3ContentHash = MD5(V3ContentNormalizedData || ProjectNormalizedData)` (MS-OVBA §2.4.2.7) and
+   compare it to the signed digest bytes.
 4. `trusted_signed_only` is treated as satisfied only when:
-   - the PKCS#7/CMS signature verifies (`SignedVerified`), **and**
-   - the digest comparison matches (`VbaSignatureBinding::Bound`).
+    - the PKCS#7/CMS signature verifies (`SignedVerified`), **and**
+    - the digest comparison matches (`VbaSignatureBinding::Bound`).
 
 If the PKCS#7/CMS signature verifies but the digest comparison fails, the signature is treated as
 present-but-invalid for Trust Center purposes. If binding cannot be verified (`Unknown`), it is
