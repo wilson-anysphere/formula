@@ -401,6 +401,49 @@ fn textjoin_flattens_ranges_and_array_literals() {
 }
 
 #[test]
+fn textsplit_splits_into_columns() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("Z1", r#"=TEXTSPLIT("a,b,c", ",")"#);
+    sheet.recalc();
+
+    assert_eq!(sheet.get("Z1"), Value::Text("a".to_string()));
+    assert_eq!(sheet.get("AA1"), Value::Text("b".to_string()));
+    assert_eq!(sheet.get("AB1"), Value::Text("c".to_string()));
+}
+
+#[test]
+fn textsplit_splits_rows_and_columns_and_pads_with_na() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("Z1", r#"=TEXTSPLIT("a,b;c", ",", ";")"#);
+    sheet.recalc();
+
+    assert_eq!(sheet.get("Z1"), Value::Text("a".to_string()));
+    assert_eq!(sheet.get("AA1"), Value::Text("b".to_string()));
+    assert_eq!(sheet.get("Z2"), Value::Text("c".to_string()));
+    assert_eq!(sheet.get("AA2"), Value::Error(ErrorKind::NA));
+}
+
+#[test]
+fn textsplit_respects_ignore_empty() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("Z1", r#"=TEXTSPLIT("a,,b", ",", , TRUE)"#);
+    sheet.recalc();
+
+    assert_eq!(sheet.get("Z1"), Value::Text("a".to_string()));
+    assert_eq!(sheet.get("AA1"), Value::Text("b".to_string()));
+}
+
+#[test]
+fn textsplit_accepts_xlfn_prefix() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("Z1", r#"=_xlfn.TEXTSPLIT("a,b", ",")"#);
+    sheet.recalc();
+
+    assert_eq!(sheet.get("Z1"), Value::Text("a".to_string()));
+    assert_eq!(sheet.get("AA1"), Value::Text("b".to_string()));
+}
+
+#[test]
 fn clean_exact_proper_replace_worksheet_functions() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", Value::Text(format!("a\u{0000}b")));

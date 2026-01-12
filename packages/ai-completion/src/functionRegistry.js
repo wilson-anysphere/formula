@@ -378,6 +378,20 @@ const CURATED_FUNCTIONS = [
       { name: "pad_with", type: "value", optional: true },
     ],
   },
+  {
+    name: "TEXTSPLIT",
+    description: "Splits text into rows and columns using delimiters.",
+    minArgs: 2,
+    maxArgs: 6,
+    args: [
+      { name: "text", type: "range" },
+      { name: "col_delimiter", type: "string" },
+      { name: "row_delimiter", type: "string", optional: true },
+      { name: "ignore_empty", type: "boolean", optional: true },
+      { name: "match_mode", type: "number", optional: true },
+      { name: "pad_with", type: "value", optional: true },
+    ],
+  },
 ];
 
 /**

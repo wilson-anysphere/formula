@@ -310,6 +310,18 @@ export const FUNCTION_SIGNATURES: Record<string, FunctionSignature> = {
     ],
     summary: "Substitutes new text for old text in a text string.",
   },
+  TEXTSPLIT: {
+    name: "TEXTSPLIT",
+    params: [
+      { name: "text" },
+      { name: "col_delimiter" },
+      { name: "row_delimiter", optional: true },
+      { name: "ignore_empty", optional: true },
+      { name: "match_mode", optional: true },
+      { name: "pad_with", optional: true },
+    ],
+    summary: "Splits text into rows and columns using delimiters and returns an array.",
+  },
 };
 
 export function getFunctionSignature(name: string): FunctionSignature | null {

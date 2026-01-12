@@ -296,6 +296,13 @@ mod tests {
     }
 
     #[test]
+    fn add_xlfn_prefixes_prefixes_textsplit() {
+        let input = r#"TEXTSPLIT("a,b",",")"#;
+        let expected = r#"_xlfn.TEXTSPLIT("a,b",",")"#;
+        assert_eq!(add_xlfn_prefixes(input), expected);
+    }
+
+    #[test]
     fn add_xlfn_prefixes_prefixes_multiple_modern_functions() {
         let input = r#"TAKE(SEQUENCE(3),2)+HSTACK({1;2},{3;4})"#;
         let expected = r#"_xlfn.TAKE(_xlfn.SEQUENCE(3),2)+_xlfn.HSTACK({1;2},{3;4})"#;

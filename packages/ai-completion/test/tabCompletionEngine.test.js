@@ -129,6 +129,23 @@ test("Typing =_xlfn.EXPA suggests =_xlfn.EXPAND(", async () => {
   );
 });
 
+test("Typing =_xlfn.TEXTSPL suggests =_xlfn.TEXTSPLIT(", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=_xlfn.TEXTSPL";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.TEXTSPLIT("),
+    `Expected an _xlfn.TEXTSPLIT suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =_xlfn.CHOOSECO suggests =_xlfn.CHOOSECOLS(", async () => {
   const engine = new TabCompletionEngine();
 
@@ -295,6 +312,52 @@ test("Range suggestions do not auto-close parens when the function needs more ar
   assert.ok(
     suggestions.some(s => s.text === "=CHOOSECOLS(A1:A10"),
     `Expected a CHOOSECOLS range suggestion without closing paren, got: ${suggestions.map(s => s.text).join(", ")}`
+  );
+});
+
+test("Typing =TEXTSPLIT(A suggests a contiguous range above the current cell but does not auto-close parens", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=TEXTSPLIT(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=TEXTSPLIT(A1:A10"),
+    `Expected a TEXTSPLIT range suggestion without closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =_xlfn.TEXTSPLIT(A suggests a contiguous range above the current cell but does not auto-close parens", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=_xlfn.TEXTSPLIT(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.TEXTSPLIT(A1:A10"),
+    `Expected an _xlfn.TEXTSPLIT range suggestion without closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 
