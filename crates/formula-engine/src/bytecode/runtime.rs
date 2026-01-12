@@ -160,6 +160,51 @@ fn eval_ast_inner(
                 return result;
             }
 
+            // Some logical/error functions are lazy in Excel: avoid evaluating unused branches/
+            // fallbacks. This mirrors the bytecode VM which compiles these functions into explicit
+            // control flow.
+            match func {
+                Function::If => {
+                    if args.len() < 2 || args.len() > 3 {
+                        return Value::Error(ErrorKind::Value);
+                    }
+                    let cond_val = eval_ast_inner(&args[0], grid, base, locale, lexical_scopes);
+                    let cond = match coerce_to_bool(cond_val) {
+                        Ok(b) => b,
+                        Err(e) => return Value::Error(e),
+                    };
+                    if cond {
+                        return eval_ast_inner(&args[1], grid, base, locale, lexical_scopes);
+                    }
+                    if args.len() == 3 {
+                        return eval_ast_inner(&args[2], grid, base, locale, lexical_scopes);
+                    }
+                    // Engine behavior: missing false branch defaults to FALSE (not blank).
+                    return Value::Bool(false);
+                }
+                Function::IfError => {
+                    if args.len() != 2 {
+                        return Value::Error(ErrorKind::Value);
+                    }
+                    let first = eval_ast_inner(&args[0], grid, base, locale, lexical_scopes);
+                    if matches!(first, Value::Error(_)) {
+                        return eval_ast_inner(&args[1], grid, base, locale, lexical_scopes);
+                    }
+                    return first;
+                }
+                Function::IfNa => {
+                    if args.len() != 2 {
+                        return Value::Error(ErrorKind::Value);
+                    }
+                    let first = eval_ast_inner(&args[0], grid, base, locale, lexical_scopes);
+                    if matches!(first, Value::Error(ErrorKind::NA)) {
+                        return eval_ast_inner(&args[1], grid, base, locale, lexical_scopes);
+                    }
+                    return first;
+                }
+                _ => {}
+            }
+
             // Evaluate arguments first (AST evaluation).
             let mut evaluated: SmallVec<[Value; 8]> = SmallVec::with_capacity(args.len());
             for (arg_idx, arg) in args.iter().enumerate() {
