@@ -29,3 +29,16 @@ test("ai-tools TS sources are importable under Node ESM when executing TS source
   assert.ok(TOOL_REGISTRY);
   assert.equal(typeof validateToolCall, "function");
 });
+
+test("ai-tools package entrypoint is importable under Node ESM when executing TS sources directly", async () => {
+  const mod = await import("@formula/ai-tools");
+
+  assert.equal(typeof mod.ToolExecutor, "function");
+  assert.equal(typeof mod.InMemoryWorkbook, "function");
+  assert.equal(typeof mod.parseA1Cell, "function");
+  assert.equal(typeof mod.formatA1Cell, "function");
+  assert.equal(typeof mod.parseA1Range, "function");
+  assert.equal(typeof mod.formatA1Range, "function");
+  assert.equal(typeof mod.validateToolCall, "function");
+  assert.ok(mod.TOOL_REGISTRY);
+});
