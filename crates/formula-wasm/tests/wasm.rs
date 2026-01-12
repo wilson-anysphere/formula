@@ -420,6 +420,8 @@ fn lex_formula_partial_returns_tokens_and_error_for_unterminated_string() {
     assert!(!parsed.tokens.is_empty(), "expected at least one token");
     let err = parsed.error.expect("expected an error");
     assert_eq!(err.message, "Unterminated string literal".to_string());
+    assert_eq!(err.span.start, 1);
+    assert_eq!(err.span.end, 7);
 
     // The string token should span to end-of-input, offset by the leading '='.
     let string_token = parsed
