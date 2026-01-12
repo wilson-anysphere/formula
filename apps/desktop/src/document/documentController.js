@@ -58,11 +58,11 @@ function encodeUtf8(text) {
 
 const NUMERIC_LITERAL_RE = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 
-// Excel sheet bounds (used for detecting full-row/column formatting ranges like
-// "A1:A1048576"). These let us apply layered row/column formats without eagerly
-// materializing every cell in the range.
+// Excel grid limits (used by the UI selection model and for scalable formatting ops).
 const EXCEL_MAX_ROWS = 1_048_576;
 const EXCEL_MAX_COLS = 16_384;
+const EXCEL_MAX_ROW = EXCEL_MAX_ROWS - 1;
+const EXCEL_MAX_COL = EXCEL_MAX_COLS - 1;
 
 /**
  * Canonicalize formula text for storage.
@@ -381,6 +381,19 @@ function invertFormatDeltas(deltas) {
   });
 }
 
+/**
+ * @param {CellDelta[]} deltas
+ * @returns {boolean}
+ */
+function cellDeltasAffectRecalc(deltas) {
+  for (const d of deltas) {
+    if (!d) continue;
+    if ((d.before?.formula ?? null) !== (d.after?.formula ?? null)) return true;
+    if ((d.before?.value ?? null) !== (d.after?.value ?? null)) return true;
+  }
+  return false;
+}
+
 class SheetModel {
   constructor() {
     /** @type {Map<string, CellState>} */
@@ -396,11 +409,11 @@ class SheetModel {
      *
      * The per-cell layer continues to live on `CellState.styleId`. The remaining layers live here.
      */
-    this.sheetStyleId = 0;
+    this.defaultStyleId = 0;
     /** @type {Map<number, number>} */
-    this.rowStyles = new Map();
+    this.rowStyleIds = new Map();
     /** @type {Map<number, number>} */
-    this.colStyles = new Map();
+    this.colStyleIds = new Map();
   }
 
   /**
@@ -544,17 +557,21 @@ export class DocumentController {
   /**
    * Subscribe to controller events.
    *
-    * Events:
-    * - `change`: {
-    *     deltas: CellDelta[],
-    *     sheetViewDeltas?: SheetViewDelta[],
-    *     formatDeltas?: FormatDelta[],
-    *     source?: string,
-    *     recalc?: boolean,
-    *   }
-    * - `history`: { canUndo: boolean, canRedo: boolean }
-    * - `dirty`: { isDirty: boolean }
-    * - `update`: emitted after any applied change (including undo/redo) for versioning adapters
+   * Events:
+   * - `change`: {
+   *     deltas: CellDelta[],
+   *     sheetViewDeltas: SheetViewDelta[],
+   *     formatDeltas: FormatDelta[],
+   *     // Preferred explicit delta streams for layered formatting.
+   *     rowStyleDeltas: Array<{ sheetId: string, row: number, beforeStyleId: number, afterStyleId: number }>,
+   *     colStyleDeltas: Array<{ sheetId: string, col: number, beforeStyleId: number, afterStyleId: number }>,
+   *     sheetStyleDeltas: Array<{ sheetId: string, beforeStyleId: number, afterStyleId: number }>,
+   *     source?: string,
+   *     recalc?: boolean,
+   *   }
+   * - `history`: { canUndo: boolean, canRedo: boolean }
+   * - `dirty`: { isDirty: boolean }
+   * - `update`: emitted after any applied change (including undo/redo) for versioning adapters
    *
    * @template {string} T
    * @param {T} event
@@ -706,9 +723,9 @@ export class DocumentController {
     const cell = this.model.getCell(sheetId, c.row, c.col);
     const sheet = this.model.sheets.get(sheetId);
 
-    const sheetStyle = this.styleTable.get(sheet?.sheetStyleId ?? 0);
-    const colStyle = this.styleTable.get(sheet?.colStyles.get(c.col) ?? 0);
-    const rowStyle = this.styleTable.get(sheet?.rowStyles.get(c.row) ?? 0);
+    const sheetStyle = this.styleTable.get(sheet?.defaultStyleId ?? 0);
+    const colStyle = this.styleTable.get(sheet?.colStyleIds.get(c.col) ?? 0);
+    const rowStyle = this.styleTable.get(sheet?.rowStyleIds.get(c.row) ?? 0);
     const cellStyle = this.styleTable.get(cell.styleId ?? 0);
 
     // Precedence: sheet < col < row < cell.
@@ -741,9 +758,8 @@ export class DocumentController {
    */
   getUsedRange(sheetId, options = {}) {
     const sheet = this.model.sheets.get(sheetId);
-    if (!sheet || !sheet.cells || sheet.cells.size === 0) return null;
-
     const includeFormat = Boolean(options.includeFormat);
+    if (!sheet) return null;
 
     let minRow = Infinity;
     let minCol = Infinity;
@@ -751,19 +767,48 @@ export class DocumentController {
     let maxCol = -Infinity;
     let hasData = false;
 
-    for (const [key, cell] of sheet.cells.entries()) {
-      if (!cell) continue;
-      const hasContent = includeFormat
-        ? cell.value != null || cell.formula != null || cell.styleId !== 0
-        : cell.value != null || cell.formula != null;
-      if (!hasContent) continue;
+    if (includeFormat) {
+      // Sheet default formatting applies to every cell.
+      if (sheet.defaultStyleId !== 0) {
+        return { startRow: 0, endRow: EXCEL_MAX_ROW, startCol: 0, endCol: EXCEL_MAX_COL };
+      }
 
-      const { row, col } = parseRowColKey(key);
-      hasData = true;
-      minRow = Math.min(minRow, row);
-      minCol = Math.min(minCol, col);
-      maxRow = Math.max(maxRow, row);
-      maxCol = Math.max(maxCol, col);
+      if (sheet.colStyleIds && sheet.colStyleIds.size > 0) {
+        hasData = true;
+        minRow = Math.min(minRow, 0);
+        maxRow = Math.max(maxRow, EXCEL_MAX_ROW);
+        for (const col of sheet.colStyleIds.keys()) {
+          minCol = Math.min(minCol, col);
+          maxCol = Math.max(maxCol, col);
+        }
+      }
+
+      if (sheet.rowStyleIds && sheet.rowStyleIds.size > 0) {
+        hasData = true;
+        minCol = Math.min(minCol, 0);
+        maxCol = Math.max(maxCol, EXCEL_MAX_COL);
+        for (const row of sheet.rowStyleIds.keys()) {
+          minRow = Math.min(minRow, row);
+          maxRow = Math.max(maxRow, row);
+        }
+      }
+    }
+
+    if (sheet.cells && sheet.cells.size > 0) {
+      for (const [key, cell] of sheet.cells.entries()) {
+        if (!cell) continue;
+        const hasContent = includeFormat
+          ? cell.value != null || cell.formula != null || cell.styleId !== 0
+          : cell.value != null || cell.formula != null;
+        if (!hasContent) continue;
+
+        const { row, col } = parseRowColKey(key);
+        hasData = true;
+        minRow = Math.min(minRow, row);
+        minCol = Math.min(minCol, col);
+        maxRow = Math.max(maxRow, row);
+        maxCol = Math.max(maxCol, col);
+      }
     }
 
     if (!hasData) return null;
@@ -994,73 +1039,133 @@ export class DocumentController {
    */
   setRangeFormat(sheetId, range, stylePatch, options = {}) {
     const r = typeof range === "string" ? parseRangeA1(range) : normalizeRange(range);
+    const isFullSheet = r.start.row === 0 && r.end.row === EXCEL_MAX_ROW && r.start.col === 0 && r.end.col === EXCEL_MAX_COL;
+    const isFullHeightCols = r.start.row === 0 && r.end.row === EXCEL_MAX_ROW;
+    const isFullWidthRows = r.start.col === 0 && r.end.col === EXCEL_MAX_COL;
 
-    const isFullColBand = r.start.row === 0 && r.end.row === EXCEL_MAX_ROWS - 1;
-    const isFullRowBand = r.start.col === 0 && r.end.col === EXCEL_MAX_COLS - 1;
+    // Ensure sheet exists so we can mutate format layers without materializing cells.
+    this.model.getCell(sheetId, 0, 0);
+    const sheet = this.model.sheets.get(sheetId);
+    if (!sheet) return;
 
-    // Layered formats:
-    // - Full sheet: A1:XFD1048576
-    // - Full column(s): A1:A1048576 (or A1:C1048576)
-    // - Full row(s): A1:XFD1 (or A1:XFD10)
-    //
-    // These should not enumerate every cell; instead they update the row/col/sheet
-    // format layers which are resolved by `getCellFormat()`.
-    if (isFullColBand || isFullRowBand) {
-      // Ensure sheet exists.
-      this.model.getCell(sheetId, 0, 0);
-      const sheet = this.model.sheets.get(sheetId);
-      if (!sheet) return;
+    /** @type {CellDelta[]} */
+    const cellDeltas = [];
+    /** @type {FormatDelta[]} */
+    const formatDeltas = [];
 
-      /** @type {FormatDelta[]} */
-      const formatDeltas = [];
+    /** @type {Map<number, number>} */
+    const patchedStyleIdCache = new Map();
+    const patchStyleId = (beforeStyleId) => {
+      const cached = patchedStyleIdCache.get(beforeStyleId);
+      if (cached != null) return cached;
+      const baseStyle = this.styleTable.get(beforeStyleId);
+      const merged = applyStylePatch(baseStyle, stylePatch);
+      const afterStyleId = this.styleTable.intern(merged);
+      patchedStyleIdCache.set(beforeStyleId, afterStyleId);
+      return afterStyleId;
+    };
 
-      if (isFullColBand && isFullRowBand) {
-        const beforeStyleId = sheet.sheetStyleId ?? 0;
-        const baseStyle = this.styleTable.get(beforeStyleId);
-        const merged = applyStylePatch(baseStyle, stylePatch);
-        const afterStyleId = this.styleTable.intern(merged);
-        if (beforeStyleId !== afterStyleId) {
-          formatDeltas.push({ sheetId, layer: "sheet", beforeStyleId, afterStyleId });
-        }
-      } else if (isFullColBand) {
-        for (let col = r.start.col; col <= r.end.col; col++) {
-          const beforeStyleId = sheet.colStyles.get(col) ?? 0;
-          const baseStyle = this.styleTable.get(beforeStyleId);
-          const merged = applyStylePatch(baseStyle, stylePatch);
-          const afterStyleId = this.styleTable.intern(merged);
-          if (beforeStyleId === afterStyleId) continue;
-          formatDeltas.push({ sheetId, layer: "col", index: col, beforeStyleId, afterStyleId });
-        }
-      } else if (isFullRowBand) {
-        for (let row = r.start.row; row <= r.end.row; row++) {
-          const beforeStyleId = sheet.rowStyles.get(row) ?? 0;
-          const baseStyle = this.styleTable.get(beforeStyleId);
-          const merged = applyStylePatch(baseStyle, stylePatch);
-          const afterStyleId = this.styleTable.intern(merged);
-          if (beforeStyleId === afterStyleId) continue;
-          formatDeltas.push({ sheetId, layer: "row", index: row, beforeStyleId, afterStyleId });
-        }
+    if (isFullSheet) {
+      if (this.canEditCell && !this.canEditCell({ sheetId, row: 0, col: 0 })) return;
+
+      // Patch sheet default.
+      const beforeStyleId = sheet.defaultStyleId ?? 0;
+      const afterStyleId = patchStyleId(beforeStyleId);
+      if (beforeStyleId !== afterStyleId) {
+        formatDeltas.push({ sheetId, layer: "sheet", beforeStyleId, afterStyleId });
       }
 
-      if (formatDeltas.length === 0) return;
-      this.#applyUserFormatDeltas(formatDeltas, { label: options.label });
+      // Patch existing row/col overrides so the new formatting wins over explicit values.
+      for (const [row, rowBeforeStyleId] of sheet.rowStyleIds.entries()) {
+        const rowAfterStyleId = patchStyleId(rowBeforeStyleId);
+        if (rowBeforeStyleId === rowAfterStyleId) continue;
+        formatDeltas.push({ sheetId, layer: "row", index: row, beforeStyleId: rowBeforeStyleId, afterStyleId: rowAfterStyleId });
+      }
+      for (const [col, colBeforeStyleId] of sheet.colStyleIds.entries()) {
+        const colAfterStyleId = patchStyleId(colBeforeStyleId);
+        if (colBeforeStyleId === colAfterStyleId) continue;
+        formatDeltas.push({ sheetId, layer: "col", index: col, beforeStyleId: colBeforeStyleId, afterStyleId: colAfterStyleId });
+      }
+
+      // Patch existing cell overrides so the new formatting wins over explicit values.
+      for (const [key, cell] of sheet.cells.entries()) {
+        if (!cell || cell.styleId === 0) continue;
+        const { row, col } = parseRowColKey(key);
+        const before = this.model.getCell(sheetId, row, col);
+        const cellAfterStyleId = patchStyleId(before.styleId);
+        const after = { value: before.value, formula: before.formula, styleId: cellAfterStyleId };
+        if (cellStateEquals(before, after)) continue;
+        cellDeltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
+      }
+
+      this.#applyUserCellAndFormatDeltas(cellDeltas, formatDeltas, { label: options.label });
       return;
     }
 
-    /** @type {CellDelta[]} */
-    const deltas = [];
+    if (isFullHeightCols) {
+      if (this.canEditCell && !this.canEditCell({ sheetId, row: 0, col: r.start.col })) return;
+
+      for (let col = r.start.col; col <= r.end.col; col++) {
+        const beforeStyleId = sheet.colStyleIds.get(col) ?? 0;
+        const afterStyleId = patchStyleId(beforeStyleId);
+        if (beforeStyleId === afterStyleId) continue;
+        formatDeltas.push({ sheetId, layer: "col", index: col, beforeStyleId, afterStyleId });
+      }
+
+      // Ensure the patch overrides explicit cell formatting (sparse overrides only).
+      for (const [key, cell] of sheet.cells.entries()) {
+        if (!cell || cell.styleId === 0) continue;
+        const { row, col } = parseRowColKey(key);
+        if (col < r.start.col || col > r.end.col) continue;
+        const before = this.model.getCell(sheetId, row, col);
+        const cellAfterStyleId = patchStyleId(before.styleId);
+        const after = { value: before.value, formula: before.formula, styleId: cellAfterStyleId };
+        if (cellStateEquals(before, after)) continue;
+        cellDeltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
+      }
+
+      this.#applyUserCellAndFormatDeltas(cellDeltas, formatDeltas, { label: options.label });
+      return;
+    }
+
+    if (isFullWidthRows) {
+      if (this.canEditCell && !this.canEditCell({ sheetId, row: r.start.row, col: 0 })) return;
+
+      for (let row = r.start.row; row <= r.end.row; row++) {
+        const beforeStyleId = sheet.rowStyleIds.get(row) ?? 0;
+        const afterStyleId = patchStyleId(beforeStyleId);
+        if (beforeStyleId === afterStyleId) continue;
+        formatDeltas.push({ sheetId, layer: "row", index: row, beforeStyleId, afterStyleId });
+      }
+
+      // Ensure the patch overrides explicit cell formatting (sparse overrides only).
+      for (const [key, cell] of sheet.cells.entries()) {
+        if (!cell || cell.styleId === 0) continue;
+        const { row, col } = parseRowColKey(key);
+        if (row < r.start.row || row > r.end.row) continue;
+        const before = this.model.getCell(sheetId, row, col);
+        const cellAfterStyleId = patchStyleId(before.styleId);
+        const after = { value: before.value, formula: before.formula, styleId: cellAfterStyleId };
+        if (cellStateEquals(before, after)) continue;
+        cellDeltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
+      }
+
+      this.#applyUserCellAndFormatDeltas(cellDeltas, formatDeltas, { label: options.label });
+      return;
+    }
+
+    // Fallback: sparse per-cell overrides.
     for (let row = r.start.row; row <= r.end.row; row++) {
       for (let col = r.start.col; col <= r.end.col; col++) {
         const before = this.model.getCell(sheetId, row, col);
-        const baseStyle = this.styleTable.get(before.styleId);
-        const merged = applyStylePatch(baseStyle, stylePatch);
-        const afterStyleId = this.styleTable.intern(merged);
+        const afterStyleId = patchStyleId(before.styleId);
         const after = { value: before.value, formula: before.formula, styleId: afterStyleId };
         if (cellStateEquals(before, after)) continue;
-        deltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
+        cellDeltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
       }
     }
-    this.#applyUserDeltas(deltas, { label: options.label });
+
+    this.#applyUserCellAndFormatDeltas(cellDeltas, [], { label: options.label });
   }
 
   /**
@@ -1076,7 +1181,7 @@ export class DocumentController {
     const sheet = this.model.sheets.get(sheetId);
     if (!sheet) return;
 
-    const beforeStyleId = sheet.sheetStyleId ?? 0;
+    const beforeStyleId = sheet.defaultStyleId ?? 0;
     const baseStyle = this.styleTable.get(beforeStyleId);
     const merged = applyStylePatch(baseStyle, stylePatch);
     const afterStyleId = this.styleTable.intern(merged);
@@ -1105,7 +1210,7 @@ export class DocumentController {
     const sheet = this.model.sheets.get(sheetId);
     if (!sheet) return;
 
-    const beforeStyleId = sheet.rowStyles.get(rowIdx) ?? 0;
+    const beforeStyleId = sheet.rowStyleIds.get(rowIdx) ?? 0;
     const baseStyle = this.styleTable.get(beforeStyleId);
     const merged = applyStylePatch(baseStyle, stylePatch);
     const afterStyleId = this.styleTable.intern(merged);
@@ -1134,7 +1239,7 @@ export class DocumentController {
     const sheet = this.model.sheets.get(sheetId);
     if (!sheet) return;
 
-    const beforeStyleId = sheet.colStyles.get(colIdx) ?? 0;
+    const beforeStyleId = sheet.colStyleIds.get(colIdx) ?? 0;
     const baseStyle = this.styleTable.get(beforeStyleId);
     const merged = applyStylePatch(baseStyle, stylePatch);
     const afterStyleId = this.styleTable.intern(merged);
@@ -1314,27 +1419,21 @@ export class DocumentController {
       if (view.rowHeights && Object.keys(view.rowHeights).length > 0) out.rowHeights = view.rowHeights;
 
       // Layered formatting (sheet/col/row).
-      if (sheet && sheet.sheetStyleId && sheet.sheetStyleId !== 0) {
-        out.sheetFormat = this.styleTable.get(sheet.sheetStyleId);
-      }
-      if (sheet && sheet.colStyles && sheet.colStyles.size > 0) {
-        /** @type {Record<string, any>} */
-        const colFormats = {};
-        for (const [col, styleId] of sheet.colStyles.entries()) {
-          if (!styleId || styleId === 0) continue;
-          colFormats[String(col)] = this.styleTable.get(styleId);
-        }
-        if (Object.keys(colFormats).length > 0) out.colFormats = colFormats;
-      }
-      if (sheet && sheet.rowStyles && sheet.rowStyles.size > 0) {
-        /** @type {Record<string, any>} */
-        const rowFormats = {};
-        for (const [row, styleId] of sheet.rowStyles.entries()) {
-          if (!styleId || styleId === 0) continue;
-          rowFormats[String(row)] = this.styleTable.get(styleId);
-        }
-        if (Object.keys(rowFormats).length > 0) out.rowFormats = rowFormats;
-      }
+      out.defaultFormat = sheet && sheet.defaultStyleId !== 0 ? this.styleTable.get(sheet.defaultStyleId) : null;
+
+      const rowFormats = Array.from(sheet?.rowStyleIds?.entries?.() ?? []).map(([row, styleId]) => ({
+        row,
+        format: styleId === 0 ? null : this.styleTable.get(styleId),
+      }));
+      rowFormats.sort((a, b) => a.row - b.row);
+      out.rowFormats = rowFormats;
+
+      const colFormats = Array.from(sheet?.colStyleIds?.entries?.() ?? []).map(([col, styleId]) => ({
+        col,
+        format: styleId === 0 ? null : this.styleTable.get(styleId),
+      }));
+      colFormats.sort((a, b) => a.col - b.col);
+      out.colFormats = colFormats;
       return out;
     });
 
@@ -1357,17 +1456,17 @@ export class DocumentController {
     const nextSheets = new Map();
     /** @type {Map<string, SheetViewState>} */
     const nextViews = new Map();
-    /** @type {Map<string, { sheetStyleId: number, rowStyles: Map<number, number>, colStyles: Map<number, number> }>} */
+    /** @type {Map<string, { defaultStyleId: number, rowStyleIds: Map<number, number>, colStyleIds: Map<number, number> }>} */
     const nextFormats = new Map();
 
-    const normalizeFormatOverrides = (raw) => {
+    const normalizeFormatOverrides = (raw, axisKey) => {
       /** @type {Map<number, number>} */
       const out = new Map();
       if (!raw) return out;
 
       if (Array.isArray(raw)) {
         for (const entry of raw) {
-          const index = Array.isArray(entry) ? entry[0] : entry?.index;
+          const index = Array.isArray(entry) ? entry[0] : entry?.index ?? entry?.[axisKey] ?? entry?.row ?? entry?.col;
           const format = Array.isArray(entry) ? entry[1] : entry?.format;
           const idx = Number(index);
           if (!Number.isInteger(idx) || idx < 0) continue;
@@ -1412,11 +1511,12 @@ export class DocumentController {
       nextSheets.set(sheet.id, cellMap);
       nextViews.set(sheet.id, view);
 
-      const sheetStyleId = sheet?.sheetFormat == null ? 0 : this.styleTable.intern(sheet.sheetFormat);
+      const defaultFormat = sheet?.defaultFormat ?? sheet?.sheetFormat ?? null;
+      const defaultStyleId = defaultFormat == null ? 0 : this.styleTable.intern(defaultFormat);
       nextFormats.set(sheet.id, {
-        sheetStyleId,
-        rowStyles: normalizeFormatOverrides(sheet?.rowFormats),
-        colStyles: normalizeFormatOverrides(sheet?.colFormats),
+        defaultStyleId,
+        rowStyleIds: normalizeFormatOverrides(sheet?.rowFormats, "row"),
+        colStyleIds: normalizeFormatOverrides(sheet?.colFormats, "col"),
       });
     }
 
@@ -1456,14 +1556,14 @@ export class DocumentController {
     const formatDeltas = [];
     for (const sheetId of allSheetIds) {
       const existingSheet = this.model.sheets.get(sheetId);
-      const beforeSheetStyleId = existingSheet?.sheetStyleId ?? 0;
-      const beforeRowStyles = existingSheet?.rowStyles ?? new Map();
-      const beforeColStyles = existingSheet?.colStyles ?? new Map();
+      const beforeSheetStyleId = existingSheet?.defaultStyleId ?? 0;
+      const beforeRowStyles = existingSheet?.rowStyleIds ?? new Map();
+      const beforeColStyles = existingSheet?.colStyleIds ?? new Map();
 
       const next = nextFormats.get(sheetId);
-      const afterSheetStyleId = next?.sheetStyleId ?? 0;
-      const afterRowStyles = next?.rowStyles ?? new Map();
-      const afterColStyles = next?.colStyles ?? new Map();
+      const afterSheetStyleId = next?.defaultStyleId ?? 0;
+      const afterRowStyles = next?.rowStyleIds ?? new Map();
+      const afterColStyles = next?.colStyleIds ?? new Map();
 
       if (beforeSheetStyleId !== afterSheetStyleId) {
         formatDeltas.push({
@@ -1701,11 +1801,20 @@ export class DocumentController {
 
     // Only recalculate for batches that included cell input edits. Sheet view changes
     // (frozen panes, row/col sizes, etc.) do not affect formula results.
-    const shouldRecalc = batch.deltasByCell.size > 0;
+    const shouldRecalc = cellDeltasAffectRecalc(Array.from(batch.deltasByCell.values()));
     if (shouldRecalc) {
       this.engine?.recalculate();
       // Emit a follow-up change so observers know formula results may have changed.
-      this.#emit("change", { deltas: [], sheetViewDeltas: [], formatDeltas: [], source: "endBatch", recalc: true });
+      this.#emit("change", {
+        deltas: [],
+        sheetViewDeltas: [],
+        formatDeltas: [],
+        rowStyleDeltas: [],
+        colStyleDeltas: [],
+        sheetStyleDeltas: [],
+        source: "endBatch",
+        recalc: true,
+      });
     }
   }
 
@@ -1745,10 +1854,19 @@ export class DocumentController {
     this.engine?.endBatch?.();
 
     // Only recalculate when canceling a batch that mutated cell inputs.
-    const shouldRecalc = Boolean(batch && batch.deltasByCell.size > 0);
+    const shouldRecalc = Boolean(batch && cellDeltasAffectRecalc(Array.from(batch.deltasByCell.values())));
     if (shouldRecalc) {
       this.engine?.recalculate();
-      this.#emit("change", { deltas: [], sheetViewDeltas: [], formatDeltas: [], source: "cancelBatch", recalc: true });
+      this.#emit("change", {
+        deltas: [],
+        sheetViewDeltas: [],
+        formatDeltas: [],
+        rowStyleDeltas: [],
+        colStyleDeltas: [],
+        sheetStyleDeltas: [],
+        source: "cancelBatch",
+        recalc: true,
+      });
     }
 
     this.#emitHistory();
@@ -1774,7 +1892,7 @@ export class DocumentController {
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
-    const shouldRecalc = cellDeltas.length > 0;
+    const shouldRecalc = cellDeltasAffectRecalc(cellDeltas);
     this.#applyEdits(inverseCells, inverseViews, inverseFormats, {
       recalc: shouldRecalc,
       emitChange: true,
@@ -1800,7 +1918,7 @@ export class DocumentController {
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
-    const shouldRecalc = cellDeltas.length > 0;
+    const shouldRecalc = cellDeltasAffectRecalc(cellDeltas);
     this.#applyEdits(cellDeltas, viewDeltas, formatDeltas, {
       recalc: shouldRecalc,
       emitChange: true,
@@ -1826,7 +1944,8 @@ export class DocumentController {
     }
 
     const source = typeof options?.source === "string" ? options.source : undefined;
-    this.#applyEdits(deltas, [], [], { recalc: this.batchDepth === 0, emitChange: true, source });
+    const shouldRecalc = this.batchDepth === 0 && cellDeltasAffectRecalc(deltas);
+    this.#applyEdits(deltas, [], [], { recalc: shouldRecalc, emitChange: true, source });
 
     if (this.batchDepth > 0) {
       this.#mergeIntoBatch(deltas);
@@ -1942,6 +2061,43 @@ export class DocumentController {
     }
 
     this.#commitOrMergeHistoryEntry([], [], deltas, options);
+  }
+
+  /**
+   * Apply a set of cell deltas and format deltas as a single user edit (one change event / one
+   * undo step), merging into an active batch if present.
+   *
+   * This is primarily used for range formatting operations that need to update both the
+   * sheet/row/col layers and a sparse set of cell overrides.
+   *
+   * @param {CellDelta[]} cellDeltas
+   * @param {FormatDelta[]} formatDeltas
+   * @param {{ label?: string, mergeKey?: string, source?: string }} options
+   */
+  #applyUserCellAndFormatDeltas(cellDeltas, formatDeltas, options) {
+    cellDeltas = Array.isArray(cellDeltas) ? cellDeltas : [];
+    formatDeltas = Array.isArray(formatDeltas) ? formatDeltas : [];
+
+    if (cellDeltas.length > 0 && this.canEditCell) {
+      cellDeltas = cellDeltas.filter((delta) =>
+        this.canEditCell({ sheetId: delta.sheetId, row: delta.row, col: delta.col })
+      );
+    }
+
+    if (cellDeltas.length === 0 && formatDeltas.length === 0) return;
+
+    const source = typeof options?.source === "string" ? options.source : undefined;
+    const shouldRecalc = this.batchDepth === 0 && cellDeltasAffectRecalc(cellDeltas);
+    this.#applyEdits(cellDeltas, [], formatDeltas, { recalc: shouldRecalc, emitChange: true, source });
+
+    if (this.batchDepth > 0) {
+      if (cellDeltas.length > 0) this.#mergeIntoBatch(cellDeltas);
+      if (formatDeltas.length > 0) this.#mergeFormatIntoBatch(formatDeltas);
+      this.#emitDirty();
+      return;
+    }
+
+    this.#commitOrMergeHistoryEntry(cellDeltas, [], formatDeltas, options);
   }
 
   /**
@@ -2074,19 +2230,19 @@ export class DocumentController {
       const sheet = this.model.sheets.get(delta.sheetId);
       if (!sheet) continue;
       if (delta.layer === "sheet") {
-        sheet.sheetStyleId = delta.afterStyleId;
+        sheet.defaultStyleId = delta.afterStyleId;
         continue;
       }
       const index = delta.index;
       if (index == null) continue;
       if (delta.layer === "row") {
-        if (delta.afterStyleId === 0) sheet.rowStyles.delete(index);
-        else sheet.rowStyles.set(index, delta.afterStyleId);
+        if (delta.afterStyleId === 0) sheet.rowStyleIds.delete(index);
+        else sheet.rowStyleIds.set(index, delta.afterStyleId);
         continue;
       }
       if (delta.layer === "col") {
-        if (delta.afterStyleId === 0) sheet.colStyles.delete(index);
-        else sheet.colStyles.set(index, delta.afterStyleId);
+        if (delta.afterStyleId === 0) sheet.colStyleIds.delete(index);
+        else sheet.colStyleIds.set(index, delta.afterStyleId);
       }
     }
     for (const delta of sheetViewDeltas) {
@@ -2117,19 +2273,19 @@ export class DocumentController {
         const sheet = this.model.sheets.get(delta.sheetId);
         if (!sheet) continue;
         if (delta.layer === "sheet") {
-          sheet.sheetStyleId = delta.beforeStyleId;
+          sheet.defaultStyleId = delta.beforeStyleId;
           continue;
         }
         const index = delta.index;
         if (index == null) continue;
         if (delta.layer === "row") {
-          if (delta.beforeStyleId === 0) sheet.rowStyles.delete(index);
-          else sheet.rowStyles.set(index, delta.beforeStyleId);
+          if (delta.beforeStyleId === 0) sheet.rowStyleIds.delete(index);
+          else sheet.rowStyleIds.set(index, delta.beforeStyleId);
           continue;
         }
         if (delta.layer === "col") {
-          if (delta.beforeStyleId === 0) sheet.colStyles.delete(index);
-          else sheet.colStyles.set(index, delta.beforeStyleId);
+          if (delta.beforeStyleId === 0) sheet.colStyleIds.delete(index);
+          else sheet.colStyleIds.set(index, delta.beforeStyleId);
         }
       }
       for (const delta of sheetViewDeltas) {
@@ -2142,10 +2298,51 @@ export class DocumentController {
     }
 
     if (options.emitChange) {
+      /** @type {any[]} */
+      const sheetStyleDeltas = [];
+      /** @type {any[]} */
+      const rowStyleDeltas = [];
+      /** @type {any[]} */
+      const colStyleDeltas = [];
+      for (const delta of formatDeltas) {
+        if (!delta) continue;
+        if (delta.layer === "sheet") {
+          sheetStyleDeltas.push({
+            sheetId: delta.sheetId,
+            beforeStyleId: delta.beforeStyleId,
+            afterStyleId: delta.afterStyleId,
+          });
+          continue;
+        }
+        const index = delta.index;
+        if (index == null) continue;
+        if (delta.layer === "row") {
+          rowStyleDeltas.push({
+            sheetId: delta.sheetId,
+            row: index,
+            beforeStyleId: delta.beforeStyleId,
+            afterStyleId: delta.afterStyleId,
+          });
+          continue;
+        }
+        if (delta.layer === "col") {
+          colStyleDeltas.push({
+            sheetId: delta.sheetId,
+            col: index,
+            beforeStyleId: delta.beforeStyleId,
+            afterStyleId: delta.afterStyleId,
+          });
+        }
+      }
+
       const payload = {
         deltas: cellDeltas.map(cloneDelta),
         sheetViewDeltas: sheetViewDeltas.map(cloneSheetViewDelta),
         formatDeltas: formatDeltas.map(cloneFormatDelta),
+        // Preferred explicit delta streams for row/col/sheet formatting.
+        rowStyleDeltas,
+        colStyleDeltas,
+        sheetStyleDeltas,
         recalc: options.recalc,
       };
       if (options.source) payload.source = options.source;

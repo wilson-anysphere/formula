@@ -142,6 +142,35 @@ test("getUsedRange can include format-only cells", () => {
   });
 });
 
+test("setRangeFormat for full-height columns does not materialize 1M cell entries", () => {
+  const doc = new DocumentController();
+
+  doc.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } });
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.cells.size, 0);
+  assert.equal(sheet.colStyleIds.size, 1);
+
+  // Deep row formatting applies even when the cell is empty.
+  assert.equal(doc.getCell("Sheet1", "A1048576").styleId, 0);
+  assert.deepEqual(doc.getCellFormat("Sheet1", "A1048576"), { font: { bold: true } });
+
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 0,
+    endRow: 1_048_575,
+    startCol: 0,
+    endCol: 0,
+  });
+
+  // Undo/redo works for column-level formatting.
+  doc.undo();
+  assert.deepEqual(doc.getCellFormat("Sheet1", "A1048576"), {});
+
+  doc.redo();
+  assert.deepEqual(doc.getCellFormat("Sheet1", "A1048576"), { font: { bold: true } });
+});
+
 test("setFrozen is undoable", () => {
   const doc = new DocumentController();
 

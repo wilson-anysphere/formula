@@ -17,6 +17,17 @@ test("encodeState/applyState roundtrip restores cell inputs and clears history",
   const snapshot = doc.encodeState();
   assert.ok(snapshot instanceof Uint8Array);
 
+  const decoded =
+    typeof TextDecoder !== "undefined"
+      ? new TextDecoder().decode(snapshot)
+      : // eslint-disable-next-line no-undef
+        Buffer.from(snapshot).toString("utf8");
+  const parsed = JSON.parse(decoded);
+  const sheet = parsed.sheets.find((s) => s.id === "Sheet1");
+  assert.equal(sheet.defaultFormat, null);
+  assert.deepEqual(sheet.rowFormats, []);
+  assert.deepEqual(sheet.colFormats, []);
+
   const restored = new DocumentController();
   let lastChange = null;
   restored.on("change", (payload) => {
@@ -40,6 +51,28 @@ test("encodeState/applyState roundtrip restores cell inputs and clears history",
     colWidths: { "0": 120 },
     rowHeights: { "1": 40 },
   });
+});
+
+test("encodeState/applyState roundtrip preserves layered column formatting", () => {
+  const doc = new DocumentController();
+  doc.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } });
+
+  const snapshot = doc.encodeState();
+  const decoded =
+    typeof TextDecoder !== "undefined"
+      ? new TextDecoder().decode(snapshot)
+      : // eslint-disable-next-line no-undef
+        Buffer.from(snapshot).toString("utf8");
+  const parsed = JSON.parse(decoded);
+  const sheet = parsed.sheets.find((s) => s.id === "Sheet1");
+  assert.deepEqual(sheet.defaultFormat, null);
+  assert.deepEqual(sheet.rowFormats, []);
+  assert.deepEqual(sheet.colFormats, [{ col: 0, format: { font: { bold: true } } }]);
+
+  const restored = new DocumentController();
+  restored.applyState(snapshot);
+  assert.deepEqual(restored.getCellFormat("Sheet1", "A1048576"), { font: { bold: true } });
+  assert.equal(restored.model.sheets.get("Sheet1").cells.size, 0);
 });
 
 test("applyState materializes empty sheets from snapshots", () => {
