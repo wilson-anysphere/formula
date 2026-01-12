@@ -3551,12 +3551,46 @@ if (
         label: t("menu.clearContents"),
         enabled: (() => {
           if (!allowEditCommands) return false;
-          // Prefer disabling the action when it would be a no-op for the common case
-          // (single-cell selection). For multi-cell selections we keep it enabled
-          // since efficiently checking for any non-empty cells would require scanning.
+
           const isSingleCell = contextKeys.get("isSingleCell") === true;
-          if (!isSingleCell) return true;
-          return contextKeys.get("cellHasValue") === true;
+          const activeHasValue = contextKeys.get("cellHasValue") === true;
+          if (isSingleCell) return activeHasValue;
+          if (activeHasValue) return true;
+
+          // More accurate (but still sparse/efficient) check for multi-cell selections:
+          // scan the sheet's sparse cell map and see if any non-empty cell falls within
+          // the current selection ranges.
+          //
+          // This avoids scanning potentially huge rectangular selections.
+          const sheetId = app.getCurrentSheetId();
+          const doc: any = app.getDocument() as any;
+          const sheetModel = doc?.model?.sheets?.get?.(sheetId) ?? null;
+          const cells: Map<string, any> | null = sheetModel?.cells ?? null;
+          if (!cells || cells.size === 0) return false;
+
+          const ranges = app.getSelectionRanges();
+          if (ranges.length === 0) return false;
+          const normalized = ranges.map((range) => ({
+            startRow: Math.min(range.startRow, range.endRow),
+            endRow: Math.max(range.startRow, range.endRow),
+            startCol: Math.min(range.startCol, range.endCol),
+            endCol: Math.max(range.startCol, range.endCol),
+          }));
+
+          for (const [key, cell] of cells.entries()) {
+            if (!cell || (cell.value == null && cell.formula == null)) continue;
+            const [rowStr, colStr] = String(key).split(",", 2);
+            const row = Number(rowStr);
+            const col = Number(colStr);
+            if (!Number.isInteger(row) || !Number.isInteger(col)) continue;
+            for (const range of normalized) {
+              if (row < range.startRow || row > range.endRow) continue;
+              if (col < range.startCol || col > range.endCol) continue;
+              return true;
+            }
+          }
+
+          return false;
         })(),
         shortcut:
           getPrimaryCommandKeybindingDisplay("edit.clearContents", commandKeybindingDisplayIndex) ?? (isMac ? "⌫" : "Del"),
