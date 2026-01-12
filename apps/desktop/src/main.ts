@@ -2144,7 +2144,17 @@ function ensureCollabSheetObserver(): void {
 
   observedCollabSession = session;
   collabSheetsObserver = () => {
-    syncSheetStoreFromCollabSession(session);
+    // `session.sheets` also stores per-sheet view state + formatting metadata that can change
+    // frequently (row/col sizing, range-run formatting, etc). The sheet tab/switcher UI only
+    // needs to update when the sheet *list* metadata changes (id/name/order/visibility/tabColor).
+    const key = collabSheetsKey(session);
+    if (
+      key === lastCollabSheetsKey &&
+      lastCollabSheetsSession === session &&
+      workbookSheetStore instanceof CollabWorkbookSheetStore
+    ) {
+      return;
+    }
     syncSheetUi();
   };
   session.sheets.observeDeep(collabSheetsObserver as any);
