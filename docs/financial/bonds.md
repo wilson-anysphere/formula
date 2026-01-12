@@ -240,24 +240,29 @@ Signature (Excel):
 - Coupon schedule is anchored at `first_interest` (not maturity). Coupon dates are computed as offsets
   from the anchor (rather than iteratively stepping `EDATE` from the previous coupon date) to avoid
   month-end drift.
+  - Excel also applies an end-of-month (EOM) pinning rule for anchored schedules: if `first_interest`
+    is the last day of its month, then all coupon dates are pinned to month-end.
 
 ### Finding the relevant coupon period (PCD/NCD) anchored at `first_interest`
 
 If `settlement < first_interest`:
 
 - `NCD = first_interest`
-- `PCD = EDATE(first_interest, -m)` (start of the “regular” coupon period that ends at `first_interest`)
+- `PCD = EOMONTH(EDATE(first_interest, -m), 0)` if `first_interest` is month-end, otherwise `EDATE(first_interest, -m)`
 
 If `settlement >= first_interest`:
 
 ```text
-pcd = first_interest
+eom = (first_interest == EOMONTH(first_interest, 0))
+coupon_date(k) = if eom then EOMONTH(EDATE(first_interest, k*m), 0) else EDATE(first_interest, k*m)
+
 k = 0
-ncd = EDATE(first_interest, (k+1)*m)
+pcd = first_interest
+ncd = coupon_date(k+1)
 while settlement >= ncd:
   k = k + 1
   pcd = ncd
-  ncd = EDATE(first_interest, (k+1)*m)
+  ncd = coupon_date(k+1)
 ```
 
 ### Accrued-interest start date (`calc_method`)
@@ -315,15 +320,17 @@ Implementation should reuse:
 
 For regular coupon bonds, Excel’s accrued interest within the current coupon period is:
 
-- Coupon payment per period: `C = rate * redemption / f`
+- Coupon payment per period: `C = 100 * rate / f` (rate is per 100 face value)
 - Accrued interest at settlement: `AI = C * (A / E)`
 
 (`A` and `E` are basis-dependent as described above.)
 
 Note the scaling difference:
 
-- `PRICE`/`YIELD` scale coupon cashflows by `redemption` (Excel’s “redemption value per 100 face value”).
-- `ACCRINT` scales coupon cashflows by `par`.
+- `PRICE`/`YIELD` are **per 100 face value**:
+  - Coupon cashflows use `100 * rate / f`.
+  - `redemption` is a *separate* maturity cashflow (amount repaid per 100 face value).
+- `ACCRINT` scales coupon cashflows by `par` and returns an amount in the same units as `par`.
 
 ### Clean vs dirty
 
@@ -354,7 +361,7 @@ Signature (Excel): `PRICE(settlement, maturity, rate, yld, redemption, frequency
 
 ### Cash-flow present value (dirty price)
 
-Let `C = rate * redemption / f`.
+Let `C = 100 * rate / f`.
 
 Each remaining coupon occurs at period exponent:
 
@@ -567,7 +574,7 @@ Inputs:
 
 Derived values:
 
-- `C = rate * redemption / f = 0.10 * 100 / 2 = 5`
+- `C = 100 * rate / f = 100 * 0.10 / 2 = 5`
 - Per-period yield `k = 0.12 / 2 = 0.06`
 - `d = 1 + k = 1.06`
 - Coupon dates after settlement: 2024-07-01 and 2025-01-01 ⇒ `N = 2`
