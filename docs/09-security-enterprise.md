@@ -461,6 +461,34 @@ This intentionally prevents narrower selectors from weakening broader restrictio
 
 Large range requests are accepted, but requesting debug matches (`includeMatched: true`) is rejected for extremely large ranges to keep the endpoint bounded.
 
+### DLP policy evaluation & enforcement (services/api)
+
+DLP policies are stored at two levels:
+
+- **Org policy**: `org_dlp_policies` (per organization)
+- **Document overrides**: `document_dlp_policies` (per document), applied only when the effective org policy allows overrides.
+
+The backend exposes a policy evaluation endpoint for clients to understand whether an action is permitted:
+
+- `POST /docs/:docId/dlp/evaluate` (requires document read permission)
+  - Body: `{ action, selector?, options? }`
+  - Response: `{ decision, reasonCode?, classification, maxAllowed }`
+
+This endpoint returns *decisions*, not full policy configuration, so clients can build UX without needing org-admin access to the raw policy.
+
+#### External share-link enforcement
+
+Public (external) share links are enforced server-side using `DLP_ACTION.SHARE_EXTERNAL_LINK`:
+
+- `POST /docs/:docId/share-links` blocks creation when `visibility = "public"` is disallowed by DLP.
+- `POST /share-links/:token/redeem` re-evaluates DLP when the redeemer is not already an org member (treat as “external access”).
+
+To avoid leaking sensitive classification/policy thresholds, the API responds with:
+
+- `403 { error: "dlp_blocked" }`
+
+When an action is blocked, an audit event is written (`event_type = "dlp.blocked"`) including the action, document id, effective classification, and reason code.
+
 ## Data Encryption
 
 ### Encryption at Rest
