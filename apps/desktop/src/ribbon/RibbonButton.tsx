@@ -104,6 +104,7 @@ export const RibbonButton = React.memo(function RibbonButton({ button, pressed, 
         classForKind(kind),
         classForSize(size),
         isPressed ? "is-pressed" : null,
+        hasMenu && menuOpen ? "is-open" : null,
       ]
         .filter(Boolean)
         .join(" ")}

@@ -169,6 +169,11 @@
   border-color: var(--selection-border);
 }
 
+.ribbon-button.is-open {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+}
+
 .ribbon-button__icon {
   display: inline-flex;
   width: 18px;
