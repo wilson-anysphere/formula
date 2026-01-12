@@ -728,7 +728,9 @@ This design allows relationship IDs to change without rewriting every rich value
 The exact XML vocab inside `richValue.xml` varies across Excel builds, but the *indexing chain* for images-in-cell
 is generally:
 
-There are (at least) two observed variants for mapping `vm`/`metadata.xml` → rich value indices.
+In this repo’s fixture corpus, mapping `vm`/`metadata.xml` → rich value indices uses the
+`futureMetadata`/`xlrd:rvb` indirection described below. Other schemas may exist in the wild; preserve and
+round-trip unknown metadata byte-for-byte.
 
 ### Variant A: `futureMetadata` / `rvb` indirection
 
@@ -753,17 +755,6 @@ There are (at least) two observed variants for mapping `vm`/`metadata.xml` → r
 
 So: **cell → vm (0/1-based) → metadata.xml → rvb@i (0-based) → rich value instance table → relIndex (0-based) →
 richValueRel.xml → rId → .rels target → image bytes**.
-
-### Variant B: `rc/@v` directly references the rich value index
-
-Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`:
-
-1. **Worksheet cell** has `c/@vm="0"`.
-2. In `xl/metadata.xml`, the first `<valueMetadata><bk>` has `<rc t="1" v="0"/>`.
-3. `v="0"` is treated as the rich value index (0-based) into the rich value store (here:
-   `xl/richData/richValue.xml`).
-4. The rich value record contains a relationship index into `richValueRel.xml`, which resolves via
-   `xl/richData/_rels/richValueRel.xml.rels` to a media part.
 
 ## Minimal XML skeletons (best-effort)
 
