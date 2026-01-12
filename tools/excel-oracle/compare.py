@@ -224,6 +224,11 @@ def main() -> int:
     parser.add_argument("--actual", required=True, help="Path to engine results JSON")
     parser.add_argument("--report", required=True, help="Path to write mismatch report JSON")
     parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print how many cases would be compared (after tag filtering / max-cases) and exit without writing a report.",
+    )
+    parser.add_argument(
         "--include-tag",
         action="append",
         default=[],
@@ -383,8 +388,19 @@ def main() -> int:
 
         included_cases.append(case)
 
+    matched_cases = len(included_cases)
     if args.max_cases and args.max_cases > 0:
         included_cases = included_cases[: args.max_cases]
+
+    if args.dry_run:
+        print("Dry run: compare.py")
+        print(f"cases: {cases_path}")
+        print(f"expected: {expected_path}")
+        print(f"actual: {actual_path}")
+        print(f"report: {report_path}")
+        print(f"cases after tag filtering: {matched_cases}")
+        print(f"cases selected: {len(included_cases)}")
+        return 0
 
     for case in included_cases:
         case_id = case["id"]
