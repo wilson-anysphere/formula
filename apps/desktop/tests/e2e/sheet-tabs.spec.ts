@@ -97,6 +97,63 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-tab-Sheet4")).toHaveAttribute("data-active", "true");
   });
 
+  test("add sheet inserts after the active sheet tab", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Ensure A1 is active so the status bar is deterministic after sheet switches.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.activateCell({ row: 0, col: 0 });
+    });
+
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+
+    // Add Sheet2 while Sheet1 is active -> [Sheet1, Sheet2].
+    await page.getByTestId("sheet-add").click();
+
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId()))
+      .not.toBe("Sheet1");
+
+    const sheet2 = await page.evaluate(() => String((window as any).__formulaApp.getCurrentSheetId()));
+    await expect(page.getByTestId(`sheet-tab-${sheet2}`)).toBeVisible();
+
+    await expect.poll(() =>
+      page.evaluate(() =>
+        Array.from(document.querySelectorAll("#sheet-tabs .sheet-tabs [data-sheet-id]"))
+          .map((el) => (el as HTMLElement).getAttribute("data-sheet-id"))
+          .filter(Boolean),
+      ),
+    ).toEqual(["Sheet1", sheet2]);
+
+    // Activate Sheet1, then add Sheet3 -> [Sheet1, Sheet3, Sheet2].
+    await page.getByTestId("sheet-tab-Sheet1").click();
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
+
+    await page.getByTestId("sheet-add").click();
+    await expect
+      .poll(() =>
+        page.evaluate((sheet2Id) => {
+          const id = (window as any).__formulaApp.getCurrentSheetId();
+          if (id === "Sheet1" || id === sheet2Id) return "";
+          return id;
+        }, sheet2),
+      )
+      .not.toBe("");
+
+    const sheet3 = await page.evaluate(() => String((window as any).__formulaApp.getCurrentSheetId()));
+    expect(sheet3).not.toBe(sheet2);
+    await expect(page.getByTestId(`sheet-tab-${sheet3}`)).toBeVisible();
+
+    await expect.poll(() =>
+      page.evaluate(() =>
+        Array.from(document.querySelectorAll("#sheet-tabs .sheet-tabs [data-sheet-id]"))
+          .map((el) => (el as HTMLElement).getAttribute("data-sheet-id"))
+          .filter(Boolean),
+      ),
+    ).toEqual(["Sheet1", sheet3, sheet2]);
+  });
+
   test("keyboard navigation activates the focused sheet tab", async ({ page }) => {
     await gotoDesktop(page);
 

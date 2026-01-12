@@ -283,6 +283,11 @@ test.describe("tauri workbook integration", () => {
     await expect
       .poll(() => page.evaluate(() => (window as any).__tauriInvokeCalls?.find((c: any) => c.cmd === "add_sheet")?.args?.name))
       .toBe("Sheet2");
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as any).__tauriInvokeCalls?.find((c: any) => c.cmd === "add_sheet")?.args?.after_sheet_id),
+      )
+      .toBe("Sheet1");
 
     // Mutate the document to ensure workbook sync uses the backend sheet id (not the requested name).
     await page.evaluate(() => {

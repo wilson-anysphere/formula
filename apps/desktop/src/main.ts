@@ -2051,7 +2051,7 @@ async function handleAddSheet(): Promise<void> {
       // Allow any microtask-batched workbook edits to enqueue before we request a new sheet id.
       await new Promise<void>((resolve) => queueMicrotask(resolve));
 
-      const info = (await invoke("add_sheet", { name: desiredName, index: insertIndex })) as SheetUiInfo;
+      const info = (await invoke("add_sheet", { name: desiredName, after_sheet_id: activeId, index: insertIndex })) as SheetUiInfo;
       const id = String((info as any)?.id ?? "").trim();
       const name = String((info as any)?.name ?? "").trim();
       if (!id) throw new Error("Backend returned empty sheet id");
@@ -3602,7 +3602,7 @@ if (
         const activeIndex = sheets.findIndex((sheet) => sheet.id === activeId);
         const insertIndex = activeIndex >= 0 ? activeIndex + 1 : sheets.length;
 
-        const info = (await invoke("add_sheet", { name: validatedName, index: insertIndex })) as SheetUiInfo;
+        const info = (await invoke("add_sheet", { name: validatedName, after_sheet_id: activeId, index: insertIndex })) as SheetUiInfo;
         const id = String((info as any)?.id ?? "").trim();
         const resolvedName = String((info as any)?.name ?? "").trim();
         if (!id) throw new Error("Backend returned empty sheet id");

@@ -400,11 +400,13 @@ impl AppState {
     pub fn add_sheet(
         &mut self,
         name: String,
+        after_sheet_id: Option<String>,
         index: Option<usize>,
     ) -> Result<SheetInfoData, AppStateError> {
         let (candidate_id, candidate_name, insert_index) = {
             let workbook = self.get_workbook()?;
             let base = name.trim();
+            let base = if base.is_empty() { "Sheet" } else { base };
             formula_model::validate_sheet_name(base)
                 .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
 
@@ -447,7 +449,20 @@ impl AppState {
                 candidate_id = format!("{base_id}-{id_counter}");
             }
 
-            let insert_index = index.unwrap_or(workbook.sheets.len()).min(workbook.sheets.len());
+            let insert_index = after_sheet_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .and_then(|after_id| {
+                    workbook
+                        .sheets
+                        .iter()
+                        .position(|sheet| sheet.id.eq_ignore_ascii_case(after_id))
+                        .map(|idx| idx.saturating_add(1))
+                })
+                .unwrap_or_else(|| index.unwrap_or(workbook.sheets.len()))
+                .min(workbook.sheets.len());
+
             (candidate_id, candidate_name, insert_index)
         };
 
@@ -3730,6 +3745,101 @@ mod tests {
     use formula_model::import::{import_csv_to_columnar_table, CsvOptions};
 
     #[test]
+    fn add_sheet_inserts_after_middle_sheet() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        workbook.add_sheet("Sheet3".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let inserted = state
+            .add_sheet("Inserted".to_string(), Some("sHeEt2".to_string()), None)
+            .expect("add sheet succeeds");
+        let inserted_id = inserted.id;
+
+        let workbook = state.get_workbook().expect("workbook loaded");
+        let ids = workbook
+            .sheets
+            .iter()
+            .map(|sheet| sheet.id.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            ids,
+            vec![
+                "Sheet1".to_string(),
+                "Sheet2".to_string(),
+                inserted_id,
+                "Sheet3".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn add_sheet_unknown_after_sheet_id_appends() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let inserted = state
+            .add_sheet("Inserted".to_string(), Some("does-not-exist".to_string()), None)
+            .expect("add sheet succeeds");
+        let inserted_id = inserted.id;
+
+        let workbook = state.get_workbook().expect("workbook loaded");
+        let ids = workbook
+            .sheets
+            .iter()
+            .map(|sheet| sheet.id.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            ids,
+            vec![
+                "Sheet1".to_string(),
+                "Sheet2".to_string(),
+                inserted_id
+            ]
+        );
+    }
+
+    #[test]
+    fn add_sheet_after_last_sheet_appends() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let inserted = state
+            .add_sheet("Inserted".to_string(), Some("sheet2".to_string()), None)
+            .expect("add sheet succeeds");
+        let inserted_id = inserted.id;
+
+        let workbook = state.get_workbook().expect("workbook loaded");
+        let ids = workbook
+            .sheets
+            .iter()
+            .map(|sheet| sheet.id.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            ids,
+            vec![
+                "Sheet1".to_string(),
+                "Sheet2".to_string(),
+                inserted_id
+            ]
+        );
+    }
+
+    #[test]
     fn xlsb_provenance_survives_persistent_recovery() {
         let fixture_path = Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -3928,7 +4038,7 @@ mod tests {
             .expect("load persistent workbook");
 
         state
-            .add_sheet("Inserted".to_string(), Some(1))
+            .add_sheet("Inserted".to_string(), None, Some(1))
             .expect("add sheet");
 
         let info = state.workbook_info().expect("workbook info");
