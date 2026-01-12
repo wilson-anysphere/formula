@@ -48,6 +48,16 @@ function getTauriInvoke(): TauriInvoke {
   return invoke;
 }
 
+function normalizeBase64String(base64: string): string {
+  if (!base64) return "";
+  if (base64.startsWith("data:")) {
+    const comma = base64.indexOf(",");
+    if (comma === -1) return "";
+    return base64.slice(comma + 1).trim();
+  }
+  return base64.trim();
+}
+
 function estimateBase64Bytes(base64: string): number {
   if (!base64) return 0;
 
@@ -91,13 +101,8 @@ function decodeBase64ToBytes(val: string): Uint8Array | undefined {
   if (!val) return undefined;
   if (estimateBase64Bytes(val) > MAX_IMAGE_BYTES) return undefined;
 
-  let base64 = val;
-  if (val.startsWith("data:")) {
-    const comma = val.indexOf(",");
-    if (comma === -1) return undefined;
-    base64 = val.slice(comma + 1);
-  }
-  base64 = base64.trim();
+  const base64 = normalizeBase64String(val);
+  if (!base64) return undefined;
 
   try {
     if (typeof atob === "function") {
@@ -180,7 +185,14 @@ function readPngBase64(source: any): string | undefined {
 
 export async function readClipboard(): Promise<ClipboardContent> {
   const invoke = getTauriInvoke();
-  const payload = (await invoke("clipboard_read")) as any;
+  /** @type {any} */
+  let payload: any = null;
+  try {
+    payload = await invoke("clipboard_read");
+  } catch {
+    // Older desktop builds exposed `read_clipboard`.
+    payload = await invoke("read_clipboard");
+  }
 
   /** @type {ClipboardContent} */
   const out = {};
@@ -226,5 +238,15 @@ export async function writeClipboard(payload: ClipboardWritePayload): Promise<vo
   if (typeof payload.rtf === "string") out.rtf = payload.rtf;
   if (typeof pngBase64 === "string") out.pngBase64 = pngBase64;
 
-  await invoke("clipboard_write", { payload: out });
+  try {
+    await invoke("clipboard_write", { payload: out });
+  } catch {
+    // Older desktop builds exposed `write_clipboard` with positional args.
+    await invoke("write_clipboard", {
+      text: typeof payload.text === "string" ? payload.text : "",
+      html: typeof payload.html === "string" ? payload.html : undefined,
+      rtf: typeof payload.rtf === "string" ? payload.rtf : undefined,
+      image_png_base64: typeof pngBase64 === "string" && pngBase64 ? pngBase64 : undefined,
+    });
+  }
 }
