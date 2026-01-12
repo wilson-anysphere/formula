@@ -182,7 +182,7 @@ describe("SpreadsheetApp formatting keyboard shortcuts", () => {
     root.remove();
   });
 
-  it("Ctrl+I toggles italic, but Cmd+I is not captured", () => {
+  it("Ctrl/Cmd+I toggles italic", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -205,14 +205,15 @@ describe("SpreadsheetApp formatting keyboard shortcuts", () => {
       expect(style.font?.italic).toBe(true);
     }
 
-    // Cmd+I should *not* be captured (reserved for the AI sidebar).
+    // Cmd+I should also apply italic.
     app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 1, endCol: 1 } }); // B1
     const cmdEvent = new KeyboardEvent("keydown", { key: "i", metaKey: true, cancelable: true });
     root.dispatchEvent(cmdEvent);
-    expect(cmdEvent.defaultPrevented).toBe(false);
+    expect(cmdEvent.defaultPrevented).toBe(true);
     {
       const cell = doc.getCell(sheetId, { row: 0, col: 1 }) as any;
-      expect(cell.styleId).toBe(0);
+      const style = doc.styleTable.get(cell.styleId) as any;
+      expect(style.font?.italic).toBe(true);
     }
 
     app.destroy();

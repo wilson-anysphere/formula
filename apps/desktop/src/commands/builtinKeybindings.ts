@@ -71,7 +71,7 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
   {
     command: "view.togglePanel.aiChat",
     key: "ctrl+shift+a",
-    mac: "cmd+i",
+    mac: "cmd+shift+a",
     when: null,
   },
   {
@@ -215,8 +215,7 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
   {
     command: "format.toggleItalic",
     key: "ctrl+i",
-    // IMPORTANT: Cmd+I is reserved for the AI sidebar (see main.ts). Italic is bound to Ctrl+I instead.
-    mac: "ctrl+i",
+    mac: "cmd+i",
     when: null,
   },
   {

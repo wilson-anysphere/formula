@@ -1587,8 +1587,7 @@ window.addEventListener("keydown", (e) => {
       applyFormattingToSelection("Bold", (doc, sheetId, ranges) => toggleBold(doc, sheetId, ranges));
       return;
     }
-    // IMPORTANT: Cmd+I is reserved for the AI sidebar. Only bind italic to Ctrl+I.
-    if (keyLower === "i" && e.ctrlKey && !e.metaKey) {
+    if (keyLower === "i") {
       e.preventDefault();
       applyFormattingToSelection("Italic", (doc, sheetId, ranges) => toggleItalic(doc, sheetId, ranges));
       return;

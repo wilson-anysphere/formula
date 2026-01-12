@@ -629,11 +629,11 @@ mockups/README.md                # Full design system
 
 **AI shortcuts:**
 - `Cmd/Ctrl+K` – Inline AI edit
-- `Cmd+I` (macOS) – Toggle AI sidebar
+- `Cmd/Ctrl+Shift+A` – Toggle AI sidebar
 - `Tab` – Accept suggestion
 
-Platform note:
-- **Windows/Linux:** `Ctrl+I` is reserved for **Italic** (Excel-compatible). Use `Ctrl+Shift+A` to toggle the AI chat sidebar.
+  Platform note:
+- `Cmd/Ctrl+I` is reserved for **Italic** (Excel-compatible), so the AI sidebar uses `Cmd/Ctrl+Shift+A`.
 
 ### AI Sidebar
 
