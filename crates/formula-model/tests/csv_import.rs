@@ -218,6 +218,24 @@ fn csv_import_type_inference_respects_locale_options() {
 }
 
 #[test]
+fn csv_import_autodetects_decimal_comma_locale_for_semicolon_csv() {
+    // A common Excel locale configuration uses:
+    // - `;` as the list separator / CSV delimiter
+    // - `,` as the decimal separator
+    //
+    // When exporting CSV, Excel often omits the `sep=` directive, relying on locale defaults.
+    // Import should infer that `,` is a decimal separator (so delimiter sniffing does not mistake
+    // decimal commas for field separators) and parse values accordingly.
+    let csv = "amount;ratio\n€1.234,50;12,5%\n";
+    let sheet =
+        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
+            .unwrap();
+
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1234.5));
+    assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Number(0.125));
+}
+
+#[test]
 fn csv_import_date_order_preference_changes_ambiguous_dates() {
     let csv = "d\n01/02/1970\n";
 

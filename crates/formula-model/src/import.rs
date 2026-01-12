@@ -197,11 +197,24 @@ fn import_csv_to_columnar_table_impl<R: BufRead>(
     mut reader: R,
     options: CsvOptions,
 ) -> Result<ColumnarTable, CsvImportError> {
-    let (sniff_prefix, delimiter) = if options.delimiter == CSV_DELIMITER_AUTO {
+    let mut options = options;
+    let (sniff_prefix, mut delimiter) = if options.delimiter == CSV_DELIMITER_AUTO {
         sniff_csv_delimiter_prefix(&mut reader, options.decimal_separator).map_err(CsvImportError::Io)?
     } else {
         (Vec::new(), options.delimiter)
     };
+
+    // Excel uses both a list separator (delimiter) and a decimal separator. For files imported with
+    // auto-delimiter detection, attempt to infer a decimal separator from the sample when the
+    // caller did not explicitly opt into a locale (`CsvOptions::decimal_separator` defaults to
+    // `.`). This improves compatibility with semicolon-delimited, decimal-comma CSVs that do not
+    // include a `sep=` directive.
+    if options.delimiter == CSV_DELIMITER_AUTO && options.decimal_separator == '.' {
+        if let Some(inferred) = infer_csv_decimal_separator_from_sample(&sniff_prefix) {
+            options.decimal_separator = inferred;
+            delimiter = sniff_csv_delimiter_with_decimal_separator(&sniff_prefix, inferred);
+        }
+    }
 
     // If we sniffed, re-play the bytes we consumed so the CSV reader sees the full stream.
     let reader = Cursor::new(sniff_prefix).chain(reader);
@@ -541,6 +554,93 @@ fn parse_csv_sep_directive(prefix: &[u8]) -> Option<u8> {
     }
 
     Some(delimiter)
+}
+
+fn infer_csv_decimal_separator_from_sample(sample: &[u8]) -> Option<char> {
+    // Best-effort locale inference for numeric parsing.
+    //
+    // Excel opens CSVs using the system's list separator and decimal separator. We don't have
+    // access to OS locale here, but we can infer the decimal separator from the data when
+    // auto-detecting the delimiter (the common "EU" case is `;` delimiter with `,` decimal).
+    //
+    // We intentionally keep this conservative: only return `,` when we see evidence of decimal
+    // commas *and* no evidence of decimal dots. (Default behavior remains decimal-dot.)
+    let mut comma_evidence = 0usize;
+    let mut dot_evidence = 0usize;
+
+    let mut i = 0usize;
+    while i < sample.len() {
+        if !sample[i].is_ascii_digit() {
+            i += 1;
+            continue;
+        }
+
+        let start = i;
+        i += 1;
+        while i < sample.len() {
+            let b = sample[i];
+            if b.is_ascii_digit() || matches!(b, b'.' | b',' | b'e' | b'E' | b'+' | b'-') {
+                i += 1;
+            } else {
+                break;
+            }
+        }
+
+        let token = &sample[start..i];
+        let exp_idx = token.iter().position(|b| matches!(*b, b'e' | b'E'));
+        let mantissa = match exp_idx {
+            Some(idx) => &token[..idx],
+            None => token,
+        };
+
+        let dot_count = mantissa.iter().filter(|b| **b == b'.').count();
+        let comma_count = mantissa.iter().filter(|b| **b == b',').count();
+
+        if dot_count > 0 && comma_count > 0 {
+            let last_dot = mantissa.iter().rposition(|b| *b == b'.');
+            let last_comma = mantissa.iter().rposition(|b| *b == b',');
+            match (last_dot, last_comma) {
+                (Some(d), Some(c)) => {
+                    if d > c {
+                        dot_evidence += 1;
+                    } else {
+                        comma_evidence += 1;
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+
+        if dot_count == 1 && comma_count == 0 {
+            let sep_idx = mantissa.iter().position(|b| *b == b'.').unwrap_or(0);
+            let digits_after = mantissa[sep_idx + 1..]
+                .iter()
+                .take_while(|b| b.is_ascii_digit())
+                .count();
+            if digits_after > 0 && digits_after != 3 {
+                dot_evidence += 1;
+            }
+            continue;
+        }
+
+        if comma_count == 1 && dot_count == 0 {
+            let sep_idx = mantissa.iter().position(|b| *b == b',').unwrap_or(0);
+            let digits_after = mantissa[sep_idx + 1..]
+                .iter()
+                .take_while(|b| b.is_ascii_digit())
+                .count();
+            if digits_after > 0 && digits_after != 3 {
+                comma_evidence += 1;
+            }
+            continue;
+        }
+    }
+
+    if comma_evidence > 0 && dot_evidence == 0 {
+        return Some(',');
+    }
+    None
 }
 
 fn sniff_csv_delimiter_prefix<R: Read>(

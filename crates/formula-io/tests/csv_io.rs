@@ -274,6 +274,25 @@ fn opens_semicolon_delimited_csv_with_sniffed_delimiter() {
 }
 
 #[test]
+fn opens_semicolon_delimited_csv_with_decimal_comma_numbers() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let csv_path = dir.path().join("eu.csv");
+
+    // EU-style CSV: semicolon delimiter, decimal comma. Note that there's no `sep=` directive.
+    std::fs::write(&csv_path, "amount;ratio\n€1.234,50;12,5%\n").expect("write csv");
+
+    let wb = open_workbook(&csv_path).expect("open csv workbook");
+    let model = match wb {
+        Workbook::Model(model) => model,
+        other => panic!("expected Workbook::Model, got {other:?}"),
+    };
+
+    let sheet = model.sheet_by_name("eu").expect("sheet missing");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1234.5));
+    assert_eq!(sheet.value_a1("B1").unwrap(), CellValue::Number(0.125));
+}
+
+#[test]
 fn opens_tab_delimited_csv_with_sniffed_delimiter() {
     let dir = tempfile::tempdir().expect("temp dir");
     let csv_path = dir.path().join("tab.csv");
