@@ -39,6 +39,33 @@ For an end-to-end smoke test, open:
 - `/scripting-test.html` (TypeScript scripting runtime)
 - `/` and click the "Python" button in the status bar (Python panel demo)
 
+## Production/Tauri: `crossOriginIsolated` check
+
+The packaged Tauri app **must** run with `globalThis.crossOriginIsolated === true` and `SharedArrayBuffer` available.
+If this regresses, the Pyodide Worker backend breaks (and Python will fall back to the slower main-thread mode).
+
+### Quick check (recommended)
+
+1. Build a production desktop binary:
+
+   ```bash
+   pnpm -C apps/desktop build
+   cd apps/desktop/src-tauri
+   cargo tauri build --no-bundle
+   ```
+
+2. Launch the built app (platform-specific binary path under `target/release/`).
+3. On startup, the app will show a long-lived **error toast** if cross-origin isolation is missing.
+
+### Manual verification (DevTools)
+
+If you have DevTools access in the packaged WebView, run:
+
+```js
+globalThis.crossOriginIsolated
+typeof SharedArrayBuffer !== "undefined"
+```
+
 ## Extensions / Marketplace (current status)
 
 The repo contains a complete **extension runtime + marketplace installer** implementation, but it currently lives in

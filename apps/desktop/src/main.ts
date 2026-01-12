@@ -69,6 +69,42 @@ window.addEventListener("unload", () => {
     // Best-effort cleanup; ignore failures during teardown.
   }
 });
+/**
+ * SharedArrayBuffer requires cross-origin isolation (COOP/COEP). When we ship a
+ * packaged Tauri build without it, Pyodide cannot use its Worker backend.
+ *
+ * Vite dev/preview servers configure COOP/COEP headers; the packaged app relies
+ * on Tauri's asset protocol configuration. Fail loudly (but non-fatally) in
+ * production Tauri builds so this doesn't ship silently.
+ */
+function warnIfMissingCrossOriginIsolationInTauriProd(): void {
+  const isTauri = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+  if (!isTauri) return;
+  if (!import.meta.env.PROD) return;
+
+  const crossOriginIsolated = globalThis.crossOriginIsolated === true;
+  const hasSharedArrayBuffer = typeof (globalThis as any).SharedArrayBuffer !== "undefined";
+  if (crossOriginIsolated && hasSharedArrayBuffer) return;
+
+  const details = `crossOriginIsolated=${String(globalThis.crossOriginIsolated)}, SharedArrayBuffer=${
+    hasSharedArrayBuffer ? "present" : "missing"
+  }`;
+
+  console.error(
+    `[formula][desktop] Cross-origin isolation missing in packaged Tauri build (${details}). ` +
+      "This breaks SharedArrayBuffer and forces Pyodide to fall back to its main-thread backend. " +
+      "Ensure the Tauri asset protocol sets COOP/COEP headers (see apps/desktop/README.md).",
+  );
+
+  // Keep it on-screen long enough that developers won't miss it.
+  showToast(
+    `Cross-origin isolation missing in packaged desktop build (${details}). Pyodide Worker backend disabled.`,
+    "error",
+    { timeoutMs: 60_000 },
+  );
+}
+
+warnIfMissingCrossOriginIsolationInTauriProd();
 
 const workbookSheetNames = new Map<string, string>();
 
