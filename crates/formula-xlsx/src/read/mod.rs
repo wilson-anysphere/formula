@@ -706,6 +706,7 @@ fn parse_relationships(bytes: &[u8]) -> Result<RelationshipsInfo, ReadError> {
                 let mut id = None;
                 let mut type_ = None;
                 let mut target = None;
+                let mut target_mode = None;
                 for attr in e.attributes() {
                     let attr = attr?;
                     let key = crate::openxml::local_name(attr.key.as_ref());
@@ -715,9 +716,21 @@ fn parse_relationships(bytes: &[u8]) -> Result<RelationshipsInfo, ReadError> {
                         type_ = Some(attr.unescape_value()?.into_owned());
                     } else if key.eq_ignore_ascii_case(b"Target") {
                         target = Some(attr.unescape_value()?.into_owned());
+                    } else if key.eq_ignore_ascii_case(b"TargetMode") {
+                        target_mode = Some(attr.unescape_value()?.into_owned());
                     }
                 }
                 if let (Some(id), Some(target)) = (id, target) {
+                    if target_mode
+                        .as_deref()
+                        .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+                    {
+                        // Workbook relationship targets can be external URIs. These do not
+                        // correspond to OPC part names and should not participate in the workbook
+                        // part resolution graph.
+                        continue;
+                    }
+
                     if let Some(type_) = &type_ {
                         match type_.as_str() {
                             REL_TYPE_STYLES => {
@@ -2580,5 +2593,77 @@ mod tests {
             .expect("expected cell meta entry for A1 after set_cell_formula(None)");
         assert_eq!(meta.cm.as_deref(), Some("7"));
         assert_eq!(meta.vm.as_deref(), Some("9"));
+    }
+
+    #[test]
+    fn ignores_external_workbook_relationships_for_metadata_part() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        // External metadata relationship is listed first and should be ignored. Otherwise we would
+        // attempt to resolve `https://...` as a package part name and fail to load the real
+        // `xl/metadata.xml`.
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="https://example.com/metadata.xml" TargetMode="External"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"/>
+</Relationships>"#;
+
+        // Minimal metadata.xml using the "direct" mapping variant (`rc/@v` stores the rich value
+        // index directly).
+        let metadata_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+  <valueMetadata count="1">
+    <bk><rc t="1" v="42"/></bk>
+  </valueMetadata>
+</metadata>"#;
+
+        // vm="1" should map to rich value index 42.
+        let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData>
+    <row r="1">
+      <c r="A1" vm="1"/>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/metadata.xml", options).unwrap();
+        zip.write_all(metadata_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(sheet_xml.as_bytes()).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+
+        let doc = load_from_bytes(&bytes).expect("load_from_bytes");
+        let sheet_id = doc.workbook.sheets[0].id;
+        let cell_ref = CellRef::from_a1("A1").unwrap();
+        assert_eq!(
+            doc.xlsx_meta().rich_value_cells.get(&(sheet_id, cell_ref)),
+            Some(&42)
+        );
     }
 }
