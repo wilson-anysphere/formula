@@ -208,21 +208,6 @@ const CONTENT_SUBSTRING_RULES = [
     message: "Forbidden: direct OpenAI API endpoint reference (Cursor-only AI).",
   },
   {
-    id: "openai",
-    needleLower: "openai",
-    message: "Forbidden: OpenAI integration reference (Cursor-only AI).",
-  },
-  {
-    id: "anthropic",
-    needleLower: "anthropic",
-    message: "Forbidden: Anthropic integration reference (Cursor-only AI).",
-  },
-  {
-    id: "ollama",
-    needleLower: "ollama",
-    message: "Forbidden: Ollama/local model integration reference (Cursor-only AI).",
-  },
-  {
     id: "formula:llm:",
     needleLower: "formula:llm:",
     message: "Forbidden: legacy/localStorage LLM key prefix (Cursor-only AI; no user keys).",
@@ -236,6 +221,21 @@ const CONTENT_SUBSTRING_RULES = [
     id: "formula:aiCompletion:localModelEnabled",
     needleLower: "formula:aicompletion:localmodelenabled",
     message: "Forbidden: legacy local model toggle storage key (Cursor-only AI; no local models).",
+  },
+  {
+    id: "openai",
+    needleLower: "openai",
+    message: "Forbidden: OpenAI integration reference (Cursor-only AI).",
+  },
+  {
+    id: "anthropic",
+    needleLower: "anthropic",
+    message: "Forbidden: Anthropic integration reference (Cursor-only AI).",
+  },
+  {
+    id: "ollama",
+    needleLower: "ollama",
+    message: "Forbidden: Ollama/local model integration reference (Cursor-only AI).",
   },
 ];
 
