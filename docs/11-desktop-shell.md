@@ -372,6 +372,7 @@ delete prior release assets.
   - `tauri_plugin_updater` (update checks)
   - `tauri_plugin_notification` (native notifications)
   - `tauri_plugin_single_instance` (forward argv/cwd from subsequent launches into the running instance)
+  - `tauri_plugin_deep_link` (best-effort runtime registration for the `formula://` deep link scheme)
 - A custom `asset:` protocol handler (`asset_protocol.rs`) to attach COEP/CORP-friendly headers for `asset://...` URLs (used by `convertFileSrc`).
 - App menu setup (see `apps/desktop/src-tauri/src/menu.rs`) and `.on_menu_event(...)` forwarding.
 - `invoke_handler(...)` mapping commands in `commands.rs`
