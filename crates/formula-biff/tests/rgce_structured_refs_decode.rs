@@ -80,6 +80,14 @@ fn decodes_structured_ref_item_only_all() {
 }
 
 #[test]
+fn decodes_structured_ref_item_only_data() {
+    let rgce = ptg_list(1, 0x0004, 0, 0, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table1[#Data]");
+    assert_eq!(normalize(&text), normalize("Table1[#Data]"));
+}
+
+#[test]
 fn decodes_structured_ref_column_range() {
     let rgce = ptg_list(1, 0x0000, 2, 4, 0x18);
     let text = decode_rgce(&rgce).expect("decode");
@@ -104,6 +112,15 @@ fn decodes_structured_ref_value_class_emits_explicit_implicit_intersection() {
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "@Table1[Column2]");
     assert_eq!(normalize(&text), normalize("@Table1[Column2]"));
+}
+
+#[test]
+fn decodes_structured_ref_unknown_flags_are_ignored() {
+    // Unknown flag bits should not hard-fail decode.
+    let rgce = ptg_list(1, 0x8000, 2, 2, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table1[Column2]");
+    assert_eq!(normalize(&text), normalize("Table1[Column2]"));
 }
 
 #[test]
