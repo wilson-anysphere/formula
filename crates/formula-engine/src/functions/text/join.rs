@@ -49,9 +49,9 @@ fn value_to_text(value: &Value, options: &FormatOptions) -> Result<String, Error
         Value::Blank => Ok(String::new()),
         Value::Number(n) => Ok(formula_format::format_value(FmtValue::Number(*n), None, options).text),
         Value::Text(s) => Ok(s.clone()),
-        Value::Entity(v) => Ok(v.display.clone()),
-        Value::Record(v) => Ok(v.display.clone()),
         Value::Bool(b) => Ok(if *b { "TRUE".to_string() } else { "FALSE".to_string() }),
+        Value::Entity(entity) => Ok(entity.display.clone()),
+        Value::Record(record) => Ok(record.display.clone()),
         Value::Error(e) => Err(*e),
         other => {
             if matches!(other, Value::Spill { .. }) {

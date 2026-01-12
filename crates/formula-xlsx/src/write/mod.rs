@@ -3278,8 +3278,7 @@ fn append_cell_xml(
                 }
             }
             value @ CellValue::Record(record) => {
-                let display = record.to_string();
-                let s = display.as_str();
+                let s = record.to_string();
                 match &value_kind {
                     CellValueKind::SharedString { .. } => {
                         let idx = shared_string_index(doc, meta, value, shared_lookup);
@@ -3289,16 +3288,16 @@ fn append_cell_xml(
                     }
                     CellValueKind::InlineString => {
                         out.push_str("<is><t");
-                        if needs_space_preserve(s) {
+                        if needs_space_preserve(&s) {
                             out.push_str(r#" xml:space="preserve""#);
                         }
                         out.push('>');
-                        out.push_str(&escape_text(s));
+                        out.push_str(&escape_text(&s));
                         out.push_str("</t></is>");
                     }
                     CellValueKind::Str => {
                         out.push_str("<v>");
-                        out.push_str(&escape_text(&raw_or_str(meta, s)));
+                        out.push_str(&escape_text(&raw_or_str(meta, &s)));
                         out.push_str("</v>");
                     }
                     _ => {

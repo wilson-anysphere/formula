@@ -81,9 +81,9 @@ impl<'a> EngineWhatIfModel<'a> {
         match value {
             Value::Number(v) => CellValue::Number(v),
             Value::Text(v) => CellValue::Text(v),
-            Value::Entity(v) => CellValue::Text(v.display),
-            Value::Record(v) => CellValue::Text(v.display),
             Value::Bool(v) => CellValue::Bool(v),
+            Value::Entity(entity) => CellValue::Text(entity.display),
+            Value::Record(record) => CellValue::Text(record.display),
             Value::Blank => CellValue::Blank,
             Value::Error(e) => CellValue::Text(e.as_code().to_string()),
             Value::Array(arr) => Self::map_from_engine_value(arr.top_left()),

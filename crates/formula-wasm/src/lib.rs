@@ -572,6 +572,8 @@ fn engine_value_to_json(value: EngineValue) -> JsonValue {
         EngineValue::Number(n) => serde_json::Number::from_f64(n)
             .map(JsonValue::Number)
             .unwrap_or_else(|| JsonValue::String(ErrorKind::Num.as_code().to_string())),
+        EngineValue::Entity(entity) => JsonValue::String(entity.display),
+        EngineValue::Record(record) => JsonValue::String(record.display),
         EngineValue::Error(kind) => JsonValue::String(kind.as_code().to_string()),
         // Arrays should generally be spilled into grid cells. If one reaches the JS boundary,
         // degrade to its top-left value so callers still get a scalar.
@@ -736,7 +738,7 @@ fn engine_value_to_cell_value_rich(value: EngineValue) -> CellValue {
         EngineValue::Bool(b) => CellValue::Boolean(b),
         EngineValue::Error(err) => CellValue::Error(engine_error_to_model(err)),
         EngineValue::Entity(entity) => {
-            let mut properties = HashMap::new();
+            let mut properties = BTreeMap::new();
             for (k, v) in entity.fields {
                 properties.insert(k, engine_value_to_cell_value_rich(v));
             }
@@ -748,7 +750,7 @@ fn engine_value_to_cell_value_rich(value: EngineValue) -> CellValue {
             })
         }
         EngineValue::Record(record) => {
-            let mut fields = HashMap::new();
+            let mut fields = BTreeMap::new();
             for (k, v) in record.fields {
                 fields.insert(k, engine_value_to_cell_value_rich(v));
             }
@@ -2246,7 +2248,6 @@ struct WasmPartialParse {
     error: Option<WasmParseError>,
     context: WasmParseContext,
 }
-
 #[wasm_bindgen(js_name = "parseFormulaPartial")]
 pub fn parse_formula_partial(
     formula: String,
@@ -3442,6 +3443,53 @@ mod tests {
         assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A1"], json!(2.0));
         assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["B1"], json!("=#REF!+A1"));
         assert!(parsed["sheets"]["Sheet1"]["cells"].get("C1").is_none());
+
+    }
+
+    #[test]
+    fn cell_value_to_engine_converts_entity_and_record_values() {
+        let mut record_fields = BTreeMap::new();
+        record_fields.insert("Name".to_string(), CellValue::String("Alice".to_string()));
+        record_fields.insert("Active".to_string(), CellValue::Boolean(true));
+        let record = CellValue::Record(formula_model::RecordValue {
+            fields: record_fields,
+            display_field: Some("Name".to_string()),
+            ..formula_model::RecordValue::default()
+        });
+
+        let mut properties = BTreeMap::new();
+        properties.insert("Person".to_string(), record);
+        properties.insert("Score".to_string(), CellValue::Number(10.0));
+        let entity = CellValue::Entity(formula_model::EntityValue {
+            entity_type: "user".to_string(),
+            entity_id: "alice".to_string(),
+            display_value: "Alice".to_string(),
+            properties,
+        });
+
+        let engine_value = cell_value_to_engine(&entity);
+        let entity = match engine_value {
+            EngineValue::Entity(entity) => entity,
+            other => panic!("expected EngineValue::Entity, got {other:?}"),
+        };
+        assert_eq!(entity.entity_type.as_deref(), Some("user"));
+        assert_eq!(entity.entity_id.as_deref(), Some("alice"));
+        assert_eq!(entity.display, "Alice");
+        assert!(matches!(
+            entity.fields.get("Score"),
+            Some(&EngineValue::Number(n)) if n == 10.0
+        ));
+
+        let record = match entity.fields.get("Person") {
+            Some(EngineValue::Record(record)) => record,
+            other => panic!("expected nested EngineValue::Record, got {other:?}"),
+        };
+        assert_eq!(record.display_field.as_deref(), Some("Name"));
+        assert_eq!(
+            record.fields.get("Name"),
+            Some(&EngineValue::Text("Alice".to_string()))
+        );
+        assert_eq!(record.fields.get("Active"), Some(&EngineValue::Bool(true)));
     }
 
     #[test]

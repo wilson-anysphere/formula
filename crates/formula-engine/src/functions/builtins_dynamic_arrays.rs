@@ -380,9 +380,9 @@ pub(super) fn sort_key(value: &Value) -> SortKeyValue {
     match value {
         Value::Number(n) => SortKeyValue::Number(*n),
         Value::Text(s) => SortKeyValue::Text(s.to_lowercase()),
-        Value::Entity(v) => SortKeyValue::Text(v.display.to_lowercase()),
-        Value::Record(v) => SortKeyValue::Text(v.display.to_lowercase()),
         Value::Bool(b) => SortKeyValue::Bool(*b),
+        Value::Entity(entity) => SortKeyValue::Text(entity.display.to_lowercase()),
+        Value::Record(record) => SortKeyValue::Text(record.display.to_lowercase()),
         Value::Blank => SortKeyValue::Blank,
         Value::Error(e) => SortKeyValue::Error(*e),
         Value::Reference(_)
@@ -482,10 +482,10 @@ fn unique_key_cell(value: &Value) -> UniqueKeyCell {
         Value::Number(n) => UniqueKeyCell::Number(canonical_number_bits(*n)),
         Value::Text(s) if s.is_empty() => UniqueKeyCell::Blank,
         Value::Text(s) => UniqueKeyCell::Text(s.to_lowercase()),
-        Value::Entity(v) if v.display.is_empty() => UniqueKeyCell::Blank,
-        Value::Entity(v) => UniqueKeyCell::Text(v.display.to_lowercase()),
-        Value::Record(v) if v.display.is_empty() => UniqueKeyCell::Blank,
-        Value::Record(v) => UniqueKeyCell::Text(v.display.to_lowercase()),
+        Value::Entity(entity) if entity.display.is_empty() => UniqueKeyCell::Blank,
+        Value::Entity(entity) => UniqueKeyCell::Text(entity.display.to_lowercase()),
+        Value::Record(record) if record.display.is_empty() => UniqueKeyCell::Blank,
+        Value::Record(record) => UniqueKeyCell::Text(record.display.to_lowercase()),
         Value::Error(e) => UniqueKeyCell::Error(*e),
         Value::Reference(_)
         | Value::ReferenceUnion(_)

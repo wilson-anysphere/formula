@@ -3,7 +3,7 @@ use formula_model::{
     format_cell_display, CellDisplay, CellValue, EntityValue, HorizontalAlignment, RecordValue,
     Style,
 };
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[test]
 fn model_formats_numbers_using_style_number_format() {
@@ -44,7 +44,7 @@ fn model_formats_entities_and_records_as_text() {
         entity_type: "stock".to_string(),
         entity_id: "AAPL".to_string(),
         display_value: "Apple Inc.".to_string(),
-        properties: HashMap::new(),
+        properties: BTreeMap::new(),
     });
 
     let display = format_cell_display(&entity, None, &options);
@@ -52,7 +52,7 @@ fn model_formats_entities_and_records_as_text() {
     assert_eq!(display.alignment, HorizontalAlignment::Left);
 
     let record = CellValue::Record(RecordValue {
-        fields: HashMap::from([("name".to_string(), CellValue::String("Ada".to_string()))]),
+        fields: BTreeMap::from([("name".to_string(), CellValue::String("Ada".to_string()))]),
         display_field: Some("name".to_string()),
         ..RecordValue::default()
     });

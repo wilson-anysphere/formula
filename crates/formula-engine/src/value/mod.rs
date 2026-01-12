@@ -218,11 +218,6 @@ impl Array {
     }
 }
 
-/// Rich value representing an Excel Entity (linked data type).
-///
-/// The engine can treat entities as "text-like" (via their [`EntityValue::display`] string), but
-/// also stores a set of named fields that can be accessed via field-access formulas like
-/// `=A1.Price` / `=A1.["Change%"]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntityValue {
     /// Display string shown in the grid UI.
@@ -237,9 +232,9 @@ pub struct EntityValue {
 
 impl EntityValue {
     #[must_use]
-    pub fn new(display: impl Into<String>) -> Self {
+    pub fn new(display_value: impl Into<String>) -> Self {
         Self {
-            display: display.into(),
+            display: display_value.into(),
             entity_type: None,
             entity_id: None,
             fields: HashMap::new(),
@@ -264,10 +259,6 @@ impl EntityValue {
     }
 }
 
-/// Rich value representing an Excel Record.
-///
-/// Records are "text-like" via their [`RecordValue::display`] string, but can also store a set of
-/// named fields for field-access formulas.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordValue {
     /// Display string shown in the grid UI.
@@ -280,9 +271,9 @@ pub struct RecordValue {
 
 impl RecordValue {
     #[must_use]
-    pub fn new(display: impl Into<String>) -> Self {
+    pub fn new(display_value: impl Into<String>) -> Self {
         Self {
-            display: display.into(),
+            display: display_value.into(),
             display_field: None,
             fields: HashMap::new(),
         }
@@ -345,9 +336,9 @@ pub type Record = RecordValue;
 pub enum Value {
     Number(f64),
     Text(String),
+    Bool(bool),
     Entity(EntityValue),
     Record(RecordValue),
-    Bool(bool),
     Blank,
     Error(ErrorKind),
     /// Reference value returned by functions like OFFSET/INDIRECT.
@@ -731,9 +722,9 @@ impl fmt::Display for Value {
         match self {
             Value::Number(n) => write!(f, "{n}"),
             Value::Text(s) => f.write_str(s),
-            Value::Entity(v) => f.write_str(&v.display),
-            Value::Record(v) => f.write_str(&v.display),
             Value::Bool(b) => write!(f, "{b}"),
+            Value::Entity(entity) => f.write_str(&entity.display),
+            Value::Record(record) => f.write_str(&record.display),
             Value::Blank => f.write_str(""),
             Value::Error(e) => write!(f, "{e}"),
             Value::Reference(_) | Value::ReferenceUnion(_) => f.write_str(ErrorKind::Value.as_code()),

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::rich_text::RichText;
 use crate::{CellRef, ErrorValue};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt;
 
 /// Versioned, JSON-friendly representation of a cell value.
@@ -104,8 +104,8 @@ pub struct EntityValue {
     /// Accept the legacy `"display"` key as an alias for backward compatibility.
     #[serde(default, alias = "display")]
     pub display_value: String,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub properties: HashMap<String, CellValue>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub properties: BTreeMap<String, CellValue>,
 }
 
 impl EntityValue {
@@ -129,7 +129,7 @@ impl EntityValue {
     }
 
     #[must_use]
-    pub fn with_properties(mut self, properties: HashMap<String, CellValue>) -> Self {
+    pub fn with_properties(mut self, properties: BTreeMap<String, CellValue>) -> Self {
         self.properties = properties;
         self
     }
@@ -157,8 +157,8 @@ impl From<EntityValue> for CellValue {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordValue {
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub fields: HashMap<String, CellValue>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub fields: BTreeMap<String, CellValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_field: Option<String>,
     /// Optional precomputed display string (legacy / fallback).
@@ -178,7 +178,7 @@ impl RecordValue {
     }
 
     #[must_use]
-    pub fn with_fields(mut self, fields: HashMap<String, CellValue>) -> Self {
+    pub fn with_fields(mut self, fields: BTreeMap<String, CellValue>) -> Self {
         self.fields = fields;
         self
     }

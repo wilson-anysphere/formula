@@ -131,12 +131,22 @@ impl Criteria {
                 number_locale,
             }),
             Value::Text(s) => parse_criteria_string(s, system, value_locale, now_utc, number_locale, &locale),
-            Value::Entity(v) => {
-                parse_criteria_string(&v.display, system, value_locale, now_utc, number_locale, &locale)
-            }
-            Value::Record(v) => {
-                parse_criteria_string(&v.display, system, value_locale, now_utc, number_locale, &locale)
-            }
+            Value::Entity(entity) => parse_criteria_string(
+                entity.display.as_str(),
+                system,
+                value_locale,
+                now_utc,
+                number_locale,
+                &locale,
+            ),
+            Value::Record(record) => parse_criteria_string(
+                record.display.as_str(),
+                system,
+                value_locale,
+                now_utc,
+                number_locale,
+                &locale,
+            ),
             Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
@@ -449,8 +459,8 @@ fn coerce_to_number(value: &Value, locale: NumberLocale) -> Option<f64> {
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Blank => Some(0.0),
         Value::Text(s) => parse_number(s, locale).ok(),
-        Value::Entity(v) => parse_number(&v.display, locale).ok(),
-        Value::Record(v) => parse_number(&v.display, locale).ok(),
+        Value::Entity(entity) => parse_number(entity.display.as_str(), locale).ok(),
+        Value::Record(record) => parse_number(record.display.as_str(), locale).ok(),
         Value::Array(arr) => coerce_to_number(&arr.top_left(), locale),
         Value::Error(_)
         | Value::Reference(_)

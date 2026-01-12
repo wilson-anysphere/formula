@@ -1953,11 +1953,11 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
         }
     }
 
-    fn text_like_str(v: &Value) -> Option<&str> {
+    fn text_like_str(v: &Value) -> Option<std::borrow::Cow<'_, str>> {
         match v {
-            Value::Text(s) => Some(s),
-            Value::Entity(v) => Some(v.display.as_str()),
-            Value::Record(v) => Some(v.display.as_str()),
+            Value::Text(s) => Some(std::borrow::Cow::Borrowed(s)),
+            Value::Entity(v) => Some(std::borrow::Cow::Borrowed(v.display.as_str())),
+            Value::Record(v) => Some(std::borrow::Cow::Borrowed(v.display.as_str())),
             _ => None,
         }
     }
@@ -1989,36 +1989,22 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
             std::cmp::Ordering::Equal => Some(0),
             std::cmp::Ordering::Greater => Some(1),
         },
-        (Value::Blank, other) if text_like_str(other).is_some() => Some(match cmp_case_insensitive("", text_like_str(other)?) {
-            std::cmp::Ordering::Less => -1,
-            std::cmp::Ordering::Equal => 0,
-            std::cmp::Ordering::Greater => 1,
-        }),
-        (other, Value::Blank) if text_like_str(other).is_some() => Some(match cmp_case_insensitive(text_like_str(other)?, "") {
-            std::cmp::Ordering::Less => -1,
-            std::cmp::Ordering::Equal => 0,
-            std::cmp::Ordering::Greater => 1,
-        }),
-        (Value::Blank, Value::Entity(y)) => Some(match cmp_case_insensitive("", &y.display) {
-            std::cmp::Ordering::Less => -1,
-            std::cmp::Ordering::Equal => 0,
-            std::cmp::Ordering::Greater => 1,
-        }),
-        (Value::Entity(x), Value::Blank) => Some(match cmp_case_insensitive(&x.display, "") {
-            std::cmp::Ordering::Less => -1,
-            std::cmp::Ordering::Equal => 0,
-            std::cmp::Ordering::Greater => 1,
-        }),
-        (Value::Blank, Value::Record(y)) => Some(match cmp_case_insensitive("", &y.display) {
-            std::cmp::Ordering::Less => -1,
-            std::cmp::Ordering::Equal => 0,
-            std::cmp::Ordering::Greater => 1,
-        }),
-        (Value::Record(x), Value::Blank) => Some(match cmp_case_insensitive(&x.display, "") {
-            std::cmp::Ordering::Less => -1,
-            std::cmp::Ordering::Equal => 0,
-            std::cmp::Ordering::Greater => 1,
-        }),
+        (Value::Blank, other) if text_like_str(other).is_some() => {
+            let other = text_like_str(other)?;
+            Some(match cmp_case_insensitive("", other.as_ref()) {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            })
+        }
+        (other, Value::Blank) if text_like_str(other).is_some() => {
+            let other = text_like_str(other)?;
+            Some(match cmp_case_insensitive(other.as_ref(), "") {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            })
+        }
         (Value::Blank, Value::Bool(y)) => Some(match false.cmp(y) {
             std::cmp::Ordering::Less => -1,
             std::cmp::Ordering::Equal => 0,
@@ -2039,7 +2025,9 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
             match (a, b) {
                 (Value::Number(x), Value::Number(y)) => Some(ordering_to_i32(x.partial_cmp(y)?)),
                 (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
-                    Some(ordering_to_i32(cmp_case_insensitive(text_like_str(a)?, text_like_str(b)?)))
+                    let a = text_like_str(a)?;
+                    let b = text_like_str(b)?;
+                    Some(ordering_to_i32(cmp_case_insensitive(a.as_ref(), b.as_ref())))
                 }
                 (Value::Bool(x), Value::Bool(y)) => Some(ordering_to_i32(x.cmp(y))),
                 (Value::Blank, Value::Blank) => Some(0),

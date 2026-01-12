@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use formula_format::FormatOptions;
 use formula_model::{format_cell_display, CellValue, EntityValue, RecordValue};
@@ -103,7 +103,7 @@ fn rich_entity_and_record_json_roundtrip() {
         .with_property("Change", 2.35);
     let entity_value = CellValue::Entity(entity);
 
-    let mut fields = HashMap::new();
+    let mut fields = BTreeMap::new();
     fields.insert("Name".to_string(), CellValue::String("Alice".to_string()));
     fields.insert("Age".to_string(), CellValue::Number(42.0));
     let record = RecordValue::new("Alice")

@@ -3428,21 +3428,19 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         return Err(ErrorKind::Value);
     }
 
-    let (l, r) = match (&left, &right) {
-        (Value::Blank, Value::Number(_)) => (Value::Number(0.0), right.clone()),
-        (Value::Number(_), Value::Blank) => (left.clone(), Value::Number(0.0)),
-        (Value::Blank, Value::Bool(_)) => (Value::Bool(false), right.clone()),
-        (Value::Bool(_), Value::Blank) => (left.clone(), Value::Bool(false)),
-        (Value::Blank, Value::Text(_)) => (Value::Text(String::new()), right.clone()),
-        (Value::Text(_), Value::Blank) => (left.clone(), Value::Text(String::new())),
-        _ => (left.clone(), right.clone()),
+    let (l, r) = match (left, right) {
+        (Value::Blank, Value::Number(b)) => (Value::Number(0.0), Value::Number(b)),
+        (Value::Number(a), Value::Blank) => (Value::Number(a), Value::Number(0.0)),
+        (Value::Blank, Value::Bool(b)) => (Value::Bool(false), Value::Bool(b)),
+        (Value::Bool(a), Value::Blank) => (Value::Bool(a), Value::Bool(false)),
+        (Value::Blank, Value::Text(b)) => (Value::Text(String::new()), Value::Text(b)),
+        (Value::Text(a), Value::Blank) => (Value::Text(a), Value::Text(String::new())),
+        (l, r) => (l, r),
     };
 
     fn text_like_str(v: &Value) -> Option<&str> {
         match v {
             Value::Text(s) => Some(s),
-            Value::Entity(v) => Some(v.display.as_str()),
-            Value::Record(v) => Some(v.display.as_str()),
             _ => None,
         }
     }
@@ -3505,6 +3503,10 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         (Value::Blank, _) => Ordering::Less,
         (_, Value::Blank) => Ordering::Greater,
         (Value::Error(_), _) | (_, Value::Error(_)) => Ordering::Equal,
+        (Value::Entity(_), _)
+        | (_, Value::Entity(_))
+        | (Value::Record(_), _)
+        | (_, Value::Record(_)) => Ordering::Equal,
         (Value::Array(_), _)
         | (_, Value::Array(_))
         | (Value::Lambda(_), _)

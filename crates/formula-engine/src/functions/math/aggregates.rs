@@ -483,13 +483,13 @@ pub(crate) fn coerce_sumproduct_number(
             Err(crate::error::ExcelError::Div0) => Err(ErrorKind::Div0),
             Err(crate::error::ExcelError::Num) => Err(ErrorKind::Num),
         },
-        Value::Entity(v) => match parse_number(v.display.as_str(), locale) {
+        Value::Entity(entity) => match parse_number(entity.display.as_str(), locale) {
             Ok(n) => Ok(n),
             Err(crate::error::ExcelError::Value) => Ok(0.0),
             Err(crate::error::ExcelError::Div0) => Err(ErrorKind::Div0),
             Err(crate::error::ExcelError::Num) => Err(ErrorKind::Num),
         },
-        Value::Record(v) => match parse_number(v.display.as_str(), locale) {
+        Value::Record(record) => match parse_number(record.display.as_str(), locale) {
             Ok(n) => Ok(n),
             Err(crate::error::ExcelError::Value) => Ok(0.0),
             Err(crate::error::ExcelError::Div0) => Err(ErrorKind::Div0),

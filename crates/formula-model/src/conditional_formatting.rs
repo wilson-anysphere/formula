@@ -1927,7 +1927,7 @@ mod tests {
                     CellRef::from_a1("A1").unwrap(),
                     CellValue::Record(crate::RecordValue {
                         display_field: Some("name".to_string()),
-                        fields: HashMap::from([(
+                        fields: std::collections::BTreeMap::from([(
                             "name".to_string(),
                             CellValue::String("Ada".to_string()),
                         )]),
@@ -1965,7 +1965,10 @@ mod tests {
 
         let record = crate::RecordValue {
             display_field: Some("name".to_string()),
-            fields: HashMap::from([("name".to_string(), CellValue::String("Ada".to_string()))]),
+            fields: std::collections::BTreeMap::from([(
+                "name".to_string(),
+                CellValue::String("Ada".to_string()),
+            )]),
             ..Default::default()
         };
         let record_display = record.to_string();
@@ -1984,7 +1987,10 @@ mod tests {
         assert_eq!(
             cell_value_as_number(CellValue::Record(crate::RecordValue {
                 display_field: Some("n".to_string()),
-                fields: HashMap::from([("n".to_string(), CellValue::String("123".to_string()))]),
+                fields: std::collections::BTreeMap::from([(
+                    "n".to_string(),
+                    CellValue::String("123".to_string()),
+                )]),
                 ..Default::default()
             })),
             None
