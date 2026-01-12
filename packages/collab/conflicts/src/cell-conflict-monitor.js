@@ -81,7 +81,12 @@ export class CellConflictMonitor {
 
     this.doc.transact(() => {
       cell.set("value", nextValue);
-      cell.delete("formula");
+      // Store a null marker rather than deleting so subsequent formula writes can
+      // causally reference this clear via Item.origin. Yjs map deletes do not
+      // create a new Item, which makes delete-vs-overwrite concurrency ambiguous
+      // across mixed client configurations (e.g. some clients running formula
+      // conflict monitors and some not).
+      cell.set("formula", null);
       cell.set("modified", ts);
       cell.set("modifiedBy", this.localUserId);
     }, this.origin);
