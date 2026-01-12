@@ -21,6 +21,7 @@
 
 pub mod autofilter;
 pub mod calc_settings;
+pub mod cell_images;
 pub mod charts;
 pub mod comments;
 mod compare;
