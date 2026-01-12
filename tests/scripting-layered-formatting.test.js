@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { DocumentController } from "../apps/desktop/src/document/documentController.js";
 import { StyleTable } from "../apps/desktop/src/formatting/styleTable.js";
 import { MacroRecorder } from "../apps/desktop/src/macro-recorder/index.js";
 import { DocumentControllerWorkbookAdapter } from "../apps/desktop/src/scripting/documentControllerWorkbookAdapter.js";
@@ -71,6 +72,18 @@ test("Range.getFormat reads effective format via DocumentController.getCellForma
   workbook.dispose();
 });
 
+test("Range.getFormat returns inherited column format when using the real DocumentController layered formatting", () => {
+  const controller = new DocumentController();
+  controller.setColFormat("Sheet1", 0, { font: { bold: true } });
+  assert.equal(controller.getCell("Sheet1", "A1").styleId, 0);
+
+  const workbook = new DocumentControllerWorkbookAdapter(controller, { activeSheetName: "Sheet1" });
+  const sheet = workbook.getActiveSheet();
+  assert.deepEqual(sheet.getRange("A1").getFormat(), { bold: true });
+
+  workbook.dispose();
+});
+
 test("Macro recorder receives formatChanged for column style deltas (layered formatting)", () => {
   const doc = new FakeDocumentController();
   const boldId = doc.styleTable.intern({ font: { bold: true } });
@@ -83,6 +96,21 @@ test("Macro recorder receives formatChanged for column style deltas (layered for
     deltas: [],
     colStyleIdDeltas: [{ sheetId: "Sheet1", col: 2, beforeStyleId: 0, afterStyleId: boldId }],
   });
+
+  assert.deepEqual(recorder.stop(), [
+    { type: "setFormat", sheetName: "Sheet1", address: "C1:C1048576", format: { bold: true } },
+  ]);
+
+  workbook.dispose();
+});
+
+test("Macro recorder receives formatChanged when DocumentController.setColFormat emits formatDeltas", () => {
+  const controller = new DocumentController();
+  const workbook = new DocumentControllerWorkbookAdapter(controller, { activeSheetName: "Sheet1" });
+  const recorder = new MacroRecorder(workbook);
+  recorder.start();
+
+  controller.setColFormat("Sheet1", 2, { font: { bold: true } });
 
   assert.deepEqual(recorder.stop(), [
     { type: "setFormat", sheetName: "Sheet1", address: "C1:C1048576", format: { bold: true } },
