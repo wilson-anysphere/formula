@@ -7326,7 +7326,17 @@ function renderSheetSwitcher(sheets: { id: string; name: string }[], activeId: s
 }
 
 sheetSwitcherEl.addEventListener("change", () => {
-  app.activateSheet(sheetSwitcherEl.value);
+  const next = sheetSwitcherEl.value;
+  if (!next) return;
+
+  // Defensive: only allow activating visible sheets via the dropdown.
+  const sheets = listSheetsForUi();
+  if (!sheets.some((sheet) => sheet.id === next)) {
+    renderSheetSwitcher(sheets, app.getCurrentSheetId());
+    return;
+  }
+
+  app.activateSheet(next);
   restoreFocusAfterSheetNavigation();
 });
 
