@@ -19,7 +19,9 @@ mod media_parts;
 mod rich_value_images;
 
 pub use images::resolve_rich_value_image_targets;
-pub use rich_value_images::{ExtractedRichValueImages, RichValueEntry, RichValueIndex, RichValueWarning};
+pub use rich_value_images::{
+    ExtractedRichValueImages, RichValueEntry, RichValueIndex, RichValueWarning,
+};
 
 use std::cmp::Ordering;
 use std::collections::HashMap;

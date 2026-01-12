@@ -26,10 +26,14 @@ fn build_rich_data_fixture_xlsx() -> Vec<u8> {
 </workbook>"#;
 
     // Use rId99 for metadata to ensure we don't accidentally collide with newly created sheet rels.
+    //
+    // Also include an unrelated low-numbered relationship (styles: rId3) so buggy sheet-id allocation
+    // strategies like "max sheet rId + 1" would collide (real XLSX files typically have these).
     let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
   <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
   <Relationship Id="rId99" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"/>
 </Relationships>"#;
 
@@ -46,6 +50,7 @@ fn build_rich_data_fixture_xlsx() -> Vec<u8> {
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
   <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
   <Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
   <Override PartName="/xl/richData/richValue.xml" ContentType="application/vnd.ms-excel.richvalue+xml"/>
   <Override PartName="/xl/richData/richValueRel.xml" ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
@@ -185,6 +190,7 @@ fn workbook_sheet_entries(xml: &[u8]) -> Vec<(String, u32, String)> {
 struct Relationship {
     id: String,
     target: String,
+    type_uri: Option<String>,
 }
 
 fn workbook_relationships(xml: &[u8]) -> Vec<Relationship> {
@@ -196,17 +202,23 @@ fn workbook_relationships(xml: &[u8]) -> Vec<Relationship> {
         match reader.read_event_into(&mut buf).expect("read xml") {
             Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"Relationship" => {
                 let mut id = None;
+                let mut type_uri = None;
                 let mut target = None;
                 for attr in e.attributes().flatten() {
                     let val = attr.unescape_value().expect("attr").into_owned();
                     match attr.key.as_ref() {
                         b"Id" => id = Some(val),
+                        b"Type" => type_uri = Some(val),
                         b"Target" => target = Some(val),
                         _ => {}
                     }
                 }
                 if let (Some(id), Some(target)) = (id, target) {
-                    out.push(Relationship { id, target });
+                    out.push(Relationship {
+                        id,
+                        target,
+                        type_uri,
+                    });
                 }
             }
             Event::Eof => break,
@@ -241,6 +253,7 @@ fn workbook_structure_edits_preserve_rich_data_parts_and_metadata_relationship()
     let names = zip_file_names(&saved);
     for part in [
         "xl/metadata.xml",
+        "xl/_rels/metadata.xml.rels",
         "xl/richData/richValue.xml",
         "xl/richData/richValueRel.xml",
         "xl/richData/_rels/richValueRel.xml.rels",
@@ -258,6 +271,12 @@ fn workbook_structure_edits_preserve_rich_data_parts_and_metadata_relationship()
 
     // Assert workbook.xml.rels still contains the metadata relationship with the same Id/Target.
     let rels = workbook_relationships(&zip_part(&saved, "xl/_rels/workbook.xml.rels"));
+    let rel_ids: BTreeSet<&str> = rels.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(
+        rel_ids.len(),
+        rels.len(),
+        "workbook.xml.rels contains duplicate Relationship Ids"
+    );
     let meta_rels: Vec<&Relationship> = rels.iter().filter(|r| r.id == "rId99").collect();
     assert_eq!(
         meta_rels.len(),
@@ -265,6 +284,11 @@ fn workbook_structure_edits_preserve_rich_data_parts_and_metadata_relationship()
         "expected exactly one workbook relationship with Id=rId99"
     );
     assert_eq!(meta_rels[0].target, "metadata.xml");
+    assert_eq!(
+        meta_rels[0].type_uri.as_deref(),
+        Some("http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"),
+        "metadata relationship Type must be preserved"
+    );
 
     // And ensure it did not collide with a sheet relationship id.
     let sheet_entries = workbook_sheet_entries(&zip_part(&saved, "xl/workbook.xml"));
@@ -272,5 +296,21 @@ fn workbook_structure_edits_preserve_rich_data_parts_and_metadata_relationship()
         !sheet_entries.iter().any(|(_, _, rid)| rid == "rId99"),
         "a sheet unexpectedly reused metadata relationship id rId99"
     );
-}
 
+    // Workbook structure edits also patch `[Content_Types].xml` for sheet insertions/removals; ensure
+    // we didn't accidentally drop the richData-related overrides.
+    let content_types =
+        String::from_utf8(zip_part(&saved, "[Content_Types].xml")).expect("[Content_Types].xml utf8");
+    assert!(
+        content_types.contains(r#"PartName="/xl/metadata.xml""#),
+        "[Content_Types].xml missing override for /xl/metadata.xml"
+    );
+    assert!(
+        content_types.contains(r#"PartName="/xl/richData/richValue.xml""#),
+        "[Content_Types].xml missing override for /xl/richData/richValue.xml"
+    );
+    assert!(
+        content_types.contains(r#"PartName="/xl/richData/richValueRel.xml""#),
+        "[Content_Types].xml missing override for /xl/richData/richValueRel.xml"
+    );
+}
