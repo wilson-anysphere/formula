@@ -587,6 +587,20 @@ mod tests {
         record(RECORD_NOTE, &payload)
     }
 
+    fn note_biff5_author_bytes(row: u16, col: u16, obj_id: u16, author_bytes: &[u8]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&row.to_le_bytes());
+        payload.extend_from_slice(&col.to_le_bytes());
+        // NOTE record stores `grbit` and `idObj` as two adjacent u16 fields; the ordering varies
+        // across parsers, so we write the same value into both fields to keep the fixture robust.
+        payload.extend_from_slice(&obj_id.to_le_bytes());
+        payload.extend_from_slice(&obj_id.to_le_bytes());
+
+        payload.push(author_bytes.len() as u8);
+        payload.extend_from_slice(author_bytes);
+        record(RECORD_NOTE, &payload)
+    }
+
     fn obj_with_id(obj_id: u16) -> Vec<u8> {
         // ftCmo subrecord:
         // - ft=0x0015
@@ -745,6 +759,35 @@ mod tests {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].author, "Alice");
         assert_eq!(notes[0].text, "Hi А");
+    }
+
+    #[test]
+    fn parses_biff5_note_author_using_codepage() {
+        // Windows-1251 0xC0 => Cyrillic 'А' (U+0410). This ensures the BIFF5 short ANSI author
+        // string goes through `strings::decode_ansi` using the workbook codepage.
+        let author_bytes = [0xC0];
+
+        let stream = [
+            bof_biff5(),
+            note_biff5_author_bytes(0, 0, 1, &author_bytes),
+            obj_with_id(1),
+            txo_with_cch_text(2),
+            continue_text_biff5(b"Hi"),
+            // Formatting CONTINUE (ignored).
+            continue_text_biff5(&[0u8; 4]),
+            eof(),
+        ]
+        .concat();
+
+        let (notes, warnings) =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1251).expect("parse");
+        assert!(
+            warnings.is_empty(),
+            "unexpected warnings: {warnings:?}"
+        );
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].author, "А");
+        assert_eq!(notes[0].text, "Hi");
     }
 
     #[test]
