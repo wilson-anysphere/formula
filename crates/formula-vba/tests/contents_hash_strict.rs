@@ -594,8 +594,15 @@ fn content_normalized_data_parses_spec_dir_stream() {
     let vba_project_bin = build_vba_project_bin_spec(&module_source, None);
     let normalized = content_normalized_data(&vba_project_bin).expect("ContentNormalizedData");
 
-    // Spec (MS-OVBA §2.4.2.1) appends line bytes without preserving newline delimiters.
-    let expected_module_normalized = b"Option ExplicitPrint \"Attribute\"Sub Foo()End Sub".to_vec();
+    // Spec (MS-OVBA §2.4.2.1) strips Attribute lines and normalizes line endings to CRLF.
+    let expected_module_normalized = concat!(
+        "Option Explicit\r\n",
+        "Print \"Attribute\"\r\n",
+        "Sub Foo()\r\n",
+        "End Sub\r\n",
+    )
+    .as_bytes()
+    .to_vec();
     let expected = [
         b"VBAProject".as_slice(),
         b"Answer=42".as_slice(),
@@ -631,8 +638,15 @@ fn content_normalized_data_parses_spec_dir_stream_with_fixed_length_projectversi
 
     let normalized = content_normalized_data(&vba_project_bin).expect("ContentNormalizedData");
 
-    // Spec (MS-OVBA §2.4.2.1) appends line bytes without preserving newline delimiters.
-    let expected_module_normalized = b"Option ExplicitPrint \"Attribute\"Sub Foo()End Sub".to_vec();
+    // Spec (MS-OVBA §2.4.2.1) strips Attribute lines and normalizes line endings to CRLF.
+    let expected_module_normalized = concat!(
+        "Option Explicit\r\n",
+        "Print \"Attribute\"\r\n",
+        "Sub Foo()\r\n",
+        "End Sub\r\n",
+    )
+    .as_bytes()
+    .to_vec();
     let expected = [
         b"VBAProject".as_slice(),
         b"Answer=42".as_slice(),
@@ -700,7 +714,7 @@ fn content_normalized_data_parses_spec_dir_stream_with_unicode_module_stream_nam
     let vba_project_bin = ole.into_inner().into_inner();
     let normalized = content_normalized_data(&vba_project_bin).expect("ContentNormalizedData");
 
-    let expected_module_normalized = b"Sub Foo()End Sub".as_slice();
+    let expected_module_normalized = b"Sub Foo()\r\nEnd Sub\r\n".as_slice();
     let expected = [
         project_name.as_bytes(),
         project_constants.as_bytes(),
@@ -761,7 +775,7 @@ fn content_normalized_data_parses_spec_dir_stream_with_alternate_unicode_record_
 
     // ContentNormalizedData must be computed successfully and include the normalized module source.
     let normalized = content_normalized_data(&vba_project_bin).expect("ContentNormalizedData");
-    let expected_module_normalized = b"Sub Foo()End Sub".as_slice();
+    let expected_module_normalized = b"Sub Foo()\r\nEnd Sub\r\n".as_slice();
     let expected = [
         project_name.as_bytes(),
         project_constants.as_bytes(),
@@ -1095,7 +1109,7 @@ fn content_normalized_data_parses_spec_dir_stream_with_reference_records() {
         build_vba_project_bin_spec_with_dir(&dir_decompressed, module_source, None);
     let normalized = content_normalized_data(&vba_project_bin).expect("ContentNormalizedData");
 
-    let expected_module_normalized = b"Sub Foo()End Sub".as_slice();
+    let expected_module_normalized = b"Sub Foo()\r\nEnd Sub\r\n".as_slice();
     let expected = [
         project_name.as_bytes(),
         project_constants.as_bytes(),

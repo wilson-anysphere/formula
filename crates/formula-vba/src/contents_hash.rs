@@ -1480,43 +1480,11 @@ fn parse_dir_for_hash_strict(
 }
 
 fn normalize_module_source_strict(bytes: &[u8]) -> Vec<u8> {
-    // MS-OVBA §2.4.2.1: split into lines on CR and lone-LF; ignore the LF of CRLF.
-    let mut lines: Vec<&[u8]> = Vec::new();
-    let mut line_start = 0usize;
-    let mut prev = 0u8;
-    for (i, &ch) in bytes.iter().enumerate() {
-        if ch == b'\r' {
-            lines.push(&bytes[line_start..i]);
-            line_start = i + 1;
-        } else if ch == b'\n' {
-            if prev != b'\r' {
-                lines.push(&bytes[line_start..i]);
-            }
-            // Always advance past LF (whether it was a lone LF or part of CRLF).
-            line_start = i + 1;
-        }
-        prev = ch;
-    }
-    lines.push(&bytes[line_start..]);
-
-    let mut out = Vec::with_capacity(bytes.len());
-    for line in lines {
-        if starts_with_ascii_case_insensitive(line, b"attribute") {
-            continue;
-        }
-        out.extend_from_slice(line);
-    }
-    out
-}
-
-fn starts_with_ascii_case_insensitive(haystack: &[u8], needle: &[u8]) -> bool {
-    if haystack.len() < needle.len() {
-        return false;
-    }
-    haystack[..needle.len()]
-        .iter()
-        .zip(needle.iter())
-        .all(|(a, b)| a.eq_ignore_ascii_case(b))
+    // MS-OVBA §2.4.2.1: strip Attribute lines and normalize line endings to CRLF.
+    //
+    // Keep strict and fallback behaviors aligned: the strict dir-stream parser should not change
+    // the ContentNormalizedData transcript semantics.
+    normalize_module_source(bytes)
 }
 
 /// Compute the MS-OVBA §2.4.2.3 **Content Hash** (v1) for a VBA project.
