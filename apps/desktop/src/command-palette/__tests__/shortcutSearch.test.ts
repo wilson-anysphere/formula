@@ -74,6 +74,17 @@ describe("command-palette shortcut search", () => {
     ]);
   });
 
+  test("accepts ctl synonym in shortcut query (ctl+shift+p)", () => {
+    const commands = [
+      { commandId: "workbench.showCommandPalette", title: "Show Command Palette", category: "Navigation", source: { kind: "builtin" as const } },
+    ];
+    const keybindingIndex = new Map<string, readonly string[]>([["workbench.showCommandPalette", ["Ctrl+Shift+P"]]]);
+
+    expect(searchShortcutCommands({ commands, keybindingIndex, query: "ctl+shift+p" }).map((c) => c.commandId)).toEqual([
+      "workbench.showCommandPalette",
+    ]);
+  });
+
   test("does not drop punctuation tokens (cmd+[ should not match all cmd shortcuts)", () => {
     const commands = [
       { commandId: "audit", title: "Audit", category: "Cat", source: { kind: "builtin" as const } },

@@ -212,7 +212,7 @@ Only **single-chord** shortcuts are supported (no multi-step sequences like `ctr
 
 Format: `"<modifier>+<modifier>+<key>"` where:
 
-- Modifiers: `ctrl`/`control`, `shift`, `alt`/`option`, `meta`/`cmd`/`command`
+- Modifiers: `ctrl`/`control`/`ctl`, `shift`, `alt`/`option`/`opt`, `meta`/`cmd`/`command` (also `win`/`super`)
 - The final token is the key (examples: `m`, `f2`, `escape`, `delete`, `arrowup`, `;`)
 
 Platform override:
@@ -228,6 +228,8 @@ Key tokens are normalized case-insensitively and with common aliases:
 - `return` → `enter`
 - `spacebar` or literal `" "` → `space`
 - `up`/`down`/`left`/`right` → `arrowup`/`arrowdown`/`arrowleft`/`arrowright`
+- `pgup` → `pageup`
+- `pgdn`/`pgdown` → `pagedown`
 
 Some shifted punctuation is matched via `KeyboardEvent.code` as a fallback, so bindings like `ctrl+shift+;` can match
 the `:` key on layouts where that shares the same physical key.

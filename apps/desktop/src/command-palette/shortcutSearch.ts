@@ -80,6 +80,7 @@ const SHORTCUT_TOKEN_SYNONYMS: Record<string, string> = {
 
   ctrl: "ctrl",
   control: "ctrl",
+  ctl: "ctrl",
 
   alt: "alt",
   option: "alt",
