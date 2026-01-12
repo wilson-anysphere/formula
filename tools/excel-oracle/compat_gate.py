@@ -51,6 +51,9 @@ DEFAULT_INCLUDE_TAGS = [
     "SORT",
     "UNIQUE",
     "ISERROR",
+    # Explicitly include value coercion cases so CI exercises the conversion rules
+    # (text -> number/date/time) we implement and diff against Excel later.
+    "coercion",
 ]
 
 
