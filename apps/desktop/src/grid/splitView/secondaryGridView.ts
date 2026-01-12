@@ -46,6 +46,7 @@ export class SecondaryGridView {
   private readonly headerRows = 1;
   private readonly headerCols = 1;
   private readonly editor: CellEditorOverlay;
+  private editingCell: { row: number; col: number } | null = null;
 
   private sheetId: string;
 
@@ -147,12 +148,14 @@ export class SecondaryGridView {
     // Editor overlay for in-place cell editing in the secondary pane.
     this.editor = new CellEditorOverlay(this.container, {
       onCommit: (commit) => {
+        this.editingCell = null;
         this.applyEdit(commit.cell, commit.value);
         this.onRequestRefresh?.();
         this.advanceSelectionAfterEdit(commit);
         focusWithoutScroll(this.container);
       },
       onCancel: () => {
+        this.editingCell = null;
         focusWithoutScroll(this.container);
       }
     });
@@ -200,6 +203,7 @@ export class SecondaryGridView {
             this.schedulePersistZoom(zoom);
           }
 
+          this.repositionEditor();
           externalCallbacks.onScroll?.(scroll, viewport);
         },
         onAxisSizeChange: (change) => {
@@ -273,6 +277,7 @@ export class SecondaryGridView {
     this.resizeObserver.disconnect();
     for (const dispose of this.disposeFns) dispose();
     this.disposeFns.length = 0;
+    this.editingCell = null;
     this.editor.close();
     this.grid.destroy();
     // Remove any DOM we created (the container stays in place).
@@ -287,6 +292,7 @@ export class SecondaryGridView {
 
     const cell = { row: request.row - this.headerRows, col: request.col - this.headerCols };
     const initialValue = request.initialKey ?? this.getCellInputText(cell);
+    this.editingCell = cell;
     this.editor.open(cell, rect, initialValue, { cursor: "end" });
   }
 
@@ -322,12 +328,96 @@ export class SecondaryGridView {
     this.document.setCellInput(sheetId, cell, rawValue, { label: "Edit cell" });
   }
 
+  private repositionEditor(): void {
+    if (!this.editor.isOpen()) return;
+    const cell = this.editingCell;
+    if (!cell) return;
+    const gridRow = cell.row + this.headerRows;
+    const gridCol = cell.col + this.headerCols;
+    const rect = this.grid.getCellRect(gridRow, gridCol);
+    if (rect) this.editor.reposition(rect);
+  }
+
   private advanceSelectionAfterEdit(commit: { cell: { row: number; col: number }; reason: "enter" | "tab"; shift: boolean }): void {
-    const counts = this.grid.renderer.scroll.getCounts();
-    const maxDocRows = Math.max(0, counts.rowCount - this.headerRows);
-    const maxDocCols = Math.max(0, counts.colCount - this.headerCols);
+    const renderer = this.grid.renderer;
+    const counts = renderer.scroll.getCounts();
+    const { rowCount, colCount } = counts;
+    const maxDocRows = Math.max(0, rowCount - this.headerRows);
+    const maxDocCols = Math.max(0, colCount - this.headerCols);
     if (maxDocRows === 0 || maxDocCols === 0) return;
 
+    const prevSelection = renderer.getSelection();
+    const prevRange = renderer.getSelectionRange();
+    const ranges = renderer.getSelectionRanges();
+    const activeIndex = renderer.getActiveSelectionIndex();
+
+    const rangeArea = (r: CellRange) => Math.max(0, r.endRow - r.startRow) * Math.max(0, r.endCol - r.startCol);
+
+    // Match DesktopSharedGrid keyboard semantics: if the current selection range covers
+    // multiple cells, Enter/Tab should move the active cell *within* that range instead
+    // of collapsing selection to a single cell.
+    if (prevRange && rangeArea(prevRange) > 1) {
+      const current = prevSelection ?? { row: prevRange.startRow, col: prevRange.startCol };
+      const activeRow = clamp(current.row, prevRange.startRow, prevRange.endRow - 1);
+      const activeCol = clamp(current.col, prevRange.startCol, prevRange.endCol - 1);
+      const backward = commit.shift;
+
+      let nextRow = activeRow;
+      let nextCol = activeCol;
+
+      if (commit.reason === "tab") {
+        if (!backward) {
+          if (activeCol + 1 < prevRange.endCol) {
+            nextCol = activeCol + 1;
+          } else if (activeRow + 1 < prevRange.endRow) {
+            nextRow = activeRow + 1;
+            nextCol = prevRange.startCol;
+          } else {
+            nextRow = prevRange.startRow;
+            nextCol = prevRange.startCol;
+          }
+        } else {
+          if (activeCol - 1 >= prevRange.startCol) {
+            nextCol = activeCol - 1;
+          } else if (activeRow - 1 >= prevRange.startRow) {
+            nextRow = activeRow - 1;
+            nextCol = prevRange.endCol - 1;
+          } else {
+            nextRow = prevRange.endRow - 1;
+            nextCol = prevRange.endCol - 1;
+          }
+        }
+      } else {
+        if (!backward) {
+          if (activeRow + 1 < prevRange.endRow) {
+            nextRow = activeRow + 1;
+          } else if (activeCol + 1 < prevRange.endCol) {
+            nextRow = prevRange.startRow;
+            nextCol = activeCol + 1;
+          } else {
+            nextRow = prevRange.startRow;
+            nextCol = prevRange.startCol;
+          }
+        } else {
+          if (activeRow - 1 >= prevRange.startRow) {
+            nextRow = activeRow - 1;
+          } else if (activeCol - 1 >= prevRange.startCol) {
+            nextRow = prevRange.endRow - 1;
+            nextCol = activeCol - 1;
+          } else {
+            nextRow = prevRange.endRow - 1;
+            nextCol = prevRange.endCol - 1;
+          }
+        }
+      }
+
+      const safeIndex = Math.max(0, Math.min(ranges.length - 1, activeIndex));
+      const updatedRanges = ranges.length === 0 ? [prevRange] : ranges;
+      this.grid.setSelectionRanges(updatedRanges, { activeIndex: safeIndex, activeCell: { row: nextRow, col: nextCol } });
+      return;
+    }
+
+    // Default behavior: move one cell relative to the edited cell.
     let nextRow = commit.cell.row;
     let nextCol = commit.cell.col;
 
