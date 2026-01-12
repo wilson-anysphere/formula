@@ -24,6 +24,10 @@ const CF_UNICODETEXT: u32 = 13;
 const CF_DIB: u32 = 8;
 const CF_DIBV5: u32 = 17;
 
+// DIB payloads are uncompressed, so they can be significantly larger than the corresponding PNG.
+// Allow a larger cap for DIB formats so we can still convert many clipboard images to PNG.
+const MAX_DIB_BYTES: usize = 4 * MAX_IMAGE_BYTES;
+
 struct ClipboardGuard;
 
 impl Drop for ClipboardGuard {
@@ -188,6 +192,36 @@ fn set_unicode_text(text: &str) -> Result<(), ClipboardError> {
     set_clipboard_bytes(CF_UNICODETEXT, bytes)
 }
 
+fn parse_png_dimensions(png_bytes: &[u8]) -> Option<(u32, u32)> {
+    // Parse the IHDR chunk so we can estimate decoded sizes without fully decoding.
+    const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+
+    if png_bytes.len() < 24 {
+        return None;
+    }
+    if !png_bytes.starts_with(&PNG_SIGNATURE) {
+        return None;
+    }
+
+    let ihdr_len = u32::from_be_bytes([png_bytes[8], png_bytes[9], png_bytes[10], png_bytes[11]])
+        as usize;
+    if ihdr_len < 8 {
+        return None;
+    }
+    if png_bytes.get(12..16)? != b"IHDR" {
+        return None;
+    }
+
+    let data_start = 16;
+    let data = png_bytes.get(data_start..data_start + ihdr_len)?;
+    let width = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+    let height = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
+    if width == 0 || height == 0 {
+        return None;
+    }
+    Some((width, height))
+}
+
 pub fn read() -> Result<ClipboardContent, ClipboardError> {
     // Rich clipboard formats are best-effort: if registration fails (rare), still return whatever
     // formats we can read (e.g. plain text).
@@ -240,8 +274,6 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
                 .filter(|s| !s.is_empty());
         }
     }
-
-    const MAX_DIB_BYTES: usize = 4 * MAX_IMAGE_BYTES; // allow larger uncompressed DIBs before converting to PNG
 
     let mut png_base64 = format_png
         .and_then(|format| try_get_clipboard_bytes(format, MAX_IMAGE_BYTES).ok().flatten())
@@ -316,9 +348,22 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
         .transpose()?;
 
     // Interop: provide a DIBV5 representation when possible, but treat conversion as best-effort.
-    // Large / highly-compressible PNGs can expand to huge pixel buffers; `png_to_dibv5` enforces a
-    // safety cap and may fail. In that case we still write the PNG bytes.
-    let dib_bytes = png_bytes.as_deref().and_then(|png| png_to_dibv5(png).ok());
+    //
+    // DIBs are uncompressed; if the PNG has huge dimensions (e.g. a compression bomb), decoding it
+    // into a full BGRA buffer can be extremely memory-intensive. Skip DIB generation when the
+    // decoded pixel buffer would exceed our DIB size cap.
+    let dib_bytes = png_bytes.as_deref().and_then(|png| {
+        if let Some((w, h)) = parse_png_dimensions(png) {
+            let decoded_len = (w as usize)
+                .checked_mul(h as usize)
+                .and_then(|px| px.checked_mul(4))?;
+            if decoded_len > MAX_DIB_BYTES {
+                return None;
+            }
+        }
+
+        png_to_dibv5(png).ok()
+    });
 
     let format_html = html_bytes
         .as_ref()

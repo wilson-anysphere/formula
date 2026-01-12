@@ -156,7 +156,10 @@ pub fn png_to_dibv5(png_bytes: &[u8]) -> Result<Vec<u8>, String> {
     let size_image =
         u32::try_from(rgba.len()).map_err(|_| "DIB pixel buffer exceeds u32 limits".to_string())?;
 
-    let mut out = Vec::with_capacity(BITMAPV5HEADER_SIZE + rgba.len());
+    let out_capacity = BITMAPV5HEADER_SIZE
+        .checked_add(rgba.len())
+        .ok_or_else(|| "dib size overflow".to_string())?;
+    let mut out = Vec::with_capacity(out_capacity);
 
     // BITMAPV5HEADER
     push_u32_le(&mut out, BITMAPV5HEADER_SIZE as u32); // bV5Size
@@ -350,7 +353,15 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
         } else {
             y
         };
-        let row = &pixels[src_y * stride..src_y * stride + row_bytes];
+        let row_start = src_y
+            .checked_mul(stride)
+            .ok_or_else(|| "dib row offset overflows".to_string())?;
+        let row_end = row_start
+            .checked_add(row_bytes)
+            .ok_or_else(|| "dib row offset overflows".to_string())?;
+        let row = pixels
+            .get(row_start..row_end)
+            .ok_or_else(|| "dib does not contain full pixel data".to_string())?;
         match bit_count {
             32 => {
                 for px in row.chunks_exact(4) {
