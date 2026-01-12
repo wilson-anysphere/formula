@@ -51,6 +51,7 @@ test.describe("sheet switcher", () => {
       });
       expect(activeSheetId).not.toEqual("Sheet2");
       expect(["Sheet1", "Sheet3"]).toContain(activeSheetId);
+      await expect(switcher).toHaveValue(activeSheetId);
     }
 
     // Unhide Sheet2 via context menu on any visible tab.
