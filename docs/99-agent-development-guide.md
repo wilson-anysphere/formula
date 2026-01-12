@@ -633,7 +633,7 @@ mockups/README.md                # Full design system
 - `Tab` – Accept suggestion
 
 Platform note:
-- **Windows/Linux:** `Ctrl+I` is reserved for **Italic** (Excel-compatible), so there is no default shortcut for toggling the AI sidebar.
+- **Windows/Linux:** `Ctrl+I` is reserved for **Italic** (Excel-compatible). Use `Ctrl+Shift+A` to toggle the AI chat sidebar.
 
 ### AI Sidebar
 
