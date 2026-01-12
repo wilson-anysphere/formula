@@ -8984,6 +8984,7 @@ mod tests {
     fn bytecode_compile_report_classifies_unsupported_operators() {
         let mut engine = Engine::new();
         // The union operator (`,`) is not supported by the bytecode backend.
+        // (Note: argument separators inside function calls are lexed separately.)
         engine.set_cell_formula("Sheet1", "B1", "=A1,C1").unwrap();
 
         let report = engine.bytecode_compile_report(10);

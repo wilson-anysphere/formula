@@ -126,10 +126,11 @@ fn row_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let rows = (reference.end.row - reference.start.row + 1) as usize;
     let cols = (reference.end.col - reference.start.col + 1) as usize;
 
+    let (sheet_rows, sheet_cols) = ctx.sheet_dimensions(&reference.sheet_id);
     let spans_all_cols = reference.start.col == 0
-        && reference.end.col == formula_model::EXCEL_MAX_COLS.saturating_sub(1);
-    let spans_all_rows = reference.start.row == 0
-        && reference.end.row == formula_model::EXCEL_MAX_ROWS.saturating_sub(1);
+        && reference.end.col == sheet_cols.saturating_sub(1);
+    let spans_all_rows =
+        reference.start.row == 0 && reference.end.row == sheet_rows.saturating_sub(1);
 
     if spans_all_cols || spans_all_rows {
         let mut values = Vec::with_capacity(rows);
@@ -184,10 +185,11 @@ fn column_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let rows = (reference.end.row - reference.start.row + 1) as usize;
     let cols = (reference.end.col - reference.start.col + 1) as usize;
 
+    let (sheet_rows, sheet_cols) = ctx.sheet_dimensions(&reference.sheet_id);
     let spans_all_cols = reference.start.col == 0
-        && reference.end.col == formula_model::EXCEL_MAX_COLS.saturating_sub(1);
-    let spans_all_rows = reference.start.row == 0
-        && reference.end.row == formula_model::EXCEL_MAX_ROWS.saturating_sub(1);
+        && reference.end.col == sheet_cols.saturating_sub(1);
+    let spans_all_rows =
+        reference.start.row == 0 && reference.end.row == sheet_rows.saturating_sub(1);
 
     if spans_all_cols || spans_all_rows {
         let mut values = Vec::with_capacity(cols);

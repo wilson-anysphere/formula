@@ -1370,6 +1370,13 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
         self.get_sheet_cell_value(sheet_id, addr)
     }
 
+    fn sheet_dimensions(&self, sheet_id: &FnSheetId) -> (u32, u32) {
+        match sheet_id {
+            FnSheetId::Local(id) => self.resolver.sheet_dimensions(*id),
+            FnSheetId::External(_) => (formula_model::EXCEL_MAX_ROWS, formula_model::EXCEL_MAX_COLS),
+        }
+    }
+
     fn iter_reference_cells<'b>(
         &'b self,
         reference: &'b FnReference,

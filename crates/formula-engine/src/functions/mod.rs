@@ -6,6 +6,7 @@ use crate::eval::{CellAddr, CompiledExpr};
 use crate::locale::ValueLocaleConfig;
 use crate::value::{ErrorKind, Lambda, Value};
 use crate::LocaleConfig;
+use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 
 pub mod date_time;
 pub mod database;
@@ -162,6 +163,16 @@ pub trait FunctionContext {
         &'a self,
         reference: &'a Reference,
     ) -> Box<dyn Iterator<Item = CellAddr> + 'a>;
+    /// Returns the logical worksheet `(rows, cols)` dimensions for `sheet_id` (if known).
+    ///
+    /// This allows functions like `ROW(5:7)` / `COLUMN(D:F)` to treat full-row / full-column
+    /// references as 1D, even when the sheet uses non-default dimensions.
+    ///
+    /// Implementations that don't track sheet dimensions can rely on the default, which matches
+    /// Excel's default worksheet bounds.
+    fn sheet_dimensions(&self, _sheet_id: &SheetId) -> (u32, u32) {
+        (EXCEL_MAX_ROWS, EXCEL_MAX_COLS)
+    }
     /// Records that `reference` was dereferenced during evaluation.
     ///
     /// Implementations may use this to build dynamic dependency sets. The default is a no-op so
