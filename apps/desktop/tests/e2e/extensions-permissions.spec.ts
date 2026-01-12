@@ -286,4 +286,91 @@ test.describe("Extensions permissions UI", () => {
     await expect(page.getByTestId(`permission-${extensionId}-cells.read`)).toHaveCount(0);
     await expect(page.getByTestId(`permission-${extensionId}-cells.write`)).toBeVisible();
   });
+
+  test("network allowlist prompts again for a new host", async ({ page }) => {
+    const serverA = http.createServer((_req, res) => {
+      res.writeHead(200, {
+        "Content-Type": "text/plain",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end("hello-a");
+    });
+
+    const serverB = http.createServer((_req, res) => {
+      res.writeHead(200, {
+        "Content-Type": "text/plain",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end("hello-b");
+    });
+
+    await new Promise<void>((resolve) => serverA.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) => serverB.listen(0, "127.0.0.2", resolve));
+
+    const addressA = serverA.address();
+    const portA = typeof addressA === "object" && addressA ? addressA.port : null;
+    if (!portA) throw new Error("Failed to allocate test port");
+
+    const addressB = serverB.address();
+    const portB = typeof addressB === "object" && addressB ? addressB.port : null;
+    if (!portB) throw new Error("Failed to allocate test port");
+
+    const urlA = `http://127.0.0.1:${portA}/`;
+    const urlB = `http://127.0.0.2:${portB}/`;
+    const extensionId = "formula.sample-hello";
+
+    try {
+      await page.addInitScript(() => {
+        try {
+          localStorage.removeItem("formula.extensionHost.permissions");
+        } catch {
+          // ignore
+        }
+      });
+
+      await gotoDesktop(page);
+
+      await page.getByTestId("open-extensions-panel").click();
+      await expect(page.getByTestId("panel-extensions")).toBeVisible();
+
+      // First run: allow permissions so network allowlist gets seeded for 127.0.0.1.
+      await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+      await expect(page.getByTestId("input-box")).toBeVisible();
+      await page.getByTestId("input-box-field").fill(JSON.stringify([urlA]));
+      await page.getByTestId("input-box-ok").click();
+
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await expect(page.getByTestId("extension-permission-ui.commands")).toBeVisible();
+      await page.getByTestId("extension-permission-allow").click();
+      await expect(page.getByTestId("extension-permission-ui.commands")).toHaveCount(0);
+
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await expect(page.getByTestId("extension-permission-network")).toBeVisible();
+      await page.getByTestId("extension-permission-allow").click();
+      await expect(page.getByTestId("extension-permission-network")).toHaveCount(0);
+
+      await expect(page.getByTestId("toast-root")).toContainText("Fetched: hello-a");
+      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("127.0.0.1");
+
+      // Second run: different host (127.0.0.2) should prompt again because network is allowlisted by hostname.
+      await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+      await expect(page.getByTestId("input-box")).toBeVisible();
+      await page.getByTestId("input-box-field").fill(JSON.stringify([urlB]));
+      await page.getByTestId("input-box-ok").click();
+
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      const networkEntry = page.getByTestId("extension-permission-network");
+      await expect(networkEntry).toBeVisible();
+      await expect(networkEntry).toContainText("127.0.0.2");
+      await page.getByTestId("extension-permission-deny").click();
+      await expect(page.getByTestId("extension-permission-network")).toHaveCount(0);
+      await expect(page.getByTestId("toast-root")).toContainText("Permission denied");
+
+      // Permissions UI should still only include the original allowlisted host.
+      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("127.0.0.1");
+    } finally {
+      await new Promise<void>((resolve) => serverA.close(() => resolve()));
+      await new Promise<void>((resolve) => serverB.close(() => resolve()));
+    }
+  });
 });
