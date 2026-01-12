@@ -269,6 +269,9 @@ fn coupon_period_e(
     // `freq` is the number of coupon payments per year.
     // `freq` has already been validated as one of {1, 2, 4} by `normalize_frequency`.
     // Reuse the shared COUP* helper to keep `E` conventions aligned with regular bond functions.
+    //
+    // Note: for basis=4 (European 30/360), Excel models `E` as a fixed `360/frequency` even when
+    // `DAYS360(PCD, NCD, TRUE)` differs for end-of-month schedules involving February.
     super::coupon_schedule::coupon_period_e(pcd, ncd, frequency, basis, system)
 }
 
