@@ -56,10 +56,20 @@ function ensureSafeFormattingRange(rangeOrRanges) {
       continue;
     }
     const cellCount = rangeCellCount(r);
-    // DocumentController.setRangeFormat stores very large rectangles as compressed "range runs"
-    // (sheet.formatRunsByCol) rather than enumerating per-cell overrides, so those ranges are
-    // safe to apply even if they are larger than our per-cell cap.
-    if (cellCount > MAX_RANGE_FORMATTING_CELLS) continue;
+    // Block extremely large non-band rectangles (and align with the UI selection-size guard).
+    // Even though DocumentController can represent large rectangles efficiently via range runs,
+    // we keep formatting operations bounded to avoid accidental multi-million-cell changes.
+    if (cellCount > MAX_RANGE_FORMATTING_CELLS) {
+      try {
+        showToast(
+          `Selection too large to apply formatting (>${MAX_RANGE_FORMATTING_CELLS.toLocaleString()} cells). Select fewer cells and try again.`,
+          "warning",
+        );
+      } catch {
+        // `showToast` requires a #toast-root (and DOM globals); ignore in non-UI contexts/tests.
+      }
+      return false;
+    }
     totalCells += cellCount;
     if (totalCells > MAX_RANGE_FORMATTING_CELLS) {
       try {
