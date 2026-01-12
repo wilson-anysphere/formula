@@ -819,9 +819,9 @@ Where it’s defined:
 Practical effect:
 
 - Backend/unit tests can run in CI without installing WebView toolchains:
-  - `bash scripts/cargo_agent.sh test -p formula-desktop-tauri`
+  - `bash scripts/cargo_agent.sh test -p desktop`
 - Validating the full desktop build locally requires the platform WebView dependencies:
-  - `bash scripts/cargo_agent.sh check -p formula-desktop-tauri --features desktop`
+  - `bash scripts/cargo_agent.sh check -p desktop --features desktop`
 
 Note: most `#[tauri::command]` functions in `apps/desktop/src-tauri/src/commands.rs` are also `#[cfg(feature = "desktop")]`, so the
 backend library can still compile (and be tested) without linking Tauri or system WebView components.
@@ -938,7 +938,7 @@ available permissions:
 
 ```bash
 # Generates `apps/desktop/src-tauri/gen/schemas/desktop-schema.json` (ignored by git).
-bash scripts/cargo_agent.sh check -p formula-desktop-tauri --features desktop --lib
+bash scripts/cargo_agent.sh check -p desktop --features desktop --lib
 
 # Lists all available `${plugin}:${permission}` identifiers.
 cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri permission ls
