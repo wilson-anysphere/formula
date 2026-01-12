@@ -1378,7 +1378,7 @@ function expectJoinKeys(ctx, expr, fnName) {
 /**
  * @param {CompilerContext} ctx
  * @param {MExpression | null} expr
- * @returns {"inner" | "left" | "right" | "full"}
+ * @returns {"inner" | "left" | "right" | "full" | "leftAnti" | "rightAnti" | "leftSemi" | "rightSemi"}
  */
 function compileJoinKind(ctx, expr) {
   if (!expr) return "inner";
@@ -1393,6 +1393,14 @@ function compileJoinKind(ctx, expr) {
         return "right";
       case "JoinKind.FullOuter":
         return "full";
+      case "JoinKind.LeftAnti":
+        return "leftAnti";
+      case "JoinKind.RightAnti":
+        return "rightAnti";
+      case "JoinKind.LeftSemi":
+        return "leftSemi";
+      case "JoinKind.RightSemi":
+        return "rightSemi";
       default:
         break;
     }
@@ -1409,6 +1417,14 @@ function compileJoinKind(ctx, expr) {
         return "right";
       case 3:
         return "full";
+      case 4:
+        return "leftAnti";
+      case 5:
+        return "rightAnti";
+      case 6:
+        return "leftSemi";
+      case 7:
+        return "rightSemi";
       default:
         break;
     }
@@ -1422,8 +1438,15 @@ function compileJoinKind(ctx, expr) {
     if (lower === "leftouter") return "left";
     if (lower === "rightouter") return "right";
     if (lower === "fullouter") return "full";
+    if (lower === "leftanti") return "leftAnti";
+    if (lower === "rightanti") return "rightAnti";
+    if (lower === "leftsemi") return "leftSemi";
+    if (lower === "rightsemi") return "rightSemi";
   }
-  ctx.error(expr, "Unsupported join kind (expected JoinKind.Inner/LeftOuter/RightOuter/FullOuter)");
+  ctx.error(
+    expr,
+    "Unsupported join kind (expected JoinKind.Inner/LeftOuter/RightOuter/FullOuter/LeftAnti/RightAnti/LeftSemi/RightSemi)",
+  );
 }
 
 /**

@@ -335,7 +335,7 @@ function dataTypeToMTypeExpr(type) {
 }
 
 /**
- * @param {"inner" | "left" | "right" | "full"} joinType
+ * @param {"inner" | "left" | "right" | "full" | "leftAnti" | "rightAnti" | "leftSemi" | "rightSemi"} joinType
  * @returns {string}
  */
 function joinTypeToM(joinType) {
@@ -348,6 +348,14 @@ function joinTypeToM(joinType) {
       return "JoinKind.RightOuter";
     case "full":
       return "JoinKind.FullOuter";
+    case "leftAnti":
+      return "JoinKind.LeftAnti";
+    case "rightAnti":
+      return "JoinKind.RightAnti";
+    case "leftSemi":
+      return "JoinKind.LeftSemi";
+    case "rightSemi":
+      return "JoinKind.RightSemi";
     default:
       return "JoinKind.Inner";
   }

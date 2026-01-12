@@ -2934,31 +2934,55 @@ export class QueryEngine {
         return new DataTable(nestedColumns, nestedRows);
       };
 
-      /** @type {Set<number> | null} */
-      const matchedRight = op.joinType === "right" || op.joinType === "full" ? new Set() : null;
+      const joinType = op.joinType;
+      const nestedJoinType = joinType === "leftSemi" ? "inner" : joinType;
 
-      for (let leftRowIndex = 0; leftRowIndex < left.rowCount; leftRowIndex++) {
-        const key = compositeKeyForRow(left, leftRowIndex, leftKeyIdx);
-        const matchIndices = rightIndex.get(key) ?? [];
-        if (matchIndices.length === 0 && (op.joinType === "inner" || op.joinType === "right")) {
-          continue;
-        }
-
-        if (matchIndices.length === 0) {
+      if (nestedJoinType === "leftAnti") {
+        for (let leftRowIndex = 0; leftRowIndex < left.rowCount; leftRowIndex++) {
+          const key = compositeKeyForRow(left, leftRowIndex, leftKeyIdx);
+          const matchIndices = rightIndex.get(key) ?? [];
+          if (matchIndices.length > 0) continue;
           emitNested(leftRowIndex, makeNestedTable([]));
-          continue;
+        }
+      } else if (nestedJoinType === "rightSemi" || nestedJoinType === "rightAnti") {
+        const leftKeySet = new Set();
+        for (let leftRowIndex = 0; leftRowIndex < left.rowCount; leftRowIndex++) {
+          leftKeySet.add(compositeKeyForRow(left, leftRowIndex, leftKeyIdx));
+        }
+        for (let rightRowIndex = 0; rightRowIndex < right.rowCount; rightRowIndex++) {
+          const key = compositeKeyForRow(right, rightRowIndex, rightKeyIdx);
+          const hasMatch = leftKeySet.has(key);
+          if (nestedJoinType === "rightSemi" && !hasMatch) continue;
+          if (nestedJoinType === "rightAnti" && hasMatch) continue;
+          emitNested(null, makeNestedTable([rightRowIndex]));
+        }
+      } else {
+        /** @type {Set<number> | null} */
+        const matchedRight = nestedJoinType === "right" || nestedJoinType === "full" ? new Set() : null;
+
+        for (let leftRowIndex = 0; leftRowIndex < left.rowCount; leftRowIndex++) {
+          const key = compositeKeyForRow(left, leftRowIndex, leftKeyIdx);
+          const matchIndices = rightIndex.get(key) ?? [];
+          if (matchIndices.length === 0 && (nestedJoinType === "inner" || nestedJoinType === "right")) {
+            continue;
+          }
+
+          if (matchIndices.length === 0) {
+            emitNested(leftRowIndex, makeNestedTable([]));
+            continue;
+          }
+
+          if (matchedRight) {
+            for (const rIdx of matchIndices) matchedRight.add(rIdx);
+          }
+          emitNested(leftRowIndex, makeNestedTable(matchIndices));
         }
 
         if (matchedRight) {
-          for (const rIdx of matchIndices) matchedRight.add(rIdx);
-        }
-        emitNested(leftRowIndex, makeNestedTable(matchIndices));
-      }
-
-      if (matchedRight) {
-        for (let rightRowIndex = 0; rightRowIndex < right.rowCount; rightRowIndex++) {
-          if (matchedRight.has(rightRowIndex)) continue;
-          emitNested(null, makeNestedTable([rightRowIndex]));
+          for (let rightRowIndex = 0; rightRowIndex < right.rowCount; rightRowIndex++) {
+            if (matchedRight.has(rightRowIndex)) continue;
+            emitNested(null, makeNestedTable([rightRowIndex]));
+          }
         }
       }
 
@@ -2968,6 +2992,41 @@ export class QueryEngine {
     }
 
     // Flat (Table.Join) semantics.
+    if (op.joinType === "leftSemi" || op.joinType === "leftAnti") {
+      /** @type {unknown[][]} */
+      const outRows = [];
+      for (let leftRowIndex = 0; leftRowIndex < left.rowCount; leftRowIndex++) {
+        const key = compositeKeyForRow(left, leftRowIndex, leftKeyIdx);
+        const matchIndices = rightIndex.get(key) ?? [];
+        const hasMatch = matchIndices.length > 0;
+        if (op.joinType === "leftSemi" && !hasMatch) continue;
+        if (op.joinType === "leftAnti" && hasMatch) continue;
+        outRows.push(left.columns.map((_c, idx) => left.getCell(leftRowIndex, idx)));
+      }
+      const out = new DataTable(left.columns, outRows);
+      this.setTableSourceIds(out, combinedSourceIds);
+      return out;
+    }
+
+    if (op.joinType === "rightSemi" || op.joinType === "rightAnti") {
+      const leftKeySet = new Set();
+      for (let leftRowIndex = 0; leftRowIndex < left.rowCount; leftRowIndex++) {
+        leftKeySet.add(compositeKeyForRow(left, leftRowIndex, leftKeyIdx));
+      }
+      /** @type {unknown[][]} */
+      const outRows = [];
+      for (let rightRowIndex = 0; rightRowIndex < right.rowCount; rightRowIndex++) {
+        const key = compositeKeyForRow(right, rightRowIndex, rightKeyIdx);
+        const hasMatch = leftKeySet.has(key);
+        if (op.joinType === "rightSemi" && !hasMatch) continue;
+        if (op.joinType === "rightAnti" && hasMatch) continue;
+        outRows.push(right.columns.map((_c, idx) => right.getCell(rightRowIndex, idx)));
+      }
+      const out = new DataTable(right.columns, outRows);
+      this.setTableSourceIds(out, combinedSourceIds);
+      return out;
+    }
+
     // Power Query `Table.Join` excludes the right-side key columns from the output,
     // even when the key column names differ.
     const excludeRightKeys = new Set(rightKeys);

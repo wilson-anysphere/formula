@@ -176,6 +176,23 @@ in
   assert.deepEqual(toJson(query2), toJson(query));
 });
 
+test("m_language round-trip: prettyPrintQueryToM (semi/anti join kinds)", () => {
+  const script = `
+let
+  Left = Query.Reference("q_left"),
+  Right = Query.Reference("q_right"),
+  #"Merged Queries" = Table.Join(Left, {"Id"}, Right, {"Id"}, JoinKind.LeftAnti)
+in
+  #"Merged Queries"
+`;
+
+  const query = compileMToQuery(script);
+  const printed = prettyPrintQueryToM(query);
+  assert.match(printed, /JoinKind\.LeftAnti/);
+  const query2 = compileMToQuery(printed);
+  assert.deepEqual(toJson(query2), toJson(query));
+});
+
 test("m_language round-trip: prettyPrintQueryToM (join comparer list)", () => {
   const script = `
 let

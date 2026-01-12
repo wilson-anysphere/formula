@@ -222,7 +222,7 @@
  * @typedef {{
  *   type: "merge";
  *   rightQuery: string;
- *   joinType: "inner" | "left" | "right" | "full";
+ *   joinType: "inner" | "left" | "right" | "full" | "leftAnti" | "rightAnti" | "leftSemi" | "rightSemi";
  *   // Optional key equality comparer.
  *   //
  *   // Power Query supports passing a comparer function to control join key equality.

@@ -688,6 +688,252 @@ in
   ]);
 });
 
+test("m_language execution: Table.Join supports semi/anti join kinds", async () => {
+  const left = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Sales"},
+    {1, 100},
+    {2, 200},
+    {3, 300}
+  })
+in
+  Source
+`,
+    { id: "q_left_semi_anti", name: "Left" },
+  );
+
+  const right = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Target"},
+    {2, "B"},
+    {4, "D"}
+  })
+in
+  Source
+`,
+    { id: "q_right_semi_anti", name: "Right" },
+  );
+
+  const engine = new QueryEngine();
+
+  const exec = async (joinKindExpr, expectedJoinType, expectedGrid) => {
+    const joinQuery = compileMToQuery(
+      `
+let
+  Left = Query.Reference("q_left_semi_anti"),
+  Right = Query.Reference("q_right_semi_anti"),
+  #"Merged Queries" = Table.Join(Left, {"Id"}, Right, {"Id"}, ${joinKindExpr})
+in
+  #"Merged Queries"
+`,
+      { id: `q_join_${expectedJoinType}`, name: `Join ${expectedJoinType}` },
+    );
+
+    assert.equal(joinQuery.steps[0]?.operation.type, "merge");
+    assert.equal(joinQuery.steps[0]?.operation.joinMode, "flat");
+    assert.equal(joinQuery.steps[0]?.operation.joinType, expectedJoinType);
+
+    const result = await engine.executeQuery(joinQuery, { queries: { q_left_semi_anti: left, q_right_semi_anti: right } }, {});
+    assert.deepEqual(result.toGrid(), expectedGrid);
+  };
+
+  await exec("JoinKind.LeftAnti", "leftAnti", [
+    ["Id", "Sales"],
+    [1, 100],
+    [3, 300],
+  ]);
+
+  await exec("JoinKind.LeftSemi", "leftSemi", [
+    ["Id", "Sales"],
+    [2, 200],
+  ]);
+
+  await exec("JoinKind.RightAnti", "rightAnti", [
+    ["Id", "Target"],
+    [4, "D"],
+  ]);
+
+  await exec("JoinKind.RightSemi", "rightSemi", [
+    ["Id", "Target"],
+    [2, "B"],
+  ]);
+});
+
+test("m_language execution: Table.Join accepts numeric and bound semi/anti join kinds", async () => {
+  const left = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Sales"},
+    {1, 100},
+    {2, 200},
+    {3, 300}
+  })
+in
+  Source
+`,
+    { id: "q_left_num_semi_anti", name: "Left" },
+  );
+
+  const right = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Target"},
+    {2, "B"},
+    {4, "D"}
+  })
+in
+  Source
+`,
+    { id: "q_right_num_semi_anti", name: "Right" },
+  );
+
+  const joinNumeric = compileMToQuery(
+    `
+let
+  Left = Query.Reference("q_left_num_semi_anti"),
+  Right = Query.Reference("q_right_num_semi_anti"),
+  #"Merged Queries" = Table.Join(Left, {"Id"}, Right, {"Id"}, 4)
+in
+  #"Merged Queries"
+`,
+    { id: "q_join_left_anti_num", name: "Join LeftAnti (num)" },
+  );
+
+  assert.equal(joinNumeric.steps[0]?.operation.type, "merge");
+  assert.equal(joinNumeric.steps[0]?.operation.joinType, "leftAnti");
+
+  const joinNumericSemi = compileMToQuery(
+    `
+let
+  Left = Query.Reference("q_left_num_semi_anti"),
+  Right = Query.Reference("q_right_num_semi_anti"),
+  #"Merged Queries" = Table.Join(Left, {"Id"}, Right, {"Id"}, 6)
+in
+  #"Merged Queries"
+`,
+    { id: "q_join_left_semi_num", name: "Join LeftSemi (num)" },
+  );
+
+  assert.equal(joinNumericSemi.steps[0]?.operation.type, "merge");
+  assert.equal(joinNumericSemi.steps[0]?.operation.joinType, "leftSemi");
+
+  const joinBound = compileMToQuery(
+    `
+let
+  Left = Query.Reference("q_left_num_semi_anti"),
+  Right = Query.Reference("q_right_num_semi_anti"),
+  Kind = JoinKind.RightSemi,
+  #"Merged Queries" = Table.Join(Left, {"Id"}, Right, {"Id"}, Kind)
+in
+  #"Merged Queries"
+`,
+    { id: "q_join_right_semi_bound", name: "Join RightSemi (bound)" },
+  );
+
+  assert.equal(joinBound.steps[0]?.operation.type, "merge");
+  assert.equal(joinBound.steps[0]?.operation.joinType, "rightSemi");
+
+  const engine = new QueryEngine();
+  const queries = { q_left_num_semi_anti: left, q_right_num_semi_anti: right };
+
+  const numericResult = await engine.executeQuery(joinNumeric, { queries }, {});
+  assert.deepEqual(numericResult.toGrid(), [
+    ["Id", "Sales"],
+    [1, 100],
+    [3, 300],
+  ]);
+
+  const numericSemiResult = await engine.executeQuery(joinNumericSemi, { queries }, {});
+  assert.deepEqual(numericSemiResult.toGrid(), [
+    ["Id", "Sales"],
+    [2, 200],
+  ]);
+
+  const boundResult = await engine.executeQuery(joinBound, { queries }, {});
+  assert.deepEqual(boundResult.toGrid(), [
+    ["Id", "Target"],
+    [2, "B"],
+  ]);
+});
+
+test("m_language execution: Table.NestedJoin supports JoinKind.LeftAnti", async () => {
+  const left = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Sales"},
+    {1, 100},
+    {2, 200},
+    {3, 300}
+  })
+in
+  Source
+`,
+    { id: "q_left_nested_left_anti", name: "Left" },
+  );
+
+  const right = compileMToQuery(
+    `
+let
+  Source = Range.FromValues({
+    {"Id", "Target"},
+    {2, "B"},
+    {4, "D"}
+  })
+in
+  Source
+`,
+    { id: "q_right_nested_left_anti", name: "Right" },
+  );
+
+  const nestedJoin = compileMToQuery(
+    `
+let
+  Left = Query.Reference("q_left_nested_left_anti"),
+  Right = Query.Reference("q_right_nested_left_anti"),
+  #"Merged Queries" = Table.NestedJoin(Left, {"Id"}, Right, {"Id"}, "Matches", JoinKind.LeftAnti)
+in
+  #"Merged Queries"
+`,
+    { id: "q_nested_left_anti", name: "Nested Join LeftAnti" },
+  );
+
+  assert.equal(nestedJoin.steps[0]?.operation.type, "merge");
+  assert.equal(nestedJoin.steps[0]?.operation.joinMode, "nested");
+  assert.equal(nestedJoin.steps[0]?.operation.joinType, "leftAnti");
+
+  const engine = new QueryEngine();
+  const result = await engine.executeQuery(
+    nestedJoin,
+    { queries: { q_left_nested_left_anti: left, q_right_nested_left_anti: right } },
+    {},
+  );
+
+  assert.deepEqual(result.toGrid().slice(0, 1), [["Id", "Sales", "Matches"]]);
+  assert.equal(result.rowCount, 2);
+  assert.deepEqual(
+    Array.from({ length: result.rowCount }, (_v, rowIdx) => [result.getCell(rowIdx, 0), result.getCell(rowIdx, 1)]),
+    [
+      [1, 100],
+      [3, 300],
+    ],
+  );
+
+  const matchesIdx = result.getColumnIndex("Matches");
+  const row0 = result.getCell(0, matchesIdx);
+  assert.ok(row0 instanceof DataTable);
+  assert.deepEqual(row0.toGrid(), [["Id", "Target"]]);
+  const row1 = result.getCell(1, matchesIdx);
+  assert.ok(row1 instanceof DataTable);
+  assert.deepEqual(row1.toGrid(), [["Id", "Target"]]);
+});
+
 test("m_language execution: Table.Join accepts JoinAlgorithm constants", async () => {
   const sales = compileMToQuery(
     `

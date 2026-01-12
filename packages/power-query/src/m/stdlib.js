@@ -134,6 +134,14 @@ export function constantIdentifierValue(name) {
       return "right";
     case "JoinKind.FullOuter":
       return "full";
+    case "JoinKind.LeftAnti":
+      return "leftAnti";
+    case "JoinKind.RightAnti":
+      return "rightAnti";
+    case "JoinKind.LeftSemi":
+      return "leftSemi";
+    case "JoinKind.RightSemi":
+      return "rightSemi";
     case "JoinAlgorithm.Dynamic":
       return "dynamic";
     case "JoinAlgorithm.SortMerge":

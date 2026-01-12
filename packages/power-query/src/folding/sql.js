@@ -1741,7 +1741,7 @@ function resolveDialect(dialect) {
 
 /**
  * @param {SqlDialect} dialect
- * @param {"inner" | "left" | "right" | "full"} joinType
+ * @param {"inner" | "left" | "right" | "full" | "leftAnti" | "rightAnti" | "leftSemi" | "rightSemi"} joinType
  * @returns {string | null}
  */
 function joinTypeToSql(dialect, joinType) {
@@ -1754,6 +1754,11 @@ function joinTypeToSql(dialect, joinType) {
       return dialect.name === "postgres" || dialect.name === "sqlserver" || dialect.name === "mysql" ? "RIGHT JOIN" : null;
     case "full":
       return dialect.name === "postgres" || dialect.name === "sqlserver" ? "FULL OUTER JOIN" : null;
+    case "leftAnti":
+    case "rightAnti":
+    case "leftSemi":
+    case "rightSemi":
+      return null;
     default: {
       /** @type {never} */
       const exhausted = joinType;
