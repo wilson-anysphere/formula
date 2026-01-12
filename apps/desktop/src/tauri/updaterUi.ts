@@ -400,62 +400,50 @@ function ensureUpdateDialog(): DialogElements {
   }
 
   const dialog = document.createElement("dialog");
-  dialog.className = "dialog";
+  dialog.className = "dialog updater-dialog";
   dialog.dataset.testid = "updater-dialog";
-  dialog.style.maxWidth = "min(640px, calc(100vw - 32px))";
-  dialog.style.width = "520px";
 
   const title = document.createElement("div");
   title.className = "dialog__title";
   title.textContent = t("updater.updateAvailableTitle");
 
   const version = document.createElement("div");
+  version.className = "updater-dialog__version";
   version.dataset.testid = "updater-version";
-  version.style.fontWeight = "600";
 
   const releaseNotesTitle = document.createElement("div");
+  releaseNotesTitle.className = "updater-dialog__release-notes-title";
   releaseNotesTitle.dataset.testid = "updater-release-notes-title";
-  releaseNotesTitle.style.marginTop = "10px";
-  releaseNotesTitle.style.fontWeight = "600";
   releaseNotesTitle.textContent = t("updater.releaseNotes");
 
   const body = document.createElement("pre");
+  body.className = "updater-dialog__body";
   body.dataset.testid = "updater-body";
-  body.style.whiteSpace = "pre-wrap";
-  body.style.margin = "6px 0 0";
-  body.style.maxHeight = "240px";
-  body.style.overflow = "auto";
 
   const status = document.createElement("div");
+  status.className = "updater-dialog__status";
   status.dataset.testid = "updater-status";
-  status.style.marginTop = "10px";
-  status.style.whiteSpace = "pre-wrap";
 
   const progressWrap = document.createElement("div");
+  progressWrap.className = "updater-dialog__progress-wrap";
   progressWrap.dataset.testid = "updater-progress-wrap";
-  progressWrap.style.display = "none";
-  progressWrap.style.marginTop = "10px";
+  progressWrap.hidden = true;
 
   const progressBar = document.createElement("progress");
+  progressBar.className = "updater-dialog__progress";
   progressBar.dataset.testid = "updater-progress";
   progressBar.max = 100;
   progressBar.value = 0;
-  progressBar.style.width = "100%";
 
   const progressText = document.createElement("div");
+  progressText.className = "updater-dialog__progress-text";
   progressText.dataset.testid = "updater-progress-text";
-  progressText.style.marginTop = "6px";
-  progressText.style.fontSize = "12px";
-  progressText.style.color = "var(--text-secondary)";
 
   progressWrap.appendChild(progressBar);
   progressWrap.appendChild(progressText);
 
   const controls = document.createElement("div");
-  controls.style.display = "flex";
-  controls.style.justifyContent = "flex-end";
-  controls.style.gap = "8px";
-  controls.style.marginTop = "12px";
+  controls.className = "dialog__controls updater-dialog__controls";
 
   const laterBtn = document.createElement("button");
   laterBtn.type = "button";
@@ -476,7 +464,7 @@ function ensureUpdateDialog(): DialogElements {
   restartBtn.type = "button";
   restartBtn.textContent = t("updater.restartNow");
   restartBtn.dataset.testid = "updater-restart";
-  restartBtn.style.display = "none";
+  restartBtn.hidden = true;
 
   controls.appendChild(laterBtn);
   controls.appendChild(viewVersionsBtn);
@@ -568,7 +556,7 @@ function renderUpdateDialog(): void {
   els.version.textContent = info ? tWithVars("updater.updateAvailableMessage", { version: info.version }) : "";
   els.body.textContent = info?.body ? info.body : "";
   els.releaseNotesTitle.textContent = t("updater.releaseNotes");
-  els.releaseNotesTitle.style.display = info?.body ? "" : "none";
+  els.releaseNotesTitle.hidden = !info?.body;
 
   els.laterBtn.disabled = downloadInFlight;
   els.viewVersionsBtn.disabled = downloadInFlight;
@@ -578,38 +566,32 @@ function renderUpdateDialog(): void {
   els.downloadBtn.textContent = downloadInFlight ? t("updater.downloading") : t("updater.download");
 
   const readyToInstall = !!downloadedUpdate && !downloadInFlight;
-  els.restartBtn.style.display = readyToInstall ? "" : "none";
+  els.restartBtn.hidden = !readyToInstall;
   els.restartBtn.disabled = false;
 
   if (downloadInFlight) {
     els.status.textContent = t("updater.downloadInProgress");
-    els.progressWrap.style.display = "";
+    els.progressWrap.hidden = false;
     renderProgress();
   } else if (lastUpdateError) {
-    els.progressWrap.style.display = "none";
+    els.progressWrap.hidden = true;
     els.status.textContent = downloadedUpdate
       ? tWithVars("updater.installFailedWithMessage", { message: lastUpdateError })
       : tWithVars("updater.downloadFailedWithMessage", { message: lastUpdateError });
   } else if (downloadedUpdate) {
     els.status.textContent = `${t("updater.downloadComplete")} ${t("updater.restartToInstall")}`;
-    els.progressWrap.style.display = "none";
+    els.progressWrap.hidden = true;
   } else {
     els.status.textContent = "";
-    els.progressWrap.style.display = "none";
+    els.progressWrap.hidden = true;
   }
 
   if (lastUpdateError) {
     els.viewVersionsBtn.textContent = t("updater.downloadManually");
-    els.viewVersionsBtn.style.background = "var(--accent)";
-    els.viewVersionsBtn.style.borderColor = "var(--accent-border)";
-    els.viewVersionsBtn.style.color = "var(--text-on-accent)";
-    els.viewVersionsBtn.style.fontWeight = "700";
+    els.viewVersionsBtn.classList.add("updater-dialog__view-versions--primary");
   } else {
     els.viewVersionsBtn.textContent = t("updater.openReleasePage");
-    els.viewVersionsBtn.style.background = "";
-    els.viewVersionsBtn.style.borderColor = "";
-    els.viewVersionsBtn.style.color = "";
-    els.viewVersionsBtn.style.fontWeight = "";
+    els.viewVersionsBtn.classList.remove("updater-dialog__view-versions--primary");
   }
   els.restartBtn.textContent = t("updater.restartNow");
 }
