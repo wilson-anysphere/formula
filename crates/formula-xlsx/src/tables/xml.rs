@@ -1,7 +1,7 @@
 use formula_model::table::{
     AutoFilter, FilterColumn, SortCondition, SortState, Table, TableColumn, TableStyleInfo,
 };
-use formula_model::{FilterCriterion, FilterJoin, FilterValue};
+use formula_model::{normalize_formula_text, FilterCriterion, FilterJoin, FilterValue};
 use formula_model::Range;
 use quick_xml::{de::from_str, se::to_string};
 use serde::{Deserialize, Serialize};
@@ -246,9 +246,9 @@ struct TableColumnXmlOut<'a> {
     #[serde(rename = "@name")]
     name: &'a str,
     #[serde(rename = "calculatedColumnFormula", skip_serializing_if = "Option::is_none")]
-    calculated_column_formula: Option<&'a str>,
+    calculated_column_formula: Option<String>,
     #[serde(rename = "totalsRowFormula", skip_serializing_if = "Option::is_none")]
-    totals_row_formula: Option<&'a str>,
+    totals_row_formula: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -387,8 +387,16 @@ pub fn write_table_xml(table: &Table) -> Result<String, String> {
                 .map(|c| TableColumnXmlOut {
                     id: c.id,
                     name: &c.name,
-                    calculated_column_formula: c.formula.as_deref(),
-                    totals_row_formula: c.totals_formula.as_deref(),
+                    calculated_column_formula: c
+                        .formula
+                        .as_deref()
+                        .and_then(normalize_formula_text)
+                        .map(|formula| crate::formula_text::add_xlfn_prefixes(&formula)),
+                    totals_row_formula: c
+                        .totals_formula
+                        .as_deref()
+                        .and_then(normalize_formula_text)
+                        .map(|formula| crate::formula_text::add_xlfn_prefixes(&formula)),
                 })
                 .collect(),
         },
@@ -408,6 +416,7 @@ pub fn write_table_xml(table: &Table) -> Result<String, String> {
 mod tests {
     use super::*;
     use formula_model::table::TableArea;
+    use formula_model::table::{Table, TableColumn};
 
     #[test]
     fn round_trips_table_xml() {
@@ -422,5 +431,45 @@ mod tests {
         let out = write_table_xml(&table).unwrap();
         let reparsed = parse_table(&out).unwrap();
         assert_eq!(reparsed, table);
+    }
+
+    #[test]
+    fn write_table_xml_prefixes_xlfn_functions_in_column_formulas() {
+        let table = Table {
+            id: 1,
+            name: "Table1".to_string(),
+            display_name: "Table1".to_string(),
+            range: Range::from_a1("A1:B2").expect("range"),
+            header_row_count: 1,
+            totals_row_count: 0,
+            columns: vec![
+                TableColumn {
+                    id: 1,
+                    name: "Seq".to_string(),
+                    formula: Some("SEQUENCE(2)".to_string()),
+                    totals_formula: None,
+                },
+                TableColumn {
+                    id: 2,
+                    name: "IsFormula".to_string(),
+                    formula: None,
+                    totals_formula: Some("ISFORMULA(A1)".to_string()),
+                },
+            ],
+            style: None,
+            auto_filter: None,
+            relationship_id: None,
+            part_path: None,
+        };
+
+        let xml = write_table_xml(&table).expect("write table xml");
+        assert!(
+            xml.contains("<calculatedColumnFormula>_xlfn.SEQUENCE(2)</calculatedColumnFormula>"),
+            "expected calculatedColumnFormula to be prefixed, got xml: {xml}"
+        );
+        assert!(
+            xml.contains("<totalsRowFormula>_xlfn.ISFORMULA(A1)</totalsRowFormula>"),
+            "expected totalsRowFormula to be prefixed, got xml: {xml}"
+        );
     }
 }

@@ -37,7 +37,7 @@ const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/rela
 ///
 /// This is used by the workbook reader to opportunistically populate
 /// `workbook.images` during import.
-pub fn load_cell_images_from_parts(
+pub(crate) fn load_cell_images_from_parts(
     parts: &BTreeMap<String, Vec<u8>>,
     workbook: &mut formula_model::Workbook,
 ) {

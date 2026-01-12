@@ -2,6 +2,7 @@ use thiserror::Error;
 
 use crate::{
     authenticode::extract_vba_signature_signed_digest,
+    compute_vba_project_digest,
     contents_hash::content_normalized_data,
     normalized_data::forms_normalized_data,
     project_digest::{compute_vba_project_digest_v3, DigestAlg},
@@ -844,6 +845,7 @@ fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
         _ => None,
     }
 }
+
 fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
     digest_alg_from_oid_str(oid).map(|alg| match alg {
         DigestAlg::Md5 => "MD5",
