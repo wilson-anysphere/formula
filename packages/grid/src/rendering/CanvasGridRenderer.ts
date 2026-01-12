@@ -201,6 +201,54 @@ function sliceByCodePointRange(text: string, offsets: number[], start: number, e
   return text.slice(offsets[s], offsets[e]);
 }
 
+function normalizeRichTextRuns(
+  textLen: number,
+  runs: Array<{ start: number; end: number; style?: Record<string, unknown> }> | undefined
+): Array<{ start: number; end: number; style?: Record<string, unknown> }> {
+  const len = clampIndex(textLen, 0, Number.isFinite(textLen) ? textLen : 0);
+  if (len === 0) return [];
+
+  if (!Array.isArray(runs) || runs.length === 0) {
+    return [{ start: 0, end: len, style: undefined }];
+  }
+
+  const normalized = runs
+    .map((run) => {
+      const start = clampIndex(run?.start, 0, len);
+      const end = clampIndex(run?.end, start, len);
+      const style = run?.style && typeof run.style === "object" && !Array.isArray(run.style) ? run.style : undefined;
+      return { start, end, style };
+    })
+    .filter((run) => run.end > run.start)
+    .sort((a, b) => (a.start !== b.start ? a.start - b.start : a.end - b.end));
+
+  if (normalized.length === 0) return [{ start: 0, end: len, style: undefined }];
+
+  const out: Array<{ start: number; end: number; style?: Record<string, unknown> }> = [];
+  let cursor = 0;
+  for (const run of normalized) {
+    if (cursor >= len) break;
+
+    if (run.start > cursor) {
+      out.push({ start: cursor, end: run.start, style: undefined });
+      cursor = run.start;
+    }
+
+    const start = Math.max(cursor, run.start);
+    const end = clampIndex(run.end, start, len);
+    if (end > start) {
+      out.push({ start, end, style: run.style });
+      cursor = end;
+    }
+  }
+
+  if (cursor < len) {
+    out.push({ start: cursor, end: len, style: undefined });
+  }
+
+  return out;
+}
+
 function isUnderline(style: RichTextRunStyle | undefined): boolean {
   const value = style?.underline;
   return Boolean(value && value !== "none");
@@ -1070,10 +1118,7 @@ export class CanvasGridRenderer {
       if (hasRichText) {
         const offsets = buildCodePointIndex(richTextText);
         const textLen = offsets.length - 1;
-        const rawRuns =
-          Array.isArray(richText?.runs) && richText.runs.length > 0
-            ? richText.runs
-            : [{ start: 0, end: textLen, style: undefined }];
+        const rawRuns = normalizeRichTextRuns(textLen, richText?.runs);
 
         const defaults = {
           family: fontFamily,
@@ -1217,10 +1262,7 @@ export class CanvasGridRenderer {
 
         const offsets = buildCodePointIndex(richTextText);
         const textLen = offsets.length - 1;
-        const rawRuns =
-          Array.isArray(richText?.runs) && richText.runs.length > 0
-            ? richText.runs
-            : [{ start: 0, end: textLen, style: undefined }];
+        const rawRuns = normalizeRichTextRuns(textLen, richText?.runs);
 
         return rawRuns.map((run) => {
           const runStyle =
@@ -2401,10 +2443,7 @@ export class CanvasGridRenderer {
 
           const offsets = buildCodePointIndex(text);
           const textLen = offsets.length - 1;
-          const rawRuns =
-            Array.isArray(richText?.runs) && richText.runs.length > 0
-              ? richText.runs
-              : [{ start: 0, end: textLen, style: undefined }];
+          const rawRuns = normalizeRichTextRuns(textLen, richText?.runs);
 
           const defaults = {
             family: fontFamily,

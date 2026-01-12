@@ -97,8 +97,8 @@ describe("CanvasGridRenderer rich text rendering", () => {
     const richText = {
       text: "Hello world",
       runs: [
-        { start: 0, end: 5, style: { italic: true, underline: true } },
-        { start: 5, end: 11, style: {} }
+        // Only style the first run; the renderer should fill the remaining range with defaults.
+        { start: 0, end: 5, style: { italic: true, underline: true } }
       ]
     };
 
