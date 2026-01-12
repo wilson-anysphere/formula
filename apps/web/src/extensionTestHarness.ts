@@ -89,7 +89,7 @@ export async function setupExtensionTestHarness(): Promise<void> {
   const api = {
     async installExtension(id: string) {
       await manager.install(id);
-      await manager.loadInstalled(id);
+      await manager.loadAllInstalled();
       return id;
     },
     async uninstallExtension(id: string) {

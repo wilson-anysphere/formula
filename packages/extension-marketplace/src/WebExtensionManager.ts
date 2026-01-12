@@ -70,6 +70,17 @@ export interface BrowserExtensionHostLike {
    */
   clearExtensionStorage?(extensionId: string): Promise<void> | void;
   listExtensions(): Array<{ id: string }>;
+  /**
+   * Starts the host and delivers startup activation events + initial workbook snapshot.
+   *
+   * Optional for backward compatibility with older BrowserExtensionHost versions.
+   */
+  startup?: () => Promise<void>;
+  /**
+   * Starts a single extension if the host is already running, ensuring it receives the
+   * initial workbook snapshot. Optional for older hosts.
+   */
+  startupExtension?: (extensionId: string) => Promise<void>;
 }
 
 export interface InstalledExtensionWithManifest extends InstalledExtensionRecord {
@@ -512,6 +523,7 @@ export class WebExtensionManager {
 
   private readonly _loadedMainUrls = new Map<string, { mainUrl: string; revoke: () => void }>();
   private _extensionApiModule: { url: string; revoke: () => void } | null = null;
+  private _didHostStartup = false;
 
   constructor(
     options: {
@@ -912,6 +924,80 @@ export class WebExtensionManager {
   }
 
   async loadInstalled(id: string): Promise<string> {
+    return this._loadInstalledInternal(id, { start: true });
+  }
+
+  /**
+   * Loads all extensions installed in IndexedDB, then triggers host startup once (if supported).
+   *
+   * This is the preferred entrypoint for desktop/web boot: it ensures extensions that rely on
+   * `activationEvents: ["onStartupFinished"]` are activated and receive the initial
+   * `workbookOpened` event.
+   */
+  async loadAllInstalled(): Promise<string[]> {
+    if (!this.host) throw new Error("WebExtensionManager requires a BrowserExtensionHost to load extensions");
+    const installed = await this.listInstalled();
+
+    const newlyLoaded: string[] = [];
+    for (const record of installed) {
+      // Avoid throwing if the caller invokes `loadAllInstalled()` multiple times.
+      if (this.isLoaded(record.id) || this.host.listExtensions().some((e) => e.id === record.id)) continue;
+      // eslint-disable-next-line no-await-in-loop
+      await this._loadInstalledInternal(record.id, { start: false });
+      newlyLoaded.push(record.id);
+    }
+
+    // Preferred behavior: call host.startup() exactly once so existing extensions don't receive
+    // duplicate startup events.
+    if (this.host.startup && !this._didHostStartup) {
+      await this.host.startup();
+      this._didHostStartup = true;
+      return newlyLoaded;
+    }
+
+    // If the host is already running, ensure any newly loaded extensions get startup semantics
+    // without spamming already-active extensions.
+    if (this.host.startupExtension && newlyLoaded.length > 0) {
+      for (const id of newlyLoaded) {
+        // eslint-disable-next-line no-await-in-loop
+        await this.host.startupExtension(id);
+      }
+    }
+
+    return newlyLoaded;
+  }
+
+  async unload(id: string): Promise<void> {
+    if (!this.host) return;
+    const existing = this._loadedMainUrls.get(String(id));
+    if (existing) {
+      this._loadedMainUrls.delete(String(id));
+      try {
+        existing.revoke();
+      } catch {
+        // ignore
+      }
+    }
+
+    await this.host.unloadExtension?.(String(id));
+  }
+
+  async dispose(): Promise<void> {
+    for (const id of [...this._loadedMainUrls.keys()]) {
+      // eslint-disable-next-line no-await-in-loop
+      await this.unload(id);
+    }
+    if (this._extensionApiModule) {
+      try {
+        this._extensionApiModule.revoke();
+      } catch {
+        // ignore
+      }
+      this._extensionApiModule = null;
+    }
+  }
+
+  private async _loadInstalledInternal(id: string, options: { start: boolean }): Promise<string> {
     if (!this.host) throw new Error("WebExtensionManager requires a BrowserExtensionHost to load extensions");
     const installed = await this.getInstalled(id);
     if (!installed) throw new Error(`Not installed: ${id}`);
@@ -969,9 +1055,12 @@ export class WebExtensionManager {
     const extensionPath = `indexeddb://formula/extensions/${installed.id}/${installed.version}`;
 
     // If already loaded, the host will throw; ensure the manager keeps a single source of truth.
-    if (this.host.listExtensions().some((e) => e.id === installed.id)) {
+    const existing = this.host.listExtensions();
+    if (existing.some((e) => e.id === installed.id)) {
       throw new Error(`Extension already loaded: ${installed.id}`);
     }
+
+    const hadOtherExtensions = existing.length > 0;
 
     await this.host.loadExtension({
       extensionId: installed.id,
@@ -981,37 +1070,19 @@ export class WebExtensionManager {
     });
 
     this._loadedMainUrls.set(installed.id, { mainUrl, revoke });
+
+    if (options.start) {
+      if (this.host.startupExtension) {
+        await this.host.startupExtension(installed.id);
+      } else if (this.host.startup && !hadOtherExtensions && !this._didHostStartup) {
+        // Fallback for older hosts: only call startup() when we're confident it won't
+        // re-emit startup events to extensions that were already running.
+        await this.host.startup();
+        this._didHostStartup = true;
+      }
+    }
+
     return installed.id;
-  }
-
-  async unload(id: string): Promise<void> {
-    if (!this.host) return;
-    const existing = this._loadedMainUrls.get(String(id));
-    if (existing) {
-      this._loadedMainUrls.delete(String(id));
-      try {
-        existing.revoke();
-      } catch {
-        // ignore
-      }
-    }
-
-    await this.host.unloadExtension?.(String(id));
-  }
-
-  async dispose(): Promise<void> {
-    for (const id of [...this._loadedMainUrls.keys()]) {
-      // eslint-disable-next-line no-await-in-loop
-      await this.unload(id);
-    }
-    if (this._extensionApiModule) {
-      try {
-        this._extensionApiModule.revoke();
-      } catch {
-        // ignore
-      }
-      this._extensionApiModule = null;
-    }
   }
 
   private async _getPackage(id: string, version: string): Promise<StoredPackageRecord | null> {

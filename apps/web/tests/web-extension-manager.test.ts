@@ -61,6 +61,18 @@ class MemoryStorage implements Storage {
   }
 }
 
+async function waitFor(condition: () => boolean, { timeoutMs = 3000, intervalMs = 25 } = {}) {
+  const start = Date.now();
+  for (;;) {
+    if (condition()) return;
+    if (Date.now() - start > timeoutMs) {
+      throw new Error("Timed out waiting for condition");
+    }
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
 class NodeWebWorkerShim {
   private readonly _worker: NodeWorker;
   private readonly _listeners = new Map<string, Set<(event: any) => void>>();
@@ -392,6 +404,123 @@ test("install persists contributed panel metadata (icon + defaultDock) into the 
   await manager.dispose();
   await host.dispose();
   await fs.rm(tmpRoot, { recursive: true, force: true });
+});
+
+test("loadInstalled triggers onStartupFinished activation + initial workbookOpened (storage key)", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-startup-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const manifest = {
+    name: "startup-ext",
+    publisher: "test",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    browser: "./dist/extension.js",
+    engines: { formula: "^1.0.0" },
+    activationEvents: ["onStartupFinished"],
+    permissions: ["storage"],
+    contributes: {}
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+  await fs.writeFile(
+    path.join(extDir, "dist", "extension.js"),
+    `import * as formula from "@formula/extension-api";\nexport async function activate() {\n  formula.events.onWorkbookOpened(() => {\n    // Event handlers are not awaited by the runtime.\n    formula.storage.set("startup.workbookOpened", "ok").catch(() => {});\n  });\n}\n`
+  );
+
+  const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "test.startup-ext",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host });
+
+  try {
+    await manager.install("test.startup-ext");
+    await manager.loadInstalled("test.startup-ext");
+
+    const store = (host as any)._storageApi.getExtensionStore("test.startup-ext");
+    await waitFor(() => store["startup.workbookOpened"] === "ok");
+    expect(store["startup.workbookOpened"]).toBe("ok");
+    expect(host.listExtensions().find((e: any) => e.id === "test.startup-ext")?.active).toBe(true);
+  } finally {
+    await manager.dispose();
+    await host.dispose();
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("update reloads onStartupFinished extension and re-delivers workbookOpened", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-startup-update-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const writeVersion = async (version: string, marker: string) => {
+    const manifest = {
+      name: "startup-ext",
+      publisher: "test",
+      version,
+      main: "./dist/extension.js",
+      browser: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: ["onStartupFinished"],
+      permissions: ["storage"],
+      contributes: {}
+    };
+    await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+    await fs.writeFile(
+      path.join(extDir, "dist", "extension.js"),
+      `import * as formula from "@formula/extension-api";\nexport async function activate() {\n  formula.events.onWorkbookOpened(() => {\n    formula.storage.set("startup.marker", ${JSON.stringify(marker)}).catch(() => {});\n  });\n}\n`
+    );
+    return createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+  };
+
+  const pkgV1 = await writeVersion("1.0.0", "v1");
+  const pkgV2 = await writeVersion("1.0.1", "v2");
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "test.startup-ext",
+    latestVersion: "1.0.1",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgV1, "1.0.1": pkgV2 }
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host });
+
+  try {
+    await manager.install("test.startup-ext", "1.0.0");
+    await manager.loadInstalled("test.startup-ext");
+
+    const store = (host as any)._storageApi.getExtensionStore("test.startup-ext");
+    await waitFor(() => store["startup.marker"] === "v1");
+    expect(store["startup.marker"]).toBe("v1");
+
+    await manager.update("test.startup-ext");
+    expect(await manager.getInstalled("test.startup-ext")).toMatchObject({ version: "1.0.1" });
+
+    await waitFor(() => store["startup.marker"] === "v2");
+    expect(store["startup.marker"]).toBe("v2");
+  } finally {
+    await manager.dispose();
+    await host.dispose();
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
 });
 
 test("tampered package fails verification and is not installed", async () => {
