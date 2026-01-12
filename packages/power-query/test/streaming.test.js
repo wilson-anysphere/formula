@@ -26,6 +26,13 @@ function collectBatches(batches) {
   return grid;
 }
 
+/**
+ * @param {unknown[][]} grid
+ */
+function gridDatesToIso(grid) {
+  return grid.map((row) => row.map((cell) => (cell instanceof Date ? cell.toISOString() : cell)));
+}
+
 test("executeQueryStreaming streams DataTable results in grid batches", async () => {
   const engine = new QueryEngine();
   const table = DataTable.fromGrid(
@@ -143,4 +150,41 @@ test("executeQueryStreaming emits Arrow date values as Date objects", { skip: !a
   const expected = (await engine.executeQuery(query, { tables: { t: arrowTable } }, {})).toGrid();
   assert.deepEqual(streamed, expected);
   assert.ok(streamed[1][0] instanceof Date);
+});
+
+test("executeQueryStreamingNonMaterializing supports distinctRows across batches (Dates)", async () => {
+  const engine = new QueryEngine();
+  const d1 = new Date("2020-01-01T00:00:00.000Z");
+  const d1b = new Date("2020-01-01T00:00:00.000Z");
+  const d2 = new Date("2020-01-02T00:00:00.000Z");
+  const d2b = new Date("2020-01-02T00:00:00.000Z");
+
+  const table = DataTable.fromGrid(
+    [
+      ["Id", "When"],
+      [1, d1],
+      [2, d2],
+      [1, d1b],
+      [2, d2b],
+    ],
+    { hasHeaders: true, inferTypes: true },
+  );
+
+  const query = {
+    id: "q_stream_distinct",
+    name: "Stream Distinct",
+    source: { type: "table", table: "t" },
+    steps: [{ id: "s_distinct", name: "Distinct", operation: { type: "distinctRows", columns: null } }],
+  };
+
+  const batches = [];
+  await engine.executeQueryStreaming(query, { tables: { t: table } }, {
+    batchSize: 2,
+    materialize: false,
+    onBatch: (batch) => batches.push(batch),
+  });
+
+  const streamed = collectBatches(batches);
+  const expected = (await engine.executeQuery(query, { tables: { t: table } }, {})).toGrid();
+  assert.deepEqual(gridDatesToIso(streamed), gridDatesToIso(expected));
 });
