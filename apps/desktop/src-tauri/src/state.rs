@@ -3670,7 +3670,6 @@ fn parse_error_kind(value: &str) -> Option<ErrorKind> {
         "Connect" => Some(ErrorKind::Connect),
         "Blocked" => Some(ErrorKind::Blocked),
         "Unknown" => Some(ErrorKind::Unknown),
-        "#N/A!" => Some(ErrorKind::NA),
         other => ErrorKind::from_code(other),
     }
 }
