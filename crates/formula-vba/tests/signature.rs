@@ -496,3 +496,42 @@ fn lists_all_signature_streams_and_extracts_digest_info_per_stream() {
         );
     }
 }
+
+#[test]
+fn lists_and_verifies_ber_indefinite_signature_stream() {
+    let digest_algorithm_oid = "2.16.840.1.101.3.4.2.1"; // sha256
+    let digest = (0u8..32u8).collect::<Vec<u8>>();
+
+    // Build a deterministic DER signature with the same digest bytes as the BER fixture so we can
+    // assert per-stream extraction results.
+    let spc = make_spc_indirect_data_content(digest_algorithm_oid, &digest);
+    let der_sig = make_pkcs7_signed_message(&spc);
+
+    // BER-indefinite SignedData fixture (OpenSSL `cms -stream` style).
+    let ber_sig = include_bytes!("fixtures/cms_indefinite.der");
+
+    let vba = build_vba_project_bin_with_signature_streams(&[
+        ("\u{0005}DigitalSignature", ber_sig),
+        ("\u{0005}DigitalSignatureEx", &der_sig),
+    ]);
+
+    let sigs = list_vba_digital_signatures(&vba).expect("signature enumeration should succeed");
+    assert_eq!(sigs.len(), 2, "expected two signature streams");
+
+    // Deterministic Excel-like ordering: DigitalSignatureEx is preferred over the legacy
+    // DigitalSignature stream.
+    assert!(sigs[0].stream_path.ends_with("\u{0005}DigitalSignatureEx"));
+    assert!(sigs[1].stream_path.ends_with("\u{0005}DigitalSignature"));
+
+    // Both signatures should verify.
+    assert_eq!(sigs[0].verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sigs[1].verification, VbaSignatureVerification::SignedVerified);
+
+    for sig in &sigs {
+        assert_eq!(
+            sig.signed_digest_algorithm_oid.as_deref(),
+            Some(digest_algorithm_oid)
+        );
+        assert_eq!(sig.signed_digest.as_deref(), Some(digest.as_slice()));
+    }
+}
