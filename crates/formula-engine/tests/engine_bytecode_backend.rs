@@ -446,6 +446,38 @@ fn bytecode_backend_matches_ast_for_let_error_propagation() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_let_unused_error_binding() {
+    let mut engine = Engine::new();
+
+    // LET evaluates binding expressions eagerly, but errors are values (not exceptions), so an
+    // unused error binding should not force the overall LET result to be an error.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(x, 1/0, 1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_engine_matches_ast(&engine, "=LET(x, 1/0, 1)", "A1");
+    assert_eq!(engine.bytecode_program_count(), 1);
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_let_with_iferror_short_circuit() {
+    let mut engine = Engine::new();
+
+    // IFERROR should short-circuit when the first argument is not an error, even when that argument
+    // is a LET local.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(x, 1, IFERROR(x, 1/0))")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_engine_matches_ast(&engine, "=LET(x, 1, IFERROR(x, 1/0))", "A1");
+    assert_eq!(engine.bytecode_program_count(), 1);
+}
+
+#[test]
 fn bytecode_backend_reuses_program_for_filled_let_patterns() {
     let mut engine = Engine::new();
 
