@@ -5097,32 +5097,35 @@ export class SpreadsheetApp {
       return { container: sharedPanes.bottomRight, originX: frozenContentWidth, originY: frozenContentHeight };
     };
 
-    const createProvider = () => ({
-      getRange: (rangeRef: string) => {
-        const parsed = parseA1Range(rangeRef);
-        if (!parsed) return [];
-        const sheetId = parsed.sheetName ? this.resolveSheetIdByName(parsed.sheetName) : this.sheetId;
-        if (!sheetId) return [];
+    const createProvider = () => {
+      // Avoid allocating a fresh `{row,col}` object for every chart range cell read.
+      const coordScratch = { row: 0, col: 0 };
+      return {
+        getRange: (rangeRef: string) => {
+          const parsed = parseA1Range(rangeRef);
+          if (!parsed) return [];
+          const sheetId = parsed.sheetName ? this.resolveSheetIdByName(parsed.sheetName) : this.sheetId;
+          if (!sheetId) return [];
 
-        const coordScratch = { row: 0, col: 0 };
-        const out: unknown[][] = [];
-        for (let r = parsed.startRow; r <= parsed.endRow; r += 1) {
-          const row: unknown[] = [];
-          coordScratch.row = r;
-          for (let c = parsed.startCol; c <= parsed.endCol; c += 1) {
-            coordScratch.col = c;
-            const state = this.document.getCell(sheetId, coordScratch) as {
-              value: unknown;
-              formula: string | null;
-            };
-            const value = state?.value ?? null;
-            row.push(isRichTextValue(value) ? value.text : value);
+          const out: unknown[][] = [];
+          for (let r = parsed.startRow; r <= parsed.endRow; r += 1) {
+            const row: unknown[] = [];
+            coordScratch.row = r;
+            for (let c = parsed.startCol; c <= parsed.endCol; c += 1) {
+              coordScratch.col = c;
+              const state = this.document.getCell(sheetId, coordScratch) as {
+                value: unknown;
+                formula: string | null;
+              };
+              const value = state?.value ?? null;
+              row.push(isRichTextValue(value) ? value.text : value);
+            }
+            out.push(row);
           }
-          out.push(row);
+          return out;
         }
-        return out;
-      }
-    });
+      };
+    };
 
     const provider = renderContent ? createProvider() : null;
 
@@ -7702,7 +7705,8 @@ export class SpreadsheetApp {
         const colCount = range.endCol - range.startCol + 1;
         if (rowCount <= 0 || colCount <= 0) continue;
 
-        const values = Array.from({ length: rowCount }, () => Array(colCount).fill(value));
+        const row = new Array(colCount).fill(value);
+        const values = new Array(rowCount).fill(row);
         this.document.setRangeValues(this.sheetId, { row: range.startRow, col: range.startCol }, values);
         this.document.setRangeFormat(
           this.sheetId,
