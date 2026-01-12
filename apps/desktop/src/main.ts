@@ -2519,7 +2519,6 @@ if (
   }
 
   const contextKeys = new ContextKeyService();
-  keybindingService.setContextKeyLookup(contextKeys.asLookup());
 
   let lastSelection: SelectionState | null = null;
 
