@@ -98,14 +98,15 @@ describe("CanvasGridRenderer rich text rendering", () => {
       text: "Hello world",
       runs: [
         // Only style the first run; the renderer should fill the remaining range with defaults.
-        { start: 0, end: 5, style: { italic: true, underline: true } }
+        // Also explicitly disable bold/italic so we exercise the "false overrides defaults" behavior.
+        { start: 0, end: 5, style: { italic: false, bold: false, underline: true } }
       ]
     };
 
     const provider: CellProvider = {
       getCell: (row, col) => {
         if (row !== 0 || col !== 0) return null;
-        return { row, col, value: richText.text, richText };
+        return { row, col, value: richText.text, richText, style: { fontWeight: "700", fontStyle: "italic" } };
       }
     };
 
@@ -141,6 +142,8 @@ describe("CanvasGridRenderer rich text rendering", () => {
     expect(fillTextCalls.length).toBeGreaterThanOrEqual(2);
     const uniqueFonts = new Set(fillTextCalls.map((c) => c.font));
     expect(uniqueFonts.size).toBeGreaterThanOrEqual(2);
+    expect(fillTextCalls.some((c) => c.font.startsWith("normal normal"))).toBe(true);
+    expect(fillTextCalls.some((c) => c.font.startsWith("italic 700"))).toBe(true);
     // We expect at least one underline stroke from the italic+underline run.
     expect(strokeCalls.length).toBeGreaterThan(0);
   });
