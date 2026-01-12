@@ -1055,6 +1055,65 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("tauri: read avoids tauri clipboard.readText when web clipboard returns html but skips oversized text/plain", async () => {
+    const largeText = new Blob([new ArrayBuffer(3 * 1024 * 1024)], { type: "text/plain" });
+    // Ensure we don't attempt to materialize a huge string via `Blob#text()`.
+    // @ts-ignore
+    largeText.text = async () => {
+      throw new Error("should not call text() for oversized plain text blobs");
+    };
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd) {
+              assert.equal(cmd, "clipboard_read");
+              return {};
+            },
+          },
+          clipboard: {
+            async readText() {
+              throw new Error("should not call tauri clipboard.readText when oversized plain text is detected");
+            },
+          },
+        },
+        navigator: {
+          clipboard: {
+            async read() {
+              return [
+                {
+                  types: ["text/html", "text/plain"],
+                  /**
+                   * @param {string} type
+                   */
+                  async getType(type) {
+                    switch (type) {
+                      case "text/html":
+                        return new Blob(["<b>hi</b>"], { type });
+                      case "text/plain":
+                        return largeText;
+                      default:
+                        throw new Error(`Unexpected clipboard type: ${type}`);
+                    }
+                  },
+                },
+              ];
+            },
+            async readText() {
+              throw new Error("should not call readText() when oversized plain text is detected");
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.deepEqual(content, { html: "<b>hi</b>" });
+      }
+    );
+  });
+
   await t.test("tauri: read falls back to tauri clipboard.readText when web clipboard yields no content", async () => {
     await withGlobals(
       {

@@ -595,6 +595,9 @@ function createWebClipboardProvider() {
               if (typeof text === "string") out.text = text;
               if (typeof rtf === "string") out.rtf = rtf;
               if (imagePng instanceof Uint8Array) out.imagePng = imagePng;
+              if (skipped_oversized_plain_text) {
+                Object.defineProperty(out, SKIPPED_OVERSIZED_PLAINTEXT, { value: true });
+              }
               return out;
             }
           }
