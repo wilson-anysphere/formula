@@ -265,7 +265,11 @@ describe("SpreadsheetApp formatting keyboard shortcuts", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    // Force legacy-like grid limits so selecting rows 0..9,999 is considered a full-column band,
+    // regardless of the global default grid mode (shared vs legacy).
+    const app = new SpreadsheetApp(root, status, {
+      limits: { ...DEFAULT_GRID_LIMITS, maxRows: 10_000, maxCols: 200 },
+    });
     const doc = app.getDocument();
 
     // Full column A within legacy limits (10k rows).
