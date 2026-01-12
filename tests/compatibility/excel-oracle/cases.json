@@ -31548,6 +31548,886 @@
       "id": "database_dsum_computed_e8e084f867f0"
     },
     {
+      "formula": "=DAVERAGE(A1:D4,\"Salary\",F1:F2)",
+      "outputCell": "J1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Name"
+        },
+        {
+          "cell": "B1",
+          "value": "Dept"
+        },
+        {
+          "cell": "C1",
+          "value": "Age"
+        },
+        {
+          "cell": "D1",
+          "value": "Salary"
+        },
+        {
+          "cell": "A2",
+          "value": "Alice"
+        },
+        {
+          "cell": "B2",
+          "value": "Sales"
+        },
+        {
+          "cell": "C2",
+          "value": 30
+        },
+        {
+          "cell": "D2",
+          "value": 1000
+        },
+        {
+          "cell": "A3",
+          "value": "Bob"
+        },
+        {
+          "cell": "B3",
+          "value": "Sales"
+        },
+        {
+          "cell": "C3",
+          "value": 35
+        },
+        {
+          "cell": "D3",
+          "value": 1500
+        },
+        {
+          "cell": "A4",
+          "value": "Carol"
+        },
+        {
+          "cell": "B4",
+          "value": "HR"
+        },
+        {
+          "cell": "C4",
+          "value": 28
+        },
+        {
+          "cell": "D4",
+          "value": 1200
+        },
+        {
+          "cell": "F2",
+          "formula": "=C2>30"
+        }
+      ],
+      "tags": [
+        "database",
+        "DAVERAGE",
+        "computed-criteria"
+      ],
+      "id": "database_daverage_computed_60822f0b9c52"
+    },
+    {
+      "formula": "=DCOUNT(A1:D4,\"Salary\",F1:F2)",
+      "outputCell": "J1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Name"
+        },
+        {
+          "cell": "B1",
+          "value": "Dept"
+        },
+        {
+          "cell": "C1",
+          "value": "Age"
+        },
+        {
+          "cell": "D1",
+          "value": "Salary"
+        },
+        {
+          "cell": "A2",
+          "value": "Alice"
+        },
+        {
+          "cell": "B2",
+          "value": "Sales"
+        },
+        {
+          "cell": "C2",
+          "value": 30
+        },
+        {
+          "cell": "D2",
+          "value": 1000
+        },
+        {
+          "cell": "A3",
+          "value": "Bob"
+        },
+        {
+          "cell": "B3",
+          "value": "Sales"
+        },
+        {
+          "cell": "C3",
+          "value": 35
+        },
+        {
+          "cell": "D3",
+          "value": 1500
+        },
+        {
+          "cell": "A4",
+          "value": "Carol"
+        },
+        {
+          "cell": "B4",
+          "value": "HR"
+        },
+        {
+          "cell": "C4",
+          "value": 28
+        },
+        {
+          "cell": "D4",
+          "value": 1200
+        },
+        {
+          "cell": "F2",
+          "formula": "=C2>30"
+        }
+      ],
+      "tags": [
+        "database",
+        "DCOUNT",
+        "computed-criteria"
+      ],
+      "id": "database_dcount_computed_66084942a0c3"
+    },
+    {
+      "formula": "=DCOUNTA(A1:D4,\"Salary\",F1:F2)",
+      "outputCell": "J1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Name"
+        },
+        {
+          "cell": "B1",
+          "value": "Dept"
+        },
+        {
+          "cell": "C1",
+          "value": "Age"
+        },
+        {
+          "cell": "D1",
+          "value": "Salary"
+        },
+        {
+          "cell": "A2",
+          "value": "Alice"
+        },
+        {
+          "cell": "B2",
+          "value": "Sales"
+        },
+        {
+          "cell": "C2",
+          "value": 30
+        },
+        {
+          "cell": "D2",
+          "value": 1000
+        },
+        {
+          "cell": "A3",
+          "value": "Bob"
+        },
+        {
+          "cell": "B3",
+          "value": "Sales"
+        },
+        {
+          "cell": "C3",
+          "value": 35
+        },
+        {
+          "cell": "D3",
+          "value": 1500
+        },
+        {
+          "cell": "A4",
+          "value": "Carol"
+        },
+        {
+          "cell": "B4",
+          "value": "HR"
+        },
+        {
+          "cell": "C4",
+          "value": 28
+        },
+        {
+          "cell": "D4",
+          "value": 1200
+        },
+        {
+          "cell": "F2",
+          "formula": "=C2>30"
+        }
+      ],
+      "tags": [
+        "database",
+        "DCOUNTA",
+        "computed-criteria"
+      ],
+      "id": "database_dcounta_computed_fe2186fb5318"
+    },
+    {
+      "formula": "=DGET(A1:D4,\"Salary\",F1:F2)",
+      "outputCell": "J1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Name"
+        },
+        {
+          "cell": "B1",
+          "value": "Dept"
+        },
+        {
+          "cell": "C1",
+          "value": "Age"
+        },
+        {
+          "cell": "D1",
+          "value": "Salary"
+        },
+        {
+          "cell": "A2",
+          "value": "Alice"
+        },
+        {
+          "cell": "B2",
+          "value": "Sales"
+        },
+        {
+          "cell": "C2",
+          "value": 30
+        },
+        {
+          "cell": "D2",
+          "value": 1000
+        },
+        {
+          "cell": "A3",
+          "value": "Bob"
+        },
+        {
+          "cell": "B3",
+          "value": "Sales"
+        },
+        {
+          "cell": "C3",
+          "value": 35
+        },
+        {
+          "cell": "D3",
+          "value": 1500
+        },
+        {
+          "cell": "A4",
+          "value": "Carol"
+        },
+        {
+          "cell": "B4",
+          "value": "HR"
+        },
+        {
+          "cell": "C4",
+          "value": 28
+        },
+        {
+          "cell": "D4",
+          "value": 1200
+        },
+        {
+          "cell": "F2",
+          "formula": "=C2>30"
+        }
+      ],
+      "tags": [
+        "database",
+        "DGET",
+        "computed-criteria"
+      ],
+      "id": "database_dget_computed_8662e48cda82"
+    },
+    {
+      "formula": "=DMAX(A1:D4,\"Salary\",F1:F2)",
+      "outputCell": "J1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Name"
+        },
+        {
+          "cell": "B1",
+          "value": "Dept"
+        },
+        {
+          "cell": "C1",
+          "value": "Age"
+        },
+        {
+          "cell": "D1",
+          "value": "Salary"
+        },
+        {
+          "cell": "A2",
+          "value": "Alice"
+        },
+        {
+          "cell": "B2",
+          "value": "Sales"
+        },
+        {
+          "cell": "C2",
+          "value": 30
+        },
+        {
+          "cell": "D2",
+          "value": 1000
+        },
+        {
+          "cell": "A3",
+          "value": "Bob"
+        },
+        {
+          "cell": "B3",
+          "value": "Sales"
+        },
+        {
+          "cell": "C3",
+          "value": 35
+        },
+        {
+          "cell": "D3",
+          "value": 1500
+        },
+        {
+          "cell": "A4",
+          "value": "Carol"
+        },
+        {
+          "cell": "B4",
+          "value": "HR"
+        },
+        {
+          "cell": "C4",
+          "value": 28
+        },
+        {
+          "cell": "D4",
+          "value": 1200
+        },
+        {
+          "cell": "F2",
+          "formula": "=C2>30"
+        }
+      ],
+      "tags": [
+        "database",
+        "DMAX",
+        "computed-criteria"
+      ],
+      "id": "database_dmax_computed_9430e819db16"
+    },
+    {
+      "formula": "=DMIN(A1:D4,\"Salary\",F1:F2)",
+      "outputCell": "J1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Name"
+        },
+        {
+          "cell": "B1",
+          "value": "Dept"
+        },
+        {
+          "cell": "C1",
+          "value": "Age"
+        },
+        {
+          "cell": "D1",
+          "value": "Salary"
+        },
+        {
+          "cell": "A2",
+          "value": "Alice"
+        },
+        {
+          "cell": "B2",
+          "value": "Sales"
+        },
+        {
+          "cell": "C2",
+          "value": 30
+        },
+        {
+          "cell": "D2",
+          "value": 1000
+        },
+        {
+          "cell": "A3",
+          "value": "Bob"
+        },
+        {
+          "cell": "B3",
+          "value": "Sales"
+        },
+        {
+          "cell": "C3",
+          "value": 35
+        },
+        {
+          "cell": "D3",
+          "value": 1500
+        },
+        {
+          "cell": "A4",
+          "value": "Carol"
+        },
+        {
+          "cell": "B4",
+          "value": "HR"
+        },
+        {
+          "cell": "C4",
+          "value": 28
+        },
+        {
+          "cell": "D4",
+          "value": 1200
+        },
+        {
+          "cell": "F2",
+          "formula": "=C2>30"
+        }
+      ],
+      "tags": [
+        "database",
+        "DMIN",
+        "computed-criteria"
+      ],
+      "id": "database_dmin_computed_e31950492c3a"
+    },
+    {
+      "formula": "=DPRODUCT(A1:D4,\"Salary\",F1:F2)",
+      "outputCell": "J1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Name"
+        },
+        {
+          "cell": "B1",
+          "value": "Dept"
+        },
+        {
+          "cell": "C1",
+          "value": "Age"
+        },
+        {
+          "cell": "D1",
+          "value": "Salary"
+        },
+        {
+          "cell": "A2",
+          "value": "Alice"
+        },
+        {
+          "cell": "B2",
+          "value": "Sales"
+        },
+        {
+          "cell": "C2",
+          "value": 30
+        },
+        {
+          "cell": "D2",
+          "value": 1000
+        },
+        {
+          "cell": "A3",
+          "value": "Bob"
+        },
+        {
+          "cell": "B3",
+          "value": "Sales"
+        },
+        {
+          "cell": "C3",
+          "value": 35
+        },
+        {
+          "cell": "D3",
+          "value": 1500
+        },
+        {
+          "cell": "A4",
+          "value": "Carol"
+        },
+        {
+          "cell": "B4",
+          "value": "HR"
+        },
+        {
+          "cell": "C4",
+          "value": 28
+        },
+        {
+          "cell": "D4",
+          "value": 1200
+        },
+        {
+          "cell": "F2",
+          "formula": "=C2>30"
+        }
+      ],
+      "tags": [
+        "database",
+        "DPRODUCT",
+        "computed-criteria"
+      ],
+      "id": "database_dproduct_computed_264b2209aa11"
+    },
+    {
+      "formula": "=DSTDEV(A1:D4,\"Salary\",F1:F2)",
+      "outputCell": "J1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Name"
+        },
+        {
+          "cell": "B1",
+          "value": "Dept"
+        },
+        {
+          "cell": "C1",
+          "value": "Age"
+        },
+        {
+          "cell": "D1",
+          "value": "Salary"
+        },
+        {
+          "cell": "A2",
+          "value": "Alice"
+        },
+        {
+          "cell": "B2",
+          "value": "Sales"
+        },
+        {
+          "cell": "C2",
+          "value": 30
+        },
+        {
+          "cell": "D2",
+          "value": 1000
+        },
+        {
+          "cell": "A3",
+          "value": "Bob"
+        },
+        {
+          "cell": "B3",
+          "value": "Sales"
+        },
+        {
+          "cell": "C3",
+          "value": 35
+        },
+        {
+          "cell": "D3",
+          "value": 1500
+        },
+        {
+          "cell": "A4",
+          "value": "Carol"
+        },
+        {
+          "cell": "B4",
+          "value": "HR"
+        },
+        {
+          "cell": "C4",
+          "value": 28
+        },
+        {
+          "cell": "D4",
+          "value": 1200
+        },
+        {
+          "cell": "F2",
+          "formula": "=C2>30"
+        }
+      ],
+      "tags": [
+        "database",
+        "DSTDEV",
+        "computed-criteria"
+      ],
+      "id": "database_dstdev_computed_f820c3895e01"
+    },
+    {
+      "formula": "=DSTDEVP(A1:D4,\"Salary\",F1:F2)",
+      "outputCell": "J1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Name"
+        },
+        {
+          "cell": "B1",
+          "value": "Dept"
+        },
+        {
+          "cell": "C1",
+          "value": "Age"
+        },
+        {
+          "cell": "D1",
+          "value": "Salary"
+        },
+        {
+          "cell": "A2",
+          "value": "Alice"
+        },
+        {
+          "cell": "B2",
+          "value": "Sales"
+        },
+        {
+          "cell": "C2",
+          "value": 30
+        },
+        {
+          "cell": "D2",
+          "value": 1000
+        },
+        {
+          "cell": "A3",
+          "value": "Bob"
+        },
+        {
+          "cell": "B3",
+          "value": "Sales"
+        },
+        {
+          "cell": "C3",
+          "value": 35
+        },
+        {
+          "cell": "D3",
+          "value": 1500
+        },
+        {
+          "cell": "A4",
+          "value": "Carol"
+        },
+        {
+          "cell": "B4",
+          "value": "HR"
+        },
+        {
+          "cell": "C4",
+          "value": 28
+        },
+        {
+          "cell": "D4",
+          "value": 1200
+        },
+        {
+          "cell": "F2",
+          "formula": "=C2>30"
+        }
+      ],
+      "tags": [
+        "database",
+        "DSTDEVP",
+        "computed-criteria"
+      ],
+      "id": "database_dstdevp_computed_99beefe8ab0e"
+    },
+    {
+      "formula": "=DVAR(A1:D4,\"Salary\",F1:F2)",
+      "outputCell": "J1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Name"
+        },
+        {
+          "cell": "B1",
+          "value": "Dept"
+        },
+        {
+          "cell": "C1",
+          "value": "Age"
+        },
+        {
+          "cell": "D1",
+          "value": "Salary"
+        },
+        {
+          "cell": "A2",
+          "value": "Alice"
+        },
+        {
+          "cell": "B2",
+          "value": "Sales"
+        },
+        {
+          "cell": "C2",
+          "value": 30
+        },
+        {
+          "cell": "D2",
+          "value": 1000
+        },
+        {
+          "cell": "A3",
+          "value": "Bob"
+        },
+        {
+          "cell": "B3",
+          "value": "Sales"
+        },
+        {
+          "cell": "C3",
+          "value": 35
+        },
+        {
+          "cell": "D3",
+          "value": 1500
+        },
+        {
+          "cell": "A4",
+          "value": "Carol"
+        },
+        {
+          "cell": "B4",
+          "value": "HR"
+        },
+        {
+          "cell": "C4",
+          "value": 28
+        },
+        {
+          "cell": "D4",
+          "value": 1200
+        },
+        {
+          "cell": "F2",
+          "formula": "=C2>30"
+        }
+      ],
+      "tags": [
+        "database",
+        "DVAR",
+        "computed-criteria"
+      ],
+      "id": "database_dvar_computed_de9796c689c4"
+    },
+    {
+      "formula": "=DVARP(A1:D4,\"Salary\",F1:F2)",
+      "outputCell": "J1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Name"
+        },
+        {
+          "cell": "B1",
+          "value": "Dept"
+        },
+        {
+          "cell": "C1",
+          "value": "Age"
+        },
+        {
+          "cell": "D1",
+          "value": "Salary"
+        },
+        {
+          "cell": "A2",
+          "value": "Alice"
+        },
+        {
+          "cell": "B2",
+          "value": "Sales"
+        },
+        {
+          "cell": "C2",
+          "value": 30
+        },
+        {
+          "cell": "D2",
+          "value": 1000
+        },
+        {
+          "cell": "A3",
+          "value": "Bob"
+        },
+        {
+          "cell": "B3",
+          "value": "Sales"
+        },
+        {
+          "cell": "C3",
+          "value": 35
+        },
+        {
+          "cell": "D3",
+          "value": 1500
+        },
+        {
+          "cell": "A4",
+          "value": "Carol"
+        },
+        {
+          "cell": "B4",
+          "value": "HR"
+        },
+        {
+          "cell": "C4",
+          "value": 28
+        },
+        {
+          "cell": "D4",
+          "value": 1200
+        },
+        {
+          "cell": "F2",
+          "formula": "=C2>30"
+        }
+      ],
+      "tags": [
+        "database",
+        "DVARP",
+        "computed-criteria"
+      ],
+      "id": "database_dvarp_computed_2cd39fa18417"
+    },
+    {
       "formula": "=DSUM(A1:D4,\"Salary\",F1:F2)",
       "outputCell": "J1",
       "inputs": [

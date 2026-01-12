@@ -92,6 +92,32 @@ def generate(
         output_cell="J1",
     )
 
+    # Basic computed criteria should work across all database functions.
+    for func in [
+        "DAVERAGE",
+        "DCOUNT",
+        "DCOUNTA",
+        "DGET",
+        "DMAX",
+        "DMIN",
+        "DPRODUCT",
+        "DSTDEV",
+        "DSTDEVP",
+        "DVAR",
+        "DVARP",
+    ]:
+        add_case(
+            cases,
+            prefix=f"database_{func.lower()}_computed",
+            tags=["database", func, "computed-criteria"],
+            formula=f'={func}(A1:D4,"Salary",F1:F2)',
+            inputs=[
+                *db_table_inputs,
+                CellInput("F2", formula="=C2>30"),
+            ],
+            output_cell="J1",
+        )
+
     # Computed criteria header may be any label that does not match a database field name.
     add_case(
         cases,
