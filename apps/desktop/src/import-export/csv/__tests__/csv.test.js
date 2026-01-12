@@ -48,6 +48,15 @@ test("CSV import treats leading whitespace before '=' as a formula indicator", (
   assert.equal(grid[2][0].value, null);
 });
 
+test("CSV import treats leading apostrophe as a text indicator (Excel convention)", () => {
+  const csv = "col\n'001\n";
+  const { grid } = importCsvToCellGrid(csv, { delimiter: "," });
+
+  assert.equal(grid[0][0].value, "col");
+  assert.equal(grid[1][0].value, "001");
+  assert.equal(grid[1][0].formula, null);
+});
+
 test("CSV export quotes fields when needed", () => {
   const csv = exportCellGridToCsv(
     [
@@ -66,6 +75,27 @@ test("CSV export serializes rich text values as plain text", () => {
 
   const csv = exportDocumentRangeToCsv(doc, "Sheet1", "A1");
   assert.equal(csv, "Hello");
+});
+
+test("CSV export falls back to formula text when no value is present", () => {
+  const doc = new DocumentController();
+  doc.setCellFormula("Sheet1", "A1", "SUM(1,2)");
+
+  const csv = exportDocumentRangeToCsv(doc, "Sheet1", "A1");
+  // Commas require quoting in CSV.
+  assert.equal(csv, '"=SUM(1,2)"');
+});
+
+test("CSV export escapes literal strings that would otherwise be parsed as formulas", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", "=literal");
+
+  const csv = exportDocumentRangeToCsv(doc, "Sheet1", "A1");
+  assert.equal(csv, "'=literal");
+
+  const { grid } = importCsvToCellGrid(csv, { delimiter: "," });
+  assert.equal(grid[0][0].value, "=literal");
+  assert.equal(grid[0][0].formula, null);
 });
 
 test("CSV export respects DocumentController cell numberFormat when serializing date numbers", () => {

@@ -27,12 +27,22 @@ function isLikelyDateNumberFormat(fmt) {
  */
 function cellToCsvField(cell) {
   const value = cell.value;
-  if (value == null) return "";
+  if (value == null) {
+    const formula = cell.formula;
+    if (typeof formula === "string" && formula.trim() !== "") {
+      // When we don't have a cached/display value, fall back to exporting the formula text.
+      return formula;
+    }
+    return "";
+  }
 
   // DocumentController stores rich text as `{ text, runs }`. CSV exports should serialize
   // this as plain text rather than `[object Object]`.
   if (typeof value === "object" && typeof value.text === "string") {
-    return value.text;
+    const text = value.text;
+    // Escape so CSV import doesn't treat literal rich text (e.g. "=literal") as a formula.
+    if (text.trimStart().startsWith("=") || text.startsWith("'")) return `'${text}`;
+    return text;
   }
 
   const numberFormat = cell.format?.numberFormat;
@@ -43,6 +53,11 @@ function cellToCsvField(cell) {
 
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
   if (typeof value === "number") return String(value);
+  if (typeof value === "string" && (value.trimStart().startsWith("=") || value.startsWith("'"))) {
+    // Escape CSV so `importCsvToCellGrid` doesn't accidentally treat literal strings (e.g. "=literal")
+    // as formulas when parsing back into a cell grid.
+    return `'${value}`;
+  }
   return String(value);
 }
 

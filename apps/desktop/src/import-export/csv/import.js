@@ -34,6 +34,11 @@ export function importCsvToCellGrid(csvText, options = {}) {
     return Array.from({ length: columnCount }, (_, col) => {
       const raw = row[col] ?? "";
 
+      if (raw.startsWith("'")) {
+        // Excel convention: a leading apostrophe forces text.
+        return { value: raw.slice(1), formula: null, format: null };
+      }
+
       const trimmed = raw.trimStart();
       if (trimmed.startsWith("=")) {
         return { value: null, formula: trimmed, format: null };
