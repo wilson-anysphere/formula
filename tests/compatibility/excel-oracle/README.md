@@ -42,6 +42,11 @@ The case corpus generator (`tools/excel-oracle/generate_cases.py`) validates tha
 - every `non_volatile` function in `shared/functionCatalog.json` has at least one case
 - `volatile` catalog functions are excluded (keeps pinned oracle comparisons deterministic)
 
+The Rust test suite also enforces these invariants (see
+`crates/formula-engine/tests/excel_oracle_coverage.rs` and
+`crates/formula-engine/tests/function_catalog_sync.rs`) so drift is caught even if
+`cases.json` is edited without re-running the generator.
+
 ## Tags and filtering
 
 Each case has `tags` that can be used to include/exclude subsets when evaluating
