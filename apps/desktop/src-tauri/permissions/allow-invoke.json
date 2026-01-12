@@ -21,6 +21,7 @@
           "get_macro_security_status",
           "get_precedents",
           "get_range",
+          "get_sheet_formatting",
           "get_sheet_print_settings",
           "get_sheet_used_range",
           "get_vba_project",
