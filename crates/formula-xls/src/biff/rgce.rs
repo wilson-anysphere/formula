@@ -1970,6 +1970,16 @@ mod tests {
     }
 
     #[test]
+    fn print_area_parsing_accepts_explicit_implicit_intersection() {
+        assert_print_area_parseable("Sheet1", "@Sheet1!$A$1:$B$2");
+    }
+
+    #[test]
+    fn print_titles_parsing_accepts_explicit_implicit_intersection() {
+        assert_print_titles_parseable("Sheet1", "@Sheet1!$1:$1");
+    }
+
+    #[test]
     fn formats_cell_ref_no_dollars() {
         assert_eq!(format_cell_ref_no_dollars(0, 0), "A1");
         assert_eq!(format_cell_ref_no_dollars(1, 1), "B2");

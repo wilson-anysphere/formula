@@ -2217,6 +2217,11 @@ fn split_print_name_sheet_ref(input: &str) -> Result<(Option<String>, &str), Str
         return Err("empty reference".to_string());
     }
 
+    // Some rgce decoders (and modern Excel) can include an explicit implicit-intersection operator
+    // `@` before a reference (e.g. `@Sheet1!A1:B2`). Built-in defined names like Print_Area /
+    // Print_Titles should still be recognized in this form, so strip a leading `@` if present.
+    let input = input.strip_prefix('@').unwrap_or(input).trim();
+
     let bytes = input.as_bytes();
     if bytes.first() == Some(&b'\'') {
         // Quoted sheet names may contain escaped quotes (`''` represents a literal `'`).
@@ -2272,7 +2277,9 @@ fn strip_workbook_prefix_from_sheet_ref(sheet_name: &str) -> &str {
 }
 
 fn parse_print_name_range(ref_str: &str) -> Result<ParsedA1Range, String> {
-    let ref_str = ref_str.trim();
+    // Allow an explicit implicit-intersection prefix (`@A1:B2`, `@Sheet1!A1:B2`), as produced by
+    // some rgce decoders for value-class range tokens.
+    let ref_str = ref_str.trim().strip_prefix('@').unwrap_or(ref_str.trim());
     if ref_str.is_empty() {
         return Err("empty range".to_string());
     }
