@@ -237,6 +237,13 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset
   -SubsetCasesPath tools/excel-oracle/odd_coupon_validation_cases.json
 ```
 
+Example (patch only the odd-coupon boundary date-equality scenarios):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset-with-excel.ps1 `
+  -SubsetCasesPath tools/excel-oracle/odd_coupon_boundary_cases.json
+```
+
 You can also patch by **tag filter** without a dedicated subset file by running against the
 canonical corpus and passing through `-IncludeTags`/`-ExcludeTags`:
 
