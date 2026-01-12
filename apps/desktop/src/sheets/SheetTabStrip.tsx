@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { ContextMenu, type ContextMenuItem } from "../menus/contextMenu";
+import { ContextMenu, type ContextMenuItem } from "../menus/contextMenu.js";
 import * as nativeDialogs from "../tauri/nativeDialogs";
 import type { SheetMeta, TabColor, WorkbookSheetStore } from "./workbookSheetStore";
 import { computeWorkbookSheetMoveIndex } from "./sheetReorder";
