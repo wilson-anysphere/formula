@@ -157,16 +157,39 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
   let ragPromise: Promise<DesktopRag> | null = null;
   let disposed = false;
 
-  let documentVersion = 0;
+  const controllerAny = options.documentController as any;
+  const supportsContentVersion =
+    typeof controllerAny?.contentVersion === "number" && Number.isFinite(controllerAny.contentVersion);
+  const supportsUpdateVersion = typeof controllerAny?.updateVersion === "number" && Number.isFinite(controllerAny.updateVersion);
+
+  // Fallback for older controller implementations that don't expose version counters.
+  let fallbackVersion = 0;
   let indexedVersion: number | null = null;
   let indexedDlpKey: string | null = null;
   let indexPromise: Promise<unknown> | null = null;
   let lastIndexStats: unknown = null;
 
+  // Legacy controllers may fire both `change` and `update` for a single mutation.
+  // Keep behavior aligned with the prior implementation by suppressing the next
+  // `update` tick after a `change`.
   let suppressNextUpdate = false;
 
+  function currentVersion(): number {
+    const controller = options.documentController as any;
+    const contentVersion = controller?.contentVersion;
+    if (typeof contentVersion === "number" && Number.isFinite(contentVersion)) return contentVersion;
+    const updateVersion = controller?.updateVersion;
+    if (typeof updateVersion === "number" && Number.isFinite(updateVersion)) return updateVersion;
+    return fallbackVersion;
+  }
+
   const onChange = () => {
-    documentVersion += 1;
+    // When the controller exposes monotonic versions, prefer those (they allow
+    // us to ignore view-only changes via `contentVersion`).
+    if (supportsContentVersion || supportsUpdateVersion) return;
+
+    // Legacy fallback: bump on any change.
+    fallbackVersion += 1;
     suppressNextUpdate = true;
     queueMicrotask(() => {
       suppressNextUpdate = false;
@@ -174,12 +197,17 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
   };
 
   const onUpdate = () => {
+    if (supportsContentVersion || supportsUpdateVersion) return;
     if (suppressNextUpdate) return;
-    documentVersion += 1;
+
+    // Legacy fallback: bump on any update. Note: change and update may both
+    // fire for a single mutation depending on controller implementation.
+    fallbackVersion += 1;
   };
 
-  const unsubscribeChange = options.documentController.on?.("change", onChange) ?? (() => {});
-  const unsubscribeUpdate = options.documentController.on?.("update", onUpdate) ?? (() => {});
+  const shouldSubscribeForFallback = !(supportsContentVersion || supportsUpdateVersion);
+  const unsubscribeChange = shouldSubscribeForFallback ? options.documentController.on?.("change", onChange) ?? (() => {}) : () => {};
+  const unsubscribeUpdate = shouldSubscribeForFallback ? options.documentController.on?.("update", onUpdate) ?? (() => {}) : () => {};
 
   async function getRag(): Promise<DesktopRag> {
     if (disposed) throw new Error("DesktopRagService is disposed");
@@ -204,12 +232,12 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
     // Avoid concurrent re-indexing (multiple chat messages, tool loops, etc).
     if (indexPromise) await indexPromise;
 
-    const currentVersion = documentVersion;
-    if (indexedVersion === currentVersion) return;
+    const versionNow = currentVersion();
+    if (indexedVersion === versionNow) return;
 
     const run = (async () => {
       const rag = await getRag();
-      const versionToIndex = documentVersion;
+      const versionToIndex = currentVersion();
       const workbook = workbookFromSpreadsheetApi({
         spreadsheet,
         workbookId: options.workbookId,
@@ -276,12 +304,12 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
     // Avoid concurrent re-indexing (multiple chat messages, tool loops, etc).
     if (indexPromise) await indexPromise;
 
-    const currentVersion = documentVersion;
-    const shouldIndex = indexedVersion !== currentVersion || indexedDlpKey !== dlpKey;
+    const versionNow = currentVersion();
+    const shouldIndex = indexedVersion !== versionNow || indexedDlpKey !== dlpKey;
 
     if (shouldIndex) {
       const run = (async () => {
-        const versionToIndex = documentVersion;
+        const versionToIndex = currentVersion();
         try {
           const ctx = await rag.contextManager.buildWorkbookContextFromSpreadsheetApi({
             ...params,
