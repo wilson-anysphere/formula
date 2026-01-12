@@ -63,6 +63,28 @@ This schema uses multiple indices; the most important ones are:
 | `_rvRel:LocalImageIdentifier` (first `<v>` inside `<rv>`) | `xl/richData/rdrichvalue.xml` | Relationship-slot index | **0-based index** into the ordered `<rel>` list in `richValueRel.xml`. |
 | `rel/@r:id` | `xl/richData/richValueRel.xml` | Relationship ID string | Resolve via `.rels` by matching `Id="..."` (not by element order). |
 
+### Practical detection (distinguishing “Place in Cell” images from other `vm` uses)
+
+Not every `vm="…"` cell is necessarily an in-cell image; it just means “this cell has value metadata”.
+For the “Place in Cell” local-image shape documented here, a robust detector should:
+
+1. Require `c/@vm` on the cell.
+2. Resolve `vm` into `xl/metadata.xml/valueMetadata`.
+   * The `vm` base is ambiguous; be prepared to handle both 0-based and 1-based indexing.
+3. Confirm the metadata type is `XLRICHVALUE` (`metadataTypes/metadataType name="XLRICHVALUE"`; referenced by `rc/@t`).
+4. Resolve the rich value index:
+   * `rc/@v` selects the `futureMetadata name="XLRICHVALUE"` `<bk>`.
+   * Within that `<bk>`, find `<xlrd:rvb i="…"/>` and use `@i` as the rich value index.
+5. Load the rich value from `xl/richData/rdrichvalue.xml` at that index and confirm its structure:
+   * `rv/@s` selects a structure in `xl/richData/rdrichvaluestructure.xml`.
+   * For images, the structure has `t="_localImage"` and includes keys `_rvRel:LocalImageIdentifier` and `CalcOrigin`.
+6. Interpret the rich value payload positionally:
+   * First `<v>` = `_rvRel:LocalImageIdentifier` (relationship slot index).
+   * Second `<v>` = `CalcOrigin` (preserve as an opaque Excel flag).
+
+The cached cell representation (`t="e"` + `#VALUE!`) is a strong signal for “Place in Cell”, but the
+structure check above is the more semantically reliable way to identify local embedded images.
+
 ## 1) Worksheet cell encoding: `t="e" vm="1"` + `#VALUE!`
 
 The worksheet stores an error value but attaches “rich value” metadata via the `vm` attribute:
