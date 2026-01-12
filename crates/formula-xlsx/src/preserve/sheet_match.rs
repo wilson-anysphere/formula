@@ -30,11 +30,14 @@ pub(crate) fn workbook_sheet_parts(
         .map_err(|e| ChartExtractionError::XmlParse(workbook_part.to_string(), e))?;
 
     let workbook_rels_part = "xl/_rels/workbook.xml.rels";
+    // Best-effort: workbook relationships are frequently missing in "regenerated" workbooks and
+    // some producers emit malformed XML. For preservation, fall back to common sheet naming
+    // conventions instead of erroring.
     let rel_map: HashMap<String, crate::relationships::Relationship> = match pkg.part(workbook_rels_part) {
-        Some(workbook_rels_xml) => parse_relationships(workbook_rels_xml, workbook_rels_part)?
-            .into_iter()
-            .map(|r| (r.id.clone(), r))
-            .collect(),
+        Some(workbook_rels_xml) => match parse_relationships(workbook_rels_xml, workbook_rels_part) {
+            Ok(rels) => rels.into_iter().map(|r| (r.id.clone(), r)).collect(),
+            Err(_) => HashMap::new(),
+        },
         None => HashMap::new(),
     };
 
@@ -77,6 +80,55 @@ pub(crate) fn workbook_sheet_parts(
     }
 
     Ok(sheets)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::io::{Cursor, Write};
+
+    use zip::write::FileOptions;
+    use zip::ZipWriter;
+
+    fn build_package(entries: &[(&str, &[u8])]) -> XlsxPackage {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+        for (name, bytes) in entries {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+
+        let bytes = zip.finish().unwrap().into_inner();
+        XlsxPackage::from_bytes(&bytes).expect("read test pkg")
+    }
+
+    #[test]
+    fn workbook_sheet_parts_tolerates_malformed_workbook_rels() {
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let pkg = build_package(&[
+            ("xl/workbook.xml", workbook_xml),
+            ("xl/_rels/workbook.xml.rels", br#"<Relationships><Relationship"#),
+            ("xl/worksheets/sheet1.xml", br#"<worksheet/>"#),
+        ]);
+
+        let sheets = workbook_sheet_parts(&pkg).expect("should fallback to sheetId");
+        assert_eq!(sheets.len(), 1);
+        assert_eq!(sheets[0].name, "Sheet1");
+        assert_eq!(sheets[0].index, 0);
+        assert_eq!(sheets[0].sheet_id, Some(1));
+        assert_eq!(sheets[0].part_name, "xl/worksheets/sheet1.xml");
+    }
 }
 
 pub(crate) fn match_sheet_by_name_or_index<'a>(

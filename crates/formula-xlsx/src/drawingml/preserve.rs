@@ -160,11 +160,15 @@ impl XlsxPackage {
 
         for sheet in sheets {
             let sheet_rels_part = rels_for_part(&sheet.part_name);
-            let rels = self
-                .part(&sheet_rels_part)
-                .map(|xml| parse_relationships(xml, &sheet_rels_part))
-                .transpose()?
-                .unwrap_or_default();
+            // Best-effort: some producers emit malformed `.rels` parts. For preservation we skip
+            // relationship discovery for this sheet rather than erroring.
+            let rels = match self.part(&sheet_rels_part) {
+                Some(xml) => match parse_relationships(xml, &sheet_rels_part) {
+                    Ok(rels) => rels,
+                    Err(_) => Vec::new(),
+                },
+                None => Vec::new(),
+            };
 
             for rel in &rels {
                 let resolved = resolve_target(&sheet.part_name, &rel.target);
@@ -695,14 +699,13 @@ fn extract_workbook_chart_sheets(
         .map_err(|e| ChartExtractionError::XmlParse(workbook_part.to_string(), e))?;
 
     let workbook_rels_part = "xl/_rels/workbook.xml.rels";
-    let rel_map: HashMap<String, crate::relationships::Relationship> =
-        match pkg.part(workbook_rels_part) {
-            Some(workbook_rels_xml) => parse_relationships(workbook_rels_xml, workbook_rels_part)?
-                .into_iter()
-                .map(|r| (r.id.clone(), r))
-                .collect(),
-            None => HashMap::new(),
-        };
+    let rel_map: HashMap<String, crate::relationships::Relationship> = match pkg.part(workbook_rels_part) {
+        Some(workbook_rels_xml) => match parse_relationships(workbook_rels_xml, workbook_rels_part) {
+            Ok(rels) => rels.into_iter().map(|r| (r.id.clone(), r)).collect(),
+            Err(_) => HashMap::new(),
+        },
+        None => HashMap::new(),
+    };
 
     let mut out = BTreeMap::new();
     for (index, sheet_node) in workbook_doc
@@ -1427,6 +1430,60 @@ fn rewrite_tag_name(name: &[u8], from_prefix: Option<&str>, to_prefix: Option<&s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::io::{Cursor, Write};
+
+    use zip::write::FileOptions;
+    use zip::ZipWriter;
+
+    fn build_package(entries: &[(&str, &[u8])]) -> XlsxPackage {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+        for (name, bytes) in entries {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+
+        let bytes = zip.finish().unwrap().into_inner();
+        XlsxPackage::from_bytes(&bytes).expect("read test pkg")
+    }
+
+    #[test]
+    fn preserve_drawing_parts_tolerates_malformed_sheet_rels() {
+        let content_types = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>"#;
+
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData/>
+  <drawing r:id="rId1"/>
+</worksheet>"#;
+
+        let pkg = build_package(&[
+            ("[Content_Types].xml", content_types),
+            ("xl/workbook.xml", workbook_xml),
+            ("xl/worksheets/sheet1.xml", sheet_xml),
+            ("xl/worksheets/_rels/sheet1.xml.rels", br#"<Relationships><Relationship"#),
+        ]);
+
+        let preserved = pkg.preserve_drawing_parts().expect("best-effort preserve");
+        assert!(
+            preserved.is_empty(),
+            "malformed sheet rels should result in skipping drawing preservation"
+        );
+    }
 
     #[test]
     fn inserts_drawing_before_ext_lst() {
