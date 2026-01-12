@@ -4179,7 +4179,7 @@ if (
       },
       {
         type: "item",
-        label: "Inline AI Edit…",
+        label: t("command.ai.inlineEdit"),
         enabled: allowEditCommands,
         shortcut: getPrimaryCommandKeybindingDisplay("ai.inlineEdit", commandKeybindingDisplayIndex) ?? primaryShortcut("K"),
         onSelect: () => executeBuiltinCommand("ai.inlineEdit"),

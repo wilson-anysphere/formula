@@ -3542,6 +3542,7 @@ export class SpreadsheetApp {
   openInlineAiEdit(): void {
     // Match the Cmd/Ctrl+K guard behavior (see `onKeyDown`).
     if (this.inlineEditController.isOpen()) return;
+    if (this.editor.isOpen()) return;
     // Inline edit should not trigger while the formula bar is actively editing.
     if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
     this.inlineEditController.open();
