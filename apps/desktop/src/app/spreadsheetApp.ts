@@ -2958,7 +2958,7 @@ export class SpreadsheetApp {
     this.commentTooltip.classList.add("comment-tooltip--visible");
   }
 
-  private goTo(reference: string): void {
+  goTo(reference: string): void {
     try {
       const currentSheetName = this.resolveSheetDisplayNameById(this.sheetId);
       const parsed = parseGoTo(reference, { workbook: this.searchWorkbook, currentSheetName });
