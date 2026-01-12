@@ -31,6 +31,25 @@ describe("createWorkbookLoadTruncationWarning", () => {
     expect(message).toContain("loadMaxRows");
     expect(message).toContain("VITE_DESKTOP_LOAD_MAX_ROWS");
   });
+
+  it("does not render NaN in the warning when usedRange values are invalid", () => {
+    const message = createWorkbookLoadTruncationWarning(
+      [
+        {
+          sheetId: "Sheet1",
+          sheetName: "Foo",
+          // Defensive: treat invalid backend ranges as 0-based (1-1 in user coords).
+          originalRange: { start_row: Number.NaN as any, end_row: Number.NaN as any, start_col: Number.NaN as any, end_col: Number.NaN as any },
+          loadedRange: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 },
+          truncatedRows: true,
+          truncatedCols: true,
+        },
+      ],
+      { maxRows: 10_000, maxCols: 200 },
+    );
+
+    expect(message).not.toContain("NaN");
+  });
 });
 
 describe("warnIfWorkbookLoadTruncated", () => {

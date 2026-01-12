@@ -16,9 +16,14 @@ function formatInt(value: number): string {
   return raw.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
+function normalizeIndex(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.floor(value);
+}
+
 function formatOneBasedInclusiveRange(start: number, end: number): string {
-  const startInclusive = Math.max(0, Math.floor(start)) + 1;
-  const endInclusive = Math.max(0, Math.floor(end)) + 1;
+  const startInclusive = Math.max(0, normalizeIndex(start)) + 1;
+  const endInclusive = Math.max(0, normalizeIndex(end)) + 1;
   return `${formatInt(startInclusive)}-${formatInt(endInclusive)}`;
 }
 
