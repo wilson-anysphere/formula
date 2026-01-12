@@ -79,6 +79,7 @@ import {
 import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js";
 import { evaluateWhenClause } from "./extensions/whenClause.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
+import { CommandPaletteController } from "./command-palette/commandPaletteController.js";
 import type { Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
 import { getPasteSpecialMenuItems } from "./clipboard/pasteSpecial.js";
@@ -2208,269 +2209,79 @@ if (
     else layoutController.closePanel(PanelIds.VBA_MIGRATE);
   });
 
-  // --- Command palette (minimal) ------------------------------------------------
+  // --- Command palette ----------------------------------------------------------
 
-  const paletteOverlay = document.createElement("div");
-  paletteOverlay.className = "command-palette-overlay";
-  paletteOverlay.hidden = true;
-  paletteOverlay.setAttribute("role", "dialog");
-  paletteOverlay.setAttribute("aria-modal", "true");
-
-  const palette = document.createElement("div");
-  palette.className = "command-palette";
-  palette.dataset.testid = "command-palette";
-
-  const paletteInput = document.createElement("input");
-  paletteInput.className = "command-palette__input";
-  paletteInput.dataset.testid = "command-palette-input";
-  paletteInput.placeholder = t("commandPalette.placeholder");
-
-  const paletteList = document.createElement("ul");
-  paletteList.className = "command-palette__list";
-  paletteList.dataset.testid = "command-palette-list";
-  // The command palette is a modal dialog, so keep at least two tabbable targets
-  // (input + list) to support a basic focus trap.
-  paletteList.tabIndex = 0;
-
-  palette.appendChild(paletteInput);
-  palette.appendChild(paletteList);
-  paletteOverlay.appendChild(palette);
-  document.body.appendChild(paletteOverlay);
-
-  type PaletteCommand = { id: string; label: string; run: () => void };
-
-  const paletteCommands: PaletteCommand[] = [
-    {
-      id: "insertPivotTable",
-      label: t("commandPalette.command.insertPivotTable"),
-      run: () => {
-        layoutController.openPanel(PanelIds.PIVOT_BUILDER);
-        // If the panel is already open, we still want to refresh its source range from
-        // the latest selection.
-        window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
-      },
-    },
-    {
-      id: "tracePrecedents",
-      label: "Trace precedents",
-      run: () => {
-        app.clearAuditing();
-        app.toggleAuditingPrecedents();
-        app.focus();
-      },
-    },
-    {
-      id: "traceDependents",
-      label: "Trace dependents",
-      run: () => {
-        app.clearAuditing();
-        app.toggleAuditingDependents();
-        app.focus();
-      },
-    },
-    {
-      id: "traceBoth",
-      label: "Trace precedents + dependents",
-      run: () => {
-        app.clearAuditing();
-        app.toggleAuditingPrecedents();
-        app.toggleAuditingDependents();
-        app.focus();
-      },
-    },
-    {
-      id: "clearAuditing",
-      label: "Clear auditing",
-      run: () => {
-        app.clearAuditing();
-        app.focus();
-      },
-    },
-    {
-      id: "toggleTransitiveAuditing",
-      label: "Toggle transitive auditing",
-      run: () => {
-        app.toggleAuditingTransitive();
-        app.focus();
-      },
-    },
-    {
-      id: "freezePanes",
-      label: "Freeze Panes",
-      run: () => {
-        app.freezePanes();
-        app.focus();
-      },
-    },
-    {
-      id: "freezeTopRow",
-      label: "Freeze Top Row",
-      run: () => {
-        app.freezeTopRow();
-        app.focus();
-      },
-    },
-    {
-      id: "freezeFirstColumn",
-      label: "Freeze First Column",
-      run: () => {
-        app.freezeFirstColumn();
-        app.focus();
-      },
-    },
-    {
-      id: "unfreezePanes",
-      label: "Unfreeze Panes",
-      run: () => {
-        app.unfreezePanes();
-        app.focus();
-      },
-    },
-    ...(import.meta.env.DEV
-      ? ([
-          {
-            id: "debugShowSystemNotification",
-            label: "Debug: Show system notification",
-            run: () => {
-              void notify({ title: "Formula", body: "This is a test system notification." });
-            },
-          },
-        ] satisfies PaletteCommand[])
-      : []),
-  ];
-
-  let paletteQuery = "";
-  let paletteSelected = 0;
-
-  function filteredCommands(): PaletteCommand[] {
-    const q = paletteQuery.trim().toLowerCase();
-    if (!q) return paletteCommands;
-    return paletteCommands.filter((cmd) => cmd.label.toLowerCase().includes(q));
-  }
-
-  function renderPalette(): void {
-    const list = filteredCommands();
-    if (paletteSelected >= list.length) paletteSelected = Math.max(0, list.length - 1);
-    paletteList.replaceChildren();
-
-    for (let i = 0; i < list.length; i += 1) {
-      const cmd = list[i]!;
-      const li = document.createElement("li");
-      li.className = "command-palette__item";
-      li.textContent = cmd.label;
-      li.setAttribute("aria-selected", i === paletteSelected ? "true" : "false");
-      li.addEventListener("mousedown", (e) => {
-        // Prevent focus leaving the input before we run the command.
-        e.preventDefault();
-      });
-      li.addEventListener("click", () => {
-        closePalette();
-        cmd.run();
-      });
-      paletteList.appendChild(li);
-    }
-  }
-
-  function openPalette(): void {
-    paletteQuery = "";
-    paletteSelected = 0;
-    paletteInput.value = "";
-    paletteOverlay.hidden = false;
-    document.addEventListener("focusin", handlePaletteDocumentFocusIn);
-    renderPalette();
-    paletteInput.focus();
-    paletteInput.select();
-  }
-
-  function closePalette(): void {
-    paletteOverlay.hidden = true;
-    document.removeEventListener("focusin", handlePaletteDocumentFocusIn);
-    // Best-effort: return focus to the grid.
+  // Register the built-in commands immediately so the palette is useful even while
+  // the extension host is still loading.
+  commandRegistry.registerBuiltinCommand("insertPivotTable", t("commandPalette.command.insertPivotTable"), () => {
+    layoutController.openPanel(PanelIds.PIVOT_BUILDER);
+    // If the panel is already open, we still want to refresh its source range from
+    // the latest selection.
+    window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
+  });
+  commandRegistry.registerBuiltinCommand("tracePrecedents", "Trace precedents", () => {
+    app.clearAuditing();
+    app.toggleAuditingPrecedents();
     app.focus();
-  }
-
-  paletteOverlay.addEventListener("click", (e) => {
-    if (e.target === paletteOverlay) closePalette();
+  });
+  commandRegistry.registerBuiltinCommand("traceDependents", "Trace dependents", () => {
+    app.clearAuditing();
+    app.toggleAuditingDependents();
+    app.focus();
+  });
+  commandRegistry.registerBuiltinCommand("traceBoth", "Trace precedents + dependents", () => {
+    app.clearAuditing();
+    app.toggleAuditingPrecedents();
+    app.toggleAuditingDependents();
+    app.focus();
+  });
+  commandRegistry.registerBuiltinCommand("clearAuditing", "Clear auditing", () => {
+    app.clearAuditing();
+    app.focus();
+  });
+  commandRegistry.registerBuiltinCommand("toggleTransitiveAuditing", "Toggle transitive auditing", () => {
+    app.toggleAuditingTransitive();
+    app.focus();
+  });
+  commandRegistry.registerBuiltinCommand("freezePanes", "Freeze Panes", () => {
+    app.freezePanes();
+    app.focus();
+  });
+  commandRegistry.registerBuiltinCommand("freezeTopRow", "Freeze Top Row", () => {
+    app.freezeTopRow();
+    app.focus();
+  });
+  commandRegistry.registerBuiltinCommand("freezeFirstColumn", "Freeze First Column", () => {
+    app.freezeFirstColumn();
+    app.focus();
+  });
+  commandRegistry.registerBuiltinCommand("unfreezePanes", "Unfreeze Panes", () => {
+    app.unfreezePanes();
+    app.focus();
   });
 
-  function handlePaletteDocumentFocusIn(e: FocusEvent): void {
-    if (paletteOverlay.hidden) return;
-    const target = e.target as Node | null;
-    if (!target) return;
-    if (paletteOverlay.contains(target)) return;
-    // If focus escapes the modal dialog, bring it back to the input.
-    paletteInput.focus();
+  if (import.meta.env.DEV) {
+    commandRegistry.registerBuiltinCommand("debugShowSystemNotification", "Debug: Show system notification", () => {
+      void notify({ title: "Formula", body: "This is a test system notification." });
+    });
   }
 
-  paletteOverlay.addEventListener("keydown", (e) => {
-    if (e.key !== "Tab") return;
-    if (paletteOverlay.hidden) return;
-
-    const focusable = [paletteInput, paletteList].filter((el) => !el.hasAttribute("disabled"));
-    if (focusable.length === 0) return;
-    if (focusable.length === 1) {
-      e.preventDefault();
-      focusable[0]!.focus();
-      return;
-    }
-
-    const first = focusable[0]!;
-    const last = focusable[focusable.length - 1]!;
-    const active = document.activeElement as HTMLElement | null;
-
-    if (e.shiftKey) {
-      if (!active || active === first) {
-        e.preventDefault();
-        last.focus();
-      }
-      return;
-    }
-
-    if (!active || active === last) {
-      e.preventDefault();
-      first.focus();
-    }
+  const paletteController = new CommandPaletteController({
+    commandRegistry,
+    ensureExtensionsLoaded,
+    extensionHostManager,
+    syncContributedCommands,
+    placeholder: t("commandPalette.placeholder"),
+    onClose: () => {
+      // Best-effort: return focus to the grid.
+      app.focus();
+    },
+    onCommandError: (err) => {
+      showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+    },
   });
 
-  paletteInput.addEventListener("input", () => {
-    paletteQuery = paletteInput.value;
-    paletteSelected = 0;
-    renderPalette();
-  });
-
-  function handlePaletteKeydown(e: KeyboardEvent): void {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      closePalette();
-      return;
-    }
-
-    const list = filteredCommands();
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      paletteSelected = list.length === 0 ? 0 : Math.min(list.length - 1, paletteSelected + 1);
-      renderPalette();
-      return;
-    }
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
-      paletteSelected = list.length === 0 ? 0 : Math.max(0, paletteSelected - 1);
-      renderPalette();
-      return;
-    }
-    if (e.key === "Enter") {
-      e.preventDefault();
-      const cmd = list[paletteSelected];
-      if (!cmd) return;
-      closePalette();
-      cmd.run();
-    }
-  }
-
-  paletteInput.addEventListener("keydown", handlePaletteKeydown);
-  paletteList.addEventListener("keydown", handlePaletteKeydown);
-
-  openCommandPalette = openPalette;
+  openCommandPalette = () => paletteController.open();
 
   window.addEventListener("keydown", (e) => {
     if (e.defaultPrevented) return;
@@ -2485,7 +2296,7 @@ if (
     }
 
     e.preventDefault();
-    openPalette();
+    paletteController.open();
   });
 
   layoutController.on("change", () => renderLayout());

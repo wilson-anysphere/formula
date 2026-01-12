@@ -91,7 +91,10 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    environmentMatchGlobs: [["src/panels/ai-audit/AIAuditPanel.vitest.ts", "jsdom"]],
+    environmentMatchGlobs: [
+      ["src/panels/ai-audit/AIAuditPanel.vitest.ts", "jsdom"],
+      ["src/command-palette/commandPaletteController.vitest.ts", "jsdom"],
+    ],
     include: ["src/**/*.vitest.ts"],
     exclude: ["tests/**", "node_modules/**"],
   },

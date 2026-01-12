@@ -446,6 +446,18 @@
   list-style: none;
 }
 
+.command-palette__footer {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  /* Keep a stable baseline height so the list doesn't jump when we toggle status text. */
+  min-height: 16px;
+}
+
+.command-palette__footer[data-variant="warning"] {
+  color: var(--warning);
+}
+
 .command-palette__item {
   padding: 8px 10px;
   border-radius: 10px;

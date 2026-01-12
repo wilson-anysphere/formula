@@ -28,6 +28,22 @@ async function grantSampleHelloPermissions(page: Page): Promise<void> {
 }
 
 test.describe("Extensions UI integration", () => {
+  test("shows extension commands in the command palette after lazy-loading extensions", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Open the command palette first (without opening the Extensions panel) and
+    // ensure that extension-contributed commands appear once the extension host loads.
+    const primary = process.platform === "darwin" ? "Meta" : "Control";
+    await page.keyboard.press(`${primary}+Shift+P`);
+    await expect(page.getByTestId("command-palette")).toBeVisible();
+
+    await page.getByTestId("command-palette-input").fill("Sum Selection");
+
+    await expect(page.getByTestId("command-palette-list")).toContainText("Sample Hello: Sum Selection", {
+      timeout: 10_000,
+    });
+  });
+
   test("runs sampleHello.openPanel and renders the panel webview", async ({ page }) => {
     await gotoDesktop(page);
     await grantSampleHelloPermissions(page);
