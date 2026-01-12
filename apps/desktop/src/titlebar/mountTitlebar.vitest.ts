@@ -21,7 +21,7 @@ describe("mountTitlebar", () => {
     await act(async () => {
       titlebar = mountTitlebar(container, {
         appName: "Formula",
-        documentName: "Untitled.xlsx",
+        documentName: "— Untitled.xlsx",
         actions: [
           { label: "Share", ariaLabel: "Share document", disabled: true },
           { label: "Comments", ariaLabel: "Open comments" },
@@ -46,6 +46,7 @@ describe("mountTitlebar", () => {
 
     expect(container.querySelector(".formula-titlebar__app-name")?.textContent).toBe("Formula");
     expect(container.querySelector(".formula-titlebar__document-name")?.textContent).toBe("Untitled.xlsx");
+    expect(container.querySelector(".formula-titlebar__document-name")?.getAttribute("title")).toBe("Untitled.xlsx");
 
     // Window controls exist with accessible labels.
     const closeButton = container.querySelector('[aria-label="Close window"]');

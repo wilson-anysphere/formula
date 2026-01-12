@@ -166,7 +166,7 @@ export function Titlebar({
         <div className="formula-titlebar__titles">
           <span className="formula-titlebar__app-name">{appName}</span>
           {normalizedDocumentName.trim().length > 0 ? (
-            <span className="formula-titlebar__document-name" title={documentName}>
+            <span className="formula-titlebar__document-name" title={normalizedDocumentName}>
               {normalizedDocumentName}
             </span>
           ) : null}
