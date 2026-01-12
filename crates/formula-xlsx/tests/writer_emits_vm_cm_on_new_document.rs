@@ -26,7 +26,7 @@ fn writer_emits_vm_cm_on_new_document() {
         );
 
     let mut doc = XlsxDocument::new(workbook);
-    doc.meta.cell_meta.insert(
+    doc.xlsx_meta_mut().cell_meta.insert(
         (sheet_id, CellRef::from_a1("A1").expect("valid A1")),
         CellMeta {
             vm: Some("1".to_string()),

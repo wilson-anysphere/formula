@@ -62,9 +62,7 @@ fn vm_cm_cell_meta_roundtrips_in_xlsx_document() -> Result<(), Box<dyn std::erro
     let sheet_id = doc.workbook.sheets[0].id;
 
     let meta = doc
-        .meta
-        .cell_meta
-        .get(&(sheet_id, CellRef::from_a1("A1")?))
+        .cell_meta(sheet_id, CellRef::from_a1("A1")?)
         .expect("expected cell meta for Sheet1!A1");
     assert_eq!(meta.vm.as_deref(), Some("1"));
     assert_eq!(meta.cm.as_deref(), Some("2"));

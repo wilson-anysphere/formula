@@ -67,7 +67,11 @@ fn sheetdata_patch_emits_vm_cm_for_new_cells_from_meta() -> Result<(), Box<dyn s
         // error value.
         CellValue::Error(ErrorValue::Value),
     );
-    let meta = doc.meta.cell_meta.entry((sheet_id, cell_ref)).or_default();
+    let meta = doc
+        .xlsx_meta_mut()
+        .cell_meta
+        .entry((sheet_id, cell_ref))
+        .or_default();
     meta.vm = Some("1".to_string());
     meta.cm = Some("2".to_string());
 

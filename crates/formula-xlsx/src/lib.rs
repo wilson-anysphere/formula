@@ -248,7 +248,7 @@ pub struct XlsxDocument {
     parts: BTreeMap<String, Vec<u8>>,
     /// Shared strings in the order they appeared in the file (if present).
     shared_strings: Vec<RichText>,
-    pub meta: XlsxMeta,
+    meta: XlsxMeta,
     calc_affecting_edits: bool,
     workbook_kind: WorkbookKind,
 }
@@ -307,6 +307,21 @@ impl XlsxDocument {
     /// preservation issues.
     pub fn xlsx_meta(&self) -> &XlsxMeta {
         &self.meta
+    }
+
+    /// Returns a mutable view of the parsed XLSX round-trip metadata captured while loading the workbook.
+    ///
+    /// This is an advanced API intended for fidelity-focused tooling and tests.
+    ///
+    /// Mutating the metadata can easily produce invalid XLSX output (for example by
+    /// inserting inconsistent indices or referencing non-existent cells/sheets), and
+    /// it does not automatically keep the associated [`Workbook`] model in sync.
+    ///
+    /// Most callers should treat [`XlsxDocument::workbook`] as the primary source
+    /// of truth and only mutate this metadata when they explicitly need to control
+    /// low-level SpreadsheetML round-trip behavior.
+    pub fn xlsx_meta_mut(&mut self) -> &mut XlsxMeta {
+        &mut self.meta
     }
 
     /// Returns metadata captured for a specific cell (if any).
