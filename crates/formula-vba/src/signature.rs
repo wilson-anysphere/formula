@@ -73,10 +73,10 @@ pub struct VbaDigitalSignature {
     /// mechanism (V3 Content Hash for `DigitalSignatureExt`).
     ///
     /// Notes:
-    /// - For legacy signature streams (`DigitalSignature` / `DigitalSignatureEx`), Office uses
-    ///   **16-byte MD5** binding digest bytes per MS-OSHARED §4.3 even when
+    /// - For legacy signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`), Office
+    ///   uses **16-byte MD5** binding digest bytes per MS-OSHARED §4.3 even when
     ///   `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256.
-    /// - For v3 (`DigitalSignatureExt`), Office uses MS-OVBA `ContentsHashV3` (SHA-256) over v3
+    /// - For v3 (`\x05DigitalSignatureExt`), Office uses MS-OVBA `ContentsHashV3` (SHA-256) over v3
     ///   `ProjectNormalizedData`. The `DigestInfo` algorithm OID is not authoritative for binding.
     pub binding: VbaSignatureBinding,
 }
@@ -539,10 +539,10 @@ pub fn verify_vba_digital_signature_bound(
 /// `DigitalSignatureExt`).
 ///
 /// Notes:
-/// - For legacy signature streams (`DigitalSignature` / `DigitalSignatureEx`), the embedded digest
-///   bytes are always a 16-byte MD5 even when `DigestInfo.digestAlgorithm.algorithm` indicates
+/// - For legacy signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`), the embedded
+///   digest bytes are always a 16-byte MD5 even when `DigestInfo.digestAlgorithm.algorithm` indicates
 ///   SHA-256 (MS-OSHARED §4.3).
-/// - For v3 (`DigitalSignatureExt`), binding is against MS-OVBA `ContentsHashV3` (SHA-256 over v3
+/// - For v3 (`\x05DigitalSignatureExt`), binding is against MS-OVBA `ContentsHashV3` (SHA-256 over v3
 ///   `ProjectNormalizedData`). The `DigestInfo` algorithm OID is not authoritative for binding.
 ///
 /// If multiple signature streams are present, we prefer:

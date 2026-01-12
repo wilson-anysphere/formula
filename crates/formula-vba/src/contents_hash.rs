@@ -1979,6 +1979,9 @@ fn normalize_project_stream_properties_v3(project_stream_bytes: &[u8]) -> Vec<u8
 /// Note: this is the spec-defined digest for `\x05DigitalSignatureExt` binding. The on-disk
 /// `DigestInfo.digestAlgorithm` OID is not authoritative for binding (some producers emit
 /// inconsistent OIDs); verifiers should compare the signed digest bytes to this SHA-256 value.
+///
+/// For debugging/out-of-spec inputs, callers can use [`crate::compute_vba_project_digest_v3`] to
+/// hash the same transcript with other algorithms.
 pub fn contents_hash_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
     let normalized = project_normalized_data_v3_transcript(vba_project_bin)?;
     Ok(Sha256::digest(&normalized).to_vec())

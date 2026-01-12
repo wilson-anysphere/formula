@@ -1,8 +1,8 @@
 # VBA Digital Signatures (vbaProject.bin / vbaProjectSignature.bin)
 
 This document captures how Excel/VBA macro signatures are stored in XLSM files, and how we extract
-and **bind** those signatures against the MS-OVBA **Contents Hash** (specifically the **V3 Content
-Hash** used by `DigitalSignatureExt`).
+and **bind** those signatures against the MS-OVBA **Contents Hash** (specifically **ContentsHashV3**
+used by `DigitalSignatureExt`).
 
 In this repo, `crates/formula-vba` implements best-effort:
 
@@ -203,29 +203,24 @@ For VBA binding, we ignore `SpcIndirectDataContent.data` and use only `messageDi
 CMS signature verification alone answers “is this a valid CMS signature over *some bytes*?”, but it
 does not, by itself, prove that the signature is bound to the rest of the VBA project.
 
-### Digest algorithm rules (v1/v2 vs v3)
+### Digest bytes (legacy vs v3)
 
-For VBA signature streams, the binding digest embedded in:
+For VBA signatures, the binding digest embedded in either:
 
-- classic `SpcIndirectDataContent.messageDigest.digest`, and
+- classic `SpcIndirectDataContent.messageDigest.digest`, or
 - MS-OSHARED `SigDataV1Serialized.sourceHash`
 
-is:
+is the value we compare against the computed MS-OVBA binding digest.
 
-- v1/v2 (`DigitalSignature` / `DigitalSignatureEx`): **always a 16-byte MD5** (the “VBA project source
-  hash”), even when `DigestInfo.digestAlgorithm.algorithm` is SHA-256.
-- v3 (`DigitalSignatureExt`): the 32-byte `ContentsHashV3`, computed as `SHA-256(ProjectNormalizedData)`.
+In practice, the expected digest algorithm/length depends on the signature stream variant:
 
-The v1/v2 MD5 behavior is specified in **MS-OSHARED §4.3**:
-https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
-
-Practical implications:
-
-- The `DigestInfo` *algorithm OID* should be treated as informational only for VBA binding:
-  - For v1/v2, the verifier must compute **MD5** and compare it to the 16 digest bytes (MS-OSHARED
-    §4.3).
-  - For v3, the verifier must compute the spec-defined **SHA-256** (`ContentsHashV3`) over v3
-    `ProjectNormalizedData` regardless of the OID.
+- Legacy `\x05DigitalSignature` / `\x05DigitalSignatureEx`: **always a 16-byte MD5** (the “VBA project
+  source hash”) per MS-OSHARED §4.3, even when `DigestInfo.digestAlgorithm.algorithm` is SHA-256.
+  - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
+- V3 `\x05DigitalSignatureExt`: **`ContentsHashV3`** (`SHA-256(ProjectNormalizedData)`, 32 bytes).
+  Some producers emit inconsistent OIDs, so verifiers should compare digest bytes to the computed
+  `ContentsHashV3` (and/or select rules based on stream kind and digest length) rather than trusting
+  the OID.
 
 ### Spec-correct transcripts
 
@@ -287,7 +282,8 @@ In this repo:
 
 - `formula_vba::project_normalized_data_v3_transcript` builds v3 `ProjectNormalizedData`
   (`crates/formula-vba/src/contents_hash.rs`)
-- `formula_vba::contents_hash_v3` computes `ContentsHashV3 = SHA-256(ProjectNormalizedData)`
+- `formula_vba::contents_hash_v3` computes `ContentsHashV3 = SHA-256(ProjectNormalizedData)` and is
+  the value used for `\x05DigitalSignatureExt` binding
   (`crates/formula-vba/src/contents_hash.rs`)
 - `formula_vba::v3_content_normalized_data` builds `V3ContentNormalizedData`
   (`crates/formula-vba/src/contents_hash.rs`)
@@ -372,12 +368,15 @@ To bind the signature to the VBA project contents, `formula-vba`:
 1. Extracts the signed digest bytes from the signature payload.
 2. Computes the appropriate MS-OVBA Contents Hash transcript (v1/v2/v3) for the current project.
 3. Computes digest bytes for that transcript:
-   - v1 (`DigitalSignature`): compute **MD5** of `ContentNormalizedData`
+   - v1 (`DigitalSignature`): compute **MD5** of `ContentNormalizedData` (MS-OSHARED §4.3; OID is not
+      authoritative for binding)
    - v2 (`DigitalSignatureEx`): compute **MD5** of (`ContentNormalizedData || FormsNormalizedData`)
+      (MS-OSHARED §4.3; OID is not authoritative for binding)
    - v3 (`DigitalSignatureExt`): compute **SHA-256** over v3 `ProjectNormalizedData` (`ContentsHashV3`)
+     (OID is not authoritative for binding)
    - When the signature stream kind is unknown (for example, a raw PKCS#7/CMS blob from
-     `vbaProjectSignature.bin`), `formula-vba` best-effort attempts v3 binding first, then falls back
-     to legacy binding.
+      `vbaProjectSignature.bin`), `formula-vba` best-effort attempts v3 binding first, then falls back
+      to legacy binding.
 4. Compares the computed digest bytes to the signed digest bytes.
 
 Result interpretation:
@@ -406,8 +405,9 @@ If you need to update or extend signature handling, start with:
   - MS-OVBA normalized-data transcript builders
 - `crates/formula-vba/src/project_digest.rs`
   - `compute_vba_project_digest` (hash over `ContentNormalizedData || FormsNormalizedData`; equivalent to v1 when `FormsNormalizedData` is empty; strict transcript-only, no raw-stream fallback)
-  - `compute_vba_project_digest_v3` (computes a digest over v3 `ProjectNormalizedData` using a chosen
-    algorithm; spec-correct `DigitalSignatureExt` binding uses `ContentsHashV3 = SHA-256(ProjectNormalizedData)`)
+  - `compute_vba_project_digest_v3` (hash over v3 `ProjectNormalizedData` with a caller-selected
+    algorithm; useful for debugging/compatibility; spec-correct `DigitalSignatureExt` binding uses
+    `ContentsHashV3 = SHA-256(ProjectNormalizedData)`)
 
 ## Tests / examples in this repo
 
@@ -438,7 +438,7 @@ and binding behavior:
 - **MS-OVBA**: VBA project storage, signature streams, and Contents Hash (V3 Content Hash) computation.
   - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/
 - **MS-OSHARED**: Office shared structures; documents the MD5-always “VBA project source hash”
-  behavior used by v1/v2 VBA signatures.
+  behavior used by v1/v2 (legacy) VBA signatures.
   - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
 - **MS-OFFCRYPTO**: Office cryptography structures (historical references; some real-world wrappers
   are MS-OSHARED).

@@ -22,15 +22,16 @@ use crate::{
 /// - For v3 (`\x05DigitalSignatureExt`), MS-OVBA defines `ContentsHashV3` as a **SHA-256** over the
 ///   v3 `ProjectNormalizedData` transcript; this is typically the binding digest bytes stored in the
 ///   signature.
-/// - Other algorithms are supported here for debugging/compatibility checks; they are not expected
-///   for Office-produced VBA signature binding.
+/// - Other algorithms are supported for debugging/out-of-spec inputs; callers verifying
+///   Office-produced signatures should typically use `DigestAlg::Md5` for v1/v2 binding and
+///   `DigestAlg::Sha256` for v3 binding.
 ///
 /// https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DigestAlg {
     /// MD5 (16 bytes).
     Md5,
-    /// SHA-1 (supported for debugging/tests; uncommon in VBA signature binding).
+    /// SHA-1 (supported for debugging/tests; not expected for Office-produced VBA signature binding).
     Sha1,
     /// SHA-256 (used by MS-OVBA v3 `ContentsHashV3` / `\x05DigitalSignatureExt` binding).
     Sha256,
