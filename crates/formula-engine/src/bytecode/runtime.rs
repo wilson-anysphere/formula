@@ -1,7 +1,8 @@
 use super::ast::{BinaryOp, Expr, Function, UnaryOp};
 use super::grid::Grid;
 use super::value::{
-    Array as ArrayValue, CellCoord, ErrorKind, MultiRangeRef, RangeRef, Ref, ResolvedRange, Value,
+    Array as ArrayValue, CellCoord, ErrorKind, MultiRangeRef, RangeRef, Ref, ResolvedRange,
+    SheetRangeRef, Value,
 };
 use crate::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::error::ExcelError;
@@ -735,71 +736,11 @@ pub fn apply_implicit_intersection(v: Value, grid: &dyn Grid, base: CellCoord) -
             Value::Error(ErrorKind::Value)
         }
         Value::MultiRange(r) => {
-            fn intersect_area(
-                grid: &dyn Grid,
-                sheet: usize,
-                range: ResolvedRange,
-                base: CellCoord,
-            ) -> Value {
-                if !range_in_bounds_on_sheet(grid, sheet, range) {
-                    return Value::Error(ErrorKind::Ref);
-                }
-
-                // Single-cell ranges return that cell.
-                if range.row_start == range.row_end && range.col_start == range.col_end {
-                    return grid.get_value_on_sheet(
-                        sheet,
-                        CellCoord {
-                            row: range.row_start,
-                            col: range.col_start,
-                        },
-                    );
-                }
-
-                // 1D ranges intersect on the matching row/column.
-                if range.col_start == range.col_end {
-                    if base.row >= range.row_start && base.row <= range.row_end {
-                        return grid.get_value_on_sheet(
-                            sheet,
-                            CellCoord {
-                                row: base.row,
-                                col: range.col_start,
-                            },
-                        );
-                    }
-                    return Value::Error(ErrorKind::Value);
-                }
-
-                if range.row_start == range.row_end {
-                    if base.col >= range.col_start && base.col <= range.col_end {
-                        return grid.get_value_on_sheet(
-                            sheet,
-                            CellCoord {
-                                row: range.row_start,
-                                col: base.col,
-                            },
-                        );
-                    }
-                    return Value::Error(ErrorKind::Value);
-                }
-
-                // 2D ranges intersect only if the current cell is within the rectangle.
-                if base.row >= range.row_start
-                    && base.row <= range.row_end
-                    && base.col >= range.col_start
-                    && base.col <= range.col_end
-                {
-                    return grid.get_value_on_sheet(sheet, base);
-                }
-
-                Value::Error(ErrorKind::Value)
-            }
-
-            // If multiple areas intersect, Excel's implicit intersection is ambiguous. We
-            // approximate by succeeding only when exactly one area intersects.
+            // Excel's implicit intersection on a multi-area reference is ambiguous; we approximate
+            // by succeeding only when exactly one area intersects.
             let mut hit: Option<Value> = None;
             for area in r.areas.iter() {
-                let v = intersect_area(grid, area.sheet, area.range.resolve(base), base);
+                let v = apply_implicit_intersection_sheet_range(*area, grid, base);
                 if matches!(v, Value::Error(ErrorKind::Value)) {
                     continue;
                 }
@@ -812,6 +753,66 @@ pub fn apply_implicit_intersection(v: Value, grid: &dyn Grid, base: CellCoord) -
         }
         other => other,
     }
+}
+
+fn apply_implicit_intersection_sheet_range(
+    area: SheetRangeRef,
+    grid: &dyn Grid,
+    base: CellCoord,
+) -> Value {
+    let range = area.range.resolve(base);
+    if !range_in_bounds_on_sheet(grid, area.sheet, range) {
+        return Value::Error(ErrorKind::Ref);
+    }
+
+    // Single-cell ranges return that cell.
+    if range.row_start == range.row_end && range.col_start == range.col_end {
+        return grid.get_value_on_sheet(
+            area.sheet,
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+        );
+    }
+
+    // 1D ranges intersect on the matching row/column.
+    if range.col_start == range.col_end {
+        if base.row >= range.row_start && base.row <= range.row_end {
+            return grid.get_value_on_sheet(
+                area.sheet,
+                CellCoord {
+                    row: base.row,
+                    col: range.col_start,
+                },
+            );
+        }
+        return Value::Error(ErrorKind::Value);
+    }
+
+    if range.row_start == range.row_end {
+        if base.col >= range.col_start && base.col <= range.col_end {
+            return grid.get_value_on_sheet(
+                area.sheet,
+                CellCoord {
+                    row: range.row_start,
+                    col: base.col,
+                },
+            );
+        }
+        return Value::Error(ErrorKind::Value);
+    }
+
+    // 2D ranges intersect only if the current cell is within the rectangle.
+    if base.row >= range.row_start
+        && base.row <= range.row_end
+        && base.col >= range.col_start
+        && base.col <= range.col_end
+    {
+        return grid.get_value_on_sheet(area.sheet, base);
+    }
+
+    Value::Error(ErrorKind::Value)
 }
 
 fn numeric_unary(op: UnaryOp, v: &Value) -> Value {
@@ -4442,7 +4443,7 @@ fn fn_vlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let lookup_value = args[0].clone();
+    let lookup_value = apply_implicit_intersection(args[0].clone(), grid, base);
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }
@@ -4505,7 +4506,7 @@ fn fn_hlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let lookup_value = args[0].clone();
+    let lookup_value = apply_implicit_intersection(args[0].clone(), grid, base);
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }
@@ -4568,7 +4569,7 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let lookup_value = args[0].clone();
+    let lookup_value = apply_implicit_intersection(args[0].clone(), grid, base);
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }

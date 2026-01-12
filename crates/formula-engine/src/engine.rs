@@ -7660,7 +7660,10 @@ fn bytecode_expr_is_eligible_inner(
                     ),
                     _ => false,
                 };
-                let lookup_ok = bytecode_expr_is_eligible_inner(&args[0], false, false, lexical_scopes);
+                // `lookup_value` is a scalar argument, so Excel applies implicit intersection when
+                // it is provided as a range reference. Allow range values here and let the runtime
+                // perform implicit intersection (matching the AST evaluator's `eval_scalar_arg`).
+                let lookup_ok = bytecode_expr_is_eligible_inner(&args[0], true, false, lexical_scopes);
                 let index_ok = bytecode_expr_is_eligible_inner(&args[2], false, false, lexical_scopes);
                 let range_lookup_ok = if args.len() == 4 {
                     bytecode_expr_is_eligible_inner(&args[3], false, false, lexical_scopes)
@@ -7686,7 +7689,8 @@ fn bytecode_expr_is_eligible_inner(
                     ),
                     _ => false,
                 };
-                let lookup_ok = bytecode_expr_is_eligible_inner(&args[0], false, false, lexical_scopes);
+                // `lookup_value` is scalar and uses implicit intersection when passed a range.
+                let lookup_ok = bytecode_expr_is_eligible_inner(&args[0], true, false, lexical_scopes);
                 let match_type_ok = if args.len() == 3 {
                     bytecode_expr_is_eligible_inner(&args[2], false, false, lexical_scopes)
                 } else {

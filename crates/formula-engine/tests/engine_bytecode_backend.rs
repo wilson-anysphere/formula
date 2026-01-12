@@ -2068,6 +2068,85 @@ fn bytecode_backend_matches_ast_for_vlookup_and_hlookup() {
 }
 
 #[test]
+fn bytecode_backend_applies_implicit_intersection_for_lookup_value_ranges() {
+    let mut engine = Engine::new();
+
+    // Lookup values in a vertical range (A1:A3) and a horizontal range (A20:C20).
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 5.0).unwrap();
+
+    engine.set_cell_value("Sheet1", "A20", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B20", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "C20", 5.0).unwrap();
+
+    // VLOOKUP table in D:E: key/value pairs.
+    engine.set_cell_value("Sheet1", "D1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "E1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "D2", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "E2", 30.0).unwrap();
+    engine.set_cell_value("Sheet1", "D3", 5.0).unwrap();
+    engine.set_cell_value("Sheet1", "E3", 50.0).unwrap();
+
+    // HLOOKUP table in A10:C11: keys on the first row, values on the second row.
+    engine.set_cell_value("Sheet1", "A10", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B10", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "C10", 5.0).unwrap();
+    engine.set_cell_value("Sheet1", "A11", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B11", 30.0).unwrap();
+    engine.set_cell_value("Sheet1", "C11", 50.0).unwrap();
+
+    // When lookup_value is passed as a range, Excel implicitly intersects it with the formula
+    // cell's row/column. The AST evaluator implements this via `eval_scalar_arg`; the bytecode
+    // backend should match.
+    engine
+        .set_cell_formula("Sheet1", "B2", "=VLOOKUP(A1:A3, D1:E3, 2, FALSE)")
+        .unwrap();
+    // Row 5 does not intersect A1:A3 -> #VALUE!.
+    engine
+        .set_cell_formula("Sheet1", "B5", "=VLOOKUP(A1:A3, D1:E3, 2, FALSE)")
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B21", "=HLOOKUP(A20:C20, A10:C11, 2, FALSE)")
+        .unwrap();
+    // Column D does not intersect A20:C20 -> #VALUE!.
+    engine
+        .set_cell_formula("Sheet1", "D21", "=HLOOKUP(A20:C20, A10:C11, 2, FALSE)")
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "C2", "=MATCH(A1:A3, A1:A3, 0)")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 5);
+    assert_eq!(
+        stats.compiled, 5,
+        "expected VLOOKUP/HLOOKUP/MATCH to compile with range lookup_value args"
+    );
+    assert_eq!(stats.fallback, 0);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(30.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B5"), Value::Error(ErrorKind::Value));
+    assert_eq!(engine.get_cell_value("Sheet1", "B21"), Value::Number(30.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D21"), Value::Error(ErrorKind::Value));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(2.0));
+
+    for (formula, cell) in [
+        ("=VLOOKUP(A1:A3, D1:E3, 2, FALSE)", "B2"),
+        ("=VLOOKUP(A1:A3, D1:E3, 2, FALSE)", "B5"),
+        ("=HLOOKUP(A20:C20, A10:C11, 2, FALSE)", "B21"),
+        ("=HLOOKUP(A20:C20, A10:C11, 2, FALSE)", "D21"),
+        ("=MATCH(A1:A3, A1:A3, 0)", "C2"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_match() {
     let mut engine = Engine::new();
 
