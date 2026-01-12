@@ -461,7 +461,7 @@ Most command handlers live in `apps/desktop/src-tauri/src/commands.rs`, with a f
 The command list is large; below are the “core” ones most contributors will interact with (not exhaustive):
 
 - **Workbook lifecycle**
-  - `open_workbook`, `new_workbook`, `save_workbook`, `mark_saved`, `add_sheet`, `rename_sheet`
+  - `open_workbook`, `new_workbook`, `save_workbook`, `mark_saved`, `add_sheet`, `rename_sheet`, `move_sheet`, `delete_sheet`
 - **Cells / ranges / recalculation**
   - `get_cell`, `set_cell`, `get_range`, `set_range`, `recalculate`, `undo`, `redo`
   - Dependency inspection: `get_precedents`, `get_dependents`
@@ -690,8 +690,9 @@ Where it’s defined:
 - `apps/desktop/src-tauri/Cargo.toml`
   - The desktop binary (`[[bin]]`) has `required-features = ["desktop"]`.
   - The `desktop` feature enables the optional deps: `tauri`, `tauri-build`, and the desktop-only Tauri plugins
-    (currently `tauri-plugin-global-shortcut`, `tauri-plugin-single-instance`, `tauri-plugin-notification`, `tauri-plugin-shell`, `tauri-plugin-updater`),
-    plus a few desktop-only helper crates (e.g. `http-range`, `percent-encoding`).
+    (currently `tauri-plugin-global-shortcut`, `tauri-plugin-single-instance`, `tauri-plugin-notification`, `tauri-plugin-dialog`,
+    `tauri-plugin-clipboard-manager`, `tauri-plugin-shell`, `tauri-plugin-updater`), plus a few desktop-only helpers (e.g.
+    `http-range`, `percent-encoding`), plus Linux-only GTK deps for the clipboard backend, and enables the `parquet` feature.
 - `apps/desktop/src-tauri/tauri.conf.json`
   - `build.features: ["desktop"]` ensures the desktop binary is compiled with the correct feature set when running the Tauri CLI
     (in agent environments: `cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri dev|build`).
