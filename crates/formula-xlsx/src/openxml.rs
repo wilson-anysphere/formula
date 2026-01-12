@@ -8,6 +8,7 @@ pub struct Relationship {
     pub id: String,
     pub type_uri: String,
     pub target: String,
+    pub target_mode: Option<String>,
 }
 
 pub fn rels_part_name(part_name: &str) -> String {
@@ -89,6 +90,7 @@ pub fn parse_relationships(xml: &[u8]) -> Result<Vec<Relationship>, XlsxError> {
                     let mut id = None;
                     let mut target = None;
                     let mut type_uri = None;
+                    let mut target_mode = None;
                     for attr in start.attributes() {
                         let attr = attr?;
                         let key = local_name(attr.key.as_ref());
@@ -99,10 +101,17 @@ pub fn parse_relationships(xml: &[u8]) -> Result<Vec<Relationship>, XlsxError> {
                             target = Some(value);
                         } else if key.eq_ignore_ascii_case(b"Type") {
                             type_uri = Some(value);
+                        } else if key.eq_ignore_ascii_case(b"TargetMode") {
+                            target_mode = Some(value);
                         }
                     }
                     if let (Some(id), Some(target), Some(type_uri)) = (id, target, type_uri) {
-                        relationships.push(Relationship { id, target, type_uri });
+                        relationships.push(Relationship {
+                            id,
+                            target,
+                            type_uri,
+                            target_mode,
+                        });
                     }
                 }
             }
