@@ -43,5 +43,13 @@ describe("shellOpen", () => {
     await expect(shellOpen("javascript:alert(1)")).rejects.toThrow(/blocked protocol/i);
     expect(tauriOpen).not.toHaveBeenCalled();
   });
-});
 
+  it("does not fall back to window.open when __TAURI__ is present but the shell plugin is missing", async () => {
+    (globalThis as any).__TAURI__ = { core: { invoke: vi.fn() } };
+    const winOpen = vi.fn();
+    (globalThis as any).window = { open: winOpen };
+
+    await expect(shellOpen("https://example.com")).rejects.toThrow(/shell plugin unavailable/i);
+    expect(winOpen).not.toHaveBeenCalled();
+  });
+});

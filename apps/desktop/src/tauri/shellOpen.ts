@@ -30,11 +30,17 @@ export async function shellOpen(url: string): Promise<void> {
     return;
   }
 
-  if (typeof window !== "undefined" && typeof window.open === "function") {
+  // In web builds (no Tauri runtime) fall back to a browser navigation.
+  if (!tauri && typeof window !== "undefined" && typeof window.open === "function") {
     window.open(url, "_blank", "noopener,noreferrer");
     return;
   }
 
+  if (tauri) {
+    // If we're running under Tauri we should *never* silently fall back to `window.open`,
+    // which would navigate inside the webview instead of the system browser.
+    throw new Error("Tauri shell plugin unavailable (expected __TAURI__.plugin.shell.open)");
+  }
+
   throw new Error("No shellOpen implementation available in this environment");
 }
-
