@@ -535,6 +535,36 @@ fn project_normalized_data_stops_project_information_parsing_on_modulenameunicod
 }
 
 #[test]
+fn project_normalized_data_ignores_fixed_length_projectversion_record_after_module_records() {
+    // Regression: PROJECTVERSION has special-case fixed-length parsing. Ensure this special-case
+    // does not accidentally include bytes when the record appears after the module section begins.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // Begin module records.
+        push_record(&mut out, 0x0019, b"Module1"); // MODULENAME
+
+        // Append a fixed-length PROJECTVERSION record (0x0009). This should be skipped since the
+        // project info section is already over.
+        out.extend_from_slice(&0x0009u16.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes()); // Reserved
+        out.extend_from_slice(&1u32.to_le_bytes()); // VersionMajor
+        out.extend_from_slice(&0u16.to_le_bytes()); // VersionMinor
+
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let normalized = project_normalized_data(&vba_bin).expect("ProjectNormalizedData");
+
+    assert_eq!(
+        normalized,
+        b"NameVBAProject",
+        "expected PROJECTVERSION bytes to be ignored after module records begin"
+    );
+}
+
+#[test]
 fn project_normalized_data_v3_missing_vba_dir_stream() {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");

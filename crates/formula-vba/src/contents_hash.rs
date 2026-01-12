@@ -129,7 +129,13 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
                 && fixed_next_ok
                 && (!tlv_next_ok || size_or_reserved == 0)
             {
-                out.extend_from_slice(&dir_decompressed[offset + 2..fixed_end]);
+                // Only incorporate PROJECTVERSION bytes while we're still in the ProjectInformation
+                // section. We still parse/skip the record after module records begin so we can
+                // validate record framing to EOF (strictness) without accidentally including bytes
+                // from the module section.
+                if in_project_information {
+                    out.extend_from_slice(&dir_decompressed[offset + 2..fixed_end]);
+                }
                 offset = fixed_end;
                 continue;
             }
