@@ -8161,7 +8161,7 @@ export class SpreadsheetApp {
   }
 
   private getComputedValuesByCoordForSheet(sheetId: string): Map<number, SpreadsheetValue> | null {
-    if (this.lastComputedValuesSheetId === sheetId && this.lastComputedValuesSheetCache) {
+    if (this.lastComputedValuesSheetId === sheetId) {
       return this.lastComputedValuesSheetCache;
     }
 
@@ -8216,6 +8216,9 @@ export class SpreadsheetApp {
     const sheetCount = (this.document as any)?.model?.sheets?.size;
     const shouldInvalidate = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
 
+    let lastSheetId: string | null = null;
+    let lastSheetCache: Map<number, SpreadsheetValue> | null = null;
+
     let minRow = Infinity;
     let maxRow = -Infinity;
     let minCol = Infinity;
@@ -8263,23 +8266,40 @@ export class SpreadsheetApp {
       if (row === undefined || col === undefined) continue;
 
       if (row >= 0 && col >= 0 && col < COMPUTED_COORD_COL_STRIDE) {
-        const key = row * COMPUTED_COORD_COL_STRIDE + col;
-        let sheetCache = this.computedValuesByCoord.get(sheetId);
+        if (sheetId !== lastSheetId) {
+          lastSheetId = sheetId;
+          lastSheetCache = this.computedValuesByCoord.get(sheetId) ?? null;
+        }
+
+        let sheetCache = lastSheetCache;
         if (!sheetCache) {
           sheetCache = new Map();
           this.computedValuesByCoord.set(sheetId, sheetCache);
+          lastSheetCache = sheetCache;
+          if (this.lastComputedValuesSheetId === sheetId) {
+            this.lastComputedValuesSheetCache = sheetCache;
+          }
         }
+
+        const key = row * COMPUTED_COORD_COL_STRIDE + col;
         sheetCache.set(key, value);
       }
 
       updated = true;
 
       if (shouldInvalidate && sheetId === this.sheetId) {
-        sawActiveSheet = true;
-        minRow = Math.min(minRow, row);
-        maxRow = Math.max(maxRow, row);
-        minCol = Math.min(minCol, col);
-        maxCol = Math.max(maxCol, col);
+        // Only invalidate within the active grid limits. The engine may produce computed
+        // results for cells outside the UI's configured grid bounds; those should not
+        // trigger massive provider invalidations.
+        const maxDocRows = this.limits.maxRows;
+        const maxDocCols = this.limits.maxCols;
+        if (row >= 0 && col >= 0 && row < maxDocRows && col < maxDocCols) {
+          sawActiveSheet = true;
+          minRow = Math.min(minRow, row);
+          maxRow = Math.max(maxRow, row);
+          minCol = Math.min(minCol, col);
+          maxCol = Math.max(maxCol, col);
+        }
       }
     }
 

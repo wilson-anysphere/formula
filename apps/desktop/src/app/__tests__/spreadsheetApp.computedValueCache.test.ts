@@ -125,6 +125,9 @@ describe("SpreadsheetApp computed-value cache", () => {
     const byCoord = new Map<number, any>();
     byCoord.set(key, 123);
     (app as any).computedValuesByCoord.set(sheetId, byCoord);
+    // Ensure any prior negative cache entry is cleared so lookups see the seeded map.
+    (app as any).lastComputedValuesSheetId = null;
+    (app as any).lastComputedValuesSheetCache = null;
 
     spy.mockClear();
     sheetIdsSpy.mockClear();
