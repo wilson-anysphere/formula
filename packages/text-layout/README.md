@@ -62,6 +62,12 @@ const engine = new TextLayoutEngine(measurer);
 
 If a `TextMeasurer` exposes `cacheKey`, the engine will automatically include it in its cache keys. This is used by the HarfBuzz backend to invalidate cached measurements/layouts when fonts or fallback settings change.
 
+### Per-run metadata
+
+`TextLayoutEngine.layout({ runs })` preserves (and includes in its cache key) any extra fields attached to run objects beyond `text`/`font` (e.g. `color`, `underline`, `underlineStyle`, `strike`).
+
+This is intentionally designed for canvas renderers that want to round-trip per-run decoration metadata through the layout engine.
+
 ## Segmentation & line breaking
 - `wrapMode: "char"` wraps at grapheme cluster boundaries (UAX #29).
 - `wrapMode: "word"` uses the Unicode Line Breaking Algorithm (UAX #14) and trims breakable whitespace at line boundaries.

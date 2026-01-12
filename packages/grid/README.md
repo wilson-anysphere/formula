@@ -45,10 +45,20 @@ Notes:
 - Supported per-run style keys:
   - `bold?: boolean`
   - `italic?: boolean`
-  - `underline?: string | boolean` (anything except `"none"` is treated as underlined)
+  - `underline?: string | boolean`
+    - `true` / `"single"`: single underline
+    - `"double"` / `"doubleAccounting"`: double underline (Excel-like)
+    - `"none"` / `false`: no underline
+    - Any other truthy string is treated as single underline
+  - `strike?: boolean` / `strikethrough?: boolean`
   - `color?: string` (engine colors are serialized as `#AARRGGBB` and are converted to canvas `rgba(...)`)
   - `font?: string`
   - `size_100pt?: number` (font size in 1/100 points; converted at 96DPI)
+
+Cell-level styling notes:
+
+- `CellStyle.underlineStyle?: "single" | "double"` can be used to request a double underline without rich text.
+- `CellStyle.strike?: boolean` enables strike-through for the whole cell.
 
 ## Theming
 

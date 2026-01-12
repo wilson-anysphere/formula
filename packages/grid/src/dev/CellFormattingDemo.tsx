@@ -472,7 +472,7 @@ export function CellFormattingDemo(): React.ReactElement {
             <div style={{ fontWeight: 600, marginBottom: 4 }}>Legend</div>
             <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.4, opacity: 0.9 }}>
               <li>
-                <code>A1:D4</code>: bold / italic / underline / strike combinations
+                <code>A1:E4</code>: bold / italic / underline / strike / double underline combinations
               </li>
               <li>
                 <code>A5:C6</code>: fills + explicit font color / font family
