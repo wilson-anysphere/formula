@@ -50,6 +50,10 @@ Primary targeted tests live at:
 
 - `crates/formula-engine/tests/functions/financial_odd_coupon.rs`
 
+Date-ordering equality edge cases are locked via:
+
+- `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`
+
 These tests currently focus on invariants that should *always* hold (e.g. independence from the
 workbook date system). As additional edge cases are discovered (EOM schedules, long first coupons,
 30/360 boundaries, solver convergence cliffs), add tests here to pin behavior.
@@ -68,6 +72,10 @@ When adding odd-coupon coverage to the oracle corpus, prefer:
 - explicit `basis` / `frequency`
 - cases that cover both Excel 1900 and 1904 date systems (the engine should match in both)
 
+The generator includes a small set of boundary-date equality cases (e.g. `issue == settlement`,
+`settlement == first_coupon`, `settlement == last_interest`) so the pinned oracle dataset can catch
+regressions in date validation rules over time.
+
 ## High-risk compatibility areas
 
 If you modify these functions, re-check these areas carefully:
@@ -78,4 +86,3 @@ If you modify these functions, re-check these areas carefully:
 3. **Error behavior**: Excel’s choice of `#NUM!` vs `#VALUE!` varies by argument and coercion path.
 4. **Yield solvers**: Newton-Raphson failures must not silently return incorrect values; when Excel
    converges, we should converge as well (usually via a fallback/bracketing strategy).
-
