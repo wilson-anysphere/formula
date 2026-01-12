@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { DocumentController } from "../document/documentController.js";
 import { DocumentWorkbookAdapter } from "./documentWorkbookAdapter.js";
 
 test("DocumentWorkbookAdapter preserves defined-name case while remaining case-insensitive", () => {
@@ -70,4 +71,58 @@ test("DocumentWorkbookAdapter resolves sheets by display name via sheetNameResol
   assert.equal(sheetQuoted.sheetId, "Sheet2");
 
   assert.throws(() => workbook.getSheet("MissingSheet"), /Unknown sheet/i);
+});
+
+test("DocumentWorkbookAdapter uses stable sheetId for cell access when sheets are renamed", () => {
+  const doc = new DocumentController();
+  // Stable id does not match display name.
+  doc.setCellValue("sheet-1", "A1", "hello");
+
+  const namesById = new Map([["sheet-1", "Budget"]]);
+  const workbook = new DocumentWorkbookAdapter({
+    document: doc,
+    sheetNameResolver: {
+      getSheetNameById: (id) => namesById.get(String(id)) ?? null,
+      getSheetIdByName: (name) => {
+        const needle = String(name ?? "").trim().toLowerCase();
+        if (!needle) return null;
+        for (const [id, sheetName] of namesById.entries()) {
+          if (sheetName.toLowerCase() === needle) return id;
+        }
+        return null;
+      },
+    },
+  });
+
+  const sheet = workbook.getSheet("Budget");
+  assert.equal(sheet.sheetId, "sheet-1");
+  // Ensure we read from the stable id (and do not create a phantom "Budget" sheet).
+  const cell = sheet.getCell(0, 0);
+  assert.ok(cell);
+  assert.equal(cell.value, "hello");
+  assert.deepEqual(doc.getSheetIds(), ["sheet-1"]);
+});
+
+test("DocumentWorkbookAdapter does not create phantom sheets when name resolution fails", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("sheet-1", "A1", "hello");
+
+  const namesById = new Map([["sheet-1", "Budget"]]);
+  const workbook = new DocumentWorkbookAdapter({
+    document: doc,
+    sheetNameResolver: {
+      getSheetNameById: (id) => namesById.get(String(id)) ?? null,
+      getSheetIdByName: (name) => {
+        const needle = String(name ?? "").trim().toLowerCase();
+        if (!needle) return null;
+        for (const [id, sheetName] of namesById.entries()) {
+          if (sheetName.toLowerCase() === needle) return id;
+        }
+        return null;
+      },
+    },
+  });
+
+  assert.throws(() => workbook.getSheet("DoesNotExist"), /Unknown sheet/i);
+  assert.deepEqual(doc.getSheetIds(), ["sheet-1"]);
 });
