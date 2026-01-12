@@ -81,3 +81,48 @@ test("beforeunload prompt triggers only when dirty", () => {
   assert.equal(dirtyEvent.returnValue, "Unsaved!");
 });
 
+test("beforeunload prompt is suppressed when a collab session becomes active", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", "x");
+
+  /** @type {any | null} */
+  let session = null;
+  const app = {
+    getCollabSession: () => session,
+  };
+
+  const target = new FakeEventTarget();
+  installUnsavedChangesPrompt(
+    target,
+    {
+      get isDirty() {
+        if (app.getCollabSession() != null) return false;
+        return doc.isDirty;
+      },
+    },
+    { message: "Unsaved!" },
+  );
+
+  /** @type {{ returnValue?: any, prevented?: boolean, preventDefault?: () => void }} */
+  const beforeCollabEvent = {
+    preventDefault() {
+      this.prevented = true;
+    },
+  };
+  target.dispatchEvent("beforeunload", beforeCollabEvent);
+  assert.equal(beforeCollabEvent.prevented, true);
+  assert.equal(beforeCollabEvent.returnValue, "Unsaved!");
+
+  // Simulate the collab session being created asynchronously after the prompt is installed.
+  session = { id: "session" };
+
+  /** @type {{ returnValue?: any, prevented?: boolean, preventDefault?: () => void }} */
+  const afterCollabEvent = {
+    preventDefault() {
+      this.prevented = true;
+    },
+  };
+  target.dispatchEvent("beforeunload", afterCollabEvent);
+  assert.equal("returnValue" in afterCollabEvent, false);
+  assert.equal(afterCollabEvent.prevented, undefined);
+});

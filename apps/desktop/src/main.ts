@@ -5587,7 +5587,28 @@ mountRibbon(ribbonRoot, {
   },
 });
 
-installUnsavedChangesPrompt(window, app.getDocument());
+// In Yjs-backed collaboration mode the workbook is continuously persisted, but
+// DocumentController's `isDirty` flips to true on essentially every local/remote
+// change (including `applyExternalDeltas`). That makes the browser/Tauri
+// beforeunload "unsaved changes" prompt effectively permanent and incorrect.
+//
+// SpreadsheetApp may attach collaboration support asynchronously, so we check
+// `getCollabSession()` at prompt time instead of only once at startup.
+const collabAwareDirtyController = {
+  get isDirty(): boolean {
+    const anyApp = app as any;
+    try {
+      if (typeof anyApp.getCollabSession === "function" && anyApp.getCollabSession() != null) {
+        return false;
+      }
+    } catch {
+      // Ignore collab detection failures and fall back to normal dirty tracking.
+    }
+    return app.getDocument().isDirty;
+  },
+};
+
+installUnsavedChangesPrompt(window, collabAwareDirtyController);
 
 function renderSheetSwitcher(sheets: { id: string; name: string }[], activeId: string) {
   sheetSwitcherEl.replaceChildren();
