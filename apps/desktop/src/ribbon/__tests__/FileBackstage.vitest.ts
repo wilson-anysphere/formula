@@ -153,6 +153,40 @@ describe("FileBackstage", () => {
     act(() => root.unmount());
   });
 
+  it("invokes Version History + Branch Manager backstage actions", () => {
+    vi.stubGlobal("requestAnimationFrame", ((cb: FrameRequestCallback) => {
+      cb(0);
+      return 0 as any;
+    }) as any);
+
+    const actions = enableFileActions();
+    const { container, root } = renderRibbon(actions);
+
+    const { overlay } = openFileBackstage(container);
+    const versionHistoryItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-version-history"]');
+    expect(versionHistoryItem).toBeInstanceOf(HTMLButtonElement);
+
+    act(() => {
+      versionHistoryItem?.click();
+    });
+
+    expect(actions.fileActions?.versionHistory).toHaveBeenCalledTimes(1);
+    expect(container.querySelector(".ribbon-backstage-overlay")).toBeNull();
+
+    const { overlay: overlay2 } = openFileBackstage(container);
+    const branchManagerItem = overlay2.querySelector<HTMLButtonElement>('[data-testid="file-branch-manager"]');
+    expect(branchManagerItem).toBeInstanceOf(HTMLButtonElement);
+
+    act(() => {
+      branchManagerItem?.click();
+    });
+
+    expect(actions.fileActions?.branchManager).toHaveBeenCalledTimes(1);
+    expect(container.querySelector(".ribbon-backstage-overlay")).toBeNull();
+
+    act(() => root.unmount());
+  });
+
   it("traps Tab navigation inside the backstage menu", () => {
     vi.stubGlobal("requestAnimationFrame", ((cb: FrameRequestCallback) => {
       cb(0);
