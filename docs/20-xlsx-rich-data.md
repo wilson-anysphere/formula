@@ -398,7 +398,8 @@ This is where Excel binds a cell’s `vm` index to a rich value index via the ri
   xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
   xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
 
-  <!-- The list of metadata “types”. Records refer to this by 1-based index (t="…"). -->
+  <!-- The list of metadata “types”. Records refer to this by `rc/@t`, which may be 1-based or 0-based
+       depending on the producer/Excel build (1-based is observed in the Excel fixtures in this repo). -->
   <metadataTypes count="1">
     <metadataType name="XLRICHVALUE"/>
   </metadataTypes>
