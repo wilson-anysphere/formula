@@ -406,6 +406,38 @@ test.describe("split view", () => {
     await expect(input).toBeFocused();
   });
 
+  test("Shift+F2 does not open comments while secondary in-cell editing is active", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
+
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+    // Focus/select A1 in secondary pane and begin editing.
+    await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    await page.keyboard.press("h");
+    const editor = secondary.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await expect(editor).toBeFocused();
+
+    const panel = page.getByTestId("comments-panel");
+    await expect(panel).not.toBeVisible();
+
+    // Comments shortcuts should not steal focus / interrupt editing.
+    await page.keyboard.press("Shift+F2");
+    await expect(panel).not.toBeVisible();
+    await expect(editor).toBeVisible();
+    await expect(editor).toBeFocused();
+  });
+
   test("primary in-cell edits commit on blur when clicking another cell (shared grid)", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
