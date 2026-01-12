@@ -2313,7 +2313,9 @@ window.addEventListener(
     const target = e.target as EventTarget | null;
     if (target instanceof HTMLElement) {
       // Let the sheet tab strip (including inline rename state) handle shortcuts when focused.
-      if (sheetTabsRootEl.contains(target)) return;
+      // Only skip when focus is inside the tablist itself; other controls (e.g. the "Add sheet"
+      // button) should still allow Ctrl/Cmd+PgUp/PgDn navigation.
+      if (target.closest?.("#sheet-tabs .sheet-tabs")) return;
 
       // Never steal the shortcut from arbitrary text inputs / contenteditable surfaces.
       //
