@@ -147,6 +147,22 @@ export async function load(url, context, defaultLoad) {
           },
         });
 
+        const errorDiagnostics = result.diagnostics?.filter((d) => d.category === ts.DiagnosticCategory.Error) ?? [];
+        if (errorDiagnostics.length > 0) {
+          const details = errorDiagnostics
+            .map((d) => {
+              const msg = ts.flattenDiagnosticMessageText(d.messageText, "\n");
+              const loc =
+                d.file && typeof d.start === "number"
+                  ? d.file.getLineAndCharacterOfPosition(d.start)
+                  : null;
+              const suffix = loc ? `:${loc.line + 1}:${loc.character + 1}` : "";
+              return `${pathname}${suffix} - TS${d.code}: ${msg}`;
+            })
+            .join("\n");
+          throw new SyntaxError(`Failed to transpile TypeScript module:\n${details}`);
+        }
+
         /** @type {{ format: "module", source: string }} */
         return { format: "module", source: result.outputText };
       })();
