@@ -12,10 +12,6 @@ const MAX_RANGE_FORMATTING_CELLS = 100_000;
 // Full-width row formatting still requires enumerating each row in the selection
 // (DocumentController row formatting layer). Align with `DEFAULT_FORMATTING_BAND_ROW_LIMIT`.
 const MAX_RANGE_FORMATTING_BAND_ROWS = 50_000;
-// Keep aligned with `DocumentController.setRangeFormat` (range-run fast path threshold).
-// Above this size, formatting is stored as compressed per-column range runs rather than
-// enumerating each cell in the rectangle.
-const RANGE_RUN_FORMAT_THRESHOLD = 50_000;
 
 function rangeCellCount(range) {
   const rows = Math.max(0, range.end.row - range.start.row + 1);
@@ -72,10 +68,6 @@ function ensureSafeFormattingRange(rangeOrRanges) {
     }
 
     const cellCount = rangeCellCount(r);
-
-    // Large rectangles are stored as compressed range runs, not per-cell overrides.
-    // Do not count these towards the "enumerated cell" safety cap.
-    if (cellCount > RANGE_RUN_FORMAT_THRESHOLD) continue;
 
     totalEnumeratedCells += cellCount;
     if (totalEnumeratedCells > MAX_RANGE_FORMATTING_CELLS) {

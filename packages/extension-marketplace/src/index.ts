@@ -1,2 +1,2 @@
-export * from "./MarketplaceClient.ts";
-export * from "./WebExtensionManager.ts";
+export * from "./MarketplaceClient.js";
+export * from "./WebExtensionManager.js";
