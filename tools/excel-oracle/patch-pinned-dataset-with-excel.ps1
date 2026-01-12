@@ -106,6 +106,7 @@ try {
   Write-Host ""
   Write-Host "Done. Review and commit the updated pinned dataset:"
   Write-Host "  git diff -- tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json"
+  Write-Host "  git diff -- tests/compatibility/excel-oracle/datasets/versioned/"
 } finally {
   Pop-Location
   if ($cleanupExcelResults -and (Test-Path -LiteralPath $excelResultsFull)) {
