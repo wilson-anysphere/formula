@@ -58,6 +58,8 @@ import type { CellRange as GridCellRange, GridAxisSizeChange, GridViewportState 
 import { resolveDesktopGridMode, type DesktopGridMode } from "../grid/shared/desktopGridMode.js";
 import { DocumentCellProvider } from "../grid/shared/documentCellProvider.js";
 import { DesktopSharedGrid } from "../grid/shared/desktopSharedGrid.js";
+import { openExternalHyperlink } from "../hyperlinks/openExternal.js";
+import { shellOpen } from "../tauri/shellOpen.js";
 import { applyFillCommitToDocumentController } from "../fill/applyFillCommit";
 import type { CellRange as FillEngineRange, FillMode as FillHandleMode } from "@formula/fill-engine";
 
@@ -79,6 +81,15 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
 
 function isInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value);
+}
+
+function looksLikeExternalHyperlink(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  // Avoid treating arbitrary "foo:bar" values as URLs; require either a scheme
+  // separator (`://`) or a `mailto:` prefix.
+  if (/^mailto:/i.test(trimmed)) return true;
+  return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed);
 }
 
 function formatDateForInsertion(date: Date): string {
@@ -4705,6 +4716,45 @@ export class SpreadsheetApp {
         this.fillPreviewRange = null;
         this.root.setPointerCapture(e.pointerId);
         this.focus();
+        return;
+      }
+    }
+
+    // Ctrl/Cmd+click on a URL-like cell value should open it externally instead
+    // of being treated as an additive selection gesture.
+    if (primary && e.pointerType === "mouse" && e.button === 0) {
+      const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
+      const renderedText = (() => {
+        if (!state) return "";
+        if (state.formula != null) {
+          if (this.showFormulas) return state.formula;
+          const computed = this.getCellComputedValue(cell);
+          return computed == null ? "" : String(computed);
+        }
+        if (isRichTextValue(state.value)) return state.value.text;
+        if (state.value != null) return String(state.value);
+        return "";
+      })();
+
+      if (typeof renderedText === "string" && looksLikeExternalHyperlink(renderedText)) {
+        // Match normal click behavior (make the clicked cell active) while still
+        // allowing the OS browser open behavior behind Ctrl/Cmd.
+        this.selection = setActiveCell(this.selection, cell, this.limits);
+        this.renderSelection();
+        this.updateStatus();
+        this.focus();
+
+        void openExternalHyperlink(renderedText.trim(), {
+          shellOpen,
+          confirmUntrustedProtocol: async (message) => {
+            if (typeof window !== "undefined" && typeof window.confirm === "function") {
+              return window.confirm(message);
+            }
+            return false;
+          },
+        }).catch(() => {
+          // Best-effort: link opening should not crash grid interaction.
+        });
         return;
       }
     }
