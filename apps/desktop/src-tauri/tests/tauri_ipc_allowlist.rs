@@ -73,20 +73,48 @@ fn parse_capability_allow_invoke_list(capability: &JsonValue) -> BTreeSet<String
 
         // Tauri v2.9 uses `allow` for scoped permissions. Keep a fallback for older schemas.
         if let Some(list) = entry.get("allow").and_then(|v| v.as_array()) {
-            allow = Some(
-                list.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect::<BTreeSet<_>>(),
-            );
+            let raw: Vec<String> = list
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect();
+
+            let set: BTreeSet<String> = raw.iter().cloned().collect();
+            if set.len() != raw.len() {
+                let mut counts = std::collections::BTreeMap::<&str, usize>::new();
+                for cmd in &raw {
+                    *counts.entry(cmd.as_str()).or_default() += 1;
+                }
+                let dups: Vec<String> = counts
+                    .into_iter()
+                    .filter_map(|(cmd, n)| (n > 1).then(|| format!("{cmd} (x{n})")))
+                    .collect();
+                panic!("`core:allow-invoke` list contains duplicates: {}", dups.join(", "));
+            }
+
+            allow = Some(set);
             break;
         }
 
         if let Some(list) = entry.get("commands").and_then(|v| v.as_array()) {
-            allow = Some(
-                list.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect::<BTreeSet<_>>(),
-            );
+            let raw: Vec<String> = list
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect();
+
+            let set: BTreeSet<String> = raw.iter().cloned().collect();
+            if set.len() != raw.len() {
+                let mut counts = std::collections::BTreeMap::<&str, usize>::new();
+                for cmd in &raw {
+                    *counts.entry(cmd.as_str()).or_default() += 1;
+                }
+                let dups: Vec<String> = counts
+                    .into_iter()
+                    .filter_map(|(cmd, n)| (n > 1).then(|| format!("{cmd} (x{n})")))
+                    .collect();
+                panic!("`core:allow-invoke` list contains duplicates: {}", dups.join(", "));
+            }
+
+            allow = Some(set);
             break;
         }
 
