@@ -116,7 +116,7 @@ commentsPanelVisible && cellHasComment
 Notes:
 
 - A missing/empty `when` clause is treated as `true`.
-- Unknown/invalid clauses fail closed (treated as `false`).
+- Unknown context keys evaluate as falsey (`undefined`), and invalid `when` syntax fails closed (treated as `false`).
 - In the current desktop context menu implementation, `when` controls whether an item is **enabled/disabled**
   (disabled items still render). For keybindings, `when` controls whether the binding is active.
 
