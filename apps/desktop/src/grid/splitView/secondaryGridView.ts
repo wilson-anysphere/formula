@@ -1,3 +1,4 @@
+import type { GridAxisSizeChange } from "@formula/grid";
 import type { DocumentController } from "../../document/documentController.js";
 import { DesktopSharedGrid } from "../shared/desktopSharedGrid.js";
 import { DocumentCellProvider } from "../shared/documentCellProvider.js";
@@ -18,6 +19,15 @@ export class SecondaryGridView {
   readonly container: HTMLElement;
   readonly provider: DocumentCellProvider;
   readonly grid: DesktopSharedGrid;
+
+  private readonly document: DocumentController;
+  private readonly getSheetId: () => string;
+  private readonly headerRows = 1;
+  private readonly headerCols = 1;
+
+  private sheetId: string;
+  private readonly appliedCols = new Set<number>();
+  private readonly appliedRows = new Set<number>();
 
   private readonly resizeObserver: ResizeObserver;
   private readonly disposeFns: Array<() => void> = [];
@@ -54,9 +64,12 @@ export class SecondaryGridView {
     persistDebounceMs?: number;
   }) {
     this.container = options.container;
+    this.document = options.document;
+    this.getSheetId = options.getSheetId;
     this.persistScroll = options.persistScroll;
     this.persistZoom = options.persistZoom;
     this.persistDebounceMs = options.persistDebounceMs ?? 150;
+    this.sheetId = options.getSheetId();
 
     // Match SpreadsheetApp behaviour: keep everything clipped to the grid viewport.
     this.container.style.overflow = "hidden";
@@ -126,16 +139,13 @@ export class SecondaryGridView {
     hTrack.appendChild(hThumb);
     this.container.appendChild(hTrack);
 
-    const headerRows = 1;
-    const headerCols = 1;
-
     this.provider =
       options.provider ??
       new DocumentCellProvider({
         document: options.document,
         getSheetId: options.getSheetId,
-        headerRows,
-        headerCols,
+        headerRows: this.headerRows,
+        headerCols: this.headerCols,
         rowCount: options.rowCount,
         colCount: options.colCount,
         showFormulas: options.showFormulas,
@@ -148,8 +158,8 @@ export class SecondaryGridView {
       provider: this.provider,
       rowCount: options.rowCount,
       colCount: options.colCount,
-      frozenRows: headerRows,
-      frozenCols: headerCols,
+      frozenRows: this.headerRows,
+      frozenCols: this.headerCols,
       defaultRowHeight: 24,
       defaultColWidth: 100,
       enableResize: true,
@@ -161,7 +171,8 @@ export class SecondaryGridView {
           this.container.dataset.scrollX = String(scroll.x);
           this.container.dataset.scrollY = String(scroll.y);
           this.schedulePersistScroll({ scrollX: scroll.x, scrollY: scroll.y });
-        }
+        },
+        onAxisSizeChange: (change) => this.onAxisSizeChange(change),
       }
     });
 
@@ -179,6 +190,9 @@ export class SecondaryGridView {
     }
     this.container.dataset.zoom = String(this.grid.renderer.getZoom());
 
+    // Apply frozen panes + axis overrides from the DocumentController sheet view.
+    this.syncSheetViewFromDocument();
+
     const initialScroll = options.initialScroll ?? { scrollX: 0, scrollY: 0 };
     if (initialScroll.scrollX !== 0 || initialScroll.scrollY !== 0) {
       this.grid.scrollTo(initialScroll.scrollX, initialScroll.scrollY);
@@ -190,6 +204,16 @@ export class SecondaryGridView {
     }
 
     this.installZoomHandler();
+
+    // Re-apply view state when the document emits sheet view deltas (freeze panes, row/col sizes).
+    const unsubscribeSheetView = this.document.on("change", (payload: any) => {
+      const deltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
+      if (deltas.length === 0) return;
+      const sheetId = this.getSheetId();
+      if (!deltas.some((delta: any) => String(delta?.sheetId ?? "") === sheetId)) return;
+      this.syncSheetViewFromDocument();
+    });
+    this.disposeFns.push(() => unsubscribeSheetView());
 
     this.resizeObserver = new ResizeObserver(() => this.resizeToContainer());
     this.resizeObserver.observe(this.container);
@@ -250,6 +274,124 @@ export class SecondaryGridView {
     const height = this.container.clientHeight;
     const dpr = window.devicePixelRatio || 1;
     this.grid.resize(width, height, dpr);
+  }
+
+  /**
+   * Sync frozen panes + row/col size overrides from `DocumentController.getSheetView()`
+   * into the secondary pane renderer.
+   */
+  syncSheetViewFromDocument(): void {
+    const sheetId = this.getSheetId();
+    if (sheetId !== this.sheetId) {
+      // Clear any axis overrides from the previous sheet before switching.
+      for (const col of this.appliedCols) {
+        this.grid.renderer.resetColWidth(col + this.headerCols);
+      }
+      for (const row of this.appliedRows) {
+        this.grid.renderer.resetRowHeight(row + this.headerRows);
+      }
+      this.appliedCols.clear();
+      this.appliedRows.clear();
+      this.sheetId = sheetId;
+    }
+
+    const view = this.document.getSheetView(sheetId) as {
+      frozenRows?: number;
+      frozenCols?: number;
+      colWidths?: Record<string, number>;
+      rowHeights?: Record<string, number>;
+    } | null;
+
+    const maxRows = Math.max(0, this.grid.renderer.scroll.getCounts().rowCount - this.headerRows);
+    const maxCols = Math.max(0, this.grid.renderer.scroll.getCounts().colCount - this.headerCols);
+
+    const normalizeFrozen = (value: unknown, max: number): number => {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return 0;
+      return Math.max(0, Math.min(Math.trunc(num), max));
+    };
+
+    const frozenRows = normalizeFrozen(view?.frozenRows, maxRows);
+    const frozenCols = normalizeFrozen(view?.frozenCols, maxCols);
+    this.grid.renderer.setFrozen(this.headerRows + frozenRows, this.headerCols + frozenCols);
+
+    const zoom = this.grid.renderer.getZoom();
+
+    const nextCols = new Map<number, number>();
+    for (const [key, value] of Object.entries(view?.colWidths ?? {})) {
+      const col = Number(key);
+      if (!Number.isInteger(col) || col < 0) continue;
+      const size = Number(value);
+      if (!Number.isFinite(size) || size <= 0) continue;
+      nextCols.set(col, size);
+    }
+
+    const nextRows = new Map<number, number>();
+    for (const [key, value] of Object.entries(view?.rowHeights ?? {})) {
+      const row = Number(key);
+      if (!Number.isInteger(row) || row < 0) continue;
+      const size = Number(value);
+      if (!Number.isFinite(size) || size <= 0) continue;
+      nextRows.set(row, size);
+    }
+
+    const allCols = new Set<number>();
+    for (const col of this.appliedCols) allCols.add(col);
+    for (const col of nextCols.keys()) allCols.add(col);
+    for (const col of allCols) {
+      const base = nextCols.get(col);
+      const gridCol = col + this.headerCols;
+      if (base === undefined) this.grid.renderer.resetColWidth(gridCol);
+      else this.grid.renderer.setColWidth(gridCol, base * zoom);
+    }
+
+    const allRows = new Set<number>();
+    for (const row of this.appliedRows) allRows.add(row);
+    for (const row of nextRows.keys()) allRows.add(row);
+    for (const row of allRows) {
+      const base = nextRows.get(row);
+      const gridRow = row + this.headerRows;
+      if (base === undefined) this.grid.renderer.resetRowHeight(gridRow);
+      else this.grid.renderer.setRowHeight(gridRow, base * zoom);
+    }
+
+    this.appliedCols.clear();
+    for (const col of nextCols.keys()) this.appliedCols.add(col);
+    this.appliedRows.clear();
+    for (const row of nextRows.keys()) this.appliedRows.add(row);
+
+    this.grid.syncScrollbars();
+    const scroll = this.grid.getScroll();
+    this.container.dataset.scrollX = String(scroll.x);
+    this.container.dataset.scrollY = String(scroll.y);
+  }
+
+  private onAxisSizeChange(change: GridAxisSizeChange): void {
+    const sheetId = this.getSheetId();
+    const baseSize = change.size / change.zoom;
+    const baseDefault = change.defaultSize / change.zoom;
+    const isDefault = Math.abs(baseSize - baseDefault) < 1e-6;
+
+    if (change.kind === "col") {
+      const docCol = change.index - this.headerCols;
+      if (docCol < 0) return;
+      const label = change.source === "autoFit" ? "Autofit Column Width" : "Resize Column";
+      if (isDefault) {
+        this.document.resetColWidth(sheetId, docCol, { label });
+      } else {
+        this.document.setColWidth(sheetId, docCol, baseSize, { label });
+      }
+      return;
+    }
+
+    const docRow = change.index - this.headerRows;
+    if (docRow < 0) return;
+    const label = change.source === "autoFit" ? "Autofit Row Height" : "Resize Row";
+    if (isDefault) {
+      this.document.resetRowHeight(sheetId, docRow, { label });
+    } else {
+      this.document.setRowHeight(sheetId, docRow, baseSize, { label });
+    }
   }
 
   private schedulePersistScroll(scroll: ScrollState): void {

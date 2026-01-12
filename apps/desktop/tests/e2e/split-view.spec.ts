@@ -146,4 +146,53 @@ test.describe("split view / shared grid zoom", () => {
       })
       .toBeGreaterThan(b1Before.x);
   });
+
+  test("secondary pane column resize updates primary pane geometry", async ({ page }) => {
+    await page.goto("/?grid=shared");
+
+    const secondaryGrid = page.getByTestId("grid-secondary");
+
+    await page.waitForFunction(() => {
+      const app = (window as any).__formulaApp;
+      const rect = app?.getCellRectA1?.("B1");
+      return rect && typeof rect.x === "number" && rect.width > 0 && rect.height > 0;
+    });
+
+    // Enable split view.
+    await page.getByTestId("split-vertical").click();
+    await expect(secondaryGrid).toBeVisible();
+
+    // Wait for the secondary grid canvases to mount + size.
+    await page.waitForFunction(() => {
+      const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="grid-secondary"] canvas');
+      return Boolean(canvas && canvas.width > 0 && canvas.height > 0);
+    });
+
+    const secondaryBox = await secondaryGrid.boundingBox();
+    if (!secondaryBox) throw new Error("Missing secondary grid bounding box");
+
+    const before = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("B1"));
+    if (!before) throw new Error("Missing B1 rect");
+
+    // Drag the boundary between columns A and B in the *secondary* header row to make column A wider.
+    const boundaryX = before.x;
+    const boundaryY = before.y / 2;
+
+    await page.mouse.move(secondaryBox.x + boundaryX, secondaryBox.y + boundaryY);
+    await page.mouse.down();
+    await page.mouse.move(secondaryBox.x + boundaryX + 80, secondaryBox.y + boundaryY, { steps: 4 });
+    await page.mouse.up();
+
+    await page.waitForFunction(
+      (threshold) => {
+        const rect = (window as any).__formulaApp.getCellRectA1("B1");
+        return rect && rect.x > threshold;
+      },
+      before.x + 30,
+    );
+
+    const after = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("B1"));
+    if (!after) throw new Error("Missing B1 rect after resize");
+    expect(after.x).toBeGreaterThan(before.x + 30);
+  });
 });
