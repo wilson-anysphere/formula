@@ -107,15 +107,24 @@ test.describe("Grid context menus", () => {
     const pasteSpecial = menu.getByRole("button", { name: "Paste Special…" });
     await expect(pasteSpecial).toBeVisible();
 
-    // Keyboard navigation should open the submenu (ArrowRight).
-    await pasteSpecial.focus();
-    await page.keyboard.press("ArrowRight");
-
+    // Mouse hover should open the submenu (Excel-like).
+    await pasteSpecial.hover();
     const submenu = menu.locator(".context-menu__submenu");
     await expect(submenu).toBeVisible();
+    await expect(submenu.getByRole("button", { name: /^Paste$/ })).toBeVisible();
     await expect(submenu.getByRole("button", { name: "Paste Values" })).toBeVisible();
     await expect(submenu.getByRole("button", { name: "Paste Formulas" })).toBeVisible();
     await expect(submenu.getByRole("button", { name: "Paste Formats" })).toBeVisible();
+
+    // Keyboard navigation should open the submenu (ArrowRight).
+    await pasteSpecial.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(submenu.getByRole("button", { name: /^Paste$/ })).toBeFocused();
+
+    // ArrowLeft should close the submenu and restore focus to the parent item.
+    await page.keyboard.press("ArrowLeft");
+    await expect(submenu).toBeHidden();
+    await expect(pasteSpecial).toBeFocused();
   });
 
   test("right-clicking a row header in split-view secondary pane opens a menu with Row Height…", async ({ page }) => {
