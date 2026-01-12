@@ -6,10 +6,11 @@
 //!    `c/@vm` (1-based).
 //! 2. `xl/metadata.xml` contains `<valueMetadata>` with a list of `<bk>` records. The `vm` value is
 //!    a 1-based index into this list.
-//! 3. Each `<valueMetadata><bk>` contains `<rc t="T" v="V"/>` where `t` is the 1-based index of
-//!    `XLRICHVALUE` in `<metadataTypes>` (Excel has been observed to emit both 0-based and 1-based
-//!    indices here), and `v` is a 0-based index into
-//!    `<futureMetadata name="XLRICHVALUE">`'s `<bk>` list.
+//! 3. Each `<valueMetadata><bk>` contains `<rc t="T" v="V"/>` where:
+//!    - `t` indexes `XLRICHVALUE` in `<metadataTypes>` (Excel has been observed to emit both 0-based
+//!      and 1-based indices here), and
+//!    - `v` indexes `<futureMetadata name="XLRICHVALUE">`'s `<bk>` list (usually 0-based, but some
+//!      producers appear to use 1-based indexing).
 //! 4. Each `<futureMetadata><bk>` contains an extension element (commonly `xlrd:rvb`) with an
 //!    `i="N"` attribute. This is the 0-based index into `xl/richData/richValue.xml`.
 //!
@@ -316,7 +317,6 @@ fn parse_value_metadata_mappings(
             vm_start_1_based = vm_start_1_based.saturating_add(count);
             continue;
         };
-
         if v_indexing_is_one_based {
             let Some(one_based) = v_idx.checked_sub(1) else {
                 vm_start_1_based = vm_start_1_based.saturating_add(count);
@@ -324,7 +324,6 @@ fn parse_value_metadata_mappings(
             };
             v_idx = one_based;
         }
-
         let Some(v) = resolve_bk_run(future_bk_indices, v_idx).flatten() else {
             vm_start_1_based = vm_start_1_based.saturating_add(count);
             continue;
