@@ -67,6 +67,67 @@ fn extracts_spc_indirect_data_digest_from_ber_indefinite_cms_wrapped_in_digsig_i
 }
 
 #[test]
+fn extracts_sigdata_v1_source_hash_from_ber_indefinite_cms_with_constructed_octet_string_econtent() {
+    // Minimal SpcIndirectDataContentV2-like payload:
+    // SEQUENCE { NULL, OCTET STRING(sigDataV1Serialized) }
+    //
+    // SigDataV1Serialized (binary-ish) is:
+    // [version u32 LE = 1][cbSourceHash u32 LE = 16][sourceHash bytes]
+    let source_hash = (0u8..16).collect::<Vec<_>>();
+    let mut sigdata = Vec::new();
+    sigdata.extend_from_slice(&1u32.to_le_bytes());
+    sigdata.extend_from_slice(&(source_hash.len() as u32).to_le_bytes());
+    sigdata.extend_from_slice(&source_hash);
+
+    let mut spc_v2 = vec![
+        0x30, 0x1C, // SEQUENCE (28 bytes)
+        0x05, 0x00, // NULL
+        0x04, 0x18, // OCTET STRING (24 bytes)
+    ];
+    spc_v2.extend_from_slice(&sigdata);
+    assert_eq!(spc_v2.len(), 30);
+
+    // Minimal BER-indefinite CMS ContentInfo/SignedData wrapper with:
+    // - BER indefinite lengths at multiple levels
+    // - eContent encoded as an *indefinite-length constructed OCTET STRING* (0x24 0x80)
+    let split = 10;
+    let (part1, part2) = spc_v2.split_at(split);
+
+    let mut pkcs7 = vec![
+        0x30, 0x80, // ContentInfo SEQUENCE (indefinite)
+        0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x07, 0x02, // OID 1.2.840.113549.1.7.2 (signedData)
+        0xA0, 0x80, // [0] EXPLICIT (indefinite)
+        0x30, 0x80, // SignedData SEQUENCE (indefinite)
+        0x02, 0x01, 0x03, // version INTEGER 3
+        0x31, 0x00, // digestAlgorithms SET (empty; we don't validate it here)
+        0x30, 0x80, // encapContentInfo SEQUENCE (indefinite)
+        0x06, 0x0A, 0x2B, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x04, // OID 1.3.6.1.4.1.311.2.1.4 (SpcIndirectDataContent; not validated)
+        0xA0, 0x80, // eContent [0] EXPLICIT (indefinite)
+        0x24, 0x80, // OCTET STRING (constructed, indefinite)
+        0x04,
+        part1.len() as u8,
+    ];
+    pkcs7.extend_from_slice(part1);
+    pkcs7.extend_from_slice(&[0x04, part2.len() as u8]);
+    pkcs7.extend_from_slice(part2);
+    pkcs7.extend_from_slice(&[
+        0x00, 0x00, // EOC for constructed OCTET STRING
+        0x00, 0x00, // EOC for eContent [0]
+        0x00, 0x00, // EOC for encapContentInfo
+        0x00, 0x00, // EOC for SignedData
+        0x00, 0x00, // EOC for [0] EXPLICIT
+        0x00, 0x00, // EOC for ContentInfo
+    ]);
+
+    let digest_info = extract_vba_signature_signed_digest(&pkcs7)
+        .expect("extract should succeed")
+        .expect("digest info should be present");
+
+    assert_eq!(digest_info.digest_algorithm_oid, "1.2.840.113549.2.5"); // MD5
+    assert_eq!(digest_info.digest, source_hash);
+}
+
+#[test]
 fn extracts_digest_from_indefinite_length_detached_signeddata_with_indefinite_encap_content_info() {
     // SpcIndirectDataContent (DER) whose digest is 0..31.
     let mut spc = vec![
