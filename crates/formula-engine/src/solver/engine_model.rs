@@ -1,4 +1,6 @@
 use super::{SolverError, SolverModel};
+use crate::coercion::number::parse_number_coercion;
+use crate::coercion::ValueLocaleConfig;
 use crate::{Engine, Value};
 
 #[derive(Clone, Debug)]
@@ -114,7 +116,8 @@ impl<'a> EngineSolverModel<'a> {
     }
 
     fn read_cell_number_or_nan(&self, cell: &CellAddress) -> f64 {
-        match coerce_value_to_number(&self.engine.get_cell_value(&cell.sheet, &cell.addr)) {
+        let locale = self.engine.value_locale();
+        match coerce_value_to_number(&self.engine.get_cell_value(&cell.sheet, &cell.addr), locale) {
             Some(n) => n,
             None => f64::NAN,
         }
@@ -122,7 +125,8 @@ impl<'a> EngineSolverModel<'a> {
 
     fn read_cell_number_strict(&self, cell: &CellAddress) -> Result<f64, String> {
         let value = self.engine.get_cell_value(&cell.sheet, &cell.addr);
-        coerce_value_to_number(&value).ok_or_else(|| {
+        let locale = self.engine.value_locale();
+        coerce_value_to_number(&value, locale).ok_or_else(|| {
             format!(
                 "cell {}!{} is not numeric (value: {value})",
                 cell.sheet, cell.addr
@@ -171,23 +175,38 @@ impl SolverModel for EngineSolverModel<'_> {
     }
 }
 
-fn coerce_value_to_number(value: &Value) -> Option<f64> {
+fn coerce_text_to_number(text: &str, value_locale: ValueLocaleConfig) -> Option<f64> {
+    parse_number_coercion(
+        text,
+        value_locale.separators.decimal_sep,
+        Some(value_locale.separators.thousands_sep),
+    )
+    .ok()
+}
+
+fn coerce_value_to_number(value: &Value, value_locale: ValueLocaleConfig) -> Option<f64> {
     match value {
-        Value::Number(n) => Some(*n),
+        Value::Number(n) => n.is_finite().then_some(*n),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Blank => Some(0.0),
-        Value::Text(s) => s.trim().parse::<f64>().ok(),
+        Value::Text(s) => coerce_text_to_number(s, value_locale),
         // Solver only supports numeric values (variables/constraints/objectives are `f64`).
         //
-        // For rich scalar values (e.g. Entity/Record) we follow the same behavior as text:
-        // attempt to parse the *display string* as a number. If the display string isn't a
-        // valid number, treat the value as non-numeric.
+        // For rich scalar values (e.g. Entity/Record) we follow the same behavior as text: attempt
+        // to parse the *display string* as a number using the engine's value-locale rules.
+        //
+        // This is intentionally more permissive than `str::parse::<f64>()`:
+        // - accepts thousands separators (locale-aware),
+        // - accepts common currency symbols, accounting parentheses, and percent signs,
+        // - rejects `NaN`/`Inf` textual inputs (Excel-compatible).
+        //
+        // If the display string isn't a valid number, treat the value as non-numeric.
         //
         // NOTE: Arrays are explicitly treated as non-numeric even though their `Display`
         // implementation shows the top-left element. Solver decision variables must be
         // scalar cells.
         Value::Array(_) => None,
-        other => other.to_string().trim().parse::<f64>().ok(),
+        other => coerce_text_to_number(&other.to_string(), value_locale),
     }
 }
 
@@ -198,6 +217,6 @@ mod tests {
     #[test]
     fn coerce_value_to_number_returns_none_for_non_numeric_values() {
         let value = Value::Array(crate::value::Array::new(1, 1, vec![Value::Number(1.0)]));
-        assert_eq!(coerce_value_to_number(&value), None);
+        assert_eq!(coerce_value_to_number(&value, ValueLocaleConfig::en_us()), None);
     }
 }
