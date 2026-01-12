@@ -1683,6 +1683,19 @@ fn bytecode_backend_matches_ast_for_concat_operator_with_numeric_literals() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_concat_operator_with_cell_and_string_literal() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 123.0).unwrap();
+    engine.set_cell_formula("Sheet1", "B1", r#"=A1&"x""#).unwrap();
+
+    // Ensure we're exercising the bytecode path.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, r#"=A1&"x""#, "B1");
+}
+
+#[test]
 fn bytecode_lower_flattens_concat_operator_chains() {
     use formula_engine::bytecode;
     use formula_engine::{LocaleConfig, ParseOptions, ReferenceStyle};
