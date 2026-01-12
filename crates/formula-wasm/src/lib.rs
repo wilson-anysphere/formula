@@ -625,6 +625,32 @@ impl WorkbookState {
         Ok(changes)
     }
 
+    fn collect_spill_output_cells(&self) -> BTreeSet<FormulaCellKey> {
+        let mut out = BTreeSet::new();
+        for (sheet_name, cells) in &self.sheets {
+            for (address, input) in cells {
+                if !is_formula_input(input) {
+                    continue;
+                }
+                let Some((origin, end)) = self.engine.spill_range(sheet_name, address) else {
+                    continue;
+                };
+                for row in origin.row..=end.row {
+                    for col in origin.col..=end.col {
+                        if row == origin.row && col == origin.col {
+                            continue;
+                        }
+                        out.insert(FormulaCellKey::new(
+                            sheet_name.clone(),
+                            CellRef::new(row, col),
+                        ));
+                    }
+                }
+            }
+        }
+        out
+    }
+
     fn edit_op_from_dto(&mut self, dto: EditOpDto) -> Result<EngineEditOp, JsValue> {
         match dto {
             EditOpDto::InsertRows { sheet, row, count } => {
@@ -881,6 +907,7 @@ impl WorkbookState {
     }
 
     fn apply_operation_internal(&mut self, dto: EditOpDto) -> Result<EditResultDto, JsValue> {
+        let spill_outputs_before = self.collect_spill_output_cells();
         let op = self.edit_op_from_dto(dto)?;
         self.remap_pending_keys_for_edit(&op);
 
@@ -949,6 +976,23 @@ impl WorkbookState {
                 // This cell is now a literal (or empty) value; remove any stale baseline.
                 self.pending_formula_baselines.remove(&key);
             }
+        }
+
+        // Spill ranges are maintained by the engine across recalc ticks, but `apply_operation`
+        // rebuilds the dependency graph (and clears spill metadata). Capture spill output cells from
+        // before the edit so the next `recalculate()` call can emit `null` deltas for any now-stale
+        // spill values that would otherwise be lost.
+        for key in spill_outputs_before {
+            let address = key.address();
+            let has_input = self
+                .sheets
+                .get(&key.sheet)
+                .and_then(|cells| cells.get(&address))
+                .is_some();
+            if has_input {
+                continue;
+            }
+            self.pending_spill_clears.insert(key);
         }
 
         // Convert to JS-friendly DTO.
@@ -2406,5 +2450,49 @@ mod tests {
         assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A1"], json!(2.0));
         assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["B1"], json!("=#REF!+A1"));
         assert!(parsed["sheets"]["Sheet1"]["cells"].get("C1").is_none());
+    }
+
+    #[test]
+    fn apply_operation_clears_stale_spill_outputs_on_next_recalc() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("=SEQUENCE(1,2)"))
+            .unwrap();
+        wb.recalculate_internal(None).unwrap();
+
+        // Ensure the spill output cell exists as a cached value (not an input).
+        let b1_before = wb.get_cell_data(DEFAULT_SHEET, "B1").unwrap();
+        assert!(b1_before.input.is_null());
+        assert_eq!(b1_before.value, json!(2.0));
+
+        wb.apply_operation_internal(EditOpDto::InsertRows {
+            sheet: DEFAULT_SHEET.to_string(),
+            row: 0,
+            count: 1,
+        })
+        .unwrap();
+
+        // The spill output at B1 should be cleared even though spill metadata was reset during the
+        // edit and the next recalc will spill into B2.
+        let changes = wb.recalculate_internal(None).unwrap();
+        assert_eq!(
+            changes,
+            vec![
+                CellChange {
+                    sheet: DEFAULT_SHEET.to_string(),
+                    address: "B1".to_string(),
+                    value: JsonValue::Null,
+                },
+                CellChange {
+                    sheet: DEFAULT_SHEET.to_string(),
+                    address: "A2".to_string(),
+                    value: json!(1.0),
+                },
+                CellChange {
+                    sheet: DEFAULT_SHEET.to_string(),
+                    address: "B2".to_string(),
+                    value: json!(2.0),
+                },
+            ]
+        );
     }
 }
