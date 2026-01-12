@@ -88,9 +88,12 @@ export function normalizeMarketplaceBaseUrl(baseUrl: string): string {
 
   raw = raw.replace(/\\/g, "/");
 
-  // Strip trailing slashes, but keep a bare "/" intact.
+  // Strip trailing slashes.
+  //
+  // Note: callers sometimes pass "/" to mean "the default API base". Treat that as "/api"
+  // rather than returning "/" (which would produce "//search" when constructing endpoint URLs).
   raw = raw.replace(/\/+$/, "");
-  if (raw === "") return "/";
+  if (raw === "") return "/api";
 
   const looksAbsolute = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw);
   if (looksAbsolute) {
@@ -117,8 +120,11 @@ export function normalizeMarketplaceBaseUrl(baseUrl: string): string {
   let out = raw;
   while (out.startsWith("./")) out = out.slice(2);
   if (!out.startsWith("/")) out = `/${out}`;
+  // Collapse multiple leading slashes so protocol-relative forms like "//host/api" don't
+  // accidentally get treated as absolute hosts by `new URL(...)`.
+  out = out.replace(/^\/+/, "/");
   out = out.replace(/\/+$/, "");
-  if (out === "") return "/";
+  if (out === "") return "/api";
   return out;
 }
 

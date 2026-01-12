@@ -16,6 +16,12 @@ describe("normalizeMarketplaceBaseUrl", () => {
     expect(normalizeMarketplaceBaseUrl("/api////")).toBe("/api");
     expect(normalizeMarketplaceBaseUrl("api")).toBe("/api");
     expect(normalizeMarketplaceBaseUrl("api/")).toBe("/api");
+    expect(normalizeMarketplaceBaseUrl("/")).toBe("/api");
+  });
+
+  it("collapses multiple leading slashes for relative paths", () => {
+    expect(normalizeMarketplaceBaseUrl("//api")).toBe("/api");
+    expect(normalizeMarketplaceBaseUrl("///api")).toBe("/api");
   });
 
   it("supports absolute URLs (and treats bare origins as marketplace hosts)", () => {
@@ -46,4 +52,3 @@ describe("MarketplaceClient default baseUrl", () => {
     expect(new MarketplaceClient().baseUrl).toBe("https://marketplace.formula.app/api");
   });
 });
-
