@@ -899,16 +899,6 @@ export class ToolExecutor {
     }
     const cells = this.spreadsheet.readRange(range);
     const entries: Array<{ cell: string; value: number }> = [];
-    const cellAllowedCache = new Map<string, boolean>();
-    const isAllowedCell = (row: number, col: number) => {
-      if (!dlp || dlp.decision.decision !== DLP_DECISION.REDACT) return true;
-      const key = `${row},${col}`;
-      const cached = cellAllowedCache.get(key);
-      if (cached !== undefined) return cached;
-      const allowed = this.isDlpCellAllowed(dlp, row, col);
-      cellAllowedCache.set(key, allowed);
-      return allowed;
-    };
     let redactedCellCount = 0;
     for (let r = 0; r < cells.length; r++) {
       for (let c = 0; c < cells[r]!.length; c++) {
@@ -917,9 +907,11 @@ export class ToolExecutor {
         // Under DLP REDACT we exclude disallowed cells from anomaly computations entirely.
         // Otherwise, even "safe" outputs (e.g. z-score) can become an inference channel for
         // restricted values via the returned scores.
-        if (!isAllowedCell(rowIndex, colIndex)) {
-          redactedCellCount++;
-          continue;
+        if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
+          if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
+            redactedCellCount++;
+            continue;
+          }
         }
         const cell = cells[r]![c]!;
         const numeric = toNumber(cell);
@@ -1054,23 +1046,13 @@ export class ToolExecutor {
     const cells = this.spreadsheet.readRange(range);
     const values: number[] = [];
     let redactedCellCount = 0;
-    const cellAllowedCache = new Map<string, boolean>();
-    const isAllowedCell = (row: number, col: number) => {
-      if (!dlp || dlp.decision.decision !== DLP_DECISION.REDACT) return true;
-      const key = `${row},${col}`;
-      const cached = cellAllowedCache.get(key);
-      if (cached !== undefined) return cached;
-      const allowed = this.isDlpCellAllowed(dlp, row, col);
-      cellAllowedCache.set(key, allowed);
-      return allowed;
-    };
     for (let r = 0; r < cells.length; r++) {
       const row = cells[r]!;
       for (let c = 0; c < row.length; c++) {
         if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
           const rowIndex = range.startRow + r;
           const colIndex = range.startCol + c;
-          if (!isAllowedCell(rowIndex, colIndex)) {
+          if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
             redactedCellCount++;
             continue;
           }
@@ -1135,8 +1117,8 @@ export class ToolExecutor {
             const row = cells[r]!;
             if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
               const rowIndex = range.startRow + r;
-              const leftAllowed = isAllowedCell(rowIndex, range.startCol);
-              const rightAllowed = isAllowedCell(rowIndex, range.startCol + 1);
+              const leftAllowed = this.isDlpCellAllowed(dlp, rowIndex, range.startCol);
+              const rightAllowed = this.isDlpCellAllowed(dlp, rowIndex, range.startCol + 1);
               if (!leftAllowed || !rightAllowed) continue;
             }
             const left = toNumber(row[0]!);
