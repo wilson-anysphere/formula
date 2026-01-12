@@ -1183,7 +1183,23 @@ fn rewrite_relationship_ids(
 
                     let colon = key.iter().position(|b| *b == b':');
                     let Some(colon) = colon else {
-                        out.push_attribute((key, attr.value.as_ref()));
+                        // Best-effort: some producers emit relationship IDs as an unprefixed `id`
+                        // attribute (not namespace-well-formed, but observed in the wild). If the
+                        // value matches a remapped relationship ID, rewrite it anyway.
+                        if key == b"id" {
+                            let value = attr.unescape_value().map_err(|e| {
+                                ChartExtractionError::XmlStructure(format!(
+                                    "{part_name}: xml attribute error: {e}"
+                                ))
+                            })?;
+                            if let Some(new_id) = id_map.get(value.as_ref()) {
+                                out.push_attribute((key, new_id.as_bytes()));
+                            } else {
+                                out.push_attribute((key, attr.value.as_ref()));
+                            }
+                        } else {
+                            out.push_attribute((key, attr.value.as_ref()));
+                        }
                         continue;
                     };
                     let prefix_bytes = &key[..colon];
@@ -1262,7 +1278,23 @@ fn rewrite_relationship_ids(
 
                     let colon = key.iter().position(|b| *b == b':');
                     let Some(colon) = colon else {
-                        out.push_attribute((key, attr.value.as_ref()));
+                        // Best-effort: some producers emit relationship IDs as an unprefixed `id`
+                        // attribute (not namespace-well-formed, but observed in the wild). If the
+                        // value matches a remapped relationship ID, rewrite it anyway.
+                        if key == b"id" {
+                            let value = attr.unescape_value().map_err(|e| {
+                                ChartExtractionError::XmlStructure(format!(
+                                    "{part_name}: xml attribute error: {e}"
+                                ))
+                            })?;
+                            if let Some(new_id) = id_map.get(value.as_ref()) {
+                                out.push_attribute((key, new_id.as_bytes()));
+                            } else {
+                                out.push_attribute((key, attr.value.as_ref()));
+                            }
+                        } else {
+                            out.push_attribute((key, attr.value.as_ref()));
+                        }
                         continue;
                     };
                     let prefix_bytes = &key[..colon];
@@ -1670,6 +1702,22 @@ mod tests {
         );
         assert!(
             !rewritten.contains(r#"rel:id="rId1""#),
+            "unexpected output: {rewritten}"
+        );
+    }
+
+    #[test]
+    fn rewrites_relationship_ids_for_unprefixed_id_attr() {
+        let fragment = r#"<a id="rId1"/>"#;
+        let mut id_map = HashMap::new();
+        id_map.insert("rId1".to_string(), "rId9".to_string());
+
+        let rewritten = rewrite_relationship_ids(fragment.as_bytes(), "test", &id_map)
+            .expect("rewrite relationship ids");
+        let rewritten = std::str::from_utf8(&rewritten).unwrap();
+        assert!(rewritten.contains(r#"id="rId9""#), "unexpected output: {rewritten}");
+        assert!(
+            !rewritten.contains(r#"id="rId1""#),
             "unexpected output: {rewritten}"
         );
     }
