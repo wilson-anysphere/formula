@@ -58,10 +58,10 @@ function ensureSafeFormattingRange(rangeOrRanges) {
           } catch {
             // ignore (e.g. toast root missing in tests)
           }
-          // Let DocumentController.setRangeFormat enforce the cap and emit a warning.
-          // This keeps headless/unit test environments (where `showToast` is a no-op)
-          // observable and maintains a single source of truth for performance limits.
-          continue;
+          // Avoid calling into DocumentController for extremely large full-width row selections.
+          // Even though DocumentController has its own safety caps, the toolbar-level guard should
+          // short-circuit so we don't build large intermediate structures or spam the console.
+          return false;
         }
       }
       continue;
