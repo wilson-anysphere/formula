@@ -109,9 +109,16 @@ All of this is encrypted-at-rest in production builds:
 
 Formula is a **Cursor product**: all AI features are powered by Cursor's backend—no local models, no API keys, no provider configuration.
 
-The formula bar supports tab completion suggestions while you type, including:
+### Formula bar tab completion
+
+The formula bar supports tab completion suggestions while you type. Suggestions combine:
 
 - fast rule-based suggestions (function names, ranges, named ranges, sheet-qualified ranges, tables/structured refs)
+- optional Cursor backend completions (Cursor-managed; no user API keys, no provider/model selection)
 - optional inline preview values (when the lightweight evaluator supports the suggested formula)
 
-Tab completion is currently heuristic-only. Caching, timeouts, and routing are internal implementation details and are not user-configurable.
+Backend completions are **time-bounded** and ignored on timeout/cancel so the formula bar stays responsive. If the backend is unavailable, the UI continues to show rule-based suggestions. Any dev/test backend URL overrides are Cursor/build-managed (not user-configurable).
+
+Notes:
+
+- Structured-reference preview is evaluated for simple table column refs (`Table[Column]` / `Table[[#All],[Column]]`) when table range metadata is available. More complex structured refs still fall back to `(preview unavailable)`.
