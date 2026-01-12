@@ -10,6 +10,7 @@ use crate::simd::{self, CmpOp, NumericCriteria};
 use crate::value::{
     cmp_case_insensitive, parse_number, ErrorKind as EngineErrorKind, Value as EngineValue,
 };
+use formula_format::{DateSystem, FormatOptions, Value as FmtValue};
 use chrono::{DateTime, Utc};
 use smallvec::SmallVec;
 use std::borrow::Cow;
@@ -969,11 +970,21 @@ fn or_range(
 
 fn format_number_general(n: f64) -> String {
     // Match the engine's number-to-text coercion semantics used by the AST evaluator (Excel's
-    // "General" format). This avoids divergence in bytecode-eligible formulas like
-    // `=CONCAT(100000000000)` which Excel formats as scientific notation.
-    EngineValue::Number(n)
-        .coerce_to_string()
-        .unwrap_or_else(|_| n.to_string())
+    // "General" format), including locale-specific decimal separator.
+    //
+    // This avoids divergence in bytecode-eligible formulas like `=CONCAT(1.5)` under `de-DE`,
+    // which Excel formats as `1,5`.
+    let options = FormatOptions {
+        locale: thread_value_locale().separators,
+        date_system: match thread_date_system() {
+            // `formula-format` always uses the Lotus 1-2-3 leap-year bug behavior
+            // for the 1900 date system (Excel compatibility).
+            ExcelDateSystem::Excel1900 { .. } => DateSystem::Excel1900,
+            ExcelDateSystem::Excel1904 => DateSystem::Excel1904,
+        },
+    };
+
+    formula_format::format_value(FmtValue::Number(n), None, &options).text
 }
 
 fn coerce_to_string(v: Value) -> Result<String, ErrorKind> {

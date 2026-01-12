@@ -188,3 +188,17 @@ fn bytecode_coercion_number_to_text_matches_ast() {
     assert!(bc_programs > 0, "expected formula to compile to bytecode");
     assert_eq!(bc_val, ast_val);
 }
+
+#[test]
+fn bytecode_coercion_number_to_text_respects_value_locale() {
+    // Locale-specific number->text coercion should match between AST and bytecode backends.
+    // de-DE uses ',' for decimals.
+    let formula = "=CONCAT(1.5)";
+
+    let (ast_val, _) = eval_single_cell(formula, false, ValueLocaleConfig::de_de());
+    assert_eq!(ast_val, Value::Text("1,5".to_string()));
+
+    let (bc_val, bc_programs) = eval_single_cell(formula, true, ValueLocaleConfig::de_de());
+    assert!(bc_programs > 0, "expected formula to compile to bytecode");
+    assert_eq!(bc_val, ast_val);
+}
