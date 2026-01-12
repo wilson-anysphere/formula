@@ -7,10 +7,26 @@ const http = require("node:http");
 
 const { ExtensionHost } = require("../src");
 
+// These integration tests spin up extension workers (and sometimes local HTTP servers). Under heavy
+// CI load, the default 5s activation/command timeouts can be too aggressive and cause spurious
+// EXTENSION_TIMEOUT failures. Keep the tests focused on integration correctness by using a more
+// forgiving timeout.
+const INTEGRATION_TEST_TIMEOUT_MS = 20_000;
+
+function createHost(options = {}) {
+  return new ExtensionHost({
+    ...options,
+    activationTimeoutMs: options.activationTimeoutMs ?? INTEGRATION_TEST_TIMEOUT_MS,
+    commandTimeoutMs: options.commandTimeoutMs ?? INTEGRATION_TEST_TIMEOUT_MS,
+    customFunctionTimeoutMs: options.customFunctionTimeoutMs ?? INTEGRATION_TEST_TIMEOUT_MS,
+    dataConnectorTimeoutMs: options.dataConnectorTimeoutMs ?? INTEGRATION_TEST_TIMEOUT_MS,
+  });
+}
+
 test("integration: load sample extension and execute contributed command", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-int-"));
 
-  const host = new ExtensionHost({
+  const host = createHost({
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
@@ -49,7 +65,7 @@ test("integration: load sample extension and execute contributed command", async
 test("integration: panel command creates panel and sets HTML", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-panel-"));
 
-  const host = new ExtensionHost({
+  const host = createHost({
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
@@ -75,7 +91,7 @@ test("integration: panel command creates panel and sets HTML", async (t) => {
 test("integration: view activation creates and renders contributed panel", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-view-"));
 
-  const host = new ExtensionHost({
+  const host = createHost({
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
@@ -111,7 +127,7 @@ test("integration: viewActivated is broadcast even if view activation fails", as
   // Deny all permission prompts so the Sample Hello extension fails to activate on view open. The
   // goal of this test is to ensure `formula.events.onViewActivated` is still delivered to already
   // running extensions (i.e. it behaves like other event broadcasts, not like an activation hook).
-  const host = new ExtensionHost({
+  const host = createHost({
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
@@ -146,7 +162,7 @@ test("integration: viewActivated is broadcast even if view activation fails", as
 test("integration: viewActivated payload normalizes viewId to string", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-view-id-normalization-"));
 
-  const host = new ExtensionHost({
+  const host = createHost({
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
@@ -178,7 +194,7 @@ test("integration: viewActivated payload normalizes viewId to string", async (t)
 test("integration: panel messaging (webview -> extension -> webview)", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-panel-msg-"));
 
-  const host = new ExtensionHost({
+  const host = createHost({
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
@@ -213,7 +229,7 @@ test("integration: panel messaging (webview -> extension -> webview)", async (t)
 test("integration: invoke custom function activates extension and returns result", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-fn-"));
 
-  const host = new ExtensionHost({
+  const host = createHost({
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
@@ -246,7 +262,7 @@ test("integration: network.fetch is permission gated and can fetch via host", as
 
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-net-"));
 
-  const host = new ExtensionHost({
+  const host = createHost({
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
@@ -271,7 +287,7 @@ test("integration: network.fetch is permission gated and can fetch via host", as
 test("integration: denied network permission blocks fetch", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-net-deny-"));
 
-  const host = new ExtensionHost({
+  const host = createHost({
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
@@ -297,7 +313,7 @@ test("integration: denied network permission blocks fetch", async (t) => {
 test("integration: clipboard API is permission gated and writes clipboard text", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-clipboard-"));
 
-  const host = new ExtensionHost({
+  const host = createHost({
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
@@ -323,7 +339,7 @@ test("integration: clipboard API is permission gated and writes clipboard text",
 test("integration: denied clipboard permission blocks clipboard writes", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-clipboard-deny-"));
 
-  const host = new ExtensionHost({
+  const host = createHost({
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
@@ -354,7 +370,7 @@ test("integration: denied clipboard permission blocks clipboard writes", async (
 test("integration: config.get returns contributed default values", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-config-"));
 
-  const host = new ExtensionHost({
+  const host = createHost({
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
@@ -376,7 +392,7 @@ test("integration: config.get returns contributed default values", async (t) => 
 test("integration: denied permission prevents side effects", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-deny-"));
 
-  const host = new ExtensionHost({
+  const host = createHost({
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),

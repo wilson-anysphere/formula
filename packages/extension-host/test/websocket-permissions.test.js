@@ -6,6 +6,10 @@ const fs = require("node:fs/promises");
 
 const { ExtensionHost } = require("../src");
 
+// Worker startup can be slow under heavy CI load. Keep the test focused on permission correctness
+// rather than strict 5s activation/command SLAs.
+const WEBSOCKET_TEST_TIMEOUT_MS = 20_000;
+
 async function writeExtensionFixture(extensionDir, manifest, entrypointCode) {
   await fs.mkdir(path.join(extensionDir, "dist"), { recursive: true });
   await fs.writeFile(path.join(extensionDir, "package.json"), JSON.stringify(manifest, null, 2), "utf8");
@@ -55,6 +59,8 @@ test("permissions: WebSocket connections are blocked when network permission is 
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
+    activationTimeoutMs: WEBSOCKET_TEST_TIMEOUT_MS,
+    commandTimeoutMs: WEBSOCKET_TEST_TIMEOUT_MS,
     permissionPrompt: async ({ permissions }) => {
       if (permissions.includes("network")) {
         sawNetworkPrompt = true;

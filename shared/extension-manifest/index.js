@@ -273,6 +273,9 @@ function validateActivationEvents(activationEvents, contributes) {
       if (id.trim().length === 0) {
         throw new ManifestError(`activationEvents references empty view/panel id`);
       }
+      // `onView:*` is used to activate an extension when its own contributed panel/view is opened.
+      // Require that the referenced id is declared under `contributes.panels` to keep activation
+      // events self-contained and validateable at publish time (marketplace).
       if (!knownPanels.has(id)) {
         throw new ManifestError(`activationEvents references unknown view/panel: ${id}`);
       }
