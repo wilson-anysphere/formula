@@ -1302,7 +1302,14 @@ export class SpreadsheetApp {
         },
         { passive: true, signal: this.domAbort.signal }
       );
-      this.root.addEventListener("pointerleave", () => this.hideCommentTooltip(), { signal: this.domAbort.signal });
+      this.root.addEventListener(
+        "pointerleave",
+        () => {
+          this.clearSharedHoverCellCache();
+          this.hideCommentTooltip();
+        },
+        { signal: this.domAbort.signal }
+      );
       this.root.addEventListener("keydown", (e) => this.onKeyDown(e), { signal: this.domAbort.signal });
     } else {
       this.root.addEventListener("pointerdown", (e) => this.onPointerDown(e), { signal: this.domAbort.signal });
