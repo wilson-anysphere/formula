@@ -237,6 +237,7 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
     let format_png = register_format("PNG").ok();
     // Some producers use a MIME-like name for PNG. Treat this as best-effort fallback.
     let format_image_png = register_format("image/png").ok();
+    let format_image_x_png = register_format("image/x-png").ok();
     // MIME-like aliases used by some cross-platform apps.
     let format_text_html = register_format("text/html").ok();
     let format_text_html_utf8 = register_format("text/html;charset=utf-8").ok();
@@ -328,6 +329,15 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
 
     if image_png_base64.is_none() {
         if let Some(format) = format_image_png {
+            image_png_base64 = try_get_clipboard_bytes(format, MAX_PNG_BYTES)
+                .ok()
+                .flatten()
+                .map(|bytes| STANDARD.encode(bytes));
+        }
+    }
+
+    if image_png_base64.is_none() {
+        if let Some(format) = format_image_x_png {
             image_png_base64 = try_get_clipboard_bytes(format, MAX_PNG_BYTES)
                 .ok()
                 .flatten()
@@ -451,6 +461,7 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
         .transpose()?;
     // Best-effort PNG variant used by some apps.
     let format_image_png = png_bytes.as_ref().and_then(|_| register_format("image/png").ok());
+    let format_image_x_png = png_bytes.as_ref().and_then(|_| register_format("image/x-png").ok());
 
     let _guard = open_clipboard_with_retry()?;
 
@@ -501,6 +512,10 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
         set_clipboard_bytes(format, bytes)?;
     }
     if let (Some(format), Some(bytes)) = (format_image_png, png_bytes.as_deref()) {
+        // Best-effort; don't fail the entire clipboard write if this alias can't be set.
+        let _ = set_clipboard_bytes(format, bytes);
+    }
+    if let (Some(format), Some(bytes)) = (format_image_x_png, png_bytes.as_deref()) {
         // Best-effort; don't fail the entire clipboard write if this alias can't be set.
         let _ = set_clipboard_bytes(format, bytes);
     }
