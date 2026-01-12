@@ -40,6 +40,12 @@ const RECORD_XF: u16 = 0x00E0;
 const RECORD_SAVERECALC: u16 = 0x005F;
 // SHEETEXT [MS-XLS 2.4.269] (BIFF8 only) stores extended sheet metadata such as sheet tab color.
 const RECORD_SHEETEXT: u16 = 0x0862;
+// EXTERNSHEET [MS-XLS 2.4.102] can be large in workbooks with many 3D references and may be split
+// across one or more `CONTINUE` records.
+const RECORD_EXTERNSHEET: u16 = 0x0017;
+// NAME [MS-XLS 2.4.150] (defined names / named ranges) may contain large formulas or description
+// strings and may be split across one or more `CONTINUE` records.
+const RECORD_NAME: u16 = 0x0018;
 
 // XF type/protection flags: bit 2 is fStyle in BIFF5/8.
 const XF_FLAG_STYLE: u16 = 0x0004;
@@ -852,8 +858,12 @@ fn workbook_globals_allows_continuation_biff5(record_id: u16) -> bool {
 }
 
 fn workbook_globals_allows_continuation_biff8(record_id: u16) -> bool {
-    // FORMAT [MS-XLS 2.4.88]
-    record_id == RECORD_FORMAT_BIFF8
+    // Records in the workbook globals substream that are known to allow `CONTINUE` records.
+    //
+    // NOTE: The `LogicalBiffRecordIter` preserves fragment boundaries so parsers can handle BIFF8
+    // continued strings (which inject an option-flags byte at the start of a continuation
+    // fragment).
+    record_id == RECORD_FORMAT_BIFF8 || record_id == RECORD_EXTERNSHEET || record_id == RECORD_NAME
 }
 
 fn parse_biff_xf_record(data: &[u8], biff: BiffVersion) -> Result<BiffXf, String> {
