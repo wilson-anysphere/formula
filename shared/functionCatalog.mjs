@@ -1171,8 +1171,8 @@ export default {
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
-        "number",
-        "number",
+        "any",
+        "any",
         "number",
         "number",
         "number",
@@ -2382,8 +2382,8 @@ export default {
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
-        "number",
-        "number",
+        "any",
+        "any",
         "number",
         "number",
         "number",
@@ -3027,8 +3027,8 @@ export default {
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
-        "number",
-        "number",
+        "any",
+        "any",
         "number",
         "number",
         "number",
@@ -4465,8 +4465,8 @@ export default {
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
-        "number",
-        "number",
+        "any",
+        "any",
         "number",
         "number",
         "number",

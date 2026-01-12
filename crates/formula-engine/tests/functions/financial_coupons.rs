@@ -157,12 +157,12 @@ fn coup_functions_apply_end_of_month_schedule_when_maturity_is_month_end_basis_1
 }
 
 #[test]
-fn coupdays_basis_4_uses_fixed_360_over_frequency_even_when_days360_is_not_180() {
+fn coupdays_basis_4_uses_european_days360_between_coupon_dates() {
     let system = ExcelDateSystem::EXCEL_1900;
 
     // Semiannual schedule with an end-of-month February maturity. For European 30/360 (basis=4),
-    // `DAYS360(2020-08-31, 2021-02-28, TRUE) = 178`, but Excel still models the coupon period length
-    // E as `360/frequency = 180` for COUP* and bond pricing helpers.
+    // the coupon-period length `E` is computed as the European `DAYS360` day-count between coupon
+    // dates (PCD->NCD). Here, `DAYS360(2020-08-31, 2021-02-28, TRUE) = 178` (not 180).
     let settlement = ymd_to_serial(ExcelDate::new(2020, 11, 15), system).unwrap();
     let maturity = ymd_to_serial(ExcelDate::new(2021, 2, 28), system).unwrap();
     let expected_pcd = ymd_to_serial(ExcelDate::new(2020, 8, 31), system).unwrap();
@@ -173,6 +173,6 @@ fn coupdays_basis_4_uses_fixed_360_over_frequency_even_when_days360_is_not_180()
     assert_eq!(coupnum(settlement, maturity, 2, 4, system).unwrap(), 1.0);
 
     assert_eq!(coupdaybs(settlement, maturity, 2, 4, system).unwrap(), 75.0);
-    assert_eq!(coupdaysnc(settlement, maturity, 2, 4, system).unwrap(), 105.0);
-    assert_eq!(coupdays(settlement, maturity, 2, 4, system).unwrap(), 180.0);
+    assert_eq!(coupdaysnc(settlement, maturity, 2, 4, system).unwrap(), 103.0);
+    assert_eq!(coupdays(settlement, maturity, 2, 4, system).unwrap(), 178.0);
 }

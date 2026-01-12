@@ -389,8 +389,8 @@ inventory::submit! {
         array_support: ArraySupport::ScalarOnly,
         return_type: ValueType::Number,
         arg_types: &[
-            ValueType::Number,
-            ValueType::Number,
+            ValueType::Any,
+            ValueType::Any,
             ValueType::Number,
             ValueType::Number,
             ValueType::Number,
@@ -460,8 +460,8 @@ inventory::submit! {
         array_support: ArraySupport::ScalarOnly,
         return_type: ValueType::Number,
         arg_types: &[
-            ValueType::Number,
-            ValueType::Number,
+            ValueType::Any,
+            ValueType::Any,
             ValueType::Number,
             ValueType::Number,
             ValueType::Number,
@@ -531,8 +531,8 @@ inventory::submit! {
         array_support: ArraySupport::ScalarOnly,
         return_type: ValueType::Number,
         arg_types: &[
-            ValueType::Number,
-            ValueType::Number,
+            ValueType::Any,
+            ValueType::Any,
             ValueType::Number,
             ValueType::Number,
             ValueType::Number,
@@ -596,8 +596,8 @@ inventory::submit! {
         array_support: ArraySupport::ScalarOnly,
         return_type: ValueType::Number,
         arg_types: &[
-            ValueType::Number,
-            ValueType::Number,
+            ValueType::Any,
+            ValueType::Any,
             ValueType::Number,
             ValueType::Number,
             ValueType::Number,
