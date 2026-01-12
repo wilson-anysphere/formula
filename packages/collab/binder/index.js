@@ -747,12 +747,34 @@ export function bindYjsToDocumentController(options) {
    */
   function findYjsSheetEntryById(sheetId) {
     if (!sheetId) return null;
+    /** @type {Array<{ index: number, entry: any, isLocal: boolean }>} */
+    const candidates = [];
     for (let i = 0; i < sheets.length; i += 1) {
       const entry = sheets.get(i);
       const id = coerceString(entry?.get?.("id") ?? entry?.id);
-      if (id === sheetId) return { index: i, entry };
+      if (id !== sheetId) continue;
+      const client = entry?._item?.id?.client;
+      const isLocal = typeof client === "number" && client === ydoc.clientID;
+      candidates.push({ index: i, entry, isLocal });
     }
-    return null;
+
+    if (candidates.length === 0) return null;
+    if (candidates.length === 1) return candidates[0];
+
+    // If we see duplicates created by the current client alongside entries from other clients,
+    // prefer selecting a non-local entry. This mirrors `ensureWorkbookSchema` behavior and
+    // helps avoid writing view state to a placeholder sheet that might later be pruned.
+    const locals = candidates.filter((c) => c.isLocal);
+    const nonLocals = candidates.filter((c) => !c.isLocal);
+    const preferred = locals.length > 0 && nonLocals.length > 0 ? nonLocals : candidates;
+
+    // Deterministic choice: pick the last matching entry by index.
+    let best = preferred[0];
+    for (const candidate of preferred) {
+      if (candidate.index > best.index) best = candidate;
+    }
+
+    return best;
   }
 
   /**

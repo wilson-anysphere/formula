@@ -95,6 +95,78 @@ test("binder: DocumentController→Yjs upgrades existing plain-object sheet entr
   }
 });
 
+test("binder: prefers non-local sheet entries when duplicates exist", async () => {
+  const ydoc = new Y.Doc();
+
+  // Simulate a remote client inserting a Sheet1 entry, then the local client
+  // also inserting a duplicate Sheet1 entry (a common race during schema init).
+  const remoteDoc = new Y.Doc();
+  remoteDoc.transact(() => {
+    const remoteSheets = remoteDoc.getArray("sheets");
+    const entry = new Y.Map();
+    entry.set("id", "Sheet1");
+    entry.set("name", "Sheet1");
+    remoteSheets.push([entry]);
+  });
+
+  Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(remoteDoc));
+
+  ydoc.transact(() => {
+    const localSheets = ydoc.getArray("sheets");
+    const entry = new Y.Map();
+    entry.set("id", "Sheet1");
+    entry.set("name", "Sheet1");
+    localSheets.push([entry]);
+  });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({ ydoc, documentController, defaultSheetId: "Sheet1" });
+
+  try {
+    documentController.setFrozen("Sheet1", 1, 0);
+
+    await waitForCondition(() => {
+      const sheets = ydoc.getArray("sheets");
+      for (const entry of sheets.toArray()) {
+        if (!(entry instanceof Y.Map)) continue;
+        if (entry.get("id") !== "Sheet1") continue;
+        const view = entry.get("view");
+        if (view?.frozenRows === 1 && view?.frozenCols === 0) return true;
+      }
+      return false;
+    });
+
+    const sheets = ydoc.getArray("sheets");
+    assert.ok(sheets.length >= 2);
+
+    /** @type {Y.Map<any>[]} */
+    const entries = [];
+    for (const entry of sheets.toArray()) {
+      if (entry instanceof Y.Map && entry.get("id") === "Sheet1") entries.push(entry);
+    }
+    assert.ok(entries.length >= 2, "expected duplicate Sheet1 entries");
+
+    const localClient = ydoc.clientID;
+    const localEntries = entries.filter((e) => e?._item?.id?.client === localClient);
+    const nonLocalEntries = entries.filter((e) => e?._item?.id?.client !== localClient);
+    assert.ok(localEntries.length > 0, "expected at least one local duplicate entry");
+    assert.ok(nonLocalEntries.length > 0, "expected at least one non-local duplicate entry");
+
+    // The binder should prefer writing view state to a non-local entry (matching
+    // ensureWorkbookSchema duplicate pruning behavior).
+    for (const entry of nonLocalEntries) {
+      assert.deepEqual(entry.get("view"), { frozenRows: 1, frozenCols: 0 });
+    }
+    for (const entry of localEntries) {
+      assert.equal(entry.get("view"), undefined);
+    }
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+    remoteDoc.destroy();
+  }
+});
+
 test("binder: hydrates sheet view state from plain-object Yjs sheet entries", async () => {
   const ydoc = new Y.Doc();
   const sheets = ydoc.getArray("sheets");
