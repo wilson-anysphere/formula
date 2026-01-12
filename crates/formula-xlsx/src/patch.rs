@@ -2098,24 +2098,19 @@ fn cell_representation_for_patch(
         CellValue::Entity(entity) => {
             let degraded = CellValue::String(entity.display_value.clone());
             cell_representation_for_patch(Some(&degraded), formula, existing_t, shared_strings)
-        }
+        },
         CellValue::Record(record) => {
             let degraded = CellValue::String(record.to_string());
             cell_representation_for_patch(Some(&degraded), formula, existing_t, shared_strings)
-        }
+        },
         CellValue::Image(image) => {
             if let Some(alt) = image.alt_text.as_deref().filter(|s| !s.is_empty()) {
                 let degraded = CellValue::String(alt.to_string());
-                cell_representation_for_patch(
-                    Some(&degraded),
-                    formula,
-                    existing_t,
-                    shared_strings,
-                )
+                cell_representation_for_patch(Some(&degraded), formula, existing_t, shared_strings)
             } else {
                 Ok((None, CellBodyKind::None))
             }
-        }
+        },
         CellValue::RichText(rich) => {
             if let Some(existing_t) = existing_t {
                 if should_preserve_unknown_t(existing_t) {
