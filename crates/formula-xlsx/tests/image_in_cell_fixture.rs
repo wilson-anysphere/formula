@@ -184,7 +184,8 @@ fn image_in_cell_fixture_has_expected_rich_value_parts() {
         "expected workbook.images image2.png bytes to match xl/media/image2.png"
     );
 
-    // `vm` should resolve to rich value indices and be captured in `XlsxDocument.meta.rich_value_cells`.
+    // `vm` should resolve to rich value indices and be captured in
+    // `XlsxDocument::xlsx_meta().rich_value_cells`.
     // In this fixture:
     // - vm="1" -> rich value index 0 (image1)
     // - vm="2" -> rich value index 1 (image2)
