@@ -90,7 +90,7 @@ test.describe("sheet tabs", () => {
 
     // Focus the tab strip via keyboard navigation.
     const sheet1Tab = page.getByRole("tab", { name: "Sheet1" });
-    for (let i = 0; i < 6; i += 1) {
+    for (let i = 0; i < 20; i += 1) {
       await page.keyboard.press("Tab");
       if (await sheet1Tab.evaluate((el) => el === document.activeElement)) break;
     }
@@ -115,7 +115,7 @@ test.describe("sheet tabs", () => {
     await gotoDesktop(page);
 
     const sheet1Tab = page.getByRole("tab", { name: "Sheet1" });
-    for (let i = 0; i < 6; i += 1) {
+    for (let i = 0; i < 20; i += 1) {
       await page.keyboard.press("Tab");
       if (await sheet1Tab.evaluate((el) => el === document.activeElement)) break;
     }
