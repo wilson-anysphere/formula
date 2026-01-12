@@ -4780,18 +4780,22 @@ fn format_number_general(n: f64) -> String {
     formula_format::format_value(FmtValue::Number(n), None, &options).text
 }
 
-fn coerce_to_string(v: &Value) -> Result<String, ErrorKind> {
+fn coerce_to_cow_str(v: &Value) -> Result<Cow<'_, str>, ErrorKind> {
     match v {
-        Value::Text(s) => Ok(s.to_string()),
-        Value::Entity(v) => Ok(v.display.clone()),
-        Value::Record(v) => Ok(v.display.clone()),
-        Value::Number(n) => Ok(format_number_general(*n)),
-        Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
-        Value::Empty | Value::Missing => Ok(String::new()),
+        Value::Text(s) => Ok(Cow::Borrowed(s.as_ref())),
+        Value::Entity(v) => Ok(Cow::Borrowed(v.display.as_str())),
+        Value::Record(v) => Ok(Cow::Borrowed(v.display.as_str())),
+        Value::Number(n) => Ok(Cow::Owned(format_number_general(*n))),
+        Value::Bool(b) => Ok(Cow::Borrowed(if *b { "TRUE" } else { "FALSE" })),
+        Value::Empty | Value::Missing => Ok(Cow::Borrowed("")),
         Value::Error(e) => Err(*e),
         Value::Lambda(_) => Err(ErrorKind::Value),
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Err(ErrorKind::Value),
     }
+}
+
+fn coerce_to_string(v: &Value) -> Result<String, ErrorKind> {
+    Ok(coerce_to_cow_str(v)?.into_owned())
 }
 
 fn concat_binary(left: &Value, right: &Value) -> Value {
@@ -4803,17 +4807,18 @@ fn concat_binary(left: &Value, right: &Value) -> Value {
         return Value::Error(*e);
     }
 
-    let left_str = match coerce_to_string(left) {
+    let left_str = match coerce_to_cow_str(left) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
-    let right_str = match coerce_to_string(right) {
+    let right_str = match coerce_to_cow_str(right) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
-    let mut out = String::new();
-    out.push_str(&left_str);
-    out.push_str(&right_str);
+    let mut out =
+        String::with_capacity(left_str.as_ref().len().saturating_add(right_str.as_ref().len()));
+    out.push_str(left_str.as_ref());
+    out.push_str(right_str.as_ref());
     Value::Text(out.into())
 }
 
@@ -4823,8 +4828,8 @@ fn fn_concat_scalar(args: &[Value]) -> Value {
     }
     let mut out = String::new();
     for arg in args {
-        match coerce_to_string(arg) {
-            Ok(s) => out.push_str(&s),
+        match coerce_to_cow_str(arg) {
+            Ok(s) => out.push_str(s.as_ref()),
             Err(e) => return Value::Error(e),
         }
     }
@@ -4834,6 +4839,26 @@ fn fn_concat_scalar(args: &[Value]) -> Value {
 fn fn_concat_op(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() < 2 {
         return Value::Error(ErrorKind::Value);
+    }
+
+    // Common fast path: scalar/array concatenation without any reference values. Avoid cloning
+    // each argument into a temporary vector only to discover that no dereferencing is needed.
+    if !args
+        .iter()
+        .any(|arg| matches!(arg, Value::Range(_) | Value::MultiRange(_)))
+    {
+        if !args.iter().any(|arg| matches!(arg, Value::Array(_))) {
+            return fn_concat_scalar(args);
+        }
+
+        let mut acc = args[0].clone();
+        for next in args.iter().skip(1) {
+            acc = elementwise_binary(&acc, next, concat_binary);
+            if matches!(acc, Value::Error(_)) {
+                break;
+            }
+        }
+        return acc;
     }
 
     // Dereference any range arguments so `A1:A2&"c"` produces a spilled array.
@@ -4874,11 +4899,11 @@ fn fn_concat(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         match arg {
             Value::Array(arr) => {
                 for v in arr.iter() {
-                    let s = match coerce_to_string(v) {
+                    let s = match coerce_to_cow_str(v) {
                         Ok(s) => s,
                         Err(e) => return Value::Error(e),
                     };
-                    out.push_str(&s);
+                    out.push_str(s.as_ref());
                 }
             }
             Value::Range(r) => {
@@ -4889,11 +4914,11 @@ fn fn_concat(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 for row in range.row_start..=range.row_end {
                     for col in range.col_start..=range.col_end {
                         let v = grid.get_value(CellCoord { row, col });
-                        let s = match coerce_to_string(&v) {
+                        let s = match coerce_to_cow_str(&v) {
                             Ok(s) => s,
                             Err(e) => return Value::Error(e),
                         };
-                        out.push_str(&s);
+                        out.push_str(s.as_ref());
                     }
                 }
             }
@@ -4930,21 +4955,21 @@ fn fn_concat(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                     for row in range.row_start..=range.row_end {
                         for col in range.col_start..=range.col_end {
                             let v = grid.get_value_on_sheet(area.sheet, CellCoord { row, col });
-                            let s = match coerce_to_string(&v) {
+                            let s = match coerce_to_cow_str(&v) {
                                 Ok(s) => s,
                                 Err(e) => return Value::Error(e),
                             };
-                            out.push_str(&s);
+                            out.push_str(s.as_ref());
                         }
                     }
                 }
             }
             other => {
-                let s = match coerce_to_string(other) {
+                let s = match coerce_to_cow_str(other) {
                     Ok(s) => s,
                     Err(e) => return Value::Error(e),
                 };
-                out.push_str(&s);
+                out.push_str(s.as_ref());
             }
         }
     }
@@ -4960,11 +4985,11 @@ fn fn_concatenate(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     let mut out = String::new();
     for arg in args {
         let v = apply_implicit_intersection(arg.clone(), grid, base);
-        let s = match coerce_to_string(&v) {
+        let s = match coerce_to_cow_str(&v) {
             Ok(s) => s,
             Err(e) => return Value::Error(e),
         };
-        out.push_str(&s);
+        out.push_str(s.as_ref());
     }
     Value::Text(out.into())
 }
@@ -8939,10 +8964,10 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
     }
 }
 
-fn coerce_to_string_for_lookup(v: &Value) -> Result<String, ErrorKind> {
+fn coerce_to_string_for_lookup(v: &Value) -> Result<Cow<'_, str>, ErrorKind> {
     // Use the bytecode runtime's locale-aware coercion (shared with CONCAT/& fixes) so wildcard
     // matching behaves consistently across backends.
-    coerce_to_string(v)
+    coerce_to_cow_str(v)
 }
 
 fn exact_match_in_first_col(grid: &dyn Grid, lookup: &Value, table: ResolvedRange) -> Option<i32> {
@@ -8954,13 +8979,9 @@ fn exact_match_in_first_col(grid: &dyn Grid, lookup: &Value, table: ResolvedRang
             col: table.col_start,
         });
         if let Some(pattern) = &wildcard_pattern {
-            let text = match &key {
-                Value::Error(_) => continue,
-                Value::Text(s) => Cow::Borrowed(s.as_ref()),
-                other => match coerce_to_string_for_lookup(other) {
-                    Ok(s) => Cow::Owned(s),
-                    Err(_) => continue,
-                },
+            let text = match coerce_to_string_for_lookup(&key) {
+                Ok(s) => s,
+                Err(_) => continue,
             };
             if pattern.matches(text.as_ref()) {
                 return Some(idx as i32);
@@ -8977,13 +8998,9 @@ fn exact_match_in_first_col_array(lookup: &Value, table: &ArrayValue) -> Option<
     for row in 0..table.rows {
         let key = table.get(row, 0).unwrap_or(&Value::Empty);
         if let Some(pattern) = &wildcard_pattern {
-            let text = match key {
-                Value::Error(_) => continue,
-                Value::Text(s) => Cow::Borrowed(s.as_ref()),
-                other => match coerce_to_string_for_lookup(other) {
-                    Ok(s) => Cow::Owned(s),
-                    Err(_) => continue,
-                },
+            let text = match coerce_to_string_for_lookup(key) {
+                Ok(s) => s,
+                Err(_) => continue,
             };
             if pattern.matches(text.as_ref()) {
                 return Some(row as i32);
@@ -9004,13 +9021,9 @@ fn exact_match_in_first_row(grid: &dyn Grid, lookup: &Value, table: ResolvedRang
             col,
         });
         if let Some(pattern) = &wildcard_pattern {
-            let text = match &key {
-                Value::Error(_) => continue,
-                Value::Text(s) => Cow::Borrowed(s.as_ref()),
-                other => match coerce_to_string_for_lookup(other) {
-                    Ok(s) => Cow::Owned(s),
-                    Err(_) => continue,
-                },
+            let text = match coerce_to_string_for_lookup(&key) {
+                Ok(s) => s,
+                Err(_) => continue,
             };
             if pattern.matches(text.as_ref()) {
                 return Some(idx as i32);
@@ -9027,13 +9040,9 @@ fn exact_match_in_first_row_array(lookup: &Value, table: &ArrayValue) -> Option<
     for col in 0..table.cols {
         let key = table.get(0, col).unwrap_or(&Value::Empty);
         if let Some(pattern) = &wildcard_pattern {
-            let text = match key {
-                Value::Error(_) => continue,
-                Value::Text(s) => Cow::Borrowed(s.as_ref()),
-                other => match coerce_to_string_for_lookup(other) {
-                    Ok(s) => Cow::Owned(s),
-                    Err(_) => continue,
-                },
+            let text = match coerce_to_string_for_lookup(key) {
+                Ok(s) => s,
+                Err(_) => continue,
             };
             if pattern.matches(text.as_ref()) {
                 return Some(col as i32);
@@ -9173,13 +9182,9 @@ fn exact_match_1d(lookup: &Value, len: usize, value_at: &dyn Fn(usize) -> Value)
     for idx in 0..len {
         let candidate = value_at(idx);
         if let Some(pattern) = &wildcard_pattern {
-            let text = match &candidate {
-                Value::Error(_) => continue,
-                Value::Text(s) => Cow::Borrowed(s.as_ref()),
-                other => match coerce_to_string_for_lookup(other) {
-                    Ok(s) => Cow::Owned(s),
-                    Err(_) => continue,
-                },
+            let text = match coerce_to_string_for_lookup(&candidate) {
+                Ok(s) => s,
+                Err(_) => continue,
             };
             if pattern.matches(text.as_ref()) {
                 return Some(idx);
@@ -9195,13 +9200,9 @@ fn exact_match_1d_slice(lookup: &Value, values: &[Value]) -> Option<usize> {
     let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
     for (idx, candidate) in values.iter().enumerate() {
         if let Some(pattern) = &wildcard_pattern {
-            let text = match candidate {
-                Value::Error(_) => continue,
-                Value::Text(s) => Cow::Borrowed(s.as_ref()),
-                other => match coerce_to_string_for_lookup(other) {
-                    Ok(s) => Cow::Owned(s),
-                    Err(_) => continue,
-                },
+            let text = match coerce_to_string_for_lookup(candidate) {
+                Ok(s) => s,
+                Err(_) => continue,
             };
             if pattern.matches(text.as_ref()) {
                 return Some(idx);
