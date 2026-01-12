@@ -160,6 +160,23 @@ test("toggleBold considers range-run overrides when computing full-column mixed 
   assert.deepEqual(lastPatch, { font: { bold: true } });
 });
 
+test("toggleBold respects row > col precedence when computing full-row toggle state", () => {
+  const doc = new DocumentController();
+
+  // Row 1 is bold by default (row formatting layer).
+  doc.setRangeFormat("Sheet1", "A1:XFD1", { font: { bold: true } });
+  // Column A explicitly sets bold=false, but row formatting overrides column formatting.
+  doc.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: false } });
+
+  let lastPatch = null;
+  doc.setRangeFormat = (_sheetId, _range, patch) => {
+    lastPatch = patch;
+  };
+
+  toggleBold(doc, "Sheet1", "A1:XFD1");
+  assert.deepEqual(lastPatch, { font: { bold: false } });
+});
+
 test("toggleBold reads full-row formatting from the row layer (no per-cell scan)", () => {
   const doc = new DocumentController();
 
