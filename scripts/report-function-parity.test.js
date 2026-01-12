@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -58,5 +59,36 @@ test("report-function-parity script runs and produces deterministic sorted lists
   const notInFtabSorted = [...notInFtab].sort();
   assert.deepEqual(notInFtab, notInFtabSorted, "catalog-not-in-ftab list should be sorted");
   assert.equal(notInFtab.length, new Set(notInFtab).size, "catalog-not-in-ftab list should be unique");
-});
 
+  // Ensure the docs snapshot stays automation-driven and doesn't silently drift.
+  const docsPath = resolve(repoRoot, "docs", "15-excel-feature-parity.md");
+  const doc = readFileSync(docsPath, "utf8");
+  const beginMarker = "<!-- BEGIN GENERATED: report-function-parity -->";
+  const endMarker = "<!-- END GENERATED: report-function-parity -->";
+  const begin = doc.indexOf(beginMarker);
+  const end = doc.indexOf(endMarker);
+  assert.ok(begin !== -1 && end !== -1 && begin < end, "expected parity doc markers to be present");
+
+  const between = doc.slice(begin + beginMarker.length, end);
+  const match = between.match(/```text\n([\s\S]*?)\n```/);
+  assert.ok(match, "expected a ```text code block between parity doc markers");
+  const docSummary = match[1].trimEnd();
+
+  const header = "Function parity report (catalog ↔ BIFF FTAB)";
+  const summaryStartIdx = lines.findIndex((line) => line === header);
+  assert.ok(summaryStartIdx !== -1, `expected parity script output to contain header: ${header}`);
+  const summaryEndIdx = lines.findIndex(
+    (line, idx) => idx > summaryStartIdx && line.startsWith("Catalog \\ FTAB (not present in FTAB): "),
+  );
+  assert.ok(
+    summaryEndIdx !== -1,
+    "expected parity script output to contain `Catalog \\ FTAB (not present in FTAB): ...` line",
+  );
+  const expectedSummary = lines.slice(summaryStartIdx, summaryEndIdx + 1).join("\n").trimEnd();
+
+  assert.equal(
+    docSummary,
+    expectedSummary,
+    "Expected docs/15-excel-feature-parity.md snapshot to match report-function-parity output. Run `pnpm -w run report:function-parity -- --update-doc`.",
+  );
+});
