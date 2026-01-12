@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { gotoDesktop } from "./helpers";
+import { gotoDesktop, openExtensionsPanel } from "./helpers";
 
 // CJS helpers (shared/* is CommonJS).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -164,7 +164,7 @@ test.describe("Desktop Marketplace (browser/IndexedDB install)", () => {
 
     // Install via Marketplace UI.
     await page.getByRole("tab", { name: "View", exact: true }).click();
-    await page.getByTestId("open-marketplace-panel").click();
+    await page.getByTestId("ribbon-root").getByTestId("open-marketplace-panel").click();
     await expect(page.getByTestId("panel-marketplace")).toBeVisible();
 
     await page.getByTestId("marketplace-search-input").fill("hello");
@@ -178,8 +178,7 @@ test.describe("Desktop Marketplace (browser/IndexedDB install)", () => {
 
     // Verify extension is runnable.
     await page.getByRole("tab", { name: "Home", exact: true }).click();
-    await page.getByTestId("open-extensions-panel").click();
-    await expect(page.getByTestId("panel-extensions")).toBeVisible();
+    await openExtensionsPanel(page);
 
     await expect(page.getByTestId("run-command-sampleHello.sumSelection")).toBeVisible({ timeout: 60_000 });
     await page.getByTestId("run-command-sampleHello.sumSelection").dispatchEvent("click");
