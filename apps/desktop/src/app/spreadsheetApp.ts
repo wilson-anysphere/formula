@@ -3326,8 +3326,9 @@ export class SpreadsheetApp {
       return;
     }
 
-    const docCell = this.docCellFromGridCell(picked);
-    const cellKey = docCell.row * COMMENT_COORD_COL_STRIDE + docCell.col;
+    const docRow = picked.row - headerRows;
+    const docCol = picked.col - headerCols;
+    const cellKey = docRow * COMMENT_COORD_COL_STRIDE + docCol;
     this.sharedHoverCellKey = cellKey;
     const preview = this.commentPreviewByCoord.get(cellKey);
     this.sharedHoverCellHasComment = Boolean(preview);
