@@ -12,6 +12,7 @@
 ///     - `PROJECTDOCSTRINGUNICODE` (0x0040) and an observed non-canonical variant (0x0041)
 ///     - `PROJECTHELPFILEPATH2` (0x003D) and an observed non-canonical variant (0x0042)
 ///     - `PROJECTCONSTANTSUNICODE` (0x003C) and an observed non-canonical variant (0x0043)
+///   - Reference strings: `REFERENCENAMEUNICODE` (0x003E)
 ///   - Module strings: `MODULENAMEUNICODE` (0x0047), `MODULESTREAMNAMEUNICODE` (0x0032),
 ///     `MODULEDOCSTRINGUNICODE` (0x0048), `MODULEHELPFILEPATHUNICODE` (0x0049)
 /// - `0x004A` is `PROJECTCOMPATVERSION`.
