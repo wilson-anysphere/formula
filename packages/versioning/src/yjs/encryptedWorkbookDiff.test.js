@@ -149,3 +149,40 @@ test("diffYjsWorkbookSnapshots: encrypted cells win over plaintext duplicates ac
   assert.equal(sheetDiff.modified[0].oldValue, null);
   assert.equal(sheetDiff.modified[0].newValue, null);
 });
+
+test("diffYjsWorkbookSnapshots: encrypted format-only changes work even when format is only present on a legacy duplicate", () => {
+  const enc = { v: 1, alg: "AES-256-GCM", keyId: "k1", ivBase64: "iv", tagBase64: "tag", ciphertextBase64: "ct" };
+
+  const doc = createWorkbookDoc();
+  const cells = doc.getMap("cells");
+
+  // Insert legacy key first (so it appears first in map iteration order),
+  // then insert canonical key with the same ciphertext but without `format`.
+  doc.transact(() => {
+    const legacy = new Y.Map();
+    legacy.set("enc", enc);
+    legacy.set("format", { bold: true });
+    cells.set("Sheet1:0,0", legacy);
+
+    const canonical = new Y.Map();
+    canonical.set("enc", enc);
+    cells.set("Sheet1:0:0", canonical);
+  });
+
+  const beforeSnapshot = Y.encodeStateAsUpdate(doc);
+
+  doc.transact(() => {
+    const legacy = cells.get("Sheet1:0,0");
+    assert.ok(legacy instanceof Y.Map);
+    legacy.set("format", { bold: false });
+  });
+
+  const afterSnapshot = Y.encodeStateAsUpdate(doc);
+  const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  const sheetDiff = diff.cellsBySheet.find((entry) => entry.sheetId === "Sheet1")?.diff;
+  assert.ok(sheetDiff);
+
+  assert.equal(sheetDiff.formatOnly.length, 1);
+  assert.deepEqual(sheetDiff.formatOnly[0].cell, { row: 0, col: 0 });
+  assert.equal(sheetDiff.modified.length, 0);
+});

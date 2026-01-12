@@ -156,7 +156,14 @@ export function sheetStateFromYjsDoc(doc, opts = {}) {
 
     if (isEncrypted) {
       if (!existing || !existingIsEncrypted || isCanonical) {
-        cells.set(key, cell);
+        // Preserve any existing format metadata if the preferred encrypted record
+        // lacks it (e.g. canonical key created during encryption while a legacy
+        // key still carries the existing format).
+        if (existing?.format != null && cell.format == null) {
+          cells.set(key, { ...cell, format: existing.format });
+        } else {
+          cells.set(key, cell);
+        }
       } else if (existing.format == null && cell.format != null) {
         cells.set(key, { ...existing, format: cell.format });
       }
