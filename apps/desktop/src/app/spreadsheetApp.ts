@@ -3284,8 +3284,22 @@ export class SpreadsheetApp {
     let numericCount = 0;
     let numericSum = 0;
 
-    const inSelection = (row: number, col: number): boolean =>
-      ranges.some((r) => row >= r.startRow && row <= r.endRow && col >= r.startCol && col <= r.endCol);
+    const inSelection =
+      ranges.length === 1
+        ? (() => {
+            const r0 = ranges[0];
+            if (!r0) return () => false;
+            return (row: number, col: number): boolean =>
+              row >= r0.startRow && row <= r0.endRow && col >= r0.startCol && col <= r0.endCol;
+          })()
+        : (row: number, col: number): boolean => {
+            for (const r of ranges) {
+              if (row < r.startRow || row > r.endRow) continue;
+              if (col < r.startCol || col > r.endCol) continue;
+              return true;
+            }
+            return false;
+          };
 
     // Reuse a single coord object while scanning selection cells to avoid allocating
     // `{row,col}` objects for every visited coordinate.
