@@ -78,6 +78,15 @@ function estimateBase64Bytes(base64: string): number {
   return bytes > 0 ? bytes : 0;
 }
 
+function normalizeBase64String(base64: string): string {
+  if (!base64) return "";
+  if (base64.startsWith("data:")) {
+    const commaIndex = base64.indexOf(",");
+    if (commaIndex >= 0) return base64.slice(commaIndex + 1).trim();
+  }
+  return base64.trim();
+}
+
 function decodeBase64ToBytes(val: string): Uint8Array | undefined {
   if (!val) return undefined;
   if (estimateBase64Bytes(val) > MAX_IMAGE_BYTES) return undefined;
@@ -182,12 +191,15 @@ export async function readClipboard(): Promise<ClipboardContent> {
 
     const pngBase64 = readPngBase64(payload);
     if (typeof pngBase64 === "string") {
+      const estimate = estimateBase64Bytes(pngBase64);
+      if (estimate > MAX_IMAGE_BYTES) return out;
+
       const bytes = decodeBase64ToBytes(pngBase64);
       if (bytes) {
         out.imagePng = bytes;
-      } else if (estimateBase64Bytes(pngBase64) <= MAX_IMAGE_BYTES) {
+      } else if (estimate <= MAX_IMAGE_BYTES) {
         // Preserve base64 only when decoding fails (legacy/internal).
-        out.pngBase64 = pngBase64;
+        out.pngBase64 = normalizeBase64String(pngBase64);
       }
     }
   }
@@ -202,7 +214,7 @@ export async function writeClipboard(payload: ClipboardWritePayload): Promise<vo
   const pngBase64FromImage = imageBytes ? encodeBytesToBase64(imageBytes) : undefined;
   const legacyPngBase64 =
     typeof payload.pngBase64 === "string" && estimateBase64Bytes(payload.pngBase64) <= MAX_IMAGE_BYTES
-      ? payload.pngBase64.trim()
+      ? normalizeBase64String(payload.pngBase64)
       : undefined;
 
   const pngBase64 = pngBase64FromImage ?? legacyPngBase64;
