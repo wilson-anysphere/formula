@@ -99,24 +99,19 @@ describe("defaultRibbonSchema", () => {
     ).toBe(true);
   });
 
-  it("does not include emoji glyph icons in the schema", () => {
-    const emojiRe = /\p{Extended_Pictographic}/u;
+  it("does not include legacy icon glyph strings in the schema", () => {
     const offenders: string[] = [];
     for (const tab of defaultRibbonSchema.tabs) {
       for (const group of tab.groups) {
         for (const button of group.buttons) {
-          if (typeof button.icon === "string" && emojiRe.test(button.icon)) {
-            offenders.push(`button:${button.id} (${button.icon})`);
-          }
+          if (typeof button.icon === "string") offenders.push(`button:${button.id} (${button.icon})`);
           for (const item of button.menuItems ?? []) {
-            if (typeof item.icon === "string" && emojiRe.test(item.icon)) {
-              offenders.push(`menuItem:${item.id} (${item.icon})`);
-            }
+            if (typeof item.icon === "string") offenders.push(`menuItem:${item.id} (${item.icon})`);
           }
         }
       }
     }
-    expect(offenders, `Found emoji icon glyphs: ${offenders.join(", ")}`).toEqual([]);
+    expect(offenders, `Found legacy icon glyph strings: ${offenders.join(", ")}`).toEqual([]);
   });
 
   it("ensures sibling ids are unique (tabs, groups, buttons, menu items)", () => {
