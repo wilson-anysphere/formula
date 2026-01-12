@@ -44,6 +44,30 @@ function isInputTarget(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
 }
 
+function isInsideKeybindingBarrier(target: EventTarget | null): boolean {
+  if (!target || typeof target !== "object") return false;
+
+  // Preferred fast path: Element.closest (works for nested overlay roots and is
+  // resilient to focus being on any descendant element).
+  const closest = (target as any).closest;
+  if (typeof closest === "function") {
+    try {
+      return Boolean(closest.call(target, '[data-keybinding-barrier="true"]'));
+    } catch {
+      // ignore and fall back to manual traversal
+    }
+  }
+
+  // Fallback for non-Element targets (or test doubles) that don't support `closest`.
+  let node: any = target;
+  while (node && typeof node === "object") {
+    if (node.dataset?.keybindingBarrier === "true") return true;
+    if (typeof node.getAttribute === "function" && node.getAttribute("data-keybinding-barrier") === "true") return true;
+    node = node.parentElement ?? node.parentNode ?? null;
+  }
+  return false;
+}
+
 export const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   // Copy/Cut/Paste (core text handling should not be overrideable by extensions).
   "ctrl+c",
@@ -240,6 +264,7 @@ export class KeybindingService {
   handleKeydown(event: KeyboardEvent): boolean {
     if (event.defaultPrevented) return false;
     if (event.repeat) return false;
+    if (isInsideKeybindingBarrier(event.target)) return false;
     const inputTarget = isInputTarget(event.target);
     if (inputTarget && this.ignoreInputTargets === "all") return false;
 
@@ -265,6 +290,7 @@ export class KeybindingService {
     // Avoid repeatedly firing commands when the user holds a key down (e.g. toggles like
     // command palette / AI chat). Spreadsheet-style repeat behavior is handled by the grid.
     if (event.repeat) return false;
+    if (isInsideKeybindingBarrier(event.target)) return false;
     const inputTarget = isInputTarget(event.target);
     if (inputTarget && this.ignoreInputTargets === "all") return false;
 

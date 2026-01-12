@@ -305,6 +305,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
   const overlay = document.createElement("div");
   overlay.className = "command-palette-overlay";
+  overlay.dataset.keybindingBarrier = "true";
   overlay.hidden = true;
   overlay.setAttribute("role", "dialog");
   overlay.setAttribute("aria-modal", "true");

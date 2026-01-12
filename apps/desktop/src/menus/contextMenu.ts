@@ -80,6 +80,7 @@ export class ContextMenu {
 
     const overlay = document.createElement("div");
     overlay.dataset.testid = options.testId ?? "context-menu";
+    overlay.dataset.keybindingBarrier = "true";
     overlay.className = "context-menu-overlay";
     overlay.hidden = true;
 

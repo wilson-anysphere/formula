@@ -194,12 +194,17 @@ export const RibbonButton = React.memo(function RibbonButton({
   }
 
   return (
-    <div className={["ribbon-dropdown", `ribbon-dropdown--${size}`].join(" ")} ref={dropdownRef}>
+    <div
+      className={["ribbon-dropdown", `ribbon-dropdown--${size}`].join(" ")}
+      ref={dropdownRef}
+      data-keybinding-barrier={menuOpen ? "true" : undefined}
+    >
       {buttonEl}
       {menuOpen ? (
         <div
           id={menuId}
           className="ribbon-dropdown__menu"
+          data-keybinding-barrier="true"
           role="menu"
           aria-label={button.ariaLabel}
           onKeyDown={(event) => {
