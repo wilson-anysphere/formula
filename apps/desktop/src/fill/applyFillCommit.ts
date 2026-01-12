@@ -117,6 +117,10 @@ function detectFillAxis(sourceRange: CellRange, targetRange: CellRange): FillAxi
 export async function applyFillCommitToDocumentControllerWithFormulaRewrite(
   options: ApplyFillCommitOptions & {
     rewriteFormulasForCopyDelta: (requests: RewriteFormulasForCopyDeltaRequest[]) => Promise<string[]>;
+    /**
+     * Optional batch label for undo history (defaults to "Fill").
+     */
+    label?: string;
   }
 ): Promise<{ editsApplied: number }> {
   const { document: doc, sheetId, sourceRange, targetRange, mode, canWriteCell, getCellComputedValue } = options;
@@ -208,7 +212,7 @@ export async function applyFillCommitToDocumentControllerWithFormulaRewrite(
     // Ignore rewrite failures and fall back to the best-effort fill-engine result.
   }
 
-  doc.beginBatch({ label: "Fill" });
+  doc.beginBatch({ label: options.label ?? "Fill" });
   try {
     for (const edit of edits) {
       coordScratch.row = edit.row;

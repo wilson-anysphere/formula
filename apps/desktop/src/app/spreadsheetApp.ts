@@ -7736,6 +7736,8 @@ export class SpreadsheetApp {
 
     const label = direction === "down" ? t("command.edit.fillDown") : t("command.edit.fillRight");
 
+    const wasm = this.wasmEngine;
+
     // Explicit batch so multi-range selections become a single undo step.
     const fillCoordScratch = { row: 0, col: 0 };
     const getCellComputedValue = (row: number, col: number) => {
@@ -7743,6 +7745,46 @@ export class SpreadsheetApp {
       fillCoordScratch.col = col;
       return this.getCellComputedValue(fillCoordScratch) as any;
     };
+
+    // When possible, prefer engine-backed formula shifting for the fill shortcut. To keep undo
+    // semantics simple (and avoid holding a DocumentController batch open across `await`s), we
+    // currently use the engine rewrite path only for the common single-range case.
+    if (wasm && operations.length === 1) {
+      const op = operations[0]!;
+      const task = applyFillCommitToDocumentControllerWithFormulaRewrite({
+        document: this.document,
+        sheetId: this.sheetId,
+        sourceRange: op.sourceRange,
+        targetRange: op.targetRange,
+        mode: "formulas",
+        getCellComputedValue,
+        rewriteFormulasForCopyDelta: (requests) => wasm.rewriteFormulasForCopyDelta(requests),
+        label,
+      })
+        .catch(() => {
+          // Fall back to legacy fill behavior if the worker is unavailable.
+          this.document.beginBatch({ label });
+          try {
+            applyFillCommitToDocumentController({
+              document: this.document,
+              sheetId: this.sheetId,
+              sourceRange: op.sourceRange,
+              targetRange: op.targetRange,
+              mode: "formulas",
+              getCellComputedValue,
+            });
+          } finally {
+            this.document.endBatch();
+          }
+        })
+        .finally(() => {
+          this.refresh();
+          this.focus();
+        });
+      this.idle.track(task);
+      return;
+    }
+
     this.document.beginBatch({ label });
     try {
       for (const op of operations) {
