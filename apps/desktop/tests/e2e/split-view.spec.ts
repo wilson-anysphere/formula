@@ -202,6 +202,40 @@ test.describe("split view", () => {
     const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
     expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThan(0.1);
   });
+
+  test("secondary multi-range selection syncs to primary without scrolling", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("split-vertical").click();
+
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await expect(secondary.locator("canvas")).toHaveCount(3);
+
+    // Scroll the primary pane so the selected cells are offscreen (sync should not scroll it back).
+    const primary = page.locator("#grid");
+    await primary.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(0, 200 * 24);
+    await expect.poll(async () => await page.evaluate(() => (window as any).__formulaApp.getScroll().y)).toBeGreaterThan(0);
+
+    const scrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+
+    // Create a multi-range selection from the secondary pane: A1, then Ctrl/Cmd+click C3.
+    await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
+    const modifier: "Control" | "Meta" = process.platform === "darwin" ? "Meta" : "Control";
+    await secondary.click({ position: { x: 48 + 2 * 100 + 12, y: 24 + 2 * 24 + 12 }, modifiers: [modifier] }); // C3
+
+    await expect(page.getByTestId("selection-range")).toHaveText("2 ranges");
+    await expect(page.getByTestId("active-cell")).toHaveText("C3");
+    await expect(page.getByTestId("formula-address")).toHaveValue("C3");
+
+    const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThan(0.1);
+  });
 });
 
 test.describe("split view / shared grid zoom", () => {
