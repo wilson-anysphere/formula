@@ -29,7 +29,7 @@ pub enum CellValue {
     /// This is a JSON-friendly representation of Excel's "entity" rich values
     /// (e.g. Stocks / Geography) where the primary scalar representation is a
     /// display string.
-    Entity(EntityValue),
+    Entity(LinkedEntityValue),
     /// Excel rich value representing a record.
     ///
     /// Record values are treated similarly to entities for scalar export: they
@@ -99,7 +99,7 @@ impl From<RichText> for CellValue {
 /// JSON-friendly representation of an Excel rich "entity" value.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct EntityValue {
+pub struct LinkedEntityValue {
     /// Entity type discriminator (e.g. `"stock"`, `"geography"`).
     #[serde(default, alias = "entity_type", skip_serializing_if = "String::is_empty")]
     pub entity_type: String,
@@ -115,7 +115,10 @@ pub struct EntityValue {
     pub properties: BTreeMap<String, CellValue>,
 }
 
-impl EntityValue {
+/// Backwards-compatible name for [`LinkedEntityValue`].
+pub type EntityValue = LinkedEntityValue;
+
+impl LinkedEntityValue {
     pub fn new(display: impl Into<String>) -> Self {
         Self {
             display_value: display.into(),
@@ -148,14 +151,14 @@ impl EntityValue {
     }
 }
 
-impl fmt::Display for EntityValue {
+impl fmt::Display for LinkedEntityValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.display_value)
     }
 }
 
-impl From<EntityValue> for CellValue {
-    fn from(value: EntityValue) -> Self {
+impl From<LinkedEntityValue> for CellValue {
+    fn from(value: LinkedEntityValue) -> Self {
         CellValue::Entity(value)
     }
 }

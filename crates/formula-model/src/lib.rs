@@ -90,7 +90,10 @@ pub use theme::{
     resolve_color_in_context, resolve_number_format_color, ArgbColor, ColorContext, ThemeColorSlot,
     ThemePalette,
 };
-pub use value::{ArrayValue, CellValue, EntityValue, ImageValue, RecordValue, RichText, SpillValue};
+pub use value::{
+    ArrayValue, CellValue, EntityValue, ImageValue, LinkedEntityValue, RecordValue, RichText,
+    SpillValue,
+};
 pub use view::{
     a1_to_cell, cell_to_a1, format_sqref, parse_sqref, SheetPane, SheetSelection, SheetView,
     SqrefParseError, WorkbookView, WorkbookWindow, WorkbookWindowState,
