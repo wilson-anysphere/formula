@@ -205,7 +205,33 @@ export function SheetTabStrip({
   const autoScrollRef = useRef<{ raf: number | null; direction: -1 | 0 | 1 }>({ raf: null, direction: 0 });
   const activeTabRef = useRef<HTMLButtonElement | null>(null);
 
+  const ensureActiveTabVisible = useCallback(() => {
+    const container = containerRef.current;
+    const tab = activeTabRef.current;
+    if (!container || !tab) return;
+
+    // Avoid `scrollIntoView` here: the tab strip opts into smooth scrolling via CSS (`scroll-behavior: smooth`),
+    // and `scrollIntoView` can therefore schedule a smooth scroll that emits `scroll` events asynchronously.
+    // That interacts poorly with context menus (they close on outside scroll events).
+    const containerRect = container.getBoundingClientRect();
+    const tabRect = tab.getBoundingClientRect();
+
+    // Give ourselves a tiny buffer to avoid jitter/rounding issues.
+    const margin = 2;
+    const leftOverflow = containerRect.left + margin - tabRect.left;
+    const rightOverflow = tabRect.right - (containerRect.right - margin);
+
+    if (leftOverflow > 0) {
+      container.scrollLeft -= leftOverflow;
+      return;
+    }
+    if (rightOverflow > 0) {
+      container.scrollLeft += rightOverflow;
+    }
+  }, []);
+
   const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
+  const editingSheetIdRef = useRef<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
   const [renameInFlight, setRenameInFlight] = useState(false);
@@ -217,6 +243,7 @@ export function SheetTabStrip({
   const tabColorPickerDefaultValueRef = useRef<string | null>(null);
 
   const lastContextMenuFocusRef = useRef<HTMLElement | null>(null);
+  const pendingEnsureActiveTabVisibleRef = useRef(false);
   const tabContextMenu = useMemo(
     () =>
       new ContextMenu({
@@ -226,6 +253,16 @@ export function SheetTabStrip({
           const target = lastContextMenuFocusRef.current;
           if (target?.isConnected) {
             target.focus({ preventScroll: true });
+          }
+
+          // If we skipped keeping the active tab visible while the context menu was open (to avoid
+          // self-triggered scroll events immediately closing the menu), perform it now.
+          if (pendingEnsureActiveTabVisibleRef.current) {
+            pendingEnsureActiveTabVisibleRef.current = false;
+            requestAnimationFrame(() => {
+              if (editingSheetIdRef.current) return;
+              ensureActiveTabVisible();
+            });
           }
         },
       }),
@@ -257,6 +294,10 @@ export function SheetTabStrip({
       input.remove();
     };
   }, []);
+
+  useEffect(() => {
+    editingSheetIdRef.current = editingSheetId;
+  }, [editingSheetId]);
 
   const stopAutoScroll = () => {
     const raf = autoScrollRef.current.raf;
@@ -779,11 +820,16 @@ export function SheetTabStrip({
   useEffect(() => {
     // Keep the active tab visible when switching sheets via keyboard or programmatically.
     if (editingSheetId) return;
-    const tab = activeTabRef.current;
-    if (tab && typeof (tab as any).scrollIntoView === "function") {
-      tab.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (tabContextMenu.isOpen()) {
+      // Opening a context menu focuses its first menu item. If we scroll the active tab into view
+      // while the menu is open (e.g. a delayed `scrollIntoView` after adding a sheet), the
+      // resulting scroll event would immediately dismiss the menu. Defer it until close.
+      pendingEnsureActiveTabVisibleRef.current = true;
+      return;
     }
-  }, [activeSheetId, editingSheetId, visibleSheets.length]);
+    pendingEnsureActiveTabVisibleRef.current = false;
+    ensureActiveTabVisible();
+  }, [activeSheetId, editingSheetId, tabContextMenu, visibleSheets.length]);
 
   return (
     <>
