@@ -186,10 +186,35 @@ export function PivotBuilderPanelContainer(props: Props) {
   const [busy, setBusy] = useState<{ kind: "create" } | { kind: "refresh"; pivotId: string } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const sheetIds: string[] = useMemo(() => {
+  const sheetIds: string[] = (() => {
     const ids = doc?.getSheetIds?.() ?? [];
     return ids.length > 0 ? ids : ["Sheet1"];
-  }, [doc]);
+  })();
+
+  const canEditCell: ((cell: { sheetId: string; row: number; col: number }) => boolean) | null =
+    typeof (doc as any)?.canEditCell === "function" ? ((doc as any).canEditCell as any) : null;
+
+  const ensureUpdatesEditable = useCallback(
+    (updates: any[] | null | undefined): boolean => {
+      if (!canEditCell) return true;
+      if (!Array.isArray(updates) || updates.length === 0) return true;
+
+      for (const update of updates) {
+        const sheetId = String(update?.sheet_id ?? "").trim();
+        const row = Number(update?.row);
+        const col = Number(update?.col);
+        if (!sheetId) continue;
+        if (!Number.isInteger(row) || row < 0) continue;
+        if (!Number.isInteger(col) || col < 0) continue;
+
+        if (!canEditCell({ sheetId, row, col })) {
+          return false;
+        }
+      }
+      return true;
+    },
+    [canEditCell],
+  );
 
   const resolveBackend = useCallback((): TauriPivotBackend | null => {
     try {
@@ -361,12 +386,24 @@ export function PivotBuilderPanelContainer(props: Props) {
         destination: dest,
       });
 
-      const canEditCell = (doc as any).canEditCell;
-      if (typeof canEditCell === "function") {
+      if (canEditCell) {
         // Always validate at least the anchor cell; scanning everything can be expensive.
         if (!canEditCell({ sheetId: dest.sheetId, row: dest.startRow, col: dest.startCol })) {
           window.alert(t("pivotBuilder.destination.error.protected"));
           return false;
+        }
+
+        // For modest pivots, validate the full output rect so we don't partially apply updates
+        // that get filtered by `DocumentController.canEditCell`.
+        if (rect.cellCount <= 10_000) {
+          for (let r = rect.startRow; r <= rect.endRow; r += 1) {
+            for (let c = rect.startCol; c <= rect.endCol; c += 1) {
+              if (!canEditCell({ sheetId: dest.sheetId, row: r, col: c })) {
+                window.alert(t("pivotBuilder.destination.error.protected"));
+                return false;
+              }
+            }
+          }
         }
       }
 
@@ -395,7 +432,7 @@ export function PivotBuilderPanelContainer(props: Props) {
 
       return true;
     },
-    [availableFields, destinationSummary, doc, sourceRange, sourceSheetId],
+    [availableFields, canEditCell, destinationSummary, doc, sourceRange, sourceSheetId],
   );
 
   const createPivot = useCallback(
@@ -462,6 +499,11 @@ export function PivotBuilderPanelContainer(props: Props) {
           config: toRustPivotConfig(cfg) as unknown as Record<string, unknown>,
         });
 
+        if (!ensureUpdatesEditable(response.updates as any)) {
+          setActionError(t("pivotBuilder.destination.error.protected"));
+          return;
+        }
+
         doc.beginBatch({ label: "Create pivot table" });
         let committed = false;
         try {
@@ -491,6 +533,7 @@ export function PivotBuilderPanelContainer(props: Props) {
       newSheetName,
       pivotName,
       props.drainBackendSync,
+      ensureUpdatesEditable,
       resolveBackend,
       sourceRange,
       sourceSheetId,
@@ -514,6 +557,11 @@ export function PivotBuilderPanelContainer(props: Props) {
 
         const updates = await backend.refreshPivotTable(pivotId);
 
+        if (!ensureUpdatesEditable(updates as any)) {
+          setActionError(t("pivotBuilder.destination.error.protected"));
+          return;
+        }
+
         doc.beginBatch({ label: "Refresh pivot table" });
         let committed = false;
         try {
@@ -530,7 +578,7 @@ export function PivotBuilderPanelContainer(props: Props) {
         setBusy(null);
       }
     },
-    [doc, loadPivotList, props.drainBackendSync, resolveBackend],
+    [doc, ensureUpdatesEditable, loadPivotList, props.drainBackendSync, resolveBackend],
   );
 
   return (

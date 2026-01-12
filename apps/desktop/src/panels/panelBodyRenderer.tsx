@@ -175,6 +175,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
         panelId,
         body,
         <PivotBuilderPanelContainer
+          key={workbookId ?? "default"}
           getDocumentController={options.getDocumentController}
           getActiveSheetId={options.getActiveSheetId}
           getSelection={options.getSelection as any}
