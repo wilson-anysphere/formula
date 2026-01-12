@@ -407,4 +407,52 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
     expect(app.toggleAuditingPrecedents).not.toHaveBeenCalled();
     expect(app.toggleAuditingDependents).not.toHaveBeenCalled();
   });
+
+  it("uses document.execCommand for undo/redo while the formula bar is editing (range selection mode)", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    const app = {
+      undo: vi.fn(),
+      redo: vi.fn(),
+      // In this test, focus is on the grid (not an input), but the formula bar is still editing.
+      isFormulaBarEditing: vi.fn(() => true),
+      focusFormulaBar: vi.fn(),
+    } as any;
+
+    const execCommand = vi.fn(() => true);
+    const prevDocument = (globalThis as any).document;
+    (globalThis as any).document = {
+      activeElement: { tagName: "DIV", isContentEditable: false },
+      execCommand,
+    };
+
+    try {
+      registerBuiltinCommands({ commandRegistry, app, layoutController });
+      await commandRegistry.executeCommand("edit.undo");
+      await commandRegistry.executeCommand("edit.redo");
+    } finally {
+      if (prevDocument === undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (globalThis as any).document;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (globalThis as any).document = prevDocument;
+      }
+    }
+
+    expect(app.focusFormulaBar).toHaveBeenCalledTimes(2);
+    expect(execCommand).toHaveBeenCalledWith("undo", false);
+    expect(execCommand).toHaveBeenCalledWith("redo", false);
+    expect(app.undo).not.toHaveBeenCalled();
+    expect(app.redo).not.toHaveBeenCalled();
+  });
 });

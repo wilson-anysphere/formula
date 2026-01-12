@@ -134,6 +134,15 @@ export function registerBuiltinCommands(params: {
         tryExecCommand("undo");
         return;
       }
+
+      // Formula bar range selection mode can temporarily move focus back to the grid while the
+      // formula bar is still actively editing. In that case, treat undo/redo as text editing
+      // operations (Excel behavior) rather than workbook history.
+      if ((app as any).isFormulaBarEditing?.()) {
+        (app as any).focusFormulaBar?.();
+        tryExecCommand("undo");
+        return;
+      }
       app.undo();
     },
     {
@@ -149,6 +158,11 @@ export function registerBuiltinCommands(params: {
     t("command.edit.redo"),
     () => {
       if (getTextEditingTarget()) {
+        tryExecCommand("redo");
+        return;
+      }
+      if ((app as any).isFormulaBarEditing?.()) {
+        (app as any).focusFormulaBar?.();
         tryExecCommand("redo");
         return;
       }
