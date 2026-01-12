@@ -82,6 +82,26 @@ fn outer_broadcasting_spills_2d_arrays() {
 }
 
 #[test]
+fn outer_broadcasting_respects_operand_positions_for_subtraction() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SEQUENCE(2,1)-SEQUENCE(1,3)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("C2").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(0.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(-1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(-2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(0.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(-1.0));
+}
+
+#[test]
 fn outer_broadcasting_over_ranges_spills_2d_arrays() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
@@ -241,6 +261,26 @@ fn comparison_broadcasting_spills_2d_boolean_arrays() {
     assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Bool(false));
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Bool(true));
     assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Bool(false));
+}
+
+#[test]
+fn comparison_broadcasting_respects_operator_direction() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SEQUENCE(2,1)<SEQUENCE(1,3)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("C2").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Bool(false));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Bool(true));
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Bool(true));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Bool(false));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Bool(false));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Bool(true));
 }
 
 #[test]
