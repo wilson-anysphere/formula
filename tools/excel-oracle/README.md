@@ -316,14 +316,7 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset
   -SubsetCasesPath tools/excel-oracle/odd_coupon_long_stub_cases.json
 ```
 
-Example (patch only the odd-coupon basis=4 (European 30/360) scenarios):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset-with-excel.ps1 `
-  -SubsetCasesPath tools/excel-oracle/odd_coupon_basis4_cases.json
-```
-
-Example (patch only the odd-coupon schedule alignment / misalignment scenarios):
+Example (patch only the odd-coupon schedule alignment / misalignment scenarios (invalid schedule cases)):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset-with-excel.ps1 `
