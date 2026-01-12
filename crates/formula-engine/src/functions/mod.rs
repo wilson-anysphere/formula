@@ -67,6 +67,7 @@ mod builtins_statistical_ets;
 mod builtins_statistical_regression;
 mod builtins_text;
 mod builtins_text_dbcs;
+mod builtins_image;
 mod builtins_thai;
 
 // On wasm targets, `inventory` registrations can be dropped by the linker if the object file

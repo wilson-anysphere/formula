@@ -68,4 +68,5 @@ mod cube_rtd;
 mod statistical_regression;
 mod text;
 mod text_dbcs;
+mod image;
 mod thai;

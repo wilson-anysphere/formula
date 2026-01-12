@@ -1852,6 +1852,20 @@ export default {
       ]
     },
     {
+      "name": "IMAGE",
+      "min_args": 1,
+      "max_args": 5,
+      "volatility": "volatile",
+      "return_type": "any",
+      "arg_types": [
+        "text",
+        "text",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "IMAGINARY",
       "min_args": 1,
       "max_args": 1,
