@@ -12,11 +12,20 @@ use super::strings;
 // See [MS-XLS] sections:
 // - ROW: 2.4.184
 // - COLINFO: 2.4.48
+// - DIMENSIONS: 2.4.84
+// - AUTOFILTERINFO: 2.4.29
+// - FILTERMODE: 2.4.102
 // - Cell records: 2.5.14
 // - MULRK: 2.4.141
 // - MULBLANK: 2.4.140
 const RECORD_ROW: u16 = 0x0208;
 const RECORD_COLINFO: u16 = 0x007D;
+/// DIMENSIONS [MS-XLS 2.4.84]
+const RECORD_DIMENSIONS: u16 = 0x0200;
+/// AUTOFILTERINFO [MS-XLS 2.4.29]
+const RECORD_AUTOFILTERINFO: u16 = 0x009D;
+/// FILTERMODE [MS-XLS 2.4.102]
+const RECORD_FILTERMODE: u16 = 0x009B;
 const RECORD_WSBOOL: u16 = 0x0081;
 /// MERGEDCELLS [MS-XLS 2.4.139]
 const RECORD_MERGEDCELLS: u16 = 0x00E5;
@@ -33,10 +42,6 @@ const RECORD_MULRK: u16 = 0x00BD;
 const RECORD_MULBLANK: u16 = 0x00BE;
 /// HLINK [MS-XLS 2.4.110]
 const RECORD_HLINK: u16 = 0x01B8;
-/// FILTERMODE [MS-XLS 2.4.120]
-const RECORD_FILTERMODE: u16 = 0x009B;
-/// AUTOFILTERINFO [MS-XLS 2.4.25]
-const RECORD_AUTOFILTERINFO: u16 = 0x009D;
 
 // Sheet protection records (worksheet substream).
 // See [MS-XLS] sections:
@@ -117,6 +122,10 @@ pub(crate) struct SheetRowColProperties {
     pub(crate) rows: BTreeMap<u32, SheetRowProperties>,
     pub(crate) cols: BTreeMap<u32, SheetColProperties>,
     pub(crate) outline_pr: OutlinePr,
+    /// Worksheet AutoFilter range inferred from BIFF metadata.
+    pub(crate) auto_filter_range: Option<Range>,
+    /// Whether the worksheet contained a `FILTERMODE` record (indicating filtered rows).
+    pub(crate) filter_mode: bool,
     pub(crate) warnings: Vec<String>,
 }
 
@@ -522,6 +531,14 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
 ) -> Result<SheetRowColProperties, String> {
     let mut props = SheetRowColProperties::default();
 
+    // Best-effort AutoFilter metadata:
+    // - DIMENSIONS gives the sheet bounding box.
+    // - AUTOFILTERINFO contains the number of filter columns.
+    // - FILTERMODE indicates an active filter state (some rows hidden by filter).
+    let mut dimensions: Option<(u32, u32, u32, u32)> = None;
+    let mut autofilter_cols: Option<u32> = None;
+    let mut saw_autofilter_info = false;
+
     let mut saw_eof = false;
     let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
     while let Some(next) = iter.next() {
@@ -542,6 +559,32 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
         }
 
         match record.record_id {
+            // DIMENSIONS [MS-XLS 2.4.84]
+            RECORD_DIMENSIONS => {
+                let data = record.data;
+                if data.len() < 14 {
+                    continue;
+                }
+                let first_row = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                let last_row_plus1 = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+                let first_col = u16::from_le_bytes([data[8], data[9]]) as u32;
+                let last_col_plus1 = u16::from_le_bytes([data[10], data[11]]) as u32;
+                dimensions = Some((first_row, last_row_plus1, first_col, last_col_plus1));
+            }
+            // AUTOFILTERINFO [MS-XLS 2.4.29]
+            RECORD_AUTOFILTERINFO => {
+                let data = record.data;
+                saw_autofilter_info = true;
+                if data.len() < 2 {
+                    continue;
+                }
+                let cols = u16::from_le_bytes([data[0], data[1]]) as u32;
+                autofilter_cols = Some(cols);
+            }
+            // FILTERMODE [MS-XLS 2.4.102]
+            RECORD_FILTERMODE => {
+                props.filter_mode = true;
+            }
             // ROW [MS-XLS 2.4.184]
             RECORD_ROW => {
                 let data = record.data;
@@ -653,6 +696,47 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                 break;
             }
             _ => {}
+        }
+    }
+
+    // Infer the AutoFilter range when we have enough information.
+    //
+    // BIFF stores the AutoFilter state across multiple records:
+    // - `AUTOFILTERINFO` indicates the presence of an AutoFilter and the number of columns.
+    // - `FILTERMODE` indicates that some rows are currently hidden by a filter.
+    // - The sheet's `DIMENSIONS` record gives a reasonable bounding box for the filter range.
+    //
+    // Note: the canonical AutoFilter range is stored in the `_FilterDatabase` defined name, but we
+    // may not have that available. We use this DIMENSIONS-based heuristic as a best-effort
+    // approximation so the filter dropdown is preserved.
+    if props.auto_filter_range.is_none() && (saw_autofilter_info || props.filter_mode) {
+        if let Some((first_row, last_row_plus1, first_col, last_col_plus1)) = dimensions {
+            // DIMENSIONS uses "last row/col + 1" semantics.
+            if last_row_plus1 > 0 && last_col_plus1 > 0 {
+                let mut end_row = last_row_plus1.saturating_sub(1);
+                let mut end_col = last_col_plus1.saturating_sub(1);
+
+                if first_row >= EXCEL_MAX_ROWS || first_col >= EXCEL_MAX_COLS {
+                    // Ignore out-of-bounds dimensions.
+                } else {
+                    end_row = end_row.min(EXCEL_MAX_ROWS.saturating_sub(1));
+                    end_col = end_col.min(EXCEL_MAX_COLS.saturating_sub(1));
+
+                    if let Some(cols) = autofilter_cols {
+                        if cols > 0 {
+                            let last_filter_col = first_col.saturating_add(cols.saturating_sub(1));
+                            end_col = end_col.min(last_filter_col);
+                        }
+                    }
+
+                    if end_row >= first_row && end_col >= first_col {
+                        props.auto_filter_range = Some(Range::new(
+                            CellRef::new(first_row, first_col),
+                            CellRef::new(end_row, end_col),
+                        ));
+                    }
+                }
+            }
         }
     }
 

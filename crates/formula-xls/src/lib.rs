@@ -678,6 +678,28 @@ fn import_xls_path_with_biff_reader(
             {
                 apply_row_col_properties(sheet, props);
                 apply_outline_properties(sheet, props);
+
+                if let Some(range) = props.auto_filter_range {
+                    // Best-effort: preserve the AutoFilter dropdown range even though we do not yet
+                    // import BIFF AutoFilter criteria.
+                    if sheet.auto_filter.is_none() {
+                        sheet.auto_filter = Some(SheetAutoFilter {
+                            range,
+                            filter_columns: Vec::new(),
+                            sort_state: None,
+                            raw_xml: Vec::new(),
+                        });
+                    }
+                }
+
+                if props.filter_mode {
+                    // BIFF `FILTERMODE` indicates that some rows are currently hidden by a filter.
+                    // We do not yet import filter criteria or filtered row visibility, so warn to
+                    // avoid surprising data changes on import.
+                    warnings.push(ImportWarning::new(format!(
+                        "sheet `{sheet_name}` has FILTERMODE (filtered rows); filter criteria/hidden rows are not preserved on import"
+                    )));
+                }
             }
 
             if sheet.auto_filter.is_none() {
