@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T03:37:04.144727599Z",
+  "generatedAt": "2026-01-12T03:42:42.051449845Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -10,7 +10,7 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "f86cb8d3e9962d186261953c7b028bdbd27eac8025225c97d606966351741b83",
+    "sha256": "cf7ed48c681f811f605f1111dbba427dc2b2ba6787ad2bc274574f2764b09cc5",
     "count": 1390
   },
   "results": [
@@ -11843,14 +11843,14 @@
       "displayText": "a"
     },
     {
-      "caseId": "text_fmt_ab34fd8b4dbc",
+      "caseId": "text_fmt_39ce4d3dacb2",
       "outputCell": "C1",
       "result": {
         "t": "s",
-        "v": "1,234.57"
+        "v": "1235"
       },
       "address": "C1",
-      "displayText": "1,234.57"
+      "displayText": "1235"
     },
     {
       "caseId": "text_pct_a4552c585ed2",
@@ -11863,14 +11863,14 @@
       "displayText": "123%"
     },
     {
-      "caseId": "text_cur_a21571662fb7",
+      "caseId": "text_int_93ca3ade4b80",
       "outputCell": "C1",
       "result": {
         "t": "s",
-        "v": "-1.00"
+        "v": "-1"
       },
       "address": "C1",
-      "displayText": "-1.00"
+      "displayText": "-1"
     },
     {
       "caseId": "value_7b9b63be93a9",
@@ -11933,24 +11933,24 @@
       "displayText": "#VALUE!"
     },
     {
-      "caseId": "dollar_226c0db3e4ad",
+      "caseId": "dollar_dc9641302262",
       "outputCell": "C1",
       "result": {
-        "t": "s",
-        "v": "$1,234.57"
+        "t": "n",
+        "v": 0.0
       },
       "address": "C1",
-      "displayText": "$1,234.57"
+      "displayText": "0"
     },
     {
-      "caseId": "dollar_459328d3832b",
+      "caseId": "dollar_239043fc35d2",
       "outputCell": "C1",
       "result": {
-        "t": "s",
-        "v": "($1,234.57)"
+        "t": "n",
+        "v": 0.0
       },
       "address": "C1",
-      "displayText": "($1,234.57)"
+      "displayText": "0"
     },
     {
       "caseId": "date_1463a856233c",

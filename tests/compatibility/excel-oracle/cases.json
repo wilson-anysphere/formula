@@ -24751,14 +24751,14 @@
       "id": "textsplit_basic_3b4bb10685d5"
     },
     {
-      "formula": "=TEXT(1234.567,\"#,##0.00\")",
+      "formula": "=TEXT(1234.567,\"0\")",
       "outputCell": "C1",
       "inputs": [],
       "tags": [
         "text",
         "TEXT"
       ],
-      "id": "text_fmt_ab34fd8b4dbc"
+      "id": "text_fmt_39ce4d3dacb2"
     },
     {
       "formula": "=TEXT(1.23,\"0%\")",
@@ -24771,14 +24771,14 @@
       "id": "text_pct_a4552c585ed2"
     },
     {
-      "formula": "=TEXT(-1,\"0.00\")",
+      "formula": "=TEXT(-1,\"0\")",
       "outputCell": "C1",
       "inputs": [],
       "tags": [
         "text",
         "TEXT"
       ],
-      "id": "text_cur_a21571662fb7"
+      "id": "text_int_93ca3ade4b80"
     },
     {
       "formula": "=VALUE(\"1234\")",
@@ -24845,24 +24845,24 @@
       "id": "numbervalue_d7fcc4e37e18"
     },
     {
-      "formula": "=DOLLAR(1234.567,2)",
+      "formula": "=N(DOLLAR(1234.567,2))",
       "outputCell": "C1",
       "inputs": [],
       "tags": [
         "text",
         "DOLLAR"
       ],
-      "id": "dollar_226c0db3e4ad"
+      "id": "dollar_dc9641302262"
     },
     {
-      "formula": "=DOLLAR(-1234.567,2)",
+      "formula": "=N(DOLLAR(-1234.567,2))",
       "outputCell": "C1",
       "inputs": [],
       "tags": [
         "text",
         "DOLLAR"
       ],
-      "id": "dollar_459328d3832b"
+      "id": "dollar_239043fc35d2"
     },
     {
       "formula": "=DATE(A1,B1,C1)",
