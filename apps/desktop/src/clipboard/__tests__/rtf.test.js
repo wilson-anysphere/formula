@@ -43,6 +43,14 @@ test("clipboard RTF serializes named colors into a color table", () => {
   assert.match(rtf, /\\clcbpat2\b/);
 });
 
+test("clipboard RTF escapes unicode using \\\\uN? sequences", () => {
+  // Astral-plane character (surrogate pair) + BMP character.
+  const rtf = serializeCellGridToRtf([[{ value: "😀Ω" }]]);
+
+  // 😀 is two UTF-16 code units, so it should emit *two* \\u escapes.
+  assert.ok((rtf.match(/\\u-?\d+\?/g) ?? []).length >= 3);
+});
+
 test("serializeCellGridToClipboardPayload includes rtf", () => {
   const payload = serializeCellGridToClipboardPayload([[{ value: "X" }]]);
   assert.equal(typeof payload.rtf, "string");

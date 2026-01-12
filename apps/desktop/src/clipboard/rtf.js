@@ -229,15 +229,19 @@ function escapeRtfText(text) {
   const escapeSegment = (segment) => {
     /** @type {string[]} */
     const out = [];
-    for (const ch of segment) {
+    // RTF `\uN` escape values are UTF-16 code units (signed 16-bit ints), not
+    // full Unicode code points. Iterate by code unit so astral-plane characters
+    // (surrogate pairs) round-trip correctly.
+    for (let i = 0; i < segment.length; i++) {
+      const ch = segment[i];
       if (ch === "\\") out.push("\\\\");
       else if (ch === "{") out.push("\\{");
       else if (ch === "}") out.push("\\}");
       else if (ch === "\t") out.push("\\tab ");
       else {
-        const codePoint = ch.codePointAt(0) ?? 0;
-        if (codePoint <= 0x7f) out.push(ch);
-        else out.push(`\\u${toRtfUnicodeValue(codePoint)}?`);
+        const codeUnit = segment.charCodeAt(i);
+        if (codeUnit <= 0x7f) out.push(ch);
+        else out.push(`\\u${toRtfUnicodeValue(codeUnit)}?`);
       }
     }
     return out.join("");
