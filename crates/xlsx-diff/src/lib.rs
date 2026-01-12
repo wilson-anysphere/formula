@@ -572,12 +572,36 @@ fn resolve_relationship_target(rels_part: &str, target: &str) -> String {
     // Relationship targets are URIs; internal targets may include a fragment (e.g. `foo.xml#bar`).
     // OPC part names do not include fragments, so strip them before resolving.
     let target = target.split_once('#').map(|(t, _)| t).unwrap_or(&target);
+    if target.is_empty() {
+        // A target of just `#fragment` refers to the relationship source part itself.
+        return source_part_from_rels_part(rels_part);
+    }
     if let Some(rest) = target.strip_prefix('/') {
         return normalize_opc_path(rest);
     }
 
     let base_dir = rels_base_dir(rels_part);
     normalize_opc_path(&format!("{base_dir}{target}"))
+}
+
+fn source_part_from_rels_part(rels_part: &str) -> String {
+    if rels_part == "_rels/.rels" {
+        return String::new();
+    }
+
+    if let Some(rels_file) = rels_part.strip_prefix("_rels/") {
+        return normalize_opc_path(rels_file.strip_suffix(".rels").unwrap_or(rels_file));
+    }
+
+    if let Some((dir, rels_file)) = rels_part.rsplit_once("/_rels/") {
+        let rels_file = rels_file.strip_suffix(".rels").unwrap_or(rels_file);
+        if dir.is_empty() {
+            return normalize_opc_path(rels_file);
+        }
+        return normalize_opc_path(&format!("{dir}/{rels_file}"));
+    }
+
+    normalize_opc_path(rels_part.strip_suffix(".rels").unwrap_or(rels_part))
 }
 
 #[cfg(test)]
@@ -594,6 +618,15 @@ mod tests {
             resolve_relationship_target("xl/_rels/workbook.xml.rels", "/xl/media/image1.png#frag"),
             "xl/media/image1.png"
         );
+        assert_eq!(
+            resolve_relationship_target("xl/_rels/workbook.xml.rels", "#frag"),
+            "xl/workbook.xml"
+        );
+        assert_eq!(
+            resolve_relationship_target("xl/worksheets/_rels/sheet1.xml.rels", "#frag"),
+            "xl/worksheets/sheet1.xml"
+        );
+        assert_eq!(resolve_relationship_target("_rels/.rels", "#frag"), "");
     }
 }
 
