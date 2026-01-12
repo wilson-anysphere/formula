@@ -166,8 +166,13 @@ fn dump_dir_records(decompressed: &[u8]) {
             // The generic UTF-16LE heuristic will mis-decode the length prefix as a character, so
             // handle these record ids specially.
             if is_len_prefixed_unicode_record_id(id) {
-                if let Some(payload) = unicode_record_payload_len_prefixed(data) {
-                    let (cow, had_errors) = UTF_16LE.decode_without_bom_handling(payload);
+                // Prefer decoding just the payload (skipping the internal u32 length prefix) for the
+                // v3 Unicode record variants, but fall back to decoding the raw bytes if the record
+                // does not match the expected shape. This keeps the output useful even when we are
+                // pointed at non-canonical or partially malformed inputs.
+                let bytes_to_decode = unicode_record_payload_len_prefixed(data).unwrap_or(data);
+                if looks_like_utf16le(bytes_to_decode) {
+                    let (cow, had_errors) = UTF_16LE.decode_without_bom_handling(bytes_to_decode);
                     let mut s = cow.into_owned();
                     s.retain(|c| c != '\u{0000}');
                     let escaped = escape_str(&s);
