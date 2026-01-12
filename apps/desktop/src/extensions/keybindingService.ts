@@ -44,7 +44,7 @@ function shouldIgnoreTarget(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
 }
 
-const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
+export const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   // Copy/Cut/Paste (core text handling should not be overrideable by extensions).
   "ctrl+c",
   "cmd+c",

@@ -2,7 +2,13 @@ import React from "react";
 
 import type { WebExtensionManager } from "@formula/extension-marketplace";
 import type { DesktopExtensionHostManager } from "./extensionHostManager.js";
-import { buildCommandKeybindingDisplayIndex, getPrimaryCommandKeybindingDisplay } from "./keybindings.js";
+import {
+  buildCommandKeybindingDisplayIndex,
+  getPrimaryCommandKeybindingDisplay,
+  parseKeybinding,
+  type ParsedKeybinding,
+} from "./keybindings.js";
+import { DEFAULT_RESERVED_EXTENSION_SHORTCUTS } from "./keybindingService.js";
 import { showInputBox, showToast } from "./ui.js";
 
 type NetworkPolicy = {
@@ -24,6 +30,21 @@ type ContributedPanel = {
   id: string;
   title: string;
 };
+
+const RESERVED_EXTENSION_KEYBINDINGS: ParsedKeybinding[] = DEFAULT_RESERVED_EXTENSION_SHORTCUTS.map((binding) =>
+  parseKeybinding("__reserved__", binding, null),
+).filter((binding): binding is ParsedKeybinding => binding != null);
+
+function isReservedExtensionKeybinding(binding: ParsedKeybinding): boolean {
+  return RESERVED_EXTENSION_KEYBINDINGS.some(
+    (reserved) =>
+      reserved.ctrl === binding.ctrl &&
+      reserved.shift === binding.shift &&
+      reserved.alt === binding.alt &&
+      reserved.meta === binding.meta &&
+      reserved.key === binding.key,
+  );
+}
 
 function groupByExtension<T extends { extensionId: string }>(items: T[]): Map<string, T[]> {
   const map = new Map<string, T[]>();
@@ -132,9 +153,20 @@ export function ExtensionsPanel({
   const extensions = manager.host.listExtensions();
   const commands = manager.getContributedCommands() as ContributedCommand[];
   const panels = manager.getContributedPanels() as ContributedPanel[];
-  const keybindings = manager.getContributedKeybindings() as Array<{ command: string; key: string; mac?: string | null }>;
   const platform = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "mac" : "other";
-  const keybindingIndex = buildCommandKeybindingDisplayIndex({ platform, contributed: keybindings });
+  const keybindings = manager.getContributedKeybindings() as Array<{
+    command: string;
+    key: string;
+    mac?: string | null;
+    when?: string | null;
+  }>;
+  const filteredKeybindings = keybindings.filter((kb) => {
+    const raw = platform === "mac" && kb.mac ? kb.mac : kb.key;
+    const parsed = parseKeybinding(kb.command, raw, kb.when ?? null);
+    if (!parsed) return false;
+    return !isReservedExtensionKeybinding(parsed);
+  });
+  const keybindingIndex = buildCommandKeybindingDisplayIndex({ platform, contributed: filteredKeybindings });
 
   const commandsByExt = groupByExtension(commands);
   const panelsByExt = groupByExtension(panels);
@@ -337,9 +369,9 @@ export function ExtensionsPanel({
       ) : null}
 
       {extensions.map((ext: any) => {
-         const extCommands = commandsByExt.get(ext.id) ?? [];
-         const extPanels = panelsByExt.get(ext.id) ?? [];
- 
+        const extCommands = commandsByExt.get(ext.id) ?? [];
+        const extPanels = panelsByExt.get(ext.id) ?? [];
+
         const declaredPermissions = collectDeclaredPermissions(ext.manifest?.permissions);
         const declaredSet = new Set(declaredPermissions);
 

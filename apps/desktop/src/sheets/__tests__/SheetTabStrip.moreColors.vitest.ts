@@ -8,6 +8,8 @@ import { WorkbookSheetStore } from "../workbookSheetStore";
 
 afterEach(() => {
   document.body.innerHTML = "";
+  document.documentElement.style.removeProperty("--sheet-tab-red");
+  document.documentElement.style.removeProperty("--sheet-tab-gray");
   // React 18 act env flag is set per-test in `renderSheetTabStrip`.
   delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
   vi.restoreAllMocks();
@@ -97,9 +99,12 @@ describe("SheetTabStrip tab color picker", () => {
     act(() => root.unmount());
   });
 
-  it("stores palette colors as Excel/OOXML ARGB even when CSS tokens are unavailable", async () => {
-    // In jsdom there are no real CSS variables; SheetTabStrip should fall back to
-    // hardcoded hex values and still be able to convert to ARGB.
+  it("stores palette colors as Excel/OOXML ARGB when selecting a token-backed palette color", async () => {
+    // JSDOM doesn't load our CSS token stylesheets; seed the tab color tokens directly so
+    // `resolveCssVar("--sheet-tab-*")` returns a hex value.
+    document.documentElement.style.setProperty("--sheet-tab-red", "#ff0000");
+    document.documentElement.style.setProperty("--sheet-tab-gray", "#7f7f7f");
+
     const store = new WorkbookSheetStore([{ id: "s1", name: "Sheet1", visibility: "visible" }]);
     const setTabColorSpy = vi.spyOn(store, "setTabColor");
 
