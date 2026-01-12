@@ -7883,7 +7883,7 @@ export class SpreadsheetApp {
     if (updated) {
       // Keep the status/formula bar in sync once computed values arrive.
       if (this.uiReady) this.updateStatus();
-      if (shouldInvalidate && sawActiveSheet) {
+      if (this.uiReady && shouldInvalidate && sawActiveSheet) {
         if (this.sharedGrid && this.sharedProvider) {
           this.sharedProvider.invalidateDocCells({
             startRow: minRow,
