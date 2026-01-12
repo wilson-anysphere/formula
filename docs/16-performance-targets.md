@@ -102,6 +102,7 @@ For rendering, we also run the real `@formula/grid` canvas renderer under Node (
 - `gridRenderer.firstFrame.p95` (attach + resize + first frame)
 - `gridRenderer.scrollStep.p95` (scroll + frame, 1M+ rows)
 - `gridRenderer.scrollStepHorizontal.p95` (horizontal scroll + frame)
+- `gridRenderer.selectionChange.p95` (selection update + frame)
 
 These benchmarks enforce a 16ms p95 budget (60fps target).
 
