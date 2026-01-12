@@ -148,6 +148,10 @@ test.describe("Extensions UI integration", () => {
       frame.locator('meta[http-equiv="Content-Security-Policy"]'),
       "webview should inject a restrictive CSP meta tag",
     ).toHaveCount(1);
+    const cspContent = await frame.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute("content");
+    expect(cspContent).toContain("default-src 'none'");
+    expect(cspContent).toContain("connect-src 'none'");
+    expect(cspContent).toContain("frame-src 'none'");
 
     const iframeHandle = await page
       .locator('iframe[data-testid="extension-webview-sampleHello.panel"]')
