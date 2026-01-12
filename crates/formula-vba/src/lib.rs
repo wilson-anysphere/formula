@@ -247,7 +247,10 @@ fn detect_project_codepage(project_stream_bytes: &[u8]) -> Option<&'static Encod
             continue;
         }
         let digits = &line[..end];
-        let n = std::str::from_utf8(digits).ok()?.parse::<u32>().ok()?;
+        let Ok(n) = std::str::from_utf8(digits).ok()?.parse::<u32>() else {
+            // Be robust against malformed/overflowing values; continue scanning other lines.
+            continue;
+        };
         return Some(encoding_for_codepage(n));
     }
 
@@ -496,6 +499,14 @@ mod tests {
     #[test]
     fn detects_project_codepage_with_utf8_bom() {
         let bytes = b"\xEF\xBB\xBFCodePage=1251\r\n";
+        let enc = detect_project_codepage(bytes).expect("detect CodePage");
+        assert_eq!(enc, WINDOWS_1251);
+    }
+
+    #[test]
+    fn detects_project_codepage_ignores_overflowing_values() {
+        // A malicious/invalid CodePage line shouldn't prevent us from finding a later valid one.
+        let bytes = b"CodePage=99999999999999999999999999999999\r\nCodePage=1251\r\n";
         let enc = detect_project_codepage(bytes).expect("detect CodePage");
         assert_eq!(enc, WINDOWS_1251);
     }
