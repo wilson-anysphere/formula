@@ -9,7 +9,6 @@ const __dirname = path.dirname(__filename);
 const desktopDir = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(desktopDir, "../..");
 
-const DESKTOP_TAURI_PACKAGE = "formula-desktop-tauri";
 const DESKTOP_BINARY_NAME = "formula-desktop";
 
 function run(
@@ -41,11 +40,42 @@ function desktopBinaryPath() {
   return path.join(repoRoot, "target", "release", exe);
 }
 
+function desktopCargoPackageName() {
+  // The desktop Tauri crate was historically named `formula-desktop-tauri` and is now `desktop`.
+  // Read the name from Cargo.toml so this script works across renames (and in forks).
+  const cargoTomlPath = path.join(desktopDir, "src-tauri", "Cargo.toml");
+  let cargoToml;
+  try {
+    cargoToml = fs.readFileSync(cargoTomlPath, "utf8");
+  } catch {
+    return "desktop";
+  }
+
+  const lines = cargoToml.split(/\r?\n/);
+  let inPackage = false;
+  for (const line of lines) {
+    if (/^\s*\[package\]\s*$/.test(line)) {
+      inPackage = true;
+      continue;
+    }
+    if (inPackage && /^\s*\[/.test(line)) {
+      inPackage = false;
+    }
+    if (!inPackage) continue;
+
+    const m = line.match(/^\s*name\s*=\s*"([^"]+)"\s*$/);
+    if (m) return m[1];
+  }
+
+  return "desktop";
+}
+
 async function cargoBuildDesktopBinary() {
+  const desktopPackage = desktopCargoPackageName();
   const cargoArgs = [
     "build",
     "-p",
-    DESKTOP_TAURI_PACKAGE,
+    desktopPackage,
     "--features",
     "desktop",
     "--bin",
@@ -94,7 +124,7 @@ async function main() {
 
   let runCmd = binary;
   let runArgs = args;
-  if (process.platform === "linux") {
+  if (process.platform === "linux" && (!process.env.DISPLAY || process.env.CI)) {
     // Ensure we have a virtual display in CI/headless environments.
     runCmd = path.join(repoRoot, "scripts", "xvfb-run-safe.sh");
     runArgs = [binary, ...args];
