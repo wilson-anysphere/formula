@@ -65,6 +65,11 @@ Build the native desktop application shell using **Tauri**. Handle system integr
 1. **File associations:** Double-click `.xlsx` opens Formula
 2. **Native dialogs:** Open/save file dialogs
 3. **Clipboard:** Rich clipboard support (HTML, RTF, images)
+   - Frontend entry point: `apps/desktop/src/clipboard/platform/provider.js`
+   - Desktop prefers custom Rust IPC commands `clipboard_read` / `clipboard_write` (multi-format),
+     with fallbacks to `navigator.clipboard` and legacy `globalThis.__TAURI__.clipboard.readText` / `writeText`.
+   - Supported formats: `text/plain`, `text/html`, `text/rtf`, `image/png`.
+   - PNG over IPC is transported as `pngBase64` (raw base64, no `data:image/png;base64,` prefix).
 4. **Drag and drop:** Files and data
 5. **System tray:** Background sync indicator
 6. **Global shortcuts:** Capture shortcuts even when unfocused
@@ -122,6 +127,11 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
   ]
 }
 ```
+
+Note: `clipboard:allow-read-text` / `clipboard:allow-write-text` only grant access to the legacy plain-text
+clipboard helpers (`globalThis.__TAURI__.clipboard.readText` / `writeText`). Rich clipboard formats
+(HTML/RTF/PNG) are handled via custom Rust commands and must be added to the `core:allow-invoke` allowlist
+when used.
 
 If you add new desktop IPC surface area, you must update the capability allowlists:
 
