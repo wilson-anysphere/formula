@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use quick_xml::events::{BytesEnd, BytesStart, Event};
 use quick_xml::{Reader as XmlReader, Writer as XmlWriter};
@@ -108,12 +108,13 @@ fn insert_relationships_before_close(
         crate::openxml::local_name(name)
     }
 
-    fn prefixed_tag(container_name: &[u8], local: &str) -> String {
-        match container_name.iter().position(|&b| b == b':') {
-            Some(idx) => {
-                let prefix = std::str::from_utf8(&container_name[..idx]).unwrap_or_default();
-                format!("{prefix}:{local}")
-            }
+    fn element_prefix(name: &[u8]) -> Option<&[u8]> {
+        name.iter().rposition(|b| *b == b':').map(|idx| &name[..idx])
+    }
+
+    fn prefixed_tag(prefix: Option<&str>, local: &str) -> String {
+        match prefix {
+            Some(prefix) => format!("{prefix}:{local}"),
             None => local.to_string(),
         }
     }
@@ -123,35 +124,79 @@ fn insert_relationships_before_close(
     let mut writer = XmlWriter::new(Vec::with_capacity(xml.len() + (to_insert.len() * 128)));
     let mut buf = Vec::new();
 
-    let mut relationship_tag_name: Option<String> = None;
+    let mut root_prefix: Option<String> = None;
+    let mut root_has_default_ns = false;
+    let mut root_declared_prefixes: HashSet<String> = HashSet::new();
+    let mut relationship_prefix: Option<String> = None;
 
     loop {
         let event = reader
             .read_event_into(&mut buf)
             .map_err(|e| ChartExtractionError::XmlStructure(format!("{part_name}: {e}")))?;
         match event {
+            Event::Start(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") => {
+                if root_prefix.is_none() {
+                    root_prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                }
+                if !root_has_default_ns || root_declared_prefixes.is_empty() {
+                    for attr in e.attributes() {
+                        let attr = attr.map_err(|e| {
+                            ChartExtractionError::XmlStructure(format!("{part_name}: {e}"))
+                        })?;
+                        let key = attr.key.as_ref();
+                        if key == b"xmlns" && attr.value.as_ref() == PACKAGE_REL_NS.as_bytes() {
+                            root_has_default_ns = true;
+                        } else if let Some(prefix) = key.strip_prefix(b"xmlns:") {
+                            if attr.value.as_ref() == PACKAGE_REL_NS.as_bytes() {
+                                if let Ok(prefix) = std::str::from_utf8(prefix) {
+                                    root_declared_prefixes.insert(prefix.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+                writer
+                    .write_event(Event::Start(e))
+                    .map_err(|e| ChartExtractionError::XmlStructure(format!("{part_name}: {e}")))?;
+            }
             Event::Start(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") => {
-                if relationship_tag_name.is_none() {
-                    relationship_tag_name =
-                        Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                if relationship_prefix.is_none() {
+                    relationship_prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
                 }
                 writer
                     .write_event(Event::Start(e))
                     .map_err(|e| ChartExtractionError::XmlStructure(format!("{part_name}: {e}")))?;
             }
             Event::Empty(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") => {
-                if relationship_tag_name.is_none() {
-                    relationship_tag_name =
-                        Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                if relationship_prefix.is_none() {
+                    relationship_prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
                 }
                 writer
                     .write_event(Event::Empty(e))
                     .map_err(|e| ChartExtractionError::XmlStructure(format!("{part_name}: {e}")))?;
             }
             Event::End(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") => {
-                let relationship_tag_name = relationship_tag_name
-                    .clone()
-                    .unwrap_or_else(|| prefixed_tag(e.name().as_ref(), "Relationship"));
+                let prefix = relationship_prefix
+                    .as_deref()
+                    // Only reuse the existing Relationship element prefix if it is declared on the
+                    // root element. Otherwise, we could emit a new sibling with an out-of-scope
+                    // prefix (invalid XML), e.g. if the input declares `xmlns:pr` on each
+                    // `<pr:Relationship>` element instead of the root.
+                    .filter(|p| root_declared_prefixes.contains(*p))
+                    .or_else(|| {
+                        if root_has_default_ns {
+                            None
+                        } else {
+                            root_prefix.as_deref()
+                        }
+                    });
+                let relationship_tag_name = prefixed_tag(prefix, "Relationship");
 
                 for rel in to_insert {
                     let mut e = BytesStart::new(relationship_tag_name.as_str());
@@ -172,9 +217,39 @@ fn insert_relationships_before_close(
             }
             Event::Empty(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") => {
                 let root_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                let relationship_tag_name = relationship_tag_name
-                    .clone()
-                    .unwrap_or_else(|| prefixed_tag(root_name.as_bytes(), "Relationship"));
+                if root_prefix.is_none() {
+                    root_prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                }
+                if !root_has_default_ns || root_declared_prefixes.is_empty() {
+                    for attr in e.attributes() {
+                        let attr = attr.map_err(|e| {
+                            ChartExtractionError::XmlStructure(format!("{part_name}: {e}"))
+                        })?;
+                        let key = attr.key.as_ref();
+                        if key == b"xmlns" && attr.value.as_ref() == PACKAGE_REL_NS.as_bytes() {
+                            root_has_default_ns = true;
+                        } else if let Some(prefix) = key.strip_prefix(b"xmlns:") {
+                            if attr.value.as_ref() == PACKAGE_REL_NS.as_bytes() {
+                                if let Ok(prefix) = std::str::from_utf8(prefix) {
+                                    root_declared_prefixes.insert(prefix.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+                let prefix = relationship_prefix
+                    .as_deref()
+                    .filter(|p| root_declared_prefixes.contains(*p))
+                    .or_else(|| {
+                        if root_has_default_ns {
+                            None
+                        } else {
+                            root_prefix.as_deref()
+                        }
+                    });
+                let relationship_tag_name = prefixed_tag(prefix, "Relationship");
 
                 writer
                     .write_event(Event::Start(e))
@@ -286,6 +361,53 @@ mod tests {
         assert!(
             updated_str.contains(r#"<pr:Relationship Id="rId2""#),
             "expected inserted <pr:Relationship>, got:\n{updated_str}"
+        );
+        assert!(
+            !updated_str.contains("<Relationship"),
+            "should not introduce unprefixed <Relationship> tags in prefix-only .rels, got:\n{updated_str}"
+        );
+    }
+
+    #[test]
+    fn ensure_rels_does_not_reuse_out_of_scope_relationship_prefix() {
+        // This `.rels` is valid XML: the existing `<x:Relationship>` element declares its prefix
+        // on itself instead of the root. When inserting new siblings, we must not reuse that
+        // out-of-scope `x:` prefix, or we'd produce invalid XML.
+        let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pr:Relationships xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships">
+  <x:Relationship xmlns:x="http://schemas.openxmlformats.org/package/2006/relationships" Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</pr:Relationships>"#;
+
+        let (updated, _) = ensure_rels_has_relationships(
+            Some(rels_xml),
+            "xl/_rels/workbook.xml.rels",
+            "xl/workbook.xml",
+            "http://schemas.microsoft.com/office/2006/relationships/vbaProject",
+            &[RelationshipStub {
+                rel_id: "rId2".to_string(),
+                target: "vbaProject.bin".to_string(),
+            }],
+        )
+        .expect("repair rels");
+
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        // Must still be valid XML.
+        let doc = roxmltree::Document::parse(updated_str).unwrap();
+        let inserted = doc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "Relationship" && n.attribute("Id") == Some("rId2"))
+            .expect("inserted relationship");
+        assert_eq!(inserted.tag_name().namespace(), Some(PACKAGE_REL_NS));
+
+        // Must use the root prefix (`pr:`), since `x:` is not in scope at the insertion point.
+        assert!(
+            updated_str.contains(r#"<pr:Relationship Id="rId2""#),
+            "expected inserted <pr:Relationship>, got:\n{updated_str}"
+        );
+        assert!(
+            !updated_str.contains(r#"<x:Relationship Id="rId2""#),
+            "should not reuse out-of-scope Relationship prefix, got:\n{updated_str}"
         );
         assert!(
             !updated_str.contains("<Relationship"),
