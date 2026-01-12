@@ -78,6 +78,8 @@ import {
 } from "./power-query/service.js";
 import { createPowerQueryRefreshStateStore } from "./power-query/refreshStateStore.js";
 import { createClipboardProvider } from "./clipboard/platform/provider.js";
+import { createDesktopDlpContext } from "./dlp/desktopDlp.js";
+import { enforceClipboardCopy } from "./dlp/enforceClipboardCopy.js";
 import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
 import { openFormatCellsDialog } from "./formatting/openFormatCellsDialog.js";
 import { DesktopExtensionHostManager } from "./extensions/extensionHostManager.js";
@@ -2313,6 +2315,43 @@ if (
 
   let extensionPanelBridge: ExtensionPanelBridge | null = null;
 
+  type ExtensionClipboardSelectionContext = {
+    sheetId: string;
+    startRow: number;
+    startCol: number;
+    endRow: number;
+    endCol: number;
+    timestampMs: number;
+  };
+
+  // Extensions can read selection values via `formula.cells.getSelection()` and then write arbitrary
+  // text to the system clipboard via `formula.clipboard.writeText()`. SpreadsheetApp's copy/cut
+  // handlers already enforce clipboard-copy DLP, but extensions would otherwise bypass it.
+  //
+  // Track the last selection returned to extensions and enforce clipboard-copy DLP on clipboard
+  // writes that occur shortly afterwards.
+  const extensionClipboardDlp = createDesktopDlpContext({ documentId: workbookId });
+  let lastExtensionSelection: ExtensionClipboardSelectionContext | null = null;
+
+  const clearLastExtensionSelection = () => {
+    lastExtensionSelection = null;
+  };
+
+  const normalizeSelectionRange = (range: { startRow: number; startCol: number; endRow: number; endCol: number }) => {
+    const startRow = Math.min(range.startRow, range.endRow);
+    const endRow = Math.max(range.startRow, range.endRow);
+    const startCol = Math.min(range.startCol, range.endCol);
+    const endCol = Math.max(range.startCol, range.endCol);
+    return { startRow, startCol, endRow, endCol };
+  };
+
+  const recordLastExtensionSelection = (
+    sheetId: string,
+    range: { startRow: number; startCol: number; endRow: number; endCol: number },
+  ) => {
+    lastExtensionSelection = { sheetId, ...range, timestampMs: Date.now() };
+  };
+
   // The desktop UI is used both inside the Tauri shell and as a pure-web fallback (e2e, local dev).
   // Only expose real workbook lifecycle operations to extensions when the Tauri bridge is present;
   // otherwise let BrowserExtensionHost fall back to its in-memory stub workbook implementation.
@@ -2414,7 +2453,10 @@ if (
     },
     async getSelection() {
       const sheetId = app.getCurrentSheetId();
-      const range = app.getSelectionRanges()[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
+      const range = normalizeSelectionRange(
+        app.getSelectionRanges()[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
+      );
+      recordLastExtensionSelection(sheetId, range);
       const values: Array<Array<string | number | boolean | null>> = [];
       for (let r = range.startRow; r <= range.endRow; r++) {
         const row: Array<string | number | boolean | null> = [];
@@ -2537,8 +2579,23 @@ if (
         return text ?? "";
       },
       writeText: async (text: string) => {
+        const selection = lastExtensionSelection;
+        if (selection && Date.now() - selection.timestampMs <= 2000) {
+          enforceClipboardCopy({
+            documentId: extensionClipboardDlp.documentId,
+            sheetId: selection.sheetId,
+            range: {
+              start: { row: selection.startRow, col: selection.startCol },
+              end: { row: selection.endRow, col: selection.endCol },
+            },
+            classificationStore: extensionClipboardDlp.classificationStore,
+            policy: extensionClipboardDlp.policy,
+          });
+        }
+
         const provider = await clipboardProviderPromise;
         await provider.write({ text: String(text ?? "") });
+        clearLastExtensionSelection();
       },
     },
     uiApi: {

@@ -28,6 +28,7 @@ async function grantSampleHelloPermissions(page: Page): Promise<void> {
       "ui.panels": true,
       "cells.read": true,
       "cells.write": true,
+      clipboard: true,
     };
 
     localStorage.setItem(key, JSON.stringify(existing));
@@ -151,6 +152,7 @@ test.describe("Extensions UI integration", () => {
   test("writes selection sum to the real clipboard via formula.clipboard.writeText", async ({ page }) => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     await gotoDesktop(page);
+    await grantSampleHelloPermissions(page);
 
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -176,6 +178,81 @@ test.describe("Extensions UI integration", () => {
     await expect
       .poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).trim()), { timeout: 10_000 })
       .toBe("1010");
+  });
+
+  test("blocks sampleHello.copySumToClipboard when the selection is Restricted by DLP", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await gotoDesktop(page);
+    await grantSampleHelloPermissions(page);
+
+    const sentinel = `sentinel-${Date.now()}`;
+    await page.evaluate(async (text) => {
+      try {
+        await navigator.clipboard.writeText(text);
+        return;
+      } catch {
+        // Fall back to legacy DOM copy.
+      }
+
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      textarea.style.top = "0";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const ok = document.execCommand("copy");
+      textarea.remove();
+      if (!ok) throw new Error("Failed to seed clipboard with sentinel text");
+    }, sentinel);
+
+    const workbookId = "local-workbook";
+
+    await page.evaluate((docId) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+
+      doc.setCellValue(sheetId, { row: 0, col: 0 }, 1);
+      doc.setCellValue(sheetId, { row: 0, col: 1 }, 2);
+      doc.setCellValue(sheetId, { row: 1, col: 0 }, 3);
+      doc.setCellValue(sheetId, { row: 1, col: 1 }, 4);
+
+      app.selectRange({
+        sheetId,
+        range: { startRow: 0, startCol: 0, endRow: 1, endCol: 1 },
+      });
+
+      const record = {
+        selector: {
+          scope: "range",
+          documentId: docId,
+          sheetId,
+          range: { start: { row: 0, col: 0 }, end: { row: 1, col: 1 } },
+        },
+        classification: { level: "Restricted" },
+        updatedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(`dlp:classifications:${docId}`, JSON.stringify([record]));
+    }, workbookId);
+
+    await page.getByTestId("open-extensions-panel").click();
+    const copyBtn = page.getByTestId("run-command-sampleHello.copySumToClipboard");
+    await expect(copyBtn).toBeVisible({ timeout: 30_000 });
+    await copyBtn.dispatchEvent("click");
+
+    await expect(page.getByTestId("toast-root")).toContainText(
+      "Clipboard copy is blocked by your organization's data loss prevention policy",
+    );
+    await expect(page.getByTestId("toast-root")).toContainText("Restricted");
+    await expect(page.getByTestId("toast-root")).toContainText("Confidential");
+
+    await expect
+      .poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).trim()), { timeout: 10_000 })
+      .toBe(sentinel);
   });
 
   test("persists an extension panel in the layout and re-activates it after reload", async ({ page }) => {
