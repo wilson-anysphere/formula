@@ -688,13 +688,20 @@ export function bindYjsToDocumentController(options) {
         return normalizeSheetViewState(json);
       }
 
-      // Back-compat: legacy top-level frozen rows/cols.
+      // Back-compat: legacy top-level sheet view fields.
+      //
+      // Officially only `frozenRows`/`frozenCols` were used outside `view`, but be generous
+      // and also accept `colWidths`/`rowHeights` in case older clients stored them similarly.
       const frozenRows = sheetMap.get("frozenRows");
       const frozenCols = sheetMap.get("frozenCols");
-      if (frozenRows !== undefined || frozenCols !== undefined) {
+      const colWidths = sheetMap.get("colWidths");
+      const rowHeights = sheetMap.get("rowHeights");
+      if (frozenRows !== undefined || frozenCols !== undefined || colWidths !== undefined || rowHeights !== undefined) {
         return normalizeSheetViewState({
           frozenRows: yjsValueToJson(frozenRows) ?? 0,
           frozenCols: yjsValueToJson(frozenCols) ?? 0,
+          colWidths: yjsValueToJson(colWidths),
+          rowHeights: yjsValueToJson(rowHeights),
         });
       }
 
@@ -713,8 +720,10 @@ export function bindYjsToDocumentController(options) {
 
       const frozenRows = sheetEntry.frozenRows;
       const frozenCols = sheetEntry.frozenCols;
-      if (frozenRows !== undefined || frozenCols !== undefined) {
-        return normalizeSheetViewState({ frozenRows, frozenCols });
+      const colWidths = sheetEntry.colWidths;
+      const rowHeights = sheetEntry.rowHeights;
+      if (frozenRows !== undefined || frozenCols !== undefined || colWidths !== undefined || rowHeights !== undefined) {
+        return normalizeSheetViewState({ frozenRows, frozenCols, colWidths, rowHeights });
       }
     }
 

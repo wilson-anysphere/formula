@@ -122,6 +122,35 @@ test("binder: hydrates sheet view state from plain-object Yjs sheet entries", as
   }
 });
 
+test("binder: hydrates sheet view state from legacy top-level frozenRows/frozenCols fields", async () => {
+  const ydoc = new Y.Doc();
+  const sheets = ydoc.getArray("sheets");
+  ydoc.transact(() => {
+    const entry = new Y.Map();
+    entry.set("id", "Sheet1");
+    entry.set("name", "Sheet1");
+    // Legacy format: view fields stored at the top-level.
+    entry.set("frozenRows", 2);
+    entry.set("frozenCols", 1);
+    sheets.push([entry]);
+  });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({ ydoc, documentController, defaultSheetId: "Sheet1" });
+
+  try {
+    await waitForCondition(() => {
+      const view = documentController.getSheetView("Sheet1");
+      return view.frozenRows === 2 && view.frozenCols === 1;
+    });
+
+    assert.deepEqual(documentController.getSheetView("Sheet1"), { frozenRows: 2, frozenCols: 1 });
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+  }
+});
+
 test("binder: applies view state when sheet id is set after view", async () => {
   const ydoc = new Y.Doc();
   const sheets = ydoc.getArray("sheets");
