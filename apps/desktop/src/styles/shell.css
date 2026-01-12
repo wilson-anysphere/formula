@@ -195,6 +195,11 @@ dialog.page-setup-dialog::backdrop {
 
 .cell-editor {
   position: absolute;
+  /* Hidden by default; .cell-editor--open controls visibility. */
+  display: none;
+  /* Ensure the editor sits above canvas overlay layers (selection, charts, etc),
+     especially in shared-grid mode where canvases are explicitly z-indexed. */
+  z-index: 10;
   box-sizing: border-box;
   padding: 2px 4px;
   border: 2px solid var(--accent);
@@ -209,6 +214,10 @@ dialog.page-setup-dialog::backdrop {
   background: var(--bg-primary);
   color: var(--text-primary);
   overflow: hidden;
+}
+
+.cell-editor.cell-editor--open {
+  display: block;
 }
 
 /* --- Sheet tabs ---------------------------------------------------------- */
