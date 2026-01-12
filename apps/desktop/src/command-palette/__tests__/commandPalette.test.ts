@@ -118,6 +118,39 @@ describe("command-palette/recents", () => {
     expect(readCommandRecents(storage)).toEqual([]);
   });
 
+  test("commands that throw non-Error values (e.g. undefined) are not recorded", async () => {
+    const storage = new MemoryStorage();
+    const commandRegistry = new CommandRegistry();
+    commandRegistry.registerBuiltinCommand("cmd.fail", "Fail", () => {
+      // eslint-disable-next-line no-throw-literal
+      throw undefined;
+    });
+
+    installCommandRecentsTracker(commandRegistry, storage, { now: () => 1234 });
+
+    await expect(commandRegistry.executeCommand("cmd.fail")).rejects.toBeUndefined();
+    expect(readCommandRecents(storage)).toEqual([]);
+  });
+
+  test("install prunes ignored commands from existing storage", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      COMMAND_RECENTS_STORAGE_KEY,
+      JSON.stringify([
+        { commandId: "clipboard.copy", lastUsedMs: 2, count: 1 },
+        { commandId: "cmd.normal", lastUsedMs: 1, count: 1 },
+      ]),
+    );
+    const commandRegistry = new CommandRegistry();
+
+    installCommandRecentsTracker(commandRegistry, storage, {
+      ignoreCommandIds: ["clipboard.copy"],
+      now: () => 1234,
+    });
+
+    expect(readCommandRecents(storage).map((e) => e.commandId)).toEqual(["cmd.normal"]);
+  });
+
   test("migrates legacy storage key into the new schema (one-time)", () => {
     const storage = new MemoryStorage();
     storage.setItem(LEGACY_COMMAND_RECENTS_STORAGE_KEY, JSON.stringify(["cmd.a", "cmd.b"]));

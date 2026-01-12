@@ -145,14 +145,28 @@ export function installCommandRecentsTracker(
   options: { maxEntries?: number; now?: () => number; storageKey?: string; ignoreCommandIds?: readonly string[] } = {},
 ): () => void {
   const now = options.now ?? (() => Date.now());
-  const ignore = new Set((options.ignoreCommandIds ?? []).map((id) => String(id)));
+  const ignore = new Set((options.ignoreCommandIds ?? []).map((id) => String(id).trim()).filter(Boolean));
+  const storageKey = options.storageKey ?? COMMAND_RECENTS_STORAGE_KEY;
 
   // Best-effort, one-time migration from the legacy recents key.
   // We only migrate when the new key has no entries yet, so it is idempotent.
   try {
-    const existing = readCommandRecents(storage, { storageKey: options.storageKey });
+    let existing = readCommandRecents(storage, { storageKey });
+
+    // If the ignore list changes over time (e.g. we start ignoring clipboard commands),
+    // drop ignored entries eagerly so the "RECENT" group stays useful immediately after update.
+    if (ignore.size > 0 && existing.length > 0) {
+      const filtered = existing.filter((entry) => !ignore.has(entry.commandId));
+      if (filtered.length !== existing.length) {
+        writeCommandRecents(storage, filtered, { storageKey });
+        existing = filtered;
+      }
+    }
+
     if (existing.length === 0) {
-      const legacyIds = safeParseLegacyRecents(storage.getItem(LEGACY_COMMAND_RECENTS_STORAGE_KEY));
+      const legacyIds = safeParseLegacyRecents(storage.getItem(LEGACY_COMMAND_RECENTS_STORAGE_KEY)).filter(
+        (id) => !ignore.has(id),
+      );
       if (legacyIds.length > 0) {
         const limit = Number.isFinite(options.maxEntries)
           ? Math.max(0, options.maxEntries ?? DEFAULT_COMMAND_RECENTS_MAX_ENTRIES)
@@ -163,7 +177,7 @@ export function installCommandRecentsTracker(
           lastUsedMs: nowMs,
           count: 1,
         }));
-        if (migrated.length > 0) writeCommandRecents(storage, migrated, { storageKey: options.storageKey });
+        if (migrated.length > 0) writeCommandRecents(storage, migrated, { storageKey });
       }
     }
   } catch {
@@ -172,11 +186,13 @@ export function installCommandRecentsTracker(
 
   return commandRegistry.onDidExecuteCommand((evt) => {
     if (ignore.has(evt.commandId)) return;
-    if (evt.error != null) return;
+    // The registry only includes `error` on failure, but use property presence (not value)
+    // so `throw undefined` doesn't accidentally count as a successful execution.
+    if ("error" in evt) return;
     recordCommandRecent(storage, evt.commandId, {
       maxEntries: options.maxEntries,
       nowMs: now(),
-      storageKey: options.storageKey,
+      storageKey,
     });
   });
 }
