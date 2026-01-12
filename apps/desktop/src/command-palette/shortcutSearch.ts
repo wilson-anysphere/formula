@@ -45,6 +45,52 @@ type ShortcutSearchLimits = {
   maxResultsPerCategory: number;
 };
 
+const SHORTCUT_TOKEN_SYNONYMS: Record<string, string> = {
+  // Modifiers.
+  cmd: "cmd",
+  command: "cmd",
+  meta: "cmd",
+  win: "cmd",
+  super: "cmd",
+
+  shift: "shift",
+
+  ctrl: "ctrl",
+  control: "ctrl",
+
+  alt: "alt",
+  option: "alt",
+  opt: "alt",
+
+  // Common keys.
+  esc: "escape",
+  escape: "escape",
+  return: "enter",
+  enter: "enter",
+  tab: "tab",
+  space: "space",
+  spacebar: "space",
+  del: "delete",
+  delete: "delete",
+  backspace: "backspace",
+
+  // Arrows.
+  up: "up",
+  arrowup: "up",
+  down: "down",
+  arrowdown: "down",
+  left: "left",
+  arrowleft: "left",
+  right: "right",
+  arrowright: "right",
+
+  // Paging keys.
+  pageup: "pageup",
+  pgup: "pageup",
+  pagedown: "pagedown",
+  pgdn: "pagedown",
+};
+
 function normalizeQuery(query: string): string {
   return String(query ?? "")
     .trim()
@@ -61,9 +107,14 @@ function extractShortcutTokens(text: string): string[] {
   const tokens: string[] = [];
   let buffer = "";
 
+  const normalizeToken = (token: string): string => {
+    const lower = token.toLowerCase();
+    return SHORTCUT_TOKEN_SYNONYMS[lower] ?? lower;
+  };
+
   const flush = () => {
     if (!buffer) return;
-    tokens.push(buffer.toLowerCase());
+    tokens.push(normalizeToken(buffer));
     buffer = "";
   };
 
@@ -71,7 +122,7 @@ function extractShortcutTokens(text: string): string[] {
     const mapped = SHORTCUT_SYMBOL_TOKENS[ch];
     if (mapped) {
       flush();
-      tokens.push(mapped);
+      tokens.push(normalizeToken(mapped));
       continue;
     }
 

@@ -45,5 +45,13 @@ describe("command-palette shortcut search", () => {
     expect(searchShortcutCommands({ commands, keybindingIndex, query: "cmd+shift+p" }).map((c) => c.commandId)).toEqual([
       "workbench.showCommandPalette",
     ]);
+
+    expect(searchShortcutCommands({ commands, keybindingIndex, query: "command+shift+p" }).map((c) => c.commandId)).toEqual([
+      "workbench.showCommandPalette",
+    ]);
+
+    expect(searchShortcutCommands({ commands, keybindingIndex, query: "meta shift p" }).map((c) => c.commandId)).toEqual([
+      "workbench.showCommandPalette",
+    ]);
   });
 });
