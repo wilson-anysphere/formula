@@ -1012,7 +1012,7 @@ The desktop app implements a minimal "Trust Center" policy layer for VBA macro e
 - `blocked`: macros never run.
 - `trusted_once` / `trusted_always`: macros run based on a workbook fingerprint allow-list.
 - `trusted_signed_only`: macros run **only** when the workbook's VBA project signature is
-  **cryptographically verified**.
+  **cryptographically verified and bound** to the VBA project contents (MS-OVBA project digest).
 
 Important notes:
 
@@ -1023,10 +1023,9 @@ Important notes:
   publisher). This can be extended in the future with an explicit `untrusted` state.
 - We also attempt to re-compute the MS-OVBA "project digest" and compare it to the signed digest
   stored inside the signature stream (binding the signature to the VBA project streams). This is
-  currently best-effort and exposed via `formula-vba` as `VbaDigitalSignature::binding`, and helps
-  detect cases where a signature blob verifies internally but the VBA project bytes have been
-  modified. The desktop Trust Center currently gates `trusted_signed_only` on PKCS#7 verification
-  status; it can be tightened to also require `binding == Bound` (closer to Excel).
+  currently best-effort and exposed via `formula-vba` as `VbaDigitalSignature::binding`. The desktop
+  Trust Center treats a VBA project as \"signed\" only when the PKCS#7/CMS signature verifies **and**
+  the digest binding check reports `Bound`.
 
 #### VBA digital signatures: stream location, payload variants, and digest binding
 
@@ -1064,17 +1063,18 @@ How to obtain the signed digest for MS-OVBA “project digest” binding:
   - digest algorithm (hash OID)
   - digest bytes
 
-Binding plan (future tightening; see MS-OVBA):
+Binding (best-effort; see MS-OVBA):
 
-1. Compute the MS-OVBA “VBA project digest” over the project streams (excluding the signature
+1. Compute the MS-OVBA-style “VBA project digest” over the project streams (excluding the signature
    streams), using the hash algorithm indicated by the extracted `DigestInfo`.
 2. Compare the computed digest to the `DigestInfo` digest bytes.
+3. `trusted_signed_only` is treated as satisfied only when:
+   - the PKCS#7/CMS signature verifies (`SignedVerified`), **and**
+   - the digest comparison matches (`VbaSignatureBinding::Bound`).
 
-Trust Center enforcement (future work):
-
-- Only treat `trusted_signed_only` as satisfied if:
-  - the PKCS#7/CMS signature verifies, **and**
-  - the digest comparison matches (signature is bound to the project contents).
+If the PKCS#7/CMS signature verifies but the digest comparison fails, the signature is treated as
+present-but-invalid for Trust Center purposes. If binding cannot be verified (`Unknown`), it is
+treated conservatively as unverified.
 
 For more detail, see [`vba-digital-signatures.md`](./vba-digital-signatures.md).
 
