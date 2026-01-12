@@ -1782,8 +1782,8 @@ export class SpreadsheetApp {
    * "formula-bar-driven navigation" workflows while the user is selecting ranges
    * across sheets.
    */
-  focusFormulaBar(): void {
-    this.formulaBar?.focus();
+  focusFormulaBar(opts: { cursor?: "end" | "all" } = {}): void {
+    this.formulaBar?.focus(opts);
   }
 
   /**
@@ -1948,10 +1948,6 @@ export class SpreadsheetApp {
     // UX flows; avoid double-refreshing by calling the underlying mutation directly here.
     this.clearSelectionContentsInternal();
     this.refresh();
-  }
-
-  focusFormulaBar(opts: { cursor?: "end" | "all" } = {}): void {
-    this.formulaBar?.focus(opts);
   }
 
   setFormulaBarDraft(text: string, opts: { cursorStart?: number; cursorEnd?: number } = {}): void {
