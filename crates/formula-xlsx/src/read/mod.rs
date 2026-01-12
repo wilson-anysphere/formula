@@ -2603,6 +2603,7 @@ mod tests {
 
     use formula_model::CellRef;
     use formula_model::CellValue;
+    use formula_model::ErrorValue;
 
     use super::load_from_bytes;
 
@@ -2683,6 +2684,70 @@ mod tests {
             .expect("expected cell meta entry for A1 after set_cell_formula(None)");
         assert_eq!(meta.cm.as_deref(), Some("7"));
         assert_eq!(meta.vm.as_deref(), Some("9"));
+    }
+
+    #[test]
+    fn set_cell_value_clears_vm_when_cell_value_is_not_rich_value_placeholder() {
+        let mut workbook = formula_model::Workbook::new();
+        let sheet_id = workbook.add_sheet("Sheet1".to_string()).unwrap();
+        let sheet = workbook.sheet_mut(sheet_id).expect("sheet exists");
+        let a1 = CellRef::from_a1("A1").unwrap();
+        sheet.set_value(a1, CellValue::Number(1.0));
+
+        let mut doc = crate::XlsxDocument::new(workbook);
+        doc.meta.cell_meta.insert(
+            (sheet_id, a1),
+            crate::CellMeta {
+                vm: Some("1".to_string()),
+                cm: Some("2".to_string()),
+                ..Default::default()
+            },
+        );
+
+        // Keep the cell value unchanged so `value_changed` stays false and we exercise the
+        // placeholder retention logic in `set_cell_value`.
+        doc.set_cell_value(sheet_id, a1, CellValue::Number(1.0));
+        let meta = doc.cell_meta(sheet_id, a1).expect("cell meta exists");
+        assert_eq!(meta.vm, None, "expected vm to be dropped for non-placeholder values");
+        assert_eq!(
+            meta.cm.as_deref(),
+            Some("2"),
+            "expected cm metadata to be preserved"
+        );
+    }
+
+    #[test]
+    fn set_cell_value_preserves_vm_when_cell_value_is_rich_value_placeholder() {
+        let mut workbook = formula_model::Workbook::new();
+        let sheet_id = workbook.add_sheet("Sheet1".to_string()).unwrap();
+        let sheet = workbook.sheet_mut(sheet_id).expect("sheet exists");
+        let a1 = CellRef::from_a1("A1").unwrap();
+        sheet.set_value(a1, CellValue::Error(ErrorValue::Value));
+
+        let mut doc = crate::XlsxDocument::new(workbook);
+        doc.meta.cell_meta.insert(
+            (sheet_id, a1),
+            crate::CellMeta {
+                vm: Some("1".to_string()),
+                cm: Some("2".to_string()),
+                ..Default::default()
+            },
+        );
+
+        // Ensure the vm metadata survives when the cell retains the `#VALUE!` placeholder used for
+        // rich values (e.g. images-in-cell).
+        doc.set_cell_value(sheet_id, a1, CellValue::Error(ErrorValue::Value));
+        let meta = doc.cell_meta(sheet_id, a1).expect("cell meta exists");
+        assert_eq!(
+            meta.vm.as_deref(),
+            Some("1"),
+            "expected vm to be preserved for rich-value placeholders"
+        );
+        assert_eq!(
+            meta.cm.as_deref(),
+            Some("2"),
+            "expected cm metadata to be preserved"
+        );
     }
 
     #[test]
