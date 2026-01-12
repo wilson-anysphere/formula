@@ -682,6 +682,26 @@ mod tests {
     }
 
     #[test]
+    fn normalize_sheet_target_handles_absolute_and_prefixed_paths() {
+        assert_eq!(
+            normalize_sheet_target("worksheets/sheet1.bin"),
+            "xl/worksheets/sheet1.bin"
+        );
+        assert_eq!(
+            normalize_sheet_target(r"worksheets\sheet1.bin"),
+            "xl/worksheets/sheet1.bin"
+        );
+        assert_eq!(
+            normalize_sheet_target("/xl/worksheets/sheet1.bin"),
+            "xl/worksheets/sheet1.bin"
+        );
+        assert_eq!(
+            normalize_sheet_target("xl/worksheets/sheet1.bin"),
+            "xl/worksheets/sheet1.bin"
+        );
+    }
+
+    #[test]
     fn parse_workbook_populates_defined_names() {
         let mut workbook_bin = Vec::new();
 
@@ -2235,9 +2255,21 @@ fn pack_col_flags(col: u32, row_rel: bool, col_rel: bool) -> Option<u16> {
     Some(v)
 }
 fn normalize_sheet_target(target: &str) -> String {
-    // Relationship targets are typically relative to `xl/`.
+    // Relationship targets are typically relative to `xl/` (the directory containing
+    // `xl/workbook.bin`), but some producers emit absolute targets (leading `/`) or include an
+    // `xl/` prefix despite the target being relative.
+    //
+    // Be tolerant and normalize:
+    // - backslashes to `/`
+    // - strip leading `/`
+    // - avoid double-prefixing `xl/` when it is already present.
+    let target = target.replace('\\', "/");
     let target = target.trim_start_matches('/');
-    format!("xl/{}", target.replace('\\', "/"))
+    if target.to_ascii_lowercase().starts_with("xl/") {
+        target.to_string()
+    } else {
+        format!("xl/{target}")
+    }
 }
 
 fn is_defined_name_record(id: u32) -> bool {
