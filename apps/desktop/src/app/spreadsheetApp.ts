@@ -634,7 +634,7 @@ export class SpreadsheetApp {
   private clipboardCopyContext:
     | {
         range: Range;
-        payload: { text?: string; html?: string };
+        payload: { text?: string; html?: string; rtf?: string };
         cells: Array<Array<{ value: unknown; formula: string | null; styleId: number }>>;
       }
     | null = null;
