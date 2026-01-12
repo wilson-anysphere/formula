@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![deny(unreachable_patterns)]
 
 //! Locale-aware formula parsing and (re-)stringification, plus a core evaluation engine.
 //!
