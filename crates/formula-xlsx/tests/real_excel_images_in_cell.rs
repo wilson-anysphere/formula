@@ -130,8 +130,13 @@ fn real_excel_images_in_cell_roundtrip_preserves_richdata_and_loads_media(
     );
 
     let sheet_xml = String::from_utf8(zip_part(&fixture_bytes, "xl/worksheets/sheet1.xml"))?;
+    let parsed = roxmltree::Document::parse(&sheet_xml)?;
+    let cell_a1 = parsed
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
+        .expect("expected A1 cell");
     assert!(
-        sheet_xml.contains(r#"<c r="A1" vm=""#),
+        cell_a1.attribute("vm").is_some(),
         "expected Sheet1!A1 cell to include a vm=\"...\" attribute, got: {sheet_xml}"
     );
 
