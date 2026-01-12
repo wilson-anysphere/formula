@@ -434,6 +434,18 @@ export class ExtensionHostManager {
 
     for (const id of toUnload) {
       await this._host.unloadExtension(id);
+      // If an extension was removed from the installed set (uninstalled), also clear any
+      // persisted permissions/storage so a future reinstall behaves like a clean install.
+      //
+      // Note: do NOT clear state for quarantined/corrupted extensions that are still installed;
+      // they may be repaired/re-enabled and should retain their prior grants/config.
+      if (!installedIds.has(id)) {
+        try {
+          await this._host.resetExtensionState?.(id);
+        } catch {
+          // ignore
+        }
+      }
     }
 
     for (const id of toReload) {
