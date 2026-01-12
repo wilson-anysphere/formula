@@ -197,17 +197,22 @@ if (contributedPanelsSeedStorage) {
 
 const sampleHelloExtensionId = `${(sampleHelloManifest as any).publisher}.${(sampleHelloManifest as any).name}`;
 for (const panel of (sampleHelloManifest as any)?.contributes?.panels ?? []) {
-  panelRegistry.registerPanel(
-    String(panel.id),
-    {
-      title: String(panel.title ?? panel.id),
-      icon: panel.icon ?? null,
-      defaultDock: "right",
-      defaultFloatingRect: { x: 140, y: 140, width: 520, height: 640 },
-      source: { kind: "extension", extensionId: sampleHelloExtensionId, contributed: true },
-    },
-    { owner: sampleHelloExtensionId },
-  );
+  try {
+    panelRegistry.registerPanel(
+      String(panel.id),
+      {
+        title: String(panel.title ?? panel.id),
+        icon: panel.icon ?? null,
+        defaultDock: "right",
+        defaultFloatingRect: { x: 140, y: 140, width: 520, height: 640 },
+        source: { kind: "extension", extensionId: sampleHelloExtensionId, contributed: true },
+      },
+      { owner: sampleHelloExtensionId },
+    );
+  } catch (err) {
+    console.error("Failed to seed built-in extension panel:", err);
+    showToast(`Failed to seed extension panel: ${String(panel?.id ?? "")}`, "error");
+  }
 }
 
 // Tauri/desktop state (declared early so panel wiring can reference them without TDZ errors).
