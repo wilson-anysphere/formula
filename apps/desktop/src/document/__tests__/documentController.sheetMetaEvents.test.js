@@ -141,3 +141,48 @@ test("deleteSheet emits sheetMetaDeltas + sheetOrderDelta", () => {
   });
   assert.deepEqual(lastChange?.sheetOrderDelta, { before: ["Sheet1", "Sheet2"], after: ["Sheet1"] });
 });
+
+test("metadata-only edits bump updateVersion but not contentVersion, and emit update events", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+
+  const initialUpdate = doc.updateVersion;
+  const initialContent = doc.contentVersion;
+
+  let updates = 0;
+  doc.on("update", () => {
+    updates += 1;
+  });
+
+  doc.renameSheet("Sheet1", "Budget");
+  assert.equal(doc.updateVersion, initialUpdate + 1);
+  assert.equal(doc.contentVersion, initialContent);
+  assert.equal(updates, 1);
+
+  doc.hideSheet("Sheet1");
+  assert.equal(doc.updateVersion, initialUpdate + 2);
+  assert.equal(doc.contentVersion, initialContent);
+  assert.equal(updates, 2);
+
+  doc.reorderSheets(["Sheet1"]);
+  // reorderSheets is a no-op here (already only one sheet), so it should not bump versions.
+  assert.equal(doc.updateVersion, initialUpdate + 2);
+  assert.equal(doc.contentVersion, initialContent);
+  assert.equal(updates, 2);
+});
+
+test("sheet add/delete bump contentVersion (sheet structure change)", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+
+  const initialUpdate = doc.updateVersion;
+  const initialContent = doc.contentVersion;
+
+  doc.addSheet({ sheetId: "Sheet2", name: "Second" });
+  assert.equal(doc.updateVersion, initialUpdate + 1);
+  assert.equal(doc.contentVersion, initialContent + 1);
+
+  doc.deleteSheet("Sheet2");
+  assert.equal(doc.updateVersion, initialUpdate + 2);
+  assert.equal(doc.contentVersion, initialContent + 2);
+});
