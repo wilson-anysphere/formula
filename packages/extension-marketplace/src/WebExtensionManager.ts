@@ -221,6 +221,12 @@ function removePermissionGrantsForExtension(storage: Storage, extensionId: strin
     if (!raw) return;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+    // If the permissions store exists but is already empty (e.g. because the host cleared the last
+    // extension and persisted `{}`), remove the key entirely so uninstall leaves a clean slate.
+    if (Object.keys(parsed as Record<string, unknown>).length === 0) {
+      storage.removeItem(PERMISSIONS_STORE_KEY);
+      return;
+    }
     if (!Object.prototype.hasOwnProperty.call(parsed, owner)) return;
     delete (parsed as Record<string, unknown>)[owner];
     if (Object.keys(parsed as Record<string, unknown>).length === 0) {

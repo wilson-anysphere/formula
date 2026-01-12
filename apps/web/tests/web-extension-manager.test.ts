@@ -1927,6 +1927,45 @@ test("uninstall removes permissions store key when the last extension is removed
   await manager.dispose();
 });
 
+test("uninstall removes permissions store key when the last extension is removed (host present)", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes },
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true,
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+  await manager.install("formula.sample-hello");
+
+  // Simulate the only extension having stored permission grants.
+  globalThis.localStorage.setItem(
+    "formula.extensionHost.permissions",
+    JSON.stringify({
+      "formula.sample-hello": { storage: true },
+    }),
+  );
+
+  await manager.uninstall("formula.sample-hello");
+
+  // The browser host's permission manager persists `{}` when the last extension is removed;
+  // WebExtensionManager should clear the key entirely on uninstall so reinstall behaves like a
+  // clean slate.
+  expect(globalThis.localStorage.getItem("formula.extensionHost.permissions")).toBe(null);
+
+  await manager.dispose();
+  await host.dispose();
+});
+
 test("uninstall removes contributed panel seed store key when empty", async () => {
   const keys = generateEd25519KeyPair();
   const extensionDir = path.resolve("extensions/sample-hello");
