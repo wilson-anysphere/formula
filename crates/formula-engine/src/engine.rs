@@ -7852,6 +7852,10 @@ fn bytecode_expr_is_eligible_inner(
                 [bytecode::Expr::RangeRef(_)] => true,
                 [bytecode::Expr::MultiRangeRef(_)] => true,
                 [bytecode::Expr::SpillRange(_)] => true,
+                [bytecode::Expr::NameRef(name)] => matches!(
+                    local_binding_kind(lexical_scopes, name),
+                    Some(BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::RefSingle)
+                ),
                 _ => false,
             },
             bytecode::ast::Function::Rows | bytecode::ast::Function::Columns => {

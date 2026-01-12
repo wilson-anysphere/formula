@@ -3459,6 +3459,47 @@ fn bytecode_backend_xlookup_xmatch_accept_let_single_cell_reference_locals() {
 }
 
 #[test]
+fn bytecode_backend_row_column_accept_let_reference_locals() {
+    let mut engine = Engine::new();
+
+    // Ensure the referenced grid locations exist.
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 2.0).unwrap();
+
+    // LET-bound range locals should be accepted by ROW/COLUMN.
+    engine
+        .set_cell_formula("Sheet1", "C1", "=LET(r, A1:B2, ROW(r))")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "E1", "=LET(r, A1:B2, COLUMN(r))")
+        .unwrap();
+
+    // LET-bound single-cell reference locals should also be accepted.
+    engine
+        .set_cell_formula("Sheet1", "G1", "=LET(r, A1, ROW(r))")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "G2", "=LET(r, B2, COLUMN(r))")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 4);
+    assert_eq!(
+        stats.compiled, 4,
+        "expected all ROW/COLUMN LET formulas to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(32)
+    );
+    assert_eq!(stats.fallback, 0);
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_spill_matches_ast(&engine, "=LET(r, A1:B2, ROW(r))", "C1");
+    assert_engine_spill_matches_ast(&engine, "=LET(r, A1:B2, COLUMN(r))", "E1");
+    assert_engine_matches_ast(&engine, "=LET(r, A1, ROW(r))", "G1");
+    assert_engine_matches_ast(&engine, "=LET(r, B2, COLUMN(r))", "G2");
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_common_logical_error_functions() {
     let mut engine = Engine::new();
 
