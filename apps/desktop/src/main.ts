@@ -117,6 +117,7 @@ import {
   seedPanelRegistryFromContributedPanelsSeedStore,
   setSeedPanelsForExtension,
 } from "./extensions/contributedPanelsSeedStore.js";
+import { builtinKeybindings } from "./commands/builtinKeybindings.js";
 
 import sampleHelloManifest from "../../../extensions/sample-hello/package.json";
 import { purgeLegacyDesktopLLMSettings } from "./ai/llm/desktopLLMClient.js";
