@@ -171,6 +171,7 @@ bash scripts/cargo_agent.sh test -p formula-xlsx --test roundtrip
 - Read-only support
 - Excel 97-2003 format
 - Convert to XLSX on save
+- `.xls` notes/comments (BIFF NOTE/OBJ/TXO): see [`docs/xls-note-import-hardening.md`](../docs/xls-note-import-hardening.md)
 
 ---
 
