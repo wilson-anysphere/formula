@@ -1,6 +1,6 @@
 use formula_engine::eval::CellAddr;
 use formula_engine::{Engine, PrecedentNode, Value};
-use formula_model::EXCEL_MAX_ROWS;
+use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 
 #[test]
 fn precedents_and_dependents_queries_work() {
@@ -292,6 +292,60 @@ fn sheet_range_3d_refs_create_per_sheet_range_nodes_for_full_column_refs() {
     // Reverse lookup via the range-node index should work for intermediate sheets in a 3D span.
     assert_eq!(
         engine.dependents("Sheet2", "A123").unwrap(),
+        vec![PrecedentNode::Cell {
+            sheet: 0,
+            addr: CellAddr { row: 0, col: 0 }
+        }]
+    );
+}
+
+#[test]
+fn sheet_range_3d_refs_create_per_sheet_range_nodes_for_full_sheet_refs() {
+    let mut engine = Engine::new();
+    // Ensure the sheet order is deterministic for the 3D span resolution.
+    engine.ensure_sheet("Summary");
+    engine.ensure_sheet("Sheet1");
+    engine.ensure_sheet("Sheet2");
+    engine.ensure_sheet("Sheet3");
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM(Sheet1:Sheet3!A:XFD)")
+        .unwrap();
+
+    let max_row = EXCEL_MAX_ROWS - 1;
+    let max_col = EXCEL_MAX_COLS - 1;
+    assert_eq!(
+        engine.precedents("Summary", "A1").unwrap(),
+        vec![
+            PrecedentNode::Range {
+                sheet: 1,
+                start: CellAddr { row: 0, col: 0 },
+                end: CellAddr {
+                    row: max_row,
+                    col: max_col
+                }
+            },
+            PrecedentNode::Range {
+                sheet: 2,
+                start: CellAddr { row: 0, col: 0 },
+                end: CellAddr {
+                    row: max_row,
+                    col: max_col
+                }
+            },
+            PrecedentNode::Range {
+                sheet: 3,
+                start: CellAddr { row: 0, col: 0 },
+                end: CellAddr {
+                    row: max_row,
+                    col: max_col
+                }
+            },
+        ]
+    );
+
+    // Reverse lookup via the range-node index should work for intermediate sheets in a 3D span.
+    assert_eq!(
+        engine.dependents("Sheet2", "C3").unwrap(),
         vec![PrecedentNode::Cell {
             sheet: 0,
             addr: CellAddr { row: 0, col: 0 }
