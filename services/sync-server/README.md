@@ -248,6 +248,7 @@ Notable metrics (prefix `sync_server_`):
 - Connection limits:
   - `SYNC_SERVER_MAX_CONNECTIONS`
   - `SYNC_SERVER_MAX_CONNECTIONS_PER_IP`
+  - Set either to `0` to disable.
   - Connection attempt rate limiting:
     - `SYNC_SERVER_MAX_CONN_ATTEMPTS_PER_WINDOW`
     - `SYNC_SERVER_CONN_ATTEMPT_WINDOW_MS`

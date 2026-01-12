@@ -125,10 +125,10 @@ export class ConnectionTracker {
 
   tryRegister(ip: string): { ok: true } | { ok: false; reason: string } {
     const currentPerIp = this.perIp.get(ip) ?? 0;
-    if (this.total >= this.maxTotal) {
+    if (this.maxTotal > 0 && this.total >= this.maxTotal) {
       return { ok: false, reason: "max_connections_exceeded" };
     }
-    if (currentPerIp >= this.maxPerIp) {
+    if (this.maxPerIp > 0 && currentPerIp >= this.maxPerIp) {
       return { ok: false, reason: "max_connections_per_ip_exceeded" };
     }
 
