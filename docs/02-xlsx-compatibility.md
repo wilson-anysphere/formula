@@ -448,9 +448,10 @@ Important indexing note:
 
 ##### 4) `[Content_Types].xml` overrides
 
-Some workbooks include explicit overrides for the extra metadata/richData parts (observed in
-`fixtures/xlsx/basic/image-in-cell.xlsx`; other files can rely on the default
-`<Default Extension="xml" ContentType="application/xml"/>` instead):
+In this repo’s fixture corpus, workbooks that include the extra metadata/richData parts also include
+explicit `[Content_Types].xml` overrides for them (e.g. `fixtures/xlsx/basic/image-in-cell.xlsx`,
+`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`, `fixtures/xlsx/rich-data/images-in-cell.xlsx`).
+Preserve whatever the source workbook uses; do not hardcode a single required set.
 
 ```xml
 <Override PartName="/xl/metadata.xml"

@@ -680,8 +680,9 @@ Also observed in tests:
 - `application/vnd.openxmlformats-officedocument.spreadsheetml.metadata+xml`
   - used by `crates/formula-xlsx/tests/metadata_rich_value_roundtrip.rs`
 
-Some workbooks may omit the override entirely and rely on the package default
-`<Default Extension="xml" ContentType="application/xml"/>`.
+In this repo’s fixtures, `xl/metadata.xml` always has an explicit `<Override>` entry. For robustness,
+parsers should not depend on it (locate parts via relationships/paths) and writers should preserve any
+existing overrides byte-for-byte when round-tripping.
 
 ### `xl/richData/*` content types (observed + variants)
 

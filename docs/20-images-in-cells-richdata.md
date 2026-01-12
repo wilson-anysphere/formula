@@ -1100,8 +1100,8 @@ hardcoding assumptions.
 
 ### `[Content_Types].xml` considerations
 
-Excel may or may not add explicit `<Override>` entries for `xl/metadata.xml` and `xl/richData/*`.
-Observed patterns in this repo:
+In this repo’s fixture corpus, workbooks that include `xl/metadata.xml` and/or `xl/richData/*` also include
+explicit `[Content_Types].xml` `<Override>` entries for those parts. Observed patterns in this repo:
 
 * `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` includes explicit overrides for `xl/metadata.xml` and
   the minimal rich value parts (`xl/richData/richValue.xml`, `xl/richData/richValueRel.xml`).
@@ -1117,9 +1117,9 @@ Observed patterns in this repo:
 * Some tests construct workbooks that use:
   * `application/vnd.openxmlformats-officedocument.spreadsheetml.metadata+xml` for `/xl/metadata.xml`
 
-For the richData tables themselves, Excel may emit Microsoft-specific content types. Observed in the real
-Excel fixture `fixtures/xlsx/rich-data/images-in-cell.xlsx` and the synthetic regression fixture
-`fixtures/xlsx/rich-data/richdata-minimal.xlsx` (overrides may be absent in other workbooks):
+For the richData tables themselves, Excel emits Microsoft-specific content types in the real Excel fixture
+`fixtures/xlsx/rich-data/images-in-cell.xlsx` and the synthetic regression fixture
+`fixtures/xlsx/rich-data/richdata-minimal.xlsx` (other producers may vary; preserve whatever is present):
 
 ```xml
 <Override PartName="/xl/richData/richValue.xml"          ContentType="application/vnd.ms-excel.richvalue+xml"/>

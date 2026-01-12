@@ -61,7 +61,9 @@ xl/media/
 
 The package also needs the usual bookkeeping:
 
-- `[Content_Types].xml` may include overrides for `metadata.xml` and the `xl/richData/*` parts (some files rely on the default `application/xml`).
+- In this repo’s fixture corpus, workbooks that include `xl/metadata.xml` and/or `xl/richData/*` also include
+  explicit `[Content_Types].xml` overrides for those parts. Preserve whatever the source workbook uses and do
+  not hardcode a single required set.
 - The workbook part (`xl/workbook.xml` + `xl/_rels/workbook.xml.rels`) typically contains a relationship to `xl/metadata.xml` and often relates directly to the rich value parts.
 
 Observed (in this repo) relationship type URIs:
@@ -98,11 +100,11 @@ At a high level:
 ```
 sheetN.xml: <c vm="VM_INDEX">…</c>
   └─> xl/metadata.xml: valueMetadata[VM_INDEX]   (vm can be 0-based or 1-based; treat as opaque)
-         └─> RV_INDEX (resolved best-effort; either directly from rc/@v, or indirectly via an <xlrd:rvb i="..."/> table)
-               └─> xl/richData/richValue*.xml (or xl/richData/rdrichvalue.xml): <rv> entry at RV_INDEX
-                      └─> (image payload references REL_SLOT_INDEX)
-                            └─> xl/richData/richValueRel.xml: <rel> at REL_SLOT_INDEX => r:id="rIdX"
-                                  └─> xl/richData/_rels/richValueRel.xml.rels: Relationship Id="rIdX"
+         └─> RV_INDEX (resolved best-effort; in this repo’s fixtures: rc/@v -> <futureMetadata name="XLRICHVALUE"> -> <xlrd:rvb i="..."/>)
+                └─> xl/richData/richValue*.xml (or xl/richData/rdrichvalue.xml): <rv> entry at RV_INDEX
+                       └─> (image payload references REL_SLOT_INDEX)
+                             └─> xl/richData/richValueRel.xml: <rel> at REL_SLOT_INDEX => r:id="rIdX"
+                                   └─> xl/richData/_rels/richValueRel.xml.rels: Relationship Id="rIdX"
                                         └─> Target="../media/imageY.png" => xl/media/imageY.png bytes
 ```
 
@@ -114,8 +116,9 @@ sheetN.xml: <c vm="VM_INDEX">…</c>
   - 0-based: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
 - Rich value indices are **0-based**.
 - `xl/metadata.xml` schemas vary:
-  - In the `futureMetadata`/`rvb` variant, `rc/@v` indexes into the `futureMetadata` table, and `xlrd:rvb/@i` is the rich value index.
-  - In other variants, `rc/@v` appears to directly be the rich value index.
+  - In all images-in-cell fixtures in this repo, we observed the `futureMetadata`/`rvb` variant where
+    `rc/@v` indexes into the `futureMetadata` table and `xlrd:rvb/@i` is the rich value index.
+  - Other schemas may exist in the wild; treat metadata as opaque and preserve unknown tables/attributes.
 - `richValue*.xml` can be **split across multiple parts** (`richValue.xml`, `richValue1.xml`, …). The `RV_INDEX` should be interpreted as a **global index across the concatenated `<rv>` streams** in part order.
   - Open question: the exact ordering rules Excel uses when multiple parts exist (lexicographic vs numeric suffix). Use numeric suffix ordering (`richValue.xml` then `richValue1.xml`, `richValue2.xml`, …) and verify with fixtures.
 - Image references inside `<rv>` appear to use an **integer relationship-slot index** (not an `rId` string directly). That slot index points into the ordered `<rel>` list in `richValueRel.xml`.
