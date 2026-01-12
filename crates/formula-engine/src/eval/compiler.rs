@@ -921,18 +921,7 @@ fn compile_sheet_reference(
 }
 
 fn parse_error_kind(raw: &str) -> ErrorKind {
-    match raw.trim().to_ascii_uppercase().as_str() {
-        "#NULL!" => ErrorKind::Null,
-        "#DIV/0!" => ErrorKind::Div0,
-        "#VALUE!" => ErrorKind::Value,
-        "#REF!" => ErrorKind::Ref,
-        "#NAME?" => ErrorKind::Name,
-        "#NUM!" => ErrorKind::Num,
-        "#N/A" => ErrorKind::NA,
-        "#SPILL!" => ErrorKind::Spill,
-        "#CALC!" => ErrorKind::Calc,
-        _ => ErrorKind::Value,
-    }
+    ErrorKind::from_code(raw).unwrap_or(ErrorKind::Value)
 }
 
 #[derive(Debug, Clone)]

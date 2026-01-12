@@ -186,20 +186,7 @@ fn parse_number(raw: &str) -> Result<f64, LowerError> {
 }
 
 fn parse_error_kind(raw: &str) -> crate::value::ErrorKind {
-    // Keep this in sync with `eval::compiler::parse_error_kind` so AST and bytecode evaluation
-    // agree on the canonical set of supported error literals.
-    match raw.trim().to_ascii_uppercase().as_str() {
-        "#NULL!" => crate::value::ErrorKind::Null,
-        "#DIV/0!" => crate::value::ErrorKind::Div0,
-        "#VALUE!" => crate::value::ErrorKind::Value,
-        "#REF!" => crate::value::ErrorKind::Ref,
-        "#NAME?" => crate::value::ErrorKind::Name,
-        "#NUM!" => crate::value::ErrorKind::Num,
-        "#N/A" => crate::value::ErrorKind::NA,
-        "#SPILL!" => crate::value::ErrorKind::Spill,
-        "#CALC!" => crate::value::ErrorKind::Calc,
-        _ => crate::value::ErrorKind::Value,
-    }
+    crate::value::ErrorKind::from_code(raw).unwrap_or(crate::value::ErrorKind::Value)
 }
 
 fn lower_array_literal_element(expr: &crate::Expr) -> Result<Option<f64>, LowerError> {

@@ -444,19 +444,7 @@ fn coerce_to_text(value: &Value) -> Option<String> {
 }
 
 fn parse_error_kind(raw: &str) -> Option<ErrorKind> {
-    let normalized = raw.trim().to_ascii_uppercase();
-    match normalized.as_str() {
-        "#NULL!" => Some(ErrorKind::Null),
-        "#DIV/0!" => Some(ErrorKind::Div0),
-        "#VALUE!" => Some(ErrorKind::Value),
-        "#REF!" => Some(ErrorKind::Ref),
-        "#NAME?" => Some(ErrorKind::Name),
-        "#NUM!" => Some(ErrorKind::Num),
-        "#N/A" => Some(ErrorKind::NA),
-        "#SPILL!" => Some(ErrorKind::Spill),
-        "#CALC!" => Some(ErrorKind::Calc),
-        _ => None,
-    }
+    ErrorKind::from_code(raw)
 }
 
 fn fold_case(input: &str) -> String {

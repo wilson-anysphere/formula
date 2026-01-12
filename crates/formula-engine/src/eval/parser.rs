@@ -371,16 +371,5 @@ fn lower_structured_ref(r: &crate::StructuredRef) -> ParsedExpr {
 }
 
 fn parse_error_kind(code: &str) -> ErrorKind {
-    match code.to_ascii_uppercase().as_str() {
-        "#NULL!" => ErrorKind::Null,
-        "#DIV/0!" => ErrorKind::Div0,
-        "#VALUE!" => ErrorKind::Value,
-        "#REF!" => ErrorKind::Ref,
-        "#NAME?" => ErrorKind::Name,
-        "#NUM!" => ErrorKind::Num,
-        "#N/A" => ErrorKind::NA,
-        "#SPILL!" => ErrorKind::Spill,
-        "#CALC!" => ErrorKind::Calc,
-        _ => ErrorKind::Value,
-    }
+    ErrorKind::from_code(code).unwrap_or(ErrorKind::Value)
 }

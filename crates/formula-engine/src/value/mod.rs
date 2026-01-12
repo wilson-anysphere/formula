@@ -94,6 +94,24 @@ impl ErrorKind {
             ErrorKind::Calc => "#CALC!",
         }
     }
+
+    /// Parse an Excel error literal (e.g. `#DIV/0!`) into an [`ErrorKind`].
+    ///
+    /// Returns `None` for error literals that this engine does not model (e.g. `#GETTING_DATA`).
+    pub fn from_code(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_uppercase().as_str() {
+            "#NULL!" => Some(ErrorKind::Null),
+            "#DIV/0!" => Some(ErrorKind::Div0),
+            "#VALUE!" => Some(ErrorKind::Value),
+            "#REF!" => Some(ErrorKind::Ref),
+            "#NAME?" => Some(ErrorKind::Name),
+            "#NUM!" => Some(ErrorKind::Num),
+            "#N/A" => Some(ErrorKind::NA),
+            "#SPILL!" => Some(ErrorKind::Spill),
+            "#CALC!" => Some(ErrorKind::Calc),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for ErrorKind {
