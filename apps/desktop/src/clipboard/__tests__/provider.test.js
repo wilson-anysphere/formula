@@ -279,6 +279,49 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("web: write includes text/rtf when provided", async () => {
+    /** @type {any[]} */
+    const writes = [];
+
+    class MockClipboardItem {
+      /**
+       * @param {Record<string, Blob>} data
+       */
+      constructor(data) {
+        this.data = data;
+      }
+    }
+
+    await withGlobals(
+      {
+        __TAURI__: undefined,
+        ClipboardItem: MockClipboardItem,
+        navigator: {
+          clipboard: {
+            async write(items) {
+              writes.push(items);
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: "plain", html: "<p>hello</p>", rtf: "{\\\\rtf1 hello}" });
+
+        assert.equal(writes.length, 1);
+        assert.equal(writes[0].length, 1);
+        const item = writes[0][0];
+        assert.ok(item instanceof MockClipboardItem);
+
+        const keys = Object.keys(item.data).sort();
+        assert.deepEqual(keys, ["text/html", "text/plain", "text/rtf"].sort());
+
+        assert.equal(item.data["text/rtf"].type, "text/rtf");
+        assert.equal(await item.data["text/rtf"].text(), "{\\\\rtf1 hello}");
+      }
+    );
+  });
+
   await t.test("web: write includes small image/png when provided", async () => {
     /** @type {any[]} */
     const writes = [];

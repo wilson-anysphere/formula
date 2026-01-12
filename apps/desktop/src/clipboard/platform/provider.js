@@ -329,12 +329,30 @@ function createTauriClipboardProvider() {
       const clipboard = globalThis.navigator?.clipboard;
       if (html && typeof ClipboardItem !== "undefined" && clipboard?.write) {
         try {
+          /** @type {Record<string, Blob>} */
           const itemPayload = {
             "text/plain": new Blob([payload.text], { type: "text/plain" }),
             "text/html": new Blob([html], { type: "text/html" }),
           };
+          if (rtf) itemPayload["text/rtf"] = new Blob([rtf], { type: "text/rtf" });
 
-          await clipboard.write([new ClipboardItem(itemPayload)]);
+          try {
+            await clipboard.write([new ClipboardItem(itemPayload)]);
+          } catch {
+            // Some platforms reject unknown/unsupported types (e.g. text/rtf). Retry
+            // with the base formats so we don't regress HTML clipboard writes.
+            if (rtf) {
+              try {
+                const fallback = new ClipboardItem({
+                  "text/plain": new Blob([payload.text], { type: "text/plain" }),
+                  "text/html": new Blob([html], { type: "text/html" }),
+                });
+                await clipboard.write([fallback]);
+              } catch {
+                // Ignore; some platforms deny rich clipboard writes.
+              }
+            }
+          }
         } catch {
           // Ignore; some platforms deny rich clipboard writes.
         }
