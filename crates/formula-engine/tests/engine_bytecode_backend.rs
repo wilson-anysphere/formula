@@ -1497,6 +1497,40 @@ fn bytecode_backend_let_array_returning_abs_allows_concat_to_flatten_arrays() {
 }
 
 #[test]
+fn bytecode_backend_let_xlookup_array_returning_xlookup_does_not_enable_concat_bytecode() {
+    let mut engine = Engine::new();
+
+    // XLOOKUP can spill when `return_array` is 2D (it returns a row/column slice). CONCAT is a
+    // scalar-only bytecode function, so make sure LET kind inference prevents smuggling that array
+    // result into CONCAT.
+    let formula = "=CONCAT(LET(x, XLOOKUP(2,{1;2;3},{10,11;20,21;30,31}), x))";
+    engine.set_cell_formula("Sheet1", "B1", formula).unwrap();
+
+    // CONCAT should fall back to the AST evaluator here, since the bytecode CONCAT implementation
+    // does not flatten array arguments the way Excel does.
+    assert_eq!(engine.bytecode_program_count(), 0);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("2021".into()));
+    assert_engine_matches_ast(&engine, formula, "B1");
+}
+
+#[test]
+fn bytecode_backend_let_xlookup_array_if_not_found_does_not_enable_concat_bytecode() {
+    let mut engine = Engine::new();
+
+    // XLOOKUP can return an array `if_not_found` value when no match is found. Ensure LET kind
+    // inference treats that as an array result so CONCAT falls back to the AST evaluator.
+    let formula = "=CONCAT(LET(x, XLOOKUP(99,{1;2;3},{10;20;30},{100;200}), x))";
+    engine.set_cell_formula("Sheet1", "B1", formula).unwrap();
+    assert_eq!(engine.bytecode_program_count(), 0);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("100200".into()));
+    assert_engine_matches_ast(&engine, formula, "B1");
+}
+
+#[test]
 fn bytecode_backend_let_single_cell_reference_local_is_scalar_safe_for_concat() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", "hello").unwrap();

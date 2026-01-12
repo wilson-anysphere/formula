@@ -7947,6 +7947,38 @@ fn bytecode_expr_is_eligible_inner(
                     }
                     kind
                 }
+                Function::XLookup => {
+                    // XLOOKUP can spill in a few situations:
+                    // - array/range `lookup_value` (vectorized lookup)
+                    // - 2D `return_array` (row/column slice)
+                    // - array/range `if_not_found` fallback (e.g. `{100;200}`)
+                    //
+                    // LET bindings are always validated in a "range + array literal" context, so
+                    // we must conservatively tag potentially-spilling XLOOKUP expressions as array
+                    // values. This prevents scalar-only bytecode functions (like CONCAT) from
+                    // incorrectly accepting LET locals that may spill at runtime.
+                    let lookup_value_is_array = matches!(
+                        args.get(0).map(|arg| infer_binding_kind(arg, scopes)),
+                        Some(BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::ArrayLiteral)
+                    );
+
+                    let return_array_is_2d_literal = matches!(
+                        args.get(2),
+                        Some(bytecode::Expr::Literal(bytecode::Value::Array(arr)))
+                            if arr.rows > 1 && arr.cols > 1
+                    );
+
+                    let if_not_found_is_array = matches!(
+                        args.get(3).map(|arg| infer_binding_kind(arg, scopes)),
+                        Some(BytecodeLocalBindingKind::ArrayLiteral | BytecodeLocalBindingKind::Range)
+                    );
+
+                    if lookup_value_is_array || return_array_is_2d_literal || if_not_found_is_array {
+                        BytecodeLocalBindingKind::ArrayLiteral
+                    } else {
+                        BytecodeLocalBindingKind::Scalar
+                    }
+                }
                 Function::Row
                 | Function::Column
                 | Function::IsError
