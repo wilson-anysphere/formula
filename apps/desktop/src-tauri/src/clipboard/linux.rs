@@ -1,3 +1,4 @@
+#[cfg(feature = "desktop")]
 use super::{ClipboardContent, ClipboardError, ClipboardWritePayload};
 
 fn normalize_target_name(target: &str) -> String {
@@ -434,27 +435,9 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
     gtk_backend::read()
 }
 
-// When the `desktop` feature is disabled, the full GTK clipboard backend isn't available.
-// Provide stubs so unit tests can still compile this module (see cfg in `clipboard/mod.rs`).
-#[cfg(not(feature = "desktop"))]
-#[cfg_attr(test, allow(dead_code))]
-pub fn read() -> Result<ClipboardContent, ClipboardError> {
-    Err(ClipboardError::Unavailable(
-        "GTK clipboard backend requires the `desktop` feature".to_string(),
-    ))
-}
-
 #[cfg(feature = "desktop")]
 pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
     gtk_backend::write(payload)
-}
-
-#[cfg(not(feature = "desktop"))]
-#[cfg_attr(test, allow(dead_code))]
-pub fn write(_payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
-    Err(ClipboardError::Unavailable(
-        "GTK clipboard backend requires the `desktop` feature".to_string(),
-    ))
 }
 
 #[cfg(test)]
