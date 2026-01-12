@@ -416,6 +416,21 @@ fn bytecode_backend_let_supports_reference_bindings() {
 }
 
 #[test]
+fn bytecode_backend_rejects_let_range_bindings_that_spill() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=LET(r, A1:A2, r)")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 0);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(2.0));
+}
+
+#[test]
 fn bytecode_backend_rejects_invalid_let_arity() {
     // LET must have an odd number of args >= 3.
     // Invalid forms should fall back to the AST evaluator (and produce #VALUE!).

@@ -6118,7 +6118,7 @@ fn bytecode_expr_is_eligible_inner(
                         lexical_scopes.pop();
                         return false;
                     }
-                    if !bytecode_expr_is_eligible_inner(&pair[1], true, lexical_scopes) {
+                    if !bytecode_expr_is_eligible_inner(&pair[1], false, lexical_scopes) {
                         lexical_scopes.pop();
                         return false;
                     }
