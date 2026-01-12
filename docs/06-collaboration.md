@@ -591,6 +591,15 @@ In addition, the binder synchronizes layered formatting defaults (sheet/row/col 
   - `defaultFormat` (style object)
   - `rowFormats` / `colFormats` (`Y.Map<string, styleObject>` keyed by string indices)
 
+Branching/merge snapshot note:
+
+- BranchService’s Yjs adapter (`branchStateFromYjsDoc`) currently reads layered formatting defaults
+  only when they are embedded in `sheets[].view` (and does not include top-level `defaultFormat` /
+  `rowFormats` / `colFormats` keys in its `DocumentState` snapshot).
+- When applying a snapshot back into Yjs (`applyBranchStateToYjsDoc`), BranchService preserves
+  unknown top-level sheet metadata keys, so these fields are not dropped — but they are not yet
+  branch/merge semantic fields unless also stored in `sheets[].view`.
+
 Semantics note:
 
 - `sheets[].view` is **shared workbook state** (similar to formatting), not per-user transient UI state.
