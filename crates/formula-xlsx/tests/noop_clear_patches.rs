@@ -154,6 +154,7 @@ fn in_memory_noop_clear_does_not_insert_cell_or_expand_dimension(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = build_minimal_a1_fixture();
     let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+    let original_sheet = pkg.part("xl/worksheets/sheet1.xml").unwrap().to_vec();
 
     let mut patches = WorkbookCellPatches::default();
     patches.set_cell("Sheet1", CellRef::from_a1("Z100")?, CellPatch::clear());
@@ -163,6 +164,11 @@ fn in_memory_noop_clear_does_not_insert_cell_or_expand_dimension(
     assert!(!has_cell(sheet_xml, "Z100"));
     assert!(!has_row(sheet_xml, "100"));
     assert_eq!(dimension_ref(sheet_xml), "A1");
+    assert_eq!(
+        pkg.part("xl/worksheets/sheet1.xml").unwrap(),
+        original_sheet.as_slice(),
+        "expected in-memory patcher to preserve sheet XML bytes for a no-op clear patch"
+    );
 
     Ok(())
 }
@@ -247,6 +253,7 @@ fn in_memory_noop_clear_does_not_expand_empty_sheetdata() -> Result<(), Box<dyn 
 {
     let bytes = build_minimal_empty_sheet_fixture();
     let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+    let original_sheet = pkg.part("xl/worksheets/sheet1.xml").unwrap().to_vec();
 
     let mut patches = WorkbookCellPatches::default();
     patches.set_cell("Sheet1", CellRef::from_a1("Z100")?, CellPatch::clear());
@@ -260,6 +267,11 @@ fn in_memory_noop_clear_does_not_expand_empty_sheetdata() -> Result<(), Box<dyn 
     assert!(!has_cell(sheet_xml, "Z100"));
     assert!(!has_row(sheet_xml, "100"));
     assert_eq!(dimension_ref(sheet_xml), "A1");
+    assert_eq!(
+        pkg.part("xl/worksheets/sheet1.xml").unwrap(),
+        original_sheet.as_slice(),
+        "expected in-memory patcher to preserve sheet XML bytes for a no-op clear patch"
+    );
 
     Ok(())
 }

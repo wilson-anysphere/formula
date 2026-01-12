@@ -698,6 +698,40 @@ fn patch_worksheet_xml(
 ) -> Result<(Vec<u8>, bool), XlsxError> {
     let scan = scan_worksheet_xml(original)?;
 
+    // Drop patches that are guaranteed to be a no-op:
+    // a non-material patch (clear with no value/formula/style) targeting a cell outside the
+    // sheet's existing used-range cannot reference an existing `<c>` element, and since it would
+    // not insert a new cell, it cannot change the worksheet XML.
+    let mut effective_patches = WorksheetCellPatches::default();
+    for (cell_ref, patch) in patches.iter() {
+        if cell_patch_is_material_for_insertion(patch, style_id_to_xf)? {
+            effective_patches
+                .cells
+                .insert((cell_ref.row, cell_ref.col), patch.clone());
+            continue;
+        }
+
+        let in_used_range = match scan.existing_used_range {
+            Some((min_row, min_col, max_row, max_col)) => {
+                let row_1 = cell_ref.row + 1;
+                let col_1 = cell_ref.col + 1;
+                row_1 >= min_row && row_1 <= max_row && col_1 >= min_col && col_1 <= max_col
+            }
+            None => false,
+        };
+
+        if in_used_range {
+            effective_patches
+                .cells
+                .insert((cell_ref.row, cell_ref.col), patch.clone());
+        }
+    }
+
+    if effective_patches.is_empty() {
+        return Ok((original.to_vec(), false));
+    }
+    let patches = &effective_patches;
+
     // Track whether any formulas actually changed (added/removed/updated) so we can apply the
     // workbook recalculation policy. This is computed while patching so no-op patches don't churn
     // calc state.
