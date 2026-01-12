@@ -172,10 +172,10 @@ export function semanticDiff(before, after) {
       if (!sameFormat(beforeCell, afterCell)) {
         result.formatOnly.push({
           cell: parseCellKey(key),
-          oldValue: beforeCell?.value ?? null,
-          newValue: afterCell?.value ?? null,
-          oldFormula: beforeCell?.formula ?? null,
-          newFormula: afterCell?.formula ?? null,
+          oldValue: beforeEncMeta.encrypted ? null : (beforeCell?.value ?? null),
+          newValue: afterEncMeta.encrypted ? null : (afterCell?.value ?? null),
+          oldFormula: beforeEncMeta.encrypted ? null : (beforeCell?.formula ?? null),
+          newFormula: afterEncMeta.encrypted ? null : (afterCell?.formula ?? null),
           ...(beforeEncMeta.encrypted || afterEncMeta.encrypted
             ? {
                 oldEncrypted: beforeEncMeta.encrypted,
@@ -190,10 +190,10 @@ export function semanticDiff(before, after) {
     }
     result.modified.push({
       cell: parseCellKey(key),
-      oldValue: beforeCell?.value ?? null,
-      newValue: afterCell?.value ?? null,
-      oldFormula: beforeCell?.formula ?? null,
-      newFormula: afterCell?.formula ?? null,
+      oldValue: beforeEncMeta.encrypted ? null : (beforeCell?.value ?? null),
+      newValue: afterEncMeta.encrypted ? null : (afterCell?.value ?? null),
+      oldFormula: beforeEncMeta.encrypted ? null : (beforeCell?.formula ?? null),
+      newFormula: afterEncMeta.encrypted ? null : (afterCell?.formula ?? null),
       ...(beforeEncMeta.encrypted || afterEncMeta.encrypted
         ? {
             oldEncrypted: beforeEncMeta.encrypted,
@@ -229,8 +229,8 @@ export function semanticDiff(before, after) {
       result.moved.push({
         oldLocation: parseCellKey(key),
         newLocation: parseCellKey(destKey),
-        value: cell?.value ?? null,
-        formula: cell?.formula ?? null,
+        value: encMeta.encrypted ? null : (cell?.value ?? null),
+        formula: encMeta.encrypted ? null : (cell?.formula ?? null),
         ...(encMeta.encrypted ? { encrypted: true, keyId: encMeta.keyId } : {}),
       });
       continue;
@@ -238,8 +238,8 @@ export function semanticDiff(before, after) {
     const encMeta = encryptionMeta(cell);
     result.removed.push({
       cell: parseCellKey(key),
-      oldValue: cell?.value ?? null,
-      oldFormula: cell?.formula ?? null,
+      oldValue: encMeta.encrypted ? null : (cell?.value ?? null),
+      oldFormula: encMeta.encrypted ? null : (cell?.formula ?? null),
       ...(encMeta.encrypted ? { oldEncrypted: true, oldKeyId: encMeta.keyId } : {}),
     });
   }
@@ -250,8 +250,8 @@ export function semanticDiff(before, after) {
     const encMeta = encryptionMeta(cell);
     result.added.push({
       cell: parseCellKey(key),
-      newValue: cell?.value ?? null,
-      newFormula: cell?.formula ?? null,
+      newValue: encMeta.encrypted ? null : (cell?.value ?? null),
+      newFormula: encMeta.encrypted ? null : (cell?.formula ?? null),
       ...(encMeta.encrypted ? { newEncrypted: true, newKeyId: encMeta.keyId } : {}),
     });
   }

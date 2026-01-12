@@ -167,3 +167,21 @@ test("semanticDiff: enc=null is treated as unencrypted (backwards compatible)", 
   assert.equal("oldEncrypted" in diff.modified[0], false);
   assert.equal("newEncrypted" in diff.modified[0], false);
  });
+
+test("semanticDiff: encrypted cells do not leak value/formula fields even if provided", () => {
+  const before = sheetFromObject({
+    [cellKey(0, 0)]: { enc: { keyId: "k1", ciphertextBase64: "ct1" }, value: "leak", formula: "=LEAK()" },
+  });
+  const after = sheetFromObject({
+    [cellKey(0, 0)]: { enc: { keyId: "k1", ciphertextBase64: "ct2" }, value: "leak2", formula: "=LEAK2()" },
+  });
+  const diff = semanticDiff(before, after);
+  assert.equal(diff.modified.length, 1);
+  assert.deepEqual(diff.modified[0].cell, { row: 0, col: 0 });
+  assert.equal(diff.modified[0].oldEncrypted, true);
+  assert.equal(diff.modified[0].newEncrypted, true);
+  assert.equal(diff.modified[0].oldValue, null);
+  assert.equal(diff.modified[0].newValue, null);
+  assert.equal(diff.modified[0].oldFormula, null);
+  assert.equal(diff.modified[0].newFormula, null);
+});
