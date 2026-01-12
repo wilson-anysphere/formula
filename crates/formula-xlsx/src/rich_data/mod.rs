@@ -54,27 +54,27 @@ pub enum RichDataError {
     },
 }
 
+fn rich_data_error_to_xlsx(err: RichDataError) -> XlsxError {
+    match err {
+        RichDataError::Xlsx(err) => err,
+        RichDataError::XmlNonUtf8 { part, source } => {
+            XlsxError::Invalid(format!("xml part {part} is not valid UTF-8: {source}"))
+        }
+        RichDataError::XmlParse { part, source } => {
+            XlsxError::Invalid(format!("xml parse error in {part}: {source}"))
+        }
+    }
+}
+
 impl XlsxPackage {
     /// Extract in-cell images stored via the Excel rich-data (`xl/metadata.xml` + `xl/richData/*`)
     /// mechanism.
     ///
     /// This is a convenience wrapper around [`extract_rich_cell_images`].
-    pub fn extract_rich_data_images(
-        &self,
-    ) -> Result<HashMap<(String, CellRef), Vec<u8>>, XlsxError> {
-        match extract_rich_cell_images(self) {
-            Ok(v) => Ok(v),
-            Err(RichDataError::Xlsx(e)) => Err(e),
-            Err(RichDataError::XmlNonUtf8 { part, source }) => Err(XlsxError::Invalid(format!(
-                "xml part {part} is not valid UTF-8: {source}"
-            ))),
-            Err(RichDataError::XmlParse { part, source }) => Err(XlsxError::Invalid(format!(
-                "xml parse error in {part}: {source}"
-            ))),
-        }
+    pub fn extract_rich_data_images(&self) -> Result<HashMap<(String, CellRef), Vec<u8>>, XlsxError> {
+        extract_rich_cell_images(self).map_err(rich_data_error_to_xlsx)
     }
 }
-
 /// Best-effort extraction of "image in cell" rich values.
 ///
 /// This follows the richData chain:
