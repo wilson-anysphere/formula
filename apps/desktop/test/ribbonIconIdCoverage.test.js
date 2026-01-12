@@ -10,8 +10,8 @@ function readDesktopSource(...segments) {
   return fs.readFileSync(path.join(__dirname, "..", "src", ...segments), "utf8");
 }
 
-function collectSchemaButtonIdsWithSize(source, sizeValue) {
-  const ids = new Set();
+function collectSchemaButtonsWithSize(source, sizeValue) {
+  const buttons = new Map();
   const re = new RegExp(`\\bsize\\s*:\\s*\\"${sizeValue}\\"`, "g");
   let match;
   while ((match = re.exec(source))) {
@@ -21,9 +21,10 @@ function collectSchemaButtonIdsWithSize(source, sizeValue) {
     const id = readTopLevelStringProp(objectSource, "id");
     const size = readTopLevelStringProp(objectSource, "size");
     assert.equal(size, sizeValue, `Expected size '${sizeValue}' for button ${id}`);
-    ids.add(id);
+    const iconId = readOptionalTopLevelStringProp(objectSource, "iconId");
+    buttons.set(id, { id, iconId });
   }
-  return [...ids].sort((a, b) => a.localeCompare(b));
+  return [...buttons.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 function findEnclosingObjectStart(source, fromIndex) {
@@ -152,11 +153,11 @@ function readTopLevelStringProp(objectSource, propName) {
   throw new Error(`Missing top-level '${propName}' string property in object:\n${objectSource.slice(0, 200)}…`);
 }
 
-function readTopLevelStringPropOptional(objectSource, propName) {
+function readOptionalTopLevelStringProp(objectSource, propName) {
   try {
     return readTopLevelStringProp(objectSource, propName);
   } catch {
-    return null;
+    return undefined;
   }
 }
 
@@ -175,26 +176,16 @@ function skipWhitespace(source, index) {
   return i;
 }
 
-test('ribbon schema assigns iconId for buttons with size: "icon"', () => {
+test('ribbon schema assigns an iconId for every button with size: "icon"', () => {
   const schemaSource = readDesktopSource("ribbon", "ribbonSchema.ts");
 
-  const iconButtonIds = collectSchemaButtonIdsWithSize(schemaSource, "icon");
-  assert.ok(iconButtonIds.includes("home.font.bold"), "Sanity-check: expected an icon-sized button id");
+  const iconButtons = collectSchemaButtonsWithSize(schemaSource, "icon");
+  assert.ok(
+    iconButtons.some((button) => button.id === "home.font.bold"),
+    "Sanity-check: expected an icon-sized button id",
+  );
 
-  const missing = [];
-  for (const id of iconButtonIds) {
-    // Find the *specific* button object that contains this id. We keep the parsing
-    // intentionally simple (string search + enclosing object scan) so this test can
-    // run under Node without a TypeScript parser.
-    const idRe = new RegExp(`\\bid\\s*:\\s*["']${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`, "g");
-    const match = idRe.exec(schemaSource);
-    assert.ok(match, `Could not locate schema button id ${id}`);
-    const objectStart = findEnclosingObjectStart(schemaSource, match.index);
-    const objectEnd = findEnclosingObjectEnd(schemaSource, objectStart);
-    const objectSource = schemaSource.slice(objectStart, objectEnd + 1);
-    const iconId = readTopLevelStringPropOptional(objectSource, "iconId");
-    if (!iconId) missing.push(id);
-  }
+  const missing = iconButtons.filter((button) => !button.iconId).map((button) => button.id);
 
   assert.deepEqual(
     missing,
@@ -203,23 +194,16 @@ test('ribbon schema assigns iconId for buttons with size: "icon"', () => {
   );
 });
 
-test('ribbon schema assigns iconId for buttons with size: "large"', () => {
+test('ribbon schema assigns an iconId for every button with size: "large"', () => {
   const schemaSource = readDesktopSource("ribbon", "ribbonSchema.ts");
 
-  const largeButtonIds = collectSchemaButtonIdsWithSize(schemaSource, "large");
-  assert.ok(largeButtonIds.includes("file.save.save"), "Sanity-check: expected a large-sized button id");
+  const largeButtons = collectSchemaButtonsWithSize(schemaSource, "large");
+  assert.ok(
+    largeButtons.some((button) => button.id === "file.save.save"),
+    "Sanity-check: expected a large-sized button id",
+  );
 
-  const missing = [];
-  for (const id of largeButtonIds) {
-    const idRe = new RegExp(`\\bid\\s*:\\s*["']${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`, "g");
-    const match = idRe.exec(schemaSource);
-    assert.ok(match, `Could not locate schema button id ${id}`);
-    const objectStart = findEnclosingObjectStart(schemaSource, match.index);
-    const objectEnd = findEnclosingObjectEnd(schemaSource, objectStart);
-    const objectSource = schemaSource.slice(objectStart, objectEnd + 1);
-    const iconId = readTopLevelStringPropOptional(objectSource, "iconId");
-    if (!iconId) missing.push(id);
-  }
+  const missing = largeButtons.filter((button) => !button.iconId).map((button) => button.id);
 
   assert.deepEqual(
     missing,
