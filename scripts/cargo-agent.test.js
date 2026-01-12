@@ -65,3 +65,29 @@ test(
     assert.ok(stderr.includes('jobs=7'), stderr);
   },
 );
+
+test(
+  'cargo_agent preserves stdout (cargo metadata JSON not corrupted by stderr logs)',
+  { skip: !hasBash || !hasCargo },
+  () => {
+    const proc = spawnSync(
+      'bash',
+      [
+        '-lc',
+        // Force cargo to emit logs on stderr while still writing JSON to stdout.
+        'export CARGO_LOG=trace && bash scripts/cargo_agent.sh metadata --format-version 1 --no-deps',
+      ],
+      { encoding: 'utf8', cwd: repoRoot },
+    );
+    if (proc.error) throw proc.error;
+    assert.equal(proc.status, 0, proc.stderr);
+
+    // Ensure cargo actually emitted something to stderr so this test would have caught a
+    // regression to the old `2>&1 | tee ...` behavior.
+    assert.ok(proc.stderr.includes('TRACE cargo:'), proc.stderr);
+
+    const stdout = String(proc.stdout).trim();
+    assert.ok(stdout.startsWith('{'), stdout.slice(0, 200));
+    assert.doesNotThrow(() => JSON.parse(stdout));
+  },
+);
