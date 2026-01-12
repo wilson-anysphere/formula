@@ -1,6 +1,5 @@
 /**
- * Minimal EventEmitter implementation that works in both browser and Node
- * runtimes.
+ * Minimal EventEmitter implementation that works in both browser and Node runtimes.
  *
  * The versioning package is consumed by the desktop/web UI bundles (Vite), so we
  * cannot depend on Node built-ins like `node:events` here.
@@ -10,12 +9,12 @@
  */
 class SimpleEventEmitter {
   constructor() {
-    /** @type {Map<string, Set<(...args: any[]) => void>>} */
+    /** @type {Map<any, Set<(...args: any[]) => void>>} */
     this._listeners = new Map();
   }
 
   /**
-   * @param {string} event
+   * @param {string | symbol} event
    * @param {(...args: any[]) => void} listener
    */
   on(event, listener) {
@@ -36,7 +35,7 @@ class SimpleEventEmitter {
   }
 
   /**
-   * @param {string} event
+   * @param {string | symbol} event
    * @param {(...args: any[]) => void} listener
    */
   off(event, listener) {
@@ -55,7 +54,7 @@ class SimpleEventEmitter {
   }
 
   /**
-   * @param {string} event
+   * @param {string | symbol} event
    * @param {(...args: any[]) => void} listener
    */
   once(event, listener) {
@@ -67,7 +66,7 @@ class SimpleEventEmitter {
   }
 
   /**
-   * @param {string} event
+   * @param {string | symbol} event
    * @param  {...any} args
    */
   emit(event, ...args) {
@@ -86,6 +85,15 @@ class SimpleEventEmitter {
       }
     }
     return true;
+  }
+
+  removeAllListeners(event) {
+    if (event == null) {
+      this._listeners.clear();
+      return this;
+    }
+    this._listeners.delete(event);
+    return this;
   }
 }
 

@@ -3111,27 +3111,53 @@ if (
       },
     ];
 
-    if (extensionHostManager.ready && !extensionHostManager.error) {
-      // Ensure command labels are available.
-      syncContributedCommands();
+    if (!extensionHostManager.ready) {
+      // Extensions are loaded lazily. Show a non-blocking placeholder while the host spins up
+      // so users understand why extension-contributed items are not immediately visible.
+      menuItems.push({ type: "separator" });
+      menuItems.push({
+        type: "item",
+        label: "Loading extensions…",
+        enabled: false,
+        onSelect: () => {
+          // Disabled placeholder item.
+        },
+      });
+      return menuItems;
+    }
 
-      const contributed = resolveMenuItems(extensionHostManager.getContributedMenu("cell/context"), contextKeys.asLookup());
-      if (contributed.length > 0) {
-        menuItems.push({ type: "separator" });
-        const model = buildContextMenuModel(contributed, commandRegistry);
-        for (const entry of model) {
-          if (entry.kind === "separator") {
-            menuItems.push({ type: "separator" });
-            continue;
-          }
-          menuItems.push({
-            type: "item",
-            label: entry.label,
-            enabled: entry.enabled,
-            shortcut: getPrimaryCommandKeybindingDisplay(entry.commandId, commandKeybindingDisplayIndex) ?? undefined,
-            onSelect: () => executeExtensionCommand(entry.commandId),
-          });
+    if (extensionHostManager.error) {
+      menuItems.push({ type: "separator" });
+      menuItems.push({
+        type: "item",
+        label: "Extensions failed to load",
+        enabled: false,
+        onSelect: () => {
+          // Disabled error item.
+        },
+      });
+      return menuItems;
+    }
+
+    // Ensure command labels are available.
+    syncContributedCommands();
+
+    const contributed = resolveMenuItems(extensionHostManager.getContributedMenu("cell/context"), contextKeys.asLookup());
+    if (contributed.length > 0) {
+      menuItems.push({ type: "separator" });
+      const model = buildContextMenuModel(contributed, commandRegistry);
+      for (const entry of model) {
+        if (entry.kind === "separator") {
+          menuItems.push({ type: "separator" });
+          continue;
         }
+        menuItems.push({
+          type: "item",
+          label: entry.label,
+          enabled: entry.enabled,
+          shortcut: getPrimaryCommandKeybindingDisplay(entry.commandId, commandKeybindingDisplayIndex) ?? undefined,
+          onSelect: () => executeExtensionCommand(entry.commandId),
+        });
       }
     }
 
@@ -3160,12 +3186,16 @@ if (
         .then(() => {
           if (session !== contextMenuSession) return;
           if (!contextMenu.isOpen()) return;
-          if (!extensionHostManager.ready || extensionHostManager.error) return;
+          if (!extensionHostManager.ready) return;
           contextMenu.update(buildGridContextMenuItems());
           if (focusFirst) contextMenu.focusFirst();
         })
         .catch(() => {
-          // ignore
+          // Best-effort: keep the context menu functional even if extension loading fails.
+          if (session !== contextMenuSession) return;
+          if (!contextMenu.isOpen()) return;
+          contextMenu.update(buildGridContextMenuItems());
+          if (focusFirst) contextMenu.focusFirst();
         });
     }
   };

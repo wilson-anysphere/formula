@@ -288,7 +288,7 @@ test.describe("Extensions UI integration", () => {
 
     // Extension contributions should appear once the lazy-loaded extension host finishes
     // initializing.
-    const item = menu.getByRole("button", { name: "Sample Hello: Open Sample Panel" });
+    const item = menu.getByRole("menuitem", { name: "Sample Hello: Open Sample Panel" });
     await expect(item).toBeVisible({ timeout: 30_000 });
   });
 
@@ -335,7 +335,7 @@ test.describe("Extensions UI integration", () => {
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
 
-    const item = menu.getByRole("button", { name: "Sample Hello: Sum Selection" });
+    const item = menu.getByRole("menuitem", { name: "Sample Hello: Sum Selection" });
     await expect(item).toBeEnabled();
     await item.click();
 
