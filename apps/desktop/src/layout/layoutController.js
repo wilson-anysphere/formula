@@ -241,6 +241,20 @@ export class LayoutController {
   }
 
   setSplitRatio(ratio, options) {
+    const persist = options?.persist ?? true;
+    const emit = options?.emit ?? true;
+
+    // Split ratio updates can be extremely high frequency (splitter drag). For ephemeral,
+    // non-emitting updates we can safely apply the change directly without running full
+    // normalization/persistence logic on every tick.
+    if (!persist && !emit) {
+      const clamped = Math.max(0.1, Math.min(0.9, ratio));
+      if (this.layout?.splitView?.ratio === clamped) return;
+      this.layout.splitView.ratio = clamped;
+      this.#needsPersist = true;
+      return;
+    }
+
     this.#commit(setSplitRatio(this.layout, ratio), options);
   }
 
