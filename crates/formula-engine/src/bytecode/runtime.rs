@@ -8404,9 +8404,6 @@ fn fn_xmatch(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 
     let pos = match &args[1] {
         Value::Range(r) => {
-            if matches!(lookup_value, Value::Lambda(_)) {
-                return Value::Error(ErrorKind::Value);
-            }
             let lookup_value = bytecode_value_to_engine_ref(&lookup_value);
             let lookup_range = r.resolve(base);
             if !range_in_bounds(grid, lookup_range) {
@@ -8440,9 +8437,6 @@ fn fn_xmatch(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             )
         }
         Value::Array(arr) => {
-            if matches!(lookup_value, Value::Lambda(_)) {
-                return Value::Error(ErrorKind::Value);
-            }
             let lookup_value = bytecode_value_to_engine_ref(&lookup_value);
             let Some((shape, len)) = array_1d_shape_len(arr) else {
                 return Value::Error(ErrorKind::Value);
