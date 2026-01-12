@@ -109,7 +109,7 @@ pub use streaming::{
     patch_xlsx_streaming_workbook_cell_patches_with_recalc_policy,
     patch_xlsx_streaming_workbook_cell_patches_with_styles,
     patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy, StreamingPatchError,
-    WorksheetCellPatch,
+    strip_vba_project_streaming, WorksheetCellPatch,
 };
 pub use styles::*;
 pub use workbook::ChartExtractionError;

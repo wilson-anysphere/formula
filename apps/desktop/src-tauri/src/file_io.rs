@@ -16,8 +16,8 @@ use formula_xlsx::print::{
 };
 use formula_xlsx::{
     patch_xlsx_streaming_workbook_cell_patches,
-    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides, CellPatch as XlsxCellPatch,
-    PartOverride, PreservedPivotParts, WorkbookCellPatches, XlsxPackage,
+    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides, strip_vba_project_streaming,
+    CellPatch as XlsxCellPatch, PartOverride, PreservedPivotParts, WorkbookCellPatches, XlsxPackage,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufReader, Cursor};
@@ -1285,6 +1285,39 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             return Ok(bytes);
         }
 
+        if wants_drop_vba && !power_query_changed {
+            let mut bytes = if patches.is_empty() {
+                let mut cursor = Cursor::new(Vec::new());
+                strip_vba_project_streaming(Cursor::new(origin_bytes), &mut cursor)
+                    .context("strip VBA project (streaming)")?;
+                cursor.into_inner()
+            } else {
+                let mut cursor = Cursor::new(Vec::new());
+                patch_xlsx_streaming_workbook_cell_patches(
+                    Cursor::new(origin_bytes),
+                    &mut cursor,
+                    &patches,
+                )
+                .context("apply worksheet cell patches (streaming)")?;
+                let patched = cursor.into_inner();
+
+                let mut stripped = Cursor::new(Vec::new());
+                strip_vba_project_streaming(Cursor::new(patched), &mut stripped)
+                    .context("strip VBA project (streaming)")?;
+                stripped.into_inner()
+            };
+
+            if print_settings_changed {
+                bytes = write_workbook_print_settings(&bytes, &workbook.print_settings)
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            }
+
+            let bytes = Arc::<[u8]>::from(bytes);
+            std::fs::write(path, bytes.as_ref())
+                .with_context(|| format!("write workbook {:?}", path))?;
+            return Ok(bytes);
+        }
+
         let mut pkg =
             XlsxPackage::from_bytes(origin_bytes).context("parse original workbook package")?;
         if !patches.is_empty() {
@@ -1914,14 +1947,14 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::state::AppState;
-    use formula_format::{format_value, FormatOptions, Value as FormatValue};
-    use formula_xlsb::biff12_varint;
-    use std::collections::BTreeSet;
-    use std::io::Read;
-    use xlsx_diff::{diff_workbooks, Severity, WorkbookArchive};
+    mod tests {
+        use super::*;
+        use crate::state::AppState;
+        use formula_format::{format_value, FormatOptions, Value as FormatValue};
+        use formula_xlsb::biff12_varint;
+        use std::collections::BTreeSet;
+        use std::io::Read;
+        use xlsx_diff::{diff_workbooks, diff_workbooks_with_options, DiffOptions, Severity, WorkbookArchive};
 
     fn assert_no_critical_diffs(expected: &Path, actual: &Path) {
         let report = diff_workbooks(expected, actual).expect("diff workbooks");
@@ -3735,6 +3768,23 @@ mod tests {
         assert!(
             !rels.contains("relationships/vbaProject"),
             "expected workbook.xml.rels to drop the vbaProject relationship"
+        );
+
+        // Ensure macro stripping doesn't perturb unrelated parts.
+        let mut ignore_parts = BTreeSet::new();
+        ignore_parts.insert("xl/vbaProject.bin".to_string());
+        ignore_parts.insert("[Content_Types].xml".to_string());
+        ignore_parts.insert("xl/_rels/workbook.xml.rels".to_string());
+        let options = DiffOptions {
+            ignore_parts,
+            ignore_globs: Vec::new(),
+        };
+        let report =
+            diff_workbooks_with_options(fixture_path, &out_path, &options).expect("diff workbooks");
+        assert_eq!(
+            report.count(Severity::Critical),
+            0,
+            "unexpected critical diffs after macro stripping: {report:?}"
         );
     }
 
