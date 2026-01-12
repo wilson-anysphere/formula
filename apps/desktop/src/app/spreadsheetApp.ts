@@ -443,7 +443,6 @@ export class SpreadsheetApp {
   private limits: GridLimits;
   private sharedGrid: DesktopSharedGrid | null = null;
   private sharedProvider: DocumentCellProvider | null = null;
-  private readonly commentMeta = new Map<string, { resolved: boolean }>();
   private readonly commentMetaByCoord = new Map<number, { resolved: boolean }>();
   private readonly commentPreviewByCoord = new Map<number, string>();
   private readonly commentThreadsByCellRef = new Map<string, Comment[]>();
@@ -621,7 +620,6 @@ export class SpreadsheetApp {
   private readonly currentUser: CommentAuthor;
   private readonly commentsDoc: Y.Doc;
   private readonly commentManager: CommentManager;
-  private commentCells = new Set<string>();
   private commentsPanelVisible = false;
   private stopCommentPersistence: (() => void) | null = null;
   private commentIndexVersion = 0;
@@ -3915,8 +3913,6 @@ export class SpreadsheetApp {
     this.clearSharedHoverCellCache();
     this.hideCommentTooltip();
 
-    this.commentCells.clear();
-    this.commentMeta.clear();
     this.commentMetaByCoord.clear();
     this.commentPreviewByCoord.clear();
     this.commentThreadsByCellRef.clear();
@@ -3951,16 +3947,7 @@ export class SpreadsheetApp {
       // Normalize A1 refs so `$A$1`, `a1`, etc map to the same cell key.
       // For collab-mode sheet-qualified refs, normalize only the A1 portion.
       const cellRef = sheetId ? `${sheetId}!${normalizedA1}` : a1IsPlain ? normalizedA1 : rawCellRef;
-      this.commentCells.add(cellRef);
-
       const resolved = Boolean(comment.resolved);
-
-      const existing = this.commentMeta.get(cellRef);
-      if (!existing) this.commentMeta.set(cellRef, { resolved });
-      else {
-        // Treat the cell as resolved only if all comment threads on the cell are resolved.
-        existing.resolved = existing.resolved && resolved;
-      }
 
       const threads = this.commentThreadsByCellRef.get(cellRef);
       if (threads) threads.push(comment);
