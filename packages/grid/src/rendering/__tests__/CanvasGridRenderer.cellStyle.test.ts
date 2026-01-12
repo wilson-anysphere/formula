@@ -9,6 +9,7 @@ type Recording = {
   lineWidths: number[];
   strokeStyles: string[];
   lineDashes: number[][];
+  lineCaps: CanvasLineCap[];
 };
 
 function createRecordingContext(canvas: HTMLCanvasElement): { ctx: CanvasRenderingContext2D; rec: Recording } {
@@ -17,13 +18,15 @@ function createRecordingContext(canvas: HTMLCanvasElement): { ctx: CanvasRenderi
     strokes: 0,
     lineWidths: [],
     strokeStyles: [],
-    lineDashes: []
+    lineDashes: [],
+    lineCaps: []
   };
 
   let font = "";
   let strokeStyle: string | CanvasGradient | CanvasPattern = "#000";
   let fillStyle: string | CanvasGradient | CanvasPattern = "#000";
   let lineWidth = 1;
+  let lineCap: CanvasLineCap = "butt";
 
   const ctx: Partial<CanvasRenderingContext2D> = {
     canvas,
@@ -53,6 +56,13 @@ function createRecordingContext(canvas: HTMLCanvasElement): { ctx: CanvasRenderi
     set lineWidth(value: number) {
       lineWidth = value;
       rec.lineWidths.push(value);
+    },
+    get lineCap() {
+      return lineCap;
+    },
+    set lineCap(value: CanvasLineCap) {
+      lineCap = value;
+      rec.lineCaps.push(value);
     },
     textAlign: "left",
     textBaseline: "alphabetic",
@@ -372,6 +382,55 @@ describe("CanvasGridRenderer CellStyle primitives", () => {
     expect(grid.rec.strokeStyles).toContain(borderColor);
     // width=2 at zoom=2 => effective 4px.
     expect(grid.rec.lineWidths).toContain(4);
+  });
+
+  it("renders dotted borders with round line caps (Excel-like)", () => {
+    const borderColor = "#ff0000";
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              style: {
+                borders: {
+                  bottom: { width: 1, style: "dotted", color: borderColor }
+                }
+              }
+            }
+          : null
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const created = createRecordingContext(this).ctx;
+      contexts.set(this, created);
+      return created;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 2, colCount: 2, defaultColWidth: 50, defaultRowHeight: 20 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(200, 80, 1);
+    renderer.renderImmediately();
+
+    expect(grid.rec.strokeStyles).toContain(borderColor);
+    expect(grid.rec.lineCaps).toContain("round");
   });
 
   it("resolves shared-edge border conflicts in favor of thicker widths", () => {
