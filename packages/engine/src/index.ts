@@ -28,6 +28,8 @@ export type {
   WorkbookBackend,
   WorkbookInfo,
   SheetInfo,
+  SheetVisibility,
+  TabColor,
   SheetUsedRange,
   RangeCellEdit,
   RangeData,
