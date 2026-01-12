@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import test from "node:test";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // Include an explicit `.ts` specifier so `scripts/run-node-tests.mjs` can skip this
 // suite when TypeScript execution isn't available (no transpile loader and no
@@ -26,7 +26,7 @@ test(
   "resolve-ts-imports-loader works under --experimental-strip-types (no TypeScript dependency)",
   { skip: !supportsTypeStripping() },
   () => {
-    const repoRoot = path.resolve(new URL(".", import.meta.url).pathname, "..");
+    const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
     const loaderUrl = pathToFileURL(path.join(repoRoot, "scripts", "resolve-ts-imports-loader.mjs")).href;
     const child = spawnSync(
       process.execPath,
