@@ -4,7 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import * as ui from "../../extensions/ui";
+import * as ui from "../../extensions/ui.js";
 import { setLocale, t, tWithVars } from "../../i18n/index.js";
 import * as notifications from "../notifications";
 import { __resetUpdaterUiStateForTests, handleUpdaterEvent, installUpdaterUi } from "../updaterUi";

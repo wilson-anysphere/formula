@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 
-import { showInputBox } from "./ui";
+import { showInputBox } from "./ui.js";
 
 describe("extensions/ui showInputBox", () => {
   it("resolves with input value when OK is clicked", async () => {
@@ -72,4 +72,3 @@ describe("extensions/ui showInputBox", () => {
     await expect(promise).resolves.toBe('{"a": 1}');
   });
 });
-
