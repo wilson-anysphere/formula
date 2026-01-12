@@ -2113,12 +2113,6 @@ function renderSheetTabs(): void {
       onSheetDeleted: ({ sheetId, name }) => {
         const doc = app.getDocument() as any;
         try {
-          doc?.model?.sheets?.delete?.(sheetId);
-        } catch {
-          // ignore
-        }
-
-        try {
           rewriteDocumentFormulasForSheetDelete(doc, name);
         } catch (err) {
           showToast(`Failed to update formulas after delete: ${String((err as any)?.message ?? err)}`, "error");
