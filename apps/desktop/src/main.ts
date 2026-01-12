@@ -3083,6 +3083,19 @@ function installSheetStoreSubscription(): void {
                 after_sheet_id: afterSheetId,
                 index: idx,
               }).catch((err) => reportError("add", err));
+
+              // New sheets can also carry non-default metadata (e.g. undo restore of a deleted
+              // hidden sheet, or applyState restores). Ensure we persist those too.
+              if (meta.visibility !== "visible") {
+                void invoke("set_sheet_visibility", { sheet_id: sheetId, visibility: meta.visibility }).catch((err) =>
+                  reportError("visibility", err),
+                );
+              }
+              if (meta.tabColor) {
+                void invoke("set_sheet_tab_color", { sheet_id: sheetId, tab_color: meta.tabColor ?? null }).catch((err) =>
+                  reportError("tab color", err),
+                );
+              }
             }
 
             // Metadata updates.
