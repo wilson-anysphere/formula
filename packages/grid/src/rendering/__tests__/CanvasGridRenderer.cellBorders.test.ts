@@ -472,6 +472,131 @@ describe("CanvasGridRenderer side border rendering (Excel-like)", () => {
     expect(gridStrokes.some((stroke) => stroke.strokeStyle === "#ff0000")).toBe(false);
   });
 
+  it("resolves merged border conflicts across frozen row boundaries (collapsed borders across quadrants)", () => {
+    const merged: CellRange = { startRow: 0, endRow: 1, startCol: 0, endCol: 2 };
+    const contains = (range: CellRange, row: number, col: number) =>
+      row >= range.startRow && row < range.endRow && col >= range.startCol && col < range.endCol;
+    const intersects = (a: CellRange, b: CellRange) =>
+      a.startRow < b.endRow && a.endRow > b.startRow && a.startCol < b.endCol && a.endCol > b.startCol;
+
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        // Merged anchor in the frozen row has a thick blue bottom border on the merged perimeter.
+        if (row === 0 && col === 0) {
+          return { row, col, value: null, style: { borders: { bottom: { width: 3, style: "solid", color: "#0000ff" } } } };
+        }
+        // Cells below (in the scrollable pane) try to draw a thin red top border, but should lose.
+        if (row === 1 && (col === 0 || col === 1)) {
+          return { row, col, value: null, style: { borders: { top: { width: 1, style: "solid", color: "#ff0000" } } } };
+        }
+        return { row, col, value: null };
+      },
+      getMergedRangeAt: (row, col) => (contains(merged, row, col) ? merged : null),
+      getMergedRangesInRange: (range) => (intersects(range, merged) ? [merged] : [])
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const { ctx: gridCtx, strokes: gridStrokes } = createRecording2dContext(gridCanvas);
+    const contentCtx = createRecording2dContext(contentCanvas).ctx;
+    const selectionCtx = createRecording2dContext(selectionCanvas).ctx;
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, gridCtx],
+      [contentCanvas, contentCtx],
+      [selectionCanvas, selectionCtx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      return contexts.get(this) ?? createRecording2dContext(this).ctx;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 2,
+      colCount: 2,
+      defaultRowHeight: 10,
+      defaultColWidth: 10
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+    gridStrokes.length = 0;
+    renderer.setFrozen(1, 0);
+
+    // Thick blue border should win on the shared boundary y=10 (odd width=3 => crisp at y=10.5).
+    const blueStroke = gridStrokes.find((stroke) => stroke.strokeStyle === "#0000ff" && stroke.lineWidth === 3);
+    expect(blueStroke).toBeTruthy();
+    expect(hasNormalizedSegment(blueStroke!.segments, { x1: 0, y1: 10.5, x2: 10, y2: 10.5 })).toBe(true);
+    expect(hasNormalizedSegment(blueStroke!.segments, { x1: 10, y1: 10.5, x2: 20, y2: 10.5 })).toBe(true);
+
+    // Ensure the red border never wins the shared edge.
+    expect(gridStrokes.some((stroke) => stroke.strokeStyle === "#ff0000")).toBe(false);
+  });
+
+  it("resolves merged border conflicts across frozen column boundaries (collapsed borders across quadrants)", () => {
+    const merged: CellRange = { startRow: 0, endRow: 2, startCol: 0, endCol: 1 };
+    const contains = (range: CellRange, row: number, col: number) =>
+      row >= range.startRow && row < range.endRow && col >= range.startCol && col < range.endCol;
+    const intersects = (a: CellRange, b: CellRange) =>
+      a.startRow < b.endRow && a.endRow > b.startRow && a.startCol < b.endCol && a.endCol > b.startCol;
+
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        // Merged anchor in the frozen col has a thick blue right border on the merged perimeter.
+        if (row === 0 && col === 0) {
+          return { row, col, value: null, style: { borders: { right: { width: 3, style: "solid", color: "#0000ff" } } } };
+        }
+        // Cells to the right (in the scrollable pane) try to draw a thin red left border, but should lose.
+        if ((row === 0 || row === 1) && col === 1) {
+          return { row, col, value: null, style: { borders: { left: { width: 1, style: "solid", color: "#ff0000" } } } };
+        }
+        return { row, col, value: null };
+      },
+      getMergedRangeAt: (row, col) => (contains(merged, row, col) ? merged : null),
+      getMergedRangesInRange: (range) => (intersects(range, merged) ? [merged] : [])
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const { ctx: gridCtx, strokes: gridStrokes } = createRecording2dContext(gridCanvas);
+    const contentCtx = createRecording2dContext(contentCanvas).ctx;
+    const selectionCtx = createRecording2dContext(selectionCanvas).ctx;
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, gridCtx],
+      [contentCanvas, contentCtx],
+      [selectionCanvas, selectionCtx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      return contexts.get(this) ?? createRecording2dContext(this).ctx;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 2,
+      colCount: 2,
+      defaultRowHeight: 10,
+      defaultColWidth: 10
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+    gridStrokes.length = 0;
+    renderer.setFrozen(0, 1);
+
+    // Thick blue border should win on the shared boundary x=10 (odd width=3 => crisp at x=10.5).
+    const blueStroke = gridStrokes.find((stroke) => stroke.strokeStyle === "#0000ff" && stroke.lineWidth === 3);
+    expect(blueStroke).toBeTruthy();
+    expect(hasNormalizedSegment(blueStroke!.segments, { x1: 10.5, y1: 0, x2: 10.5, y2: 10 })).toBe(true);
+    expect(hasNormalizedSegment(blueStroke!.segments, { x1: 10.5, y1: 10, x2: 10.5, y2: 20 })).toBe(true);
+
+    expect(gridStrokes.some((stroke) => stroke.strokeStyle === "#ff0000")).toBe(false);
+  });
+
   it("resolves shared-edge border conflicts deterministically (width, style, tie-break)", () => {
     const provider: CellProvider = {
       getCell: (row, col) => {
