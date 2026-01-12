@@ -153,8 +153,8 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
                 _ => Value::Text(abs),
             }
         }
-        CellInfoType::Col => Value::Number((addr.col + 1) as f64),
-        CellInfoType::Row => Value::Number((addr.row + 1) as f64),
+        CellInfoType::Col => Value::Number((u64::from(addr.col) + 1) as f64),
+        CellInfoType::Row => Value::Number((u64::from(addr.row) + 1) as f64),
         CellInfoType::Contents => {
             let cell_ref = Reference {
                 sheet_id: reference.sheet_id.clone(),

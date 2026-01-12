@@ -107,7 +107,7 @@ inventory::submit! {
 
 fn row_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     if args.is_empty() {
-        return Value::Number((ctx.current_cell_addr().row + 1) as f64);
+        return Value::Number((u64::from(ctx.current_cell_addr().row) + 1) as f64);
     }
 
     let reference = match reference_from_arg(ctx.eval_arg(&args[0])) {
@@ -117,7 +117,7 @@ fn row_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let reference = reference.normalized();
 
     if reference.is_single_cell() {
-        return Value::Number((reference.start.row + 1) as f64);
+        return Value::Number((u64::from(reference.start.row) + 1) as f64);
     }
 
     let rows = (reference.end.row - reference.start.row + 1) as usize;
@@ -131,7 +131,7 @@ fn row_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     if spans_all_cols || spans_all_rows {
         let mut values = Vec::with_capacity(rows);
         for row in reference.start.row..=reference.end.row {
-            values.push(Value::Number((row + 1) as f64));
+            values.push(Value::Number((u64::from(row) + 1) as f64));
         }
         if rows == 1 {
             return values.first().cloned().unwrap_or(Value::Blank);
@@ -141,7 +141,7 @@ fn row_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let mut values = Vec::with_capacity(rows.saturating_mul(cols));
     for row in reference.start.row..=reference.end.row {
-        let n = Value::Number((row + 1) as f64);
+        let n = Value::Number((u64::from(row) + 1) as f64);
         for _ in reference.start.col..=reference.end.col {
             values.push(n.clone());
         }
@@ -165,7 +165,7 @@ inventory::submit! {
 
 fn column_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     if args.is_empty() {
-        return Value::Number((ctx.current_cell_addr().col + 1) as f64);
+        return Value::Number((u64::from(ctx.current_cell_addr().col) + 1) as f64);
     }
 
     let reference = match reference_from_arg(ctx.eval_arg(&args[0])) {
@@ -175,7 +175,7 @@ fn column_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let reference = reference.normalized();
 
     if reference.is_single_cell() {
-        return Value::Number((reference.start.col + 1) as f64);
+        return Value::Number((u64::from(reference.start.col) + 1) as f64);
     }
 
     let rows = (reference.end.row - reference.start.row + 1) as usize;
@@ -189,7 +189,7 @@ fn column_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     if spans_all_cols || spans_all_rows {
         let mut values = Vec::with_capacity(cols);
         for col in reference.start.col..=reference.end.col {
-            values.push(Value::Number((col + 1) as f64));
+            values.push(Value::Number((u64::from(col) + 1) as f64));
         }
         if cols == 1 {
             return values.first().cloned().unwrap_or(Value::Blank);
@@ -200,7 +200,7 @@ fn column_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut values = Vec::with_capacity(rows.saturating_mul(cols));
     let mut row_values = Vec::with_capacity(cols);
     for col in reference.start.col..=reference.end.col {
-        row_values.push(Value::Number((col + 1) as f64));
+        row_values.push(Value::Number((u64::from(col) + 1) as f64));
     }
     for _ in 0..rows {
         values.extend(row_values.iter().cloned());
@@ -226,13 +226,13 @@ fn rows_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     match ctx.eval_arg(&args[0]) {
         ArgValue::Reference(r) => {
             let r = r.normalized();
-            let rows = r.end.row - r.start.row + 1;
+            let rows = u64::from(r.end.row).saturating_sub(u64::from(r.start.row)) + 1;
             Value::Number(rows as f64)
         }
         ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Value),
         ArgValue::Scalar(Value::Reference(r)) => {
             let r = r.normalized();
-            let rows = r.end.row - r.start.row + 1;
+            let rows = u64::from(r.end.row).saturating_sub(u64::from(r.start.row)) + 1;
             Value::Number(rows as f64)
         }
         ArgValue::Scalar(Value::Array(arr)) => Value::Number(arr.rows as f64),
@@ -259,13 +259,13 @@ fn columns_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     match ctx.eval_arg(&args[0]) {
         ArgValue::Reference(r) => {
             let r = r.normalized();
-            let cols = r.end.col - r.start.col + 1;
+            let cols = u64::from(r.end.col).saturating_sub(u64::from(r.start.col)) + 1;
             Value::Number(cols as f64)
         }
         ArgValue::ReferenceUnion(_) => Value::Error(ErrorKind::Value),
         ArgValue::Scalar(Value::Reference(r)) => {
             let r = r.normalized();
-            let cols = r.end.col - r.start.col + 1;
+            let cols = u64::from(r.end.col).saturating_sub(u64::from(r.start.col)) + 1;
             Value::Number(cols as f64)
         }
         ArgValue::Scalar(Value::Array(arr)) => Value::Number(arr.cols as f64),
