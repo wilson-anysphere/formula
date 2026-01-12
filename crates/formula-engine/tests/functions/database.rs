@@ -194,3 +194,34 @@ fn database_functions_computed_criteria_requires_formula() {
         Value::Error(ErrorKind::Value)
     );
 }
+
+#[test]
+fn database_functions_computed_criteria_multiple_computed_columns() {
+    let mut sheet = TestSheet::new();
+    seed_database(&mut sheet);
+
+    // Criteria (F1:G2): both headers blank -> both columns are computed criteria.
+    //
+    // Age>30 AND Dept="HR" matches only Dan (salary 2000).
+    sheet.set_formula("F2", "=C2>30");
+    sheet.set_formula("G2", "=B2=\"HR\"");
+
+    assert_number(&sheet.eval("=DSUM(A1:D5,\"Salary\",F1:G2)"), 2000.0);
+    assert_number(&sheet.eval("=DGET(A1:D5,\"Salary\",F1:G2)"), 2000.0);
+}
+
+#[test]
+fn database_functions_computed_criteria_or_across_computed_rows() {
+    let mut sheet = TestSheet::new();
+    seed_database(&mut sheet);
+
+    // Criteria (F1:F3): blank header -> computed criteria.
+    //
+    // Age>35 OR Age<30 matches Dan (2000) and Carol ("n/a").
+    sheet.set_formula("F2", "=C2>35");
+    sheet.set_formula("F3", "=C2<30");
+
+    assert_number(&sheet.eval("=DSUM(A1:D5,\"Salary\",F1:F3)"), 2000.0);
+    assert_number(&sheet.eval("=DCOUNT(A1:D5,\"Salary\",F1:F3)"), 1.0);
+    assert_number(&sheet.eval("=DCOUNTA(A1:D5,\"Salary\",F1:F3)"), 2.0);
+}
