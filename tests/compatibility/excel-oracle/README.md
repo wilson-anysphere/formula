@@ -47,6 +47,12 @@ and exits non-zero if mismatches exceed the configured threshold.
   ```bash
   python tools/excel-oracle/regenerate_subset_corpora.py
   ```
+
+  To only verify the subset corpora are up to date (without rewriting files), run:
+
+  ```bash
+  python tools/excel-oracle/regenerate_subset_corpora.py --check
+  ```
 - `datasets/` — results datasets:
   - `excel-oracle.pinned.json` — pinned Excel dataset for CI (no Excel needed).
   - `versioned/` — version-tagged pinned datasets (useful when Excel behavior differs across versions/builds).
