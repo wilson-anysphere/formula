@@ -85,9 +85,29 @@ Performance is a feature. Users should never wait, never see jank, never hit lim
 
 ### Automated Performance Tests
 
+The repo's CI performance suite is run via:
+
+```bash
+pnpm benchmark
+```
+
+This executes `apps/desktop/tests/performance/run.ts`, which contains both JS/TS microbenchmarks and
+Rust engine benchmarks (`formula-engine/src/bin/perf_bench.rs`).
+
+#### Renderer guardrails (Node/JSDOM)
+
+For rendering, we also run the real `@formula/grid` canvas renderer under Node (via JSDOM + a mocked
+2D canvas context) to guard against regressions in per-frame CPU cost at large sheet sizes:
+
+- `gridRenderer.firstFrame.p95` (attach + resize + first frame)
+- `gridRenderer.scrollStep.p95` (scroll + frame, 1M+ rows)
+- `gridRenderer.scrollStepHorizontal.p95` (horizontal scroll + frame)
+
+These benchmarks enforce a 16ms p95 budget (60fps target).
+
 ```typescript
 // tests/performance/benchmark.ts
-
+ 
 interface BenchmarkResult {
   name: string;
   iterations: number;
