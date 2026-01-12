@@ -245,9 +245,28 @@ pub(crate) fn parse_biff_sheet_hyperlinks(
 ) -> Result<SheetHyperlinks, String> {
     let mut out = SheetHyperlinks::default();
 
-    for record in records::BestEffortSubstreamIter::from_offset(workbook_stream, start)? {
+    // HLINK records can legally be split across one or more `CONTINUE` records if the hyperlink
+    // payload exceeds the BIFF record size limit. Use the logical iterator so we can reassemble
+    // those fragments before decoding.
+    let allows_continuation = |record_id: u16| record_id == RECORD_HLINK;
+    let iter = records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
+
+    for record in iter {
+        let record = match record {
+            Ok(record) => record,
+            // Best-effort: stop scanning on malformed record boundaries, but keep any successfully
+            // decoded hyperlinks.
+            Err(_) => break,
+        };
+
+        // BOF indicates the start of a new substream; stop before consuming the next section so we
+        // don't attribute later hyperlinks to this worksheet.
+        if record.offset != start && records::is_bof_record(record.record_id) {
+            break;
+        }
+
         match record.record_id {
-            RECORD_HLINK => match decode_hlink_record(record.data, codepage) {
+            RECORD_HLINK => match decode_hlink_record(record.data.as_ref(), codepage) {
                 Ok(Some(link)) => out.hyperlinks.push(link),
                 Ok(None) => {}
                 Err(err) => out.warnings.push(format!(
