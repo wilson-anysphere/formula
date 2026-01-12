@@ -91,7 +91,7 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
       if (!manager) return;
       const next = await manager.listVersions();
       setVersions(next);
-      if (selectedId && !next.some((v) => v.id === selectedId)) setSelectedId(null);
+      if (selectedId && !next.some((v: any) => v.id === selectedId)) setSelectedId(null);
     } catch (e) {
       setError((e as Error).message);
     }

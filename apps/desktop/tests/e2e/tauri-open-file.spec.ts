@@ -192,9 +192,10 @@ test.describe("tauri open-file integration", () => {
       const dialogs = (window as any).__tauriDialogCalls as Array<{ kind: string; message: string }> | undefined;
       const openWorkbookCalled =
         Array.isArray(invokes) && invokes.some((i) => i?.cmd === "open_workbook" && i?.args?.path === "/tmp/fake.xlsx");
-      const errorDialog =
-        Array.isArray(dialogs) && dialogs.find((d) => d?.kind === "message" || d?.kind === "alert")?.message;
-      return { openWorkbookCalled, errorDialog: errorDialog ?? null };
+      const errorDialog = Array.isArray(dialogs)
+        ? dialogs.find((d) => d?.kind === "message" || d?.kind === "alert")?.message ?? null
+        : null;
+      return { openWorkbookCalled, errorDialog };
     });
     if (!openWorkbookOutcome.openWorkbookCalled) {
       throw new Error(openWorkbookOutcome.errorDialog ?? "open_workbook was never invoked");
@@ -401,9 +402,10 @@ test.describe("tauri open-file integration", () => {
       const openPaths = Array.isArray(invokes)
         ? invokes.filter((i) => i?.cmd === "open_workbook").map((i) => i?.args?.path)
         : [];
-      const errorDialog =
-        Array.isArray(dialogs) && dialogs.find((d) => d?.kind === "message" || d?.kind === "alert")?.message;
-      return { openPaths, errorDialog: errorDialog ?? null };
+      const errorDialog = Array.isArray(dialogs)
+        ? dialogs.find((d) => d?.kind === "message" || d?.kind === "alert")?.message ?? null
+        : null;
+      return { openPaths, errorDialog };
     });
     if (openWorkbookOutcome.openPaths[openWorkbookOutcome.openPaths.length - 1] !== "/tmp/second.xlsx") {
       throw new Error(openWorkbookOutcome.errorDialog ?? "open_workbook was never invoked for /tmp/second.xlsx");

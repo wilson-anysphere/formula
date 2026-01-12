@@ -119,19 +119,37 @@ function tabColorEquals(a: unknown, b: unknown): boolean {
 
 function tabColorToBackendArg(input: unknown): TabColor | null {
   if (!input) return null;
+
+  // Some legacy/internal flows represent tab color as a raw rgb string.
   if (typeof input === "string") {
     const rgb = input.trim();
-    return rgb ? { rgb } : null;
+    return rgb ? { rgb: rgb.toUpperCase() } : null;
   }
+
   if (typeof input !== "object") return null;
   const color = input as any;
   const out: TabColor = {};
-  if (typeof color.rgb === "string" && color.rgb.trim() !== "") out.rgb = color.rgb.trim();
-  if (typeof color.theme === "number") out.theme = color.theme;
-  if (typeof color.indexed === "number") out.indexed = color.indexed;
-  if (typeof color.tint === "number") out.tint = color.tint;
+
+  if (typeof color.rgb === "string") {
+    const rgb = color.rgb.trim();
+    if (rgb) out.rgb = rgb.toUpperCase();
+  }
+  if (typeof color.theme === "number" && Number.isFinite(color.theme)) out.theme = color.theme;
+  if (typeof color.indexed === "number" && Number.isFinite(color.indexed)) out.indexed = color.indexed;
+  if (typeof color.tint === "number" && Number.isFinite(color.tint)) out.tint = color.tint;
   if (typeof color.auto === "boolean") out.auto = color.auto;
-  return Object.keys(out).length > 0 ? out : null;
+
+  if (
+    out.rgb == null &&
+    out.theme == null &&
+    out.indexed == null &&
+    out.tint == null &&
+    out.auto == null
+  ) {
+    return null;
+  }
+
+  return out;
 }
 
 function normalizeSheetVisibility(raw: unknown): SheetVisibility {

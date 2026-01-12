@@ -213,8 +213,7 @@ export async function readClipboard(): Promise<ClipboardContent> {
     payload = await invoke("read_clipboard");
   }
 
-  /** @type {ClipboardContent} */
-  const out = {};
+  const out: ClipboardContent = {};
   if (payload && typeof payload === "object") {
     if (typeof payload.text === "string") out.text = payload.text;
     if (typeof payload.html === "string") out.html = payload.html;

@@ -347,7 +347,7 @@ describe("DocumentControllerSpreadsheetApi", () => {
 
     const api = new DocumentControllerSpreadsheetApi(controller);
     const workbook = workbookFromSpreadsheetApi({ spreadsheet: api as any, workbookId: "wb-doc" });
-    const sheet = workbook.sheets.find((s) => s.name === "Sheet1");
+    const sheet = workbook.sheets.find((s: any) => s.name === "Sheet1");
     expect(sheet).toBeTruthy();
     if (!sheet) throw new Error("Missing sheet");
 

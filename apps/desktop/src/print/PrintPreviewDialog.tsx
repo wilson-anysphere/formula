@@ -18,7 +18,12 @@ export function PrintPreviewDialog({ pdfBytes, filename, autoPrint = false, onDo
   const autoPrintedRef = React.useRef(false);
 
   const pdfUrl = React.useMemo(() => {
-    const blob = new Blob([pdfBytes], { type: "application/pdf" });
+    // `Blob` expects ArrayBuffer-backed views. TypeScript models `Uint8Array` as possibly backed by a
+    // `SharedArrayBuffer` (`ArrayBufferLike`), so normalize for type safety.
+    const normalized: Uint8Array<ArrayBuffer> =
+      pdfBytes.buffer instanceof ArrayBuffer ? (pdfBytes as Uint8Array<ArrayBuffer>) : new Uint8Array(pdfBytes);
+
+    const blob = new Blob([normalized], { type: "application/pdf" });
     return URL.createObjectURL(blob);
   }, [pdfBytes]);
 

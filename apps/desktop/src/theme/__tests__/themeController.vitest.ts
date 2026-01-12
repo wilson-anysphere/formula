@@ -36,10 +36,10 @@ function createMatchMediaStub(initialMatches: Record<string, boolean> = {}): Mat
           return Boolean(matchesByQuery[query]);
         },
         onchange: null,
-        addEventListener(_type, cb) {
+        addEventListener(_type: string, cb: EventListenerOrEventListenerObject) {
           getListeners(query).add(cb as unknown as (event: { matches: boolean }) => void);
         },
-        removeEventListener(_type, cb) {
+        removeEventListener(_type: string, cb: EventListenerOrEventListenerObject) {
           getListeners(query).delete(cb as unknown as (event: { matches: boolean }) => void);
         },
         addListener(cb) {
@@ -120,4 +120,3 @@ describe("ThemeController (jsdom)", () => {
     controller.stop();
   });
 });
-

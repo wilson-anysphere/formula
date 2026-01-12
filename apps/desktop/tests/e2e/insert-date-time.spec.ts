@@ -18,7 +18,21 @@ async function stubDateNow(page: import("@playwright/test").Page): Promise<void>
           super(fixed);
           return;
         }
-        super(...(args as any));
+        if (args.length === 1) {
+          super(args[0] as any);
+          return;
+        }
+        // Avoid `super(...args)` to keep TypeScript happy with the overloaded `Date` constructor.
+        // (TS requires spread arguments to be tuple-typed when targeting non-rest call signatures.)
+        super(
+          args[0] as any,
+          args[1] as any,
+          args[2] as any,
+          args[3] as any,
+          args[4] as any,
+          args[5] as any,
+          args[6] as any
+        );
       }
 
       static now() {

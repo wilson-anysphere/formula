@@ -22,7 +22,7 @@ async function waitForIdle(page: import("@playwright/test").Page): Promise<void>
 }
 
 type RichClipboardItem = {
-  types: string[];
+  types: readonly string[];
   html: string | null;
   rtf: string | null;
 };

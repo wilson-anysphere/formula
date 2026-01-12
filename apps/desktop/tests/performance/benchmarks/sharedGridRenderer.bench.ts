@@ -97,7 +97,7 @@ function ensureDomAndCanvasMocks(): void {
     }) as unknown as CanvasRenderingContext2D;
 
   const ctxCache = new WeakMap<HTMLCanvasElement, CanvasRenderingContext2D>();
-  win.HTMLCanvasElement.prototype.getContext = function getContextStub() {
+  win.HTMLCanvasElement.prototype.getContext = function getContextStub(this: HTMLCanvasElement) {
     const canvas = this as HTMLCanvasElement;
     const cached = ctxCache.get(canvas);
     if (cached) return cached;
