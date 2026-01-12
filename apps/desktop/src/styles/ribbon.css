@@ -12,16 +12,59 @@
   user-select: none;
 }
 
+.ribbon__tabstrip {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  height: 26px;
+  padding: 0 6px;
+  gap: 6px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
 .ribbon__tabs {
   display: flex;
   align-items: stretch;
-  height: 26px;
-  padding: 0 6px;
   gap: 2px;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border);
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+.ribbon__tabstrip-right {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.ribbon__collapse-toggle {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-radius: 6px;
+  height: 22px;
+  width: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease);
+}
+
+.ribbon__collapse-toggle:hover {
+  background: var(--bg-tertiary);
+}
+
+.ribbon__collapse-toggle:focus-visible {
+  outline: 2px solid var(--selection-border);
+  outline-offset: 2px;
 }
 
 .ribbon__tab {
@@ -317,4 +360,54 @@
 
 .ribbon-dropdown__label {
   flex: 1;
+}
+
+/* Density modes (responsive + user-collapsed) */
+
+.ribbon[data-density="compact"] .ribbon__content {
+  padding: 4px 6px;
+  min-height: 52px;
+}
+
+.ribbon[data-density="compact"] .ribbon__tabpanel {
+  min-height: 44px;
+  gap: 10px;
+}
+
+.ribbon[data-density="compact"] .ribbon-group {
+  gap: 2px;
+  padding-right: 10px;
+}
+
+.ribbon[data-density="compact"] .ribbon-group__label {
+  display: none;
+}
+
+.ribbon[data-density="compact"] .ribbon-button {
+  padding: 2px 4px;
+  min-height: 20px;
+}
+
+.ribbon[data-density="compact"] .ribbon-button__label {
+  display: none;
+}
+
+.ribbon[data-density="compact"] .ribbon-button--large {
+  grid-row: span 1;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  min-width: 28px;
+  gap: 4px;
+}
+
+.ribbon[data-density="compact"] .ribbon-button--large .ribbon-button__icon {
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+}
+
+.ribbon[data-density="hidden"] .ribbon__content {
+  display: none;
 }

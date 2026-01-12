@@ -7,6 +7,36 @@ import { getRibbonPressedOverridesSnapshot, subscribeRibbonPressedOverrides } fr
 
 import "../styles/ribbon.css";
 
+type RibbonDensity = "full" | "compact" | "hidden";
+
+const RIBBON_COLLAPSED_STORAGE_KEY = "formula.ui.ribbonCollapsed";
+
+function readRibbonCollapsedFromStorage(): boolean {
+  try {
+    const value = localStorage.getItem(RIBBON_COLLAPSED_STORAGE_KEY);
+    return value === "true" || value === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeRibbonCollapsedToStorage(collapsed: boolean): void {
+  try {
+    localStorage.setItem(RIBBON_COLLAPSED_STORAGE_KEY, collapsed ? "true" : "false");
+  } catch {
+    // Ignore storage errors (e.g. disabled storage).
+  }
+}
+
+function densityFromWidth(width: number): RibbonDensity {
+  // In non-layout environments (tests/SSR) `getBoundingClientRect()` is often 0.
+  // Default to "full" rather than collapsing the ribbon in those cases.
+  if (!Number.isFinite(width) || width <= 0) return "full";
+  if (width < 800) return "hidden";
+  if (width < 1200) return "compact";
+  return "full";
+}
+
 function computeInitialPressed(schema: RibbonSchema): Record<string, boolean> {
   const pressed: Record<string, boolean> = {};
   for (const tab of schema.tabs) {
@@ -40,6 +70,8 @@ export interface RibbonProps {
 }
 
 export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: RibbonProps) {
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+
   const tabs = schema.tabs;
   const defaultTabId = React.useMemo(() => {
     if (initialTabId && tabs.some((tab) => tab.id === initialTabId)) {
@@ -58,6 +90,17 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
     getRibbonPressedOverridesSnapshot,
     getRibbonPressedOverridesSnapshot,
   );
+  const [ribbonWidth, setRibbonWidth] = React.useState<number>(0);
+  const [userCollapsed, setUserCollapsed] = React.useState<boolean>(() => readRibbonCollapsedFromStorage());
+
+  const toggleUserCollapsed = React.useCallback(() => {
+    setUserCollapsed((prev) => !prev);
+  }, []);
+
+  React.useEffect(() => {
+    // Persist the user-controlled "Collapse Ribbon" toggle.
+    writeRibbonCollapsedToStorage(userCollapsed);
+  }, [userCollapsed]);
 
   const tabButtonRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
 
@@ -69,6 +112,31 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
     // Spread here is fine: there are only ~tens of ribbon controls.
     return { ...pressedById, ...pressedOverrides };
   }, [pressedById, pressedOverrides]);
+
+  React.useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+
+    const update = () => {
+      const width = root.getBoundingClientRect().width;
+      setRibbonWidth((prev) => (prev === width ? prev : width));
+    };
+
+    update();
+
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver((entries) => {
+        const entry = entries[entries.length - 1];
+        const width = entry?.contentRect?.width ?? root.getBoundingClientRect().width;
+        setRibbonWidth((prev) => (prev === width ? prev : width));
+      });
+      observer.observe(root);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
 
   React.useEffect(() => {
     // Keep internal toggle state in sync with schema changes (e.g. when tabs/groups
@@ -140,10 +208,17 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
     (panel as HTMLElement).focus?.();
   }, []);
 
+  const responsiveDensity = React.useMemo(() => densityFromWidth(ribbonWidth), [ribbonWidth]);
+  const density: RibbonDensity = responsiveDensity === "hidden" ? "hidden" : userCollapsed ? "hidden" : responsiveDensity;
+  const contentVisible = density !== "hidden";
+  const collapseLabel = userCollapsed ? "Expand ribbon" : "Collapse ribbon";
+
   return (
     <div
       className="ribbon"
       data-testid="ribbon-root"
+      data-density={density}
+      ref={rootRef}
       onKeyDownCapture={(event) => {
         if (event.key !== "Escape" && event.key !== "ArrowUp") return;
         const target = event.target as HTMLElement | null;
@@ -163,94 +238,113 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
         tabButtonRefs.current[activeTabId]?.focus();
       }}
     >
-      <div className="ribbon__tabs" role="tablist" aria-label="Ribbon tabs" aria-orientation="horizontal">
-        {tabs.map((tab, index) => {
-          const isActive = tab.id === activeTabId;
-          const isFile = Boolean(tab.isFile);
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              className={[
-                "ribbon__tab",
-                isActive ? "is-active" : null,
-                isFile ? "ribbon__tab--file" : null,
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              role="tab"
-              id={`ribbon-tab-${tab.id}`}
-              aria-selected={isActive}
-              aria-controls={`ribbon-panel-${tab.id}`}
-              tabIndex={isActive ? 0 : -1}
-              ref={(el) => {
-                tabButtonRefs.current[tab.id] = el;
-              }}
-              onClick={() => {
-                setActiveTabId(tab.id);
-                actions.onTabChange?.(tab.id);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "ArrowRight") {
-                  event.preventDefault();
-                  selectTabByIndex((index + 1) % tabs.length);
-                  return;
-                }
-                if (event.key === "ArrowLeft") {
-                  event.preventDefault();
-                  selectTabByIndex((index - 1 + tabs.length) % tabs.length);
-                  return;
-                }
-                if (event.key === "Home") {
-                  event.preventDefault();
-                  selectTabByIndex(0);
-                  return;
-                }
-                if (event.key === "End") {
-                  event.preventDefault();
-                  selectTabByIndex(tabs.length - 1);
-                  return;
-                }
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  if (!isActive) {
-                    setActiveTabId(tab.id);
-                    actions.onTabChange?.(tab.id);
-                    requestAnimationFrame(() => focusFirstControl(tab.id));
+      <div className="ribbon__tabstrip">
+        <div className="ribbon__tabs" role="tablist" aria-label="Ribbon tabs" aria-orientation="horizontal">
+          {tabs.map((tab, index) => {
+            const isActive = tab.id === activeTabId;
+            const isFile = Boolean(tab.isFile);
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                className={[
+                  "ribbon__tab",
+                  isActive ? "is-active" : null,
+                  isFile ? "ribbon__tab--file" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                role="tab"
+                id={`ribbon-tab-${tab.id}`}
+                aria-selected={isActive}
+                aria-controls={`ribbon-panel-${tab.id}`}
+                tabIndex={isActive ? 0 : -1}
+                ref={(el) => {
+                  tabButtonRefs.current[tab.id] = el;
+                }}
+                onClick={() => {
+                  setActiveTabId(tab.id);
+                  actions.onTabChange?.(tab.id);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowRight") {
+                    event.preventDefault();
+                    selectTabByIndex((index + 1) % tabs.length);
                     return;
                   }
-                  focusFirstControl(tab.id);
-                  return;
-                }
-                if (event.key === "Tab" && !event.shiftKey) {
-                  // Excel-style: Tab from the active tab moves focus into the tab panel.
-                  // Shift+Tab should keep browser default behavior (move focus backwards).
-                  event.preventDefault();
-                  if (!isActive) {
-                    setActiveTabId(tab.id);
-                    actions.onTabChange?.(tab.id);
-                    requestAnimationFrame(() => focusFirstControl(tab.id));
+                  if (event.key === "ArrowLeft") {
+                    event.preventDefault();
+                    selectTabByIndex((index - 1 + tabs.length) % tabs.length);
                     return;
                   }
-                  focusFirstControl(tab.id);
-                  return;
-                }
-              }}
-            >
-              {tab.label}
-            </button>
-          );
-        })}
+                  if (event.key === "Home") {
+                    event.preventDefault();
+                    selectTabByIndex(0);
+                    return;
+                  }
+                  if (event.key === "End") {
+                    event.preventDefault();
+                    selectTabByIndex(tabs.length - 1);
+                    return;
+                  }
+                  if (event.key === "ArrowDown") {
+                    if (!contentVisible) return;
+                    event.preventDefault();
+                    if (!isActive) {
+                      setActiveTabId(tab.id);
+                      actions.onTabChange?.(tab.id);
+                      requestAnimationFrame(() => focusFirstControl(tab.id));
+                      return;
+                    }
+                    focusFirstControl(tab.id);
+                    return;
+                  }
+                  if (event.key === "Tab" && !event.shiftKey) {
+                    if (!contentVisible) return;
+                    // Excel-style: Tab from the active tab moves focus into the tab panel.
+                    // Shift+Tab should keep browser default behavior (move focus backwards).
+                    event.preventDefault();
+                    if (!isActive) {
+                      setActiveTabId(tab.id);
+                      actions.onTabChange?.(tab.id);
+                      requestAnimationFrame(() => focusFirstControl(tab.id));
+                      return;
+                    }
+                    focusFirstControl(tab.id);
+                    return;
+                  }
+                }}
+                onDoubleClick={() => {
+                  if (isActive) toggleUserCollapsed();
+                }}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="ribbon__tabstrip-right">
+          <button
+            type="button"
+            className="ribbon__collapse-toggle"
+            aria-label={collapseLabel}
+            title={collapseLabel}
+            aria-pressed={userCollapsed}
+            onClick={toggleUserCollapsed}
+          >
+            {userCollapsed ? "▾" : "▴"}
+          </button>
+        </div>
       </div>
 
-      <div className="ribbon__content">
+      <div className="ribbon__content" hidden={!contentVisible}>
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
           return (
             <div
-                  key={tab.id}
-                  id={`ribbon-panel-${tab.id}`}
-                  role="tabpanel"
+              key={tab.id}
+              id={`ribbon-panel-${tab.id}`}
+              role="tabpanel"
               aria-labelledby={`ribbon-tab-${tab.id}`}
               aria-label={tab.label}
               tabIndex={-1}
