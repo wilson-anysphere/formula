@@ -253,6 +253,35 @@ fn imports_note_comment_when_txo_header_is_missing() {
 }
 
 #[test]
+fn imports_note_comment_when_txo_header_is_truncated_and_missing_cb_runs() {
+    let bytes =
+        xls_fixture_builder::build_note_comment_truncated_txo_header_missing_cb_runs_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("NotesTxoHeaderNoCbRuns")
+        .expect("NotesTxoHeaderNoCbRuns missing");
+
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let comments = sheet.comments_for_cell(a1);
+    assert_eq!(comments.len(), 1, "expected 1 comment on A1");
+    assert_eq!(comments[0].content, "Hello");
+    assert_eq!(comments[0].author.name, "Alice");
+    assert_eq!(comments[0].id, "xls-note:A1:1");
+
+    assert!(
+        result.warnings.iter().any(|w| w.message.contains("truncated text")),
+        "expected truncation warning; warnings={:?}",
+        result
+            .warnings
+            .iter()
+            .map(|w| w.message.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn imports_note_comment_when_txo_cch_text_is_at_alternate_offset() {
     let bytes = xls_fixture_builder::build_note_comment_txo_cch_text_offset_4_fixture_xls();
     let result = import_fixture(&bytes);

@@ -47,6 +47,39 @@ const TXO_MAX_TEXT_CHARS: usize = 32 * 1024;
 
 const MAX_WARNINGS_PER_SHEET: usize = 20;
 
+fn looks_like_txo_formatting_runs(fragment: &[u8]) -> bool {
+    // TXO rich-text formatting runs are stored as an array of 4-byte records:
+    // [ich: u16][ifnt: u16] (see MS-XLS 2.5.267 / 2.4.334).
+    //
+    // When the TXO header is missing/truncated we may not know `cbRuns`, so we use a heuristic
+    // to avoid decoding formatting run bytes as text.
+    //
+    // Importantly: formatting-run CONTINUE payloads do *not* begin with the 1-byte "high-byte"
+    // string flag used by continued-string fragments. That means the payload length is usually
+    // a multiple of 4, whereas continued-string fragments are typically `1 + n` bytes (and
+    // Unicode fragments are always odd-length).
+    if fragment.len() < 4 || fragment.len() % 4 != 0 {
+        return false;
+    }
+
+    let mut likely_records = 0usize;
+    let mut total_records = 0usize;
+    for chunk in fragment.chunks_exact(4) {
+        total_records += 1;
+        let pos = u16::from_le_bytes([chunk[0], chunk[1]]) as usize;
+        let font = u16::from_le_bytes([chunk[2], chunk[3]]) as usize;
+        // Heuristic: formatting runs usually reference character positions and font indices
+        // that fit in a single byte (high bytes are zero) and are within reasonable bounds.
+        if chunk[1] == 0 && chunk[3] == 0 && pos <= TXO_MAX_TEXT_CHARS && font <= 0x0FFF {
+            likely_records += 1;
+        }
+    }
+
+    // Require a majority match so we don't accidentally treat short/odd continued-string
+    // fragments as formatting runs.
+    total_records > 0 && likely_records * 2 >= total_records
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BiffNote {
     pub(crate) cell: CellRef,
@@ -439,6 +472,10 @@ fn parse_txo_text_biff5(
         }
         let take_len = frag.len().min(remaining_bytes);
         remaining_bytes = remaining_bytes.saturating_sub(take_len);
+        let frag = &frag[..take_len];
+        if looks_like_txo_formatting_runs(frag) {
+            break;
+        }
         capacity_raw = capacity_raw.saturating_add(take_len).min(TXO_MAX_TEXT_CHARS);
     }
 
@@ -459,6 +496,9 @@ fn parse_txo_text_biff5(
             let take_len = frag.len().min(remaining_bytes);
             remaining_bytes = remaining_bytes.saturating_sub(take_len);
             let frag = &frag[..take_len];
+            if looks_like_txo_formatting_runs(frag) {
+                break;
+            }
             let len = if matches!(frag.first().copied(), Some(0) | Some(1)) {
                 frag.len().saturating_sub(1)
             } else {
@@ -524,7 +564,11 @@ fn parse_txo_text_biff5(
 
         let take_len = frag.len().min(remaining_bytes);
         remaining_bytes = remaining_bytes.saturating_sub(take_len);
-        let mut frag = &frag[..take_len];
+        let frag = &frag[..take_len];
+        if looks_like_txo_formatting_runs(frag) {
+            break;
+        }
+        let mut frag = frag;
 
         if skip_leading_flag_bytes && matches!(frag.first().copied(), Some(0) | Some(1)) {
             frag = frag.get(1..).unwrap_or(&[]);
@@ -629,6 +673,9 @@ fn parse_txo_text_biff8(
         let take_len = frag.len().min(remaining_bytes);
         remaining_bytes = remaining_bytes.saturating_sub(take_len);
         let frag = &frag[..take_len];
+        if looks_like_txo_formatting_runs(frag) {
+            break;
+        }
         let Some((&flags, bytes)) = frag.split_first() else {
             continue;
         };
@@ -817,43 +864,6 @@ fn fallback_decode_continue_fragments(
     codepage: u16,
     warnings: &mut Vec<String>,
 ) -> Option<String> {
-    fn looks_like_txo_formatting_runs(fragment: &[u8]) -> bool {
-        // TXO rich-text formatting runs are stored as an array of 4-byte records:
-        // [ich: u16][ifnt: u16] (see MS-XLS 2.5.267 / 2.4.334).
-        //
-        // When the TXO header is missing/truncated we don't know `cbRuns`, so we use a heuristic
-        // to avoid decoding formatting run bytes as text.
-        //
-        // Importantly: formatting-run CONTINUE payloads do *not* begin with the 1-byte "high-byte"
-        // string flag used by continued-string fragments. That means the payload length is usually
-        // a multiple of 4, whereas continued-string fragments are typically `1 + n` bytes (and
-        // Unicode fragments are always odd-length).
-        if fragment.len() < 4 || fragment.len() % 4 != 0 {
-            return false;
-        }
-
-        let mut likely_records = 0usize;
-        let mut total_records = 0usize;
-        for chunk in fragment.chunks_exact(4) {
-            total_records += 1;
-            let pos = u16::from_le_bytes([chunk[0], chunk[1]]) as usize;
-            let font = u16::from_le_bytes([chunk[2], chunk[3]]) as usize;
-            // Heuristic: formatting runs usually reference character positions and font indices
-            // that fit in a single byte (high bytes are zero) and are within reasonable bounds.
-            if chunk[1] == 0
-                && chunk[3] == 0
-                && pos <= TXO_MAX_TEXT_CHARS
-                && font <= 0x0FFF
-            {
-                likely_records += 1;
-            }
-        }
-
-        // Require a majority match so we don't accidentally treat short/odd continued-string
-        // fragments as formatting runs.
-        total_records > 0 && likely_records * 2 >= total_records
-    }
-
     let mut fragments = record.fragments();
     let _ = fragments.next(); // skip header
 
@@ -1275,7 +1285,8 @@ mod tests {
         // we'd silently drop bytes and miss the truncation warning.
         let mut txo_payload = vec![0u8; 18];
         // Spec-defined field says 5 chars (but the continuation will only contain 3).
-        txo_payload[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2].copy_from_slice(&5u16.to_le_bytes());
+        txo_payload[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2]
+            .copy_from_slice(&5u16.to_le_bytes());
         // Alternate offset 4 contains a smaller plausible value.
         txo_payload[4..6].copy_from_slice(&2u16.to_le_bytes());
 
@@ -1293,6 +1304,36 @@ mod tests {
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1252).expect("parse");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "ABC");
+        assert!(
+            warnings.iter().any(|w| w.contains("truncated text")),
+            "expected truncation warning; warnings={warnings:?}"
+        );
+    }
+
+    #[test]
+    fn does_not_decode_biff5_formatting_runs_as_text_when_txo_header_is_truncated() {
+        // When the TXO header is truncated such that `cbRuns` is missing, we still want to avoid
+        // decoding formatting run bytes as part of the text payload.
+        let mut txo_header = vec![0u8; 8];
+        txo_header[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2]
+            .copy_from_slice(&10u16.to_le_bytes());
+
+        let stream = [
+            bof_biff5(),
+            note_biff5(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            record(RECORD_TXO, &txo_header),
+            continue_text_biff5(b"Hello"),
+            // Formatting run bytes: [ich=0][ifnt=1].
+            continue_text_biff5(&[0x00, 0x00, 0x01, 0x00]),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
         assert!(
             warnings.iter().any(|w| w.contains("truncated text")),
             "expected truncation warning; warnings={warnings:?}"
@@ -1657,6 +1698,37 @@ mod tests {
         assert!(
             warnings.iter().any(|w| w.contains("falling back")),
             "expected fallback warning; warnings={warnings:?}"
+        );
+    }
+
+    #[test]
+    fn does_not_decode_biff8_formatting_runs_as_text_when_cb_runs_is_missing() {
+        // If the TXO header is truncated such that `cbRuns` is missing, but `cchText` is still
+        // present and larger than the actual text bytes, we should stop before decoding the
+        // formatting run bytes as text.
+        let mut txo_header = vec![0u8; 8];
+        txo_header[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2]
+            .copy_from_slice(&10u16.to_le_bytes());
+
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            record(RECORD_TXO, &txo_header),
+            continue_text_ascii("Hello"),
+            // Formatting run bytes: [ich=0][ifnt=1] (no leading flags byte).
+            record(records::RECORD_CONTINUE, &[0x00, 0x00, 0x01, 0x00]),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
+        assert!(
+            warnings.iter().any(|w| w.contains("truncated text")),
+            "expected truncation warning; warnings={warnings:?}"
         );
     }
 

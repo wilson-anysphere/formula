@@ -701,6 +701,26 @@ pub fn build_note_comment_missing_txo_header_fixture_xls() -> Vec<u8> {
 }
 
 /// Build a BIFF8 `.xls` fixture containing a single sheet with a NOTE/OBJ/TXO comment where the
+/// TXO header is truncated such that the `cbRuns` field is missing.
+///
+/// The `cchText` field is intentionally larger than the available text bytes, and a formatting-run
+/// `CONTINUE` payload follows the text. The importer should **not** decode formatting run bytes as
+/// text.
+pub fn build_note_comment_truncated_txo_header_missing_cb_runs_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_truncated_txo_header_missing_cb_runs_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a single sheet with a NOTE/OBJ/TXO comment where the
 /// TXO `cchText` field is stored at an alternate offset (4 instead of the spec-defined offset 6).
 pub fn build_note_comment_txo_cch_text_offset_4_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_note_comment_txo_cch_text_offset_4_workbook_stream();
@@ -1440,6 +1460,14 @@ fn build_note_comment_missing_txo_header_workbook_stream() -> Vec<u8> {
     )
 }
 
+fn build_note_comment_truncated_txo_header_missing_cb_runs_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream(
+        "NotesTxoHeaderNoCbRuns",
+        &build_note_comment_truncated_txo_header_missing_cb_runs_sheet_stream(),
+        1252,
+    )
+}
+
 fn build_note_comment_txo_cch_text_offset_4_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream(
         "NotesTxoCchOffset4",
@@ -1774,6 +1802,54 @@ fn build_note_comment_missing_txo_header_sheet_stream() -> Vec<u8> {
     // Formatting runs continuation. Unlike continued string fragments, this payload does **not**
     // have a leading flags byte. When the TXO header is missing, our fallback decoder should stop
     // before decoding these bytes as text.
+    push_record(&mut sheet, RECORD_CONTINUE, &[0x00, 0x00, 0x01, 0x00]);
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_note_comment_truncated_txo_header_missing_cb_runs_sheet_stream() -> Vec<u8> {
+    const OBJECT_ID: u16 = 1;
+    const AUTHOR: &str = "Alice";
+    const XF_GENERAL_CELL: u16 = 16;
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes());
+    dims.extend_from_slice(&1u32.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&1u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Ensure the anchor cell exists in the calamine value grid.
+    push_record(&mut sheet, RECORD_BLANK, &blank_cell(0, 0, XF_GENERAL_CELL));
+
+    push_record(
+        &mut sheet,
+        RECORD_NOTE,
+        &note_record(0u16, 0u16, OBJECT_ID, AUTHOR),
+    );
+    push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
+
+    // TXO header (truncated) containing only `cchText` at offset 6. `cbRuns` (offset 12) is
+    // missing, so the parser must avoid decoding formatting runs via heuristics.
+    let mut txo = [0u8; 8];
+    txo[6..8].copy_from_slice(&10u16.to_le_bytes()); // cchText larger than actual text bytes
+    push_record(&mut sheet, RECORD_TXO, &txo);
+
+    // CONTINUE #1: compressed bytes "Hello"
+    let mut cont1 = Vec::<u8>::new();
+    cont1.push(0); // flags: compressed 8-bit chars
+    cont1.extend_from_slice(b"Hello");
+    push_record(&mut sheet, RECORD_CONTINUE, &cont1);
+
+    // CONTINUE #2: formatting runs (no leading flags byte): [ich=0][ifnt=1]
     push_record(&mut sheet, RECORD_CONTINUE, &[0x00, 0x00, 0x01, 0x00]);
 
     push_record(&mut sheet, RECORD_EOF, &[]);
