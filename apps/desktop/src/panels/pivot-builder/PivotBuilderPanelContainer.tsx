@@ -518,9 +518,21 @@ export function PivotBuilderPanelContainer(props: Props) {
 
       if (destinationKind === "new") {
         try {
-          const info = await backend.addSheet(newSheetName);
-          destinationSheetIdResolved = info.id;
-          destinationSheetIdResolved = destinationSheetIdResolved || newSheetName;
+          const ids = doc?.getSheetIds?.() ?? [];
+          const orderedIds = ids.length > 0 ? ids : activeSheetId ? [activeSheetId] : [];
+          const activeIndex = activeSheetId ? orderedIds.indexOf(activeSheetId) : -1;
+          const insertIndex = activeIndex >= 0 ? activeIndex + 1 : orderedIds.length;
+
+          const info = await backend.addSheet(newSheetName, { index: insertIndex });
+          destinationSheetIdResolved = info.id || newSheetName;
+
+          // Ensure the sheet exists in the local DocumentController so downstream calls (like
+          // destination validation and pivot updates) don't materialize it at the wrong position.
+          try {
+            doc?.addSheet?.({ sheetId: destinationSheetIdResolved, name: info.name, insertAfterId: activeSheetId }, { source: "pivot" });
+          } catch {
+            // ignore
+          }
         } catch (err: any) {
           setActionError(err?.message ?? String(err));
           return;
@@ -574,6 +586,7 @@ export function PivotBuilderPanelContainer(props: Props) {
     },
     [
       availableFields.length,
+      activeSheetId,
       destCellA1,
       destSheetId,
       destinationKind,

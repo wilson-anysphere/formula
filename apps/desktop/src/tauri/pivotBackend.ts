@@ -61,8 +61,12 @@ export class TauriPivotBackend {
     this.invoke = options.invoke ?? getTauriInvoke();
   }
 
-  async addSheet(name: string): Promise<SheetInfo> {
-    const payload = await this.invoke("add_sheet", { name });
+  async addSheet(name: string, options: { index?: number } = {}): Promise<SheetInfo> {
+    const args: Record<string, unknown> = { name };
+    if (typeof options.index === "number" && Number.isInteger(options.index) && options.index >= 0) {
+      args.index = options.index;
+    }
+    const payload = await this.invoke("add_sheet", args);
     return payload as SheetInfo;
   }
 
@@ -86,4 +90,3 @@ export class TauriPivotBackend {
     return (payload as CellUpdate[]) ?? [];
   }
 }
-
