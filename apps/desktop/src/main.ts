@@ -394,6 +394,7 @@ let workbookSync: ReturnType<typeof startWorkbookSync> | null = null;
 let rerenderLayout: (() => void) | null = null;
 let vbaEventMacros: ReturnType<typeof installVbaEventMacros> | null = null;
 let ribbonLayoutController: LayoutController | null = null;
+let activeMacroRecorder: MacroRecorder | null = null;
 let ensureExtensionsLoadedRef: (() => Promise<void>) | null = null;
 let syncContributedCommandsRef: (() => void) | null = null;
 let syncContributedPanelsRef: (() => void) | null = null;
@@ -2203,6 +2204,7 @@ if (
   });
 
   const macroRecorder = new MacroRecorder(scriptingWorkbook);
+  activeMacroRecorder = macroRecorder;
 
   // SpreadsheetApp selection changes live outside the DocumentController mutation stream. Emit
   // selectionChanged events from the UI so the macro recorder can capture selection steps.
@@ -5775,14 +5777,13 @@ mountRibbon(ribbonReactRoot, {
       }
 
       const placement = getPanelPlacement(layoutController.layout, panelId);
-      if (placement.kind === "closed" || placement.kind === "docked") {
-        layoutController.openPanel(panelId);
-        return;
-      }
+      // Always call openPanel so we activate docked panels and also trigger a layout
+      // re-render even when the panel is already floating (useful for commands like
+      // Record Macro that update panel-local state).
+      layoutController.openPanel(panelId);
 
       // Floating panels can be minimized; opening should restore them.
-      const floating = layoutController.layout?.floating?.[panelId];
-      if (floating?.minimized) {
+      if (placement.kind === "floating" && layoutController.layout?.floating?.[panelId]?.minimized) {
         layoutController.setFloatingPanelMinimized(panelId, false);
       }
     };
@@ -6346,7 +6347,11 @@ mountRibbon(ribbonReactRoot, {
         return;
 
       case "view.macros.recordMacro":
+        activeMacroRecorder?.start();
+        openRibbonPanel(PanelIds.MACROS);
+        return;
       case "view.macros.recordMacro.stop":
+        activeMacroRecorder?.stop();
         openRibbonPanel(PanelIds.MACROS);
         return;
 
@@ -6364,10 +6369,17 @@ mountRibbon(ribbonReactRoot, {
         }
         return;
 
-      case "developer.code.recordMacro":
-      case "developer.code.recordMacro.stop":
       case "developer.code.macroSecurity":
       case "developer.code.macroSecurity.trustCenter":
+        openRibbonPanel(PanelIds.MACROS);
+        return;
+
+      case "developer.code.recordMacro":
+        activeMacroRecorder?.start();
+        openRibbonPanel(PanelIds.MACROS);
+        return;
+      case "developer.code.recordMacro.stop":
+        activeMacroRecorder?.stop();
         openRibbonPanel(PanelIds.MACROS);
         return;
 

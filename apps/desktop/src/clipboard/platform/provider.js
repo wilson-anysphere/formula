@@ -367,8 +367,7 @@ function createTauriClipboardProvider() {
       // RTF/image that were written natively.
       //
       // ClipboardItem writes are best-effort and intentionally omit RTF so we don't regress HTML
-      // clipboard writes on platforms that reject unsupported types. When rich writes fail, retry
-      // with just HTML/plain.
+      // clipboard writes on platforms that reject unsupported types.
       const clipboard = globalThis.navigator?.clipboard;
       if (!wrote && (html || rtf) && typeof ClipboardItem !== "undefined" && clipboard?.write) {
         try {
