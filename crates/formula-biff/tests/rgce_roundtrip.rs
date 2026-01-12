@@ -72,6 +72,14 @@ fn rgce_encode_structured_ref_is_unsupported() {
 }
 
 #[test]
+fn rgce_encode_field_access_is_unsupported() {
+    match encode_rgce("A1.Price") {
+        Err(EncodeRgceError::Unsupported(_)) => {}
+        other => panic!("expected Unsupported error, got: {other:?}"),
+    }
+}
+
+#[test]
 fn rgce_roundtrip_discount_securities_and_tbill_functions() {
     // Ensure the BIFF encoder/decoder roundtrips for the discount security + T-bill functions.
     // This mainly exercises `PtgFuncVar` for optional `basis` arguments and `PtgFunc` for fixed
