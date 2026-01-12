@@ -223,22 +223,35 @@ function removePermissionGrantsForExtension(storage: Storage, extensionId: strin
 function deleteAllPackagesForExtension(packagesStore: IDBObjectStore, extensionId: string): Promise<void> {
   const id = String(extensionId);
   if (!id) return Promise.resolve();
+  const prefix = `${id}@`;
   return new Promise((resolve, reject) => {
-    // Prefer using the `byId` index when available; fall back to scanning the full store
-    // for older DB schemas.
-    let req: IDBRequest<IDBCursorWithValue | null>;
-    let shouldDelete: ((value: unknown) => boolean) | null = null;
+    type AnyCursor = IDBCursor | IDBCursorWithValue;
+    let req: IDBRequest<AnyCursor | null>;
 
+    // All package keys are `${extensionId}@${version}`, so we can delete all packages for the
+    // extension via a key-prefix range without needing schema indexes or loading large `bytes`
+    // values into memory.
     try {
-      const index = packagesStore.index("byId");
-      req = index.openCursor(id);
-    } catch {
-      shouldDelete = (value: unknown) => {
-        if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return String((value as any).id ?? "") === id;
-      };
-      req = packagesStore.openCursor();
+      let range: IDBKeyRange | undefined;
+      if (typeof IDBKeyRange !== "undefined" && typeof IDBKeyRange.bound === "function") {
+        range = IDBKeyRange.bound(prefix, `${prefix}\uffff`);
+      }
+
+      // `openKeyCursor` avoids materializing the full stored value (which includes the package bytes).
+      // Not all runtimes/polyfills support it, so fall back to `openCursor` when needed.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const openKeyCursor = (packagesStore as any)?.openKeyCursor as
+        | ((range?: IDBKeyRange) => IDBRequest<IDBCursor | null>)
+        | undefined;
+
+      if (typeof openKeyCursor === "function") {
+        req = openKeyCursor.call(packagesStore, range);
+      } else {
+        req = packagesStore.openCursor(range);
+      }
+    } catch (error) {
+      reject(error);
+      return;
     }
 
     req.onerror = () => reject(req.error ?? new Error("Failed to iterate extension packages"));
@@ -248,9 +261,14 @@ function deleteAllPackagesForExtension(packagesStore: IDBObjectStore, extensionI
         resolve();
         return;
       }
-      if (!shouldDelete || shouldDelete(cursor.value)) {
+
+      // If the runtime doesn't support IDBKeyRange, we had to iterate the full store; filter by key prefix.
+      const key = String((cursor as any).key ?? "");
+      if (key.startsWith(prefix)) {
         try {
-          cursor.delete();
+          // Some IndexedDB implementations/polyfills do not support `cursor.delete()` on key cursors.
+          // Deleting via the object store is universally supported.
+          packagesStore.delete((cursor as any).primaryKey ?? (cursor as any).key);
         } catch {
           // ignore
         }
