@@ -263,9 +263,6 @@ export class DesktopSharedGrid {
     this.container.setAttribute("aria-describedby", this.a11yStatusId);
     this.container.style.touchAction = "none";
 
-    // Attempt to resolve theme CSS vars if the host app defines them.
-    this.renderer.setTheme(resolveGridThemeFromCssVars(this.container));
-
     this.renderer.attach({
       grid: this.gridCanvas,
       content: this.contentCanvas,
@@ -273,6 +270,11 @@ export class DesktopSharedGrid {
     });
     this.renderer.setFrozen(this.frozenRows, this.frozenCols);
     this.renderer.setFillHandleEnabled(this.interactionMode === "default" && Boolean(this.callbacks.onFillCommit));
+
+    // Attempt to resolve theme CSS vars if the host app defines them, and keep the
+    // renderer in sync with future theme/media changes.
+    this.refreshTheme();
+    this.installThemeWatchers();
 
     // Ensure the selection canvas captures pointer events (background/content are paint-only).
     this.gridCanvas.style.pointerEvents = "none";
@@ -468,6 +470,86 @@ export class DesktopSharedGrid {
   private emitSelectionRangeChange(prev: CellRange | null, next: CellRange | null): void {
     if (rangesEqual(prev, next)) return;
     this.callbacks.onSelectionRangeChange?.(next);
+  }
+
+  /**
+   * Re-resolve the grid theme from CSS variables and apply it to the renderer.
+   *
+   * This is needed because the host app can change `<html data-theme=...>` or
+   * system preferences (dark mode / forced-colors) at runtime.
+   */
+  private refreshTheme(): void {
+    const before = this.renderer.getTheme();
+    this.renderer.setTheme(resolveGridThemeFromCssVars(this.container));
+    // `setTheme` schedules a repaint via rAF when the theme actually changes, but
+    // we want shared-grid theme updates (via MutationObserver / matchMedia) to be
+    // reflected immediately.
+    if (this.renderer.getTheme() !== before) {
+      this.renderer.renderImmediately();
+    }
+  }
+
+  private installThemeWatchers(): void {
+    const refreshTheme = () => this.refreshTheme();
+
+    const attributeFilter = ["style", "class", "data-theme", "data-reduced-motion"];
+    const observers: MutationObserver[] = [];
+
+    if (typeof MutationObserver !== "undefined") {
+      const observe = (el: Element | null) => {
+        if (!el) return;
+        const observer = new MutationObserver(() => refreshTheme());
+        observer.observe(el, { attributes: true, attributeFilter });
+        observers.push(observer);
+      };
+
+      observe(this.container);
+
+      const doc = this.container.ownerDocument;
+      const root = doc?.documentElement;
+      if (root && root !== this.container) observe(root);
+
+      const body = doc?.body;
+      if (body && body !== this.container && body !== root) observe(body);
+    }
+
+    const view = this.container.ownerDocument?.defaultView;
+    const canMatchMedia = Boolean(view && typeof view.matchMedia === "function");
+    const mqlDark = canMatchMedia ? view!.matchMedia("(prefers-color-scheme: dark)") : null;
+    const mqlContrast = canMatchMedia ? view!.matchMedia("(prefers-contrast: more)") : null;
+    const mqlForcedColors = canMatchMedia ? view!.matchMedia("(forced-colors: active)") : null;
+    const mqlReducedMotion = canMatchMedia ? view!.matchMedia("(prefers-reduced-motion: reduce)") : null;
+
+    const onMediaChange = () => refreshTheme();
+
+    const attachMediaListener = (mql: MediaQueryList | null) => {
+      if (!mql) return () => {};
+      const legacy = mql as unknown as {
+        addListener?: (listener: () => void) => void;
+        removeListener?: (listener: () => void) => void;
+      };
+
+      if (typeof (mql as any).addEventListener === "function") {
+        mql.addEventListener("change", onMediaChange);
+        return () => mql.removeEventListener("change", onMediaChange);
+      }
+
+      legacy.addListener?.(onMediaChange);
+      return () => legacy.removeListener?.(onMediaChange);
+    };
+
+    const detachDark = attachMediaListener(mqlDark);
+    const detachContrast = attachMediaListener(mqlContrast);
+    const detachForced = attachMediaListener(mqlForcedColors);
+    const detachReducedMotion = attachMediaListener(mqlReducedMotion);
+
+    this.disposeFns.push(() => {
+      for (const observer of observers) observer.disconnect();
+      detachDark();
+      detachContrast();
+      detachForced();
+      detachReducedMotion();
+    });
   }
 
   private installWheelHandler(): void {
