@@ -420,7 +420,7 @@ Most command handlers live in `apps/desktop/src-tauri/src/commands.rs`, with a f
 The command list is large; below are the “core” ones most contributors will interact with (not exhaustive):
 
 - **Workbook lifecycle**
-  - `open_workbook`, `new_workbook`, `save_workbook`, `mark_saved`, `add_sheet`
+  - `open_workbook`, `new_workbook`, `save_workbook`, `mark_saved`, `add_sheet`, `rename_sheet`
 - **Cells / ranges / recalculation**
   - `get_cell`, `set_cell`, `get_range`, `set_range`, `recalculate`, `undo`, `redo`
   - Dependency inspection: `get_precedents`, `get_dependents`
