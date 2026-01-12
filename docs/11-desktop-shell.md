@@ -280,7 +280,8 @@ Where it’s defined:
 
 - `apps/desktop/src-tauri/Cargo.toml`
   - The desktop binary (`[[bin]]`) has `required-features = ["desktop"]`.
-  - The `desktop` feature enables the optional deps: `tauri`, `tauri-build`, and Tauri plugins.
+  - The `desktop` feature enables the optional deps: `tauri`, `tauri-build`, and the desktop-only Tauri plugins
+    (currently `tauri-plugin-global-shortcut`, `tauri-plugin-updater`, `tauri-plugin-single-instance`).
 - `apps/desktop/src-tauri/tauri.conf.json`
   - `build.features: ["desktop"]` ensures `tauri dev` / `tauri build` compiles the real desktop binary with the correct feature set.
 
@@ -288,6 +289,9 @@ Practical effect:
 
 - `bash scripts/cargo_agent.sh test -p desktop` can run in CI without installing WebView toolchains.
 - Building/running the app uses the `desktop` feature and therefore requires the platform WebView dependencies.
+
+Note: most `#[tauri::command]` functions in `apps/desktop/src-tauri/src/commands.rs` are also `#[cfg(feature = "desktop")]`, so the
+backend library can still compile (and be tested) without linking Tauri or system WebView components.
 
 ---
 
