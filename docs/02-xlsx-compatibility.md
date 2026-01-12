@@ -321,6 +321,20 @@ Another common variant (unprefixed `richValue*.xml` names):
 </Relationships>
 ```
 
+Some packages instead attach the richData parts to `xl/metadata.xml` via `xl/_rels/metadata.xml.rels` (rather than directly from `xl/workbook.xml`):
+
+```xml
+<!-- xl/_rels/metadata.xml.rels -->
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+                Type="http://schemas.microsoft.com/office/2017/06/relationships/richValue"
+                Target="richData/richValue.xml"/>
+  <Relationship Id="rId2"
+                Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueRel"
+                Target="richData/richValueRel.xml"/>
+</Relationships>
+```
+
 ##### `xl/richData/rdrichvaluetypes.xml` + `xl/richData/rdrichvaluestructure.xml` (type/structure tables)
 
 Excel commonly emits additional Rich Data “schema” parts:
