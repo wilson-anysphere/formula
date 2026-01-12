@@ -121,7 +121,7 @@ pub(crate) fn workbook_xml_force_full_calc_on_load(
                         .unwrap_or_else(|| "calcPr".to_string());
                     let mut calc_pr = BytesStart::new(tag.as_str());
                     calc_pr.push_attribute(("fullCalcOnLoad", "1"));
-                    writer.write_event(Event::Empty(calc_pr))?;
+                    writer.write_event(Event::Empty(calc_pr.into_owned()))?;
                 }
                 writer.write_event(Event::End(e.to_owned()))?;
             }
@@ -140,7 +140,8 @@ fn patched_calc_pr(e: &BytesStart<'_>) -> Result<BytesStart<'static>, RecalcPoli
     let mut calc_pr = BytesStart::new(name);
     for attr in e.attributes() {
         let attr = attr?;
-        if attr.key.as_ref() == b"fullCalcOnLoad" {
+        let key = crate::openxml::local_name(attr.key.as_ref());
+        if key.eq_ignore_ascii_case(b"fullCalcOnLoad") {
             continue;
         }
         calc_pr.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
@@ -372,5 +373,53 @@ mod tests {
 
         // Preserve original prefixes for unrelated elements.
         assert!(updated.contains("<ct:Types"));
+    }
+
+    #[test]
+    fn workbook_xml_force_full_calc_on_load_patches_prefixed_calc_pr() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:calcPr fullCalcOnLoad="0" calcId="171027"/>
+</x:workbook>
+"#;
+
+        let updated =
+            workbook_xml_force_full_calc_on_load(workbook_xml.as_bytes()).expect("patch workbook");
+        let updated = std::str::from_utf8(&updated).expect("utf8 workbook");
+
+        assert!(updated.contains("<x:calcPr"), "expected calcPr prefix to be preserved");
+        assert!(
+            updated.contains(r#"fullCalcOnLoad="1""#),
+            "expected fullCalcOnLoad to be set to 1"
+        );
+        assert!(
+            updated.contains(r#"calcId="171027""#),
+            "expected other calcPr attributes to be preserved"
+        );
+    }
+
+    #[test]
+    fn workbook_xml_force_full_calc_on_load_inserts_prefixed_calc_pr_when_missing() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+</x:workbook>
+"#;
+
+        let updated =
+            workbook_xml_force_full_calc_on_load(workbook_xml.as_bytes()).expect("patch workbook");
+        let updated = std::str::from_utf8(&updated).expect("utf8 workbook");
+
+        assert!(
+            updated.contains("<x:workbook"),
+            "expected workbook prefix to be preserved"
+        );
+        assert!(
+            updated.contains("<x:calcPr"),
+            "expected inserted calcPr to use workbook prefix"
+        );
+        assert!(
+            updated.contains(r#"fullCalcOnLoad="1""#),
+            "expected inserted calcPr fullCalcOnLoad=1"
+        );
     }
 }
