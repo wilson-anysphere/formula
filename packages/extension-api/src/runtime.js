@@ -318,7 +318,25 @@ function enhanceWorkbook(workbook) {
 
   return attachNonEnumerableMethods(obj, {
     async save() {
+      const pathValue = obj.path;
+      const hasPath = typeof pathValue === "string" && pathValue.trim().length > 0;
       await rpcCall("workbook", "save", []);
+      // Save may prompt for a path (Save As) if the workbook is currently unsaved.
+      // Refresh the workbook snapshot only in that scenario so `workbook.path` is accurate
+      // without adding an extra roundtrip for normal file-backed saves.
+      if (!hasPath) {
+        const updated = await rpcCall("workbook", "getActiveWorkbook", []);
+        if (updated && typeof updated === "object") {
+          obj.name = updated.name;
+          obj.path = updated.path;
+          if (Array.isArray(updated.sheets)) {
+            obj.sheets = updated.sheets.map((sheet) => enhanceSheet(sheet));
+          }
+          if (updated.activeSheet && typeof updated.activeSheet === "object") {
+            obj.activeSheet = enhanceSheet(updated.activeSheet);
+          }
+        }
+      }
     },
     async saveAs(workbookPath) {
       await rpcCall("workbook", "saveAs", [String(workbookPath)]);

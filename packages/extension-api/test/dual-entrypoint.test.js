@@ -53,6 +53,15 @@ function createMockHost() {
       case "workbook.save":
       case "workbook.close":
       case "workbook.saveAs":
+        if (key === "workbook.close") {
+          activeWorkbook = { ...activeWorkbook, name: "BookClosed", path: null };
+        }
+        if (key === "workbook.save") {
+          // Model Save prompting for a path (Save As) when the workbook is currently unsaved.
+          if (!activeWorkbook?.path) {
+            activeWorkbook = { ...activeWorkbook, name: "BookSavedFromSave", path: "/tmp/book-saved-from-save.xlsx" };
+          }
+        }
         if (key === "workbook.saveAs") {
           const workbookPath = String(args[0]);
           activeWorkbook = { ...activeWorkbook, name: "BookSaved", path: workbookPath };
@@ -207,6 +216,20 @@ test("dual entrypoint: CJS + ESM stay in lockstep", async (t) => {
       { type: "api_call", namespace: "workbook", method: "save", args: [] }
     ]);
 
+    // When saving an unsaved workbook (pathless), the workbook instance should refresh fields.
+    calls.length = 0;
+    await workbookCjs.close();
+    assert.equal(workbookCjs.path, null);
+
+    calls.length = 0;
+    await workbookCjs.save();
+    assert.equal(workbookCjs.path, "/tmp/book-saved-from-save.xlsx");
+    assert.equal(workbookCjs.name, "BookSavedFromSave");
+    assert.deepEqual(calls.filter((m) => m.type === "api_call").map(stripApiCall), [
+      { type: "api_call", namespace: "workbook", method: "save", args: [] },
+      { type: "api_call", namespace: "workbook", method: "getActiveWorkbook", args: [] }
+    ]);
+
     // ESM workbook helpers should call RPC and refresh local fields.
     calls.length = 0;
     await workbookEsm.saveAs("/tmp/book2.xlsx");
@@ -348,4 +371,3 @@ test("dual entrypoint: CJS + ESM stay in lockstep", async (t) => {
     });
   });
 });
-
