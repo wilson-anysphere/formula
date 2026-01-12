@@ -112,3 +112,55 @@ test("BrowserExtensionHost: exposes manifest contributions for UI integration", 
     { extensionId, id: "test.connector", name: "Test Connector", icon: null }
   ]);
 });
+
+test("BrowserExtensionHost: unloadExtension clears contributed panel reservations", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{ onPostMessage(msg) { if (msg?.type === "init") return; } }, { onPostMessage(msg) { if (msg?.type === "init") return; } }]);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension({
+    extensionId: "test.a",
+    extensionPath: "memory://a/",
+    mainUrl: "memory://a/main.mjs",
+    manifest: {
+      name: "a",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [],
+      permissions: [],
+      contributes: { panels: [{ id: "shared.panel", title: "Shared Panel" }] }
+    }
+  });
+
+  await host.unloadExtension("test.a");
+
+  // If unloadExtension does not clear _panelContributions, this second load would throw
+  // because the panel id is still considered owned by the first (now-unloaded) extension.
+  await host.loadExtension({
+    extensionId: "test.b",
+    extensionPath: "memory://b/",
+    mainUrl: "memory://b/main.mjs",
+    manifest: {
+      name: "b",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [],
+      permissions: [],
+      contributes: { panels: [{ id: "shared.panel", title: "Shared Panel" }] }
+    }
+  });
+
+  assert.deepEqual(host.listExtensions().map((e) => e.id).sort(), ["test.b"]);
+});

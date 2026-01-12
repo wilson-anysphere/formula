@@ -1023,6 +1023,16 @@ class BrowserExtensionHost {
     }
 
     try {
+      for (const panel of extension.manifest.contributes?.panels ?? []) {
+        if (this._panelContributions.get(panel.id) === extension.id) {
+          this._panelContributions.delete(panel.id);
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
       for (const fn of extension.manifest.contributes?.customFunctions ?? []) {
         if (this._customFunctions.get(fn.name) === extension.id) this._customFunctions.delete(fn.name);
       }
