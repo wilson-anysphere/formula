@@ -359,6 +359,28 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(effectiveA1.fill?.fgColor).toBe("#FFFFFF00");
   });
 
+  it("does not materialize inherited range-run formatting into per-cell styles when writeRange includes matching formats", () => {
+    const controller = new DocumentController();
+    // Force range-run formatting (compressed per-column runs) by formatting a large rectangle.
+    controller.setRangeFormat("Sheet1", "A1:B25001", { font: { bold: true } }, { label: "Bold range" });
+
+    const sheetModel = controller.model.sheets.get("Sheet1");
+    expect(sheetModel).toBeDefined();
+    expect(sheetModel!.formatRunsByCol?.size).toBeGreaterThan(0);
+    // Range-run formatting should not eagerly materialize per-cell styleIds.
+    expect(sheetModel!.cells.size).toBe(0);
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    // Writing a range that includes the *effective* format (as returned by readRange/sort_range)
+    // should not force that inherited formatting into per-cell styles.
+    api.writeRange(
+      { sheet: "Sheet1", startRow: 1, startCol: 1, endRow: 2, endCol: 1 },
+      [[{ value: null, format: { bold: true } }], [{ value: null, format: { bold: true } }]]
+    );
+
+    expect(sheetModel!.cells.size).toBe(0);
+  });
+
   it("clears stale formatting when writeRange moves formatted cells (no contamination)", () => {
     const controller = new DocumentController();
     controller.setRangeValues("Sheet1", "A1:B1", [[1, 2]]);

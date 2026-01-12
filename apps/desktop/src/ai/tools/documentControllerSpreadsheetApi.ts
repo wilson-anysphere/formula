@@ -576,7 +576,7 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
         return;
       }
 
-      const sheetModel = this.controller.model.sheets.get(range.sheet);
+      const sheetModel = this.controller.model.sheets.get(sheetId);
       const cellMap: Map<string, any> | undefined = sheetModel?.cells;
       const hasLayeredFormattingWritePath = typeof (this.controller as any).getCellFormat === "function";
 
@@ -592,21 +592,55 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
       };
 
       const inheritedFormatCache = new Map<string, CellFormat | undefined>();
-      const getInheritedFormat = (styleIds: [number, number, number]): CellFormat | undefined => {
-        const [sheetStyleId, rowStyleId, colStyleId] = styleIds;
-        if (sheetStyleId === 0 && rowStyleId === 0 && colStyleId === 0) return undefined;
-        const key = `${sheetStyleId},${rowStyleId},${colStyleId}`;
+      const getInheritedFormat = (styleIds: [number, number, number, number]): CellFormat | undefined => {
+        const [sheetStyleId, rowStyleId, colStyleId, runStyleId] = styleIds;
+        if (sheetStyleId === 0 && rowStyleId === 0 && colStyleId === 0 && runStyleId === 0) return undefined;
+        const key = `${sheetStyleId},${rowStyleId},${colStyleId},${runStyleId}`;
         if (inheritedFormatCache.has(key)) return inheritedFormatCache.get(key);
 
         const sheetFormat = getFormatForStyleId(sheetStyleId);
         const colFormat = getFormatForStyleId(colStyleId);
         const rowFormat = getFormatForStyleId(rowStyleId);
+        const runFormat = getFormatForStyleId(runStyleId);
 
-        const merged: CellFormat = { ...(sheetFormat ?? {}), ...(colFormat ?? {}), ...(rowFormat ?? {}) };
+        // Precedence: sheet < col < row < range-run.
+        const merged: CellFormat = { ...(sheetFormat ?? {}), ...(colFormat ?? {}), ...(rowFormat ?? {}), ...(runFormat ?? {}) };
         const out = Object.keys(merged).length > 0 ? merged : undefined;
         inheritedFormatCache.set(key, out);
         return out;
       };
+
+      const startRow0 = range.startRow - 1;
+      const startCol0 = range.startCol - 1;
+
+      type FormatRun = { startRow: number; endRowExclusive: number; styleId: number };
+      const runListsByCol: Array<FormatRun[] | null> = new Array(colCount).fill(null);
+      const runIndexByCol = new Array<number>(colCount).fill(0);
+
+      if (hasLayeredFormattingWritePath && sheetModel?.formatRunsByCol?.get) {
+        for (let c = 0; c < colCount; c++) {
+          const col0 = startCol0 + c;
+          const runs = sheetModel.formatRunsByCol.get(col0) as FormatRun[] | undefined;
+          if (!Array.isArray(runs) || runs.length === 0) continue;
+          runListsByCol[c] = runs;
+          if (startRow0 <= 0) continue;
+          // Initialize to the first run whose endRowExclusive is > startRow0.
+          let lo = 0;
+          let hi = runs.length - 1;
+          let idx = runs.length;
+          while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            const run = runs[mid]!;
+            if (startRow0 < run.endRowExclusive) {
+              idx = mid;
+              hi = mid - 1;
+            } else {
+              lo = mid + 1;
+            }
+          }
+          runIndexByCol[c] = idx;
+        }
+      }
 
       const inputs: any[][] = [];
       for (let r = 0; r < rowCount; r++) {
@@ -614,23 +648,38 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
         const outRow: any[] = [];
         for (let c = 0; c < colCount; c++) {
           const cell = srcRow[c] ?? { value: null };
-          const row0 = range.startRow - 1 + r;
-          const col0 = range.startCol - 1 + c;
+          const row0 = startRow0 + r;
+          const col0 = startCol0 + c;
+
+          let runStyleId = 0;
+          const runs = runListsByCol[c];
+          if (runs) {
+            let idx = runIndexByCol[c]!;
+            while (idx < runs.length && row0 >= runs[idx]!.endRowExclusive) idx++;
+            runIndexByCol[c] = idx;
+            const run = idx < runs.length ? runs[idx] : null;
+            if (run && row0 >= run.startRow && row0 < run.endRowExclusive) {
+              runStyleId = typeof run.styleId === "number" ? run.styleId : 0;
+            }
+          }
 
           const cellState = cellMap?.get(`${row0},${col0}`);
           const cellStyleId = typeof cellState?.styleId === "number" ? cellState.styleId : 0;
           const baseCellStyle = cellStyleId === 0 ? {} : this.controller.styleTable.get(cellStyleId);
 
-          const styleIds: [number, number, number, number] = hasLayeredFormattingWritePath
+          const styleIds: [number, number, number, number, number] = hasLayeredFormattingWritePath
             ? [
                 typeof sheetModel?.defaultStyleId === "number" ? sheetModel.defaultStyleId : 0,
                 typeof sheetModel?.rowStyleIds?.get === "function" ? (sheetModel.rowStyleIds.get(row0) ?? 0) : 0,
                 typeof sheetModel?.colStyleIds?.get === "function" ? (sheetModel.colStyleIds.get(col0) ?? 0) : 0,
+                runStyleId,
                 cellStyleId
               ]
-            : [0, 0, 0, cellStyleId];
+            : [0, 0, 0, 0, cellStyleId];
 
-          const inheritedFormat = hasLayeredFormattingWritePath ? getInheritedFormat([styleIds[0], styleIds[1], styleIds[2]]) : undefined;
+          const inheritedFormat = hasLayeredFormattingWritePath
+            ? getInheritedFormat([styleIds[0], styleIds[1], styleIds[2], styleIds[3]])
+            : undefined;
 
           const requestedFormat = cell.format && Object.keys(cell.format).length > 0 ? cell.format : null;
 
