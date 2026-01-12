@@ -182,6 +182,7 @@ worksheet cell attributes like `c/@vm` and `c/@cm`.
 This is distinct from legacy “floating” images stored under `xl/drawings/*`.
 
 **Detail spec:** [20-images-in-cells.md](./20-images-in-cells.md)
+**RichData deep dive:** [20-xlsx-richdata-images-in-cell.md](./20-xlsx-richdata-images-in-cell.md)
 
 **Packaging note:** see [In-cell images (cellimages.xml)](#in-cell-images-cellimagesxml) for the OPC
 part/relationships conventions that must be preserved for round-trip safety.

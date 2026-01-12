@@ -36,18 +36,26 @@ xl/
 │   └── image*.{png,jpg,gif,...}
 ├── metadata.xml
 └── richData/
-    ├── *.xml
+    ├── richValue.xml
+    ├── richValueRel.xml
+    ├── richValueTypes.xml
+    ├── richValueStructure.xml
     └── _rels/
-        └── *.rels
+        └── richValueRel.xml.rels
 ```
 
 Notes:
 
 - `xl/media/*` contains the actual image bytes (usually `.png`, but Excel may use other formats).
-- `xl/richData/*` contains “rich value” tables used by Excel for non-primitive cell values (data types,
-  entities, and images-in-cells).
+- The exact `xl/richData/*` file set can vary across Excel builds; the `richValue*` names shown above are
+  common, but Formula should preserve the entire `xl/richData/` directory byte-for-byte unless we
+  explicitly implement rich-value editing.
 - `xl/metadata.xml` and the per-cell `c/@vm` + `c/@cm` attributes connect worksheet cells to the rich
   value system.
+
+See also: [20-xlsx-richdata-images-in-cell.md](./20-xlsx-richdata-images-in-cell.md) for a deeper (still
+best-effort) description of the `richValue*` part set and how `richValueRel.xml` is used to resolve
+media relationships.
 
 ## Worksheet cell references (`c/@vm`, `c/@cm`, `<extLst>`)
 
@@ -233,12 +241,12 @@ Because the exact file set and schemas vary across Excel builds, Formula’s sho
 - **preserve all `xl/richData/*` parts and their `*.rels`**, and
 - treat them as an **atomic bundle** with `xl/metadata.xml` + `xl/cellimages.xml` during round-trip.
 
-Example file names seen in the ecosystem (verify with a checked-in fixture before hard-coding):
+Common file names (Excel version-dependent; treat as “expected shape”, not a strict schema):
 
+- `xl/richData/richValue.xml`
+- `xl/richData/richValueRel.xml` (+ `xl/richData/_rels/richValueRel.xml.rels`)
 - `xl/richData/richValueTypes.xml`
-- `xl/richData/richValueStructures.xml`
-- `xl/richData/richValueData.xml`
-- plus potential supporting parts and relationship files under `xl/richData/_rels/`
+- `xl/richData/richValueStructure.xml`
 
 ## `[Content_Types].xml` requirements
 
@@ -338,6 +346,8 @@ does not “orphan” images or break Excel’s internal references.
 - **`xl/cellimages.xml` parsing (workbook-level) + media import**
   - Parser: `crates/formula-xlsx/src/cell_images/mod.rs`
   - Test: `crates/formula-xlsx/tests/cell_images.rs`
+- **Best-effort image import during `XlsxDocument` load**
+  - `crates/formula-xlsx/src/read/mod.rs` calls `load_cell_images_from_parts(...)` to populate `workbook.images`.
 - **Preservation of `xl/cellimages.xml` + `xl/_rels/cellimages.xml.rels` + `xl/media/*` on cell edits**
   - Test: `crates/formula-xlsx/tests/cellimages_preservation.rs`
 - **`vm` attribute preservation** on edit is covered by:
