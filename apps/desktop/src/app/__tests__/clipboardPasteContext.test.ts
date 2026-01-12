@@ -43,4 +43,30 @@ describe("clipboardPasteContext", () => {
     expect(isInternalPaste).toBe(false);
     expect(nextContext).toBeNull();
   });
+
+  it("does not clear internal clipboard context when clipboard read yields no usable content", () => {
+    const initialContext = {
+      range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 },
+      payload: { text: "A\tB" },
+      cells: [[{ value: "A", formula: null, styleId: 0 }]],
+    };
+
+    const { isInternalPaste, nextContext } = reconcileClipboardCopyContextForPaste(initialContext, {});
+
+    expect(isInternalPaste).toBe(false);
+    expect(nextContext).toEqual(initialContext);
+  });
+
+  it("treats trailing newlines in clipboard text as internal when the content matches", () => {
+    const initialContext = {
+      range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 },
+      payload: { text: "A\tB" },
+      cells: [[{ value: "A", formula: null, styleId: 0 }]],
+    };
+
+    const { isInternalPaste, nextContext } = reconcileClipboardCopyContextForPaste(initialContext, { text: "A\tB\n" });
+
+    expect(isInternalPaste).toBe(true);
+    expect(nextContext).toEqual(initialContext);
+  });
 });
