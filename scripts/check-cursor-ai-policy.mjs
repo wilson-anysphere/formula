@@ -176,6 +176,7 @@ const SCANNED_BASENAMES_WITHOUT_EXTENSION = new Set([
   "notice",
   ".gitkeep",
   ".gitignore",
+  ".gitmodules",
   ".gitattributes",
   ".dockerignore",
   ".npmrc",

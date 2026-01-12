@@ -387,6 +387,19 @@ test("cursor AI policy guard scans extensionless dotfiles (e.g. .gitignore)", as
   }
 });
 
+test("cursor AI policy guard scans .gitmodules files", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-gitmodules-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, ".gitmodules", "OpenAI\n");
+
+    const result = await runPolicyApi(tmpRoot, { maxViolations: 1 });
+    assert.equal(result.ok, false);
+    assert.match(formatViolations(result.violations), /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("cursor AI policy guard scans .gitkeep files", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-gitkeep-fail-"));
   try {
