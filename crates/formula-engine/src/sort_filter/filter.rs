@@ -593,6 +593,34 @@ mod tests {
     }
 
     #[test]
+    fn locale_aware_date_filter_parses_ampm_datetime_strings() {
+        let data = range(vec![
+            vec![CellValue::Text("Val".into())],
+            vec![CellValue::Text("1/2/2020 2:00 PM".into())],
+            vec![CellValue::Text("1/2/2020 2:00PM".into())],
+            vec![CellValue::Text("1/3/2020 2:00 PM".into())],
+        ]);
+
+        let filter = AutoFilter {
+            range: data.range,
+            columns: BTreeMap::from([(
+                0,
+                ColumnFilter {
+                    join: FilterJoin::Any,
+                    criteria: vec![FilterCriterion::Date(DateComparison::OnDate(
+                        NaiveDate::from_ymd_opt(2020, 1, 2).unwrap(),
+                    ))],
+                },
+            )]),
+        };
+
+        let result =
+            apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::en_us());
+        assert_eq!(result.visible_rows, vec![true, true, true, false]);
+        assert_eq!(result.hidden_sheet_rows, vec![3]);
+    }
+
+    #[test]
     fn blanks_filter() {
         let data = range(vec![
             vec![CellValue::Text("Val".into())],

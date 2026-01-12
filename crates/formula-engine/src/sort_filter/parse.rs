@@ -34,12 +34,29 @@ pub(crate) fn parse_text_datetime(text: &str, value_locale: ValueLocaleConfig) -
         return None;
     }
 
+    let upper = s.to_ascii_uppercase();
+    let has_ampm = upper.ends_with("AM") || upper.ends_with("PM");
+
     // Common ISO-ish formats first.
     if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
         return Some(dt);
     }
     if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M") {
         return Some(dt);
+    }
+    if has_ampm {
+        if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %I:%M:%S %p") {
+            return Some(dt);
+        }
+        if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %I:%M %p") {
+            return Some(dt);
+        }
+        if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %I:%M:%S%p") {
+            return Some(dt);
+        }
+        if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %I:%M%p") {
+            return Some(dt);
+        }
     }
     if let Ok(date) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
         return Some(date.and_hms_opt(0, 0, 0)?);
@@ -53,6 +70,20 @@ pub(crate) fn parse_text_datetime(text: &str, value_locale: ValueLocaleConfig) -
     if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y/%m/%d %H:%M") {
         return Some(dt);
     }
+    if has_ampm {
+        if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y/%m/%d %I:%M:%S %p") {
+            return Some(dt);
+        }
+        if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y/%m/%d %I:%M %p") {
+            return Some(dt);
+        }
+        if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y/%m/%d %I:%M:%S%p") {
+            return Some(dt);
+        }
+        if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y/%m/%d %I:%M%p") {
+            return Some(dt);
+        }
+    }
     if let Ok(date) = NaiveDate::parse_from_str(s, "%Y/%m/%d") {
         return Some(date.and_hms_opt(0, 0, 0)?);
     }
@@ -62,6 +93,20 @@ pub(crate) fn parse_text_datetime(text: &str, value_locale: ValueLocaleConfig) -
     }
     if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y.%m.%d %H:%M") {
         return Some(dt);
+    }
+    if has_ampm {
+        if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y.%m.%d %I:%M:%S %p") {
+            return Some(dt);
+        }
+        if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y.%m.%d %I:%M %p") {
+            return Some(dt);
+        }
+        if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y.%m.%d %I:%M:%S%p") {
+            return Some(dt);
+        }
+        if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y.%m.%d %I:%M%p") {
+            return Some(dt);
+        }
     }
     if let Ok(date) = NaiveDate::parse_from_str(s, "%Y.%m.%d") {
         return Some(date.and_hms_opt(0, 0, 0)?);
@@ -76,6 +121,20 @@ pub(crate) fn parse_text_datetime(text: &str, value_locale: ValueLocaleConfig) -
             if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%m/%d/%Y %H:%M") {
                 return Some(dt);
             }
+            if has_ampm {
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%m/%d/%Y %I:%M:%S %p") {
+                    return Some(dt);
+                }
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%m/%d/%Y %I:%M %p") {
+                    return Some(dt);
+                }
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%m/%d/%Y %I:%M:%S%p") {
+                    return Some(dt);
+                }
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%m/%d/%Y %I:%M%p") {
+                    return Some(dt);
+                }
+            }
             if let Ok(date) = NaiveDate::parse_from_str(s, "%m/%d/%Y") {
                 return Some(date.and_hms_opt(0, 0, 0)?);
             }
@@ -86,6 +145,20 @@ pub(crate) fn parse_text_datetime(text: &str, value_locale: ValueLocaleConfig) -
             }
             if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%m-%d-%Y %H:%M") {
                 return Some(dt);
+            }
+            if has_ampm {
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%m-%d-%Y %I:%M:%S %p") {
+                    return Some(dt);
+                }
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%m-%d-%Y %I:%M %p") {
+                    return Some(dt);
+                }
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%m-%d-%Y %I:%M:%S%p") {
+                    return Some(dt);
+                }
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%m-%d-%Y %I:%M%p") {
+                    return Some(dt);
+                }
             }
             if let Ok(date) = NaiveDate::parse_from_str(s, "%m-%d-%Y") {
                 return Some(date.and_hms_opt(0, 0, 0)?);
@@ -98,6 +171,20 @@ pub(crate) fn parse_text_datetime(text: &str, value_locale: ValueLocaleConfig) -
             if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d/%m/%Y %H:%M") {
                 return Some(dt);
             }
+            if has_ampm {
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d/%m/%Y %I:%M:%S %p") {
+                    return Some(dt);
+                }
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d/%m/%Y %I:%M %p") {
+                    return Some(dt);
+                }
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d/%m/%Y %I:%M:%S%p") {
+                    return Some(dt);
+                }
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d/%m/%Y %I:%M%p") {
+                    return Some(dt);
+                }
+            }
             if let Ok(date) = NaiveDate::parse_from_str(s, "%d/%m/%Y") {
                 return Some(date.and_hms_opt(0, 0, 0)?);
             }
@@ -109,6 +196,20 @@ pub(crate) fn parse_text_datetime(text: &str, value_locale: ValueLocaleConfig) -
             if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d.%m.%Y %H:%M") {
                 return Some(dt);
             }
+            if has_ampm {
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d.%m.%Y %I:%M:%S %p") {
+                    return Some(dt);
+                }
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d.%m.%Y %I:%M %p") {
+                    return Some(dt);
+                }
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d.%m.%Y %I:%M:%S%p") {
+                    return Some(dt);
+                }
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d.%m.%Y %I:%M%p") {
+                    return Some(dt);
+                }
+            }
             if let Ok(date) = NaiveDate::parse_from_str(s, "%d.%m.%Y") {
                 return Some(date.and_hms_opt(0, 0, 0)?);
             }
@@ -119,6 +220,20 @@ pub(crate) fn parse_text_datetime(text: &str, value_locale: ValueLocaleConfig) -
             }
             if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d-%m-%Y %H:%M") {
                 return Some(dt);
+            }
+            if has_ampm {
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d-%m-%Y %I:%M:%S %p") {
+                    return Some(dt);
+                }
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d-%m-%Y %I:%M %p") {
+                    return Some(dt);
+                }
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d-%m-%Y %I:%M:%S%p") {
+                    return Some(dt);
+                }
+                if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d-%m-%Y %I:%M%p") {
+                    return Some(dt);
+                }
             }
             if let Ok(date) = NaiveDate::parse_from_str(s, "%d-%m-%Y") {
                 return Some(date.and_hms_opt(0, 0, 0)?);
