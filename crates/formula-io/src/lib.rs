@@ -274,13 +274,16 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
         // OOXML packages (e.g. password-protected `.xlsx`) that wrap the real workbook in an
         // `EncryptedPackage` stream.
         //
-        // We don't support decryption here; detect and return a user-friendly error.
+        // We don't support decryption here; detect and return a user-friendly error so callers
+        // don't try to route it through the legacy `.xls` importer.
         file.rewind().map_err(|source| Error::DetectIo {
             path: path.to_path_buf(),
             source,
         })?;
         if let Ok(mut ole) = cfb::CompoundFile::open(file) {
-            if stream_exists(&mut ole, "EncryptionInfo") && stream_exists(&mut ole, "EncryptedPackage") {
+            if stream_exists(&mut ole, "EncryptionInfo")
+                && stream_exists(&mut ole, "EncryptedPackage")
+            {
                 return Err(Error::EncryptedWorkbook {
                     path: path.to_path_buf(),
                 });
