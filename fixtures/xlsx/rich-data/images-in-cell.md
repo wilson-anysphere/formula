@@ -210,7 +210,7 @@ And `xl/_rels/cellimages.xml.rels` resolves that `rId1` to the media part:
 
 ```text
 xl/worksheets/sheet1.xml  cell <c r="A1" vm="1">
-  -> xl/metadata.xml      valueMetadata[1] -> rc v="0" -> futureMetadata bk[0] -> xlrd:rvb i="0"
+  -> xl/metadata.xml      valueMetadata bk #0 (selected by vm="1" in this file) -> rc v="0" -> futureMetadata bk #0 -> xlrd:rvb i="0"
   -> xl/richData/richValue.xml     rich value #0 -> <v kind="rel">0</v> (REL_SLOT)
   -> xl/richData/richValueRel.xml  rel slot #0 -> r:id="rId1"
   -> xl/richData/_rels/richValueRel.xml.rels  rId1 -> ../media/image1.png
