@@ -1,43 +1,68 @@
 use super::ast::{BinaryOp, Expr, Function, UnaryOp};
 use super::grid::Grid;
 use super::value::{Array as ArrayValue, CellCoord, ErrorKind, RangeRef, ResolvedRange, Value};
+use chrono::{DateTime, Utc};
 use crate::date::ExcelDateSystem;
 use crate::error::ExcelError;
 use crate::functions::math::criteria::Criteria as EngineCriteria;
+use crate::locale::ValueLocaleConfig;
 use crate::value::{
     cmp_case_insensitive, parse_number, ErrorKind as EngineErrorKind, Value as EngineValue,
 };
 use crate::simd::{self, CmpOp, NumericCriteria};
 use smallvec::SmallVec;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::sync::Arc;
 
 thread_local! {
     static BYTECODE_DATE_SYSTEM: Cell<ExcelDateSystem> = Cell::new(ExcelDateSystem::EXCEL_1900);
+    static BYTECODE_VALUE_LOCALE: Cell<ValueLocaleConfig> = Cell::new(ValueLocaleConfig::en_us());
+    static BYTECODE_NOW_UTC: RefCell<DateTime<Utc>> = RefCell::new(Utc::now());
 }
 
-pub(crate) struct BytecodeDateSystemGuard {
-    prev: ExcelDateSystem,
+pub(crate) struct BytecodeEvalContextGuard {
+    prev_date_system: ExcelDateSystem,
+    prev_value_locale: ValueLocaleConfig,
+    prev_now_utc: DateTime<Utc>,
 }
 
-impl Drop for BytecodeDateSystemGuard {
+impl Drop for BytecodeEvalContextGuard {
     fn drop(&mut self) {
-        BYTECODE_DATE_SYSTEM.with(|cell| cell.set(self.prev));
+        BYTECODE_DATE_SYSTEM.with(|cell| cell.set(self.prev_date_system));
+        BYTECODE_VALUE_LOCALE.with(|cell| cell.set(self.prev_value_locale));
+        BYTECODE_NOW_UTC.with(|cell| {
+            cell.replace(self.prev_now_utc.clone());
+        });
     }
 }
 
-pub(crate) fn set_thread_date_system(system: ExcelDateSystem) -> BytecodeDateSystemGuard {
-    let prev = BYTECODE_DATE_SYSTEM.with(|cell| {
-        let prev = cell.get();
-        cell.set(system);
-        prev
-    });
-    BytecodeDateSystemGuard { prev }
+pub(crate) fn set_thread_eval_context(
+    date_system: ExcelDateSystem,
+    value_locale: ValueLocaleConfig,
+    now_utc: DateTime<Utc>,
+) -> BytecodeEvalContextGuard {
+    let prev_date_system = BYTECODE_DATE_SYSTEM.with(|cell| cell.replace(date_system));
+    let prev_value_locale = BYTECODE_VALUE_LOCALE.with(|cell| cell.replace(value_locale));
+    let prev_now_utc = BYTECODE_NOW_UTC.with(|cell| cell.replace(now_utc));
+
+    BytecodeEvalContextGuard {
+        prev_date_system,
+        prev_value_locale,
+        prev_now_utc,
+    }
 }
 
 fn thread_date_system() -> ExcelDateSystem {
     BYTECODE_DATE_SYSTEM.with(|cell| cell.get())
+}
+
+fn thread_value_locale() -> ValueLocaleConfig {
+    BYTECODE_VALUE_LOCALE.with(|cell| cell.get())
+}
+
+fn thread_now_utc() -> DateTime<Utc> {
+    BYTECODE_NOW_UTC.with(|cell| cell.borrow().clone())
 }
 
 pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord) -> Value {
@@ -814,8 +839,13 @@ fn parse_countif_criteria(criteria: &Value) -> Result<EngineCriteria, ErrorKind>
         Value::Array(_) | Value::Range(_) => return Err(ErrorKind::Value),
     };
 
-    EngineCriteria::parse_with_date_system(&criteria_value, thread_date_system())
-        .map_err(engine_error_to_bytecode)
+    EngineCriteria::parse_with_date_system_and_locale(
+        &criteria_value,
+        thread_date_system(),
+        thread_value_locale(),
+        thread_now_utc(),
+    )
+    .map_err(engine_error_to_bytecode)
 }
 
 fn count_if_range_criteria(

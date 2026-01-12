@@ -2,6 +2,7 @@ use formula_engine::eval::{
     parse_a1, EvalContext, Evaluator, RecalcContext, SheetReference, ValueResolver,
 };
 use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::{Engine, ErrorKind, ExternalValueProvider, Value};
 use proptest::prelude::*;
 use std::sync::Arc;
@@ -370,4 +371,53 @@ fn bytecode_backend_countif_date_criteria_respects_engine_date_system() {
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(1.0));
     assert_engine_matches_ast(&engine, r#"=COUNTIF(A1:A3, ">1/1/2020")"#, "B1");
     assert_engine_matches_ast(&engine, r#"=COUNTIF(A1:A3, "=1/1/2020")"#, "B2");
+}
+
+#[test]
+fn bytecode_backend_countif_criteria_respects_engine_value_locale() {
+    // Numeric parsing uses the workbook value locale (decimal/thousands separators).
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 1.5).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 2.0).unwrap();
+    engine
+        .set_cell_value("Sheet1", "D1", Value::Text(">1,5".to_string()))
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=COUNTIF(A1:A3, D1)")
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path (criteria arg is a cell reference).
+    assert_eq!(engine.bytecode_program_count(), 1);
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_engine_matches_ast(&engine, "=COUNTIF(A1:A3, D1)", "B1");
+
+    // Date parsing uses the workbook value locale's date order (DMY for de-DE).
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+
+    let system = engine.date_system();
+    let jan_2 = ymd_to_serial(ExcelDate::new(2020, 1, 2), system).unwrap();
+    let feb_1 = ymd_to_serial(ExcelDate::new(2020, 2, 1), system).unwrap();
+
+    engine.set_cell_value("Sheet1", "A1", jan_2 as f64).unwrap();
+    engine.set_cell_value("Sheet1", "A2", feb_1 as f64).unwrap();
+    engine
+        .set_cell_value("Sheet1", "D1", Value::Text(">=1/2/2020".to_string()))
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=COUNTIF(A1:A2, D1)")
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path (criteria arg is a cell reference).
+    assert_eq!(engine.bytecode_program_count(), 1);
+    engine.recalculate_single_threaded();
+
+    // In de-DE (DMY), "1/2/2020" is Feb 1, 2020.
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_engine_matches_ast(&engine, "=COUNTIF(A1:A2, D1)", "B1");
 }
