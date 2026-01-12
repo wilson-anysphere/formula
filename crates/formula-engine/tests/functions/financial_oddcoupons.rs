@@ -184,7 +184,7 @@ fn odd_coupon_settlement_equal_coupon_dates_are_rejected() {
     let first_coupon = ymd_to_serial(ExcelDate::new(2023, 1, 31), system).unwrap();
     let maturity2 = ymd_to_serial(ExcelDate::new(2024, 7, 31), system).unwrap();
     let result = oddfprice(
-        first_coupon, // settlement == first_coupon
+        first_coupon, // settlement == first_coupon (invalid boundary)
         maturity2,
         issue,
         first_coupon,
