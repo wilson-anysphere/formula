@@ -130,6 +130,8 @@ test.describe("split view", () => {
     await expect(page.getByTestId("formula-address")).toHaveValue("B2");
     // The primary pane should also mirror the selection state (even if the cell is offscreen).
     await expect(page.locator("#grid").getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell B2");
+    await expect(page.locator("#grid").getByTestId("canvas-grid-a11y-status")).toContainText("Selection B2");
+    await expect(secondary.getByTestId("canvas-grid-a11y-status")).toContainText("Selection B2");
     const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll());
     expect(Math.abs(scrollAfter.x - scrollBefore.x)).toBeLessThan(0.1);
     expect(Math.abs(scrollAfter.y - scrollBefore.y)).toBeLessThan(0.1);
@@ -168,6 +170,7 @@ test.describe("split view", () => {
     await expect(page.getByTestId("formula-address")).toHaveValue("B2");
     // The secondary pane should mirror selection state without being scrolled to reveal it.
     await expect(secondary.getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell B2");
+    await expect(secondary.getByTestId("canvas-grid-a11y-status")).toContainText("Selection B2");
     const secondaryScrollAfter = {
       x: Number((await secondary.getAttribute("data-scroll-x")) ?? 0),
       y: Number((await secondary.getAttribute("data-scroll-y")) ?? 0),
@@ -221,6 +224,8 @@ test.describe("split view", () => {
     await expect(page.getByTestId("active-cell")).toHaveText("D4");
     await expect(page.getByTestId("formula-address")).toHaveValue("D4");
     await expect(page.locator("#grid").getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell D4");
+    await expect(page.locator("#grid").getByTestId("canvas-grid-a11y-status")).toContainText("Selection B2:D4");
+    await expect(secondary.getByTestId("canvas-grid-a11y-status")).toContainText("Selection B2:D4");
 
     const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll());
     expect(Math.abs(scrollAfter.x - scrollBefore.x)).toBeLessThan(0.1);
