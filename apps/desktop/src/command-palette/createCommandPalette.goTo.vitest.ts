@@ -53,6 +53,51 @@ describe("createCommandPalette Go to suggestion", () => {
     palette.dispose();
   });
 
+  it("executes Go to on Enter and closes the palette", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const workbook: GoToWorkbookLookup = {
+      getTable: () => null,
+      getName: () => null,
+    };
+    const onGoTo = vi.fn();
+
+    const palette = createCommandPalette({
+      commandRegistry,
+      contextKeys: {} as any,
+      keybindingIndex: new Map(),
+      ensureExtensionsLoaded: async () => {},
+      onCloseFocus: () => {},
+      inputDebounceMs: 0,
+      goTo: { workbook, getCurrentSheetName: () => "Sheet1", onGoTo },
+    });
+
+    palette.open();
+
+    const overlay = document.querySelector<HTMLElement>(".command-palette-overlay");
+    expect(overlay).toBeTruthy();
+    expect(overlay!.hidden).toBe(false);
+
+    const input = document.querySelector<HTMLInputElement>('[data-testid="command-palette-input"]');
+    expect(input).toBeTruthy();
+
+    input!.value = "B3";
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    input!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(onGoTo).toHaveBeenCalledTimes(1);
+    expect(onGoTo).toHaveBeenCalledWith({
+      type: "range",
+      source: "a1",
+      sheetName: "Sheet1",
+      range: { startRow: 2, endRow: 2, startCol: 1, endCol: 1 },
+    });
+    expect(overlay!.hidden).toBe(true);
+
+    palette.dispose();
+  });
+
   it("formats sheet-qualified refs using the explicit sheet name (not the current sheet)", async () => {
     const commandRegistry = new CommandRegistry();
     commandRegistry.registerBuiltinCommand("test.someCommand", "Some Command", () => {}, { category: "Test" });
