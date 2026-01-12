@@ -97,12 +97,17 @@ function __handleMessage(message) {
       const pending = state.pendingRequests.get(message.id);
       if (!pending) return;
       state.pendingRequests.delete(message.id);
+      const payload = message.error && typeof message.error === "object" ? message.error : null;
       const errorMessage =
-        typeof message.error === "string"
-          ? message.error
-          : String(message.error?.message ?? "Unknown error");
+        typeof message.error === "string" ? message.error : String(payload?.message ?? "Unknown error");
       const err = new Error(errorMessage);
-      if (message.error?.stack) err.stack = String(message.error.stack);
+      if (payload?.stack) err.stack = String(payload.stack);
+      if (typeof payload?.name === "string" && payload.name.trim().length > 0) {
+        err.name = String(payload.name);
+      }
+      if (payload && Object.prototype.hasOwnProperty.call(payload, "code")) {
+        err.code = payload.code;
+      }
       pending.reject(err);
       return;
     }

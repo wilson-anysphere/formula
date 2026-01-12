@@ -29,6 +29,12 @@ function deserializeError(payload) {
     typeof payload === "string" ? payload : String(payload?.message ?? "Unknown error");
   const err = new Error(message);
   if (payload?.stack) err.stack = String(payload.stack);
+  if (typeof payload?.name === "string" && payload.name.trim().length > 0) {
+    err.name = String(payload.name);
+  }
+  if (Object.prototype.hasOwnProperty.call(payload ?? {}, "code")) {
+    err.code = payload.code;
+  }
   return err;
 }
 

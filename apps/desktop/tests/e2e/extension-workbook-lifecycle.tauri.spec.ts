@@ -1051,7 +1051,7 @@ test.describe("extension workbook lifecycle (tauri)", () => {
               await formula.workbook.openWorkbook(${JSON.stringify("/tmp/cancel-open.xlsx")});
               return { ok: true, opened };
             } catch (err) {
-              return { ok: false, opened, error: err?.message ?? String(err) };
+              return { ok: false, opened, error: err?.message ?? String(err), name: err?.name ?? null };
             }
           }));
         }
@@ -1077,6 +1077,7 @@ test.describe("extension workbook lifecycle (tauri)", () => {
     });
 
     expect(result.ok).toBe(false);
+    expect(result.name).toBe("AbortError");
     expect(String(result.error ?? "")).toMatch(/cancel/i);
     expect(result.opened).toEqual([]);
 
@@ -1230,7 +1231,7 @@ test.describe("extension workbook lifecycle (tauri)", () => {
               await formula.workbook.save();
               return { ok: true, beforeSave };
             } catch (err) {
-              return { ok: false, beforeSave, error: err?.message ?? String(err) };
+              return { ok: false, beforeSave, error: err?.message ?? String(err), name: err?.name ?? null };
             }
           }));
         }
@@ -1256,7 +1257,8 @@ test.describe("extension workbook lifecycle (tauri)", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.beforeSave).toEqual([]);
+    expect(result.name).toBe("AbortError");
+    expect(result.beforeSave).toEqual([null]);
     expect(String(result.error ?? "")).toMatch(/save/i);
     expect(String(result.error ?? "")).toMatch(/cancel/i);
 
@@ -1418,7 +1420,7 @@ test.describe("extension workbook lifecycle (tauri)", () => {
               await formula.workbook.createWorkbook();
               return { ok: true, opened };
             } catch (err) {
-              return { ok: false, opened, error: err?.message ?? String(err) };
+              return { ok: false, opened, error: err?.message ?? String(err), name: err?.name ?? null };
             }
           }));
         }
@@ -1444,6 +1446,7 @@ test.describe("extension workbook lifecycle (tauri)", () => {
     });
 
     expect(result.ok).toBe(false);
+    expect(result.name).toBe("AbortError");
     expect(String(result.error ?? "")).toMatch(/cancel/i);
     expect(result.opened).toEqual([]);
 
@@ -1605,7 +1608,7 @@ test.describe("extension workbook lifecycle (tauri)", () => {
               await formula.workbook.close();
               return { ok: true, opened };
             } catch (err) {
-              return { ok: false, opened, error: err?.message ?? String(err) };
+              return { ok: false, opened, error: err?.message ?? String(err), name: err?.name ?? null };
             }
           }));
         }
@@ -1631,6 +1634,7 @@ test.describe("extension workbook lifecycle (tauri)", () => {
     });
 
     expect(result.ok).toBe(false);
+    expect(result.name).toBe("AbortError");
     expect(String(result.error ?? "")).toMatch(/cancel/i);
     expect(result.opened).toEqual([]);
 

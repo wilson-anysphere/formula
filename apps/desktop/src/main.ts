@@ -8200,7 +8200,9 @@ async function openWorkbookFromPath(
   const ok = await confirmDiscardDirtyState("open another workbook");
   if (!ok) {
     if (options.throwOnCancel) {
-      throw new Error("Open workbook cancelled");
+      const err = new Error("Open workbook cancelled");
+      err.name = "AbortError";
+      throw err;
     }
     return;
   }
@@ -8360,7 +8362,9 @@ async function handleSaveAs(
   });
   if (!path) {
     if (options.throwOnCancel) {
-      throw new Error("Save cancelled");
+      const err = new Error("Save cancelled");
+      err.name = "AbortError";
+      throw err;
     }
     return;
   }
@@ -8426,7 +8430,9 @@ async function handleNewWorkbook(
   const ok = await confirmDiscardDirtyState(actionLabel);
   if (!ok) {
     if (options.throwOnCancel) {
-      throw new Error(cancelMessage);
+      const err = new Error(cancelMessage);
+      err.name = "AbortError";
+      throw err;
     }
     return;
   }

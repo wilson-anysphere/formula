@@ -65,7 +65,14 @@ const API_PERMISSIONS = {
 
 function serializeError(error) {
   if (error instanceof Error) {
-    return { message: error.message, stack: error.stack };
+    const payload = { message: error.message, stack: error.stack };
+    if (typeof error.name === "string" && error.name.trim().length > 0) {
+      payload.name = error.name;
+    }
+    if (Object.prototype.hasOwnProperty.call(error, "code")) {
+      payload.code = error.code;
+    }
+    return payload;
   }
   return { message: String(error) };
 }
@@ -74,6 +81,12 @@ function deserializeError(payload) {
   const message = typeof payload === "string" ? payload : String(payload?.message ?? "Unknown error");
   const err = new Error(message);
   if (payload?.stack) err.stack = String(payload.stack);
+  if (typeof payload?.name === "string" && payload.name.trim().length > 0) {
+    err.name = String(payload.name);
+  }
+  if (Object.prototype.hasOwnProperty.call(payload ?? {}, "code")) {
+    err.code = payload.code;
+  }
   return err;
 }
 
