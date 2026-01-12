@@ -107,6 +107,35 @@ describe("LayoutController persistence", () => {
     expect(parsed.splitView.ratio).toBeCloseTo(0.1, 5);
   });
 
+  test("setSplitRatio emit:false ignores invalid ratios (NaN/Infinity)", () => {
+    const storage = new MemoryStorage();
+    const keyPrefix = "test.layout";
+    const workspaceManager = new LayoutWorkspaceManager({ storage, keyPrefix });
+    const workbookId = "workbook-split-ratio-invalid";
+    const controller = new LayoutController({ workbookId, workspaceManager });
+    const key = `${keyPrefix}.workbook.${encodeURIComponent(workbookId)}.v1`;
+
+    let changeCount = 0;
+    controller.on("change", () => {
+      changeCount += 1;
+    });
+
+    controller.setSplitDirection("vertical");
+    const persistedBefore = storage.getItem(key);
+    expect(persistedBefore).not.toBeNull();
+    expect(changeCount).toBe(1);
+
+    const ratioBefore = controller.layout.splitView.ratio;
+
+    controller.setSplitRatio(Number.NaN, { persist: false, emit: false });
+    controller.setSplitRatio(Number.POSITIVE_INFINITY, { persist: false, emit: false });
+    controller.setSplitRatio(Number.NEGATIVE_INFINITY, { persist: false, emit: false });
+
+    expect(controller.layout.splitView.ratio).toBe(ratioBefore);
+    expect(storage.getItem(key)).toBe(persistedBefore);
+    expect(changeCount).toBe(1);
+  });
+
   test("setSplitPaneZoom can be applied without persisting/emitting, then flushed with persistNow()", () => {
     const storage = new MemoryStorage();
     const keyPrefix = "test.layout";
