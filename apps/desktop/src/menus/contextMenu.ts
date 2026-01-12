@@ -52,6 +52,9 @@ export class ContextMenu {
   private readonly onClose: (() => void) | null;
   private keydownListener: ((e: KeyboardEvent) => void) | null = null;
   private pointerDownListener: ((e: PointerEvent) => void) | null = null;
+  private wheelListener: ((e: WheelEvent) => void) | null = null;
+  private resizeListener: (() => void) | null = null;
+  private blurListener: (() => void) | null = null;
 
   private readonly buttonItems = new WeakMap<HTMLButtonElement, ContextMenuButtonItem>();
 
@@ -106,6 +109,32 @@ export class ContextMenu {
       this.close();
     };
     window.addEventListener("pointerdown", this.pointerDownListener, true);
+
+    // Close on wheel scrolling the underlying surface (keep it open when scrolling
+    // within the menu/submenu itself).
+    this.wheelListener = (e: WheelEvent) => {
+      if (!this.isShown) return;
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (this.menu.contains(target)) return;
+      if (this.submenu && this.submenu.contains(target)) return;
+      this.close();
+    };
+    window.addEventListener("wheel", this.wheelListener, { capture: true, passive: true });
+
+    // Close on window focus changes / resizes (prevents awkward positioning after
+    // viewport changes).
+    this.resizeListener = () => {
+      if (!this.isShown) return;
+      this.close();
+    };
+    window.addEventListener("resize", this.resizeListener);
+
+    this.blurListener = () => {
+      if (!this.isShown) return;
+      this.close();
+    };
+    window.addEventListener("blur", this.blurListener);
 
     this.keydownListener = (e) => this.onKeyDown(e);
     window.addEventListener("keydown", this.keydownListener, true);
@@ -171,6 +200,21 @@ export class ContextMenu {
     if (this.pointerDownListener) {
       window.removeEventListener("pointerdown", this.pointerDownListener, true);
       this.pointerDownListener = null;
+    }
+
+    if (this.wheelListener) {
+      window.removeEventListener("wheel", this.wheelListener, true);
+      this.wheelListener = null;
+    }
+
+    if (this.resizeListener) {
+      window.removeEventListener("resize", this.resizeListener);
+      this.resizeListener = null;
+    }
+
+    if (this.blurListener) {
+      window.removeEventListener("blur", this.blurListener);
+      this.blurListener = null;
     }
 
     try {
