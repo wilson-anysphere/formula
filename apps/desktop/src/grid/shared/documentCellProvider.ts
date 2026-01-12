@@ -13,6 +13,12 @@ type DocStyle = Record<string, any>;
 const CACHE_KEY_COL_STRIDE = 65_536;
 const SHEET_CACHE_MAX_SIZE = 50_000;
 
+// Excel stores alignment indent as an integer "level". There isn't a stable
+// px-based representation (it depends on font + rendering), but visually it is
+// close to ~one character width per level in the default font. We approximate
+// this as 8px per indent level for shared-grid rendering.
+const INDENT_PX_PER_LEVEL = 8;
+
 function isPlainObject(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -126,9 +132,11 @@ export class DocumentCellProvider implements CellProvider {
 
     const styleTable: any = (this.options.document as any)?.styleTable;
 
-    // Prefer stable style-id tuples when available so we can cache formatting results
-    // without calling `DocumentController.getCellFormat()` for every cell.
-    if (typeof controller.getCellFormatStyleIds === "function" && typeof styleTable?.get === "function") {
+    // Prefer stable style-id tuples when available so we can cache formatting results.
+    // If the underlying style table is available we can avoid calling `getCellFormat()`
+    // entirely; otherwise we still cache the resolved format by tuple and only call
+    // `getCellFormat()` once per unique tuple.
+    if (typeof controller.getCellFormatStyleIds === "function") {
       const ids = controller.getCellFormatStyleIds(sheetId, coord) as unknown;
       if (Array.isArray(ids) && ids.length >= 4) {
         const normalizeId = (value: unknown): number =>
@@ -145,23 +153,33 @@ export class DocumentCellProvider implements CellProvider {
         const cached = this.resolvedFormatCache.get(key);
         if (cached !== undefined) return cached;
 
-        const sheetStyle = styleTable.get(sheetDefaultStyleId);
-        const colStyle = styleTable.get(colStyleId);
-        const rowStyle = styleTable.get(rowStyleId);
-        const runStyle = styleTable.get(rangeRunStyleId);
-        const cellStyle = styleTable.get(cellStyleId);
+        if (typeof styleTable?.get === "function") {
+          const sheetStyle = styleTable.get(sheetDefaultStyleId);
+          const colStyle = styleTable.get(colStyleId);
+          const rowStyle = styleTable.get(rowStyleId);
+          const runStyle = styleTable.get(rangeRunStyleId);
+          const cellStyle = styleTable.get(cellStyleId);
 
-        // Precedence: sheet < col < row < range-run < cell.
-        const sheetCol = applyStylePatch(sheetStyle, colStyle);
-        const sheetColRow = applyStylePatch(sheetCol, rowStyle);
-        const sheetColRowRun = applyStylePatch(sheetColRow, runStyle);
-        const merged = applyStylePatch(sheetColRowRun, cellStyle);
+          // Precedence: sheet < col < row < range-run < cell.
+          const sheetCol = applyStylePatch(sheetStyle, colStyle);
+          const sheetColRow = applyStylePatch(sheetCol, rowStyle);
+          const sheetColRowRun = applyStylePatch(sheetColRow, runStyle);
+          const merged = applyStylePatch(sheetColRowRun, cellStyle);
 
-        const style = this.convertDocStyleToGridStyle(merged);
-        const numberFormat = getNumberFormat(merged);
-        const out = { style, numberFormat };
-        this.resolvedFormatCache.set(key, out);
-        return out;
+          const style = this.convertDocStyleToGridStyle(merged);
+          const numberFormat = getNumberFormat(merged);
+          const out = { style, numberFormat };
+          this.resolvedFormatCache.set(key, out);
+          return out;
+        }
+
+        if (typeof controller.getCellFormat === "function") {
+          const resolvedDocStyle: unknown = controller.getCellFormat(sheetId, coord);
+          const docStyle: DocStyle = isPlainObject(resolvedDocStyle) ? (resolvedDocStyle as DocStyle) : {};
+          const out = { style: this.convertDocStyleToGridStyle(docStyle), numberFormat: getNumberFormat(docStyle) };
+          this.resolvedFormatCache.set(key, out);
+          return out;
+        }
       }
     }
 
@@ -290,6 +308,12 @@ export class DocumentCellProvider implements CellProvider {
     else if (horizontal === "right") out.textAlign = "end";
     // "general"/undefined: leave undefined so renderer can pick based on value type.
     if (alignment?.wrapText === true || (alignment as any)?.wrap_text === true) out.wrapMode = "word";
+
+    const indentRaw = (alignment as any)?.indent;
+    if (typeof indentRaw === "number" && Number.isFinite(indentRaw) && indentRaw > 0) {
+      const level = Math.max(0, Math.trunc(indentRaw));
+      if (level > 0) out.textIndentPx = level * INDENT_PX_PER_LEVEL;
+    }
 
     const vertical = alignment?.vertical;
     if (vertical === "top") out.verticalAlign = "top";

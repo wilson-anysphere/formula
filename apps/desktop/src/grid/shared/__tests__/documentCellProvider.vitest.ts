@@ -144,6 +144,88 @@ describe("DocumentCellProvider formatting integration", () => {
     expect((cell?.style as any)?.diagonalBorders?.down?.color).not.toMatch(/^#[0-9a-f]{8}$/i);
   });
 
+  it("maps formula-model snake_case formatting keys into @formula/grid CellStyle", () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", "hello");
+
+    doc.setRangeFormat("Sheet1", "A1", {
+      font: { size_100pt: 1200 },
+      fill: { fg_color: "#FFFFFF00" },
+      alignment: { wrap_text: true }
+    });
+
+    const headerRows = 1;
+    const headerCols = 1;
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows,
+      headerCols,
+      rowCount: 2 + headerRows,
+      colCount: 2 + headerCols,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(headerRows, headerCols);
+    expect(cell).not.toBeNull();
+    expect(cell?.style?.fill).toBe("#ffff00");
+    expect(cell?.style?.wrapMode).toBe("word");
+    expect(cell?.style?.fontSize).toBeCloseTo(16, 5);
+  });
+
+  it("maps Excel alignment.indent into the shared-grid indent primitive", () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", "hello");
+    doc.setRangeFormat("Sheet1", "A1", { alignment: { indent: 2 } });
+
+    const headerRows = 1;
+    const headerCols = 1;
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows,
+      headerCols,
+      rowCount: 2 + headerRows,
+      colCount: 2 + headerCols,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(headerRows, headerCols);
+    expect(cell).not.toBeNull();
+    // 8px per indent level (see DocumentCellProvider).
+    expect((cell?.style as any)?.textIndentPx).toBe(16);
+  });
+
+  it("caches resolved @formula/grid CellStyle by getCellFormatStyleIds tuple", () => {
+    const getCellFormat = vi.fn(() => ({ font: { bold: true } }));
+    const doc = {
+      getCell: vi.fn(() => ({ value: "x", formula: null, styleId: 0 })),
+      getCellFormatStyleIds: vi.fn(() => [0, 0, 0, 1] as [number, number, number, number]),
+      getCellFormat,
+      on: vi.fn(() => () => {})
+    };
+
+    const provider = new DocumentCellProvider({
+      document: doc as any,
+      getSheetId: () => "Sheet1",
+      headerRows: 0,
+      headerCols: 0,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    // Different coordinates but identical formatting tuple.
+    provider.getCell(0, 0);
+    provider.getCell(0, 1);
+    provider.getCell(1, 0);
+
+    expect(getCellFormat).toHaveBeenCalledTimes(1);
+  });
+
   it("emits grid invalidation updates for format-layer-only deltas", () => {
     const doc = new DocumentController();
 
