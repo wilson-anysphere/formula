@@ -3971,6 +3971,85 @@ fn odd_coupon_bond_functions_coerce_date_text_in_frequency_and_basis_like_value(
 }
 
 #[test]
+fn odd_coupon_bond_functions_coerce_time_text_in_frequency_and_basis_like_value() {
+    let mut sheet = TestSheet::new();
+
+    // Excel's numeric coercion (VALUE-like) can interpret some text as a time serial (a fraction
+    // of a day). If so, the odd-coupon bond functions should truncate and then validate the
+    // resulting integer.
+    //
+    // Example: "1:00" -> 1/24 (~0.04166) -> trunc->0.
+    // - For frequency, 0 is invalid => #NUM! (not #VALUE!)
+    match sheet.eval(
+        r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,"1:00",0)"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval(
+        r#"=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,98,100,"1:00",0)"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval(
+        r#"=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,"1:00",0)"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval(
+        r#"=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,"1:00",0)"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+
+    // For basis, the same "1:00" input should coerce to 0 and behave like basis=0.
+    let baseline_oddfprice = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0)";
+    let baseline_oddfprice_value = match eval_number_or_skip(&mut sheet, baseline_oddfprice) {
+        Some(v) => v,
+        None => return,
+    };
+    let time_basis_oddfprice = r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,"1:00")"#;
+    let time_basis_oddfprice_value = eval_number_or_skip(&mut sheet, time_basis_oddfprice)
+        .expect("ODDFPRICE should accept time-like text for basis and truncate it to 0");
+    assert_close(time_basis_oddfprice_value, baseline_oddfprice_value, 1e-9);
+
+    let baseline_oddfyield = "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,98,100,2,0)";
+    let baseline_oddfyield_value = eval_number_or_skip(&mut sheet, baseline_oddfyield)
+        .expect("ODDFYIELD should return a number for the baseline");
+    let time_basis_oddfyield = r#"=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,98,100,2,"1:00")"#;
+    let time_basis_oddfyield_value = eval_number_or_skip(&mut sheet, time_basis_oddfyield)
+        .expect("ODDFYIELD should accept time-like text for basis and truncate it to 0");
+    assert_close(time_basis_oddfyield_value, baseline_oddfyield_value, 1e-9);
+
+    let baseline_oddlprice =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0)";
+    let baseline_oddlprice_value = eval_number_or_skip(&mut sheet, baseline_oddlprice)
+        .expect("ODDLPRICE should return a number for the baseline");
+    let time_basis_oddlprice =
+        r#"=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,"1:00")"#;
+    let time_basis_oddlprice_value = eval_number_or_skip(&mut sheet, time_basis_oddlprice)
+        .expect("ODDLPRICE should accept time-like text for basis and truncate it to 0");
+    assert_close(time_basis_oddlprice_value, baseline_oddlprice_value, 1e-9);
+
+    let baseline_oddlyield =
+        "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,2,0)";
+    let baseline_oddlyield_value = eval_number_or_skip(&mut sheet, baseline_oddlyield)
+        .expect("ODDLYIELD should return a number for the baseline");
+    let time_basis_oddlyield =
+        r#"=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,2,"1:00")"#;
+    let time_basis_oddlyield_value = eval_number_or_skip(&mut sheet, time_basis_oddlyield)
+        .expect("ODDLYIELD should accept time-like text for basis and truncate it to 0");
+    assert_close(time_basis_oddlyield_value, baseline_oddlyield_value, 1e-9);
+}
+
+#[test]
 fn oddfprice_day_count_basis_relationships() {
     let system = ExcelDateSystem::EXCEL_1900;
 
