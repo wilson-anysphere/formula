@@ -99,6 +99,37 @@ function shouldPreserveSchemaV1WorkbookMap(value, field) {
 }
 
 /**
+ * Backwards-compatible detection for schemaVersion=1 callers that existed
+ * before BranchService tracked per-sheet `view` state (e.g. frozen panes).
+ *
+ * Those callers will send sheet metadata maps that omit `view` (and any
+ * `frozenRows`/`frozenCols` keys). Treat the missing view as "no change" so
+ * older clients can't accidentally wipe existing sheet view state.
+ *
+ * @param {any} value
+ * @param {string} sheetId
+ */
+function shouldPreserveSchemaV1SheetView(value, sheetId) {
+  if (!isRecord(value) || value.schemaVersion !== 1) return false;
+  const sheets = value.sheets;
+  if (!isRecord(sheets) || !isRecord(sheets.metaById)) return false;
+  const meta = sheets.metaById[sheetId];
+  if (!isRecord(meta)) return false;
+
+  // If the sheet meta explicitly includes view state (either nested under `view`
+  // or as legacy top-level fields), then it's an intentional update.
+  if ("view" in meta) {
+    const view = meta.view;
+    // Treat non-object view values (null/undefined) as omitted.
+    if (isRecord(view)) return false;
+    // If a key exists but is invalid, assume the caller doesn't support view and preserve.
+    return true;
+  }
+  if ("frozenRows" in meta || "frozenCols" in meta) return false;
+  return true;
+}
+
+/**
  * BranchService provides high-level branch/merge operations for a single
  * document.
  *
@@ -312,6 +343,16 @@ export class BranchService {
       if (shouldPreserveSchemaV1WorkbookMap(nextState, "comments")) {
         merged.comments = structuredClone(currentState.comments ?? {});
         didOverlay = true;
+      }
+
+      // Preserve sheet-level view state (e.g. frozen panes) when the caller omits it.
+      for (const sheetId of Object.keys(merged.sheets.metaById ?? {})) {
+        if (!shouldPreserveSchemaV1SheetView(nextState, sheetId)) continue;
+        const currentView = currentState.sheets.metaById?.[sheetId]?.view;
+        if (currentView !== undefined) {
+          merged.sheets.metaById[sheetId].view = structuredClone(currentView);
+          didOverlay = true;
+        }
       }
 
       if (didOverlay) effectiveNextState = merged;

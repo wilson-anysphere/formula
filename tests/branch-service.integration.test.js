@@ -288,6 +288,43 @@ test("schemaVersion=1 commits missing comments preserve existing comments", asyn
   assert.equal(state.comments.c1?.content, "hello");
 });
 
+test("schemaVersion=1 commits missing sheet view preserve existing frozen panes", async () => {
+  const actor = { userId: "u1", role: "owner" };
+  const store = new InMemoryBranchStore();
+  const service = new BranchService({ docId: "doc-schema-v1-no-sheet-view", store });
+
+  await service.init(actor, {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: { Sheet1: { id: "Sheet1", name: "Sheet1", view: { frozenRows: 2, frozenCols: 1 } } },
+    },
+    cells: { Sheet1: {} },
+    metadata: {},
+    namedRanges: {},
+    comments: {},
+  });
+
+  // Simulate an older schemaVersion=1 client that doesn't know about per-sheet view state.
+  await service.commit(actor, {
+    nextState: {
+      schemaVersion: 1,
+      sheets: {
+        order: ["Sheet1"],
+        metaById: { Sheet1: { id: "Sheet1", name: "Sheet1" } },
+      },
+      cells: { Sheet1: { A1: { value: 123 } } },
+      metadata: {},
+      namedRanges: {},
+      comments: {},
+    },
+  });
+
+  const state = await service.getCurrentState();
+  assert.deepEqual(state.cells.Sheet1.A1, { value: 123 });
+  assert.deepEqual(state.sheets.metaById.Sheet1.view, { frozenRows: 2, frozenCols: 1 });
+});
+
 test("schemaVersion=1 commits missing sheets preserve existing sheet metadata", async () => {
   const actor = { userId: "u1", role: "owner" };
   const store = new InMemoryBranchStore();
