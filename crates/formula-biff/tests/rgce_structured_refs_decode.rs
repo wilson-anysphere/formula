@@ -82,6 +82,22 @@ fn decodes_structured_ref_totals_column() {
 }
 
 #[test]
+fn decodes_structured_ref_item_only_headers() {
+    let rgce = ptg_list(1, 0x0002, 0, 0, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table1[#Headers]");
+    assert_eq!(normalize(&text), normalize("Table1[#Headers]"));
+}
+
+#[test]
+fn decodes_structured_ref_item_only_totals() {
+    let rgce = ptg_list(1, 0x0008, 0, 0, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table1[#Totals]");
+    assert_eq!(normalize(&text), normalize("Table1[#Totals]"));
+}
+
+#[test]
 fn decodes_structured_ref_all_column() {
     let rgce = ptg_list(1, 0x0001, 2, 2, 0x18);
     let text = decode_rgce(&rgce).expect("decode");
