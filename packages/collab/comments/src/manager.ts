@@ -461,7 +461,12 @@ export function createCommentManagerForDoc(params: (
   // Normalize any foreign nested types into local Yjs instances so comment edits
   // are undoable even when the doc was hydrated by a foreign Yjs build.
   try {
-    normalizeCommentsRootToLocalTypes(params.doc);
+    // Only attempt normalization when the `comments` root already exists. This
+    // avoids eagerly instantiating a Map root for pre-hydration docs (which can
+    // clobber legacy Array-backed documents by fixing the root type too early).
+    if (params.doc.share.get("comments")) {
+      normalizeCommentsRootToLocalTypes(params.doc);
+    }
   } catch {
     // Best-effort; never block comment usage on normalization.
   }

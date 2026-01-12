@@ -78,7 +78,7 @@ import { bindSheetViewToCollabSession, type SheetViewBinder } from "../collab/sh
 import { dateToExcelSerial } from "../shared/valueParsing.js";
 
 import * as Y from "yjs";
-import { CommentManager, bindDocToStorage, getCommentsRoot } from "@formula/collab-comments";
+import { CommentManager, bindDocToStorage, createCommentManagerForDoc, getCommentsRoot } from "@formula/collab-comments";
 import type { Comment, CommentAuthor } from "@formula/collab-comments";
 import { bindCollabSessionToDocumentController, createCollabSession, type CollabSession } from "@formula/collab-session";
 import { getCollabUserIdentity, type CollabUserIdentity } from "../collab/userIdentity";
@@ -606,6 +606,7 @@ export class SpreadsheetApp {
   private readonly domAbort = new AbortController();
   private commentsDocUpdateListener: (() => void) | null = null;
   private stopCommentsRootObserver: (() => void) | null = null;
+  private commentsUndoScopeAdded = false;
 
   private readonly inlineEditController: InlineEditController;
 
@@ -830,7 +831,21 @@ export class SpreadsheetApp {
       this.commentsDoc = this.collabSession.doc;
       // Avoid eagerly instantiating the `comments` root type before the provider has
       // hydrated the document; older docs may still use a legacy Array-backed schema.
-      this.commentManager = new CommentManager(this.commentsDoc, { transact: (fn) => this.collabSession!.transactLocal(fn) });
+      this.commentManager = createCommentManagerForDoc({
+        doc: this.commentsDoc,
+        // Ensure comment edits are tracked by the binder-origin collaborative UndoManager
+        // (so Cmd/Ctrl+Z reverts comment add/edit/reply/resolve just like cell edits).
+        transact: (fn) => {
+          const transact = (undoService as any)?.transact;
+          if (typeof transact === "function") {
+            transact(fn);
+            return;
+          }
+          // Fallback: run directly with the binder origin so any externally created
+          // UndoManager tracking `binderOrigin` still captures the transaction.
+          this.commentsDoc.transact(fn, binderOrigin);
+        },
+      });
 
       void bindCollabSessionToDocumentController({
         session: this.collabSession,
@@ -1290,6 +1305,11 @@ export class SpreadsheetApp {
             // Best-effort; never block app startup on comment schema issues.
           }
           if (!root) return;
+
+          // Ensure comments participate in collaborative undo/redo. We defer this
+          // until after provider sync so we don't accidentally clobber legacy
+          // Array-backed roots by instantiating a Map too early.
+          this.ensureCommentsUndoScope(root);
 
           const handler = () => {
             this.reindexCommentCells();
@@ -3803,6 +3823,55 @@ export class SpreadsheetApp {
 
   private commentCellRef(cell: CellCoord, sheetId: string = this.sheetId): string {
     return this.commentCellRefFromA1(sheetId, cellToA1(cell));
+  }
+
+  private ensureCommentsUndoScope(root?: ReturnType<typeof getCommentsRoot> | null): void {
+    if (this.commentsUndoScopeAdded) return;
+    const undoService = this.collabUndoService;
+    if (!undoService) return;
+    const localOrigins = undoService.localOrigins;
+    if (!localOrigins) return;
+
+    let undoManager: Y.UndoManager | null = null;
+    for (const origin of localOrigins) {
+      if (origin instanceof Y.UndoManager) {
+        undoManager = origin;
+        break;
+      }
+      // Tolerate multiple `yjs` module instances (ESM/CJS) by duck-typing.
+      const maybe = origin as any;
+      if (maybe && typeof maybe === "object" && maybe.constructor?.name === "UndoManager" && typeof maybe.addToScope === "function") {
+        undoManager = maybe as Y.UndoManager;
+        break;
+      }
+    }
+    if (!undoManager) return;
+
+    let resolvedRoot = root ?? null;
+    if (!resolvedRoot) {
+      const session = this.collabSession;
+      if (!session) return;
+
+      // Avoid instantiating the `comments` root pre-hydration; older documents may
+      // still use an Array-backed schema and would be clobbered by `doc.getMap`.
+      const provider = session.provider;
+      const providerSynced =
+        provider && typeof (provider as any).on === "function" ? Boolean((provider as any).synced) : true;
+      if (!providerSynced && !session.doc.share.get("comments")) return;
+
+      try {
+        resolvedRoot = getCommentsRoot(session.doc);
+      } catch {
+        return;
+      }
+    }
+
+    try {
+      undoManager.addToScope(resolvedRoot.kind === "map" ? resolvedRoot.map : resolvedRoot.array);
+      this.commentsUndoScopeAdded = true;
+    } catch {
+      // Best-effort; never block comment usage on undo wiring.
+    }
   }
 
   private reindexCommentCells(): void {

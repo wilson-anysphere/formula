@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 
 import { createCollabSession } from "@formula/collab-session";
+import { createCommentManagerForDoc } from "@formula/collab-comments";
 import { REMOTE_ORIGIN } from "@formula/collab-undo";
 
 import { DocumentController } from "../document/documentController.js";
@@ -78,6 +79,53 @@ describe("collaboration-safe undo/redo (desktop)", () => {
     await flushBinderWork();
     expect(document.getCell("Sheet1", { row: 0, col: 0 }).value).toBe("local-a1");
     expect(document.getCell("Sheet1", { row: 0, col: 1 }).value).toBe("remote-b1");
+
+    binder.destroy();
+  });
+
+  it("undo/redo captures comment add/edit when comments use binder-origin transactions", async () => {
+    const session = createCollabSession({ doc: new Y.Doc() });
+    const document = new DocumentController();
+
+    const { binder, undoService } = await bindDocumentControllerWithCollabUndo({
+      session,
+      documentController: document,
+      defaultSheetId: "Sheet1",
+    });
+
+    const comments = createCommentManagerForDoc({ doc: session.doc, transact: undoService.transact! });
+
+    const commentId = comments.addComment({
+      id: "c1",
+      cellRef: "Sheet1:0:0",
+      kind: "threaded",
+      content: "hello",
+      author: { id: "u1", name: "Alice" },
+      now: 1,
+    });
+    undoService.stopCapturing();
+
+    comments.setCommentContent({ commentId, content: "hello (edited)", now: 2 });
+
+    const getContent = () => comments.listAll().find((c) => c.id === commentId)?.content ?? null;
+
+    expect(getContent()).toBe("hello (edited)");
+    expect(undoService.canUndo()).toBe(true);
+
+    undoService.undo();
+    expect(getContent()).toBe("hello");
+
+    expect(undoService.canUndo()).toBe(true);
+    undoService.undo();
+    expect(getContent()).toBe(null);
+
+    expect(undoService.canRedo()).toBe(true);
+    undoService.redo();
+    expect(getContent()).toBe("hello");
+
+    expect(undoService.canRedo()).toBe(true);
+    undoService.redo();
+    expect(getContent()).toBe("hello (edited)");
 
     binder.destroy();
   });

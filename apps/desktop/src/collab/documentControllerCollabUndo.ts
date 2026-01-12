@@ -1,6 +1,7 @@
 import { bindCollabSessionToDocumentController, type CollabSession, type DocumentControllerBinder } from "@formula/collab-session";
 import { getCommentsRoot } from "@formula/collab-comments";
 import { createUndoService, type UndoService } from "@formula/collab-undo";
+import * as Y from "yjs";
 
 export type DocumentControllerCollabUndoBinding = {
   binder: DocumentControllerBinder;
@@ -64,6 +65,50 @@ export async function bindDocumentControllerWithCollabUndo(options: {
   // Ensure undo/redo transactions are treated as "local" by conflict monitors.
   for (const origin of undoService.localOrigins ?? []) {
     session.localOrigins.add(origin);
+  }
+
+  // Ensure comments participate in the binder-origin undo scope once it's safe to
+  // instantiate the `comments` root (older docs may still use an Array-backed schema).
+  const undoManager: Y.UndoManager | null = (() => {
+    for (const origin of undoService.localOrigins ?? []) {
+      if (origin instanceof Y.UndoManager) return origin;
+      const maybe = origin as any;
+      if (maybe && typeof maybe === "object" && maybe.constructor?.name === "UndoManager" && typeof maybe.addToScope === "function") {
+        return maybe as Y.UndoManager;
+      }
+    }
+    return null;
+  })();
+
+  const ensureCommentsUndoScope = () => {
+    if (!undoManager) return;
+
+    // Avoid clobbering legacy docs by instantiating a Map root before the provider
+    // has hydrated the document.
+    const provider = session.provider;
+    const providerSynced =
+      provider && typeof (provider as any).on === "function" ? Boolean((provider as any).synced) : true;
+    if (!providerSynced && !session.doc.share.get("comments")) return;
+
+    try {
+      const root = getCommentsRoot(session.doc);
+      undoManager.addToScope(root.kind === "map" ? root.map : root.array);
+    } catch {
+      // Best-effort.
+    }
+  };
+
+  const provider = session.provider;
+  if (provider && typeof provider.on === "function") {
+    const onSync = (isSynced: boolean) => {
+      if (!isSynced) return;
+      provider.off?.("sync", onSync);
+      ensureCommentsUndoScope();
+    };
+    provider.on("sync", onSync);
+    if ((provider as any).synced) onSync(true);
+  } else {
+    ensureCommentsUndoScope();
   }
 
   const binder = await bindCollabSessionToDocumentController({
