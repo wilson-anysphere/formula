@@ -26,9 +26,24 @@ test("panelBodyRenderer.tsx avoids inline styles (class-driven panel mounts)", (
     "panelBodyRenderer.tsx should avoid React inline styles (style={...}); use CSS classes instead",
   );
   assert.equal(
+    /<[^>]*\bstyle\s*=\s*["']/i.test(source),
+    false,
+    "panelBodyRenderer.tsx should avoid HTML inline styles (style=\"...\"); use CSS classes instead",
+  );
+  assert.equal(
     /\.style\./.test(source),
     false,
     "panelBodyRenderer.tsx should not assign DOM inline styles via `.style.*`; use CSS classes instead",
+  );
+  assert.equal(
+    /\[\s*["']style["']\s*\]/.test(source),
+    false,
+    "panelBodyRenderer.tsx should not access the style attribute via bracket notation; use CSS classes instead",
+  );
+  assert.equal(
+    /setAttribute\(\s*["']style["']/.test(source) || /setAttributeNS\(\s*[^,]+,\s*["']style["']/.test(source),
+    false,
+    "panelBodyRenderer.tsx should not set style attributes via setAttribute; use CSS classes instead",
   );
 
   for (const forbidden of [
