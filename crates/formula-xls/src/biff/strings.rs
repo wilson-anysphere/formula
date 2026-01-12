@@ -9,6 +9,12 @@ use encoding_rs::{
 
 use super::BiffVersion;
 
+// BIFF8 string option flags used by ShortXLUnicodeString and XLUnicodeString.
+// See [MS-XLS] 2.5.293 and 2.5.268.
+const STR_FLAG_HIGH_BYTE: u8 = 0x01;
+const STR_FLAG_EXT: u8 = 0x04;
+const STR_FLAG_RICH_TEXT: u8 = 0x08;
+
 pub(crate) fn encoding_for_codepage(codepage: u16) -> Option<&'static Encoding> {
     Some(match codepage as u32 {
         874 => WINDOWS_874,
@@ -119,7 +125,7 @@ fn parse_biff8_string_payload(
     mut offset: usize,
     codepage: u16,
 ) -> Result<(String, usize), String> {
-    let richtext_runs = if flags & 0x08 != 0 {
+    let richtext_runs = if flags & STR_FLAG_RICH_TEXT != 0 {
         if input.len() < offset + 2 {
             return Err("unexpected end of string".to_string());
         }
@@ -130,7 +136,7 @@ fn parse_biff8_string_payload(
         0
     };
 
-    let ext_size = if flags & 0x04 != 0 {
+    let ext_size = if flags & STR_FLAG_EXT != 0 {
         if input.len() < offset + 4 {
             return Err("unexpected end of string".to_string());
         }
@@ -146,7 +152,7 @@ fn parse_biff8_string_payload(
         0
     };
 
-    let is_unicode = (flags & 0x01) != 0;
+    let is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
     let char_bytes = if is_unicode {
         cch.checked_mul(2)
             .ok_or_else(|| "string length overflow".to_string())?
@@ -198,7 +204,7 @@ pub(crate) fn parse_biff8_unicode_string_best_effort(
     let flags = input[2];
     let mut offset = 3usize;
 
-    if flags & 0x08 != 0 {
+    if flags & STR_FLAG_RICH_TEXT != 0 {
         // cRun (optional)
         if input.len() < offset + 2 {
             return Some(String::new());
@@ -206,7 +212,7 @@ pub(crate) fn parse_biff8_unicode_string_best_effort(
         offset += 2;
     }
 
-    if flags & 0x04 != 0 {
+    if flags & STR_FLAG_EXT != 0 {
         // cbExtRst (optional)
         if input.len() < offset + 4 {
             return Some(String::new());
@@ -214,7 +220,7 @@ pub(crate) fn parse_biff8_unicode_string_best_effort(
         offset += 4;
     }
 
-    let is_unicode = (flags & 0x01) != 0;
+    let is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
     let bytes_per_char = if is_unicode { 2 } else { 1 };
     let bytes = input.get(offset..).unwrap_or_default();
     let available_chars = bytes.len() / bytes_per_char;
@@ -341,19 +347,19 @@ impl<'a> FragmentCursor<'a> {
         let cch = self.read_u16_le()? as usize;
         let flags = self.read_u8()?;
 
-        let richtext_runs = if flags & 0x08 != 0 {
+        let richtext_runs = if flags & STR_FLAG_RICH_TEXT != 0 {
             self.read_u16_le()? as usize
         } else {
             0
         };
 
-        let ext_size = if flags & 0x04 != 0 {
+        let ext_size = if flags & STR_FLAG_EXT != 0 {
             self.read_u32_le()? as usize
         } else {
             0
         };
 
-        let mut is_unicode = (flags & 0x01) != 0;
+        let mut is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
         let mut remaining_chars = cch;
         let mut out = String::new();
 
@@ -363,7 +369,7 @@ impl<'a> FragmentCursor<'a> {
                 // byte is option flags for the continued segment (fHighByte).
                 self.advance_fragment()?;
                 let cont_flags = self.read_u8()?;
-                is_unicode = (cont_flags & 0x01) != 0;
+                is_unicode = (cont_flags & STR_FLAG_HIGH_BYTE) != 0;
                 continue;
             }
 
