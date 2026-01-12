@@ -4300,7 +4300,6 @@ fn append_cell_xml(
             }
         }
     }
-
     // SpreadsheetML cell metadata pointers.
     //
     // Excel emits `vm`/`cm` attributes on `<c>` elements to reference value metadata and cell
