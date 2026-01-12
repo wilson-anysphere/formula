@@ -198,7 +198,6 @@ function setManualUpdateCheckFollowUp(active: boolean): void {
     }, 120_000);
   }
 }
-
 function getTauriListen(): TauriListen | null {
   const listen = (globalThis as any).__TAURI__?.event?.listen as TauriListen | undefined;
   if (typeof listen !== "function") return null;
@@ -808,6 +807,10 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
     case "update-available": {
       const manualFollowUp = manualUpdateCheckFollowUp;
       setManualUpdateCheckFollowUp(false);
+      // Only show the in-app update dialog for manual checks. Startup checks should be silent
+      // (the shell shows a system notification instead).
+      if (source !== "manual") break;
+
       const version =
         typeof payload?.version === "string" && payload.version.trim() !== ""
           ? payload.version.trim()
@@ -837,7 +840,6 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
       // Avoid repeatedly showing the startup prompt for the same version.
       if (source !== "manual" && updateDialogShownForVersion === version) break;
       updateDialogShownForVersion = version;
-
       openUpdateAvailableDialog({ ...payload, version, body });
       break;
     }

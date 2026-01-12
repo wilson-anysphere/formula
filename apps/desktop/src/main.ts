@@ -5834,7 +5834,6 @@ try {
   });
 
   // Updater UI (toasts / dialogs / focus management) is handled by `installUpdaterUi(...)`.
-
   void listen("shortcut-quick-open", () => {
     void promptOpenWorkbook().catch((err) => {
       console.error("Failed to open workbook:", err);

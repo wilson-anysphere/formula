@@ -28,7 +28,7 @@ describe("updaterUi (dialog + download)", () => {
     document.body.replaceChildren();
   });
 
-  it("opens a dialog when an update-available event is received", async () => {
+  it("does not open a dialog when update-available is received during startup checks", async () => {
     const handlers = new Map<string, (event: any) => void>();
     const listen = vi.fn(async (eventName: string, handler: (event: any) => void) => {
       handlers.set(eventName, handler);
@@ -38,17 +38,13 @@ describe("updaterUi (dialog + download)", () => {
     vi.stubGlobal("__TAURI__", { event: { listen } });
 
     const { installUpdaterUi } = await import("../updaterUi");
-    installUpdaterUi();
+    await installUpdaterUi();
 
     handlers.get("update-available")?.({ payload: { source: "startup", version: "9.9.9", body: "Release notes\nLine 2" } });
     await flushMicrotasks();
 
     const dialog = document.querySelector<HTMLDialogElement>('[data-testid="updater-dialog"]');
-    expect(dialog).not.toBeNull();
-    expect(dialog?.getAttribute("open") === "" || dialog?.open === true).toBe(true);
-
-    expect(dialog?.querySelector('[data-testid="updater-version"]')?.textContent).toContain("9.9.9");
-    expect(dialog?.querySelector('[data-testid="updater-body"]')?.textContent).toContain("Release notes");
+    expect(dialog).toBeNull();
   });
 
   it("does not suppress an update dialog when the user clicks manual check during an in-flight startup check", async () => {
@@ -98,7 +94,7 @@ describe("updaterUi (dialog + download)", () => {
     });
 
     const { installUpdaterUi } = await import("../updaterUi");
-    installUpdaterUi();
+    await installUpdaterUi();
 
     handlers.get("update-available")?.({ payload: { source: "manual", version: "1.2.3", body: "notes" } });
     await flushMicrotasks();
