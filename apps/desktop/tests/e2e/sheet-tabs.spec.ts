@@ -967,4 +967,75 @@ test.describe("sheet tabs", () => {
 
     expect(ids).toEqual(["Sheet1", "Sheet2", "Sheet4", "Sheet3"]);
   });
+
+  test("sheet tab context menus can set tab color, hide the active sheet, and unhide via the tab strip background", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Keep A1 active so the status bar reflects deterministic values after sheet switches.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.activateCell({ row: 0, col: 0 });
+    });
+
+    // Lazily create Sheet2 by writing a value into it.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
+    });
+
+    const sheet2Tab = page.getByTestId("sheet-tab-Sheet2");
+    await expect(sheet2Tab).toBeVisible();
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
+
+    // Tab Color palette sets underline visible.
+    const tabMenu = page.getByTestId("sheet-tab-context-menu");
+    await sheet2Tab.click();
+    await expect(sheet2Tab).toHaveAttribute("data-active", "true");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
+
+    await sheet2Tab.focus();
+    await page.keyboard.press("Shift+F10");
+    await expect(tabMenu).toBeVisible();
+    await tabMenu.getByRole("button", { name: "Tab Color" }).click();
+    await tabMenu.getByRole("button", { name: "Blue" }).click();
+    await expect(tabMenu).toBeHidden();
+    await expect(sheet2Tab.locator(".sheet-tab__color")).toBeVisible();
+
+    // Hiding the active sheet should activate an adjacent visible sheet (Sheet1).
+    await sheet2Tab.focus();
+    await page.keyboard.press("Shift+F10");
+    await expect(tabMenu).toBeVisible();
+    await tabMenu.getByRole("button", { name: "Hide", exact: true }).click();
+    await expect(tabMenu).toBeHidden();
+
+    await expect(sheet2Tab).toHaveCount(0);
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 1");
+    await expect(page.getByTestId("active-value")).toHaveText("Seed");
+
+    // Unhide via background menu restores Sheet2.
+    await page.evaluate(() => {
+      const strip = document.querySelector<HTMLElement>("#sheet-tabs .sheet-tabs");
+      if (!strip) throw new Error("Missing sheet tab strip");
+      const rect = strip.getBoundingClientRect();
+      strip.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + rect.width - 4,
+          clientY: rect.top + rect.height / 2,
+        }),
+      );
+    });
+
+    await expect(tabMenu).toBeVisible();
+    await tabMenu.getByRole("button", { name: "Unhide…" }).click();
+    await page.getByTestId("quick-pick").getByRole("button", { name: "Sheet2" }).click();
+
+    await expect(sheet2Tab).toBeVisible();
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
+
+    // Tab color should persist after hide/unhide.
+    await expect(sheet2Tab.locator(".sheet-tab__color")).toBeVisible();
+  });
 });

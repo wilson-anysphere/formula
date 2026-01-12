@@ -14,6 +14,7 @@ const SHEET_TAB_COLOR_PALETTE: Array<{ label: string; token: string; fallbackCss
   { label: "Orange", token: "--sheet-tab-orange", fallbackCss: "orange" },
   { label: "Yellow", token: "--sheet-tab-yellow", fallbackCss: "yellow" },
   { label: "Green", token: "--sheet-tab-green", fallbackCss: "green" },
+  { label: "Teal", token: "--sheet-tab-teal", fallbackCss: "teal" },
   { label: "Blue", token: "--sheet-tab-blue", fallbackCss: "blue" },
   { label: "Purple", token: "--sheet-tab-purple", fallbackCss: "purple" },
   { label: "Gray", token: "--sheet-tab-gray", fallbackCss: "gray" },
@@ -112,15 +113,16 @@ export function SheetTabStrip({
   const renameCommitRef = useRef<Promise<boolean> | null>(null);
   const [canScroll, setCanScroll] = useState<{ left: boolean; right: boolean }>({ left: false, right: false });
 
-  const lastContextMenuTabRef = useRef<HTMLButtonElement | null>(null);
+  const lastContextMenuFocusRef = useRef<HTMLElement | null>(null);
   const tabContextMenu = useMemo(
     () =>
       new ContextMenu({
         testId: "sheet-tab-context-menu",
         onClose: () => {
           // Restore focus so keyboard users don't "fall off" the tab strip after dismissing the menu.
-          if (lastContextMenuTabRef.current?.isConnected) {
-            lastContextMenuTabRef.current.focus({ preventScroll: true });
+          const target = lastContextMenuFocusRef.current;
+          if (target?.isConnected) {
+            target.focus({ preventScroll: true });
           }
         },
       }),
@@ -485,6 +487,33 @@ export function SheetTabStrip({
     tabContextMenu.open({ x: anchor.x, y: anchor.y, items });
   };
 
+  const openSheetTabStripContextMenu = (anchor: { x: number; y: number }) => {
+    // Only allow unhiding "hidden" sheets. Excel does not expose "veryHidden" sheets in the
+    // standard UI (VBA-only), so keep them out of this picker.
+    const hiddenSheets = store.listAll().filter((sheet) => sheet.visibility === "hidden");
+    const items: ContextMenuItem[] = [
+      {
+        type: "item",
+        label: "Unhide…",
+        enabled: hiddenSheets.length > 0,
+        onSelect: async () => {
+          try {
+            const selected = await showQuickPick(
+              hiddenSheets.map((sheet) => ({ label: sheet.name, value: sheet.id })),
+              { placeHolder: "Unhide Sheet" },
+            );
+            if (!selected) return;
+            store.unhide(selected);
+          } catch (err) {
+            onError?.(err instanceof Error ? err.message : String(err));
+          }
+        },
+      },
+    ];
+
+    tabContextMenu.open({ x: anchor.x, y: anchor.y, items });
+  };
+
   const deleteSheet = async (sheet: SheetMeta): Promise<void> => {
     if (editingSheetId && editingSheetId !== sheet.id) {
       const ok = await commitRename(editingSheetId);
@@ -613,15 +642,34 @@ export function SheetTabStrip({
       <div
         className="sheet-tabs"
         ref={containerRef}
-        role="tablist"
-        aria-label="Sheets"
-        aria-orientation="horizontal"
-        data-dragging={draggingSheetId ? "true" : undefined}
-        onKeyDown={(e) => {
-          if (e.defaultPrevented) return;
-
-          const target = e.target as HTMLElement | null;
-          if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+         role="tablist"
+         aria-label="Sheets"
+         aria-orientation="horizontal"
+         data-dragging={draggingSheetId ? "true" : undefined}
+         onContextMenu={(e) => {
+           const target = e.target as Element | null;
+           if (!target) return;
+ 
+           // Let the native input context menu work while inline renaming.
+           if (target.closest("input.sheet-tab__input")) return;
+ 
+           // Tab context menus are handled by the tab button itself.
+           if (target.closest('button[role="tab"][data-sheet-id]')) return;
+ 
+           e.preventDefault();
+           e.stopPropagation();
+ 
+           // Restore focus to the surface that was active before the menu opened (typically the grid).
+           const active = document.activeElement;
+           lastContextMenuFocusRef.current = active instanceof HTMLElement ? active : null;
+ 
+           openSheetTabStripContextMenu({ x: e.clientX, y: e.clientY });
+         }}
+         onKeyDown={(e) => {
+           if (e.defaultPrevented) return;
+ 
+           const target = e.target as HTMLElement | null;
+           if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
 
           const tabs = containerRef.current
             ? Array.from(containerRef.current.querySelectorAll<HTMLButtonElement>('button[role="tab"]'))
@@ -649,7 +697,7 @@ export function SheetTabStrip({
                     const ok = await commitRename(activeEditingId);
                     if (!ok) return;
                   }
-                  lastContextMenuTabRef.current = target;
+                  lastContextMenuFocusRef.current = target;
                   const rect = target.getBoundingClientRect();
                   openSheetTabContextMenu(sheetId, { x: rect.left + rect.width / 2, y: rect.bottom });
                 })();
@@ -754,7 +802,7 @@ export function SheetTabStrip({
                   const ok = await commitRename(activeEditingId);
                   if (!ok) return;
                 }
-                lastContextMenuTabRef.current = target;
+                lastContextMenuFocusRef.current = target;
                 openSheetTabContextMenu(sheet.id, anchor);
               })();
             }}

@@ -139,7 +139,6 @@
   height: 100%;
   display: block;
 }
-
 .context-menu__shortcut {
   flex: none;
   color: var(--text-secondary);
