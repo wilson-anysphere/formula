@@ -52,6 +52,11 @@ pub fn project_normalized_data_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
     let mut offset = 0usize;
     let mut module_idx = 0usize;
     let mut current_module_unicode = ModuleUnicodePresence::default();
+    // Tracks whether we've consumed any non-name records for the current module record group.
+    // Used to disambiguate MODULENAMEUNICODE when MODULENAME is absent (non-spec, but observed in
+    // some TLV-ish dir streams).
+    let mut in_module = false;
+    let mut module_seen_non_name_record = false;
     while offset < dir_decompressed.len() {
         let (id, data, next_offset) = read_dir_record(&dir_decompressed, offset)?;
         offset = next_offset;
@@ -105,37 +110,74 @@ pub fn project_normalized_data_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                     .copied()
                     .unwrap_or_default();
                 module_idx = module_idx.saturating_add(1);
+                in_module = true;
+                module_seen_non_name_record = false;
 
                 if !current_module_unicode.module_name {
                     out.extend_from_slice(data);
                 }
             }
 
+            // MODULENAMEUNICODE (Unicode).
+            //
+            // In spec-compliant streams this usually appears immediately after MODULENAME and is an
+            // alternate representation of the current module's name. Some producers omit MODULENAME
+            // entirely and emit only MODULENAMEUNICODE; when that happens, treat it as the start of
+            // a module record group so that Unicode-vs-ANSI selection for subsequent records works.
+            0x0047 => {
+                let start_new = !in_module || module_seen_non_name_record;
+                if start_new {
+                    current_module_unicode = modules_unicode
+                        .get(module_idx)
+                        .copied()
+                        .unwrap_or_default();
+                    module_idx = module_idx.saturating_add(1);
+                    in_module = true;
+                    module_seen_non_name_record = false;
+                }
+                out.extend_from_slice(unicode_record_payload(data)?);
+            }
+
             // MODULESTREAMNAME (ANSI) vs MODULESTREAMNAMEUNICODE (Unicode).
             //
             // For ANSI, strip a trailing reserved u16 when present (commonly `0x0000`).
-            0x001A if !current_module_unicode.module_stream_name => {
-                out.extend_from_slice(trim_reserved_u16(data));
+            0x001A => {
+                if !current_module_unicode.module_stream_name {
+                    out.extend_from_slice(trim_reserved_u16(data));
+                }
+                if in_module {
+                    module_seen_non_name_record = true;
+                }
             }
 
             // MODULEDOCSTRING (ANSI) vs MODULEDOCSTRINGUNICODE (Unicode)
-            0x001C if !current_module_unicode.module_docstring => {
-                out.extend_from_slice(data);
+            0x001C => {
+                if !current_module_unicode.module_docstring {
+                    out.extend_from_slice(data);
+                }
+                if in_module {
+                    module_seen_non_name_record = true;
+                }
             }
 
             // Non-string module metadata records included in V3.
             0x001E | 0x0021 | 0x0025 | 0x0028 => {
                 out.extend_from_slice(data);
+                if in_module {
+                    module_seen_non_name_record = true;
+                }
             }
 
             // Unicode module string record variants.
             //
             // Observed record IDs:
-            // - 0x0047: MODULENAME (Unicode)
             // - 0x0032: MODULESTREAMNAME (Unicode)
             // - 0x0048: MODULEDOCSTRING (Unicode)
-            0x0047 | 0x0032 | 0x0048 => {
+            0x0032 | 0x0048 => {
                 out.extend_from_slice(unicode_record_payload(data)?);
+                if in_module {
+                    module_seen_non_name_record = true;
+                }
             }
 
             // All other records (references, module offsets, etc.) are excluded from V3
@@ -160,6 +202,7 @@ fn scan_unicode_presence(
     let mut project_unicode = ProjectUnicodePresence::default();
     let mut modules_unicode: Vec<ModuleUnicodePresence> = Vec::new();
     let mut current_module: Option<usize> = None;
+    let mut current_module_seen_non_name_record = false;
 
     let mut offset = 0usize;
     while offset < dir_decompressed.len() {
@@ -171,6 +214,7 @@ fn scan_unicode_presence(
             0x0019 => {
                 current_module = Some(modules_unicode.len());
                 modules_unicode.push(ModuleUnicodePresence::default());
+                current_module_seen_non_name_record = false;
             }
 
             // Project-level Unicode/alternate string variants.
@@ -180,18 +224,34 @@ fn scan_unicode_presence(
 
             // Module-level Unicode string variants.
             0x0047 => {
-                if let Some(idx) = current_module {
+                let start_new = current_module.is_none() || current_module_seen_non_name_record;
+                if start_new {
+                    current_module = Some(modules_unicode.len());
+                    let mut presence = ModuleUnicodePresence::default();
+                    presence.module_name = true;
+                    modules_unicode.push(presence);
+                    current_module_seen_non_name_record = false;
+                } else if let Some(idx) = current_module {
                     modules_unicode[idx].module_name = true;
                 }
             }
             0x0032 => {
                 if let Some(idx) = current_module {
                     modules_unicode[idx].module_stream_name = true;
+                    current_module_seen_non_name_record = true;
                 }
             }
             0x0048 => {
                 if let Some(idx) = current_module {
                     modules_unicode[idx].module_docstring = true;
+                    current_module_seen_non_name_record = true;
+                }
+            }
+            // Any non-name module record helps disambiguate MODULENAMEUNICODE as either an alternate
+            // representation (immediately after MODULENAME) or the start of a new module group.
+            0x001A | 0x001C | 0x001E | 0x0021 | 0x0025 | 0x0028 | 0x002B | 0x002C | 0x0031 => {
+                if current_module.is_some() {
+                    current_module_seen_non_name_record = true;
                 }
             }
 

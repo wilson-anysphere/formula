@@ -786,6 +786,49 @@ fn project_normalized_data_v3_prefers_unicode_over_ansi_for_strings() {
     );
 }
 
+#[test]
+fn project_normalized_data_v3_handles_unicode_only_modulename_group_start() {
+    // Some real-world (non-spec) dir encodings omit MODULENAME (0x0019) entirely and emit only
+    // MODULENAMEUNICODE (0x0047). Ensure the metadata transcript still treats this as the start of a
+    // module record group so that Unicode-vs-ANSI preference works for subsequent module records.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // Module group described only by MODULENAMEUNICODE.
+        push_record(&mut out, 0x0047, &unicode_record_data("UniMod"));
+
+        // Provide both ANSI and Unicode stream name records; Unicode should win, and ANSI must be
+        // omitted from the output.
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"AnsiStream");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        push_record(&mut out, 0x0032, &unicode_record_data("UniStream"));
+
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE
+
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let normalized = project_normalized_data_v3_dir_records(&vba_bin).expect("ProjectNormalizedDataV3");
+
+    let expected = [
+        utf16le_bytes("UniMod"),
+        utf16le_bytes("UniStream"),
+        0u16.to_le_bytes().to_vec(),
+    ]
+    .concat();
+
+    assert_eq!(normalized, expected);
+    assert!(
+        !normalized
+            .windows(b"AnsiStream".len())
+            .any(|w| w == b"AnsiStream"),
+        "expected ANSI MODULESTREAMNAME bytes to be omitted when MODULESTREAMNAMEUNICODE is present"
+    );
+}
+
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() {
         return Some(0);
