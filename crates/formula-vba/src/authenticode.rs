@@ -37,7 +37,8 @@ const OID_MD5_STR: &str = "1.2.840.113549.2.5";
 /// This is a best-effort parser intended for binding verification (MS-OVBA "project digest").
 ///
 /// Returns:
-/// - `Ok(Some(_))` if a PKCS#7/CMS SignedData blob and `SpcIndirectDataContent` were found and parsed.
+/// - `Ok(Some(_))` if a PKCS#7/CMS SignedData blob was found and its signed content parsed as either
+///   `SpcIndirectDataContent` or `SpcIndirectDataContentV2`.
 /// - `Ok(None)` if no PKCS#7 SignedData could be located in the stream.
 ///
 /// Notes:
@@ -124,8 +125,8 @@ pub fn extract_vba_signature_signed_digest(
 
     // Fallback: scan for embedded SignedData ContentInfo sequences. This is best-effort: signature
     // streams can contain *multiple* SignedData blobs (e.g. certificate stores + signature), so we
-    // keep searching until we find one whose signed content parses as Authenticode
-    // `SpcIndirectDataContent`.
+    // keep searching until we find one whose signed content parses as an Authenticode/MS-OSHARED
+    // binding payload (`SpcIndirectDataContent` or `SpcIndirectDataContentV2`).
     //
     // Prefer later candidates: the actual signature payload is typically stored last.
     for offset in (0..signature_stream.len()).rev() {
@@ -160,7 +161,7 @@ pub fn extract_vba_signature_signed_digest(
     }
     Err(last_err.unwrap_or_else(|| {
         VbaSignatureSignedDigestError::Der(
-            "no SpcIndirectDataContent digest found in PKCS#7 SignedData candidates".to_owned(),
+            "no VBA signed digest found in PKCS#7 SignedData candidates".to_owned(),
         )
     }))
 }
