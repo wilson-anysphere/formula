@@ -44,6 +44,7 @@ function runScenario(ids) {
   });
 
   monitor.setLocalValue(cellKey, 1);
+  const trackedBefore = monitor._lastLocalEditByCellKey.get(cellKey);
 
   const remoteDoc = new Y.Doc();
   remoteDoc.clientID = remoteClientId;
@@ -65,9 +66,11 @@ function runScenario(ids) {
   const finalCell = /** @type {any} */ (cells.get(cellKey));
   const finalValue = finalCell?.get?.("value") ?? null;
 
+  const trackedAfter = monitor._lastLocalEditByCellKey.get(cellKey);
+
   monitor.dispose();
 
-  return { conflicts, finalValue };
+  return { conflicts, finalValue, trackedBefore, trackedAfter };
 }
 
 test("CellConflictMonitor ignores version restore origins", () => {
@@ -80,5 +83,8 @@ test("CellConflictMonitor ignores version restore origins", () => {
 
   // The restore transaction should be ignored entirely (no conflict emission).
   assert.equal(result.conflicts.length, 0);
-});
 
+  // The restore transaction should also not pollute local-edit tracking (Task 38).
+  assert.equal(result.trackedBefore?.value, 1);
+  assert.equal(result.trackedAfter?.value, 1);
+});

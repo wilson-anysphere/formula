@@ -44,6 +44,8 @@ function runScenario(ids) {
   });
 
   monitor.setLocalFormula(cellKey, "=1");
+  const trackedBefore = monitor._lastLocalFormulaEditByCellKey.get(cellKey);
+  const trackedContentBefore = monitor._lastLocalContentEditByCellKey.get(cellKey);
 
   const remoteDoc = new Y.Doc();
   remoteDoc.clientID = remoteClientId;
@@ -66,9 +68,12 @@ function runScenario(ids) {
   const finalCell = /** @type {any} */ (cells.get(cellKey));
   const finalFormula = (finalCell?.get?.("formula") ?? "").toString();
 
+  const trackedAfter = monitor._lastLocalFormulaEditByCellKey.get(cellKey);
+  const trackedContentAfter = monitor._lastLocalContentEditByCellKey.get(cellKey);
+
   monitor.dispose();
 
-  return { conflicts, finalFormula };
+  return { conflicts, finalFormula, trackedBefore, trackedAfter, trackedContentBefore, trackedContentAfter };
 }
 
 test("FormulaConflictMonitor ignores version restore origins", () => {
@@ -84,5 +89,12 @@ test("FormulaConflictMonitor ignores version restore origins", () => {
 
   // The restore transaction should be ignored entirely (no conflict emission).
   assert.equal(result.conflicts.length, 0);
-});
 
+  // The restore transaction should also not pollute local-edit tracking (Task 38).
+  assert.equal(result.trackedBefore?.formula, "=1");
+  assert.equal(result.trackedAfter?.formula, "=1");
+  assert.equal(result.trackedContentBefore?.kind, "formula");
+  assert.equal(result.trackedContentBefore?.formula, "=1");
+  assert.equal(result.trackedContentAfter?.kind, "formula");
+  assert.equal(result.trackedContentAfter?.formula, "=1");
+});
