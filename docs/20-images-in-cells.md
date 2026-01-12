@@ -372,7 +372,7 @@ Representative skeleton (SpreadsheetML namespace is expected, but element detail
 Excel stores non-primitive “rich” cell values using a set of XML parts under `xl/richData/`.
 For images-in-cells, these rich values are expected to contain (directly or indirectly) a reference to:
 
-- an entry in `xl/cellimages.xml`, and therefore
+- an entry in `xl/cellImages.xml` (or `xl/cellimages.xml`), and therefore
 - an image binary in `xl/media/*`.
 
 At minimum, `xl/richData/richValue.xml` is expected to exist when `xl/metadata.xml` contains
@@ -551,12 +551,12 @@ does not “orphan” images or break Excel’s internal references.
 
 ### Implemented / covered by tests today
 
-- **`xl/cellimages.xml` parsing (workbook-level) + media import**
+- **`xl/cellImages.xml` / `xl/cellimages.xml` parsing (workbook-level) + media import**
   - Parser: `crates/formula-xlsx/src/cell_images/mod.rs`
   - Test: `crates/formula-xlsx/tests/cell_images.rs`
 - **Best-effort image import during `XlsxDocument` load**
   - `crates/formula-xlsx/src/read/mod.rs` calls `load_cell_images_from_parts(...)` to populate `workbook.images`.
-- **Preservation of `xl/cellimages.xml` + `xl/_rels/cellimages.xml.rels` + `xl/media/*` on cell edits**
+- **Preservation of `xl/cellImages.xml` / `xl/cellimages.xml` + matching `.rels` + `xl/media/*` on cell edits**
   - Test: `crates/formula-xlsx/tests/cellimages_preservation.rs`
 - **`vm` attribute preservation** on edit is covered by:
   - `crates/formula-xlsx/tests/sheetdata_row_col_attrs.rs` (`editing_a_cell_does_not_strip_unrelated_row_col_or_cell_attrs`)
@@ -574,7 +574,7 @@ does not “orphan” images or break Excel’s internal references.
 
 Limitations (current Formula behavior):
 
-- Formula can **load** the image bytes referenced by `cellimages.xml` into `workbook.images`, but it does not yet
+- Formula can **load** the image bytes referenced by the `cellImages` part (`xl/cellImages.xml` / `xl/cellimages.xml`) into `workbook.images`, but it does not yet
   build a first-class “cell → image” semantic mapping from `vm`/`metadata.xml`/`richData/*`. That work is tracked
   in the TODO section below (fixture-driven rich-value parsing).
 
@@ -589,7 +589,7 @@ Limitations (current Formula behavior):
     - `/xl/metadata.xml`
     - `/xl/richData/*.xml` (especially `/xl/richData/richValue.xml`)
   - the relationship Type URIs (if any) that connect the workbook/worksheets to:
-    - `xl/cellimages.xml`
+    - `xl/cellImages.xml` / `xl/cellimages.xml`
     - `xl/metadata.xml`
     - `xl/richData/*`
 - **Rich-value semantics (beyond preservation)**:
