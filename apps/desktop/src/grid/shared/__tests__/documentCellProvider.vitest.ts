@@ -77,6 +77,46 @@ describe("DocumentCellProvider formatting integration", () => {
     expect(cell?.style?.rotationDeg).toBe(45);
   });
 
+  it('maps alignment.vertical "center" to grid verticalAlign "middle"', () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", "hello");
+    doc.setRangeFormat("Sheet1", "A1", { alignment: { vertical: "center" } });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 3,
+      colCount: 3,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell?.style?.verticalAlign).toBe("middle");
+  });
+
+  it('maps alignment.vertical "bottom" to grid verticalAlign "bottom"', () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", "hello");
+    doc.setRangeFormat("Sheet1", "A1", { alignment: { vertical: "bottom" } });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 3,
+      colCount: 3,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell?.style?.verticalAlign).toBe("bottom");
+  });
+
   it("prefers alignment.textRotation over alignment.rotation", () => {
     const doc = new DocumentController();
     doc.setCellValue("Sheet1", "A1", "hello");
