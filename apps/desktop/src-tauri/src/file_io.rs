@@ -2218,7 +2218,7 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
             .expect("create EncryptedPackage stream");
         let bytes = ole.into_inner().into_inner();
 
-        for filename in ["encrypted.xlsx", "encrypted.xls"] {
+        for filename in ["encrypted.xlsx", "encrypted.xls", "encrypted.xlsb"] {
             let path = tmp.path().join(filename);
             std::fs::write(&path, &bytes).expect("write encrypted fixture");
 

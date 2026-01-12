@@ -20,7 +20,7 @@ fn detects_encrypted_ooxml_xlsx_container() {
 
     // Test both correct and incorrect extensions to ensure content sniffing detects encryption
     // before attempting to open as legacy BIFF.
-    for filename in ["encrypted.xlsx", "encrypted.xls"] {
+    for filename in ["encrypted.xlsx", "encrypted.xls", "encrypted.xlsb"] {
         let path = tmp.path().join(filename);
         std::fs::write(&path, &bytes).expect("write encrypted fixture");
 
@@ -33,6 +33,12 @@ fn detects_encrypted_ooxml_xlsx_container() {
         assert!(
             msg.contains("encrypted") || msg.contains("password"),
             "expected error message to mention encryption/password protection, got: {msg}"
+        );
+
+        let err = open_workbook_model(&path).expect_err("expected encrypted workbook to error");
+        assert!(
+            matches!(err, Error::EncryptedWorkbook { .. }),
+            "expected Error::EncryptedWorkbook, got {err:?}"
         );
     }
 }
