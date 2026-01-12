@@ -209,10 +209,34 @@ export class MockWorkbook {
     return null;
   }
 
-  create_sheet({ name }) {
+  create_sheet({ name, index }) {
     const nextIndex = this.sheets.size + 1;
     const id = sheetIdForIndex(nextIndex);
-    this.sheets.set(id, { id, name, cells: new Map() });
+    const newSheet = { id, name, cells: new Map() };
+
+    const orderedIds = Array.from(this.sheets.keys());
+
+    let insertIndex;
+    if (typeof index === "number" && Number.isInteger(index) && index >= 0) {
+      insertIndex = Math.min(index, orderedIds.length);
+    } else {
+      const activeIdx = orderedIds.indexOf(this.activeSheetId);
+      insertIndex = activeIdx >= 0 ? activeIdx + 1 : orderedIds.length;
+    }
+
+    orderedIds.splice(insertIndex, 0, id);
+
+    const nextSheets = new Map();
+    for (const sheetId of orderedIds) {
+      if (sheetId === id) {
+        nextSheets.set(id, newSheet);
+      } else {
+        const existing = this.sheets.get(sheetId);
+        if (existing) nextSheets.set(sheetId, existing);
+      }
+    }
+    this.sheets = nextSheets;
+
     return id;
   }
 

@@ -292,7 +292,7 @@ function registerFormulaBridge(runtime) {
   runtime.registerJsModule("formula_bridge", {
     get_active_sheet_id: () => rpcCallSync("get_active_sheet_id", null),
     get_sheet_id: (name) => rpcCallSync("get_sheet_id", { name }),
-    create_sheet: (name) => rpcCallSync("create_sheet", { name }),
+    create_sheet: (name, index) => rpcCallSync("create_sheet", index === undefined ? { name } : { name, index }),
     get_sheet_name: (sheet_id) => rpcCallSync("get_sheet_name", { sheet_id }),
     rename_sheet: (sheet_id, name) => rpcCallSync("rename_sheet", { sheet_id, name }),
 

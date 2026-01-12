@@ -27,6 +27,33 @@ sheet["A2"] = "=A1*2"
   assert.equal(workbook.get_cell_value({ sheet_id: workbook.activeSheetId, row: 1, col: 0 }), 84);
 });
 
+test("native python runtime forwards create_sheet index to host API", async () => {
+  const workbook = new MockWorkbook();
+  // Populate a few sheets so insertion position is observable.
+  const secondId = workbook.create_sheet({ name: "Second", index: 1 });
+  workbook.create_sheet({ name: "Third", index: 2 });
+  workbook.activeSheetId = secondId;
+  workbook.selection.sheet_id = secondId;
+
+  const runtime = new NativePythonRuntime({
+    timeoutMs: 10_000,
+    maxMemoryBytes: 256 * 1024 * 1024,
+    permissions: { filesystem: "none", network: "none" },
+  });
+
+  const script = `
+import formula
+
+formula.create_sheet("Inserted")
+formula.create_sheet("AtStart", index=0)
+`;
+
+  await runtime.execute(script, { api: workbook });
+
+  const sheetNames = Array.from(workbook.sheets.values(), (sheet) => sheet.name);
+  assert.deepEqual(sheetNames, ["AtStart", "Sheet1", "Second", "Inserted", "Third"]);
+});
+
 test("native python runtime returns captured stderr output (print)", async () => {
   const workbook = new MockWorkbook();
   const runtime = new NativePythonRuntime({

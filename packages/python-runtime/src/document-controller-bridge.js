@@ -43,8 +43,19 @@ export class DocumentControllerBridge {
     return this.sheetIds.has(name) ? name : null;
   }
 
-  create_sheet({ name }) {
-    this.sheetIds.add(name);
+  create_sheet({ name, index }) {
+    const ordered = Array.from(this.sheetIds);
+
+    let insertIndex;
+    if (typeof index === "number" && Number.isInteger(index) && index >= 0) {
+      insertIndex = Math.min(index, ordered.length);
+    } else {
+      const activeIdx = ordered.indexOf(this.activeSheetId);
+      insertIndex = activeIdx >= 0 ? activeIdx + 1 : ordered.length;
+    }
+
+    ordered.splice(insertIndex, 0, name);
+    this.sheetIds = new Set(ordered);
     return name;
   }
 

@@ -33,3 +33,34 @@ test("pyodide main-thread formula_bridge reads API from the runtime instance and
   assert.equal(registered.formula_bridge.get_active_sheet_id(), "Sheet2");
 });
 
+test("pyodide main-thread formula_bridge forwards create_sheet index when provided", () => {
+  /** @type {Record<string, any>} */
+  const registered = {};
+
+  const runtime = {
+    registerJsModule(name, mod) {
+      registered[name] = mod;
+    },
+  };
+
+  /** @type {any} */
+  let lastParams = null;
+
+  setFormulaBridgeApi(runtime, {
+    create_sheet(params) {
+      lastParams = params;
+      return "sheet_new";
+    },
+  });
+
+  registerFormulaBridge(runtime);
+  assert.ok(registered.formula_bridge);
+
+  // Without an index, the params should match the legacy shape.
+  assert.equal(registered.formula_bridge.create_sheet("NoIndex"), "sheet_new");
+  assert.deepEqual(lastParams, { name: "NoIndex" });
+
+  // With an index, it should be forwarded to the host API.
+  assert.equal(registered.formula_bridge.create_sheet("WithIndex", 2), "sheet_new");
+  assert.deepEqual(lastParams, { name: "WithIndex", index: 2 });
+});

@@ -428,7 +428,7 @@ export function registerFormulaBridge(runtime) {
   runtime.registerJsModule("formula_bridge", {
     get_active_sheet_id: () => call("get_active_sheet_id", null),
     get_sheet_id: (name) => call("get_sheet_id", { name }),
-    create_sheet: (name) => call("create_sheet", { name }),
+    create_sheet: (name, index) => call("create_sheet", index === undefined ? { name } : { name, index }),
     get_sheet_name: (sheet_id) => call("get_sheet_name", { sheet_id }),
     rename_sheet: (sheet_id, name) => call("rename_sheet", { sheet_id, name }),
  

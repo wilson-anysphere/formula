@@ -16,7 +16,7 @@ export class DocumentControllerBridge {
 
   get_active_sheet_id(): string;
   get_sheet_id(params: { name: string }): string | null;
-  create_sheet(params: { name: string }): string;
+  create_sheet(params: { name: string; index?: number | null }): string;
   get_sheet_name(params: { sheet_id: string }): string;
   rename_sheet(params: { sheet_id: string; name: string }): null;
 
@@ -32,4 +32,3 @@ export class DocumentControllerBridge {
   set_range_format(params: { range: FormulaRange; format: any }): null;
   get_range_format(params: { range: FormulaRange }): any;
 }
-
