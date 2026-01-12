@@ -3,8 +3,8 @@ import { expect, test } from "@playwright/test";
 import { gotoDesktop } from "./helpers";
 
 async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
-  await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
-  await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+  await page.waitForFunction(() => Boolean((window.__formulaApp as any)?.whenIdle), null, { timeout: 10_000 });
+  await page.evaluate(() => (window.__formulaApp as any).whenIdle());
 }
 
 test.describe("Clear Contents context menu", () => {
@@ -13,8 +13,7 @@ test.describe("Clear Contents context menu", () => {
     await waitForIdle(page);
 
     const styleIdBefore = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
       const doc = app.getDocument();
       const sheetId = app.getCurrentSheetId();
@@ -26,7 +25,7 @@ test.describe("Clear Contents context menu", () => {
     expect(styleIdBefore).not.toBe(0);
 
     const grid = page.locator("#grid");
-    const a1Rect = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"));
+    const a1Rect = await page.evaluate(() => (window.__formulaApp as any).getCellRectA1("A1"));
     await grid.click({ position: { x: a1Rect.x + a1Rect.width / 2, y: a1Rect.y + a1Rect.height / 2 } });
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
@@ -57,7 +56,7 @@ test.describe("Clear Contents context menu", () => {
 
     await waitForIdle(page);
     const { value, styleIdAfter } = await page.evaluate(async () => {
-      const app: any = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       const sheetId = app.getCurrentSheetId();
       const doc = app.getDocument();
       return {
@@ -74,8 +73,7 @@ test.describe("Clear Contents context menu", () => {
     await waitForIdle(page);
 
     await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
       const doc = app.getDocument();
       const sheetId = app.getCurrentSheetId();
@@ -84,7 +82,7 @@ test.describe("Clear Contents context menu", () => {
     await waitForIdle(page);
 
     const grid = page.locator("#grid");
-    const a1Rect = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"));
+    const a1Rect = await page.evaluate(() => (window.__formulaApp as any).getCellRectA1("A1"));
     await grid.click({ position: { x: a1Rect.x + a1Rect.width / 2, y: a1Rect.y + a1Rect.height / 2 } });
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
@@ -97,7 +95,7 @@ test.describe("Clear Contents context menu", () => {
     await page.keyboard.press("Enter");
 
     await waitForIdle(page);
-    const value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    const value = await page.evaluate(() => (window.__formulaApp as any).getCellValueA1("A1"));
     expect(value).toBe("");
   });
 
@@ -107,8 +105,7 @@ test.describe("Clear Contents context menu", () => {
 
     // Ensure A1 is empty.
     await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
       const doc = app.getDocument();
       const sheetId = app.getCurrentSheetId();
@@ -117,7 +114,7 @@ test.describe("Clear Contents context menu", () => {
     await waitForIdle(page);
 
     const grid = page.locator("#grid");
-    const a1Rect = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"));
+    const a1Rect = await page.evaluate(() => (window.__formulaApp as any).getCellRectA1("A1"));
     await grid.click({ position: { x: a1Rect.x + a1Rect.width / 2, y: a1Rect.y + a1Rect.height / 2 } });
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
