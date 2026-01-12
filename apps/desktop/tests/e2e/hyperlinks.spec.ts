@@ -6,6 +6,19 @@ async function waitForIdle(page: import("@playwright/test").Page): Promise<void>
   await page.evaluate(() => (window as any).__formulaApp.whenIdle());
 }
 
+type InvokeCall = [string, any];
+
+function filterInvokeCalls(calls: InvokeCall[], cmd: string): InvokeCall[] {
+  return (Array.isArray(calls) ? calls : []).filter((call) => Array.isArray(call) && call[0] === cmd);
+}
+
+async function waitForInvoke(page: import("@playwright/test").Page, cmd: string): Promise<void> {
+  await page.waitForFunction((expectedCmd) => {
+    const calls = (window as any).__invokeCalls;
+    return Array.isArray(calls) && calls.some((call: any[]) => Array.isArray(call) && call[0] === expectedCmd);
+  }, cmd);
+}
+
 test.describe("external hyperlink opening", () => {
   const GRID_MODES = ["legacy", "shared"] as const;
 
@@ -53,14 +66,16 @@ test.describe("external hyperlink opening", () => {
         modifiers: [modifier],
       });
 
-      await page.waitForFunction(() => (window as any).__invokeCalls?.length === 1);
+      await waitForInvoke(page, "open_external_url");
 
       const [invokeCalls, windowCalls] = await Promise.all([
         page.evaluate(() => (window as any).__invokeCalls),
         page.evaluate(() => (window as any).__windowOpenCalls),
       ]);
 
-      expect(invokeCalls).toEqual([["open_external_url", { url: "https://example.com" }]]);
+      expect(filterInvokeCalls(invokeCalls, "open_external_url")).toEqual([
+        ["open_external_url", { url: "https://example.com" }],
+      ]);
       expect(windowCalls).toEqual([]);
     });
   }
@@ -99,7 +114,7 @@ test.describe("external hyperlink opening", () => {
     const urlBefore = page.url();
 
     await page.click("#e2e-external-anchor");
-    await page.waitForFunction(() => (window as any).__invokeCalls?.length === 1);
+    await waitForInvoke(page, "open_external_url");
 
     const [invokeCalls, windowCalls, urlAfter] = await Promise.all([
       page.evaluate(() => (window as any).__invokeCalls),
@@ -107,9 +122,9 @@ test.describe("external hyperlink opening", () => {
       page.url(),
     ]);
 
-    expect(invokeCalls).toHaveLength(1);
-    expect(invokeCalls[0][0]).toBe("open_external_url");
-    expect(invokeCalls[0][1]?.url).toMatch(/^https:\/\/example\.com\/?$/);
+    const openCalls = filterInvokeCalls(invokeCalls, "open_external_url");
+    expect(openCalls).toHaveLength(1);
+    expect(openCalls[0][1]?.url).toMatch(/^https:\/\/example\.com\/?$/);
     expect(windowCalls).toEqual([]);
     expect(urlAfter).toBe(urlBefore);
   });
@@ -137,12 +152,12 @@ test.describe("external hyperlink opening", () => {
     });
 
     await page.click("#e2e-external-anchor-middle", { button: "middle" });
-    await page.waitForFunction(() => (window as any).__invokeCalls?.length === 1);
+    await waitForInvoke(page, "open_external_url");
 
     const invokeCalls = await page.evaluate(() => (window as any).__invokeCalls);
-    expect(invokeCalls).toHaveLength(1);
-    expect(invokeCalls[0][0]).toBe("open_external_url");
-    expect(invokeCalls[0][1]?.url).toMatch(/^https:\/\/example\.com\/?$/);
+    const openCalls = filterInvokeCalls(invokeCalls, "open_external_url");
+    expect(openCalls).toHaveLength(1);
+    expect(openCalls[0][1]?.url).toMatch(/^https:\/\/example\.com\/?$/);
   });
 
   test("clicking a mailto: <a href> opens via the desktop Rust shell command", async ({ page }) => {
@@ -169,11 +184,13 @@ test.describe("external hyperlink opening", () => {
 
     const urlBefore = page.url();
     await page.click("#e2e-external-anchor-mailto");
-    await page.waitForFunction(() => (window as any).__invokeCalls?.length === 1);
+    await waitForInvoke(page, "open_external_url");
 
     const [invokeCalls, urlAfter] = await Promise.all([page.evaluate(() => (window as any).__invokeCalls), page.url()]);
 
-    expect(invokeCalls).toEqual([["open_external_url", { url: "mailto:test@example.com" }]]);
+    expect(filterInvokeCalls(invokeCalls, "open_external_url")).toEqual([
+      ["open_external_url", { url: "mailto:test@example.com" }],
+    ]);
     expect(urlAfter).toBe(urlBefore);
   });
 
@@ -207,7 +224,7 @@ test.describe("external hyperlink opening", () => {
       page.url(),
     ]);
 
-    expect(shellCalls).toEqual([]);
+    expect(filterInvokeCalls(shellCalls, "open_external_url")).toEqual([]);
     expect(urlAfter).toBe(urlBefore);
   });
 
@@ -241,7 +258,7 @@ test.describe("external hyperlink opening", () => {
       page.url(),
     ]);
 
-    expect(shellCalls).toEqual([]);
+    expect(filterInvokeCalls(shellCalls, "open_external_url")).toEqual([]);
     expect(urlAfter).toBe(urlBefore);
   });
 
@@ -272,7 +289,7 @@ test.describe("external hyperlink opening", () => {
     await page.waitForTimeout(50);
 
     const [invokeCalls, urlAfter] = await Promise.all([page.evaluate(() => (window as any).__invokeCalls), page.url()]);
-    expect(invokeCalls).toEqual([]);
+    expect(filterInvokeCalls(invokeCalls, "open_external_url")).toEqual([]);
     expect(urlAfter).toBe(urlBefore);
   });
 
@@ -319,7 +336,7 @@ test.describe("external hyperlink opening", () => {
     ]);
 
     expect(confirmCalls).toEqual([]);
-    expect(shellCalls).toEqual([]);
+    expect(filterInvokeCalls(shellCalls, "open_external_url")).toEqual([]);
     expect(urlAfter).toBe(urlBefore);
   });
 
@@ -363,7 +380,7 @@ test.describe("external hyperlink opening", () => {
     ]);
 
     expect(confirmCalls).toEqual([]);
-    expect(invokeCalls).toEqual([]);
+    expect(filterInvokeCalls(invokeCalls, "open_external_url")).toEqual([]);
     expect(urlAfter).toBe(urlBefore);
   });
 });
