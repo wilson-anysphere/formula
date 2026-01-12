@@ -1339,9 +1339,6 @@ def write_cellimages_xlsx(path: pathlib.Path) -> None:
 
 
 def content_types_image_in_cell_richdata_xml() -> str:
-    # Minimal content types for an image-in-cell workbook. We intentionally keep
-    # richData parts as `application/xml` via the default so this fixture stays
-    # small and focuses on "unknown part preservation" in the reader/writer.
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
@@ -1350,6 +1347,9 @@ def content_types_image_in_cell_richdata_xml() -> str:
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
   <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
+  <Override PartName="/xl/richData/richValue.xml" ContentType="application/vnd.ms-excel.richvalue+xml"/>
+  <Override PartName="/xl/richData/richValueRel.xml" ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
   <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
   <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
 </Types>
@@ -1357,12 +1357,8 @@ def content_types_image_in_cell_richdata_xml() -> str:
 
 
 def sheet_image_in_cell_richdata_xml() -> str:
-    # `vm="0"` points at the first valueMetadata record in `xl/metadata.xml`. In
-    # modern Excel this can be used to associate an image-in-cell rich value.
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <dimension ref="A1"/>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheetData>
     <row r="1">
       <c r="A1" vm="0"><v>0</v></c>
@@ -1374,10 +1370,20 @@ def sheet_image_in_cell_richdata_xml() -> str:
 
 def metadata_image_in_cell_richdata_xml() -> str:
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
   <metadataTypes count="1">
-    <metadataType name="XLRICHVALUE" minSupportedVersion="0" copy="1" pasteAll="1" pasteValues="1" merge="1" splitFirst="1" rowColShift="1" clearFormats="1" clearComments="1" assign="1" coerce="1" cellMeta="1"/>
+    <metadataType name="XLRICHVALUE" minSupportedVersion="120000" maxSupportedVersion="120000"/>
   </metadataTypes>
+  <futureMetadata name="XLRICHVALUE" count="1">
+    <bk>
+      <extLst>
+        <ext uri="{3E2803F5-59A4-4A43-8C86-93BA0C219F4F}">
+          <xlrd:rvb i="0"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
   <valueMetadata count="1">
     <bk>
       <rc t="1" v="0"/>
@@ -1391,7 +1397,7 @@ def rich_value_xml() -> str:
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
   <rv s="0" t="image">
-    <v>0</v>
+    <v kind="rel">0</v>
   </rv>
 </rvData>
 """
@@ -1414,6 +1420,10 @@ def rich_value_rel_rels_xml() -> str:
 """
 
 
+def workbook_rels_image_in_cell_richdata_extra() -> str:
+    return '  <Relationship Id="rId99" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"/>'
+
+
 def write_image_in_cell_richdata_xlsx(path: pathlib.Path) -> None:
     sheet_names = ["Sheet1"]
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1433,7 +1443,7 @@ def write_image_in_cell_richdata_xlsx(path: pathlib.Path) -> None:
                 sheet_count=1,
                 include_shared_strings=False,
                 extra_relationships=[
-                    '  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata" Target="metadata.xml"/>',
+                    workbook_rels_image_in_cell_richdata_extra(),
                     '  <Relationship Id="rId4" Type="http://schemas.microsoft.com/office/2017/06/relationships/richValue" Target="richData/richValue.xml"/>',
                     '  <Relationship Id="rId5" Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueRel" Target="richData/richValueRel.xml"/>',
                 ],
