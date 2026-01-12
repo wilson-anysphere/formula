@@ -2361,8 +2361,13 @@ fn bytecode_backend_compiles_error_literals() {
         ("=#VALUE!", Value::Error(ErrorKind::Value)),
         ("=#NAME?", Value::Error(ErrorKind::Name)),
         ("=#NUM!", Value::Error(ErrorKind::Num)),
+        ("=#GETTING_DATA", Value::Error(ErrorKind::GettingData)),
         ("=#SPILL!", Value::Error(ErrorKind::Spill)),
         ("=#CALC!", Value::Error(ErrorKind::Calc)),
+        ("=#FIELD!", Value::Error(ErrorKind::Field)),
+        ("=#CONNECT!", Value::Error(ErrorKind::Connect)),
+        ("=#BLOCKED!", Value::Error(ErrorKind::Blocked)),
+        ("=#UNKNOWN!", Value::Error(ErrorKind::Unknown)),
     ] {
         let mut engine = Engine::new();
         engine.set_cell_formula("Sheet1", "A1", formula).unwrap();
