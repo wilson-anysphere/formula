@@ -995,6 +995,8 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "home.alignment.alignLeft": formatState.align === "left",
       "home.alignment.center": formatState.align === "center",
       "home.alignment.alignRight": formatState.align === "right",
+      // Keep AutoSave off until a real autosave implementation exists.
+      "file.save.autoSave": false,
       "view.show.showFormulas": app.getShowFormulas(),
       "view.show.performanceStats": Boolean((app.getGridPerfStats() as any)?.enabled),
       "view.window.split": ribbonLayoutController ? ribbonLayoutController.layout.splitView.direction !== "none" : false,
@@ -4786,11 +4788,15 @@ commandRegistry.registerBuiltinCommand(
   },
 );
 
+function showDesktopOnlyToast(message: string): void {
+  showToast(`Desktop-only: ${message}`);
+}
+
 function getTauriInvokeForPrint(): TauriInvoke | null {
   const invoke =
     queuedInvoke ?? ((globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined) ?? null;
   if (!invoke) {
-    showToast("Print/Export is available in the desktop app.");
+    showDesktopOnlyToast("Print/Export is available in the desktop app.");
     return null;
   }
   return invoke;
@@ -5075,7 +5081,7 @@ mountRibbon(ribbonRoot, {
   fileActions: {
     newWorkbook: () => {
       if (!tauriBackend) {
-        showToast("Creating new workbooks is available in the desktop app.");
+        showDesktopOnlyToast("Creating new workbooks is available in the desktop app.");
         return;
       }
       void handleNewWorkbook().catch((err) => {
@@ -5085,7 +5091,7 @@ mountRibbon(ribbonRoot, {
     },
     openWorkbook: () => {
       if (!tauriBackend) {
-        showToast("Opening workbooks is available in the desktop app.");
+        showDesktopOnlyToast("Opening workbooks is available in the desktop app.");
         return;
       }
       void promptOpenWorkbook().catch((err) => {
@@ -5095,7 +5101,7 @@ mountRibbon(ribbonRoot, {
     },
     saveWorkbook: () => {
       if (!tauriBackend) {
-        showToast("Saving workbooks is available in the desktop app.");
+        showDesktopOnlyToast("Saving workbooks is available in the desktop app.");
         return;
       }
       void handleSave().catch((err) => {
@@ -5105,7 +5111,7 @@ mountRibbon(ribbonRoot, {
     },
     saveWorkbookAs: () => {
       if (!tauriBackend) {
-        showToast("Save As is available in the desktop app.");
+        showDesktopOnlyToast("Save As is available in the desktop app.");
         return;
       }
       void handleSaveAs().catch((err) => {
@@ -5122,7 +5128,7 @@ mountRibbon(ribbonRoot, {
     print: () => {
       const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
       if (!invokeAvailable) {
-        showToast("Print is available in the desktop app.");
+        showDesktopOnlyToast("Print is available in the desktop app.");
         return;
       }
       showToast("Print is not implemented yet. Opening Page Setup…");
@@ -5133,7 +5139,7 @@ mountRibbon(ribbonRoot, {
     },
     closeWindow: () => {
       if (!handleCloseRequestForRibbon) {
-        showToast("Closing windows is available in the desktop app.");
+        showDesktopOnlyToast("Closing windows is available in the desktop app.");
         return;
       }
       void handleCloseRequestForRibbon({ quit: false }).catch((err) => {
@@ -5143,7 +5149,7 @@ mountRibbon(ribbonRoot, {
     },
     quit: () => {
       if (!handleCloseRequestForRibbon) {
-        showToast("Quitting is available in the desktop app.");
+        showDesktopOnlyToast("Quitting is available in the desktop app.");
         return;
       }
       void handleCloseRequestForRibbon({ quit: true }).catch((err) => {
@@ -5613,7 +5619,7 @@ mountRibbon(ribbonRoot, {
       case "file.new.new":
       case "file.new.blankWorkbook": {
         if (!tauriBackend) {
-          showToast("Creating new workbooks is available in the desktop app.");
+          showDesktopOnlyToast("Creating new workbooks is available in the desktop app.");
           return;
         }
         void handleNewWorkbook().catch((err) => {
@@ -5625,7 +5631,7 @@ mountRibbon(ribbonRoot, {
 
       case "file.open.open": {
         if (!tauriBackend) {
-          showToast("Opening workbooks is available in the desktop app.");
+          showDesktopOnlyToast("Opening workbooks is available in the desktop app.");
           return;
         }
         void promptOpenWorkbook().catch((err) => {
@@ -5637,7 +5643,7 @@ mountRibbon(ribbonRoot, {
 
       case "file.save.save": {
         if (!tauriBackend) {
-          showToast("Saving workbooks is available in the desktop app.");
+          showDesktopOnlyToast("Saving workbooks is available in the desktop app.");
           return;
         }
         void handleSave().catch((err) => {
@@ -5647,11 +5653,16 @@ mountRibbon(ribbonRoot, {
         return;
       }
 
+      case "file.save.autoSave": {
+        showToast("AutoSave is not implemented yet.");
+        return;
+      }
+
       case "file.save.saveAs":
       case "file.save.saveAs.copy":
       case "file.save.saveAs.download": {
         if (!tauriBackend) {
-          showToast("Save As is available in the desktop app.");
+          showDesktopOnlyToast("Save As is available in the desktop app.");
           return;
         }
         void handleSaveAs().catch((err) => {
@@ -5691,7 +5702,7 @@ mountRibbon(ribbonRoot, {
       case "file.print.print": {
         const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
         if (!invokeAvailable) {
-          showToast("Print is available in the desktop app.");
+          showDesktopOnlyToast("Print is available in the desktop app.");
           return;
         }
         showToast("Print is not implemented yet. Opening Page Setup…");
@@ -5705,7 +5716,7 @@ mountRibbon(ribbonRoot, {
       case "file.print.printPreview": {
         const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
         if (!invokeAvailable) {
-          showToast("Print Preview is available in the desktop app.");
+          showDesktopOnlyToast("Print Preview is available in the desktop app.");
           return;
         }
         showToast("Print Preview is not implemented yet. Exporting PDF instead…");
@@ -5736,7 +5747,7 @@ mountRibbon(ribbonRoot, {
 
         const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
         if (!invokeAvailable) {
-          showToast("Closing windows is available in the desktop app.");
+          showDesktopOnlyToast("Closing windows is available in the desktop app.");
         }
         void hideTauriWindow().catch((err) => {
           console.error("Failed to close window:", err);
@@ -6154,6 +6165,10 @@ mountRibbon(ribbonRoot, {
         void openCustomZoomQuickPick();
         return;
       default:
+        if (commandId.startsWith("file.")) {
+          showToast(`File command not implemented: ${commandId}`);
+          return;
+        }
         showToast(`Ribbon: ${commandId}`);
         return;
     }
