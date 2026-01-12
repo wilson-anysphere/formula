@@ -97,7 +97,6 @@ type AuditingCacheEntry = {
   precedentsError: string | null;
   dependentsError: string | null;
 };
-
 const MAX_KEYBOARD_FORMATTING_CELLS = 50_000;
 // Encode (row, col) into a single numeric key for allocation-free lookups.
 // `16_384` matches Excel's maximum column count, so the mapping is collision-free for Excel-sized sheets.
@@ -2483,6 +2482,12 @@ export class SpreadsheetApp {
           const changes = await engineHydrateFromDocument(engine, this.document);
           this.applyComputedChanges(changes);
         });
+      }
+      const presence = this.collabSession?.presence;
+      if (presence) {
+        presence.setCursor(this.selection.active);
+        presence.setSelections(this.selection.ranges);
+        presence.setActiveSheet(this.sheetId);
       }
     } finally {
       this.wasmSyncSuspended = false;
