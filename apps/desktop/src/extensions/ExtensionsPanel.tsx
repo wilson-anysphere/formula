@@ -339,7 +339,9 @@ export function ExtensionsPanel({
                         type="button"
                         data-testid={`run-command-${cmd.command}`}
                         onClick={() => {
-                          void executeCommandAndRefreshPermissions(String(ext.id), cmd.command);
+                          void executeCommandAndRefreshPermissions(String(ext.id), cmd.command).catch((err) => {
+                            showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+                          });
                         }}
                         style={{
                           textAlign: "left",
