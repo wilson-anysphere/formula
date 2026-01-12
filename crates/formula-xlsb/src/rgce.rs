@@ -842,9 +842,11 @@ fn decode_rgce_impl(
                             StructuredColumns::All
                         } else if col_first == col_last {
                             StructuredColumns::Single(
-                                ctx.and_then(|ctx| ctx.table_column_name(decoded.table_id, col_first))
-                                    .map(|s| s.to_string())
-                                    .unwrap_or_else(|| format!("Column{col_first}")),
+                                ctx.and_then(|ctx| {
+                                    ctx.table_column_name(decoded.table_id, col_first)
+                                })
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| format!("Column{col_first}")),
                             )
                         } else {
                             let start = ctx
@@ -881,7 +883,12 @@ fn decode_rgce_impl(
                             is_missing: false,
                         });
                     }
-                    _ => return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg }),
+                    _ => {
+                        return Err(DecodeError::UnknownPtg {
+                            offset: ptg_offset,
+                            ptg,
+                        })
+                    }
                 }
             }
             0x19 => {
@@ -1806,7 +1813,10 @@ struct PtgListDecoded {
     col_last: u32,
 }
 
-fn decode_ptg_list_payload_best_effort(payload: &[u8; 12], ctx: Option<&WorkbookContext>) -> PtgListDecoded {
+fn decode_ptg_list_payload_best_effort(
+    payload: &[u8; 12],
+    ctx: Option<&WorkbookContext>,
+) -> PtgListDecoded {
     // There are multiple "in the wild" encodings for the 12-byte PtgList payload (table refs /
     // structured references). We try a handful of plausible layouts and prefer the one that
     // resolves cleanly against the provided workbook context.
@@ -1914,7 +1924,10 @@ fn score_ptg_list_candidate(cand: &PtgListDecoded, ctx: &WorkbookContext) -> i32
     score
 }
 
-fn structured_ref_is_single_cell(item: Option<StructuredRefItem>, columns: &StructuredColumns) -> bool {
+fn structured_ref_is_single_cell(
+    item: Option<StructuredRefItem>,
+    columns: &StructuredColumns,
+) -> bool {
     match (item, columns) {
         (Some(StructuredRefItem::ThisRow), StructuredColumns::Single(_)) => true,
         (Some(StructuredRefItem::Headers), StructuredColumns::Single(_)) => true,
@@ -3538,6 +3551,7 @@ impl<'a> FormulaParser<'a> {
                 expr
             }
             Some(ch) if ch.is_ascii_digit() || ch == '.' => self.parse_number()?,
+            Some('[') => self.parse_ident_or_ref()?,
             Some('\'') => self.parse_ident_or_ref()?,
             Some(ch) if is_ident_start(ch) => self.parse_ident_or_ref()?,
             _ => return Err("unexpected token".to_string()),
@@ -3879,9 +3893,45 @@ impl<'a> FormulaParser<'a> {
         self.skip_ws();
         match self.peek_char() {
             Some('\'') => self.parse_quoted_sheet_name().map(Some),
+            Some('[') => {
+                let start = self.pos;
+                let parsed = self.parse_external_sheet_name()?;
+                if parsed.is_none() {
+                    self.pos = start;
+                }
+                Ok(parsed)
+            }
             Some(ch) if is_ident_start(ch) => Ok(self.parse_identifier()?),
             _ => Ok(None),
         }
+    }
+
+    fn parse_external_sheet_name(&mut self) -> Result<Option<String>, String> {
+        if self.next_char() != Some('[') {
+            return Ok(None);
+        }
+
+        let mut book = String::new();
+        loop {
+            match self.next_char() {
+                Some(']') => break,
+                Some(ch) => book.push(ch),
+                None => return Err("unterminated external workbook prefix".to_string()),
+            }
+        }
+
+        self.skip_ws();
+        let sheet = match self.peek_char() {
+            Some('\'') => Some(self.parse_quoted_sheet_name()?),
+            Some(ch) if is_ident_start(ch) => self.parse_identifier()?,
+            _ => None,
+        };
+
+        let Some(sheet) = sheet else {
+            return Ok(None);
+        };
+
+        Ok(Some(format!("[{book}]{sheet}")))
     }
 
     fn parse_quoted_sheet_name(&mut self) -> Result<String, String> {

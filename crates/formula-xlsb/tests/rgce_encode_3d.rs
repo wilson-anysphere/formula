@@ -1,4 +1,6 @@
-use formula_xlsb::rgce::{decode_rgce_with_context, encode_rgce_with_context, CellCoord, EncodeError};
+use formula_xlsb::rgce::{
+    decode_rgce_with_context, encode_rgce_with_context, CellCoord, EncodeError,
+};
 use formula_xlsb::workbook_context::WorkbookContext;
 use formula_xlsb::XlsbWorkbook;
 use pretty_assertions::assert_eq;
@@ -20,11 +22,29 @@ fn encodes_and_decodes_sheet_range_ref_in_function() {
     let mut ctx = WorkbookContext::default();
     ctx.add_extern_sheet("Sheet1", "Sheet3", 1);
 
-    let encoded =
-        encode_rgce_with_context("=SUM('Sheet1:Sheet3'!A1)", &ctx, CellCoord::new(0, 0))
-            .expect("encode");
+    let encoded = encode_rgce_with_context("=SUM('Sheet1:Sheet3'!A1)", &ctx, CellCoord::new(0, 0))
+        .expect("encode");
     let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
     assert_eq!(decoded, "SUM('Sheet1:Sheet3'!A1)");
+}
+
+#[test]
+fn encodes_and_decodes_external_workbook_sheet_range_ref_in_function() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet_external_workbook("Book2.xlsb", "SheetA", "SheetB", 0);
+
+    // Excel writes external workbook 3D spans as `[Book]SheetA:SheetB!A1`, but the rgce decoder
+    // emits a single quoted identifier (`'[Book]SheetA:SheetB'!A1`) so the prefix is a single
+    // token for formula-engine.
+    let encoded = encode_rgce_with_context(
+        "=SUM([Book2.xlsb]SheetA:SheetB!A1)",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "SUM('[Book2.xlsb]SheetA:SheetB'!A1)");
 }
 
 #[test]
@@ -43,8 +63,8 @@ fn encodes_and_decodes_sheet_scoped_name() {
     let mut ctx = WorkbookContext::default();
     ctx.add_sheet_name("Sheet2", "MyLocalName", 2);
 
-    let encoded =
-        encode_rgce_with_context("=Sheet2!MyLocalName", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let encoded = encode_rgce_with_context("=Sheet2!MyLocalName", &ctx, CellCoord::new(0, 0))
+        .expect("encode");
     assert_eq!(
         encoded.rgce,
         vec![
@@ -85,8 +105,8 @@ fn encodes_addin_udf_calls_via_namex() {
     let wb = XlsbWorkbook::open(path).expect("open xlsb");
     let ctx = wb.workbook_context();
 
-    let encoded = encode_rgce_with_context("=MyAddinFunc(1,2)", ctx, CellCoord::new(0, 0))
-        .expect("encode");
+    let encoded =
+        encode_rgce_with_context("=MyAddinFunc(1,2)", ctx, CellCoord::new(0, 0)).expect("encode");
     assert_eq!(
         encoded.rgce,
         vec![
