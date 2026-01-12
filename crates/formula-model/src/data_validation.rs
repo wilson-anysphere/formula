@@ -467,7 +467,7 @@ fn is_blank(candidate: &CellValue) -> bool {
         CellValue::Entity(e) => e.display_value.is_empty(),
         CellValue::Record(r) => {
             if let Some(field) = r.display_field.as_deref() {
-                if let Some(value) = r.fields.get(field) {
+                if let Some(value) = r.get_field_case_insensitive(field) {
                     return match value {
                         CellValue::Empty => true,
                         CellValue::String(s) => s.is_empty(),

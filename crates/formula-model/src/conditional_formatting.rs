@@ -1078,7 +1078,7 @@ fn cell_value_truthy(value: &CellValue) -> bool {
         // truthy iff their derived display string is non-empty.
         CellValue::Record(r) => {
             if let Some(field) = r.display_field.as_deref() {
-                if let Some(value) = r.fields.get(field) {
+                if let Some(value) = r.get_field_case_insensitive(field) {
                     return match value {
                         CellValue::Empty => false,
                         CellValue::String(s) => !s.is_empty(),
