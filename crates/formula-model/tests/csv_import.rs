@@ -1,6 +1,6 @@
 use formula_model::import::{
     import_csv_to_columnar_table, import_csv_to_worksheet, CsvDateOrder, CsvOptions,
-    CsvTimestampTzPolicy,
+    CsvTextEncoding, CsvTimestampTzPolicy,
 };
 use formula_model::{CellRef, CellValue};
 use std::io::Cursor;
@@ -196,6 +196,31 @@ fn csv_import_reports_invalid_utf8_with_row_and_column() {
         sheet.value(CellRef::new(0, 1)),
         CellValue::String("helloÿ".to_string())
     );
+}
+
+#[test]
+fn csv_import_utf8_encoding_reports_invalid_utf8_with_row_and_column() {
+    let mut bytes = b"id,text\n1,\"hello".to_vec();
+    bytes.push(0xFF);
+    bytes.extend_from_slice(b"\"\n");
+
+    let err = import_csv_to_columnar_table(
+        Cursor::new(bytes),
+        CsvOptions {
+            encoding: CsvTextEncoding::Utf8,
+            ..CsvOptions::default()
+        },
+    )
+    .unwrap_err();
+
+    match err {
+        formula_model::import::CsvImportError::Parse { row, column, reason } => {
+            assert_eq!(row, 2);
+            assert_eq!(column, 2);
+            assert!(reason.contains("UTF-8"));
+        }
+        other => panic!("expected CsvImportError::Parse, got {other:?}"),
+    }
 }
 
 #[test]
