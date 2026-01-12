@@ -8906,7 +8906,8 @@ async function openWorkbookFromPath(
     await loadWorkbookIntoDocument(activeWorkbook);
     if (options.notifyExtensions !== false) {
       try {
-        emitWorkbookOpenedForExtensions(getWorkbookSnapshotForExtensions());
+        const openedPath = activeWorkbook.path ?? activeWorkbook.origin_path ?? path;
+        emitWorkbookOpenedForExtensions(getWorkbookSnapshotForExtensions({ pathOverride: openedPath }));
       } catch {
         // Ignore extension host errors; workbook open should still succeed.
       }
