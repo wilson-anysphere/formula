@@ -147,17 +147,29 @@ pub(crate) fn parse_digsig_info_serialized(stream: &[u8]) -> Option<DigSigInfoSe
 
             // The signature can appear at a small number of offsets depending on the ordering of
             // the (project name, cert store, signature) blobs.
+            // Some producers include additional unknown blobs/fields before the signature bytes.
+            // When the signature is stored as the final blob in the structure, `cbSignature` lets
+            // us locate it by counting back from the end of the stream. Include that as an
+            // additional candidate offset.
             let candidate_offsets = [
-                header.header_size,                                      // sig first
-                header.header_size.saturating_add(header.cert_len),      // cert then sig
-                header.header_size.saturating_add(proj_bytes),           // project then sig
+                header.header_size, // sig first
+                header.header_size.saturating_add(header.cert_len), // cert then sig
+                header.header_size.saturating_add(proj_bytes), // project then sig
                 header
                     .header_size
                     .saturating_add(header.cert_len)
                     .saturating_add(proj_bytes), // project+cert then sig (or cert+project then sig)
+                stream
+                    .len()
+                    .checked_sub(header.sig_len)
+                    .filter(|&off| off >= header.header_size)
+                    .unwrap_or(usize::MAX),
             ];
 
             for &pkcs7_offset in &candidate_offsets {
+                if pkcs7_offset == usize::MAX {
+                    continue;
+                }
                 let sig_end = match pkcs7_offset.checked_add(header.sig_len) {
                     Some(end) => end,
                     None => continue,
@@ -532,5 +544,40 @@ mod tests {
         assert_eq!(parsed.pkcs7_offset, expected_offset);
         assert_eq!(parsed.pkcs7_len, pkcs7.len());
         assert_eq!(parsed.version, Some(version));
+    }
+
+    #[test]
+    fn parses_digsig_info_serialized_when_unknown_bytes_shift_signature_offset() {
+        let pkcs7 = include_bytes!("../tests/fixtures/cms_indefinite.der");
+
+        // Synthetic DigSigInfoSerialized-like stream with an extra unknown blob inserted between the
+        // project name and cert store. This is not part of the "common" layout, but some producers
+        // appear to include extra fields. We should still be able to locate the PKCS#7 payload using
+        // cbSignature (counting backwards from the end).
+        let project_name_utf16: Vec<u16> = "VBAProject\0".encode_utf16().collect();
+        let mut project_name_bytes = Vec::new();
+        for ch in &project_name_utf16 {
+            project_name_bytes.extend_from_slice(&ch.to_le_bytes());
+        }
+        let unknown = vec![0x11, 0x22, 0x33];
+        let cert_store = vec![0xAA, 0xBB, 0xCC, 0xDD];
+
+        let cb_signature = pkcs7.len() as u32;
+        let cb_cert_store = cert_store.len() as u32;
+        let cch_project = project_name_utf16.len() as u32;
+
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&cb_signature.to_le_bytes());
+        stream.extend_from_slice(&cb_cert_store.to_le_bytes());
+        stream.extend_from_slice(&cch_project.to_le_bytes());
+        stream.extend_from_slice(&project_name_bytes);
+        stream.extend_from_slice(&unknown);
+        stream.extend_from_slice(&cert_store);
+        stream.extend_from_slice(pkcs7);
+
+        let parsed = parse_digsig_info_serialized(&stream).expect("should parse");
+        let expected_offset = 12 + project_name_bytes.len() + unknown.len() + cert_store.len();
+        assert_eq!(parsed.pkcs7_offset, expected_offset);
+        assert_eq!(parsed.pkcs7_len, pkcs7.len());
     }
 }
