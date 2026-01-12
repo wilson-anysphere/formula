@@ -169,7 +169,7 @@ Notes:
 
 ```xml
 <rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
-  <rv s="0" t="image"><v>REL_SLOT</v></rv>
+  <rv s="0" t="image"><v>0</v></rv>
 </rvData>
 ```
 
@@ -181,7 +181,8 @@ Notes:
 ```
 
 * Namespace is **`…/2017/richdata`** for `richValue.xml` and **`…/2017/richdata2`** for `richValueRel.xml`.
-* The image payload is a single integer `<v>`: `REL_SLOT` is the 0-based index into the `<rel>` list.
+* The image payload is a single integer `<v>`; in this fixture the value is `0` and it is the 0-based index
+  into the `<rel>` list.
 
 ### Fixture: `fixtures/xlsx/basic/image-in-cell.xlsx` (`rdrichvalue.xml` + `richValueRel.xml` 2022 variant)
 
@@ -439,7 +440,7 @@ Even before full rich-data editing is implemented, round-trip compatibility need
 
 1. **More `<rv>` payload variants**
    - This repo confirms two concrete encodings:
-     - `richValue.xml` variant: `<rv t="image"><v>REL_SLOT</v></rv>` with
+     - `richValue.xml` variant: `<rv t="image"><v>0</v></rv>` (0 = relationship-slot index) with
        `richValueRel.xml` root `<richValueRel xmlns="…/2017/richdata2">`.
      - `rdRichValue*` variant: `rdrichvalue.xml` `<rv><v>…</v><v>…</v></rv>` interpreted via
        `rdrichvaluestructure.xml`, with the relationship slot index in the key

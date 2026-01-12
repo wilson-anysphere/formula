@@ -125,7 +125,7 @@ Notes:
 ```xml
 <rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
   <rv s="0" t="image">
-    <v>REL_SLOT</v>
+    <v>0</v>
   </rv>
 </rvData>
 ```
@@ -133,7 +133,7 @@ Notes:
 Notes:
 
 * Namespace is **`…/2017/richdata`**.
-* The payload `<v>` is an integer **relationship-slot index** (`REL_SLOT`, 0-based) into
+* The payload `<v>` is an integer **relationship-slot index** (0-based) into
   `xl/richData/richValueRel.xml`.
 
 **`xl/richData/richValueRel.xml` namespace**
