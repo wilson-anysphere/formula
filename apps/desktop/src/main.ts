@@ -744,6 +744,7 @@ function currentSelectionRect(): SelectionRect {
 }
 
 let openCommandPalette: (() => void) | null = null;
+const commandRegistry = new CommandRegistry();
 
 // --- Sheet tabs (minimal multi-sheet support) ---------------------------------
 
@@ -1501,7 +1502,6 @@ if (
 
   extensionHostManagerForE2e = extensionHostManager;
 
-  const commandRegistry = new CommandRegistry();
   registerBuiltinCommands({ commandRegistry, app, layoutController });
 
   extensionPanelBridge = new ExtensionPanelBridge({
@@ -1553,6 +1553,9 @@ if (
     { command: "clipboard.copy", key: "ctrl+c", mac: "cmd+c" },
     { command: "clipboard.paste", key: "ctrl+v", mac: "cmd+v" },
     { command: "clipboard.pasteSpecial", key: "ctrl+alt+v", mac: "cmd+option+v" },
+    { command: "edit.find", key: "ctrl+f", mac: "cmd+f" },
+    { command: "edit.replace", key: "ctrl+h", mac: "cmd+h" },
+    { command: "navigation.goTo", key: "ctrl+g", mac: "cmd+g" },
     { command: "edit.clearContents", key: "delete", mac: "backspace" },
   ];
 
@@ -2915,6 +2918,42 @@ function showDialogAndFocus(dialog: HTMLDialogElement): void {
 
   requestAnimationFrame(focusInput);
 }
+
+commandRegistry.registerBuiltinCommand(
+  "edit.find",
+  "Find…",
+  () => showDialogAndFocus(findDialog as any),
+  {
+    category: "Editing",
+    icon: null,
+    description: "Show the Find dialog",
+    keywords: ["find", "search"],
+  },
+);
+
+commandRegistry.registerBuiltinCommand(
+  "edit.replace",
+  "Replace…",
+  () => showDialogAndFocus(replaceDialog as any),
+  {
+    category: "Editing",
+    icon: null,
+    description: "Show the Replace dialog",
+    keywords: ["replace", "find"],
+  },
+);
+
+commandRegistry.registerBuiltinCommand(
+  "navigation.goTo",
+  "Go To…",
+  () => showDialogAndFocus(goToDialog as any),
+  {
+    category: "Navigation",
+    icon: null,
+    description: "Go to a reference or named range",
+    keywords: ["go to", "goto", "reference", "name box"],
+  },
+);
 
 function getTauriInvokeForPrint(): TauriInvoke | null {
   const invoke =
