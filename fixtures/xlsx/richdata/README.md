@@ -29,6 +29,13 @@ It is still useful for exercising round-trip preservation of rich-data parts (se
 truth. If/when a real Excel-saved linked-data-types fixture is added, prefer that file for definitive
 schema validation.
 
+Note: this repository also contains `fixtures/xlsx/rich-data/` which is the
+original home for RichData fixtures and includes an Excel-saved “images in cell”
+fixture. The long-term intent is that **linked data types fixtures should also
+be saved by Excel 365** (for ground-truth schema validation). If this file ever
+needs to be regenerated, prefer producing it in Excel 365 and re-checking that
+it still round-trips cleanly in tests.
+
 ### Regenerating (Excel 365)
 
 1. Create a new blank workbook.

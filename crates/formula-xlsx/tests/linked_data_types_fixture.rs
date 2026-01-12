@@ -4,6 +4,34 @@ use std::path::Path;
 
 use zip::ZipArchive;
 
+fn normalize_opc_path(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    let mut out: Vec<&str> = Vec::new();
+    for segment in normalized.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                out.pop();
+            }
+            _ => out.push(segment),
+        }
+    }
+    out.join("/")
+}
+
+fn resolve_relationship_target(base_part: &str, target: &str) -> String {
+    let target = target.replace('\\', "/");
+    if let Some(rest) = target.strip_prefix('/') {
+        return normalize_opc_path(rest);
+    }
+
+    let base_dir = base_part
+        .rsplit_once('/')
+        .map(|(dir, _)| format!("{dir}/"))
+        .unwrap_or_default();
+    normalize_opc_path(&format!("{base_dir}{target}"))
+}
+
 fn zip_entry_names(zip_bytes: &[u8]) -> Result<Vec<String>, zip::result::ZipError> {
     let cursor = Cursor::new(zip_bytes);
     let mut archive = ZipArchive::new(cursor)?;
@@ -55,10 +83,38 @@ fn linked_data_types_fixture_roundtrips_richdata_parts() -> Result<(), Box<dyn s
         "fixture missing xl/richData/* parts; zip entries: {names:?}"
     );
 
+    // Ensure metadata.xml.rels actually links to richData parts (don't hard-code names).
+    let metadata_rels_bytes = zip_part_bytes(&fixture_bytes, "xl/_rels/metadata.xml.rels")?;
+    let metadata_rels = std::str::from_utf8(&metadata_rels_bytes)?;
+    let rels_doc = roxmltree::Document::parse(metadata_rels)?;
+    let mut richdata_rel_targets: Vec<String> = Vec::new();
+    for rel in rels_doc.descendants().filter(|n| {
+        n.is_element()
+            && n.tag_name().name() == "Relationship"
+            && n.attribute("Target").is_some()
+    }) {
+        let target = rel.attribute("Target").unwrap_or_default();
+        let resolved = resolve_relationship_target("xl/metadata.xml", target);
+        if resolved.starts_with("xl/richData/") {
+            richdata_rel_targets.push(resolved);
+        }
+    }
+    assert!(
+        !richdata_rel_targets.is_empty(),
+        "expected xl/_rels/metadata.xml.rels to reference at least one xl/richData/* target; rels: {metadata_rels}"
+    );
+    for target in &richdata_rel_targets {
+        assert!(
+            name_set.contains(target.as_str()),
+            "metadata.xml.rels references missing target {target}; zip entries: {names:?}"
+        );
+    }
+
     // Parse the worksheet XML and ensure at least one cell has vm/cm attributes.
     let sheet_xml_bytes = zip_part_bytes(&fixture_bytes, "xl/worksheets/sheet1.xml")?;
     let sheet_xml = std::str::from_utf8(&sheet_xml_bytes)?;
     let parsed = roxmltree::Document::parse(sheet_xml)?;
+    let mut vm_values: Vec<u32> = Vec::new();
     let has_vm_or_cm = parsed.descendants().any(|n| {
         n.is_element()
             && n.tag_name().name() == "c"
@@ -68,6 +124,48 @@ fn linked_data_types_fixture_roundtrips_richdata_parts() -> Result<(), Box<dyn s
         has_vm_or_cm,
         "expected at least one <c> element with vm/cm attributes; sheet1.xml: {sheet_xml}"
     );
+
+    for cell in parsed.descendants().filter(|n| {
+        n.is_element() && n.tag_name().name() == "c" && n.attribute("vm").is_some()
+    }) {
+        if let Some(vm) = cell.attribute("vm").and_then(|v| v.parse::<u32>().ok()) {
+            vm_values.push(vm);
+        }
+    }
+    vm_values.sort();
+    vm_values.dedup();
+
+    // Try resolving vm -> rich value index via metadata.xml (best-effort).
+    let metadata_xml_bytes = zip_part_bytes(&fixture_bytes, "xl/metadata.xml")?;
+    let vm_map = formula_xlsx::parse_value_metadata_vm_to_rich_value_index_map(&metadata_xml_bytes)?;
+    assert!(
+        !vm_map.is_empty(),
+        "expected parse_value_metadata_vm_to_rich_value_index_map to return at least one mapping"
+    );
+    for vm in &vm_values {
+        assert!(
+            vm_map.contains_key(vm),
+            "expected vm={vm} to resolve via xl/metadata.xml; known mappings: {vm_map:?}"
+        );
+    }
+
+    // Ensure the mapped rich value indices are in-range for xl/richData/richValue.xml.
+    if name_set.contains("xl/richData/richValue.xml") {
+        let rich_value_bytes = zip_part_bytes(&fixture_bytes, "xl/richData/richValue.xml")?;
+        let rich_value_xml = std::str::from_utf8(&rich_value_bytes)?;
+        let rich_value_doc = roxmltree::Document::parse(rich_value_xml)?;
+        let rv_count = rich_value_doc
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name() == "rv")
+            .count() as u32;
+        assert!(rv_count > 0, "expected richValue.xml to contain <rv> records");
+        for (vm, rv_idx) in &vm_map {
+            assert!(
+                *rv_idx < rv_count,
+                "vm={vm} maps to rv index {rv_idx}, but richValue.xml has {rv_count} <rv> records"
+            );
+        }
+    }
 
     // Round-trip through XlsxDocument and ensure richdata-related parts remain present.
     let doc = formula_xlsx::load_from_bytes(&fixture_bytes)?;
