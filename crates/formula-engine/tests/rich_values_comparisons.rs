@@ -1,14 +1,13 @@
 use formula_engine::value::{EntityValue, RecordValue};
 use formula_engine::{Engine, Value};
 
-#[test]
-fn rich_values_compare_and_sort_like_text() {
-    let mut engine = Engine::new();
-
+fn assert_rich_values_compare_and_sort_like_text(mut engine: Engine) {
     engine
         .set_cell_value("Sheet1", "A1", Value::Entity(EntityValue::new("Apple")))
         .unwrap();
-    engine.set_cell_value("Sheet1", "B1", "Apple").unwrap();
+    // Excel comparisons are case-insensitive; entities/records should behave the same by using
+    // their display strings.
+    engine.set_cell_value("Sheet1", "B1", "apple").unwrap();
     engine
         .set_cell_value("Sheet1", "D1", Value::Record(RecordValue::new("Apple")))
         .unwrap();
@@ -23,6 +22,9 @@ fn rich_values_compare_and_sort_like_text() {
     engine
         .set_cell_formula("Sheet1", "C3", "=XMATCH(TRUE, A1:A2, 0, 2)")
         .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C4", r#"=XMATCH("APPLE", A1:A2, 0, 2)"#)
+        .unwrap();
 
     engine.recalculate();
 
@@ -30,5 +32,17 @@ fn rich_values_compare_and_sort_like_text() {
     assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Bool(true));
     assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Bool(true));
     assert_eq!(engine.get_cell_value("Sheet1", "C3"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C4"), Value::Number(1.0));
 }
 
+#[test]
+fn rich_values_compare_and_sort_like_text_bytecode() {
+    assert_rich_values_compare_and_sort_like_text(Engine::new());
+}
+
+#[test]
+fn rich_values_compare_and_sort_like_text_ast() {
+    let mut engine = Engine::new();
+    engine.set_bytecode_enabled(false);
+    assert_rich_values_compare_and_sort_like_text(engine);
+}
