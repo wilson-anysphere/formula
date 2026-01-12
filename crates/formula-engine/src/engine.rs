@@ -1974,6 +1974,7 @@ impl Engine {
                     date_system,
                     value_locale,
                     recalc_ctx.now_utc.clone(),
+                    recalc_ctx.recalc_id,
                 );
                 for (k, compiled) in &parallel_tasks {
                     let ctx = crate::eval::EvalContext {
@@ -2029,6 +2030,7 @@ impl Engine {
                                             date_system,
                                             value_locale,
                                             recalc_ctx.now_utc.clone(),
+                                            recalc_ctx.recalc_id,
                                         ),
                                     )
                                 },
@@ -2097,6 +2099,7 @@ impl Engine {
                 date_system,
                 value_locale,
                 recalc_ctx.now_utc.clone(),
+                recalc_ctx.recalc_id,
             );
             for (k, compiled) in &serial_tasks {
                 let ctx = crate::eval::EvalContext {
@@ -7102,6 +7105,8 @@ fn bytecode_expr_is_eligible_inner(
             | bytecode::ast::Function::Mod
             | bytecode::ast::Function::Sign
             | bytecode::ast::Function::Concat
+            | bytecode::ast::Function::Rand
+            | bytecode::ast::Function::RandBetween
             | bytecode::ast::Function::Not => args
                 .iter()
                 .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)),

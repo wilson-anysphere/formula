@@ -24,6 +24,9 @@ thread_local! {
     static BYTECODE_DATE_SYSTEM: Cell<ExcelDateSystem> = Cell::new(ExcelDateSystem::EXCEL_1900);
     static BYTECODE_VALUE_LOCALE: Cell<ValueLocaleConfig> = Cell::new(ValueLocaleConfig::en_us());
     static BYTECODE_NOW_UTC: RefCell<DateTime<Utc>> = RefCell::new(Utc::now());
+    static BYTECODE_RECALC_ID: Cell<u64> = Cell::new(0);
+    static BYTECODE_CURRENT_SHEET_ID: Cell<u64> = Cell::new(0);
+    static BYTECODE_RNG_COUNTER: Cell<u64> = Cell::new(0);
 }
 
 /// Row-span threshold for treating a reference as "huge" and preferring sparse iteration.
@@ -37,6 +40,7 @@ pub(crate) struct BytecodeEvalContextGuard {
     prev_date_system: ExcelDateSystem,
     prev_value_locale: ValueLocaleConfig,
     prev_now_utc: DateTime<Utc>,
+    prev_recalc_id: u64,
 }
 
 impl Drop for BytecodeEvalContextGuard {
@@ -46,6 +50,7 @@ impl Drop for BytecodeEvalContextGuard {
         BYTECODE_NOW_UTC.with(|cell| {
             cell.replace(self.prev_now_utc.clone());
         });
+        BYTECODE_RECALC_ID.with(|cell| cell.set(self.prev_recalc_id));
     }
 }
 
@@ -53,15 +58,18 @@ pub(crate) fn set_thread_eval_context(
     date_system: ExcelDateSystem,
     value_locale: ValueLocaleConfig,
     now_utc: DateTime<Utc>,
+    recalc_id: u64,
 ) -> BytecodeEvalContextGuard {
     let prev_date_system = BYTECODE_DATE_SYSTEM.with(|cell| cell.replace(date_system));
     let prev_value_locale = BYTECODE_VALUE_LOCALE.with(|cell| cell.replace(value_locale));
     let prev_now_utc = BYTECODE_NOW_UTC.with(|cell| cell.replace(now_utc));
+    let prev_recalc_id = BYTECODE_RECALC_ID.with(|cell| cell.replace(recalc_id));
 
     BytecodeEvalContextGuard {
         prev_date_system,
         prev_value_locale,
         prev_now_utc,
+        prev_recalc_id,
     }
 }
 
@@ -80,6 +88,30 @@ fn thread_number_locale() -> crate::value::NumberLocale {
 
 fn thread_now_utc() -> DateTime<Utc> {
     BYTECODE_NOW_UTC.with(|cell| cell.borrow().clone())
+}
+
+fn thread_recalc_id() -> u64 {
+    BYTECODE_RECALC_ID.with(|cell| cell.get())
+}
+
+fn thread_current_sheet_id() -> u64 {
+    BYTECODE_CURRENT_SHEET_ID.with(|cell| cell.get())
+}
+
+pub(crate) fn set_thread_current_sheet_id(sheet_id: usize) {
+    BYTECODE_CURRENT_SHEET_ID.with(|cell| cell.set(sheet_id as u64));
+}
+
+pub(crate) fn reset_thread_rng_counter() {
+    BYTECODE_RNG_COUNTER.with(|cell| cell.set(0));
+}
+
+fn next_rng_draw() -> u64 {
+    BYTECODE_RNG_COUNTER.with(|cell| {
+        let draw = cell.get();
+        cell.set(draw.wrapping_add(1));
+        draw
+    })
 }
 
 fn parse_value_from_text(s: &str) -> Result<f64, ErrorKind> {
@@ -381,6 +413,8 @@ fn eval_ast_inner(
                     | Function::Mod
                     | Function::Sign
                     | Function::Concat
+                    | Function::Rand
+                    | Function::RandBetween
                     | Function::Not
                     | Function::IsBlank
                     | Function::IsNumber
@@ -885,6 +919,8 @@ pub fn call_function(
         Function::Mod => fn_mod(args),
         Function::Sign => fn_sign(args),
         Function::Concat => fn_concat(args),
+        Function::Rand => fn_rand(args, base),
+        Function::RandBetween => fn_randbetween(args, base),
         Function::Not => fn_not(args),
         Function::IsBlank => fn_isblank(args, grid, base),
         Function::IsNumber => fn_isnumber(args, grid, base),
@@ -904,6 +940,91 @@ pub fn call_function(
         Function::Address => fn_address(args),
         Function::Unknown(_) => Value::Error(ErrorKind::Name),
     }
+}
+
+fn fn_rand(args: &[Value], base: CellCoord) -> Value {
+    if !args.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
+    let bits = volatile_rand_u64(base) >> 11; // 53 bits.
+    Value::Number((bits as f64) / ((1u64 << 53) as f64))
+}
+
+fn fn_randbetween(args: &[Value], base: CellCoord) -> Value {
+    if args.len() != 2 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let bottom = match coerce_to_number(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let top = match coerce_to_number(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    if !bottom.is_finite() || !top.is_finite() {
+        return Value::Error(ErrorKind::Num);
+    }
+
+    let low_f = bottom.ceil();
+    let high_f = top.floor();
+    if low_f < (i64::MIN as f64)
+        || low_f > (i64::MAX as f64)
+        || high_f < (i64::MIN as f64)
+        || high_f > (i64::MAX as f64)
+    {
+        return Value::Error(ErrorKind::Num);
+    }
+
+    let low = low_f as i64;
+    let high = high_f as i64;
+    if low > high {
+        return Value::Error(ErrorKind::Num);
+    }
+
+    let span = match high.checked_sub(low).and_then(|d| d.checked_add(1)) {
+        Some(v) if v > 0 => v as u64,
+        _ => return Value::Error(ErrorKind::Num),
+    };
+
+    let offset = volatile_rand_u64_below(span, base) as i64;
+    Value::Number((low + offset) as f64)
+}
+
+fn volatile_rand_u64_below(span: u64, base: CellCoord) -> u64 {
+    if span <= 1 {
+        return 0;
+    }
+
+    let zone = (u64::MAX / span) * span;
+    loop {
+        let v = volatile_rand_u64(base);
+        if v < zone {
+            return v % span;
+        }
+    }
+}
+
+fn volatile_rand_u64(base: CellCoord) -> u64 {
+    let draw = next_rng_draw();
+
+    let mut seed = thread_recalc_id();
+    seed ^= thread_current_sheet_id().wrapping_mul(0x9e3779b97f4a7c15);
+    seed ^= (base.row as u64).wrapping_mul(0xbf58476d1ce4e5b9);
+    seed ^= (base.col as u64).wrapping_mul(0x94d049bb133111eb);
+    seed ^= draw.wrapping_mul(0x3c79ac492ba7b653);
+    splitmix64(seed)
+}
+
+fn splitmix64(mut state: u64) -> u64 {
+    // A simple, fast mixer with good statistical properties (used as a deterministic
+    // PRNG building block). The transform is bijective over u64, making it a good fit
+    // for per-cell deterministic RNG.
+    state = state.wrapping_add(0x9e3779b97f4a7c15);
+    state = (state ^ (state >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    state = (state ^ (state >> 27)).wrapping_mul(0x94d049bb133111eb);
+    state ^ (state >> 31)
 }
 
 fn fn_today(args: &[Value]) -> Value {

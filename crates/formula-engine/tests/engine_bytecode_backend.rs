@@ -1307,9 +1307,42 @@ fn bytecode_backend_matches_ast_for_concat_operator() {
     assert_eq!(engine.bytecode_program_count(), 2);
 
     engine.recalculate_single_threaded();
-
     assert_engine_matches_ast(&engine, "=\"a\"&\"b\"", "A1");
     assert_engine_matches_ast(&engine, "=A2&B2", "C2");
+}
+
+#[test]
+fn bytecode_backend_compiles_rand_functions_and_matches_ast() {
+    let mut engine = Engine::new();
+
+    // Multiple draws within a single formula should be distinct (per-eval RNG counter).
+    engine
+        .set_cell_formula("Sheet1", "A1", "=RAND()+RAND()")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=RANDBETWEEN(1,100)+RANDBETWEEN(1,100)")
+        .unwrap();
+
+    // RAND/RANDBETWEEN should both compile to bytecode.
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=RAND()+RAND()", "A1");
+    assert_engine_matches_ast(&engine, "=RANDBETWEEN(1,100)+RANDBETWEEN(1,100)", "A2");
+
+    // Sanity check basic invariants.
+    match engine.get_cell_value("Sheet1", "A1") {
+        Value::Number(n) => assert!((0.0..2.0).contains(&n), "got {n}"),
+        other => panic!("expected RAND()+RAND() to return a number, got {other:?}"),
+    }
+    match engine.get_cell_value("Sheet1", "A2") {
+        Value::Number(n) => {
+            assert!((2.0..=200.0).contains(&n), "got {n}");
+            assert_eq!(n.fract(), 0.0, "expected integer result, got {n}");
+        }
+        other => panic!("expected RANDBETWEEN()+RANDBETWEEN() to return a number, got {other:?}"),
+    }
 }
 
 #[test]
@@ -2253,6 +2286,38 @@ fn bytecode_backend_xor_reference_semantics_match_ast() {
     }
 }
 
+#[test]
+fn bytecode_backend_rng_is_stable_within_one_recalc_tick_and_changes_across_ticks() {
+    let mut engine = Engine::new();
+    engine.set_cell_formula("Sheet1", "A1", "=RAND()").unwrap();
+    // Ensure we're exercising the bytecode backend for the RAND() formula.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.set_cell_formula("Sheet1", "B1", "=A1").unwrap();
+    engine.set_cell_formula("Sheet1", "C1", "=A1").unwrap();
+
+    engine.recalculate_single_threaded();
+
+    let first = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), first);
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), first);
+
+    // RNG should change on each recalc tick; allow a few attempts to avoid pathological
+    // collisions in the float representation.
+    let mut changed = false;
+    for _ in 0..5 {
+        engine.recalculate_single_threaded();
+        let next = engine.get_cell_value("Sheet1", "A1");
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), next);
+        assert_eq!(engine.get_cell_value("Sheet1", "C1"), next);
+        if next != first {
+            changed = true;
+            break;
+        }
+    }
+    assert!(changed, "expected RAND() to change across recalculations");
+}
+
 proptest! {
     #![proptest_config(ProptestConfig { cases: 32, .. ProptestConfig::default() })]
     #[test]
@@ -2479,7 +2544,7 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
 
     // Supported + eligible.
     engine.set_cell_formula("Sheet1", "A1", "=1+1").unwrap();
-    // Volatile.
+    // Volatile (thread-safe; should compile to bytecode).
     engine.set_cell_formula("Sheet1", "A2", "=RAND()").unwrap();
     // Cross-sheet reference.
     engine.set_cell_value("Sheet2", "A1", 42.0).unwrap();
@@ -2491,8 +2556,8 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 4);
-    assert_eq!(stats.compiled, 1);
-    assert_eq!(stats.fallback, 3);
+    assert_eq!(stats.compiled, 2);
+    assert_eq!(stats.fallback, 2);
 
     assert_eq!(
         stats
@@ -2504,13 +2569,6 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
             .unwrap_or(0),
         1
     );
-
-    // RAND should fail the eligibility gate (unsupported function).
-    let rand_ineligible = stats
-        .fallback_reasons
-        .get(&BytecodeCompileReason::IneligibleExpr)
-        .copied()
-        .unwrap_or(0);
 
     // Intersection can fail in lowering (Unsupported) or by failing the eligibility gate.
     let unsupported = stats
@@ -2526,14 +2584,12 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
         .copied()
         .unwrap_or(0);
 
-    // A2 (RAND) is ineligible; A4 (intersection) can be ineligible or unsupported.
-    assert_eq!(unsupported + ineligible, 2);
-    assert!(rand_ineligible >= 1, "expected RAND() to be ineligible for bytecode");
+    // A4 (intersection) can be ineligible or unsupported.
+    assert_eq!(unsupported + ineligible, 1);
 
     let report = engine.bytecode_compile_report(usize::MAX);
-    assert_eq!(report.len(), 3);
+    assert_eq!(report.len(), 2);
 
-    let a2 = parse_a1("A2").unwrap();
     let a3 = parse_a1("A3").unwrap();
     let a4 = parse_a1("A4").unwrap();
 
@@ -2544,7 +2600,6 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
             .map(|e| e.reason.clone())
     };
 
-    assert_eq!(reason_for(a2), Some(BytecodeCompileReason::IneligibleExpr));
     assert_eq!(
         reason_for(a3),
         Some(BytecodeCompileReason::LowerError(

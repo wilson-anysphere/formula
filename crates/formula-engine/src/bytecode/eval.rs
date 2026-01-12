@@ -40,6 +40,8 @@ impl Vm {
         base: CellCoord,
         locale: &crate::LocaleConfig,
     ) -> Value {
+        super::runtime::set_thread_current_sheet_id(sheet_id);
+        super::runtime::reset_thread_rng_counter();
         self.stack.clear();
         self.locals.clear();
         self.locals.resize(program.locals.len(), Value::Empty);
@@ -208,7 +210,11 @@ impl Vm {
         value_locale: ValueLocaleConfig,
         now_utc: DateTime<Utc>,
     ) -> Value {
-        let _guard = super::runtime::set_thread_eval_context(date_system, value_locale, now_utc);
+        // Treat each explicit evaluation call as its own "recalc tick" for volatile functions.
+        // Use the supplied `now_utc` (which callers can freeze) to derive a deterministic id.
+        let recalc_id = now_utc.timestamp_nanos_opt().unwrap_or(0) as u64;
+        let _guard =
+            super::runtime::set_thread_eval_context(date_system, value_locale, now_utc, recalc_id);
 
         // Criteria strings inside quotes should follow the workbook/value locale for numeric parsing.
         let mut locale_config = crate::LocaleConfig::en_us();
@@ -285,8 +291,8 @@ mod tests {
         let grid = super::super::grid::ColumnarGrid::new(1, 1);
 
         let now_utc = Utc.with_ymd_and_hms(2024, 6, 15, 0, 0, 0).unwrap();
-        let expected = ymd_to_serial(ExcelDate::new(2024, 1, 2), ExcelDateSystem::EXCEL_1900)
-            .unwrap() as f64;
+        let expected =
+            ymd_to_serial(ExcelDate::new(2024, 1, 2), ExcelDateSystem::EXCEL_1900).unwrap() as f64;
 
         let mut vm = Vm::with_capacity(32);
         let value = vm.eval_with_coercion_context(

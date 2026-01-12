@@ -125,6 +125,7 @@ impl RecalcEngine {
         let now_utc = chrono::Utc::now();
         let date_system = ExcelDateSystem::EXCEL_1900;
         let value_locale = ValueLocaleConfig::en_us();
+        let recalc_id = now_utc.timestamp_nanos_opt().unwrap_or(0) as u64;
 
         for level in &graph.levels {
             results.clear();
@@ -133,25 +134,24 @@ impl RecalcEngine {
                 let g: &dyn Grid = &*grid;
                 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
                 {
-                    results
-                        .par_iter_mut()
-                        .zip(level.par_iter())
-                        .for_each_init(
-                            || {
-                                (
-                                    Vm::with_capacity(32),
-                                    super::runtime::set_thread_eval_context(
-                                        date_system,
-                                        value_locale,
-                                        now_utc.clone(),
-                                    ),
-                                )
-                            },
-                            |(vm, _guard), (out, &idx)| {
-                                let node = &graph.nodes[idx];
-                                *out = vm.eval(&node.program, g, 0, node.coord, &locale);
-                            },
-                        );
+                    results.par_iter_mut().zip(level.par_iter()).for_each_init(
+                        || {
+                            (
+                                Vm::with_capacity(32),
+                                super::runtime::set_thread_eval_context(
+                                    date_system,
+                                    value_locale,
+                                    now_utc.clone(),
+                                    recalc_id,
+                                ),
+                            )
+                        },
+                        |(vm, _guard), (out, &idx)| {
+                            let node = &graph.nodes[idx];
+                            super::runtime::set_thread_current_sheet_id(0);
+                            *out = vm.eval(&node.program, g, 0, node.coord, &locale);
+                        },
+                    );
                 }
                 #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
                 {
@@ -160,9 +160,11 @@ impl RecalcEngine {
                         date_system,
                         value_locale,
                         now_utc.clone(),
+                        recalc_id,
                     );
                     for (out, &idx) in results.iter_mut().zip(level.iter()) {
                         let node = &graph.nodes[idx];
+                        super::runtime::set_thread_current_sheet_id(0);
                         *out = vm.eval(&node.program, g, 0, node.coord, &locale);
                     }
                 }
@@ -247,6 +249,7 @@ mod tests {
             ExcelDateSystem::EXCEL_1900,
             ValueLocaleConfig::de_de(),
             now_utc.clone(),
+            0,
         );
         // Keep the bytecode function runtime's locale config in sync with the value-locale
         // configured above so any criteria parsing inside quoted strings matches Excel.
