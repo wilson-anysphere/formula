@@ -170,25 +170,197 @@ export function getCellGridFromRange(doc, sheetId, range) {
   /** @type {Map<string, any>} */
   const formatCache = new Map();
 
+  /**
+   * Normalize style ids returned from controller helpers / internal state.
+   * @param {any} value
+   */
+  const normalizeStyleId = (value) => {
+    const n = Number(value);
+    return Number.isInteger(n) && n >= 0 ? n : 0;
+  };
+
+  // `getSheetView` exists on the legacy DocumentController, but we only want to
+  // consult it for layered style ids when it actually exposes them. Cache the
+  // view so we don't clone/allocate it for every cell in the range.
+  let cachedSheetView = null;
+  let cachedSheetViewLoaded = false;
+  let cachedSheetViewHasStyleLayers = false;
+  const getSheetViewForStyleLayers = () => {
+    if (cachedSheetViewLoaded) return cachedSheetView;
+    cachedSheetViewLoaded = true;
+    if (doc && typeof doc.getSheetView === "function") {
+      cachedSheetView = doc.getSheetView(sheetId);
+      cachedSheetViewHasStyleLayers = Boolean(
+        cachedSheetView &&
+          (cachedSheetView.sheetDefaultStyleId != null ||
+            cachedSheetView.defaultStyleId != null ||
+            cachedSheetView.sheetStyleId != null ||
+            cachedSheetView.rowStyleIds != null ||
+            cachedSheetView.rowStyles != null ||
+            cachedSheetView.rowStyleIdByRow != null ||
+            cachedSheetView.colStyleIds != null ||
+            cachedSheetView.colStyles != null ||
+            cachedSheetView.colStyleIdByCol != null)
+      );
+    }
+    return cachedSheetView;
+  };
+
+  /**
+   * Resolve the set of style ids contributing to a cell's effective format.
+   *
+   * Prefer controller helpers when available; otherwise fall back to best-effort
+   * inspection of common internal state shapes.
+   *
+   * @param {number} row
+   * @param {number} col
+   * @param {number} cellStyleId
+   * @returns {[number, number, number, number]}
+   */
+  const getCellStyleIdTuple = (row, col, cellStyleId) => {
+    const coord = { row, col };
+
+    // Preferred: helper that returns the tuple directly.
+    /** @type {any} */
+    const helper =
+      (doc && typeof doc.getCellFormatStyleIds === "function" && doc.getCellFormatStyleIds) ||
+      (doc && typeof doc.getCellFormatIds === "function" && doc.getCellFormatIds) ||
+      (doc && typeof doc.getCellFormatStyleIdTuple === "function" && doc.getCellFormatStyleIdTuple) ||
+      (doc && typeof doc.getCellStyleIdTuple === "function" && doc.getCellStyleIdTuple);
+
+    if (helper) {
+      const out = helper.call(doc, sheetId, coord);
+      if (Array.isArray(out) && out.length >= 4) {
+        return [
+          normalizeStyleId(out[0]),
+          normalizeStyleId(out[1]),
+          normalizeStyleId(out[2]),
+          normalizeStyleId(out[3]),
+        ];
+      }
+      if (out && typeof out === "object") {
+        const sheetDefaultStyleId = normalizeStyleId(
+          out.sheetDefaultStyleId ?? out.sheetStyleId ?? out.defaultStyleId ?? out.sheetDefault
+        );
+        const rowStyleId = normalizeStyleId(out.rowStyleId ?? out.rowDefaultStyleId ?? out.rowDefault);
+        const colStyleId = normalizeStyleId(out.colStyleId ?? out.colDefaultStyleId ?? out.colDefault);
+        const cellId = normalizeStyleId(out.cellStyleId ?? out.styleId ?? cellStyleId);
+        return [sheetDefaultStyleId, rowStyleId, colStyleId, cellId];
+      }
+    }
+
+    // Best-effort fallback: query per-layer style ids if exposed.
+    let sheetDefaultStyleId = 0;
+    let rowStyleId = 0;
+    let colStyleId = 0;
+
+    if (doc && typeof doc.getSheetDefaultStyleId === "function") {
+      sheetDefaultStyleId = normalizeStyleId(doc.getSheetDefaultStyleId(sheetId));
+    } else if (doc && typeof doc.getSheetView === "function") {
+      const view = getSheetViewForStyleLayers();
+      if (cachedSheetViewHasStyleLayers) {
+        sheetDefaultStyleId = normalizeStyleId(
+          view?.sheetDefaultStyleId ?? view?.defaultStyleId ?? view?.sheetStyleId
+        );
+
+        const rowStyles = view?.rowStyleIds ?? view?.rowStyles ?? view?.rowStyleIdByRow;
+        if (rowStyles) {
+          if (typeof rowStyles.get === "function") rowStyleId = normalizeStyleId(rowStyles.get(row));
+          else rowStyleId = normalizeStyleId(rowStyles[String(row)] ?? rowStyles[row]);
+        }
+
+        const colStyles = view?.colStyleIds ?? view?.colStyles ?? view?.colStyleIdByCol;
+        if (colStyles) {
+          if (typeof colStyles.get === "function") colStyleId = normalizeStyleId(colStyles.get(col));
+          else colStyleId = normalizeStyleId(colStyles[String(col)] ?? colStyles[col]);
+        }
+      }
+    }
+
+    if (doc && typeof doc.getRowStyleId === "function") {
+      rowStyleId = normalizeStyleId(doc.getRowStyleId(sheetId, row));
+    }
+    if (doc && typeof doc.getColStyleId === "function") {
+      colStyleId = normalizeStyleId(doc.getColStyleId(sheetId, col));
+    }
+
+    return [sheetDefaultStyleId, rowStyleId, colStyleId, normalizeStyleId(cellStyleId)];
+  };
+
+  /**
+   * Resolve the effective style object for a given cell.
+   *
+   * @param {number} row
+   * @param {number} col
+   * @param {number} cellStyleId
+   * @returns {any | null}
+   */
+  const getEffectiveStyle = (row, col, cellStyleId) => {
+    const coord = { row, col };
+    if (doc && typeof doc.getCellFormat === "function") {
+      return doc.getCellFormat(sheetId, coord);
+    }
+    if (doc && typeof doc.getEffectiveCellStyle === "function") {
+      return doc.getEffectiveCellStyle(sheetId, coord);
+    }
+    if (doc && typeof doc.getCellStyle === "function") {
+      return doc.getCellStyle(sheetId, coord);
+    }
+
+    // Legacy DocumentController: per-cell styleId only.
+    return doc?.styleTable?.get && typeof doc.styleTable.get === "function" ? doc.styleTable.get(cellStyleId) : null;
+  };
+
+  const hasStyleIdTupleHelper =
+    doc &&
+    (typeof doc.getCellFormatStyleIds === "function" ||
+      typeof doc.getCellFormatIds === "function" ||
+      typeof doc.getCellFormatStyleIdTuple === "function" ||
+      typeof doc.getCellStyleIdTuple === "function");
+  const hasPerLayerStyleIdMethods =
+    doc &&
+    (typeof doc.getSheetDefaultStyleId === "function" ||
+      typeof doc.getRowStyleId === "function" ||
+      typeof doc.getColStyleId === "function");
+
+  // Initialize cachedSheetViewHasStyleLayers (at most one call).
+  getSheetViewForStyleLayers();
+  const canDeriveStyleIdTuple = Boolean(hasStyleIdTupleHelper || hasPerLayerStyleIdMethods || cachedSheetViewHasStyleLayers);
+
   for (let row = r.start.row; row <= r.end.row; row++) {
     /** @type {CellState[]} */
     const outRow = [];
     for (let col = r.start.col; col <= r.end.col; col++) {
       const cell = doc.getCell(sheetId, { row, col });
-      const style =
-        doc?.getCellFormat && typeof doc.getCellFormat === "function"
-          ? doc.getCellFormat(sheetId, { row, col })
-          : doc?.styleTable?.get && typeof doc.styleTable.get === "function"
-            ? doc.styleTable.get(typeof cell?.styleId === "number" ? cell.styleId : 0)
-            : null;
 
-      const cacheKey = stableStringify(style);
+      const cellStyleId = typeof cell?.styleId === "number" ? cell.styleId : 0;
+
+      // If the controller can supply the contributing style ids, cache by the
+      // (sheet,row,col,cell) style-id tuple. Otherwise, fall back to caching by
+      // the resolved style object to avoid collisions.
       let format = null;
-      if (formatCache.has(cacheKey)) {
-        format = formatCache.get(cacheKey) ?? null;
+      if (doc && typeof doc.getCellFormat === "function" && !canDeriveStyleIdTuple) {
+        const style = getEffectiveStyle(row, col, cellStyleId);
+        const cacheKey = stableStringify(style);
+        if (formatCache.has(cacheKey)) {
+          format = formatCache.get(cacheKey) ?? null;
+        } else {
+          format = styleToClipboardFormat(style);
+          formatCache.set(cacheKey, format);
+        }
       } else {
-        format = styleToClipboardFormat(style);
-        formatCache.set(cacheKey, format);
+        const styleIdTuple = getCellStyleIdTuple(row, col, cellStyleId);
+        const hasAnyStyle = styleIdTuple.some((id) => id !== 0);
+        if (hasAnyStyle) {
+          const cacheKey = styleIdTuple.join(",");
+          if (formatCache.has(cacheKey)) {
+            format = formatCache.get(cacheKey) ?? null;
+          } else {
+            const style = getEffectiveStyle(row, col, cellStyleId);
+            format = styleToClipboardFormat(style);
+            formatCache.set(cacheKey, format);
+          }
+        }
       }
       outRow.push({ value: cell.value, formula: cell.formula, format });
     }
