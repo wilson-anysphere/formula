@@ -358,8 +358,7 @@ export class FormulaBarView {
       let nextCursorEnd = toggled.cursorEnd;
 
       // Excel UX: keep the full reference token selected after toggling so repeated
-      // F4 presses keep cycling the same token. (CellEditorOverlay intentionally differs
-      // and preserves caret-at-end behavior; FormulaBarView matches the formula bar UX.)
+      // F4 presses keep cycling the same token.
       if (cursorStart === cursorEnd) {
         const { references, activeIndex } = extractFormulaReferences(toggled.text, nextCursorStart, nextCursorEnd);
         const active = activeIndex == null ? null : references[activeIndex] ?? null;
