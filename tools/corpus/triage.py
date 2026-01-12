@@ -89,11 +89,16 @@ def _scan_features(zip_names: list[str]) -> dict[str, Any]:
     features["has_connections"] = "xl/connections.xml" in zip_names
     features["has_shared_strings"] = "xl/sharedStrings.xml" in zip_names
     # Excel's "Images in Cell" feature (aka `cellImages`).
-    cellimages_part_re = re.compile(r"(?i)^cellimages\d*\.xml$")
+    cellimages_part_re = re.compile(r"^cellimages\d*\.xml$")
+    zip_names_casefold = [n.replace("\\", "/").casefold() for n in zip_names]
     features["has_cell_images"] = any(
-        (normalized := n.replace("\\", "/")).casefold().startswith("xl/")
-        and cellimages_part_re.match(posixpath.basename(normalized))
-        for n in zip_names
+        n == "xl/cellimages.xml"
+        or n.endswith("/cellimages.xml")
+        # Defensive: some writers may include folder-based layouts under `xl/cellImages/`.
+        or n.startswith("xl/cellimages/")
+        # Also detect numeric-suffix variants like `xl/cellImages1.xml`.
+        or (n.startswith("xl/") and cellimages_part_re.match(posixpath.basename(n)))
+        for n in zip_names_casefold
     )
     features["sheet_xml_count"] = len([n for n in zip_names if n.startswith("xl/worksheets/sheet")])
     return features
