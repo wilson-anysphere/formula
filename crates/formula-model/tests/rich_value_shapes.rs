@@ -220,3 +220,59 @@ fn record_json_display_field_can_point_to_nested_record() {
         other => panic!("expected record, got {other:?}"),
     }
 }
+
+#[test]
+fn record_json_display_field_can_point_to_image_alt_text() {
+    let json = r#"
+    {
+      "type": "record",
+      "value": {
+        "fields": {
+          "logo": {
+            "type": "image",
+            "value": { "imageId": "logo.png", "altText": "Logo" }
+          }
+        },
+        "displayField": "logo"
+      }
+    }
+    "#;
+
+    let value: CellValue = serde_json::from_str(json).unwrap();
+    let options = FormatOptions::default();
+    let display = format_cell_display(&value, None, &options);
+    assert_eq!(display.text, "Logo");
+
+    match &value {
+        CellValue::Record(record) => assert_eq!(record.to_string(), "Logo"),
+        other => panic!("expected record, got {other:?}"),
+    }
+}
+
+#[test]
+fn record_json_display_field_can_point_to_image_without_alt_text() {
+    let json = r#"
+    {
+      "type": "record",
+      "value": {
+        "fields": {
+          "logo": {
+            "type": "image",
+            "value": { "imageId": "logo.png" }
+          }
+        },
+        "displayField": "logo"
+      }
+    }
+    "#;
+
+    let value: CellValue = serde_json::from_str(json).unwrap();
+    let options = FormatOptions::default();
+    let display = format_cell_display(&value, None, &options);
+    assert_eq!(display.text, "[Image]");
+
+    match &value {
+        CellValue::Record(record) => assert_eq!(record.to_string(), "[Image]"),
+        other => panic!("expected record, got {other:?}"),
+    }
+}

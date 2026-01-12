@@ -476,6 +476,7 @@ fn is_blank(candidate: &CellValue) -> bool {
                         CellValue::Number(_) | CellValue::Boolean(_) | CellValue::Error(_) => false,
                         CellValue::Entity(entity) => entity.display_value.is_empty(),
                         CellValue::Record(record) => record.to_string().is_empty(),
+                        CellValue::Image(_) => false,
                         // Non-scalar displayField values fall back to `display_value`.
                         _ => r.display_value.is_empty(),
                     };

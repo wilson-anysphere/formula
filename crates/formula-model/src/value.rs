@@ -214,6 +214,14 @@ impl RecordValue {
             CellValue::RichText(rt) => Some(rt.text.clone()),
             CellValue::Entity(entity) => Some(entity.display_value.clone()),
             CellValue::Record(record) => Some(record.to_string()),
+            CellValue::Image(image) => Some(
+                image
+                    .alt_text
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("[Image]")
+                    .to_string(),
+            ),
             _ => None,
         }
     }

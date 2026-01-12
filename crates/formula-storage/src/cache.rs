@@ -879,6 +879,7 @@ fn estimate_cell_value_bytes(value: &CellValue) -> usize {
             return record.display_value.len();
         };
         match value {
+            CellValue::Empty => 0,
             CellValue::String(s) => s.len(),
             CellValue::Number(n) => n.to_string().len(),
             CellValue::Boolean(b) => {
@@ -892,6 +893,12 @@ fn estimate_cell_value_bytes(value: &CellValue) -> usize {
             CellValue::RichText(rt) => rt.text.len(),
             CellValue::Entity(entity) => entity.display_value.len(),
             CellValue::Record(record) => record_display_len(record),
+            CellValue::Image(image) => image
+                .alt_text
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.len())
+                .unwrap_or("[Image]".len()),
             _ => record.display_value.len(),
         }
     }

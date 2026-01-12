@@ -52,6 +52,14 @@ pub fn format_cell_display(
                         display_buf = Some(record.to_string());
                         display_buf.as_deref()
                     }
+                    CellValue::Image(image) => image
+                        .alt_text
+                        .as_deref()
+                        .filter(|s| !s.is_empty())
+                        .or_else(|| {
+                            display_buf = Some("[Image]".to_string());
+                            display_buf.as_deref()
+                        }),
                     _ => None,
                 })
                 .or_else(|| (!record.display_value.is_empty()).then_some(record.display_value.as_str()))
