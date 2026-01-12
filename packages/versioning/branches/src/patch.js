@@ -263,6 +263,15 @@ export function applyPatch(state, patch) {
           id: typeof meta.id === "string" && meta.id.length > 0 ? meta.id : sheetId,
           name: meta.name == null ? null : String(meta.name),
         };
+        if (isRecord(meta.view)) {
+          nextMeta.view = structuredClone(meta.view);
+        } else if ("frozenRows" in meta || "frozenCols" in meta) {
+          // Back-compat: some older patches may have stored view fields directly on the sheet meta.
+          nextMeta.view = structuredClone({
+            frozenRows: meta.frozenRows ?? 0,
+            frozenCols: meta.frozenCols ?? 0,
+          });
+        }
         out.sheets.metaById[sheetId] = nextMeta;
         if (!isRecord(out.cells[sheetId])) out.cells[sheetId] = {};
       }

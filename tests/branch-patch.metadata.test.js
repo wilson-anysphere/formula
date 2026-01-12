@@ -48,3 +48,27 @@ test("patch: legacy cell patches can still apply when combined with metadata sec
   assert.equal(applied.cells.Sheet1.A1.value, 2);
   assert.equal(applied.metadata.scenario, "next");
 });
+
+test("patch: diff/apply includes sheet view changes (frozen panes)", () => {
+  const base = normalizeDocumentState({
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: { Sheet1: { id: "Sheet1", name: "Sheet1", view: { frozenRows: 0, frozenCols: 0 } } },
+    },
+    cells: { Sheet1: {} },
+    metadata: {},
+    namedRanges: {},
+    comments: {},
+  });
+
+  const next = structuredClone(base);
+  next.sheets.metaById.Sheet1.view = { frozenRows: 2, frozenCols: 1 };
+
+  const patch = diffDocumentStates(base, next);
+  assert.equal(patch.schemaVersion, 1);
+  assert.deepEqual(patch.sheets?.metaById?.Sheet1?.view, { frozenRows: 2, frozenCols: 1 });
+
+  const applied = applyPatch(base, patch);
+  assert.deepEqual(applied.sheets.metaById.Sheet1.view, { frozenRows: 2, frozenCols: 1 });
+});
