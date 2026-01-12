@@ -297,10 +297,27 @@ fn open_workbook_model_csv_strips_utf8_bom() {
 #[test]
 fn open_workbook_model_csv_invalid_sheet_name_falls_back_to_sheet1() {
     let tmp = tempfile::tempdir().expect("temp dir");
-    let path = tmp.path().join("bad[name].csv");
+    // Use a filename stem that becomes empty after Excel sheet-name sanitization.
+    // `[` and `]` are invalid in sheet names but valid on common filesystems.
+    let path = tmp.path().join("[].csv");
     std::fs::write(&path, "col1\n1\n").expect("write csv");
 
     let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
     assert_eq!(workbook.sheets.len(), 1);
     assert_eq!(workbook.sheets[0].name, "Sheet1");
+}
+
+#[test]
+fn open_workbook_model_csv_sanitizes_sheet_name() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let csv_path = dir.path().join("bad[name]test.csv");
+    std::fs::write(&csv_path, "col1\n1\n2\n").expect("write csv");
+
+    let workbook = formula_io::open_workbook_model(&csv_path).expect("open workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "badnametest");
+
+    // Regression check: writing to XLSX should succeed (sheet name must be Excel-valid).
+    let mut out = std::io::Cursor::new(Vec::<u8>::new());
+    formula_io::xlsx::write_workbook_to_writer(&workbook, &mut out).expect("write xlsx");
 }

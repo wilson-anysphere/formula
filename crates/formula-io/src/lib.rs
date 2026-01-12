@@ -5,6 +5,7 @@ pub use formula_xls as xls;
 pub use formula_xlsb as xlsb;
 pub use formula_xlsx as xlsx;
 use formula_model::import::{import_csv_into_workbook, CsvImportError, CsvOptions, CsvTextEncoding};
+use formula_model::sanitize_sheet_name;
 
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 
@@ -374,6 +375,7 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
                     preserve_parsed_parts: false,
                     preserve_worksheets: false,
                     decode_formulas: true,
+                    ..Default::default()
                 },
             )
             .map_err(|source| Error::OpenXlsb {
@@ -392,12 +394,11 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
             })?;
             let reader = BufReader::new(file);
 
-            let sheet_name = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .filter(|s| !s.trim().is_empty())
-                .and_then(|name| formula_model::validate_sheet_name(name).ok().map(|_| name.to_string()))
-                .unwrap_or_else(|| "Sheet1".to_string());
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            let sheet_name = formula_model::validate_sheet_name(stem)
+                .ok()
+                .map(|_| stem.to_string())
+                .unwrap_or_else(|| sanitize_sheet_name(stem));
 
             let mut workbook = formula_model::Workbook::new();
             import_csv_into_workbook(
@@ -485,12 +486,11 @@ pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
             })?;
             let reader = std::io::BufReader::new(file);
 
-            let sheet_name = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .filter(|s| !s.trim().is_empty())
-                .and_then(|name| formula_model::validate_sheet_name(name).ok().map(|_| name.to_string()))
-                .unwrap_or_else(|| "Sheet1".to_string());
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            let sheet_name = formula_model::validate_sheet_name(stem)
+                .ok()
+                .map(|_| stem.to_string())
+                .unwrap_or_else(|| sanitize_sheet_name(stem));
 
             let mut workbook = formula_model::Workbook::new();
             import_csv_into_workbook(
