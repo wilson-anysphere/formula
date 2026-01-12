@@ -18,7 +18,7 @@ The source of truth for “what the engine currently implements” is:
     **[`crates/formula-engine/tests/function_catalog_sync.rs`](../crates/formula-engine/tests/function_catalog_sync.rs)**.
   - Used by downstream tooling (JS/TS, docs, scripts) without having to compile Rust.
 
-Current implemented function count (from `shared/functionCatalog.json`): **295**
+Current implemented function count (from `shared/functionCatalog.json`): **319**
 
 > This number will change over time. Run the parity report script below to get the current values
 > in your checkout.
@@ -49,6 +49,12 @@ node tools/parity/report_functions.mjs
 
 (Source: [`tools/parity/report_functions.mjs`](../tools/parity/report_functions.mjs))
 
+To print the list of FTAB names that don’t exist in the engine catalog yet:
+
+```bash
+node tools/parity/report_functions.mjs --list-missing
+```
+
 The report prints:
 
 - Implemented function count (from `shared/functionCatalog.json`)
@@ -59,9 +65,9 @@ The report prints:
 
 ```text
 Excel function parity (code-driven)
-Implemented functions (shared/functionCatalog.json): 295
-BIFF FTAB function names (non-empty): 478
-FTAB names missing from engine catalog (approx): 261
+Implemented functions (shared/functionCatalog.json): <count>
+BIFF FTAB function names (non-empty): <count>
+FTAB names missing from engine catalog (approx): <count>
 ```
 
 ## Notes on tricky function families
