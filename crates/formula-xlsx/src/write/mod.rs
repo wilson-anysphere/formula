@@ -4671,11 +4671,15 @@ fn ensure_workbook_rels_has_relationship(
                     for attr in e.attributes() {
                         let attr = attr?;
                         let key = attr.key.as_ref();
-                        if key == b"xmlns" {
+                        if key == b"xmlns"
+                            && attr.value.as_ref() == crate::relationships::PACKAGE_REL_NS.as_bytes()
+                        {
                             root_has_default_ns = true;
                         } else if let Some(prefix) = key.strip_prefix(b"xmlns:") {
-                            if let Ok(prefix) = std::str::from_utf8(prefix) {
-                                root_declared_prefixes.insert(prefix.to_string());
+                            if attr.value.as_ref() == crate::relationships::PACKAGE_REL_NS.as_bytes() {
+                                if let Ok(prefix) = std::str::from_utf8(prefix) {
+                                    root_declared_prefixes.insert(prefix.to_string());
+                                }
                             }
                         }
                     }
@@ -4817,11 +4821,15 @@ fn patch_workbook_rels_for_sheet_edits(
                     for attr in e.attributes() {
                         let attr = attr?;
                         let key = attr.key.as_ref();
-                        if key == b"xmlns" {
+                        if key == b"xmlns"
+                            && attr.value.as_ref() == crate::relationships::PACKAGE_REL_NS.as_bytes()
+                        {
                             root_has_default_ns = true;
                         } else if let Some(prefix) = key.strip_prefix(b"xmlns:") {
-                            if let Ok(prefix) = std::str::from_utf8(prefix) {
-                                root_declared_prefixes.insert(prefix.to_string());
+                            if attr.value.as_ref() == crate::relationships::PACKAGE_REL_NS.as_bytes() {
+                                if let Ok(prefix) = std::str::from_utf8(prefix) {
+                                    root_declared_prefixes.insert(prefix.to_string());
+                                }
                             }
                         }
                     }
@@ -4838,12 +4846,20 @@ fn patch_workbook_rels_for_sheet_edits(
                         .and_then(|p| std::str::from_utf8(p).ok())
                         .map(|s| s.to_string());
                 }
-                if !root_has_default_ns {
+                if !root_has_default_ns || root_declared_prefixes.is_empty() {
                     for attr in e.attributes() {
                         let attr = attr?;
-                        if attr.key.as_ref() == b"xmlns" {
+                        let key = attr.key.as_ref();
+                        if key == b"xmlns"
+                            && attr.value.as_ref() == crate::relationships::PACKAGE_REL_NS.as_bytes()
+                        {
                             root_has_default_ns = true;
-                            break;
+                        } else if let Some(prefix) = key.strip_prefix(b"xmlns:") {
+                            if attr.value.as_ref() == crate::relationships::PACKAGE_REL_NS.as_bytes() {
+                                if let Ok(prefix) = std::str::from_utf8(prefix) {
+                                    root_declared_prefixes.insert(prefix.to_string());
+                                }
+                            }
                         }
                     }
                 }
@@ -4853,13 +4869,16 @@ fn patch_workbook_rels_for_sheet_edits(
                 } else {
                     writer.write_event(Event::Start(e.to_owned()))?;
 
-                    let prefix = relationship_prefix.as_deref().or_else(|| {
-                        if root_has_default_ns {
-                            None
-                        } else {
-                            root_prefix.as_deref()
-                        }
-                    });
+                    let prefix = relationship_prefix
+                        .as_deref()
+                        .filter(|p| root_declared_prefixes.contains(*p))
+                        .or_else(|| {
+                            if root_has_default_ns {
+                                None
+                            } else {
+                                root_prefix.as_deref()
+                            }
+                        });
                     let relationship_tag = prefixed_tag(prefix, "Relationship");
                     for sheet in added {
                         let target = relationship_target_from_workbook(&sheet.path);
