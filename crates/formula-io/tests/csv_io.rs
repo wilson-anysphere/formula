@@ -1,5 +1,5 @@
 use formula_io::{open_workbook, save_workbook, Workbook};
-use formula_model::{sanitize_sheet_name, CellValue};
+use formula_model::{sanitize_sheet_name, CellValue, EXCEL_MAX_SHEET_NAME_LEN};
 
 #[test]
 fn opens_csv_and_saves_as_xlsx() {
@@ -115,6 +115,32 @@ fn csv_import_sanitizes_sheet_name_from_file_stem() {
         sheet.value_a1("B2").unwrap(),
         CellValue::String("world".to_string())
     );
+}
+
+#[test]
+fn csv_import_truncates_sheet_name_to_excel_max_len_in_utf16_units() {
+    let dir = tempfile::tempdir().expect("temp dir");
+
+    let prefix = "a".repeat(EXCEL_MAX_SHEET_NAME_LEN - 2);
+    // 🙂 is a non-BMP character, so it counts as 2 UTF-16 code units in Excel.
+    let long_stem = format!("{prefix}🙂{}", "b".repeat(10));
+    let path = dir.path().join(format!("{long_stem}.csv"));
+
+    std::fs::write(&path, "col1\n1\n").expect("write csv");
+
+    let wb = open_workbook(&path).expect("open csv workbook");
+    let model = match wb {
+        Workbook::Model(model) => model,
+        other => panic!("expected Workbook::Model, got {other:?}"),
+    };
+
+    let expected = sanitize_sheet_name(&long_stem);
+    assert_eq!(expected.encode_utf16().count(), EXCEL_MAX_SHEET_NAME_LEN);
+    assert_eq!(model.sheets[0].name, expected);
+
+    // Regression check: export should succeed (sheet name must be Excel-valid).
+    let out_path = dir.path().join("out.xlsx");
+    save_workbook(&Workbook::Model(model), &out_path).expect("save xlsx");
 }
 
 #[test]
