@@ -52,6 +52,19 @@ fn randarray_missing_rows_uses_default() {
 }
 
 #[test]
+fn randarray_missing_cols_uses_default() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=RANDARRAY(2,)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("A2").unwrap());
+}
+
+#[test]
 fn randarray_accepts_xlfn_prefix() {
     let mut engine = Engine::new();
     engine
@@ -149,6 +162,31 @@ fn randarray_min_equals_max_returns_constant_array() {
             "expected {addr} to be the constant min/max value"
         );
     }
+}
+
+#[test]
+fn randarray_blank_min_uses_default() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=RANDARRAY(1,1,,2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let Value::Number(n) = engine.get_cell_value("Sheet1", "A1") else {
+        panic!("expected RANDARRAY to return a number");
+    };
+    assert!((0.0..2.0).contains(&n), "expected 0 <= {n} < 2");
+}
+
+#[test]
+fn randarray_missing_max_uses_default() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=RANDARRAY(1,1,1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
 }
 
 #[test]
