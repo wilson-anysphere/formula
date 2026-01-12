@@ -26,19 +26,23 @@ pub(super) fn eval_number_or_skip(sheet: &mut TestSheet, formula: &str) -> Optio
 }
 
 fn coupon_date_from_maturity(maturity: &str, months_per_period: i32, periods_back: i32) -> String {
-    // Excel’s regular coupon schedules are maturity-anchored: starting from `maturity`, you step
-    // backwards in fixed month increments (12/frequency) using `EDATE`. Because `EDATE` clamps to
-    // the end of month when the target month is shorter, `EDATE(maturity, -(k*m))` is *not*
-    // equivalent to `k` repeated steps of `EDATE(..., -m)` in general (e.g. Dec 31 -> Jun 30 ->
-    // Dec 30). Build an explicit nested `EDATE` expression to match the schedule derivation used
-    // by the bond functions.
+    // Coupon schedules are maturity-anchored: each coupon date is computed as an offset from
+    // `maturity` (not by stepping iteratively period-by-period).
+    //
+    // This matters because `EDATE` month-stepping is not invertible due to end-of-month clamping;
+    // iterative stepping can drift the day-of-month (e.g. Dec 31 -> Jun 30 -> Dec 30). The engine’s
+    // COUP* functions (and bond schedule math) compute coupon dates as `EDATE(maturity, -k*m)`, so
+    // tests should too.
     debug_assert!(months_per_period > 0);
     debug_assert!(periods_back >= 0);
-    let mut expr = maturity.to_string();
-    for _ in 0..periods_back {
-        expr = format!("EDATE({expr},-{months_per_period})");
+    let months_back = months_per_period
+        .checked_mul(periods_back)
+        .expect("months_back fits in i32");
+    if months_back == 0 {
+        maturity.to_string()
+    } else {
+        format!("EDATE({maturity},-{months_back})")
     }
-    expr
 }
 
 #[test]
@@ -332,7 +336,7 @@ fn price_matches_pv_when_settlement_is_coupon_date() {
                                 let pv = eval_number(
                                     &mut sheet,
                                     &format!(
-                                        "=LET(n,{k},c,100*({rate})/{frequency},r,({yld})/{frequency},PV(r,n,-c,-{redemption}))"
+                                        "=LET(n,{k},c,({redemption})*({rate})/{frequency},r,({yld})/{frequency},PV(r,n,-c,-{redemption}))"
                                     ),
                                 );
 
@@ -384,13 +388,17 @@ fn duration_n1_equals_time_to_maturity() {
                     // we picked settlement in the final coupon period).
                     //
                     // Compute expected DURATION using the same day-count definitions as the bond
-                    // schedule:
-                    // - basis 0/4 use DAYS360
-                    // - basis 1/2/3 use actual serial-day differences
+                    // schedule (`coupon_schedule` in `bonds.rs`):
+                    // - basis 0/4: `E` is modeled as 360/frequency and `DSC = E - A` (with `A`
+                    //   computed via DAYS360)
+                    // - basis 2: `E = 360/frequency`, `DSC` is an actual day count
+                    // - basis 3: `E = 365/frequency`, `DSC` is an actual day count
+                    // - basis 1: `E` is the actual length of the coupon period, and `DSC` is an
+                    //   actual day count
                     let expected = eval_number(
                         &mut sheet,
                         &format!(
-                            "=LET(pcd,{pcd},dsc,IF({basis}=0,DAYS360({settlement},{maturity},FALSE),IF({basis}=4,DAYS360({settlement},{maturity},TRUE),{maturity}-{settlement})),e,IF({basis}=0,DAYS360(pcd,{maturity},FALSE),IF({basis}=4,DAYS360(pcd,{maturity},TRUE),{maturity}-pcd)),(dsc/e)/{frequency})"
+                            "=LET(pcd,{pcd},a,IF({basis}=0,DAYS360(pcd,{settlement},FALSE),IF({basis}=4,DAYS360(pcd,{settlement},TRUE),{settlement}-pcd)),e,IF(OR({basis}=0,{basis}=2,{basis}=4),360/{frequency},IF({basis}=3,365/{frequency},{maturity}-pcd)),dsc,IF(OR({basis}=0,{basis}=4),e-a,{maturity}-{settlement}),(dsc/e)/{frequency})"
                         ),
                     );
 
