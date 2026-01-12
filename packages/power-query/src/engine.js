@@ -1,6 +1,11 @@
-import { applyOperation, compileStreamingPipeline, isStreamableOperationSequence } from "./steps.js";
+import { applyOperation, compileStreamingPipeline, isStreamableOperation, isStreamableOperationSequence } from "./steps.js";
 import { ArrowTableAdapter } from "./arrowTable.js";
 import { DataTable, makeUniqueColumnNames } from "./table.js";
+
+import { createSpillStore } from "./streaming/spillStore.js";
+import { sortRowsStreaming } from "./streaming/operators/sortRows.js";
+import { groupByStreaming } from "./streaming/operators/groupBy.js";
+import { mergeStreaming } from "./streaming/operators/merge.js";
 
 import { hashValue } from "./cache/key.js";
 import { valueKey } from "./valueKey.js";
@@ -118,6 +123,18 @@ function isModuleNotFoundError(err) {
  *   rowCount: number;
  *   totalRowsEmitted: number;
  * } | {
+ *   type: "stream:spill";
+ *   queryId: string;
+ *   operator: string;
+ *   phase?: string;
+ *   runCount?: number;
+ *   rightRowCount?: number;
+ * } | {
+ *   type: "stream:operator";
+ *   queryId: string;
+ *   operator: string;
+ *   spilled?: boolean;
+ * } | {
  *   type: "privacy:firewall";
  *   queryId: string;
  *   phase: "folding" | "combine";
@@ -139,6 +156,12 @@ function isModuleNotFoundError(err) {
  *   signal?: AbortSignal;
  *   onProgress?: (event: EngineProgressEvent) => void;
  *   cache?: { mode?: "use" | "refresh" | "bypass"; ttlMs?: number; validation?: "none" | "source-state" };
+ *   streaming?: {
+ *     enabled?: boolean;
+ *     spill?: import("./streaming/spillStore.js").SpillStoreOptions;
+ *     maxInMemoryRows?: number;
+ *     maxInMemoryBytes?: number;
+ *   };
  * }} ExecuteOptions
  */
 
@@ -249,6 +272,197 @@ function throwIfAborted(signal) {
   const err = new Error("Aborted");
   err.name = "AbortError";
   throw err;
+}
+
+/**
+ * Determine whether a query operation sequence can be executed using the streaming v2 executor.
+ *
+ * Streaming v2 supports a streamable prefix/suffix plus out-of-core implementations for select
+ * non-streamable operations (sort/groupBy/merge).
+ *
+ * @param {QueryOperation[]} operations
+ * @returns {boolean}
+ */
+function isStreamingV2OperationSequence(operations) {
+  for (const op of operations) {
+    if (op.type === "promoteHeaders") continue;
+    if (isStreamableOperation(op)) continue;
+    if (op.type === "sortRows") continue;
+    if (op.type === "groupBy") {
+      const aggs = Array.isArray(op.aggregations) ? op.aggregations : [];
+      for (const agg of aggs) {
+        const kind = agg?.op;
+        if (!["count", "sum", "min", "max", "average", "countDistinct"].includes(kind)) {
+          return false;
+        }
+      }
+      continue;
+    }
+    if (op.type === "merge") {
+      const joinType = op.joinType ?? "inner";
+      if (joinType !== "inner" && joinType !== "left") return false;
+      const joinMode = op.joinMode ?? "flat";
+      if (joinMode !== "flat" && joinMode !== "nested") return false;
+      continue;
+    }
+    // Not supported by v2 streaming executor.
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Apply a mixed (streamable + out-of-core) operation list to an input batch stream.
+ *
+ * @param {QueryEngine} engine
+ * @param {{ columns: import("./table.js").Column[]; batches: AsyncIterable<unknown[][]> }} input
+ * @param {QueryOperation[]} operations
+ * @param {QueryExecutionContext} context
+ * @param {ExecuteOptions & { batchSize: number }} options
+ * @param {{ credentialCache: Map<string, Promise<unknown>>, permissionCache: Map<string, Promise<boolean>>, now: () => number }} state
+ * @param {Set<string>} callStack
+ * @param {import("./streaming/spillStore.js").SpillStore} spillStore
+ * @param {{ maxInMemoryRows: number; maxInMemoryBytes?: number | undefined; queryId: string }} streamingConfig
+ */
+async function applyOperationsStreamingV2(
+  engine,
+  input,
+  operations,
+  context,
+  options,
+  state,
+  callStack,
+  spillStore,
+  streamingConfig,
+) {
+  let columns = input.columns;
+  let batches = input.batches;
+
+  /** @type {QueryOperation[]} */
+  let pending = [];
+
+  const flushPending = () => {
+    if (pending.length === 0) return;
+    const pipeline = compileStreamingPipeline(pending, columns);
+    columns = pipeline.columns;
+    batches = applyStreamingPipelineToBatches(pipeline, batches, options.signal);
+    pending = [];
+  };
+
+  /**
+   * @param {import("./model.js").MergeOp} op
+   */
+  const loadMergeRight = async (op) => {
+    if (callStack.has(op.rightQuery)) {
+      throw new Error(`Query reference cycle detected: ${Array.from(callStack).join(" -> ")} -> ${op.rightQuery}`);
+    }
+
+    const existing = context.queryResults?.[op.rightQuery];
+    if (existing) {
+      const table = existing.table;
+      const outColumns = table.columns.map((c) => ({ name: c.name, type: c.type ?? "any" }));
+
+      async function* outBatches() {
+        /** @type {unknown[][]} */
+        let batch = [];
+        for (const row of table.iterRows()) {
+          batch.push(row);
+          if (batch.length >= options.batchSize) {
+            yield batch;
+            batch = [];
+          }
+        }
+        if (batch.length > 0) yield batch;
+      }
+
+      return { columns: outColumns, batches: outBatches() };
+    }
+
+    const query = context.queries?.[op.rightQuery];
+    if (!query) throw new Error(`Unknown query '${op.rightQuery}'`);
+    if (callStack.has(query.id)) {
+      throw new Error(`Query reference cycle detected: ${Array.from(callStack).join(" -> ")} -> ${query.id}`);
+    }
+    const nextStack = new Set(callStack);
+    nextStack.add(query.id);
+
+    const depOptions = { ...options, limit: undefined, maxStepIndex: undefined };
+    return engine.executeQueryToBatchesForStreaming(query, context, depOptions, state, nextStack);
+  };
+
+  for (const op of operations) {
+    if (op.type === "promoteHeaders") {
+      flushPending();
+      ({ columns, batches } = await applyPromoteHeadersStreaming(columns, batches, options.signal));
+      continue;
+    }
+
+    if (isStreamableOperation(op)) {
+      pending.push(op);
+      continue;
+    }
+
+    flushPending();
+
+    if (op.type === "sortRows") {
+      ({ columns, batches } = sortRowsStreaming(
+        { columns, batches },
+        op.sortBy,
+        {
+          store: spillStore,
+          batchSize: options.batchSize,
+          maxInMemoryRows: streamingConfig.maxInMemoryRows,
+          maxInMemoryBytes: streamingConfig.maxInMemoryBytes,
+          signal: options.signal,
+          onProgress: options.onProgress,
+          queryId: streamingConfig.queryId,
+        },
+      ));
+      continue;
+    }
+
+    if (op.type === "groupBy") {
+      ({ columns, batches } = groupByStreaming(
+        { columns, batches },
+        op.groupColumns,
+        op.aggregations,
+        {
+          store: spillStore,
+          batchSize: options.batchSize,
+          maxInMemoryRows: streamingConfig.maxInMemoryRows,
+          maxInMemoryBytes: streamingConfig.maxInMemoryBytes,
+          signal: options.signal,
+          onProgress: options.onProgress,
+          queryId: streamingConfig.queryId,
+        },
+      ));
+      continue;
+    }
+
+    if (op.type === "merge") {
+      const right = await loadMergeRight(op);
+      ({ columns, batches } = mergeStreaming({
+        left: { columns, batches },
+        right,
+        op,
+        store: spillStore,
+        batchSize: options.batchSize,
+        maxInMemoryRows: streamingConfig.maxInMemoryRows,
+        maxInMemoryBytes: streamingConfig.maxInMemoryBytes,
+        signal: options.signal,
+        onProgress: options.onProgress,
+        queryId: streamingConfig.queryId,
+      }));
+      continue;
+    }
+
+    /** @type {never} */
+    const exhausted = op;
+    throw new Error(`Unsupported operation '${exhausted.type}'`);
+  }
+
+  flushPending();
+  return { columns, batches };
 }
 
 /**
@@ -3330,7 +3544,8 @@ export class QueryEngine {
       operations.push({ type: "take", count: options.limit });
     }
 
-    const canStreamSteps = isStreamableOperationSequence(operations);
+    const streamingEnabled = options.streaming?.enabled ?? true;
+    const canStreamSteps = streamingEnabled ? isStreamingV2OperationSequence(operations) : isStreamableOperationSequence(operations);
 
     const fileConnector = this.connectors.get("file");
     const canStreamSource =
@@ -3376,6 +3591,10 @@ export class QueryEngine {
     const state = { credentialCache: new Map(), permissionCache: new Map(), now: () => Date.now() };
     const callStack = new Set([query.id]);
 
+    const spillStore = createSpillStore(options.streaming?.spill);
+    const maxInMemoryRows = options.streaming?.maxInMemoryRows ?? 50_000;
+    const maxInMemoryBytes = options.streaming?.maxInMemoryBytes;
+
     let streamingSource = query.source;
     if (streamingSource.type === "parquet") {
       const projection = computeParquetProjectionColumns(steps);
@@ -3404,24 +3623,19 @@ export class QueryEngine {
     let inputColumns = source.columns;
     let inputBatches = source.batches;
 
-    while (true) {
-      const promoteIndex = pipelineOperations.findIndex((op) => op.type === "promoteHeaders");
-      if (promoteIndex < 0) break;
-
-      const prefixOps = pipelineOperations.slice(0, promoteIndex);
-      const suffixOps = pipelineOperations.slice(promoteIndex + 1);
-      const prefixPipeline = compileStreamingPipeline(prefixOps, inputColumns);
-      const prefixBatches = applyStreamingPipelineToBatches(prefixPipeline, inputBatches, options.signal);
-      ({ columns: inputColumns, batches: inputBatches } = await applyPromoteHeadersStreaming(
-        prefixPipeline.columns,
-        prefixBatches,
-        options.signal,
-      ));
-      pipelineOperations = suffixOps;
-    }
-
-    const pipeline = compileStreamingPipeline(pipelineOperations, inputColumns);
-    const outputColumns = pipeline.columns;
+    const planned = await applyOperationsStreamingV2(
+      this,
+      { columns: inputColumns, batches: inputBatches },
+      pipelineOperations,
+      context,
+      { ...options, batchSize },
+      state,
+      callStack,
+      spillStore,
+      { maxInMemoryRows, maxInMemoryBytes, queryId: query.id },
+    );
+    const outputColumns = planned.columns;
+    const outputBatches = planned.batches;
 
     let totalRowsEmitted = 0;
     if (includeHeader) {
@@ -3494,16 +3708,12 @@ export class QueryEngine {
     };
 
     try {
-      for await (const batchRows of inputBatches) {
+      for await (const batchRows of outputBatches) {
         throwIfAborted(options.signal);
-        const result = pipeline.transformBatch(batchRows);
-        enqueue(result.rows);
-        await emitAvailable(result.done);
-        if (result.done) break;
+        enqueue(batchRows);
+        await emitAvailable(false);
       }
 
-      const flushed = pipeline.transformBatch([]);
-      enqueue(flushed.rows);
       await emitAvailable(true);
     } finally {
       options.onProgress?.({ type: "source:complete", queryId: query.id, sourceType: streamingSource.type });
@@ -3842,7 +4052,8 @@ export class QueryEngine {
       operations.push({ type: "take", count: options.limit });
     }
 
-    const canStreamSteps = isStreamableOperationSequence(operations);
+    const streamingEnabled = options.streaming?.enabled ?? true;
+    const canStreamSteps = streamingEnabled ? isStreamingV2OperationSequence(operations) : isStreamableOperationSequence(operations);
 
     const fileConnector = this.connectors.get("file");
     const canStreamSource =
@@ -3879,6 +4090,10 @@ export class QueryEngine {
     /** @type {QueryOperation[]} */
     let pipelineOperations = operations;
 
+    const spillStore = createSpillStore(options.streaming?.spill);
+    const maxInMemoryRows = options.streaming?.maxInMemoryRows ?? 50_000;
+    const maxInMemoryBytes = options.streaming?.maxInMemoryBytes;
+
     let streamingSource = query.source;
     if (streamingSource.type === "parquet") {
       const projection = computeParquetProjectionColumns(steps);
@@ -3906,24 +4121,19 @@ export class QueryEngine {
     let inputColumns = source.columns;
     let inputBatches = source.batches;
 
-    while (true) {
-      const promoteIndex = pipelineOperations.findIndex((op) => op.type === "promoteHeaders");
-      if (promoteIndex < 0) break;
-
-      const prefixOps = pipelineOperations.slice(0, promoteIndex);
-      const suffixOps = pipelineOperations.slice(promoteIndex + 1);
-      const prefixPipeline = compileStreamingPipeline(prefixOps, inputColumns);
-      const prefixBatches = applyStreamingPipelineToBatches(prefixPipeline, inputBatches, options.signal);
-      ({ columns: inputColumns, batches: inputBatches } = await applyPromoteHeadersStreaming(
-        prefixPipeline.columns,
-        prefixBatches,
-        options.signal,
-      ));
-      pipelineOperations = suffixOps;
-    }
-
-    const pipeline = compileStreamingPipeline(pipelineOperations, inputColumns);
-    const outputColumns = pipeline.columns;
+    const planned = await applyOperationsStreamingV2(
+      this,
+      { columns: inputColumns, batches: inputBatches },
+      pipelineOperations,
+      context,
+      { ...options, batchSize },
+      state,
+      callStack,
+      spillStore,
+      { maxInMemoryRows, maxInMemoryBytes, queryId: query.id },
+    );
+    const outputColumns = planned.columns;
+    const outputBatches = planned.batches;
 
     async function* batches() {
       /** @type {unknown[][]} */
@@ -3970,18 +4180,14 @@ export class QueryEngine {
         }
       };
 
-      for await (const batchRows of inputBatches) {
+      for await (const batchRows of outputBatches) {
         throwIfAborted(options.signal);
-        const result = pipeline.transformBatch(batchRows);
-        enqueue(result.rows);
-        for await (const chunk of yieldAvailable(result.done)) {
+        enqueue(batchRows);
+        for await (const chunk of yieldAvailable(false)) {
           yield chunk;
         }
-        if (result.done) break;
       }
 
-      const flushed = pipeline.transformBatch([]);
-      enqueue(flushed.rows);
       for await (const chunk of yieldAvailable(true)) {
         yield chunk;
       }

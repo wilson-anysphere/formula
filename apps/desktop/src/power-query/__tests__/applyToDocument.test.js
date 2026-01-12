@@ -69,6 +69,48 @@ test("applyQueryToDocument writes query output into the destination range (file 
   assert.equal(doc.getCell("Sheet1", { row: 2, col: 1 }).value, 200);
 });
 
+test("applyQueryToDocument streams sortRows without falling back to materialization", async () => {
+  const ROWS = 1000;
+
+  const engine = new QueryEngine({
+    fileAdapter: {
+      readText: async () => {
+        throw new Error("unexpected full read");
+      },
+      readTextStream: async function* () {
+        yield "A\n";
+        let chunk = "";
+        for (let i = ROWS; i >= 1; i--) {
+          chunk += `${i}\n`;
+          if (i % 200 === 0) {
+            yield chunk;
+            chunk = "";
+          }
+        }
+        if (chunk) yield chunk;
+      },
+    },
+  });
+
+  const doc = new DocumentController({ engine: new MockEngine() });
+
+  const query = {
+    id: "q_sort_apply",
+    name: "Sort apply",
+    source: { type: "csv", path: "/tmp/sort_apply.csv", options: { hasHeaders: true } },
+    steps: [{ id: "s_sort", name: "Sort", operation: { type: "sortRows", sortBy: [{ column: "A", direction: "ascending" }] } }],
+  };
+
+  const destination = { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true };
+  const result = await applyQueryToDocument(doc, query, destination, { engine, batchSize: 256 });
+
+  assert.deepEqual(result, { rows: ROWS + 1, cols: 1 });
+  assert.equal(doc.getCell("Sheet1", { row: 0, col: 0 }).value, "A");
+  assert.equal(doc.getCell("Sheet1", { row: 1, col: 0 }).value, 1);
+  assert.equal(doc.getCell("Sheet1", { row: 2, col: 0 }).value, 2);
+  assert.equal(doc.getCell("Sheet1", { row: ROWS, col: 0 }).value, ROWS);
+});
+
 test("applyQueryToDocument loads formula-like strings as values (not formulas)", async () => {
   const engine = new QueryEngine();
   const doc = new DocumentController({ engine: new MockEngine() });

@@ -1444,6 +1444,7 @@ export const STREAMABLE_OPERATION_TYPES = new Set([
   "replaceValues",
   "removeRowsWithErrors",
   "distinctRows",
+  "expandTableColumn",
   "reorderColumns",
   "addIndexColumn",
   "combineColumns",
@@ -1459,6 +1460,9 @@ export const STREAMABLE_OPERATION_TYPES = new Set([
 export function isStreamableOperation(operation) {
   if (operation.type === "splitColumn") {
     return Array.isArray(operation.newColumns) && operation.newColumns.length > 0;
+  }
+  if (operation.type === "expandTableColumn") {
+    return Array.isArray(operation.columns);
   }
   return STREAMABLE_OPERATION_TYPES.has(operation.type);
 }
@@ -1932,6 +1936,83 @@ export function compileStreamingPipeline(operations, inputColumns) {
           }),
           done: false,
         }));
+        break;
+      }
+      case "expandTableColumn": {
+        if (!Array.isArray(op.columns)) {
+          throw new Error("Streaming expandTableColumn requires an explicit columns list");
+        }
+
+        const columnIdx = getColumnIndex(op.column);
+        const columnsToExpand = op.columns;
+        const newColumnNames = op.newColumnNames ?? null;
+
+        if (newColumnNames && newColumnNames.length !== columnsToExpand.length) {
+          throw new Error(
+            `expandTableColumn expected newColumnNames to have the same length as columns (${columnsToExpand.length}), got ${newColumnNames.length}`,
+          );
+        }
+
+        const prefixColumns = columns.slice(0, columnIdx);
+        const suffixColumns = columns.slice(columnIdx + 1);
+
+        const rawExpandedNames = newColumnNames ?? columnsToExpand;
+        const reserved = new Set([...prefixColumns.map((c) => c.name), ...suffixColumns.map((c) => c.name)]);
+        const baseExpanded = makeUniqueColumnNames(rawExpandedNames);
+        const expandedNames = baseExpanded.map((base) => {
+          if (!reserved.has(base)) {
+            reserved.add(base);
+            return base;
+          }
+          let i = 1;
+          while (reserved.has(`${base}.${i}`)) i += 1;
+          const unique = `${base}.${i}`;
+          reserved.add(unique);
+          return unique;
+        });
+
+        columns = [
+          ...prefixColumns,
+          ...expandedNames.map((name) => ({ name, type: "any" })),
+          ...suffixColumns,
+        ];
+        columnIndex = buildIndex(columns);
+
+        transforms.push((rows) => {
+          /** @type {unknown[][]} */
+          const out = [];
+
+          for (const row of rows) {
+            const src = Array.isArray(row) ? row : [];
+            const prefix = prefixColumns.map((_c, idx) => normalizeCell(src?.[idx]));
+            const suffix = suffixColumns.map((_c, idx) => normalizeCell(src?.[columnIdx + 1 + idx]));
+            const nestedValue = normalizeCell(src?.[columnIdx]);
+
+            if (nestedValue == null) {
+              out.push([...prefix, ...columnsToExpand.map(() => null), ...suffix]);
+              continue;
+            }
+
+            if (!isITable(nestedValue)) {
+              throw new Error(`expandTableColumn expected '${op.column}' to contain nested tables or null`);
+            }
+
+            const nested = nestedValue;
+            const nestedIndices = columnsToExpand.map((c) => nested.getColumnIndex(c));
+
+            if (nested.rowCount === 0) {
+              out.push([...prefix, ...columnsToExpand.map(() => null), ...suffix]);
+              continue;
+            }
+
+            for (let nestedRow = 0; nestedRow < nested.rowCount; nestedRow++) {
+              const expanded = nestedIndices.map((idx) => nested.getCell(nestedRow, idx));
+              out.push([...prefix, ...expanded.map(normalizeCell), ...suffix]);
+            }
+          }
+
+          return { rows: out, done: false };
+        });
         break;
       }
       case "splitColumn": {
