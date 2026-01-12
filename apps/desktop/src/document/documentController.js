@@ -5,6 +5,7 @@ import {
 } from "./cell.js";
 import { formatA1, normalizeRange, parseA1, parseRangeA1 } from "./coords.js";
 import { applyStylePatch, StyleTable } from "../formatting/styleTable.js";
+import { getSheetNameValidationErrorMessage } from "../../../../packages/workbook-backend/src/sheetNameValidation.js";
 
 /**
  * @typedef {import("./cell.js").CellState} CellState
@@ -31,6 +32,16 @@ function sortKey(sheetId, row, col) {
   return `${sheetId}\u0000${row.toString().padStart(10, "0")}\u0000${col
     .toString()
     .padStart(10, "0")}`;
+}
+
+function normalizeSheetNameForCaseInsensitiveCompare(name) {
+  // Excel compares sheet names case-insensitively with Unicode NFKC normalization.
+  // Match the semantics we use elsewhere (`@formula/workbook-backend`).
+  try {
+    return String(name ?? "").normalize("NFKC").toUpperCase();
+  } catch {
+    return String(name ?? "").toUpperCase();
+  }
 }
 
 function parseRowColKey(key) {
@@ -2094,23 +2105,13 @@ export class DocumentController {
    */
   #validateSheetName(name, options = {}) {
     const normalized = String(name ?? "").trim();
-    if (!normalized) throw new Error("Sheet name cannot be empty");
-    if (normalized.length > 31) {
-      throw new Error("Sheet name cannot exceed 31 characters");
-    }
-    if (/[:\\\/\?\*\[\]]/.test(normalized)) {
-      throw new Error("Sheet name cannot contain: : \\\\ / ? * [ ]");
-    }
-
     const ignore = options.ignoreSheetId ?? null;
-    const candidateCi = normalized.toLowerCase();
-    for (const id of this.getSheetIds()) {
-      if (ignore && id === ignore) continue;
-      const meta = this.getSheetMeta(id) ?? this.#defaultSheetMeta(id);
-      if (meta.name.toLowerCase() === candidateCi) {
-        throw new Error("Duplicate sheet name");
-      }
-    }
+    const existingNames = this.getSheetIds()
+      .filter((id) => !(ignore && id === ignore))
+      .map((id) => (this.getSheetMeta(id) ?? this.#defaultSheetMeta(id)).name);
+
+    const err = getSheetNameValidationErrorMessage(normalized, { existingNames });
+    if (err) throw new Error(err);
 
     return normalized;
   }
@@ -2270,12 +2271,16 @@ export class DocumentController {
     if (!sheetId) sheetId = generateId();
     if (this.model.sheets.has(sheetId)) throw new Error(`Duplicate sheet id: ${sheetId}`);
 
-    const existingNames = beforeOrder.map((id) => (this.getSheetMeta(id) ?? this.#defaultSheetMeta(id)).name.toLowerCase());
+    const existingNames = new Set(
+      beforeOrder.map((id) =>
+        normalizeSheetNameForCaseInsensitiveCompare((this.getSheetMeta(id) ?? this.#defaultSheetMeta(id)).name),
+      ),
+    );
     const defaultName = (() => {
       if (params.name != null) return this.#validateSheetName(params.name, { ignoreSheetId: null });
       for (let n = 1; ; n += 1) {
         const candidate = `Sheet${n}`;
-        if (!existingNames.includes(candidate.toLowerCase())) return candidate;
+        if (!existingNames.has(normalizeSheetNameForCaseInsensitiveCompare(candidate))) return candidate;
       }
     })();
 
