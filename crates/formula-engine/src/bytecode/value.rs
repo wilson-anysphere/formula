@@ -124,6 +124,10 @@ impl ErrorKind {
     pub fn from_code(raw: &str) -> Option<Self> {
         crate::value::ErrorKind::from_code(raw).map(Self::from)
     }
+
+    pub fn as_code(self) -> &'static str {
+        crate::value::ErrorKind::from(self).as_code()
+    }
 }
 
 impl From<crate::value::ErrorKind> for ErrorKind {
@@ -235,17 +239,6 @@ impl Eq for Value {}
 
 impl fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            ErrorKind::Null => "#NULL!",
-            ErrorKind::Div0 => "#DIV/0!",
-            ErrorKind::Ref => "#REF!",
-            ErrorKind::Value => "#VALUE!",
-            ErrorKind::Name => "#NAME?",
-            ErrorKind::Num => "#NUM!",
-            ErrorKind::NA => "#N/A",
-            ErrorKind::Spill => "#SPILL!",
-            ErrorKind::Calc => "#CALC!",
-        };
-        f.write_str(s)
+        f.write_str(self.as_code())
     }
 }
