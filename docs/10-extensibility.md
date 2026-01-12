@@ -40,15 +40,132 @@ extensions run in a Web Worker (`BrowserExtensionHost`) with import/eval guardra
 The desktop implements a small, VS Code-inspired subset of `when` syntax for menus/keybindings:
 
 - Operators: `&&`, `||`, `!`, parentheses
-- Identifiers (context keys): `cellHasValue`, `hasSelection`, `sheetName`, …
+- Identifiers (context keys): `cellHasValue`, `selectionType`, `activeCellA1`, …
 - Equality: `==` / `!=` against string/number/boolean literals
 
-Notes on built-in keys:
+Built-in keys (desktop UI):
 
-- `sheetName` uses the active sheet’s **display name**.
-- `cellHasValue` is `true` for both literal values and formula cells (presence of a formula counts as “has value”).
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `sheetName` | string | Active sheet **display name**. |
+| `cellHasValue` | boolean | `true` if the **active cell** has a non-empty literal value **or** a formula. |
+| `selectionType` | `"cell" \| "range" \| "multi" \| "column" \| "row" \| "all"` | Shape of the current selection. |
+| `hasSelection` | boolean | Convenience key: `true` when the selection is anything other than a single cell (`selectionType != "cell"`). |
+| `isSingleCell` | boolean | Convenience key: `true` when `selectionType == "cell"`. |
+| `isMultiRange` | boolean | Convenience key: `true` when `selectionType == "multi"`. |
+| `activeCellA1` | string | Active cell address in A1 notation (e.g. `"C3"`). |
 
-Unknown/invalid clauses fail closed (treated as `false`).
+Planned / reserved keys (not yet exposed in the desktop UI):
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `gridArea` | `"cell" \| "rowHeader" \| "colHeader" \| "corner"` | Where the interaction happened (cell grid vs row/col header vs corner). |
+| `commentsPanelVisible` | boolean | Whether the comments panel is open. |
+| `cellHasComment` | boolean | Whether the active cell has a comment. |
+
+Examples:
+
+```txt
+# Enable only for a single cell (no selection range)
+isSingleCell
+
+# Enable only when the selection is a rectangular range (not a whole row/column/all)
+selectionType == "range"
+
+# Enable only for multi-range selections
+isMultiRange
+
+# Enable only when the active cell has a value or formula
+isSingleCell && cellHasValue
+
+# Sheet-specific enablement + address targeting
+sheetName == "Sheet1" && activeCellA1 == "A1"
+
+# (Planned) Separate header context menus
+gridArea == "rowHeader"
+
+# (Planned) Only enable when a comment exists and the comments panel is visible
+commentsPanelVisible && cellHasComment
+```
+
+Notes:
+
+- Unknown/invalid clauses fail closed (treated as `false`).
+- In the current desktop context menu implementation, `when` controls whether an item is **enabled/disabled**
+  (disabled items still render). For keybindings, `when` controls whether the binding is active.
+
+## Menus (manifest contributions)
+
+Extensions can contribute menu items via `contributes.menus` in the manifest (and via `formula.ui.registerContextMenu(...)`).
+
+Supported menu locations (desktop UI):
+
+- `cell/context` — the grid (cell) context menu.
+
+Reserved menu locations (not yet wired in the desktop UI, but reserved for future parity):
+
+- `row/context` — row header context menu
+- `column/context` — column header context menu
+- `corner/context` — top-left corner (select-all) context menu
+
+### `group` / `group@order` + separators
+
+Menu items may include an optional `group` string:
+
+- `"<groupName>"` (e.g. `"extensions"`)
+- `"<groupName>@<order>"` (e.g. `"extensions@10"`)
+
+Sorting rules (current implementation):
+
+1. Group name (lexicographic, empty group first)
+2. `order` (numeric ascending; missing/invalid order defaults to `0`)
+3. Command id (lexicographic)
+
+Separators:
+
+- The context menu renderer automatically inserts a separator when the **group name changes** between adjacent items
+  after sorting.
+- Items with `group: null` / omitted are treated as the empty group name (`""`).
+
+## Keybindings
+
+Extensions can contribute keyboard shortcuts via `contributes.keybindings`.
+
+### Format (single chord only)
+
+Only **single-chord** shortcuts are supported (no multi-step sequences like `ctrl+k ctrl+c`).
+
+Format: `"<modifier>+<modifier>+<key>"` where:
+
+- Modifiers: `ctrl`/`control`, `shift`, `alt`/`option`, `meta`/`cmd`/`command`
+- The final token is the key (examples: `m`, `f2`, `escape`, `delete`, `arrowup`, `;`)
+
+Platform override:
+
+- Use the `mac` field to specify a different keybinding on macOS (otherwise `key` is used on all platforms).
+
+### Alias normalization
+
+Key tokens are normalized case-insensitively and with common aliases:
+
+- `esc` → `escape`
+- `del` → `delete`
+- `return` → `enter`
+- `spacebar` or literal `" "` → `space`
+- `up`/`down`/`left`/`right` → `arrowup`/`arrowdown`/`arrowleft`/`arrowright`
+
+Some shifted punctuation is matched via `KeyboardEvent.code` as a fallback, so bindings like `ctrl+shift+;` can match
+the `:` key on layouts where that shares the same physical key.
+
+### Precedence + reserved shortcuts
+
+- Extension keybindings only run when the event has not already been handled (`event.defaultPrevented === false`) and
+  focus is not in a text input/textarea/contenteditable element.
+- Built-in application shortcuts take precedence over extension-contributed keybindings (extensions should not rely on
+  overriding core editing shortcuts).
+- Some shortcuts are reserved by the desktop host and should not be used by extensions:
+  - `Ctrl/Cmd+Shift+P` (command palette)
+  - `Ctrl/Cmd+Shift+O` (quick open)
 
 ---
 
@@ -173,6 +290,11 @@ This legacy path extracts extensions to disk and loads them into the Node extens
         "title": "Run My Extension",
         "category": "My Extension",
         "icon": "$(play)"
+      },
+      {
+        "command": "myExtension.processCell",
+        "title": "Process Cell",
+        "category": "My Extension"
       }
     ],
     
@@ -180,13 +302,8 @@ This legacy path extracts extensions to disk and loads them into the Node extens
       "cell/context": [
         {
           "command": "myExtension.processCell",
-          "when": "cellHasValue"
-        }
-      ],
-      "toolbar": [
-        {
-          "command": "myExtension.run",
-          "group": "extensions"
+          "when": "isSingleCell && cellHasValue",
+          "group": "extensions@10"
         }
       ]
     },
@@ -196,7 +313,7 @@ This legacy path extracts extensions to disk and loads them into the Node extens
         "command": "myExtension.run",
         "key": "ctrl+shift+m",
         "mac": "cmd+shift+m",
-        "when": "hasSelection"
+        "when": "selectionType != 'cell'"
       }
     ],
     
