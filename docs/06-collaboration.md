@@ -733,7 +733,9 @@ import { createCommentManagerForSession } from "@formula/collab-comments";
 const comments = createCommentManagerForSession(session);
 
 const commentId = comments.addComment({
-  cellRef: "A1",
+  // In collaborative mode, the desktop UI uses sheet-qualified refs like `Sheet1!A1`.
+  // (In non-collab mode some legacy docs use unqualified "A1".)
+  cellRef: "Sheet1!A1",
   kind: "threaded",
   content: "Hello",
   author: { id: userId, name: userName },
