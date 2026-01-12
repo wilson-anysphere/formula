@@ -690,3 +690,91 @@ test("BrowserExtensionHost: workbook.getActiveWorkbook overwrites stored path wh
 
   assert.equal(apiResult?.path ?? null, null);
 });
+
+test("BrowserExtensionHost: workbookOpened events update the fallback workbook snapshot when getActiveWorkbook is not implemented", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  /** @type {((event: any) => void) | null} */
+  let onWorkbookOpened = null;
+
+  /** @type {any} */
+  let apiResult;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "api_result" && msg.id === "req1") {
+          apiResult = msg.result;
+          resolveDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      onWorkbookOpened(handler) {
+        onWorkbookOpened = handler;
+        return () => {
+          onWorkbookOpened = null;
+        };
+      },
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.workbook-opened-updates-fallback";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-opened-updates-fallback/",
+    mainUrl: "memory://workbook-opened-updates-fallback/main.mjs",
+    manifest: {
+      name: "workbook-opened-updates-fallback",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: [],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+
+  assert.equal(typeof onWorkbookOpened, "function");
+  onWorkbookOpened({
+    workbook: {
+      name: "opened.xlsx",
+      path: "/tmp/opened.xlsx",
+      sheets: [{ id: "sheet1", name: "Sheet1" }],
+      activeSheet: { id: "sheet1", name: "Sheet1" },
+    },
+  });
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "getActiveWorkbook",
+    args: [],
+  });
+
+  await done;
+
+  assert.equal(apiResult?.path, "/tmp/opened.xlsx");
+  assert.equal(apiResult?.name, "opened.xlsx");
+});

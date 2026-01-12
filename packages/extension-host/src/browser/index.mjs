@@ -511,12 +511,8 @@ class BrowserExtensionHost {
           try {
             if (Object.prototype.hasOwnProperty.call(workbook, "name")) {
               const rawName = workbook.name;
-              const trimmed = typeof rawName === "string" ? rawName.trim() : null;
-              if (trimmed) {
-                next.name = trimmed;
-              } else if (rawName !== undefined && rawName !== null) {
-                next.name = String(rawName);
-              }
+              const trimmed = rawName == null ? "" : String(rawName).trim();
+              if (trimmed) next.name = trimmed;
             }
           } catch {
             // ignore
@@ -2429,6 +2425,80 @@ class BrowserExtensionHost {
         const id = data?.workbook?.activeSheet?.id;
         if (typeof id === "string" && id.trim()) {
           this._activeSheetId = id.trim();
+        }
+      }
+
+      // Keep internal workbook metadata in sync when the host emits workbook lifecycle events
+      // through the spreadsheet API hooks (e.g. desktop UI-triggered open/new/save operations).
+      if (evt === "workbookOpened" || evt === "beforeSave") {
+        const wb = data?.workbook;
+        if (wb && typeof wb === "object") {
+          const next = { ...this._workbook };
+
+          // Merge name/path using the same semantics as `_getActiveWorkbook`.
+          try {
+            if (Object.prototype.hasOwnProperty.call(wb, "name")) {
+              const rawName = wb.name;
+              const trimmed = rawName == null ? "" : String(rawName).trim();
+              if (trimmed) next.name = trimmed;
+            }
+          } catch {
+            // ignore
+          }
+
+          try {
+            if (Object.prototype.hasOwnProperty.call(wb, "path")) {
+              const rawPath = wb.path;
+              if (rawPath === undefined) {
+                // keep previous
+              } else if (rawPath == null) {
+                next.path = null;
+              } else {
+                const str = String(rawPath);
+                next.path = str.trim().length > 0 ? str : null;
+              }
+            }
+          } catch {
+            // ignore
+          }
+
+          // Best-effort: update internal sheet metadata from the workbook snapshot so
+          // `getActiveWorkbook` stays accurate even when the host doesn't implement
+          // `listSheets` / `getActiveSheet`.
+          try {
+            if (Object.prototype.hasOwnProperty.call(wb, "sheets") && Array.isArray(wb.sheets)) {
+              const normalized = wb.sheets
+                .map((sheet) => {
+                  if (!sheet || typeof sheet !== "object") return null;
+                  const id = typeof sheet.id === "string" ? sheet.id.trim() : String(sheet.id ?? "").trim();
+                  const name = typeof sheet.name === "string" ? sheet.name.trim() : String(sheet.name ?? "").trim();
+                  if (!id || !name) return null;
+                  return { id, name };
+                })
+                .filter(Boolean);
+              if (normalized.length > 0) {
+                this._sheets = normalized;
+              }
+            }
+          } catch {
+            // ignore
+          }
+
+          try {
+            if (
+              Object.prototype.hasOwnProperty.call(wb, "activeSheet") &&
+              wb.activeSheet &&
+              typeof wb.activeSheet === "object"
+            ) {
+              const idRaw = wb.activeSheet.id;
+              const id = typeof idRaw === "string" ? idRaw.trim() : String(idRaw ?? "").trim();
+              if (id) this._activeSheetId = id;
+            }
+          } catch {
+            // ignore
+          }
+
+          this._workbook = { name: next.name, path: next.path ?? null };
         }
       }
     } catch {
