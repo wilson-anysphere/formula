@@ -20,6 +20,7 @@ const WHEN_COMMAND_PALETTE_CLOSED = "workbench.commandPaletteOpen == false";
 // the user is typing in a text input (notably the formula bar editor).
 const WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT = "workbench.commandPaletteOpen == false && focus.inTextInput == false";
 const WHEN_EDIT_CELL = `${WHEN_SPREADSHEET_READY} && focus.inGrid == false`;
+const WHEN_OPEN_CONTEXT_MENU = `${WHEN_SPREADSHEET_READY} && ${WHEN_COMMAND_PALETTE_CLOSED} && focus.inSheetTabs == false`;
 
 /**
  * Built-in keybindings that power UI affordances (Command Palette + context menus)
@@ -397,6 +398,18 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     key: "shift+f2",
     mac: "shift+f2",
     when: WHEN_SPREADSHEET_READY,
+  },
+  {
+    command: "ui.openContextMenu",
+    key: "shift+f10",
+    mac: "shift+f10",
+    when: WHEN_OPEN_CONTEXT_MENU,
+  },
+  {
+    command: "ui.openContextMenu",
+    key: "contextmenu",
+    mac: "contextmenu",
+    when: WHEN_OPEN_CONTEXT_MENU,
   },
   {
     command: "comments.togglePanel",

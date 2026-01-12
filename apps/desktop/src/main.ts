@@ -6268,6 +6268,38 @@ if (
     openGridContextMenuAtPoint(gridRect.left + gridRect.width / 2, gridRect.top + gridRect.height / 2);
   };
 
+  // Central command entrypoint so Shift+F10 / ContextMenu can migrate to KeybindingService
+  // cleanly (e.g. if keybinding dispatch moves earlier in the capture phase).
+  commandRegistry.registerBuiltinCommand(
+    "ui.openContextMenu",
+    t("command.ui.openContextMenu"),
+    () => {
+      // Fail-closed: only allow opening the grid context menu when we can
+      // confidently say focus is not inside a text input.
+      if (contextKeys.get("focus.inTextInput") !== false) return;
+
+      // If *any* context menu is already open, let it manage focus/keyboard handling.
+      // This avoids opening the grid context menu while another menu (e.g. sheet tabs)
+      // is active.
+      const openContextMenu = document.querySelector<HTMLElement>(".context-menu-overlay:not([hidden])");
+      if (openContextMenu) return;
+
+      // When focus is on a sheet tab, Shift+F10 / ContextMenu should behave like Excel and
+      // open the sheet-tab context menu instead of the active-cell context menu.
+      // (The tab strip is responsible for handling these keys.)
+      const target = document.activeElement as HTMLElement | null;
+      if (target?.closest?.('#sheet-tabs button[role="tab"]')) return;
+
+      openGridContextMenuAtActiveCell();
+    },
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.ui.openContextMenu"),
+      keywords: ["context menu", "menu"],
+    },
+  );
+
   window.addEventListener(
     "keydown",
     (e) => {
