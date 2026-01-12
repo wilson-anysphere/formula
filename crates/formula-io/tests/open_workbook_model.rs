@@ -1,10 +1,9 @@
 use std::io::Write as _;
 use std::path::PathBuf;
 
-use formula_model::{CellRef, CellValue, DateSystem, SheetVisibility};
-
-#[cfg(feature = "parquet")]
-use formula_model::sanitize_sheet_name;
+use formula_model::{
+    sanitize_sheet_name, CellRef, CellValue, DateSystem, SheetVisibility, EXCEL_MAX_SHEET_NAME_LEN,
+};
 
 fn fixture_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures").join(rel)
@@ -901,6 +900,27 @@ fn open_workbook_model_csv_sanitizes_sheet_name() {
     let workbook = formula_io::open_workbook_model(&csv_path).expect("open workbook model");
     assert_eq!(workbook.sheets.len(), 1);
     assert_eq!(workbook.sheets[0].name, "badnametest");
+
+    // Regression check: writing to XLSX should succeed (sheet name must be Excel-valid).
+    let mut out = std::io::Cursor::new(Vec::<u8>::new());
+    formula_io::xlsx::write_workbook_to_writer(&workbook, &mut out).expect("write xlsx");
+}
+
+#[test]
+fn open_workbook_model_csv_truncates_sheet_name_to_excel_max_len_in_utf16_units() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let prefix = "a".repeat(EXCEL_MAX_SHEET_NAME_LEN - 2);
+    // 🙂 is a non-BMP character, so it counts as 2 UTF-16 code units in Excel.
+    let long_stem = format!("{prefix}🙂{}", "b".repeat(10));
+    let csv_path = dir.path().join(format!("{long_stem}.csv"));
+    std::fs::write(&csv_path, "col1\n1\n").expect("write csv");
+
+    let workbook = formula_io::open_workbook_model(&csv_path).expect("open workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+
+    let expected = sanitize_sheet_name(&long_stem);
+    assert_eq!(expected.encode_utf16().count(), EXCEL_MAX_SHEET_NAME_LEN);
+    assert_eq!(workbook.sheets[0].name, expected);
 
     // Regression check: writing to XLSX should succeed (sheet name must be Excel-valid).
     let mut out = std::io::Cursor::new(Vec::<u8>::new());
