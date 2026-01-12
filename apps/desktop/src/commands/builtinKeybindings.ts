@@ -118,7 +118,7 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
   {
     command: "edit.replace",
     key: "ctrl+h",
-    // Avoid `Cmd+H` (macOS Hide).
+    // Avoid Cmd+H (macOS Hide).
     mac: "cmd+option+f",
     when: null,
   },

@@ -358,8 +358,8 @@ export class FormulaBarView {
       const toggled = toggleA1AbsoluteAtCursor(prevText, cursorStart, cursorEnd);
       if (!toggled) return;
 
-      // Excel UX: after toggling, keep the entire reference token selected so
-      // repeated F4 presses continue cycling the same reference.
+      // Excel UX: after toggling, keep the reference token selected so repeated F4 presses
+      // continue cycling the same reference.
       const delta = toggled.text.length - prevText.length;
       const oldTokenLen = active.end - active.start;
       const tokenStart = active.start;
