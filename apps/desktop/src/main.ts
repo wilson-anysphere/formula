@@ -4646,6 +4646,8 @@ if (
 
     const controls = document.createElement("div");
     controls.className = "dock-panel__controls";
+    controls.setAttribute("role", "toolbar");
+    controls.setAttribute("aria-label", "Panel controls");
 
     function iconButton(label: string, testId: string, icon: SVGElement, onClick: () => void) {
       const btn = document.createElement("button");
@@ -4756,6 +4758,8 @@ if (
 
       const controls = document.createElement("div");
       controls.className = "dock-panel__controls";
+      controls.setAttribute("role", "toolbar");
+      controls.setAttribute("aria-label", "Panel controls");
 
       const dockLeftBtn = document.createElement("button");
       dockLeftBtn.type = "button";
