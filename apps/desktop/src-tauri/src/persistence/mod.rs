@@ -585,7 +585,7 @@ mod write_xlsx_from_storage_tests {
     }
 
     #[test]
-    fn write_xlsx_from_storage_enforces_workbook_kind_and_macro_behavior_for_templates_and_addins(
+    fn write_xlsx_from_storage_enforces_workbook_kind_and_macro_behavior_for_xlsx_family(
     ) -> anyhow::Result<()> {
         let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../fixtures/xlsx/macros/basic.xlsm");
@@ -602,6 +602,16 @@ mod write_xlsx_from_storage_tests {
         let tmp = tempfile::tempdir().context("temp dir")?;
 
         let cases = [
+            (
+                "xlsx",
+                formula_xlsx::WorkbookKind::Workbook,
+                None::<&[u8]>,
+            ),
+            (
+                "xlsm",
+                formula_xlsx::WorkbookKind::MacroEnabledWorkbook,
+                Some(expected_vba),
+            ),
             (
                 "xltx",
                 formula_xlsx::WorkbookKind::Template,
@@ -640,7 +650,7 @@ mod write_xlsx_from_storage_tests {
     }
 
     #[test]
-    fn write_xlsx_from_storage_writes_print_settings_for_templates_and_addins() -> anyhow::Result<()> {
+    fn write_xlsx_from_storage_writes_print_settings_for_xlsx_family() -> anyhow::Result<()> {
         let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../fixtures/xlsx/basic/print-settings.xlsx");
         let workbook_meta =
@@ -684,7 +694,7 @@ mod write_xlsx_from_storage_tests {
         let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
 
         let tmp = tempfile::tempdir().context("temp dir")?;
-        for ext in ["xltx", "xlam"] {
+        for ext in ["xlsx", "xlsm", "xltx", "xltm", "xlam"] {
             let out_path = tmp.path().join(format!("print-settings.{ext}"));
             let bytes = write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
                 .with_context(|| format!("export to .{ext}"))?;
