@@ -72,8 +72,8 @@ export function createDesktopFormulaConflictMonitor(opts) {
  * Key behavior:
  * - Only treat DocumentController-driven edits (binderOrigin, plus optional undo origins)
  *   as local so they are logged into `cellStructuralOps`.
- * - Do NOT treat `sessionOrigin` as local (branch checkout/merge are bulk writes and
- *   should not be logged).
+ * - Do NOT treat `sessionOrigin` as local (it is used for programmatic/bulk writes like
+ *   conflict resolutions and should not be logged).
  * - Do NOT treat `VERSIONING_RESTORE_ORIGIN` as local (version restore is a bulk write).
  *
  * @param {object} opts

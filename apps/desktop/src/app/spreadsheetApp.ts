@@ -733,8 +733,9 @@ export class SpreadsheetApp {
       // In particular:
       // - Version restore uses origin "versioning-restore" and should not surface
       //   formula/value conflict UI.
-      // - Branch checkout/merge uses `session.origin` and should not be logged into
-      //   `cellStructuralOps` by the structural conflict monitor.
+      // - Branch checkout/merge uses origin "branching-apply" and should not surface
+      //   formula/value conflict UI or be logged into `cellStructuralOps` by the
+      //   structural conflict monitor.
       this.formulaConflictMonitor = createDesktopFormulaConflictMonitor({
         doc: this.collabSession.doc,
         cells: this.collabSession.cells as any,
