@@ -2504,11 +2504,11 @@ if (
     };
 
     extensionSpreadsheetApi.saveWorkbook = async () => {
-      await handleSave();
+      await handleSave({ notifyExtensions: false });
     };
 
     extensionSpreadsheetApi.saveWorkbookAs = async (path: string) => {
-      await handleSaveAsPath(String(path));
+      await handleSaveAsPath(String(path), { notifyExtensions: false });
     };
 
     extensionSpreadsheetApi.closeWorkbook = async () => {
@@ -5992,29 +5992,33 @@ async function copyPowerQueryPersistence(fromWorkbookId: string, toWorkbookId: s
   }
 }
 
-async function handleSave(): Promise<void> {
+async function handleSave(options: { notifyExtensions?: boolean } = {}): Promise<void> {
   if (!tauriBackend) return;
   if (!activeWorkbook) return;
   if (!workbookSync) return;
 
   if (!activeWorkbook.path) {
-    await handleSaveAs();
+    await handleSaveAs({ notifyExtensions: options.notifyExtensions });
     return;
   }
 
-  try {
-    extensionHostManagerForE2e?.host.saveWorkbook();
-  } catch {
-    // Ignore extension host errors; save should still succeed.
+  if (options.notifyExtensions !== false) {
+    try {
+      extensionHostManagerForE2e?.host.saveWorkbook();
+    } catch {
+      // Ignore extension host errors; save should still succeed.
+    }
   }
   await workbookSync.markSaved();
 }
 
-async function handleSaveAs(): Promise<void> {
+async function handleSaveAs(
+  options: { previousPanelWorkbookId?: string; notifyExtensions?: boolean } = {},
+): Promise<void> {
   if (!tauriBackend) return;
   if (!activeWorkbook) return;
 
-  const previousPanelWorkbookId = activePanelWorkbookId;
+  const previousPanelWorkbookId = options.previousPanelWorkbookId ?? activePanelWorkbookId;
   const { save } = getTauriDialog();
   const path = await save({
     filters: [
@@ -6024,12 +6028,12 @@ async function handleSaveAs(): Promise<void> {
   });
   if (!path) return;
 
-  await handleSaveAsPath(path, { previousPanelWorkbookId });
+  await handleSaveAsPath(path, { previousPanelWorkbookId, notifyExtensions: options.notifyExtensions });
 }
 
 async function handleSaveAsPath(
   path: string,
-  options: { previousPanelWorkbookId?: string } = {},
+  options: { previousPanelWorkbookId?: string; notifyExtensions?: boolean } = {},
 ): Promise<void> {
   if (!tauriBackend) return;
   if (!activeWorkbook) return;
@@ -6040,10 +6044,12 @@ async function handleSaveAsPath(
   // Ensure any pending microtask-batched workbook edits are flushed before saving.
   await new Promise<void>((resolve) => queueMicrotask(resolve));
   await drainBackendSync();
-  try {
-    extensionHostManagerForE2e?.host.saveWorkbookAs(path);
-  } catch {
-    // Ignore extension host errors; save should still succeed.
+  if (options.notifyExtensions !== false) {
+    try {
+      extensionHostManagerForE2e?.host.saveWorkbookAs(path);
+    } catch {
+      // Ignore extension host errors; save should still succeed.
+    }
   }
   if (queuedInvoke) {
     await queuedInvoke("save_workbook", { path });

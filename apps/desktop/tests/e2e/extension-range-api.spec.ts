@@ -1,25 +1,38 @@
-import { expect, test } from "@playwright/test";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { expect, test, type Page } from "@playwright/test";
 
 import { gotoDesktop } from "./helpers";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const repoRoot = path.resolve(__dirname, "../../../..");
+async function grantExtensionPermissions(page: Page, extensionId: string, permissions: string[]): Promise<void> {
+  await page.addInitScript(
+    ({ extensionId, permissions }) => {
+      const key = "formula.extensionHost.permissions";
+      const existing = (() => {
+        try {
+          const raw = localStorage.getItem(key);
+          return raw ? JSON.parse(raw) : {};
+        } catch {
+          return {};
+        }
+      })();
 
-function viteFsUrl(absPath: string) {
-  return `/@fs${absPath}`;
+      existing[extensionId] = {
+        ...(existing[extensionId] ?? {}),
+        ...Object.fromEntries(permissions.map((perm) => [perm, true])),
+      };
+
+      localStorage.setItem(key, JSON.stringify(existing));
+    },
+    { extensionId, permissions },
+  );
 }
 
 test.describe("Desktop extension spreadsheet API", () => {
   test("Sheet.getRange/setRange round-trips values", async ({ page }) => {
+    await grantExtensionPermissions(page, "formula-test.range-ext", ["ui.commands", "cells.read", "cells.write"]);
     await gotoDesktop(page);
 
-    const extensionApiUrl = viteFsUrl(path.join(repoRoot, "packages/extension-api/index.mjs"));
-
     const result = await page.evaluate(
-      async ({ extensionApiUrl }) => {
+      async () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const manager: any = (window as any).__formulaExtensionHostManager;
         if (!manager) throw new Error("Missing window.__formulaExtensionHostManager (desktop e2e harness)");
@@ -42,7 +55,8 @@ test.describe("Desktop extension spreadsheet API", () => {
         };
 
         const code = `
-          import * as formula from ${JSON.stringify(extensionApiUrl)};
+          const formula = globalThis[Symbol.for("formula.extensionApi.api")];
+          if (!formula) throw new Error("Missing formula extension API runtime");
           export async function activate(context) {
             context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
               commandId,
@@ -78,7 +92,6 @@ test.describe("Desktop extension spreadsheet API", () => {
           URL.revokeObjectURL(mainUrl);
         }
       },
-      { extensionApiUrl },
     );
 
     expect(result).toEqual([
@@ -88,12 +101,16 @@ test.describe("Desktop extension spreadsheet API", () => {
   });
 
   test("formula.sheets.createSheet creates a sheet and Sheet.getRange/setRange work on it", async ({ page }) => {
+    await grantExtensionPermissions(page, "formula-test.sheet-create-ext", [
+      "ui.commands",
+      "sheets.manage",
+      "cells.read",
+      "cells.write",
+    ]);
     await gotoDesktop(page);
 
-    const extensionApiUrl = viteFsUrl(path.join(repoRoot, "packages/extension-api/index.mjs"));
-
     const result = await page.evaluate(
-      async ({ extensionApiUrl }) => {
+      async () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const manager: any = (window as any).__formulaExtensionHostManager;
         if (!manager) throw new Error("Missing window.__formulaExtensionHostManager (desktop e2e harness)");
@@ -115,7 +132,8 @@ test.describe("Desktop extension spreadsheet API", () => {
         };
 
         const code = `
-          import * as formula from ${JSON.stringify(extensionApiUrl)};
+          const formula = globalThis[Symbol.for("formula.extensionApi.api")];
+          if (!formula) throw new Error("Missing formula extension API runtime");
           export async function activate(context) {
             context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
               commandId,
@@ -152,7 +170,6 @@ test.describe("Desktop extension spreadsheet API", () => {
           URL.revokeObjectURL(mainUrl);
         }
       },
-      { extensionApiUrl },
     );
 
     expect(result.sheetName).toBe("Data");
@@ -164,6 +181,7 @@ test.describe("Desktop extension spreadsheet API", () => {
   });
 
   test("formula.sheets.activateSheet activates the real UI sheet", async ({ page }) => {
+    await grantExtensionPermissions(page, "formula-test.sheet-ext", ["ui.commands", "sheets.manage"]);
     await gotoDesktop(page);
 
     // Create a second sheet in the underlying DocumentController model so we can activate it.
@@ -175,10 +193,8 @@ test.describe("Desktop extension spreadsheet API", () => {
       doc.setCellValue("Sheet2", { row: 0, col: 0 }, "Hello");
     });
 
-    const extensionApiUrl = viteFsUrl(path.join(repoRoot, "packages/extension-api/index.mjs"));
-
     const result = await page.evaluate(
-      async ({ extensionApiUrl }) => {
+      async () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const manager: any = (window as any).__formulaExtensionHostManager;
         if (!manager) throw new Error("Missing window.__formulaExtensionHostManager (desktop e2e harness)");
@@ -200,7 +216,8 @@ test.describe("Desktop extension spreadsheet API", () => {
         };
 
         const code = `
-          import * as formula from ${JSON.stringify(extensionApiUrl)};
+          const formula = globalThis[Symbol.for("formula.extensionApi.api")];
+          if (!formula) throw new Error("Missing formula extension API runtime");
           export async function activate(context) {
             context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
               commandId,
@@ -235,7 +252,6 @@ test.describe("Desktop extension spreadsheet API", () => {
           URL.revokeObjectURL(mainUrl);
         }
       },
-      { extensionApiUrl },
     );
 
     expect(result.active.name).toBe("Sheet2");
@@ -251,6 +267,7 @@ test.describe("Desktop extension spreadsheet API", () => {
   });
 
   test("formula.events.onSheetActivated fires when an extension activates a sheet", async ({ page }) => {
+    await grantExtensionPermissions(page, "formula-test.sheet-events-ext", ["ui.commands", "sheets.manage"]);
     await gotoDesktop(page);
 
     await page.evaluate(() => {
@@ -261,10 +278,8 @@ test.describe("Desktop extension spreadsheet API", () => {
       doc.setCellValue("Sheet2", { row: 0, col: 0 }, "Hello");
     });
 
-    const extensionApiUrl = viteFsUrl(path.join(repoRoot, "packages/extension-api/index.mjs"));
-
     const result = await page.evaluate(
-      async ({ extensionApiUrl }) => {
+      async () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const manager: any = (window as any).__formulaExtensionHostManager;
         if (!manager) throw new Error("Missing window.__formulaExtensionHostManager (desktop e2e harness)");
@@ -286,7 +301,8 @@ test.describe("Desktop extension spreadsheet API", () => {
         };
 
         const code = `
-          import * as formula from ${JSON.stringify(extensionApiUrl)};
+          const formula = globalThis[Symbol.for("formula.extensionApi.api")];
+          if (!formula) throw new Error("Missing formula extension API runtime");
           export async function activate(context) {
             context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
               commandId,
@@ -334,7 +350,6 @@ test.describe("Desktop extension spreadsheet API", () => {
           URL.revokeObjectURL(mainUrl);
         }
       },
-      { extensionApiUrl },
     );
 
     expect(result.active.name).toBe("Sheet2");

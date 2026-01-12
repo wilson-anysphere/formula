@@ -86,6 +86,32 @@ test.describe("extension workbook lifecycle (tauri)", () => {
           }),
         },
       };
+
+      // The desktop extension host now uses a real permission prompt UI. Pre-grant
+      // the permissions needed by this ad-hoc test extension so the worker can
+      // activate without blocking on an interactive modal.
+      try {
+        const extensionId = "formula-test.wb-test";
+        const key = "formula.extensionHost.permissions";
+        const existing = (() => {
+          try {
+            const raw = localStorage.getItem(key);
+            return raw ? JSON.parse(raw) : {};
+          } catch {
+            return {};
+          }
+        })();
+
+        existing[extensionId] = {
+          ...(existing[extensionId] ?? {}),
+          "ui.commands": true,
+          "workbook.manage": true,
+        };
+
+        localStorage.setItem(key, JSON.stringify(existing));
+      } catch {
+        // ignore
+      }
     });
 
     await gotoDesktop(page);
