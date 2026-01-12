@@ -79,7 +79,8 @@ test.describe("collaboration: sheet metadata", () => {
           );
           if (existingIds.has("Sheet2")) return;
 
-          const MapCtor = session.cells?.constructor ?? null;
+          const firstSheet: any = session.sheets.get(0);
+          const MapCtor = firstSheet?.constructor ?? session.cells?.constructor ?? null;
           if (typeof MapCtor !== "function") throw new Error("Missing Y.Map constructor");
           const sheet = new MapCtor();
           sheet.set("id", "Sheet2");
@@ -134,18 +135,21 @@ test.describe("collaboration: sheet metadata", () => {
           if (fromIndex === 0) return;
 
           const entry: any = session.sheets.get(fromIndex);
-          const MapCtor = session.cells?.constructor ?? null;
+          const MapCtor = entry?.constructor ?? session.cells?.constructor ?? null;
           if (typeof MapCtor !== "function") throw new Error("Missing Y.Map constructor");
           const clone = new MapCtor();
-          if (entry && typeof entry.forEach === "function") {
-            entry.forEach((v: any, k: string) => {
-              clone.set(k, v);
-            });
-          } else if (entry && typeof entry === "object") {
-            for (const [k, v] of Object.entries(entry)) {
-              clone.set(k, v);
-            }
-          }
+          // Only copy stable sheet-list metadata fields. Sheet entries can contain nested
+          // Yjs types (e.g. `view`), and reusing those objects during a move can violate
+          // Yjs' parentage rules. (The production code uses a deep clone for this.)
+          const id = String(entry?.get?.("id") ?? entry?.id ?? "").trim();
+          if (!id) throw new Error("Sheet entry missing id");
+          clone.set("id", id);
+          const name = entry?.get?.("name") ?? entry?.name;
+          if (name != null) clone.set("name", name);
+          const visibility = entry?.get?.("visibility") ?? entry?.visibility;
+          if (visibility != null) clone.set("visibility", visibility);
+          const tabColor = entry?.get?.("tabColor") ?? entry?.tabColor;
+          if (tabColor != null) clone.set("tabColor", tabColor);
 
           session.sheets.delete(fromIndex, 1);
           session.sheets.insert(0, [clone]);
