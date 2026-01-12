@@ -127,6 +127,29 @@ fn evaluates_sum_over_sheet_range_row_range() {
 }
 
 #[test]
+fn sum_full_sheet_range_over_sheet_range_is_sparse_and_marks_dirty() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "B2", 2.0).unwrap();
+    engine.set_cell_value("Sheet3", "XFD1048576", 3.0).unwrap();
+
+    engine
+        // Place the formula on a different sheet so we don't create a circular reference: `A:XFD`
+        // covers the entire sheet.
+        .set_cell_formula("Summary", "C1", "=SUM(Sheet1:Sheet3!A:XFD)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Summary", "C1"), Value::Number(6.0));
+
+    // Updating a cell that was previously blank should still dirty the formula cell even though
+    // the audit graph does not expand full-sheet ranges.
+    engine.set_cell_value("Sheet2", "C3", 10.0).unwrap();
+    assert!(engine.is_dirty("Summary", "C1"));
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Summary", "C1"), Value::Number(16.0));
+}
+
+#[test]
 fn union_over_sheet_range_refs_is_ref_error() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
