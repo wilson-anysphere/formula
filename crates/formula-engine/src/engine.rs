@@ -5388,14 +5388,14 @@ impl crate::eval::ValueResolver for Snapshot {
         Value::Blank
     }
 
+    fn external_data_provider(&self) -> Option<&dyn ExternalDataProvider> {
+        self.external_data_provider.as_deref()
+    }
+
     fn get_external_value(&self, sheet: &str, addr: CellAddr) -> Option<Value> {
         self.external_value_provider
             .as_ref()
             .and_then(|provider| provider.get(sheet, addr))
-    }
-
-    fn external_data_provider(&self) -> Option<&dyn ExternalDataProvider> {
-        self.external_data_provider.as_deref()
     }
 
     fn sheet_id(&self, name: &str) -> Option<usize> {

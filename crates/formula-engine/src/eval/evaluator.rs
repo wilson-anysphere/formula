@@ -136,6 +136,7 @@ pub trait ValueResolver {
     fn get_external_value(&self, _sheet: &str, _addr: CellAddr) -> Option<Value> {
         None
     }
+    /// Optional external data provider used by RTD / CUBE* functions.
     fn external_data_provider(&self) -> Option<&dyn crate::ExternalDataProvider> {
         None
     }

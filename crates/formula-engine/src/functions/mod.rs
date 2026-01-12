@@ -191,6 +191,7 @@ pub trait FunctionContext {
         None
     }
 
+    /// Optional external data provider used by RTD / CUBE* functions.
     fn external_data_provider(&self) -> Option<&dyn crate::ExternalDataProvider> {
         None
     }

@@ -1,6 +1,8 @@
 use formula_engine::debug::{Span, TraceKind, TraceRef};
 use formula_engine::eval::CellAddr;
-use formula_engine::{Engine, ExternalValueProvider, NameDefinition, NameScope, Value};
+use formula_engine::{
+    Engine, ExternalDataProvider, ExternalValueProvider, NameDefinition, NameScope, Value,
+};
 use formula_model::table::TableColumn;
 use formula_model::{Range, Table};
 use std::collections::HashMap;
@@ -27,6 +29,145 @@ impl ExternalValueProvider for TestExternalProvider {
             .expect("lock poisoned")
             .get(&(sheet.to_string(), addr))
             .cloned()
+    }
+}
+
+#[derive(Default)]
+struct TestExternalDataProvider {
+    calls: Mutex<Vec<(String, Vec<Value>)>>,
+}
+
+impl TestExternalDataProvider {
+    fn record_call(&self, function: &str, args: Vec<Value>) {
+        self.calls
+            .lock()
+            .expect("lock poisoned")
+            .push((function.to_string(), args));
+    }
+
+    fn calls(&self) -> Vec<(String, Vec<Value>)> {
+        self.calls.lock().expect("lock poisoned").clone()
+    }
+}
+
+impl ExternalDataProvider for TestExternalDataProvider {
+    fn rtd(&self, prog_id: &str, server: &str, topics: &[String]) -> Value {
+        let mut args = vec![Value::Text(prog_id.to_string()), Value::Text(server.to_string())];
+        args.extend(topics.iter().cloned().map(Value::Text));
+        self.record_call("RTD", args);
+        Value::Number(123.0)
+    }
+
+    fn cube_value(&self, connection: &str, tuples: &[String]) -> Value {
+        let mut args = vec![Value::Text(connection.to_string())];
+        args.extend(tuples.iter().cloned().map(Value::Text));
+        self.record_call("CUBEVALUE", args);
+        Value::Number(456.0)
+    }
+
+    fn cube_member(
+        &self,
+        connection: &str,
+        member_expression: &str,
+        caption: Option<&str>,
+    ) -> Value {
+        let mut args = vec![
+            Value::Text(connection.to_string()),
+            Value::Text(member_expression.to_string()),
+        ];
+        if let Some(caption) = caption {
+            args.push(Value::Text(caption.to_string()));
+        }
+        self.record_call("CUBEMEMBER", args);
+        Value::Error(formula_engine::ErrorKind::NA)
+    }
+
+    fn cube_member_property(
+        &self,
+        connection: &str,
+        member_expression_or_handle: &str,
+        property: &str,
+    ) -> Value {
+        self.record_call(
+            "CUBEMEMBERPROPERTY",
+            vec![
+                Value::Text(connection.to_string()),
+                Value::Text(member_expression_or_handle.to_string()),
+                Value::Text(property.to_string()),
+            ],
+        );
+        Value::Error(formula_engine::ErrorKind::NA)
+    }
+
+    fn cube_ranked_member(
+        &self,
+        connection: &str,
+        set_expression_or_handle: &str,
+        rank: i64,
+        caption: Option<&str>,
+    ) -> Value {
+        let mut args = vec![
+            Value::Text(connection.to_string()),
+            Value::Text(set_expression_or_handle.to_string()),
+            Value::Number(rank as f64),
+        ];
+        if let Some(caption) = caption {
+            args.push(Value::Text(caption.to_string()));
+        }
+        self.record_call("CUBERANKEDMEMBER", args);
+        Value::Error(formula_engine::ErrorKind::NA)
+    }
+
+    fn cube_set(
+        &self,
+        connection: &str,
+        set_expression: &str,
+        caption: Option<&str>,
+        sort_order: Option<i64>,
+        sort_by: Option<&str>,
+    ) -> Value {
+        let mut args = vec![
+            Value::Text(connection.to_string()),
+            Value::Text(set_expression.to_string()),
+        ];
+        if let Some(caption) = caption {
+            args.push(Value::Text(caption.to_string()));
+        }
+        if let Some(sort_order) = sort_order {
+            args.push(Value::Number(sort_order as f64));
+        }
+        if let Some(sort_by) = sort_by {
+            args.push(Value::Text(sort_by.to_string()));
+        }
+        self.record_call("CUBESET", args);
+        Value::Error(formula_engine::ErrorKind::NA)
+    }
+
+    fn cube_set_count(&self, set_expression_or_handle: &str) -> Value {
+        self.record_call(
+            "CUBESETCOUNT",
+            vec![Value::Text(set_expression_or_handle.to_string())],
+        );
+        Value::Error(formula_engine::ErrorKind::NA)
+    }
+
+    fn cube_kpi_member(
+        &self,
+        connection: &str,
+        kpi_name: &str,
+        kpi_property: &str,
+        caption: Option<&str>,
+    ) -> Value {
+        let mut args = vec![
+            Value::Text(connection.to_string()),
+            Value::Text(kpi_name.to_string()),
+            Value::Text(kpi_property.to_string()),
+        ];
+        if let Some(caption) = caption {
+            args.push(Value::Text(caption.to_string()));
+        }
+        self.record_call("CUBEKPIMEMBER", args);
+        Value::Error(formula_engine::ErrorKind::NA)
     }
 }
 
@@ -102,6 +243,75 @@ fn trace_spans_map_to_formula_and_values_match() {
     // Right is `2*3`.
     assert_eq!(slice(&dbg.formula, dbg.trace.children[1].span), "2*3");
     assert_eq!(dbg.trace.children[1].value, Value::Number(6.0));
+}
+
+#[test]
+fn debug_trace_supports_getting_data_error_literal() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=#GETTING_DATA")
+        .unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(computed, Value::Error(formula_engine::ErrorKind::GettingData));
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(dbg.value, computed);
+}
+
+#[test]
+fn debug_trace_supports_rtd_calls() {
+    let provider = Arc::new(TestExternalDataProvider::default());
+
+    let mut engine = Engine::new();
+    engine.set_external_data_provider(Some(provider.clone()));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=RTD(\"my.prog\",\"\",42)")
+        .unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(computed, Value::Number(123.0));
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(dbg.value, computed);
+    assert_eq!(dbg.trace.children.len(), 3);
+
+    assert!(
+        provider
+            .calls()
+            .iter()
+            .any(|(name, _args)| name == "RTD"),
+        "expected provider to record an RTD call"
+    );
+}
+
+#[test]
+fn debug_trace_supports_cube_calls() {
+    let provider = Arc::new(TestExternalDataProvider::default());
+
+    let mut engine = Engine::new();
+    engine.set_external_data_provider(Some(provider.clone()));
+    engine
+        .set_cell_formula("Sheet1", "A1", "=CUBEVALUE(\"conn\",\"[Measures].[X]\")")
+        .unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(computed, Value::Number(456.0));
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(dbg.value, computed);
+    assert_eq!(dbg.trace.children.len(), 2);
+
+    assert!(
+        provider
+            .calls()
+            .iter()
+            .any(|(name, _args)| name == "CUBEVALUE"),
+        "expected provider to record a CUBEVALUE call"
+    );
 }
 
 #[test]

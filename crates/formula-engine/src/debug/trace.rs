@@ -2104,10 +2104,440 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             "IF" => self.fn_if(args),
             "IFERROR" => self.fn_iferror(args),
             "ISERROR" => self.fn_iserror(args),
+            "RTD" => self.fn_rtd(args),
             "SUM" => self.fn_sum(args),
+            "CUBEVALUE" => self.fn_cubevalue(args),
+            "CUBEMEMBER" => self.fn_cubemember(args),
+            "CUBEMEMBERPROPERTY" => self.fn_cubememberproperty(args),
+            "CUBERANKEDMEMBER" => self.fn_cuberankedmember(args),
+            "CUBESET" => self.fn_cubeset(args),
+            "CUBESETCOUNT" => self.fn_cubesetcount(args),
+            "CUBEKPIMEMBER" => self.fn_cubekpimember(args),
             "VLOOKUP" => self.fn_vlookup(args),
             _ => (Value::Error(ErrorKind::Name), Vec::new()),
         }
+    }
+
+    fn fn_rtd(&self, args: &[SpannedExpr<usize>]) -> (Value, Vec<TraceNode>) {
+        if args.len() < 3 {
+            return (Value::Error(ErrorKind::Value), Vec::new());
+        }
+
+        let Some(provider) = self.resolver.external_data_provider() else {
+            return (Value::Error(ErrorKind::NA), Vec::new());
+        };
+
+        let mut traces = Vec::with_capacity(args.len());
+
+        let (prog_id, trace) = self.eval_scalar(&args[0]);
+        traces.push(trace);
+        if let Value::Error(e) = prog_id {
+            return (Value::Error(e), traces);
+        }
+        let prog_id = match prog_id.coerce_to_string() {
+            Ok(v) => v,
+            Err(e) => return (Value::Error(e), traces),
+        };
+
+        let (server, trace) = self.eval_scalar(&args[1]);
+        traces.push(trace);
+        if let Value::Error(e) = server {
+            return (Value::Error(e), traces);
+        }
+        let server = match server.coerce_to_string() {
+            Ok(v) => v,
+            Err(e) => return (Value::Error(e), traces),
+        };
+
+        let mut topics = Vec::with_capacity(args.len().saturating_sub(2));
+        for arg in &args[2..] {
+            let (topic, trace) = self.eval_scalar(arg);
+            traces.push(trace);
+            if let Value::Error(e) = topic {
+                return (Value::Error(e), traces);
+            }
+            match topic.coerce_to_string() {
+                Ok(v) => topics.push(v),
+                Err(e) => return (Value::Error(e), traces),
+            }
+        }
+
+        let out = provider.rtd(&prog_id, &server, &topics);
+        (out, traces)
+    }
+
+    fn fn_cubevalue(&self, args: &[SpannedExpr<usize>]) -> (Value, Vec<TraceNode>) {
+        if args.len() < 2 {
+            return (Value::Error(ErrorKind::Value), Vec::new());
+        }
+
+        let Some(provider) = self.resolver.external_data_provider() else {
+            return (Value::Error(ErrorKind::NA), Vec::new());
+        };
+
+        let mut traces = Vec::with_capacity(args.len());
+
+        let (connection, trace) = self.eval_scalar(&args[0]);
+        traces.push(trace);
+        if let Value::Error(e) = connection {
+            return (Value::Error(e), traces);
+        }
+        let connection = match connection.coerce_to_string() {
+            Ok(v) => v,
+            Err(e) => return (Value::Error(e), traces),
+        };
+
+        let mut tuples = Vec::with_capacity(args.len().saturating_sub(1));
+        for arg in &args[1..] {
+            let (tuple, trace) = self.eval_scalar(arg);
+            traces.push(trace);
+            if let Value::Error(e) = tuple {
+                return (Value::Error(e), traces);
+            }
+            match tuple.coerce_to_string() {
+                Ok(v) => tuples.push(v),
+                Err(e) => return (Value::Error(e), traces),
+            }
+        }
+
+        let out = provider.cube_value(&connection, &tuples);
+        (out, traces)
+    }
+
+    fn fn_cubemember(&self, args: &[SpannedExpr<usize>]) -> (Value, Vec<TraceNode>) {
+        if args.len() < 2 || args.len() > 3 {
+            return (Value::Error(ErrorKind::Value), Vec::new());
+        }
+
+        let Some(provider) = self.resolver.external_data_provider() else {
+            return (Value::Error(ErrorKind::NA), Vec::new());
+        };
+
+        let mut traces = Vec::with_capacity(args.len());
+
+        let (connection, trace) = self.eval_scalar(&args[0]);
+        traces.push(trace);
+        if let Value::Error(e) = connection {
+            return (Value::Error(e), traces);
+        }
+        let connection = match connection.coerce_to_string() {
+            Ok(v) => v,
+            Err(e) => return (Value::Error(e), traces),
+        };
+
+        let (member_expression, trace) = self.eval_scalar(&args[1]);
+        traces.push(trace);
+        if let Value::Error(e) = member_expression {
+            return (Value::Error(e), traces);
+        }
+        let member_expression = match member_expression.coerce_to_string() {
+            Ok(v) => v,
+            Err(e) => return (Value::Error(e), traces),
+        };
+
+        let caption = if args.len() >= 3 {
+            let (caption, trace) = self.eval_scalar(&args[2]);
+            traces.push(trace);
+            if let Value::Error(e) = caption {
+                return (Value::Error(e), traces);
+            }
+            match caption.coerce_to_string() {
+                Ok(v) => Some(v),
+                Err(e) => return (Value::Error(e), traces),
+            }
+        } else {
+            None
+        };
+
+        let out = provider.cube_member(&connection, &member_expression, caption.as_deref());
+        (out, traces)
+    }
+
+    fn fn_cubememberproperty(&self, args: &[SpannedExpr<usize>]) -> (Value, Vec<TraceNode>) {
+        if args.len() != 3 {
+            return (Value::Error(ErrorKind::Value), Vec::new());
+        }
+
+        let Some(provider) = self.resolver.external_data_provider() else {
+            return (Value::Error(ErrorKind::NA), Vec::new());
+        };
+
+        let mut traces = Vec::with_capacity(args.len());
+
+        let (connection, trace) = self.eval_scalar(&args[0]);
+        traces.push(trace);
+        if let Value::Error(e) = connection {
+            return (Value::Error(e), traces);
+        }
+        let connection = match connection.coerce_to_string() {
+            Ok(v) => v,
+            Err(e) => return (Value::Error(e), traces),
+        };
+
+        let (member_expression_or_handle, trace) = self.eval_scalar(&args[1]);
+        traces.push(trace);
+        if let Value::Error(e) = member_expression_or_handle {
+            return (Value::Error(e), traces);
+        }
+        let member_expression_or_handle = match member_expression_or_handle.coerce_to_string() {
+            Ok(v) => v,
+            Err(e) => return (Value::Error(e), traces),
+        };
+
+        let (property, trace) = self.eval_scalar(&args[2]);
+        traces.push(trace);
+        if let Value::Error(e) = property {
+            return (Value::Error(e), traces);
+        }
+        let property = match property.coerce_to_string() {
+            Ok(v) => v,
+            Err(e) => return (Value::Error(e), traces),
+        };
+
+        let out = provider.cube_member_property(&connection, &member_expression_or_handle, &property);
+        (out, traces)
+    }
+
+    fn fn_cuberankedmember(&self, args: &[SpannedExpr<usize>]) -> (Value, Vec<TraceNode>) {
+        if args.len() < 3 || args.len() > 4 {
+            return (Value::Error(ErrorKind::Value), Vec::new());
+        }
+
+        let Some(provider) = self.resolver.external_data_provider() else {
+            return (Value::Error(ErrorKind::NA), Vec::new());
+        };
+
+        let mut traces = Vec::with_capacity(args.len());
+
+        // connection
+        let (conn, trace) = self.eval_scalar(&args[0]);
+        traces.push(trace);
+        if let Value::Error(e) = conn {
+            return (Value::Error(e), traces);
+        }
+        let conn = match conn.coerce_to_string() {
+            Ok(s) => s,
+            Err(e) => return (Value::Error(e), traces),
+        };
+
+        // set_expression
+        let (set_expr, trace) = self.eval_scalar(&args[1]);
+        traces.push(trace);
+        if let Value::Error(e) = set_expr {
+            return (Value::Error(e), traces);
+        }
+        let set_expr = match set_expr.coerce_to_string() {
+            Ok(s) => s,
+            Err(e) => return (Value::Error(e), traces),
+        };
+
+        // rank (numeric)
+        let (rank, trace) = self.eval_scalar(&args[2]);
+        traces.push(trace);
+        if let Value::Error(e) = rank {
+            return (Value::Error(e), traces);
+        }
+        let rank = match rank.coerce_to_i64() {
+            Ok(n) => n,
+            Err(e) => return (Value::Error(e), traces),
+        };
+
+        // optional caption
+        let caption = if args.len() >= 4 {
+            let (caption, trace) = self.eval_scalar(&args[3]);
+            traces.push(trace);
+            if let Value::Error(e) = caption {
+                return (Value::Error(e), traces);
+            }
+            let caption = match caption.coerce_to_string() {
+                Ok(s) => s,
+                Err(e) => return (Value::Error(e), traces),
+            };
+            Some(caption)
+        } else {
+            None
+        };
+
+        let out = provider.cube_ranked_member(&conn, &set_expr, rank, caption.as_deref());
+        (out, traces)
+    }
+
+    fn fn_cubeset(&self, args: &[SpannedExpr<usize>]) -> (Value, Vec<TraceNode>) {
+        if args.len() < 2 || args.len() > 5 {
+            return (Value::Error(ErrorKind::Value), Vec::new());
+        }
+
+        let Some(provider) = self.resolver.external_data_provider() else {
+            return (Value::Error(ErrorKind::NA), Vec::new());
+        };
+
+        let mut traces = Vec::with_capacity(args.len());
+
+        // connection
+        let (conn, trace) = self.eval_scalar(&args[0]);
+        traces.push(trace);
+        if let Value::Error(e) = conn {
+            return (Value::Error(e), traces);
+        }
+        let conn = match conn.coerce_to_string() {
+            Ok(s) => s,
+            Err(e) => return (Value::Error(e), traces),
+        };
+
+        // set_expression
+        let (set_expr, trace) = self.eval_scalar(&args[1]);
+        traces.push(trace);
+        if let Value::Error(e) = set_expr {
+            return (Value::Error(e), traces);
+        }
+        let set_expr = match set_expr.coerce_to_string() {
+            Ok(s) => s,
+            Err(e) => return (Value::Error(e), traces),
+        };
+
+        // optional caption (string)
+        let caption = if args.len() >= 3 {
+            let (caption, trace) = self.eval_scalar(&args[2]);
+            traces.push(trace);
+            if let Value::Error(e) = caption {
+                return (Value::Error(e), traces);
+            }
+            let caption = match caption.coerce_to_string() {
+                Ok(s) => s,
+                Err(e) => return (Value::Error(e), traces),
+            };
+            Some(caption)
+        } else {
+            None
+        };
+
+        // optional sort_order (numeric)
+        let sort_order = if args.len() >= 4 {
+            let (order, trace) = self.eval_scalar(&args[3]);
+            traces.push(trace);
+            if let Value::Error(e) = order {
+                return (Value::Error(e), traces);
+            }
+            let order = match order.coerce_to_i64() {
+                Ok(n) => n,
+                Err(e) => return (Value::Error(e), traces),
+            };
+            Some(order)
+        } else {
+            None
+        };
+
+        // optional sort_by (string)
+        let sort_by = if args.len() >= 5 {
+            let (sort_by, trace) = self.eval_scalar(&args[4]);
+            traces.push(trace);
+            if let Value::Error(e) = sort_by {
+                return (Value::Error(e), traces);
+            }
+            let sort_by = match sort_by.coerce_to_string() {
+                Ok(s) => s,
+                Err(e) => return (Value::Error(e), traces),
+            };
+            Some(sort_by)
+        } else {
+            None
+        };
+
+        let out = provider.cube_set(
+            &conn,
+            &set_expr,
+            caption.as_deref(),
+            sort_order,
+            sort_by.as_deref(),
+        );
+        (out, traces)
+    }
+
+    fn fn_cubesetcount(&self, args: &[SpannedExpr<usize>]) -> (Value, Vec<TraceNode>) {
+        if args.len() != 1 {
+            return (Value::Error(ErrorKind::Value), Vec::new());
+        }
+
+        let Some(provider) = self.resolver.external_data_provider() else {
+            return (Value::Error(ErrorKind::NA), Vec::new());
+        };
+
+        let (set, trace) = self.eval_scalar(&args[0]);
+        let traces = vec![trace];
+        if let Value::Error(e) = set {
+            return (Value::Error(e), traces);
+        }
+        let set = match set.coerce_to_string() {
+            Ok(s) => s,
+            Err(e) => return (Value::Error(e), traces),
+        };
+
+        let out = provider.cube_set_count(&set);
+        (out, traces)
+    }
+
+    fn fn_cubekpimember(&self, args: &[SpannedExpr<usize>]) -> (Value, Vec<TraceNode>) {
+        if args.len() < 3 || args.len() > 4 {
+            return (Value::Error(ErrorKind::Value), Vec::new());
+        }
+
+        let Some(provider) = self.resolver.external_data_provider() else {
+            return (Value::Error(ErrorKind::NA), Vec::new());
+        };
+
+        let mut traces = Vec::with_capacity(args.len());
+
+        let (connection, trace) = self.eval_scalar(&args[0]);
+        traces.push(trace);
+        if let Value::Error(e) = connection {
+            return (Value::Error(e), traces);
+        }
+        let connection = match connection.coerce_to_string() {
+            Ok(v) => v,
+            Err(e) => return (Value::Error(e), traces),
+        };
+
+        let (kpi_name, trace) = self.eval_scalar(&args[1]);
+        traces.push(trace);
+        if let Value::Error(e) = kpi_name {
+            return (Value::Error(e), traces);
+        }
+        let kpi_name = match kpi_name.coerce_to_string() {
+            Ok(v) => v,
+            Err(e) => return (Value::Error(e), traces),
+        };
+
+        let (kpi_property, trace) = self.eval_scalar(&args[2]);
+        traces.push(trace);
+        if let Value::Error(e) = kpi_property {
+            return (Value::Error(e), traces);
+        }
+        let kpi_property = match kpi_property.coerce_to_string() {
+            Ok(v) => v,
+            Err(e) => return (Value::Error(e), traces),
+        };
+
+        let caption = if args.len() == 4 {
+            let (caption, trace) = self.eval_scalar(&args[3]);
+            traces.push(trace);
+            if let Value::Error(e) = caption {
+                return (Value::Error(e), traces);
+            }
+            match caption.coerce_to_string() {
+                Ok(v) => Some(v),
+                Err(e) => return (Value::Error(e), traces),
+            }
+        } else {
+            None
+        };
+
+        let out = provider.cube_kpi_member(
+            &connection,
+            &kpi_name,
+            &kpi_property,
+            caption.as_deref(),
+        );
+        (out, traces)
     }
 
     fn fn_if(&self, args: &[SpannedExpr<usize>]) -> (Value, Vec<TraceNode>) {
