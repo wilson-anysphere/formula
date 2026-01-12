@@ -15,8 +15,9 @@ use formula_xlsx::print::{
     read_workbook_print_settings, write_workbook_print_settings, WorkbookPrintSettings,
 };
 use formula_xlsx::{
-    patch_xlsx_streaming_workbook_cell_patches, CellPatch as XlsxCellPatch, PreservedPivotParts,
-    WorkbookCellPatches, XlsxPackage,
+    patch_xlsx_streaming_workbook_cell_patches,
+    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides, CellPatch as XlsxCellPatch,
+    PartOverride, PreservedPivotParts, WorkbookCellPatches, XlsxPackage,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufReader, Cursor};
@@ -1013,6 +1014,43 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         if patches.is_empty() && print_settings_changed && !wants_drop_vba && !power_query_changed {
             let bytes = write_workbook_print_settings(origin_bytes, &workbook.print_settings)
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
+            let bytes = Arc::<[u8]>::from(bytes);
+            std::fs::write(path, bytes.as_ref())
+                .with_context(|| format!("write workbook {:?}", path))?;
+            return Ok(bytes);
+        }
+
+        if !wants_drop_vba && power_query_changed {
+            let mut part_overrides: HashMap<String, PartOverride> = HashMap::new();
+            match workbook.power_query_xml.as_ref() {
+                Some(bytes) => {
+                    let override_op = if workbook.original_power_query_xml.is_some() {
+                        PartOverride::Replace(bytes.clone())
+                    } else {
+                        PartOverride::Add(bytes.clone())
+                    };
+                    part_overrides.insert(FORMULA_POWER_QUERY_PART.to_string(), override_op);
+                }
+                None => {
+                    part_overrides.insert(FORMULA_POWER_QUERY_PART.to_string(), PartOverride::Remove);
+                }
+            }
+
+            let mut cursor = Cursor::new(Vec::new());
+            patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
+                Cursor::new(origin_bytes),
+                &mut cursor,
+                &patches,
+                &part_overrides,
+            )
+            .context("apply worksheet cell patches + part overrides (streaming)")?;
+
+            let mut bytes = cursor.into_inner();
+            if print_settings_changed {
+                bytes = write_workbook_print_settings(&bytes, &workbook.print_settings)
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            }
 
             let bytes = Arc::<[u8]>::from(bytes);
             std::fs::write(path, bytes.as_ref())
@@ -2554,13 +2592,32 @@ mod tests {
         formula_xlsx::write_workbook_to_writer(&model, &mut cursor).expect("write workbook");
         let base_bytes = cursor.into_inner();
 
+        // Save a version without the part so we can assert absent -> added transitions.
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let no_pq_path = tmp.path().join("no-pq.xlsx");
+        std::fs::write(&no_pq_path, &base_bytes).expect("write no-pq");
+
+        let mut workbook = read_xlsx_blocking(&no_pq_path).expect("read workbook without pq");
+        assert!(workbook.power_query_xml.is_none());
+        assert!(workbook.original_power_query_xml.is_none());
+
+        let added_xml = br#"<FormulaPowerQuery version="1"><![CDATA[{"queries":[{"id":"added"}]}]]></FormulaPowerQuery>"#.to_vec();
+        workbook.power_query_xml = Some(added_xml.clone());
+        let added_path = tmp.path().join("added.xlsx");
+        let added_bytes = write_xlsx_blocking(&added_path, &workbook).expect("write added");
+        let added_pkg = XlsxPackage::from_bytes(added_bytes.as_ref()).expect("parse added");
+        assert_eq!(
+            added_pkg.part(FORMULA_POWER_QUERY_PART),
+            Some(added_xml.as_slice()),
+            "expected save to add the new power-query.xml payload"
+        );
+
         // Inject a Formula Power Query part.
         let initial_xml = br#"<FormulaPowerQuery version="1"><![CDATA[{"queries":[{"id":"q1"}]}]]></FormulaPowerQuery>"#.to_vec();
         let mut pkg = XlsxPackage::from_bytes(&base_bytes).expect("parse generated package");
         pkg.set_part(FORMULA_POWER_QUERY_PART, initial_xml.clone());
         let injected_bytes = pkg.write_to_bytes().expect("write injected package");
 
-        let tmp = tempfile::tempdir().expect("temp dir");
         let src_path = tmp.path().join("src.xlsx");
         std::fs::write(&src_path, &injected_bytes).expect("write src");
 
@@ -2590,7 +2647,7 @@ mod tests {
             "expected patch-based save to preserve power-query.xml verbatim"
         );
 
-        // Changing the PQ payload should switch to the XlsxPackage save path and update the part.
+        // Changing the PQ payload should update the part while keeping the save streaming.
         let mut workbook = read_xlsx_blocking(&src_path).expect("read workbook for update");
         let updated_xml = br#"<FormulaPowerQuery version="1"><![CDATA[{"queries":[{"id":"q2"}]}]]></FormulaPowerQuery>"#.to_vec();
         workbook.power_query_xml = Some(updated_xml.clone());

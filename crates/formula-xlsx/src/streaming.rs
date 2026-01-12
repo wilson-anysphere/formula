@@ -81,6 +81,26 @@ pub struct WorksheetCellPatch {
     pub xf_index: Option<u32>,
 }
 
+/// Override behavior for arbitrary (non-worksheet) OPC parts while streaming-patching.
+///
+/// This is primarily intended for losslessly updating "sidecar" XML parts (e.g.
+/// `xl/formula/power-query.xml`) without inflating the entire [`crate::XlsxPackage`] in memory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PartOverride {
+    /// Write these bytes to the output ZIP for this entry.
+    ///
+    /// If the part exists in the input, it will be replaced in-place. If it does not exist, it
+    /// will be appended to the output ZIP after all input entries have been copied.
+    Replace(Vec<u8>),
+    /// Remove the part from the output ZIP (skip copying it if it exists).
+    Remove,
+    /// Ensure the part exists with these bytes.
+    ///
+    /// Behaves like [`PartOverride::Replace`] when the part is present in the input, and appends
+    /// the part when it is missing.
+    Add(Vec<u8>),
+}
+
 impl WorksheetCellPatch {
     pub fn new(
         worksheet_part: impl Into<String>,
@@ -143,6 +163,7 @@ pub fn patch_xlsx_streaming<R: Read + Seek, W: Write + Seek>(
         &mut archive,
         output,
         &patches_by_part,
+        &HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
         recalc_policy,
@@ -247,6 +268,118 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
         &patches_by_part,
         &pre_read_parts,
         &HashMap::new(),
+        &HashMap::new(),
+        recalc_policy,
+    )?;
+    Ok(())
+}
+
+/// Apply [`WorkbookCellPatches`] using the streaming ZIP rewriter, plus arbitrary part overrides.
+///
+/// This variant supports replacing/adding/removing non-worksheet parts (e.g.
+/// `xl/formula/power-query.xml`) without inflating the entire workbook package into an
+/// [`crate::XlsxPackage`].
+pub fn patch_xlsx_streaming_workbook_cell_patches_with_part_overrides<
+    R: Read + Seek,
+    W: Write + Seek,
+>(
+    input: R,
+    output: W,
+    patches: &WorkbookCellPatches,
+    part_overrides: &HashMap<String, PartOverride>,
+) -> Result<(), StreamingPatchError> {
+    if patches.is_empty() {
+        let mut archive = ZipArchive::new(input)?;
+        patch_xlsx_streaming_with_archive(
+            &mut archive,
+            output,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            part_overrides,
+            RecalcPolicy::PRESERVE,
+        )?;
+        return Ok(());
+    }
+
+    // StyleId patches require rewriting styles.xml; callers should use the style-aware variant.
+    for (_, sheet_patches) in patches.sheets() {
+        for (_, patch) in sheet_patches.iter() {
+            if patch.style_id().is_some_and(|id| id != 0) {
+                return Err(crate::XlsxError::Invalid(
+                    "style_id patches require patch_xlsx_streaming_workbook_cell_patches_with_styles"
+                        .to_string(),
+                )
+                .into());
+            }
+        }
+    }
+
+    let mut archive = ZipArchive::new(input)?;
+
+    let mut pre_read_parts: HashMap<String, Vec<u8>> = HashMap::new();
+    let workbook_xml = read_zip_part(&mut archive, "xl/workbook.xml", &mut pre_read_parts)?;
+    let workbook_xml = String::from_utf8(workbook_xml).map_err(crate::XlsxError::from)?;
+    let workbook_sheets = parse_workbook_sheets(&workbook_xml)?;
+
+    let workbook_rels_bytes = read_zip_part(
+        &mut archive,
+        "xl/_rels/workbook.xml.rels",
+        &mut pre_read_parts,
+    )?;
+    let rels = parse_relationships(&workbook_rels_bytes)?;
+    let mut rel_targets: HashMap<String, String> = HashMap::new();
+    for rel in rels {
+        rel_targets.insert(rel.id, resolve_target("xl/workbook.xml", &rel.target));
+    }
+
+    let mut patches_by_part: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
+    let mut saw_formula_patch = false;
+    for (sheet_selector, sheet_patches) in patches.sheets() {
+        if sheet_patches.is_empty() {
+            continue;
+        }
+        let worksheet_part =
+            resolve_worksheet_part_for_selector(sheet_selector, &workbook_sheets, &rel_targets)?;
+
+        for (cell_ref, patch) in sheet_patches.iter() {
+            let (value, formula) = match patch {
+                CellPatch::Clear { .. } => (CellValue::Empty, None),
+                CellPatch::Set { value, formula, .. } => (value.clone(), formula.clone()),
+            };
+            saw_formula_patch |= formula_is_material(formula.as_deref());
+            let xf_index = patch.style_index();
+            patches_by_part
+                .entry(worksheet_part.clone())
+                .or_default()
+                .push(
+                    WorksheetCellPatch::new(worksheet_part.clone(), cell_ref, value, formula)
+                        .with_xf_index(xf_index),
+                );
+        }
+    }
+
+    for patches in patches_by_part.values_mut() {
+        patches.sort_by_key(|p| (p.cell.row, p.cell.col));
+    }
+
+    let mut formula_changed = saw_formula_patch;
+    if !formula_changed {
+        formula_changed = streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
+    }
+    let recalc_policy = if formula_changed {
+        RecalcPolicy::default()
+    } else {
+        RecalcPolicy::PRESERVE
+    };
+
+    patch_xlsx_streaming_with_archive(
+        &mut archive,
+        output,
+        &patches_by_part,
+        &pre_read_parts,
+        &HashMap::new(),
+        part_overrides,
         recalc_policy,
     )?;
     Ok(())
@@ -389,6 +522,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles<R: Read + Seek, W:
         &patches_by_part,
         &pre_read_parts,
         &updated_parts,
+        &HashMap::new(),
         recalc_policy,
     )?;
     Ok(())
@@ -1020,6 +1154,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
     patches_by_part: &HashMap<String, Vec<WorksheetCellPatch>>,
     pre_read_parts: &HashMap<String, Vec<u8>>,
     updated_parts: &HashMap<String, Vec<u8>>,
+    part_overrides: &HashMap<String, PartOverride>,
     recalc_policy: RecalcPolicy,
 ) -> Result<(), StreamingPatchError> {
     let (shared_strings_part, shared_string_indices, shared_strings_updated) =
@@ -1089,6 +1224,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
 
     let mut zip = ZipWriter::new(output);
     let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+    let mut applied_part_overrides: HashSet<String> = HashSet::new();
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
@@ -1098,14 +1234,31 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
 
         let name = file.name().to_string();
 
+        // Track worksheet patch targets so we can report `MissingWorksheetPart` accurately even if
+        // a caller overrides the part (e.g. removes or replaces it).
+        missing_parts.remove(&name);
+
         if recalc_policy.drop_calc_chain_on_formula_change && name == "xl/calcChain.xml" {
             // Drop calcChain.xml entirely when formulas change, matching the in-memory patcher.
             continue;
         }
 
+        if let Some(override_op) = part_overrides.get(&name) {
+            applied_part_overrides.insert(name.clone());
+            match override_op {
+                PartOverride::Remove => {
+                    continue;
+                }
+                PartOverride::Replace(bytes) | PartOverride::Add(bytes) => {
+                    zip.start_file(name.clone(), options)?;
+                    zip.write_all(bytes)?;
+                    continue;
+                }
+            }
+        }
+
         if let Some(patches) = effective_patches_by_part.get(&name) {
             zip.start_file(name.clone(), options)?;
-            missing_parts.remove(&name);
             let indices = shared_string_indices.get(&name);
             let worksheet_meta = worksheet_metadata_by_part
                 .get(&name)
@@ -1149,6 +1302,31 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
             // Use raw copy to preserve bytes for unchanged parts and avoid a decompression /
             // recompression pass over large binary assets.
             zip.raw_copy_file(file)?;
+        }
+    }
+
+    // Append any missing override parts deterministically.
+    if !part_overrides.is_empty() {
+        let mut to_append: Vec<(&String, &PartOverride)> = part_overrides
+            .iter()
+            .filter(|(name, override_op)| {
+                if applied_part_overrides.contains(*name) {
+                    return false;
+                }
+                matches!(
+                    override_op,
+                    PartOverride::Add(_) | PartOverride::Replace(_)
+                )
+            })
+            .collect();
+        to_append.sort_by_key(|(name, _)| *name);
+        for (name, override_op) in to_append {
+            let bytes = match override_op {
+                PartOverride::Replace(bytes) | PartOverride::Add(bytes) => bytes,
+                PartOverride::Remove => continue,
+            };
+            zip.start_file(name.clone(), options)?;
+            zip.write_all(bytes)?;
         }
     }
 
