@@ -65,7 +65,8 @@ pub fn extract_vba_signature_signed_digest(
 
     // Fallback: scan for embedded SignedData ContentInfo sequences. This is best-effort: signature
     // streams can contain *multiple* SignedData blobs (e.g. certificate stores + signature), so we
-    // keep searching until we find one whose eContentType is SpcIndirectDataContent.
+    // keep searching until we find one whose signed content parses as Authenticode
+    // `SpcIndirectDataContent`.
     for offset in 0..signature_stream.len() {
         if signature_stream[offset] != 0x30 {
             continue;
