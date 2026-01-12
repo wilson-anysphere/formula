@@ -1074,6 +1074,50 @@ test.describe("split view", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("F2");
   });
 
+  test("clicking inside the secondary cell editor does not commit the edit", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    // Seed a known value so we can assert edits are not committed prematurely.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument();
+      doc.setCellValue(sheetId, "A1", "seed");
+    });
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+    await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    // Begin editing and type a value, but do NOT press Enter/Tab.
+    await page.keyboard.press("h");
+    const editor = secondary.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await page.keyboard.type("ello");
+    await expect(editor).toHaveValue("hello");
+
+    // Clicking inside the textarea should keep it focused and not commit/close.
+    await editor.click({ position: { x: 10, y: 10 } });
+    await expect(editor).toBeFocused();
+    await expect(editor).toHaveValue("hello");
+
+    expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("seed");
+
+    // Commit explicitly.
+    await page.keyboard.press("Enter");
+    await waitForIdle(page);
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("hello");
+  });
+
   test("clicking the primary pane commits an in-progress secondary-pane edit", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
