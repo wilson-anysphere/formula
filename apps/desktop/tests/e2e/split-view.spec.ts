@@ -351,6 +351,15 @@ test.describe("split view", () => {
     await page.keyboard.press("Delete");
     await waitForIdle(page);
     expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"))).toBe("");
+
+    // Backspace should also clear the active cell (common on mac keyboards / laptop layouts).
+    await page.keyboard.press(`${modifier}+V`);
+    await waitForIdle(page);
+    expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"))).toBe("hello");
+
+    await page.keyboard.press("Backspace");
+    await waitForIdle(page);
+    expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"))).toBe("");
   });
 
   test("primary in-cell edits commit on blur when clicking another cell (shared grid)", async ({ page }) => {
