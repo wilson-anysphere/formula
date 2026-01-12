@@ -1969,7 +1969,6 @@ export class SpreadsheetApp {
       this.syncSharedGridInteractionMode();
       this.updateEditState();
       bar.model.beginEdit();
-      bar.textarea.style.display = "block";
     }
 
     const textarea = bar.textarea;
@@ -2002,7 +2001,6 @@ export class SpreadsheetApp {
       this.syncSharedGridInteractionMode();
       this.updateEditState();
       bar.model.beginEdit();
-      bar.textarea.style.display = "block";
 
       const textarea = bar.textarea;
       textarea.value = text;

@@ -29,6 +29,7 @@ export class FormulaBarView {
   #hintEl: HTMLElement;
   #errorButton: HTMLButtonElement;
   #errorPanel: HTMLElement;
+  #isErrorPanelOpen = false;
   #hoverOverride: RangeAddress | null = null;
   #selectedReferenceIndex: number | null = null;
   #callbacks: FormulaBarViewCallbacks;
@@ -117,13 +118,12 @@ export class FormulaBarView {
     errorButton.textContent = "!";
     errorButton.title = "Show error details";
     errorButton.setAttribute("aria-label", "Show formula error");
+    errorButton.setAttribute("aria-expanded", "false");
     errorButton.dataset.testid = "formula-error-button";
-    errorButton.style.display = "none";
 
     const errorPanel = document.createElement("div");
     errorPanel.className = "formula-bar-error-panel";
     errorPanel.dataset.testid = "formula-error-panel";
-    errorPanel.style.display = "none";
 
     row.appendChild(nameBox);
     row.appendChild(actions);
@@ -194,8 +194,7 @@ export class FormulaBarView {
     });
 
     errorButton.addEventListener("click", () => {
-      const isOpen = this.#errorPanel.style.display !== "none";
-      this.#errorPanel.style.display = isOpen ? "none" : "block";
+      this.#setErrorPanelOpen(!this.#isErrorPanelOpen);
     });
 
     cancelButton.addEventListener("click", () => this.#cancel());
@@ -213,7 +212,10 @@ export class FormulaBarView {
   }
 
   focus(opts: { cursor?: "end" | "all" } = {}): void {
-    this.textarea.style.display = "block";
+    // Ensure the textarea is visible so `.focus()` works even when the formula bar is not currently editing.
+    // `#render()` keeps this class in sync with `model.isEditing`, but `focus()` is called while
+    // still in view mode, so we need to allow the textarea to become focusable first.
+    this.root.classList.add("formula-bar--editing");
     // Prevent browser focus handling from scrolling the desktop shell horizontally.
     // (The app uses its own scroll containers; window scrolling is accidental and
     // breaks pointer-coordinate based interactions like range-drag insertion.)
@@ -530,8 +532,8 @@ export class FormulaBarView {
     }
     this.#highlightEl.innerHTML = highlightHtml;
 
-    // When not editing, hide the textarea and allow hover interactions directly on the highlighted text.
-    this.textarea.style.display = this.model.isEditing ? "block" : "none";
+    // Toggle editing UI state (textarea visibility, hover hit-testing, etc.) through CSS classes.
+    this.root.classList.toggle("formula-bar--editing", this.model.isEditing);
 
     const hint = this.model.functionHint();
     if (!hint) {
@@ -552,12 +554,12 @@ export class FormulaBarView {
 
     const explanation = this.model.errorExplanation();
     if (!explanation) {
-      this.#errorButton.style.display = "none";
-      this.#errorPanel.style.display = "none";
+      this.root.classList.toggle("formula-bar--has-error", false);
+      this.#setErrorPanelOpen(false);
       this.#errorPanel.textContent = "";
     } else {
       const address = this.model.activeCell.address;
-      this.#errorButton.style.display = "inline-flex";
+      this.root.classList.toggle("formula-bar--has-error", true);
       this.#errorPanel.innerHTML = `
         <div class="formula-bar-error-title">${explanation.code} (${escapeHtml(address)}): ${explanation.title}</div>
         <div class="formula-bar-error-desc">${explanation.description}</div>
@@ -567,6 +569,12 @@ export class FormulaBarView {
 
     this.#syncScroll();
     this.#adjustHeight();
+  }
+
+  #setErrorPanelOpen(open: boolean): void {
+    this.#isErrorPanelOpen = open;
+    this.root.classList.toggle("formula-bar--error-panel-open", open);
+    this.#errorButton.setAttribute("aria-expanded", open ? "true" : "false");
   }
 
   #adjustHeight(): void {
