@@ -173,6 +173,9 @@ This is distinct from legacy “floating” images stored under `xl/drawings/*`.
 
 **Detail spec:** [20-images-in-cells.md](./20-images-in-cells.md)
 
+**Packaging note:** see [In-cell images (cellimages.xml)](#in-cell-images-cellimagesxml) for the OPC
+part/relationships conventions that must be preserved for round-trip safety.
+
 ### Formula Storage
 
 ```xml
