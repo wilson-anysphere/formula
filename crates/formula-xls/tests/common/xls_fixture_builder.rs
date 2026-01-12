@@ -5353,7 +5353,10 @@ fn build_defined_names_builtins_chkey_mismatch_workbook_stream() -> Vec<u8> {
     push_record(
         &mut globals,
         RECORD_NAME,
-        &builtin_name_record_with_chkey(true, 1, 0x06, 0x07, &print_area_rgce),
+        // Store the correct built-in id in `rgchName`, but populate `chKey` with an arbitrary,
+        // non-zero byte (as some writers do). Excel appears to prefer `rgchName` for built-in
+        // names, so the importer should interpret this as Print_Area (0x06), not Print_Titles.
+        &builtin_name_record_with_chkey(true, 1, b'X', 0x06, &print_area_rgce),
     );
 
     // Print_Titles on Sheet2: Sheet2!$1:$1,Sheet2!$A:$A (not hidden).
