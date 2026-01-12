@@ -2568,14 +2568,22 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
         // Best-effort: clamp `cch` if the name string cannot fit in the first fragment.
         //
         // Calamine slices `&payload[14..]` then indexes `buf[1..=cch]`, which requires
-        // `payload.len() > 14 + cch`.
-        if len >= 4 && len > 14 {
-            let cch = out[data_start + 3] as usize;
-            let available = len - 14;
-            if available <= cch {
-                // Ensure `available > cch` (or set to 0 if we can't even fit the flags byte).
-                let new_cch = available.saturating_sub(1).min(u8::MAX as usize) as u8;
-                out[data_start + 3] = new_cch;
+        // `payload.len() > 14 + cch` (non-built-in names only).
+        if len >= 4 && data_start + 4 <= out.len() {
+            let grbit = if len >= 2 && data_start + 2 <= out.len() {
+                u16::from_le_bytes([out[data_start], out[data_start + 1]])
+            } else {
+                0
+            };
+            let is_builtin = (grbit & NAME_FLAG_BUILTIN) != 0;
+            if !is_builtin {
+                let cch = out[data_start + 3] as usize;
+                let available = len.saturating_sub(14);
+                if available <= cch {
+                    // Ensure `available > cch` (or set to 0 if we can't even fit the flags byte).
+                    let new_cch = available.saturating_sub(1).min(u8::MAX as usize) as u8;
+                    out[data_start + 3] = new_cch;
+                }
             }
         }
     }
