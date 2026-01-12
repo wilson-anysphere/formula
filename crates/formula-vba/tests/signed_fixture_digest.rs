@@ -1,8 +1,9 @@
 use std::io::Read;
 
 use formula_vba::{
-    extract_vba_signature_signed_digest, list_vba_digital_signatures, parse_vba_digital_signature,
-    verify_vba_digital_signature, VbaSignatureBinding, VbaSignatureVerification,
+    extract_signer_certificate_info, extract_vba_signature_signed_digest, list_vba_digital_signatures,
+    parse_vba_digital_signature, verify_vba_digital_signature, VbaSignatureBinding,
+    VbaSignatureVerification,
 };
 
 fn load_fixture_vba_bin() -> Vec<u8> {
@@ -32,6 +33,13 @@ fn extracts_spc_indirect_data_digest_from_signed_vba_fixture() {
         sig.stream_path.contains("DigitalSignature"),
         "expected DigitalSignature stream, got {}",
         sig.stream_path
+    );
+    assert!(
+        sig.signer_subject
+            .as_deref()
+            .is_some_and(|s| s.contains("Formula VBA Fixture")),
+        "expected signer subject to mention fixture CN, got: {:?}",
+        sig.signer_subject
     );
 
     // Many real-world files wrap the PKCS#7 blob in a [MS-OFFCRYPTO] DigSigInfoSerialized header.
@@ -65,6 +73,18 @@ fn extracts_spc_indirect_data_digest_from_signed_vba_fixture() {
         "2.16.840.1.101.3.4.2.1"
     );
     assert_eq!(signed_digest.digest, (0u8..32).collect::<Vec<_>>());
+
+    let cert_info =
+        extract_signer_certificate_info(&sig.signature).expect("expected embedded certificate info");
+    assert!(
+        cert_info.subject.contains("Formula VBA Fixture"),
+        "expected certificate subject to mention fixture CN, got: {}",
+        cert_info.subject
+    );
+    assert!(
+        !cert_info.sha256_fingerprint_hex.is_empty(),
+        "expected certificate fingerprint"
+    );
 }
 
 #[test]
