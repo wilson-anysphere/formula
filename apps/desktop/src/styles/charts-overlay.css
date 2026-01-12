@@ -1,0 +1,18 @@
+.chart-pane {
+  position: absolute;
+  pointer-events: none;
+  overflow: hidden;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+}
+
+/* Modifier classes exist for debugging hooks / future styling extensions. */
+.chart-pane--top-left,
+.chart-pane--top-right,
+.chart-pane--bottom-left,
+.chart-pane--bottom-right {
+  /* no-op */
+}
+

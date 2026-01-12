@@ -3049,23 +3049,17 @@ export class SpreadsheetApp {
     if (!this.sharedGrid) return;
     if (this.sharedChartPanes) return;
 
-    const createPane = (testId: string) => {
+    const createPane = (testId: string, className: string) => {
       const pane = document.createElement("div");
       pane.dataset.testid = testId;
-      pane.style.position = "absolute";
-      pane.style.pointerEvents = "none";
-      pane.style.overflow = "hidden";
-      pane.style.left = "0";
-      pane.style.top = "0";
-      pane.style.width = "0";
-      pane.style.height = "0";
+      pane.className = className;
       return pane;
     };
 
-    const topLeft = createPane("chart-pane-top-left");
-    const topRight = createPane("chart-pane-top-right");
-    const bottomLeft = createPane("chart-pane-bottom-left");
-    const bottomRight = createPane("chart-pane-bottom-right");
+    const topLeft = createPane("chart-pane-top-left", "chart-pane chart-pane--top-left");
+    const topRight = createPane("chart-pane-top-right", "chart-pane chart-pane--top-right");
+    const bottomLeft = createPane("chart-pane-bottom-left", "chart-pane chart-pane--bottom-left");
+    const bottomRight = createPane("chart-pane-bottom-right", "chart-pane chart-pane--bottom-right");
 
     this.chartLayer.appendChild(topLeft);
     this.chartLayer.appendChild(topRight);
