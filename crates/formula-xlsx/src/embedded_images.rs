@@ -434,6 +434,8 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
                         // rather than `Target="../media/image1.png"` (relative to `xl/richData/`).
                         let target = if target.starts_with("media/") {
                             format!("xl/{target}")
+                        } else if target.starts_with("xl/") {
+                            target.to_string()
                         } else {
                             path::resolve_target(rich_value_rel_part, target)
                         };

@@ -182,6 +182,15 @@ const RICH_VALUE_REL_RELS_XML_MEDIA_RELATIVE_TO_XL: &str =
 </Relationships>
 "#;
 
+const RICH_VALUE_REL_RELS_XML_XL_MEDIA_NO_LEADING_SLASH: &str =
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+                 Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                 Target="xl/media/image1.png"/>
+</Relationships>
+"#;
+
 const RICH_VALUE_REL_RELS_XML_NON_IMAGE: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1"
@@ -307,6 +316,16 @@ fn extracts_when_rich_value_rel_rels_target_is_relative_to_xl() {
         METADATA_XML,
         1,
         RICH_VALUE_REL_RELS_XML_MEDIA_RELATIVE_TO_XL,
+    );
+}
+
+#[test]
+fn extracts_when_rich_value_rel_rels_target_starts_with_xl_prefix() {
+    // Some producers emit `Target="xl/media/image1.png"` (missing the leading `/`).
+    assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema_with_rels(
+        METADATA_XML,
+        1,
+        RICH_VALUE_REL_RELS_XML_XL_MEDIA_NO_LEADING_SLASH,
     );
 }
 
