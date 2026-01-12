@@ -260,8 +260,8 @@ fn parse_txo_text_biff5(
     codepage: u16,
     warnings: &mut Vec<String>,
 ) -> Option<String> {
-    // BIFF5 notes are rare for us; keep this best-effort and only support the same continuation
-    // layout as BIFF8, but decode 8-bit bytes using the workbook codepage.
+    // BIFF5 stores the TXO text bytes directly in subsequent CONTINUE records (no per-fragment
+    // option flags byte). Treat the continued bytes as ANSI encoded using the workbook codepage.
     let first = record.first_fragment();
     if first.len() < TXO_TEXT_LEN_OFFSET + 2 {
         // Best-effort: if the TXO header is malformed, decode the first continuation as text.
@@ -292,18 +292,13 @@ fn parse_txo_text_biff5(
             continue;
         }
 
-        // Each fragment begins with a one-byte "high-byte" flag in BIFF8; for BIFF5 treat it as
-        // reserved and always decode as ANSI.
-        if offset == 0 {
-            offset = 1;
-        }
-
-        let available = frag.len().saturating_sub(offset);
-        if available == 0 {
+        if offset >= frag.len() {
             frag_idx += 1;
             offset = 0;
             continue;
         }
+
+        let available = frag.len() - offset;
         let take = remaining.min(available);
         out.push_str(&strings::decode_ansi(codepage, &frag[offset..offset + take]));
         remaining -= take;
@@ -491,6 +486,10 @@ mod tests {
         record(records::RECORD_BOF_BIFF8, &[0u8; 16])
     }
 
+    fn bof_biff5() -> Vec<u8> {
+        record(records::RECORD_BOF_BIFF5, &[0u8; 16])
+    }
+
     fn eof() -> Vec<u8> {
         record(records::RECORD_EOF, &[])
     }
@@ -507,6 +506,20 @@ mod tests {
         // BIFF8 ShortXLUnicodeString author (compressed).
         payload.push(author.len() as u8);
         payload.push(0); // flags (compressed)
+        payload.extend_from_slice(author.as_bytes());
+
+        record(RECORD_NOTE, &payload)
+    }
+
+    fn note_biff5(row: u16, col: u16, obj_id: u16, author: &str) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&row.to_le_bytes());
+        payload.extend_from_slice(&col.to_le_bytes());
+        payload.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        payload.extend_from_slice(&obj_id.to_le_bytes()); // idObj
+
+        // BIFF5 short ANSI string (length + bytes).
+        payload.push(author.len() as u8);
         payload.extend_from_slice(author.as_bytes());
 
         record(RECORD_NOTE, &payload)
@@ -559,6 +572,10 @@ mod tests {
         record(records::RECORD_CONTINUE, &payload)
     }
 
+    fn continue_text_biff5(bytes: &[u8]) -> Vec<u8> {
+        record(records::RECORD_CONTINUE, bytes)
+    }
+
     fn continue_text_unicode(text: &str) -> Vec<u8> {
         let mut payload = Vec::new();
         payload.push(0x01); // fHighByte=1 (UTF-16LE)
@@ -591,6 +608,39 @@ mod tests {
         assert_eq!(note.cell, CellRef::new(0, 0));
         assert_eq!(note.author, "Alice");
         assert_eq!(note.text, "Hello");
+    }
+
+    #[test]
+    fn parses_biff5_txo_text_from_continue_without_flags_using_codepage() {
+        // Include a non-ASCII byte in the BIFF5 text (0xC0 => Cyrillic 'А' in Windows-1251) to
+        // ensure codepage decoding is applied.
+        let text_bytes = [b'H', b'i', b' ', 0xC0];
+
+        let mut txo_payload = vec![0u8; 18];
+        txo_payload[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2]
+            .copy_from_slice(&(text_bytes.len() as u16).to_le_bytes());
+
+        let stream = [
+            bof_biff5(),
+            note_biff5(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            record(RECORD_TXO, &txo_payload),
+            continue_text_biff5(&text_bytes),
+            // Formatting CONTINUE (ignored).
+            continue_text_biff5(&[0u8; 4]),
+            eof(),
+        ]
+        .concat();
+
+        let (notes, warnings) =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1251).expect("parse");
+        assert!(
+            warnings.is_empty(),
+            "unexpected warnings: {warnings:?}"
+        );
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].author, "Alice");
+        assert_eq!(notes[0].text, "Hi А");
     }
 
     #[test]
