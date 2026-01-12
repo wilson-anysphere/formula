@@ -633,7 +633,7 @@ fn parse_workbook_metadata(
 
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"workbookPr" => {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"workbookPr" => {
                 for attr in e.attributes() {
                     let attr = attr?;
                     if attr.key.as_ref() == b"date1904" {
@@ -644,7 +644,7 @@ fn parse_workbook_metadata(
                     }
                 }
             }
-            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"calcPr" => {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"calcPr" => {
                 for attr in e.attributes() {
                     let attr = attr?;
                     match attr.key.as_ref() {
@@ -661,21 +661,24 @@ fn parse_workbook_metadata(
                     }
                 }
             }
-            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"sheet" => {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"sheet" => {
                 let mut name = None;
                 let mut sheet_id = None;
                 let mut r_id = None;
                 let mut state = None;
                 for attr in e.attributes() {
                     let attr = attr?;
-                    match attr.key.as_ref() {
+                    let key = attr.key.as_ref();
+                    match key {
                         b"name" => name = Some(attr.unescape_value()?.into_owned()),
                         b"sheetId" => {
                             sheet_id =
                                 Some(attr.unescape_value()?.into_owned().parse().unwrap_or(0))
                         }
-                        b"r:id" => r_id = Some(attr.unescape_value()?.into_owned()),
                         b"state" => state = Some(attr.unescape_value()?.into_owned()),
+                        _ if crate::openxml::local_name(key) == b"id" => {
+                            r_id = Some(attr.unescape_value()?.into_owned())
+                        }
                         _ => {}
                     }
                 }
@@ -695,7 +698,7 @@ fn parse_workbook_metadata(
                     path,
                 });
             }
-            Event::Start(e) if e.name().as_ref() == b"definedName" => {
+            Event::Start(e) if e.local_name().as_ref() == b"definedName" => {
                 let mut name = None;
                 let mut local_sheet_id = None;
                 let mut comment = None;
@@ -728,7 +731,7 @@ fn parse_workbook_metadata(
                     value: String::new(),
                 });
             }
-            Event::Empty(e) if e.name().as_ref() == b"definedName" => {
+            Event::Empty(e) if e.local_name().as_ref() == b"definedName" => {
                 let mut name = None;
                 let mut local_sheet_id = None;
                 let mut comment = None;
@@ -770,7 +773,7 @@ fn parse_workbook_metadata(
                     dn.value.push_str(std::str::from_utf8(e.as_ref())?);
                 }
             }
-            Event::End(e) if e.name().as_ref() == b"definedName" => {
+            Event::End(e) if e.local_name().as_ref() == b"definedName" => {
                 if let Some(dn) = current_defined.take() {
                     defined_names.push(dn);
                 }

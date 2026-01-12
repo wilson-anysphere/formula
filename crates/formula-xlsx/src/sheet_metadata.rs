@@ -43,7 +43,8 @@ fn parse_sheet_element(e: &BytesStart<'_>) -> Result<WorkbookSheetInfo, XlsxErro
 
     for attr in e.attributes() {
         let attr = attr?;
-        match attr.key.as_ref() {
+        let key = attr.key.as_ref();
+        match key {
             b"name" => name = Some(attr.unescape_value()?.to_string()),
             b"sheetId" => {
                 let v = attr.unescape_value()?;
@@ -57,7 +58,9 @@ fn parse_sheet_element(e: &BytesStart<'_>) -> Result<WorkbookSheetInfo, XlsxErro
                     _ => SheetVisibility::Visible,
                 };
             }
-            b"r:id" => rel_id = Some(attr.unescape_value()?.to_string()),
+            _ if crate::openxml::local_name(key) == b"id" => {
+                rel_id = Some(attr.unescape_value()?.to_string())
+            }
             _ => {}
         }
     }
