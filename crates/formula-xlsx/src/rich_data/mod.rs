@@ -70,10 +70,83 @@ impl XlsxPackage {
     /// Extract in-cell images stored via the Excel rich-data (`xl/metadata.xml` + `xl/richData/*`)
     /// mechanism.
     ///
-    /// This is a convenience wrapper around [`extract_rich_cell_images`].
+    /// This is a convenience wrapper around [`extract_rich_cell_images`], with a fallback for
+    /// legacy/simplified workbooks that omit the `xl/richData/richValue*.xml` parts and instead
+    /// index directly into `xl/richData/richValueRel.xml`.
     pub fn extract_rich_data_images(&self) -> Result<HashMap<(String, CellRef), Vec<u8>>, XlsxError> {
-        extract_rich_cell_images(self).map_err(rich_data_error_to_xlsx)
+        let extracted = if self.part_names().any(is_rich_value_part) {
+            extract_rich_cell_images(self)
+        } else {
+            extract_rich_data_images_via_rel_table(self)
+        };
+
+        extracted.map_err(rich_data_error_to_xlsx)
     }
+}
+
+fn extract_rich_data_images_via_rel_table(
+    pkg: &XlsxPackage,
+) -> Result<HashMap<(String, CellRef), Vec<u8>>, RichDataError> {
+    // If we can't resolve sheet names to parts, we can't provide stable (sheet name, cell) keys.
+    // Treat missing workbook parts as "no richData".
+    if pkg.part("xl/workbook.xml").is_none() || pkg.part("xl/_rels/workbook.xml.rels").is_none() {
+        return Ok(HashMap::new());
+    }
+
+    // The workbook parsing stack can error for malformed workbook.xml; bubble that up.
+    let worksheet_parts = pkg.worksheet_parts()?;
+
+    let metadata_part = resolve_workbook_metadata_part_name(pkg)?;
+    let Some(metadata_bytes) = pkg.part(&metadata_part) else {
+        return Ok(HashMap::new());
+    };
+    let vm_to_rich_value = parse_vm_to_rich_value_index_map(metadata_bytes, &metadata_part)?;
+    if vm_to_rich_value.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let Some(rich_value_rel_bytes) = pkg.part("xl/richData/richValueRel.xml") else {
+        return Ok(HashMap::new());
+    };
+    let rel_index_to_rid = parse_rich_value_rel_rids(rich_value_rel_bytes)?;
+    if rel_index_to_rid.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let Some(rich_value_rel_rels_bytes) = pkg.part("xl/richData/_rels/richValueRel.xml.rels")
+    else {
+        return Ok(HashMap::new());
+    };
+    let rid_to_target = parse_rich_value_rel_rels(rich_value_rel_rels_bytes)?;
+    if rid_to_target.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut out: HashMap<(String, CellRef), Vec<u8>> = HashMap::new();
+    for sheet in worksheet_parts {
+        let Some(sheet_bytes) = pkg.part(&sheet.worksheet_part) else {
+            continue;
+        };
+        let cells = parse_worksheet_vm_cells(sheet_bytes)?;
+        for (cell, vm) in cells {
+            let Some(&rich_value_idx) = vm_to_rich_value.get(&vm) else {
+                continue;
+            };
+            let Some(rid) = rel_index_to_rid.get(rich_value_idx as usize) else {
+                continue;
+            };
+            let Some(target) = rid_to_target.get(rid) else {
+                continue;
+            };
+            let target_part = path::resolve_target("xl/richData/richValueRel.xml", target);
+            let Some(bytes) = pkg.part(&target_part) else {
+                continue;
+            };
+            out.insert((sheet.name.clone(), cell), bytes.to_vec());
+        }
+    }
+
+    Ok(out)
 }
 /// Best-effort extraction of "image in cell" rich values.
 ///
