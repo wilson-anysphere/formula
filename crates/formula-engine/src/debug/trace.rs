@@ -1041,6 +1041,12 @@ impl ParserImpl {
         let mut args = Vec::new();
         if !matches!(self.peek().kind, TokenKind::RParen) {
             loop {
+                if args.len() == crate::EXCEL_MAX_ARGS {
+                    return Err(FormulaParseError::UnexpectedToken(format!(
+                        "Too many arguments (max {})",
+                        crate::EXCEL_MAX_ARGS
+                    )));
+                }
                 args.push(self.parse_compare()?);
                 if matches!(self.peek().kind, TokenKind::Comma) {
                     self.next();
@@ -2561,4 +2567,24 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         | (Value::ReferenceUnion(_), _)
         | (_, Value::ReferenceUnion(_)) => Ordering::Equal,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_spanned_formula_rejects_function_calls_with_more_than_255_args() {
+        let args = std::iter::repeat("1")
+            .take(crate::EXCEL_MAX_ARGS + 1)
+            .collect::<Vec<_>>()
+            .join(",");
+        let formula = format!("=SUM({args})");
+
+        let err = parse_spanned_formula(&formula).unwrap_err();
+        assert!(
+            err.to_string().contains("Too many arguments"),
+            "unexpected error: {err}"
+        );
+    }
 }
