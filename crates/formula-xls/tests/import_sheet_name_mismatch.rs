@@ -136,7 +136,7 @@ fn patch_first_boundsheet_name(workbook_stream: &mut [u8]) -> (String, usize) {
             let string_data = &mut data[6..];
             let cch = string_data[0] as usize;
             assert!(
-                string_data.len() >= 1 + cch,
+                string_data.len() > cch,
                 "unexpected end of BIFF5 sheet name"
             );
             assert!(cch >= 3, "expected sheet name to be at least 3 chars");
