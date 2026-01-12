@@ -156,7 +156,14 @@ function describePolicy(details, scanPolicy) {
   return { blocked: false, reason: null, warning: warnings.length > 0 ? warnings.join(" · ") : null };
 }
 
-async function renderSearchResults({ container, marketplaceClient, extensionManager, extensionHostManager, query }) {
+async function renderSearchResults({
+  container,
+  marketplaceClient,
+  extensionManager,
+  extensionHostManager,
+  query,
+  transientStatusById,
+}) {
   container.textContent = "Searching…";
   const results = await marketplaceClient.search({ q: query, limit: 25, offset: 0 });
 
@@ -176,6 +183,7 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
   for (const item of results.results) {
     const installed = await extensionManager.getInstalled(item.id);
     const details = detailsById.get(item.id) || null;
+    const transientStatus = transientStatusById?.get(item.id) ?? null;
 
     const latestVersion = details?.latestVersion || item.latestVersion || null;
     const latestScanStatusRaw =
@@ -249,6 +257,11 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
 
     const actions = el("div", { className: "actions" });
     if (!installed) {
+      if (typeof transientStatus === "string" && transientStatus.trim()) {
+        actions.append(
+          el("div", { className: "installed-meta" }, [document.createTextNode(String(transientStatus))]),
+        );
+      }
       actions.append(
         el(
           "button",
@@ -295,14 +308,21 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
                 } else if (extensionHostManager) {
                   await extensionHostManager.reloadExtension(item.id);
                 }
-                 updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
-                 actions.textContent = "Installed";
-                 tryNotifyExtensionsChanged();
-                 await renderSearchResults({ container, marketplaceClient, extensionManager, extensionHostManager, query });
-               } catch (error) {
-                 // eslint-disable-next-line no-console
-                 console.error(error);
-                 tryShowToast(String(error?.message ?? error), "error");
+                updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
+                actions.textContent = "Installed";
+                tryNotifyExtensionsChanged();
+                await renderSearchResults({
+                  container,
+                  marketplaceClient,
+                  extensionManager,
+                  extensionHostManager,
+                  query,
+                  transientStatusById,
+                });
+              } catch (error) {
+                // eslint-disable-next-line no-console
+                console.error(error);
+                tryShowToast(String(error?.message ?? error), "error");
                 actions.textContent = `Error: ${String(error?.message ?? error)}`;
               }
             },
@@ -317,6 +337,10 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
       if (installed.signingKeyId) metaParts.push(`key=${installed.signingKeyId}`);
       if (metaParts.length > 0) {
         actions.append(el("div", { className: "installed-meta" }, [document.createTextNode(metaParts.join(" · "))]));
+      }
+      if (transientStatusById && transientStatusById.has(item.id)) {
+        // Any "recently uninstalled" state is no longer relevant if the extension is installed again.
+        transientStatusById.delete(item.id);
       }
 
       if (installed.corrupted || installed.incompatible) {
@@ -348,14 +372,14 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
                     }
                   }
 
-                  if (extensionHostManager?.syncInstalledExtensions) {
-                    await extensionHostManager.syncInstalledExtensions();
-                  } else if (extensionHostManager) {
-                    await extensionHostManager.reloadExtension(item.id);
-                  }
-                  updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
-                  actions.textContent = "Repaired";
-                  tryNotifyExtensionsChanged();
+                   if (extensionHostManager?.syncInstalledExtensions) {
+                     await extensionHostManager.syncInstalledExtensions();
+                   } else if (extensionHostManager) {
+                     await extensionHostManager.reloadExtension(item.id);
+                   }
+                   updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
+                   actions.textContent = "Repaired";
+                   tryNotifyExtensionsChanged();
                 } catch (error) {
                   // eslint-disable-next-line no-console
                   console.error(error);
@@ -388,14 +412,22 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
 
                 const storage = getDefaultSeedStoreStorage();
                 if (storage) removeSeedPanelsForExtension(storage, item.id);
- 
-                 actions.textContent = "Uninstalled";
-                 tryNotifyExtensionsChanged();
-                 await renderSearchResults({ container, marketplaceClient, extensionManager, extensionHostManager, query });
-               } catch (error) {
-                 // eslint-disable-next-line no-console
-                 console.error(error);
-                 tryShowToast(String(error?.message ?? error), "error");
+                if (transientStatusById) transientStatusById.set(item.id, "Uninstalled");
+
+                actions.textContent = "Uninstalled";
+                tryNotifyExtensionsChanged();
+                await renderSearchResults({
+                  container,
+                  marketplaceClient,
+                  extensionManager,
+                  extensionHostManager,
+                  query,
+                  transientStatusById,
+                });
+              } catch (error) {
+                // eslint-disable-next-line no-console
+                console.error(error);
+                tryShowToast(String(error?.message ?? error), "error");
                 actions.textContent = `Error: ${String(error?.message ?? error)}`;
               }
             },
@@ -438,15 +470,22 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
                 } else if (extensionHostManager) {
                   await extensionHostManager.reloadExtension(item.id);
                 }
- 
-                 updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
-                 actions.textContent = "Updated";
-                 tryNotifyExtensionsChanged();
-                 await renderSearchResults({ container, marketplaceClient, extensionManager, extensionHostManager, query });
-               } catch (error) {
-                 // eslint-disable-next-line no-console
-                 console.error(error);
-                 tryShowToast(String(error?.message ?? error), "error");
+
+                updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
+                actions.textContent = "Updated";
+                tryNotifyExtensionsChanged();
+                await renderSearchResults({
+                  container,
+                  marketplaceClient,
+                  extensionManager,
+                  extensionHostManager,
+                  query,
+                  transientStatusById,
+                });
+              } catch (error) {
+                // eslint-disable-next-line no-console
+                console.error(error);
+                tryShowToast(String(error?.message ?? error), "error");
                 actions.textContent = `Error: ${String(error?.message ?? error)}`;
               }
             },
@@ -470,6 +509,9 @@ export function createMarketplacePanel({
   extensionManager,
   extensionHostManager,
 }) {
+  // Ephemeral UI state for showing a status in the search results after actions like uninstall.
+  // Cleared whenever the user manually triggers a new search.
+  const transientStatusById = new Map();
   const queryInput = el("input", {
     type: "search",
     placeholder: "Search extensions…",
@@ -482,12 +524,14 @@ export function createMarketplacePanel({
     {
       dataset: { testid: "marketplace-search-button" },
       onClick: async () => {
+        transientStatusById.clear();
         await renderSearchResults({
           container: resultsContainer,
           marketplaceClient,
           extensionManager,
           extensionHostManager,
           query: queryInput.value,
+          transientStatusById,
         });
       },
     },
