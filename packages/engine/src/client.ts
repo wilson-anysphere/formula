@@ -131,6 +131,9 @@ export interface EngineClient {
   /**
    * Best-effort partial parse for editor/autocomplete scenarios.
    *
+   * `cursor` (when provided) is expressed as a **UTF-16 code unit** offset (JS
+   * string indexing). This matches the span units returned by `lexFormula`.
+   *
    * This call is independent of any loaded workbook.
    */
   parseFormulaPartial(
