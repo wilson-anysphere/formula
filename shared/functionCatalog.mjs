@@ -338,6 +338,63 @@ export default {
       ]
     },
     {
+      "name": "BETA.DIST",
+      "min_args": 4,
+      "max_args": 6,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "bool",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "BETA.INV",
+      "min_args": 3,
+      "max_args": 5,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "BETADIST",
+      "min_args": 3,
+      "max_args": 5,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "BETAINV",
+      "min_args": 3,
+      "max_args": 5,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "BINOM.DIST",
       "min_args": 4,
       "max_args": 4,
@@ -453,6 +510,73 @@ export default {
       "arg_types": [
         "text",
         "any"
+      ]
+    },
+    {
+      "name": "CHIDIST",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "CHIINV",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "CHISQ.DIST",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
+      "name": "CHISQ.DIST.RT",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "CHISQ.INV",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "CHISQ.INV.RT",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
       ]
     },
     {
@@ -592,6 +716,42 @@ export default {
       "return_type": "text",
       "arg_types": [
         "any"
+      ]
+    },
+    {
+      "name": "CONFIDENCE",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "CONFIDENCE.NORM",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "CONFIDENCE.T",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
       ]
     },
     {
@@ -1408,6 +1568,79 @@ export default {
       ]
     },
     {
+      "name": "EXPON.DIST",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
+      "name": "EXPONDIST",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
+      "name": "F.DIST",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
+      "name": "F.DIST.RT",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "F.INV",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "F.INV.RT",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "F.TEST",
       "min_args": 2,
       "max_args": 2,
@@ -1447,6 +1680,18 @@ export default {
       "arg_types": []
     },
     {
+      "name": "FDIST",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "FILTER",
       "min_args": 2,
       "max_args": 3,
@@ -1479,6 +1724,38 @@ export default {
       "arg_types": [
         "text",
         "text",
+        "number"
+      ]
+    },
+    {
+      "name": "FINV",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "FISHER",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "FISHERINV",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
         "number"
       ]
     },
@@ -1650,6 +1927,86 @@ export default {
       "arg_types": [
         "number",
         "any"
+      ]
+    },
+    {
+      "name": "GAMMA",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "GAMMA.DIST",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
+      "name": "GAMMA.INV",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "GAMMADIST",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
+      "name": "GAMMAINV",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "GAMMALN",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "GAMMALN.PRECISE",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
       ]
     },
     {
@@ -2447,6 +2804,55 @@ export default {
         "any",
         "bool",
         "bool"
+      ]
+    },
+    {
+      "name": "LOGINV",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "LOGNORM.DIST",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
+      "name": "LOGNORM.INV",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "LOGNORMDIST",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
       ]
     },
     {
@@ -4098,6 +4504,62 @@ export default {
       ]
     },
     {
+      "name": "T.DIST",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
+      "name": "T.DIST.2T",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "T.DIST.RT",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "T.INV",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "T.INV.2T",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "T.TEST",
       "min_args": 4,
       "max_args": 4,
@@ -4175,6 +4637,18 @@ export default {
       "arg_types": [
         "any",
         "any",
+        "number"
+      ]
+    },
+    {
+      "name": "TDIST",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
         "number"
       ]
     },
@@ -4306,6 +4780,17 @@ export default {
       "return_type": "number",
       "arg_types": [
         "any"
+      ]
+    },
+    {
+      "name": "TINV",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
       ]
     },
     {
@@ -4571,6 +5056,32 @@ export default {
       "arg_types": [
         "number",
         "number"
+      ]
+    },
+    {
+      "name": "WEIBULL",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
+      "name": "WEIBULL.DIST",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "bool"
       ]
     },
     {

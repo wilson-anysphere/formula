@@ -236,6 +236,76 @@ def generate_cases() -> dict[str, Any]:
         formula="=GROWTH({2;6;18},{0;1;2},{3;4})",
     )
 
+    # Continuous distributions + related STAT functions.
+    #
+    # The oracle corpus is name-sensitive: every non-volatile function in `shared/functionCatalog.json`
+    # must appear in at least one `case.formula`. These cases are intentionally small and
+    # deterministic, and we include legacy aliases separately so coverage stays robust across
+    # name changes.
+    #
+    # T distribution (modern + legacy).
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "T.DIST"], formula="=T.DIST(0.5,5,TRUE)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "T.DIST.RT"], formula="=T.DIST.RT(1,5)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "T.DIST.2T"], formula="=T.DIST.2T(1,5)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "T.INV"], formula="=T.INV(0.25,5)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "T.INV.2T"], formula="=T.INV.2T(0.5,5)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "TDIST"], formula="=TDIST(1,5,2)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "TINV"], formula="=TINV(0.5,5)")
+
+    # Chi-square distribution (modern + legacy).
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "CHISQ.DIST"], formula="=CHISQ.DIST(1,2,TRUE)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "CHISQ.DIST.RT"], formula="=CHISQ.DIST.RT(1,2)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "CHISQ.INV"], formula="=CHISQ.INV(0.5,2)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "CHISQ.INV.RT"], formula="=CHISQ.INV.RT(0.5,2)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "CHIDIST"], formula="=CHIDIST(1,2)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "CHIINV"], formula="=CHIINV(0.5,2)")
+
+    # F distribution (modern + legacy).
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "F.DIST"], formula="=F.DIST(1,1,1,TRUE)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "F.DIST.RT"], formula="=F.DIST.RT(1,1,1)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "F.INV"], formula="=F.INV(0.5,1,1)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "F.INV.RT"], formula="=F.INV.RT(0.5,1,1)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "FDIST"], formula="=FDIST(1,1,1)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "FINV"], formula="=FINV(0.5,1,1)")
+
+    # Beta distribution (modern + legacy).
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "BETA.DIST"], formula="=BETA.DIST(0.5,2,2,TRUE)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "BETA.INV"], formula="=BETA.INV(0.5,2,2)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "BETADIST"], formula="=BETADIST(0.5,2,2)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "BETAINV"], formula="=BETAINV(0.5,2,2)")
+
+    # Gamma distribution / gamma special functions (modern + legacy).
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "GAMMA.DIST"], formula="=GAMMA.DIST(1,1,2,TRUE)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "GAMMA.INV"], formula="=GAMMA.INV(0.5,1,2)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "GAMMADIST"], formula="=GAMMADIST(1,1,2,TRUE)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "GAMMAINV"], formula="=GAMMAINV(0.5,1,2)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "GAMMA"], formula="=GAMMA(5)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "GAMMALN"], formula="=GAMMALN(5)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "GAMMALN.PRECISE"], formula="=GAMMALN.PRECISE(5)")
+
+    # Lognormal distribution (modern + legacy).
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "LOGNORM.DIST"], formula="=LOGNORM.DIST(1,0,1,TRUE)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "LOGNORM.INV"], formula="=LOGNORM.INV(0.5,0,1)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "LOGNORMDIST"], formula="=LOGNORMDIST(1,0,1)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "LOGINV"], formula="=LOGINV(0.5,0,1)")
+
+    # Exponential distribution (modern + legacy).
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "EXPON.DIST"], formula="=EXPON.DIST(1,0.5,TRUE)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "EXPONDIST"], formula="=EXPONDIST(1,0.5,TRUE)")
+
+    # Weibull distribution (modern + legacy).
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "WEIBULL.DIST"], formula="=WEIBULL.DIST(1,1,2,TRUE)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "WEIBULL"], formula="=WEIBULL(1,1,2,TRUE)")
+
+    # Fisher transforms.
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "FISHER"], formula="=FISHER(0.5)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "FISHERINV"], formula="=FISHERINV(0.5493061443340548)")
+
+    # Confidence intervals (modern + legacy).
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "CONFIDENCE.NORM"], formula="=CONFIDENCE.NORM(0.05,1,100)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "CONFIDENCE.T"], formula="=CONFIDENCE.T(0.05,1,100)")
+    _add_case(cases, prefix="stat_dist", tags=["statistical", "CONFIDENCE"], formula="=CONFIDENCE(0.05,1,100)")
+
     logical.generate(cases, add_case=_add_case, CellInput=CellInput)
     coercion.generate(cases, add_case=_add_case, CellInput=CellInput)
     text.generate(cases, add_case=_add_case, CellInput=CellInput, excel_serial_1900=_excel_serial_1900)

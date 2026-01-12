@@ -340,3 +340,59 @@ pub(crate) fn lift5(
 
     Value::Array(Array::new(shape.rows, shape.cols, out))
 }
+
+pub(crate) fn lift6(
+    a: Value,
+    b: Value,
+    c: Value,
+    d: Value,
+    e: Value,
+    f: Value,
+    func: impl Fn(&Value, &Value, &Value, &Value, &Value, &Value) -> Result<Value, ErrorKind>,
+) -> Value {
+    let Some(shape) = (match dominant_shape(&[&a, &b, &c, &d, &e, &f]) {
+        Ok(shape) => shape,
+        Err(err) => return Value::Error(err),
+    }) else {
+        return match func(&a, &b, &c, &d, &e, &f) {
+            Ok(v) => v,
+            Err(err) => Value::Error(err),
+        };
+    };
+
+    if !broadcast_compatible(&a, shape)
+        || !broadcast_compatible(&b, shape)
+        || !broadcast_compatible(&c, shape)
+        || !broadcast_compatible(&d, shape)
+        || !broadcast_compatible(&e, shape)
+        || !broadcast_compatible(&f, shape)
+    {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let total = match shape.rows.checked_mul(shape.cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Spill),
+    };
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+    let mut out = Vec::new();
+    if out.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
+    for idx in 0..total {
+        let av = element_at(&a, shape, idx);
+        let bv = element_at(&b, shape, idx);
+        let cv = element_at(&c, shape, idx);
+        let dv = element_at(&d, shape, idx);
+        let ev = element_at(&e, shape, idx);
+        let fv = element_at(&f, shape, idx);
+        out.push(match func(av, bv, cv, dv, ev, fv) {
+            Ok(v) => v,
+            Err(err) => Value::Error(err),
+        });
+    }
+
+    Value::Array(Array::new(shape.rows, shape.cols, out))
+}

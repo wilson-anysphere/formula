@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T20:46:17.962077919Z",
+  "generatedAt": "2026-01-12T20:31:31.902337468Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "468b8f5de1a7f85e7b9934c118a4a833e1e46447e142caa1b9c615f6d67ab0e0",
-    "count": 1889
+    "sha256": "4bcb217bcff7ef9dab298d5ea86ed868950d4d7135a42a4954a158823fae3d5d",
+    "count": 1887
   },
   "results": [
     {
@@ -17661,26 +17661,6 @@
       },
       "address": "C1",
       "displayText": "0.03999999999999963"
-    },
-    {
-      "caseId": "oddfprice_settlement_eq_maturity_b623c4531ee4",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
-    },
-    {
-      "caseId": "oddfyield_settlement_eq_maturity_0d2709ada9b0",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
     },
     {
       "caseId": "oddfprice_issue_eq_first_coupon_277cdeb14458",

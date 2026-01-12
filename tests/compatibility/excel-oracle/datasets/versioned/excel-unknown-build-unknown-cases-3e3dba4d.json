@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T20:46:17.962077919Z",
+  "generatedAt": "2026-01-12T20:03:09.047695166Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "468b8f5de1a7f85e7b9934c118a4a833e1e46447e142caa1b9c615f6d67ab0e0",
-    "count": 1889
+    "sha256": "3e3dba4d3b72936896a7c68c37d5702335f1f7f2a51106e1872a6b5b31349cbc",
+    "count": 1872
   },
   "results": [
     {
@@ -15543,116 +15543,6 @@
       "displayText": "1500"
     },
     {
-      "caseId": "database_daverage_computed_60822f0b9c52",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 1500.0
-      },
-      "address": "J1",
-      "displayText": "1500"
-    },
-    {
-      "caseId": "database_dcount_computed_66084942a0c3",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 1.0
-      },
-      "address": "J1",
-      "displayText": "1"
-    },
-    {
-      "caseId": "database_dcounta_computed_fe2186fb5318",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 1.0
-      },
-      "address": "J1",
-      "displayText": "1"
-    },
-    {
-      "caseId": "database_dget_computed_8662e48cda82",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 1500.0
-      },
-      "address": "J1",
-      "displayText": "1500"
-    },
-    {
-      "caseId": "database_dmax_computed_9430e819db16",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 1500.0
-      },
-      "address": "J1",
-      "displayText": "1500"
-    },
-    {
-      "caseId": "database_dmin_computed_e31950492c3a",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 1500.0
-      },
-      "address": "J1",
-      "displayText": "1500"
-    },
-    {
-      "caseId": "database_dproduct_computed_264b2209aa11",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 1500.0
-      },
-      "address": "J1",
-      "displayText": "1500"
-    },
-    {
-      "caseId": "database_dstdev_computed_f820c3895e01",
-      "outputCell": "J1",
-      "result": {
-        "t": "e",
-        "v": "#DIV/0!"
-      },
-      "address": "J1",
-      "displayText": "#DIV/0!"
-    },
-    {
-      "caseId": "database_dstdevp_computed_99beefe8ab0e",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 0.0
-      },
-      "address": "J1",
-      "displayText": "0"
-    },
-    {
-      "caseId": "database_dvar_computed_de9796c689c4",
-      "outputCell": "J1",
-      "result": {
-        "t": "e",
-        "v": "#DIV/0!"
-      },
-      "address": "J1",
-      "displayText": "#DIV/0!"
-    },
-    {
-      "caseId": "database_dvarp_computed_2cd39fa18417",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 0.0
-      },
-      "address": "J1",
-      "displayText": "0"
-    },
-    {
       "caseId": "database_dsum_computed_7c13191a1e32",
       "outputCell": "J1",
       "result": {
@@ -16883,46 +16773,6 @@
       "displayText": "5"
     },
     {
-      "caseId": "oddfprice_basis_omitted_yld0_03dad81a6f57",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 196.59861111111107
-      },
-      "address": "C1",
-      "displayText": "196.59861111111107"
-    },
-    {
-      "caseId": "oddfyield_basis_omitted_from_yld0_price_76cfab9b4bd7",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": -1.6554281206748928e-14
-      },
-      "address": "C1",
-      "displayText": "-0.000000000000016554281206748928"
-    },
-    {
-      "caseId": "oddlprice_basis_omitted_yld0_917699f349fc",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 102.39861111111111
-      },
-      "address": "C1",
-      "displayText": "102.39861111111111"
-    },
-    {
-      "caseId": "oddlyield_basis_omitted_from_yld0_price_1eb28bd4feca",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": -3.9476664800510696e-16
-      },
-      "address": "C1",
-      "displayText": "-0.00000000000000039476664800510696"
-    },
-    {
       "caseId": "oddfprice_basis0_da0074a10837",
       "outputCell": "C1",
       "result": {
@@ -17661,26 +17511,6 @@
       },
       "address": "C1",
       "displayText": "0.03999999999999963"
-    },
-    {
-      "caseId": "oddfprice_settlement_eq_maturity_b623c4531ee4",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
-    },
-    {
-      "caseId": "oddfyield_settlement_eq_maturity_0d2709ada9b0",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
     },
     {
       "caseId": "oddfprice_issue_eq_first_coupon_277cdeb14458",

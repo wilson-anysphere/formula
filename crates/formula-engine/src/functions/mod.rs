@@ -8,6 +8,7 @@ use crate::value::{ErrorKind, Lambda, Value};
 use crate::LocaleConfig;
 use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 
+pub(crate) mod array_lift;
 pub mod date_time;
 pub mod database;
 pub mod engineering;
@@ -17,7 +18,6 @@ pub mod lookup;
 pub mod math;
 pub mod statistical;
 pub mod text;
-pub(crate) mod array_lift;
 pub(crate) mod wildcard;
 
 /// Identifies the source worksheet for a reference argument.
@@ -186,7 +186,11 @@ pub trait FunctionContext {
     fn eval_arg(&self, expr: &CompiledExpr) -> ArgValue;
     fn eval_scalar(&self, expr: &CompiledExpr) -> Value;
     fn eval_formula(&self, expr: &CompiledExpr) -> Value;
-    fn eval_formula_with_bindings(&self, expr: &CompiledExpr, bindings: &HashMap<String, Value>) -> Value;
+    fn eval_formula_with_bindings(
+        &self,
+        expr: &CompiledExpr,
+        bindings: &HashMap<String, Value>,
+    ) -> Value;
     fn capture_lexical_env(&self) -> HashMap<String, Value>;
     fn apply_implicit_intersection(&self, reference: &Reference) -> Value;
     fn get_cell_value(&self, sheet_id: &SheetId, addr: CellAddr) -> Value;

@@ -21004,6 +21004,436 @@
       "id": "stat_growth_750ef3f5abd7"
     },
     {
+      "formula": "=T.DIST(0.5,5,TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "T.DIST"
+      ],
+      "id": "stat_dist_e762e2f7ac77"
+    },
+    {
+      "formula": "=T.DIST.RT(1,5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "T.DIST.RT"
+      ],
+      "id": "stat_dist_4d535a564908"
+    },
+    {
+      "formula": "=T.DIST.2T(1,5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "T.DIST.2T"
+      ],
+      "id": "stat_dist_86bfebb0c4a8"
+    },
+    {
+      "formula": "=T.INV(0.25,5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "T.INV"
+      ],
+      "id": "stat_dist_9b1acbc401c8"
+    },
+    {
+      "formula": "=T.INV.2T(0.5,5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "T.INV.2T"
+      ],
+      "id": "stat_dist_3528b6a462bf"
+    },
+    {
+      "formula": "=TDIST(1,5,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "TDIST"
+      ],
+      "id": "stat_dist_ac302c29a981"
+    },
+    {
+      "formula": "=TINV(0.5,5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "TINV"
+      ],
+      "id": "stat_dist_a8c693fa3017"
+    },
+    {
+      "formula": "=CHISQ.DIST(1,2,TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "CHISQ.DIST"
+      ],
+      "id": "stat_dist_b56290ef1373"
+    },
+    {
+      "formula": "=CHISQ.DIST.RT(1,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "CHISQ.DIST.RT"
+      ],
+      "id": "stat_dist_8f97c3767fd8"
+    },
+    {
+      "formula": "=CHISQ.INV(0.5,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "CHISQ.INV"
+      ],
+      "id": "stat_dist_2d997698a7d0"
+    },
+    {
+      "formula": "=CHISQ.INV.RT(0.5,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "CHISQ.INV.RT"
+      ],
+      "id": "stat_dist_cb5f42456d2d"
+    },
+    {
+      "formula": "=CHIDIST(1,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "CHIDIST"
+      ],
+      "id": "stat_dist_5312ea376e14"
+    },
+    {
+      "formula": "=CHIINV(0.5,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "CHIINV"
+      ],
+      "id": "stat_dist_c9d5a71c0c23"
+    },
+    {
+      "formula": "=F.DIST(1,1,1,TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "F.DIST"
+      ],
+      "id": "stat_dist_2233664b02b5"
+    },
+    {
+      "formula": "=F.DIST.RT(1,1,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "F.DIST.RT"
+      ],
+      "id": "stat_dist_c158e96e449d"
+    },
+    {
+      "formula": "=F.INV(0.5,1,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "F.INV"
+      ],
+      "id": "stat_dist_6788bdea9c37"
+    },
+    {
+      "formula": "=F.INV.RT(0.5,1,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "F.INV.RT"
+      ],
+      "id": "stat_dist_4058e62ae4f7"
+    },
+    {
+      "formula": "=FDIST(1,1,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "FDIST"
+      ],
+      "id": "stat_dist_6f62045eb376"
+    },
+    {
+      "formula": "=FINV(0.5,1,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "FINV"
+      ],
+      "id": "stat_dist_f3c10c377b64"
+    },
+    {
+      "formula": "=BETA.DIST(0.5,2,2,TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "BETA.DIST"
+      ],
+      "id": "stat_dist_a1d4cb912046"
+    },
+    {
+      "formula": "=BETA.INV(0.5,2,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "BETA.INV"
+      ],
+      "id": "stat_dist_4ff8637ed339"
+    },
+    {
+      "formula": "=BETADIST(0.5,2,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "BETADIST"
+      ],
+      "id": "stat_dist_3372d0dc359b"
+    },
+    {
+      "formula": "=BETAINV(0.5,2,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "BETAINV"
+      ],
+      "id": "stat_dist_cb7240ac835f"
+    },
+    {
+      "formula": "=GAMMA.DIST(1,1,2,TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "GAMMA.DIST"
+      ],
+      "id": "stat_dist_a6035b70dde1"
+    },
+    {
+      "formula": "=GAMMA.INV(0.5,1,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "GAMMA.INV"
+      ],
+      "id": "stat_dist_46a2709936af"
+    },
+    {
+      "formula": "=GAMMADIST(1,1,2,TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "GAMMADIST"
+      ],
+      "id": "stat_dist_752324b216ac"
+    },
+    {
+      "formula": "=GAMMAINV(0.5,1,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "GAMMAINV"
+      ],
+      "id": "stat_dist_590ae256977e"
+    },
+    {
+      "formula": "=GAMMA(5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "GAMMA"
+      ],
+      "id": "stat_dist_257fa71e858d"
+    },
+    {
+      "formula": "=GAMMALN(5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "GAMMALN"
+      ],
+      "id": "stat_dist_b3d93ca363f3"
+    },
+    {
+      "formula": "=GAMMALN.PRECISE(5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "GAMMALN.PRECISE"
+      ],
+      "id": "stat_dist_cc293ecb4cb3"
+    },
+    {
+      "formula": "=LOGNORM.DIST(1,0,1,TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "LOGNORM.DIST"
+      ],
+      "id": "stat_dist_ed5efa986fc7"
+    },
+    {
+      "formula": "=LOGNORM.INV(0.5,0,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "LOGNORM.INV"
+      ],
+      "id": "stat_dist_c038a2cd246d"
+    },
+    {
+      "formula": "=LOGNORMDIST(1,0,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "LOGNORMDIST"
+      ],
+      "id": "stat_dist_0a24d1cbeeb2"
+    },
+    {
+      "formula": "=LOGINV(0.5,0,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "LOGINV"
+      ],
+      "id": "stat_dist_4b8e3e986e93"
+    },
+    {
+      "formula": "=EXPON.DIST(1,0.5,TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "EXPON.DIST"
+      ],
+      "id": "stat_dist_9e6f25194bdd"
+    },
+    {
+      "formula": "=EXPONDIST(1,0.5,TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "EXPONDIST"
+      ],
+      "id": "stat_dist_64c3d2dbd393"
+    },
+    {
+      "formula": "=WEIBULL.DIST(1,1,2,TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "WEIBULL.DIST"
+      ],
+      "id": "stat_dist_42d4f73726b5"
+    },
+    {
+      "formula": "=WEIBULL(1,1,2,TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "WEIBULL"
+      ],
+      "id": "stat_dist_5fb9926ccd80"
+    },
+    {
+      "formula": "=FISHER(0.5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "FISHER"
+      ],
+      "id": "stat_dist_835170637f68"
+    },
+    {
+      "formula": "=FISHERINV(0.5493061443340548)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "FISHERINV"
+      ],
+      "id": "stat_dist_a2d027ddb216"
+    },
+    {
+      "formula": "=CONFIDENCE.NORM(0.05,1,100)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "CONFIDENCE.NORM"
+      ],
+      "id": "stat_dist_f21c05300667"
+    },
+    {
+      "formula": "=CONFIDENCE.T(0.05,1,100)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "CONFIDENCE.T"
+      ],
+      "id": "stat_dist_c7f1f6f32eaa"
+    },
+    {
+      "formula": "=CONFIDENCE(0.05,1,100)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "CONFIDENCE"
+      ],
+      "id": "stat_dist_ddd2a13415d4"
+    },
+    {
       "formula": "=AND(A1,B1)",
       "outputCell": "C1",
       "inputs": [

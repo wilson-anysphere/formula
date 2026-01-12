@@ -14,6 +14,7 @@ mod hypothesis;
 
 pub use discrete::*;
 pub use hypothesis::*;
+pub mod distributions;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RankMethod {
@@ -549,7 +550,12 @@ pub fn percentrank_exc(values: &[f64], x: f64) -> Result<f64, ErrorKind> {
     }
 }
 
-pub fn rank(number: f64, values: &[f64], order: RankOrder, method: RankMethod) -> Result<f64, ErrorKind> {
+pub fn rank(
+    number: f64,
+    values: &[f64],
+    order: RankOrder,
+    method: RankMethod,
+) -> Result<f64, ErrorKind> {
     if values.is_empty() {
         return Err(ErrorKind::NA);
     }
