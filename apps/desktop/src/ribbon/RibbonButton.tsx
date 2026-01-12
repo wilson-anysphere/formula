@@ -222,6 +222,7 @@ export const RibbonButton = React.memo(function RibbonButton({
               role="menuitem"
               className="ribbon-dropdown__menuitem"
               aria-label={item.ariaLabel}
+              tabIndex={-1}
               disabled={item.disabled}
               data-testid={item.testId}
               data-command-id={item.id}
