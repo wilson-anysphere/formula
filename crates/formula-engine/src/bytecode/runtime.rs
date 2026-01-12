@@ -8296,8 +8296,11 @@ fn count_if_range_criteria_on_sheet(
 }
 
 fn count_if_array_criteria(arr: &ArrayValue, criteria: &EngineCriteria) -> usize {
+    // Avoid cloning the bytecode value just to convert it into an `EngineValue` for criteria
+    // matching. In particular, cloning `Value::Array` would deep-clone the entire nested array
+    // even though it is coerced to `#SPILL!` for COUNTIF matching.
     arr.iter()
-        .filter(|v| criteria.matches(&bytecode_value_to_engine((*v).clone())))
+        .filter(|&v| criteria.matches(&bytecode_value_to_engine_ref(v)))
         .count()
 }
 
