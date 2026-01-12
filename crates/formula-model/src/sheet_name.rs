@@ -65,3 +65,54 @@ pub fn validate_sheet_name(name: &str) -> Result<(), SheetNameError> {
 
     Ok(())
 }
+
+fn truncate_to_utf16_units(name: &str, max_units: usize) -> String {
+    if name.encode_utf16().count() <= max_units {
+        return name.to_string();
+    }
+
+    let mut out = String::new();
+    let mut units = 0usize;
+    for ch in name.chars() {
+        let ch_units = ch.len_utf16();
+        if units + ch_units > max_units {
+            break;
+        }
+        out.push(ch);
+        units += ch_units;
+    }
+    out
+}
+
+/// Sanitize a sheet name so that it always satisfies [`validate_sheet_name`].
+///
+/// This helper is intended for inputs like file names (CSV/Parquet imports) that might contain
+/// characters Excel disallows in worksheet names.
+///
+/// Notes:
+/// - This does **not** guarantee uniqueness within a workbook (e.g. two different inputs could both
+///   sanitize to `"Sheet1"`).
+pub fn sanitize_sheet_name(name: &str) -> String {
+    let mut sanitized = name.trim().to_string();
+
+    sanitized.retain(|ch| !matches!(ch, ':' | '\\' | '/' | '?' | '*' | '[' | ']'));
+
+    sanitized = sanitized.trim().trim_matches('\'').trim().to_string();
+
+    sanitized = truncate_to_utf16_units(&sanitized, EXCEL_MAX_SHEET_NAME_LEN);
+
+    // Truncation can create a leading/trailing apostrophe (e.g. if an internal apostrophe becomes
+    // the final character), so strip again.
+    sanitized = sanitized.trim().trim_matches('\'').trim().to_string();
+
+    if sanitized.is_empty() {
+        return "Sheet1".to_string();
+    }
+
+    debug_assert!(
+        validate_sheet_name(&sanitized).is_ok(),
+        "sanitize_sheet_name produced invalid name: {sanitized:?}"
+    );
+
+    sanitized
+}

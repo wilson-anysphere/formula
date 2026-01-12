@@ -1067,6 +1067,10 @@ mod tests {
 
     #[tokio::test]
     async fn sqlite_query_enforces_max_rows() {
+        // This test reads `FORMULA_SQL_QUERY_TIMEOUT_MS` indirectly (via `query_sqlite`), so guard
+        // against other tests in this module temporarily overriding it.
+        let _guard = env_mutex().lock().unwrap();
+
         let (opts, mut keeper) = make_shared_in_memory_sqlite().await;
         seed_numbers_table(&mut keeper, 400).await;
 
@@ -1082,6 +1086,10 @@ mod tests {
 
     #[tokio::test]
     async fn sqlite_query_allows_exact_limit() {
+        // This test reads `FORMULA_SQL_QUERY_TIMEOUT_MS` indirectly (via `query_sqlite`), so guard
+        // against other tests in this module temporarily overriding it.
+        let _guard = env_mutex().lock().unwrap();
+
         let (opts, mut keeper) = make_shared_in_memory_sqlite().await;
         seed_numbers_table(&mut keeper, 400).await;
 

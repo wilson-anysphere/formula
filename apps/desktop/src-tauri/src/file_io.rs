@@ -4,7 +4,7 @@ use calamine::{open_workbook_auto, Data, Reader};
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 use formula_model::{
     import::{import_csv_to_columnar_table, CsvOptions, CsvTextEncoding},
-    CellValue as ModelCellValue, DateSystem as WorkbookDateSystem, WorksheetId,
+    sanitize_sheet_name, CellValue as ModelCellValue, DateSystem as WorkbookDateSystem, WorksheetId,
 };
 use formula_xlsb::{
     CellEdit as XlsbCellEdit, CellValue as XlsbCellValue, OpenOptions as XlsbOpenOptions,
@@ -839,12 +839,7 @@ pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
         .map_err(|e| anyhow::anyhow!(e.to_string()))
         .with_context(|| format!("import csv {:?}", path))?;
 
-    let sheet_name = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or("Sheet1")
-        .to_string();
+    let sheet_name = sanitize_sheet_name(path.file_stem().and_then(|s| s.to_str()).unwrap_or(""));
     let mut sheet = Sheet::new(sheet_name.clone(), sheet_name);
     sheet.set_columnar_table(Arc::new(table));
 
@@ -881,12 +876,7 @@ pub fn read_parquet_blocking(path: &Path) -> anyhow::Result<Workbook> {
         .map_err(|e| anyhow::anyhow!(e.to_string()))
         .with_context(|| format!("import parquet {:?}", path))?;
 
-    let sheet_name = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or("Sheet1")
-        .to_string();
+    let sheet_name = sanitize_sheet_name(path.file_stem().and_then(|s| s.to_str()).unwrap_or(""));
     let mut sheet = Sheet::new(sheet_name.clone(), sheet_name);
     sheet.set_columnar_table(Arc::new(table));
 
@@ -2719,6 +2709,31 @@ mod tests {
             model_sheet.value(b1),
             ModelCellValue::String("override".to_string())
         );
+    }
+
+    #[test]
+    fn reads_csv_with_invalid_file_name_sanitizes_sheet_name_and_writes_xlsx() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        // Use characters that are invalid for Excel sheet names but valid on common filesystems.
+        let path = tmp.path().join("bad[name]test.csv");
+        std::fs::write(&path, "id,name\n1,hello\n").expect("write csv");
+
+        let workbook = read_csv_blocking(&path).expect("read csv");
+        assert_eq!(workbook.sheets.len(), 1);
+        let sheet = &workbook.sheets[0];
+
+        assert_eq!(sheet.name, "badnametest");
+        assert!(!sheet.name.trim().is_empty(), "sheet name should be non-empty");
+        for ch in [':', '\\', '/', '?', '*', '[', ']'] {
+            assert!(
+                !sheet.name.contains(ch),
+                "expected sanitized sheet name to not contain {ch}, got: {}",
+                sheet.name
+            );
+        }
+
+        let out_path = tmp.path().join("sanitized.xlsx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write xlsx");
     }
 
     #[test]

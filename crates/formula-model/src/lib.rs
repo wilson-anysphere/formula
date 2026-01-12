@@ -74,7 +74,9 @@ pub use print_settings::{
     ColRange, ManualPageBreaks, Orientation, PageMargins, PageSetup, PaperSize, PrintTitles,
     RowRange, Scaling, SheetPrintSettings, WorkbookPrintSettings,
 };
-pub use sheet_name::{validate_sheet_name, SheetNameError, EXCEL_MAX_SHEET_NAME_LEN};
+pub use sheet_name::{
+    sanitize_sheet_name, validate_sheet_name, SheetNameError, EXCEL_MAX_SHEET_NAME_LEN,
+};
 pub use style::{
     Alignment, Border, BorderEdge, BorderStyle, Color, Fill, FillPattern, Font,
     HorizontalAlignment, Protection, Style, StyleTable, VerticalAlignment,
