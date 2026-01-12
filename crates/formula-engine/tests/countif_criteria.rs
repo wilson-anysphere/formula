@@ -110,6 +110,29 @@ fn countif_error_criteria_counts_errors_and_criteria_errors_propagate() {
 }
 
 #[test]
+fn countif_error_literal_criteria_compiles_to_bytecode_and_propagates() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "Z1", "=COUNTIF(A1:A3, #DIV/0!)")
+        .unwrap();
+
+    assert!(
+        engine.bytecode_program_count() > 0,
+        "expected COUNTIF formula with error literal criteria to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "Z1"),
+        Value::Error(ErrorKind::Div0)
+    );
+}
+
+#[test]
 fn countif_boolean_criteria() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", true).unwrap();
