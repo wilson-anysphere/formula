@@ -51,6 +51,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -161,19 +162,41 @@ def _run_formula_excel_oracle(
         subprocess.run(cmd, cwd=str(repo_root), env=env, check=True)
         return
 
-    cmd = [
-        "cargo",
-        "run",
-        "-p",
-        "formula-excel-oracle",
-        "--quiet",
-        "--locked",
-        "--",
-        "--cases",
-        str(cases_path),
-        "--out",
-        str(out_path),
-    ]
+    use_cargo_agent = (
+        os.name != "nt"
+        and shutil.which("bash") is not None
+        and (repo_root / "scripts" / "cargo_agent.sh").is_file()
+    )
+
+    if use_cargo_agent:
+        cmd = [
+            "bash",
+            "scripts/cargo_agent.sh",
+            "run",
+            "-p",
+            "formula-excel-oracle",
+            "--quiet",
+            "--locked",
+            "--",
+            "--cases",
+            str(cases_path),
+            "--out",
+            str(out_path),
+        ]
+    else:
+        cmd = [
+            "cargo",
+            "run",
+            "-p",
+            "formula-excel-oracle",
+            "--quiet",
+            "--locked",
+            "--",
+            "--cases",
+            str(cases_path),
+            "--out",
+            str(out_path),
+        ]
     subprocess.run(cmd, cwd=str(repo_root), env=env, check=True)
 
 

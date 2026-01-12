@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -154,10 +155,14 @@ def _build_engine_cmd(
     max_cases: int,
     include_tags: list[str],
     exclude_tags: list[str],
+    use_cargo_agent: bool,
 ) -> list[str]:
-    cmd = [
-        "cargo",
-        "run",
+    if use_cargo_agent:
+        cmd = ["bash", "scripts/cargo_agent.sh", "run"]
+    else:
+        cmd = ["cargo", "run"]
+
+    cmd += [
         "-p",
         "formula-excel-oracle",
         "--quiet",
@@ -335,6 +340,11 @@ def main() -> int:
     tag_rel_tol.append("odd_coupon=1e-6")
 
     repo_root = Path(__file__).resolve().parents[2]
+    use_cargo_agent = (
+        os.name != "nt"
+        and shutil.which("bash") is not None
+        and (repo_root / "scripts" / "cargo_agent.sh").is_file()
+    )
     env = os.environ.copy()
     default_global_cargo_home = Path.home() / ".cargo"
     cargo_home = env.get("CARGO_HOME")
@@ -378,6 +388,7 @@ def main() -> int:
         max_cases=args.max_cases,
         include_tags=include_tags,
         exclude_tags=exclude_tags,
+        use_cargo_agent=use_cargo_agent,
     )
 
     subprocess.run(engine_cmd, check=True, cwd=repo_root, env=env)

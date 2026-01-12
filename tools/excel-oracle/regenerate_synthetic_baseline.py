@@ -154,23 +154,43 @@ def main() -> int:
     if not args.skip_pinned:
         with tempfile.TemporaryDirectory(prefix="excel-oracle-") as tmp:
             engine_results_path = Path(tmp) / "engine-results.json"
-            _run(
-                cmd=(
-                    "cargo",
-                    "run",
-                    "--quiet",
-                    "-p",
-                    "formula-excel-oracle",
-                    "--locked",
-                    "--",
-                    "--cases",
-                    str(cases_relpath),
-                    "--out",
-                    str(engine_results_path),
-                ),
-                cwd=repo_root,
-                env=env,
-            )
+            if _have_command("bash") and (repo_root / "scripts/cargo_agent.sh").is_file():
+                _run(
+                    cmd=(
+                        "bash",
+                        "scripts/cargo_agent.sh",
+                        "run",
+                        "--quiet",
+                        "-p",
+                        "formula-excel-oracle",
+                        "--locked",
+                        "--",
+                        "--cases",
+                        str(cases_relpath),
+                        "--out",
+                        str(engine_results_path),
+                    ),
+                    cwd=repo_root,
+                    env=env,
+                )
+            else:
+                _run(
+                    cmd=(
+                        "cargo",
+                        "run",
+                        "--quiet",
+                        "-p",
+                        "formula-excel-oracle",
+                        "--locked",
+                        "--",
+                        "--cases",
+                        str(cases_relpath),
+                        "--out",
+                        str(engine_results_path),
+                    ),
+                    cwd=repo_root,
+                    env=env,
+                )
             _run(
                 cmd=(
                     sys.executable,

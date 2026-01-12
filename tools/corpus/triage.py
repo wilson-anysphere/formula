@@ -6,6 +6,7 @@ import argparse
 import io
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -386,8 +387,15 @@ def _build_rust_helper() -> Path:
     exe = target_dir / "debug" / _rust_exe_name()
 
     try:
+        use_cargo_agent = (
+            os.name != "nt"
+            and shutil.which("bash") is not None
+            and (root / "scripts" / "cargo_agent.sh").is_file()
+        )
         subprocess.run(
-            ["cargo", "build", "-p", "formula-corpus-triage"],
+            ["bash", "scripts/cargo_agent.sh", "build", "-p", "formula-corpus-triage"]
+            if use_cargo_agent
+            else ["cargo", "build", "-p", "formula-corpus-triage"],
             cwd=root,
             env=env,
             check=True,
