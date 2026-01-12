@@ -172,8 +172,12 @@ export class DesktopExtensionHostManager {
         for (const ext of extensions as any[]) {
           const id = typeof ext?.id === "string" ? ext.id : null;
           if (!id) continue;
-          // eslint-disable-next-line no-await-in-loop
-          await (this.host as any).startupExtension(id);
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            await (this.host as any).startupExtension(id);
+          } catch (err) {
+            error ??= err;
+          }
         }
       }
     } catch (err) {
