@@ -1205,11 +1205,18 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
             removed_parts |= {n for n in names if n.startswith("customUI/")}
             removed_parts |= {n for n in names if n.startswith("docProps/thumbnail")}
 
-            # `xl/cellimages.xml` can embed images via DrawingML `<a:blip r:embed="...">`
+            # `xl/**/cellimages.xml` can embed images via DrawingML `<a:blip r:embed="...">`
             # relationship IDs that target `xl/media/**`. When media is removed we must also
-            # drop this part (or else we leave dangling `r:embed` references).
-            removed_parts |= {n for n in names if n.lower() == "xl/cellimages.xml"}
-            removed_parts |= {n for n in names if n.lower() == "xl/_rels/cellimages.xml.rels"}
+            # drop this part (and its rels) or else we leave dangling `r:embed` references.
+            cellimages_parts = {
+                n for n in names if n.lower().startswith("xl/") and n.lower().endswith("/cellimages.xml")
+            }
+            removed_parts |= cellimages_parts
+            for part in cellimages_parts:
+                rels_lower = posixpath.join(
+                    posixpath.dirname(part), "_rels", posixpath.basename(part) + ".rels"
+                ).lower()
+                removed_parts |= {n for n in names if n.lower() == rels_lower}
 
         if options.scrub_metadata or options.remove_secrets:
             removed_parts |= {n for n in names if n == "docProps/custom.xml"}
@@ -1452,7 +1459,10 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                     ):
                         new = _sanitize_vml_drawing(raw, options=options)
                         rewritten.append(name)
-                    elif name.lower() == "xl/cellimages.xml" and (options.scrub_metadata or options.hash_strings):
+                    elif (
+                        name.lower().startswith("xl/") and name.lower().endswith("/cellimages.xml")
+                        and (options.scrub_metadata or options.hash_strings)
+                    ):
                         new = _sanitize_cell_images(raw, options=options)
                         rewritten.append(name)
                     elif name.startswith("xl/charts/") and name.endswith(".xml") and (
