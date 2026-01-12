@@ -251,4 +251,72 @@ describe("SpreadsheetApp shared-grid axis size sync", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("does not persist axis resize edits while the formula bar is actively editing", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const formulaBar = document.createElement("div");
+      document.body.appendChild(formulaBar);
+
+      const app = new SpreadsheetApp(root, status, { formulaBar });
+      expect(app.getGridMode()).toBe("shared");
+
+      const input = formulaBar.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
+      expect(input).not.toBeNull();
+      input!.focus();
+      input!.value = "=SUM(";
+      input!.dispatchEvent(new Event("input", { bubbles: true }));
+
+      // Mimic selecting ranges while the formula bar is still editing.
+      root.focus();
+      expect(app.isEditing()).toBe(true);
+
+      const sharedGrid = (app as any).sharedGrid;
+      expect(sharedGrid).toBeTruthy();
+      const renderer = sharedGrid.renderer;
+
+      // Resize the first data column (grid index 1 => doc col 0) in the renderer to mimic an interactive drag.
+      const index = 1;
+      const prevSize = renderer.getColWidth(index);
+      const nextSize = prevSize + 25;
+      renderer.setColWidth(index, nextSize);
+
+      const doc = app.getDocument() as any;
+      const sheetId = app.getCurrentSheetId();
+
+      // The resize callback should no-op while editing and restore the renderer size.
+      (app as any).onSharedGridAxisSizeChange({
+        kind: "col",
+        index,
+        size: nextSize,
+        previousSize: prevSize,
+        defaultSize: renderer.scroll.cols.defaultSize,
+        zoom: renderer.getZoom(),
+        source: "resize",
+      });
+
+      expect(renderer.getColWidth(index)).toBeCloseTo(prevSize, 6);
+
+      const view = doc.getSheetView(sheetId) ?? {};
+      expect((view as any).colWidths?.["0"]).toBeUndefined();
+
+      // Focus should be restored to the formula bar so the user can continue typing.
+      expect(document.activeElement).toBe(input);
+
+      app.destroy();
+      root.remove();
+      formulaBar.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });

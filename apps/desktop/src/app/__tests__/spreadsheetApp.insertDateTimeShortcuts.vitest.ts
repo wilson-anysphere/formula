@@ -574,6 +574,90 @@ describe("SpreadsheetApp Excel-style date/time insertion shortcuts (serial value
     formulaBar.remove();
   });
 
+  it("routes clipboard/undo shortcuts into the formula bar while focus is on the grid (range selection mode)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const prevExecCommand = (document as any).execCommand;
+    const execSpy = vi.fn(() => true);
+    Object.defineProperty(document, "execCommand", { configurable: true, value: execSpy });
+
+    try {
+      const app = new SpreadsheetApp(root, status, { formulaBar });
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+
+      const input = formulaBar.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
+      expect(input).not.toBeNull();
+      input!.focus();
+      expect(app.isEditing()).toBe(true);
+
+      input!.value = "=SUM(1+2)";
+      input!.setSelectionRange(input!.value.length, input!.value.length);
+      input!.dispatchEvent(new Event("input", { bubbles: true }));
+
+      // Mimic a range-selection workflow where focus temporarily moves back to the grid.
+      root.focus();
+
+      // Ctrl+A should select all in the formula bar (not select all cells).
+      root.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: true,
+          key: "a",
+          code: "KeyA",
+        }),
+      );
+      expect(input!.selectionStart).toBe(0);
+      expect(input!.selectionEnd).toBe(input!.value.length);
+
+      root.focus();
+      root.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: true,
+          key: "c",
+          code: "KeyC",
+        }),
+      );
+      expect(execSpy).toHaveBeenCalledWith("copy", false);
+
+      root.focus();
+      root.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: true,
+          key: "z",
+          code: "KeyZ",
+        }),
+      );
+      expect(execSpy).toHaveBeenCalledWith("undo", false);
+
+      expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBe("Seed");
+      expect(app.isCellEditorOpen()).toBe(false);
+
+      app.destroy();
+    } finally {
+      if (prevExecCommand === undefined) {
+        delete (document as any).execCommand;
+      } else {
+        Object.defineProperty(document, "execCommand", { configurable: true, value: prevExecCommand });
+      }
+      root.remove();
+      formulaBar.remove();
+    }
+  });
+
   it("Fill Down/Right commands no-op while the formula bar is actively editing", () => {
     const root = createRoot();
     const status = {

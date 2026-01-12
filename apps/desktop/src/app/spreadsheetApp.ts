@@ -3983,6 +3983,43 @@ export class SpreadsheetApp {
     this.clearSharedHoverCellCache();
     this.hideCommentTooltip();
 
+    // Do not allow row/col resize/auto-fit to mutate the sheet while the user is actively editing
+    // (cell editor, formula bar, inline edit). This keeps edit state isolated from unrelated
+    // document mutations (Excel-like "editing mode" safety).
+    //
+    // Note: DesktopSharedGrid updates the renderer sizes interactively during the drag, so when we
+    // no-op the document mutation we must also restore the renderer to its previous size.
+    if (this.isEditing()) {
+      const renderer = this.sharedGrid.renderer;
+      const EPS = 1e-6;
+      if (change.kind === "col") {
+        const prev = change.previousSize;
+        const isDefault = Math.abs(prev - change.defaultSize) < EPS;
+        if (isDefault) renderer.resetColWidth(change.index);
+        else renderer.setColWidth(change.index, prev);
+      } else {
+        const prev = change.previousSize;
+        const isDefault = Math.abs(prev - change.defaultSize) < EPS;
+        if (isDefault) renderer.resetRowHeight(change.index);
+        else renderer.setRowHeight(change.index, prev);
+      }
+
+      // Force a scrollbar + overlay sync after restoring the axis size.
+      this.sharedGrid.scrollBy(0, 0);
+
+      // Restore focus to the active editing surface so the user can continue typing.
+      if (this.editor.isOpen()) {
+        try {
+          (this.editor.element as any).focus?.({ preventScroll: true });
+        } catch {
+          this.editor.element.focus();
+        }
+      } else if (this.formulaBar?.isEditing() || this.formulaEditCell) {
+        this.formulaBar?.focus();
+      }
+      return;
+    }
+
     // Tag sheet-view mutations originating from the primary shared grid so the document `change`
     // listener can avoid redundantly re-syncing axis sizes back into the same renderer (which is
     // already updated interactively during the drag). Other panes (e.g. split view) will still
@@ -8053,6 +8090,7 @@ export class SpreadsheetApp {
     // This prevents "Enter moves selection" / "Escape does nothing" behavior while the user
     // is still building a formula in the formula bar.
     if (this.formulaBar?.isEditing() || this.formulaEditCell) {
+      const primary = e.ctrlKey || e.metaKey;
       if (e.key === "Escape") {
         e.preventDefault();
         this.formulaBar?.cancelEdit();
@@ -8102,6 +8140,43 @@ export class SpreadsheetApp {
         textarea.dispatchEvent(new Event("input", { bubbles: true }));
         this.formulaBar.focus();
         return;
+      }
+
+      // Route common "text editing" shortcuts (undo/redo/select-all/clipboard) into the formula bar
+      // even when focus is currently on the grid (range selection mode).
+      if (this.formulaBar && primary && !e.altKey) {
+        const textarea = this.formulaBar.textarea;
+        const key = e.key.toLowerCase();
+
+        if (isUndoKeyboardEvent(e) || isRedoKeyboardEvent(e)) {
+          e.preventDefault();
+          this.formulaBar.focus();
+          try {
+            document.execCommand(isUndoKeyboardEvent(e) ? "undo" : "redo", false);
+          } catch {
+            // Best-effort.
+          }
+          return;
+        }
+
+        if (!e.shiftKey && key === "a") {
+          e.preventDefault();
+          this.formulaBar.focus();
+          textarea.setSelectionRange(0, textarea.value.length);
+          return;
+        }
+
+        if (!e.shiftKey && (key === "c" || key === "x" || key === "v")) {
+          e.preventDefault();
+          this.formulaBar.focus();
+          const command = key === "c" ? "copy" : key === "x" ? "cut" : "paste";
+          try {
+            document.execCommand(command, false);
+          } catch {
+            // Best-effort: clipboard execCommand can be blocked by platform permissions.
+          }
+          return;
+        }
       }
     }
 
