@@ -434,6 +434,10 @@ test.describe("BrowserExtensionHost", () => {
         const manager = new DesktopExtensionHostManager({
           engineVersion: "1.0.0",
           spreadsheetApi,
+          clipboardApi: {
+            readText: async () => navigator.clipboard.readText(),
+            writeText: async (next: string) => navigator.clipboard.writeText(String(next ?? "")),
+          },
           uiApi: {},
           permissionPrompt: async () => true,
         });
