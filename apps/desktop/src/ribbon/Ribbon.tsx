@@ -101,6 +101,13 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
     [actions, tabs],
   );
 
+  const focusFirstControl = React.useCallback((tabId: string) => {
+    const panel = document.getElementById(`ribbon-panel-${tabId}`);
+    if (!panel) return;
+    const first = panel.querySelector<HTMLButtonElement>("button:not(:disabled)");
+    first?.focus();
+  }, []);
+
   return (
     <div className="ribbon" data-testid="ribbon-root">
       <div className="ribbon__tabs" role="tablist" aria-label="Ribbon tabs">
@@ -149,6 +156,17 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                 if (event.key === "End") {
                   event.preventDefault();
                   selectTabByIndex(tabs.length - 1);
+                  return;
+                }
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  if (!isActive) {
+                    setActiveTabId(tab.id);
+                    actions.onTabChange?.(tab.id);
+                    requestAnimationFrame(() => focusFirstControl(tab.id));
+                    return;
+                  }
+                  focusFirstControl(tab.id);
                   return;
                 }
               }}
