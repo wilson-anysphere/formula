@@ -435,31 +435,27 @@ Classifications are stored as `document_classifications` records with a `selecto
 
 ### Effective classification resolution
 
-To enforce DLP server-side, the backend resolves an **effective classification** for a query selector:
+`services/api` supports two related (but intentionally different) classification resolution modes:
 
-- **Cell query** matches:
-  - the exact `cell` selector
-  - any `range` selectors that **contain** the cell
-  - matching `column` selector
-  - matching `sheet` selector
-  - matching `document` selector
-- **Range query** matches any selectors that **intersect** the queried range (including cells inside the range).
+1) **Selector precedence** (used by the classification resolve endpoint)
+   - Cell queries:
+     - exact `cell` selector (if present)
+     - otherwise the **smallest containing** `range` selector
+     - otherwise matching `column` → `sheet` → `document` → default `Public`
+   - Range queries:
+     - the **smallest containing** `range` selector (if present)
+     - if the query is a single column, falls back to matching `column`
+     - otherwise matching `sheet` → `document` → default `Public`
 
-The effective classification is computed using conservative “max” semantics:
-
-- **Level:** maximum classification level across all matched selectors (e.g. any `Restricted` makes the result `Restricted`)
-- **Labels:** union of labels across all matched selectors
-
-This intentionally prevents narrower selectors from weakening broader restrictions (e.g. a `Public` cell inside a `Restricted` range is still effectively `Restricted`).
+2) **Aggregate semantics** (used for DLP evaluation of `range` selectors)
+   - When DLP is evaluated for a `range` selector, the backend computes the **maximum** classification level across all selectors that *intersect* the queried range (including cells inside the range) and unions labels across all matches. This is intentionally conservative for bulk operations like copy/export.
 
 ### API: resolve endpoint
 
-`services/api` exposes `POST /docs/:docId/classifications/resolve` (requires document read permission):
+`services/api` exposes `POST /docs/:docId/classifications/resolve` (requires document read permission) which uses **selector precedence**:
 
-- Request body: `{ selector: <cell|range selector>, includeMatched?: boolean }`
-- Response: `{ effectiveClassification, matchedCount, matched?: [...] }`
-
-Large range requests are accepted, but requesting debug matches (`includeMatched: true`) is rejected for extremely large ranges to keep the endpoint bounded.
+- Request body: `{ selector: <cell|range selector> }`
+- Response: `{ classification, source }` where `source` includes the resolved scope and `selectorKey`.
 
 ### DLP policy evaluation & enforcement (services/api)
 
