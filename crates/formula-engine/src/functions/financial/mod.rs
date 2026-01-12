@@ -34,6 +34,7 @@ pub use cashflows::{irr, mirr, npv, xirr, xnpv};
 pub use depreciation::{db, ddb, sln, syd, vdb};
 pub use duration::pduration;
 pub use french_depreciation::{amordegrec, amorlinc};
+pub use french_depreciation::amordegrec as amordegrc;
 pub use misc::{dollarde, dollarfr, ispmt};
 pub use odd_coupon::{oddfprice, oddfyield, oddlprice, oddlyield};
 pub use schedules::fvschedule;
