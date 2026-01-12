@@ -13,5 +13,5 @@ export function trimMessagesToBudget(params: {
     | null
     | ((messagesToSummarize: any[]) => string | any | null | undefined | Promise<string | any | null | undefined>);
   summaryRole?: "system" | "assistant";
+  signal?: AbortSignal;
 }): Promise<any[]>;
-

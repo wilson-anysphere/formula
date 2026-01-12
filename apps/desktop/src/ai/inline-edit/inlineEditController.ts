@@ -255,7 +255,8 @@ export class InlineEditController {
                 maxTokens: maxMessageTokens,
                 reserveForOutputTokens,
                 estimator,
-                keepLastMessages
+                keepLastMessages,
+                signal
               });
               if (Array.isArray(request.messages)) {
                 const next = trimmed === request.messages ? trimmed.slice() : trimmed;

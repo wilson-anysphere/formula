@@ -471,7 +471,8 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
       maxTokens: maxMessageTokens,
       reserveForOutputTokens,
       estimator,
-      keepLastMessages
+      keepLastMessages,
+      signal
     });
 
     const requireApproval = createPreviewApprovalHandler({
@@ -498,12 +499,14 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
           chat: async (request: any) => {
             const requestToolTokens = estimateToolDefinitionTokens(request?.tools as any, estimator);
             const requestMaxMessageTokens = Math.max(0, contextWindowTokens - requestToolTokens);
+            const requestSignal: AbortSignal | undefined = request?.signal ?? signal;
             const trimmed = await trimMessagesToBudget({
               messages: request.messages as any,
               maxTokens: requestMaxMessageTokens,
               reserveForOutputTokens,
               estimator,
-              keepLastMessages
+              keepLastMessages,
+              signal: requestSignal
             });
 
             if (Array.isArray(request.messages)) {
@@ -516,16 +519,18 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
             return options.llmClient.chat({ ...request, model: request?.model ?? options.model } as any);
           },
           streamChat: options.llmClient.streamChat
-            ? async function* streamChat(request: any) {
-                const requestToolTokens = estimateToolDefinitionTokens(request?.tools as any, estimator);
-                const requestMaxMessageTokens = Math.max(0, contextWindowTokens - requestToolTokens);
-                const trimmed = await trimMessagesToBudget({
-                  messages: request.messages as any,
-                  maxTokens: requestMaxMessageTokens,
-                  reserveForOutputTokens,
-                  estimator,
-                  keepLastMessages
-                });
+              ? async function* streamChat(request: any) {
+                  const requestToolTokens = estimateToolDefinitionTokens(request?.tools as any, estimator);
+                  const requestMaxMessageTokens = Math.max(0, contextWindowTokens - requestToolTokens);
+                  const requestSignal: AbortSignal | undefined = request?.signal ?? signal;
+                  const trimmed = await trimMessagesToBudget({
+                    messages: request.messages as any,
+                    maxTokens: requestMaxMessageTokens,
+                    reserveForOutputTokens,
+                    estimator,
+                    keepLastMessages,
+                    signal: requestSignal
+                  });
  
                 if (Array.isArray(request.messages)) {
                   const next = trimmed === request.messages ? trimmed.slice() : trimmed;

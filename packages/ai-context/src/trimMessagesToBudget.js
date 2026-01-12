@@ -5,6 +5,47 @@ const DEFAULT_SUMMARY_MAX_TOKENS = 256;
 const DEFAULT_KEEP_LAST_MESSAGES = 40;
 const TRIM_SUFFIX = "\n…(trimmed to fit context budget)…";
 
+function createAbortError(message = "Aborted") {
+  const err = new Error(message);
+  err.name = "AbortError";
+  return err;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError();
+}
+
+/**
+ * Await a promise but reject early if the AbortSignal is triggered.
+ *
+ * This cannot cancel underlying work, but it ensures callers stop waiting promptly.
+ *
+ * @template T
+ * @param {Promise<T> | T} promise
+ * @param {AbortSignal | undefined} signal
+ * @returns {Promise<T>}
+ */
+function awaitWithAbort(promise, signal) {
+  if (!signal) return Promise.resolve(promise);
+  if (signal.aborted) return Promise.reject(createAbortError());
+
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(createAbortError());
+    signal.addEventListener("abort", onAbort, { once: true });
+
+    Promise.resolve(promise).then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      }
+    );
+  });
+}
+
 /**
  * @param {any} message
  */
@@ -22,8 +63,10 @@ function isGeneratedSummaryMessage(message) {
  * @param {any} message
  * @param {number} maxTokens
  * @param {import("./tokenBudget.js").TokenEstimator} estimator
+ * @param {AbortSignal | undefined} signal
  */
-function trimMessageToTokens(message, maxTokens, estimator) {
+function trimMessageToTokens(message, maxTokens, estimator, signal) {
+  throwIfAborted(signal);
   if (!message || typeof message !== "object") return message;
   if (maxTokens <= 0) return { ...message, content: "" };
   if (estimator.estimateMessageTokens(message) <= maxTokens) return message;
@@ -37,6 +80,7 @@ function trimMessageToTokens(message, maxTokens, estimator) {
   let best = "";
 
   while (lo <= hi) {
+    throwIfAborted(signal);
     const mid = Math.floor((lo + hi) / 2);
     const candidate = content.slice(0, mid) + TRIM_SUFFIX;
     const next = { ...message, content: candidate };
@@ -61,11 +105,13 @@ function trimMessageToTokens(message, maxTokens, estimator) {
  * real summarization model hook is provided by the caller.
  *
  * @param {any[]} messages
+ * @param {AbortSignal | undefined} signal
  * @returns {string}
  */
-function defaultSummarize(messages) {
+function defaultSummarize(messages, signal) {
   const lines = [];
   for (const msg of messages) {
+    throwIfAborted(signal);
     if (!msg || typeof msg !== "object") continue;
     const role = typeof msg.role === "string" ? msg.role : "unknown";
     const content = typeof msg.content === "string" ? msg.content : "";
@@ -89,9 +135,11 @@ function defaultSummarize(messages) {
  * @param {any[]} messages
  * @param {number} budgetTokens
  * @param {import("./tokenBudget.js").TokenEstimator} estimator
+ * @param {AbortSignal | undefined} signal
  * @returns {{ kept: any[], dropped: any[] }}
  */
-function takeTailWithinBudget(messages, budgetTokens, estimator) {
+function takeTailWithinBudget(messages, budgetTokens, estimator, signal) {
+  throwIfAborted(signal);
   if (!Array.isArray(messages) || messages.length === 0) return { kept: [], dropped: [] };
 
   const last = messages[messages.length - 1];
@@ -104,6 +152,7 @@ function takeTailWithinBudget(messages, budgetTokens, estimator) {
   const keptReversed = [];
 
   for (let i = messages.length - 1; i >= 0; i -= 1) {
+    throwIfAborted(signal);
     const msg = messages[i];
     const tokens = estimator.estimateMessageTokens(msg);
 
@@ -115,12 +164,13 @@ function takeTailWithinBudget(messages, budgetTokens, estimator) {
 
     if (keptReversed.length === 0) {
       // Always keep the most recent message, but trim its content to fit.
-      keptReversed.push(trimMessageToTokens(msg, remaining, estimator));
+      keptReversed.push(trimMessageToTokens(msg, remaining, estimator, signal));
       remaining = 0;
     }
     break;
   }
 
+  throwIfAborted(signal);
   const kept = keptReversed.reverse();
   const droppedCount = Math.max(0, messages.length - kept.length);
   const dropped = droppedCount > 0 ? messages.slice(0, droppedCount) : [];
@@ -148,10 +198,13 @@ function takeTailWithinBudget(messages, budgetTokens, estimator) {
  *   summaryMaxTokens?: number,
  *   summarize?: ((messagesToSummarize: any[]) => (string | any | null | undefined) | Promise<string | any | null | undefined>) | null,
  *   summaryRole?: "system" | "assistant"
+ *   signal?: AbortSignal
  * }} params
  * @returns {Promise<any[]>}
  */
 export async function trimMessagesToBudget(params) {
+  const signal = params.signal;
+  throwIfAborted(signal);
   const messages = Array.isArray(params.messages) ? params.messages : [];
   const maxTokens = Number.isFinite(params.maxTokens) ? params.maxTokens : 0;
   const reserveForOutputTokens = Number.isFinite(params.reserveForOutputTokens) ? params.reserveForOutputTokens : 0;
@@ -159,7 +212,8 @@ export async function trimMessagesToBudget(params) {
   const keepLastMessages = Number.isFinite(params.keepLastMessages) ? params.keepLastMessages : DEFAULT_KEEP_LAST_MESSAGES;
   const summaryMaxTokens = Number.isFinite(params.summaryMaxTokens) ? params.summaryMaxTokens : DEFAULT_SUMMARY_MAX_TOKENS;
   const summaryRole = params.summaryRole ?? "system";
-  const summarize = params.summarize === null ? null : params.summarize ?? defaultSummarize;
+  const summarize =
+    params.summarize === null ? null : params.summarize ?? ((messagesToSummarize) => defaultSummarize(messagesToSummarize, signal));
 
   const allowedPromptTokens = Math.max(0, maxTokens - reserveForOutputTokens);
   if (allowedPromptTokens <= 0) return [];
@@ -172,6 +226,7 @@ export async function trimMessagesToBudget(params) {
   const otherMessages = [];
 
   for (const msg of messages) {
+    throwIfAborted(signal);
     if (msg && typeof msg === "object" && msg.role === "system" && !isGeneratedSummaryMessage(msg)) {
       systemMessages.push(msg);
     } else {
@@ -183,10 +238,11 @@ export async function trimMessagesToBudget(params) {
   let systemTrimmed = systemMessages.map((m) => ({ ...m }));
   if (estimator.estimateMessagesTokens(systemTrimmed) > allowedPromptTokens) {
     for (let i = systemTrimmed.length - 1; i >= 0; i -= 1) {
+      throwIfAborted(signal);
       const without = systemTrimmed.filter((_m, idx) => idx !== i);
       const tokensWithout = estimator.estimateMessagesTokens(without);
       const budgetForThis = Math.max(0, allowedPromptTokens - tokensWithout);
-      systemTrimmed[i] = trimMessageToTokens(systemTrimmed[i], budgetForThis, estimator);
+      systemTrimmed[i] = trimMessageToTokens(systemTrimmed[i], budgetForThis, estimator, signal);
     }
   }
 
@@ -215,14 +271,16 @@ export async function trimMessagesToBudget(params) {
     recentBudget = otherBudget;
   }
 
-  const { kept: recentKept, dropped: droppedFromRecent } = takeTailWithinBudget(recentByCount, recentBudget, estimator);
+  const { kept: recentKept, dropped: droppedFromRecent } = takeTailWithinBudget(recentByCount, recentBudget, estimator, signal);
   const toSummarize = [...generatedSummaries, ...olderByCount, ...droppedFromRecent];
 
   /** @type {any[]} */
   const out = [...systemTrimmed];
 
   if (summarize && toSummarize.length > 0 && summaryBudget > 0) {
-    const summaryValue = await summarize(toSummarize);
+    throwIfAborted(signal);
+    const summaryValue = await awaitWithAbort(summarize(toSummarize), signal);
+    throwIfAborted(signal);
     if (summaryValue) {
       const summaryMessage =
         typeof summaryValue === "string"
@@ -231,7 +289,7 @@ export async function trimMessagesToBudget(params) {
               role: summaryValue.role ?? summaryRole,
               content: `${CONTEXT_SUMMARY_MARKER}\n${String(summaryValue.content ?? "")}`.trim(),
             };
-      out.push(trimMessageToTokens(summaryMessage, summaryBudget, estimator));
+      out.push(trimMessageToTokens(summaryMessage, summaryBudget, estimator, signal));
     }
   }
 
@@ -239,12 +297,18 @@ export async function trimMessagesToBudget(params) {
 
   // Final safety check: if we still exceed, drop/truncate from the start of non-system messages.
   while (out.length > 0 && estimator.estimateMessagesTokens(out) > allowedPromptTokens) {
+    throwIfAborted(signal);
     // Preserve all system messages; remove the first non-system if possible.
     const firstNonSystemIdx = out.findIndex((m) => !(m && typeof m === "object" && m.role === "system" && !isGeneratedSummaryMessage(m)));
     if (firstNonSystemIdx === -1) {
       // Only system messages remain; truncate the last one.
       const idx = out.length - 1;
-      out[idx] = trimMessageToTokens(out[idx], Math.max(0, allowedPromptTokens - estimator.estimateMessagesTokens(out.slice(0, idx))), estimator);
+      out[idx] = trimMessageToTokens(
+        out[idx],
+        Math.max(0, allowedPromptTokens - estimator.estimateMessagesTokens(out.slice(0, idx))),
+        estimator,
+        signal
+      );
       break;
     }
     out.splice(firstNonSystemIdx, 1);
@@ -252,8 +316,9 @@ export async function trimMessagesToBudget(params) {
 
   // Ensure we never exceed the budget due to unexpected estimator behavior.
   if (estimator.estimateMessagesTokens(out) > allowedPromptTokens) {
-    return takeTailWithinBudget(out, allowedPromptTokens, estimator).kept;
+    return takeTailWithinBudget(out, allowedPromptTokens, estimator, signal).kept;
   }
 
+  throwIfAborted(signal);
   return out;
 }

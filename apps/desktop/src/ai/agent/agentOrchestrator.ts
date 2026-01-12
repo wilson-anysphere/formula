@@ -401,7 +401,8 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
           maxTokens: maxMessageTokens,
           reserveForOutputTokens,
           estimator,
-          keepLastMessages
+          keepLastMessages,
+          signal
         });
         if (Array.isArray(request.messages)) {
           const next = trimmed === request.messages ? trimmed.slice() : trimmed;
@@ -431,7 +432,8 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
               maxTokens: maxMessageTokens,
               reserveForOutputTokens,
               estimator,
-              keepLastMessages
+              keepLastMessages,
+              signal
             });
             if (Array.isArray(request.messages)) {
               const next = trimmed === request.messages ? trimmed.slice() : trimmed;

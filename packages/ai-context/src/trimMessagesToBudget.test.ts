@@ -73,5 +73,50 @@ describe("trimMessagesToBudget", () => {
     expect(summaryMessages).toHaveLength(1);
     expect(estimator.estimateMessagesTokens(trimmed)).toBeLessThanOrEqual(300);
   });
-});
 
+  it("respects AbortSignal (already aborted)", async () => {
+    const abortController = new AbortController();
+    abortController.abort();
+
+    await expect(
+      trimMessagesToBudget({
+        messages: [{ role: "user", content: "hello" }],
+        maxTokens: 10,
+        reserveForOutputTokens: 0,
+        signal: abortController.signal
+      })
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("aborts while awaiting summarize callback", async () => {
+    const estimator = createHeuristicTokenEstimator({ charsPerToken: 1, tokensPerMessageOverhead: 0 });
+    const abortController = new AbortController();
+
+    let resolveStarted: (() => void) | null = null;
+    const started = new Promise<void>((resolve) => {
+      resolveStarted = resolve;
+    });
+
+    const promise = trimMessagesToBudget({
+      messages: [
+        { role: "system", content: "sys" },
+        ...Array.from({ length: 10 }, (_v, i) => ({ role: "user", content: `user-${i}-` + "x".repeat(50) })),
+        { role: "assistant", content: "latest assistant" }
+      ],
+      maxTokens: 200,
+      reserveForOutputTokens: 0,
+      estimator,
+      keepLastMessages: 1,
+      summaryMaxTokens: 50,
+      summarize: async () => {
+        resolveStarted?.();
+        return new Promise(() => {});
+      },
+      signal: abortController.signal
+    });
+
+    await started;
+    abortController.abort();
+    await expect(promise).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
