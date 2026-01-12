@@ -153,7 +153,7 @@ describe("SpreadsheetApp collab persistence", () => {
       collab: {
         wsUrl: "ws://example.invalid",
         docId: "doc-123",
-        offlineEnabled: true,
+        persistenceEnabled: true,
         user: { id: "u1", name: "User 1", color: "#ff0000" },
       },
     });
@@ -180,7 +180,7 @@ describe("SpreadsheetApp collab persistence", () => {
       collab: {
         wsUrl: "ws://example.invalid",
         docId: "doc-456",
-        offlineEnabled: false,
+        persistenceEnabled: false,
         user: { id: "u2", name: "User 2", color: "#00ff00" },
       },
     });
@@ -188,6 +188,33 @@ describe("SpreadsheetApp collab persistence", () => {
     expect(mocks.createCollabSession).toHaveBeenCalledTimes(1);
     const options = mocks.createCollabSession.mock.calls[0]?.[0] as any;
     expect(options?.connection?.docId).toBe("doc-456");
+    expect(options?.persistence).toBeUndefined();
+    expect(options?.offline).toBeUndefined();
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("supports legacy offlineEnabled toggle (offlineEnabled=false disables persistence)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, {
+      collab: {
+        wsUrl: "ws://example.invalid",
+        docId: "doc-legacy-offline",
+        offlineEnabled: false,
+        user: { id: "u3", name: "User 3", color: "#0000ff" },
+      },
+    });
+
+    expect(mocks.createCollabSession).toHaveBeenCalledTimes(1);
+    const options = mocks.createCollabSession.mock.calls[0]?.[0] as any;
+    expect(options?.connection?.docId).toBe("doc-legacy-offline");
     expect(options?.persistence).toBeUndefined();
     expect(options?.offline).toBeUndefined();
 
