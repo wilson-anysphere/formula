@@ -416,6 +416,90 @@ def _make_minimal_xlsx_with_printer_settings() -> bytes:
     return buf.getvalue()
 
 
+def _make_minimal_xlsx_with_cell_images() -> bytes:
+    """Construct a minimal XLSX containing the in-cell images part (`xl/cellimages.xml`).
+
+    This is a known leak surface because it can embed DrawingML `r:embed` relationship IDs
+    pointing at `xl/media/**`. When `remove_secrets=True` the sanitizer drops `xl/media/**`,
+    so it must also drop (or sanitize) this part to avoid dangling references.
+    """
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/cellimages.xml" ContentType="application/vnd.ms-excel.cellimages+xml"/>
+</Types>
+""",
+        )
+        z.writestr(
+            "_rels/.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>
+""",
+        )
+        z.writestr(
+            "xl/workbook.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>
+""",
+        )
+        z.writestr(
+            "xl/_rels/workbook.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.microsoft.com/office/2022/relationships/cellImages" Target="cellimages.xml"/>
+</Relationships>
+""",
+        )
+        z.writestr(
+            "xl/worksheets/sheet1.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+  </sheetData>
+</worksheet>
+""",
+        )
+        z.writestr(
+            "xl/cellimages.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cellImages xmlns="http://schemas.microsoft.com/office/spreadsheetml/2023/cellimages"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <a:blip r:embed="rId1"/>
+</cellImages>
+""",
+        )
+        z.writestr(
+            "xl/_rels/cellimages.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>
+""",
+        )
+        z.writestr("xl/media/image1.png", b"\x89PNG\r\n\x1a\nPNGDATA")
+
+    return buf.getvalue()
+
+
 def _make_minimal_xlsx_with_dialogsheet_inline_str() -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
@@ -780,6 +864,30 @@ class SanitizeTests(unittest.TestCase):
             self.assertNotIn("xl/printerSettings/printerSettings1.bin", names)
             rels = z.read("xl/worksheets/_rels/sheet1.xml.rels").decode("utf-8", errors="ignore")
             self.assertNotIn("printerSettings1.bin", rels)
+
+    def test_remove_secrets_drops_cellimages_part_to_avoid_dangling_embeds(self) -> None:
+        original = _make_minimal_xlsx_with_cell_images()
+        sanitized, summary = sanitize_xlsx_bytes(original, options=SanitizeOptions(remove_secrets=True))
+
+        self.assertIn("xl/media/image1.png", summary.removed_parts)
+        self.assertIn("xl/cellimages.xml", summary.removed_parts)
+        self.assertIn("xl/_rels/cellimages.xml.rels", summary.removed_parts)
+
+        with zipfile.ZipFile(io.BytesIO(sanitized), "r") as z:
+            names = set(z.namelist())
+            # Media is always removed when remove_secrets=True.
+            self.assertFalse(any(n.startswith("xl/media/") for n in names))
+
+            # `xl/cellimages.xml` and its rels part should be removed so we don't leave
+            # dangling `r:embed` IDs referencing missing relationships.
+            self.assertNotIn("xl/cellimages.xml", names)
+            self.assertNotIn("xl/_rels/cellimages.xml.rels", names)
+
+            # Workbook relationships and content types should not reference removed parts.
+            wb_rels = z.read("xl/_rels/workbook.xml.rels").decode("utf-8", errors="ignore")
+            self.assertNotIn("cellimages.xml", wb_rels.lower())
+            ct = z.read("[Content_Types].xml").decode("utf-8", errors="ignore")
+            self.assertNotIn("/xl/cellimages.xml", ct.lower())
 
     def test_dialogsheet_cell_values_are_sanitized(self) -> None:
         original = _make_minimal_xlsx_with_dialogsheet_inline_str()

@@ -393,6 +393,21 @@ def _sanitize_drawing(xml: bytes, *, options: SanitizeOptions) -> bytes:
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
+def _sanitize_cell_images(xml: bytes, *, options: SanitizeOptions) -> bytes:
+    """Best-effort scrubber for `xl/cellimages.xml` (in-cell images).
+
+    The schema for this part is not stable across Excel versions. We treat it as a
+    DrawingML-adjacent XML blob and defensively scrub common text and descriptive
+    attributes that can contain user-provided metadata.
+    """
+
+    root = ET.fromstring(xml)
+    if options.scrub_metadata or options.hash_strings:
+        _sanitize_xml_text_elements(root, options=options, local_names={"t"})
+        _sanitize_xml_attributes(root, options=options, attr_names={"name", "descr", "title"})
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
 def _sanitize_vml_drawing(xml: bytes, *, options: SanitizeOptions) -> bytes:
     root = ET.fromstring(xml)
     if options.scrub_metadata or options.hash_strings:
@@ -1183,6 +1198,12 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
             removed_parts |= {n for n in names if n.startswith("customUI/")}
             removed_parts |= {n for n in names if n.startswith("docProps/thumbnail")}
 
+            # `xl/cellimages.xml` can embed images via DrawingML `<a:blip r:embed="...">`
+            # relationship IDs that target `xl/media/**`. When media is removed we must also
+            # drop this part (or else we leave dangling `r:embed` references).
+            removed_parts |= {n for n in names if n.lower() == "xl/cellimages.xml"}
+            removed_parts |= {n for n in names if n.lower() == "xl/_rels/cellimages.xml.rels"}
+
         if options.scrub_metadata or options.remove_secrets:
             removed_parts |= {n for n in names if n == "docProps/custom.xml"}
 
@@ -1423,6 +1444,9 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                         options.scrub_metadata or options.hash_strings or options.remove_secrets
                     ):
                         new = _sanitize_vml_drawing(raw, options=options)
+                        rewritten.append(name)
+                    elif name.lower() == "xl/cellimages.xml" and (options.scrub_metadata or options.hash_strings):
+                        new = _sanitize_cell_images(raw, options=options)
                         rewritten.append(name)
                     elif name.startswith("xl/charts/") and name.endswith(".xml") and (
                         options.redact_cell_values
