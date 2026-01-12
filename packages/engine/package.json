@@ -11,6 +11,7 @@
     "smoke:wasm": "node scripts/smoke-wasm.mjs"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./backend/formula": "./src/backend/formula.ts"
   }
 }
