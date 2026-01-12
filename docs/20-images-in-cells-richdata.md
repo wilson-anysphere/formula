@@ -466,6 +466,24 @@ Implementation guidance:
 * When writing new files, keep relationship IDs stable and prefer “append-only” updates. Excel may rewrite
   relationship type URIs and renumber `rId*` values.
 
+#### Observed values summary (from in-repo fixtures/tests)
+
+These values are copied from fixtures/tests in this repo and are safe to treat as “known in the wild”:
+
+| Kind | Value | Source |
+|------|-------|--------|
+| Workbook → metadata relationship Type | `http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata` | `fixtures/xlsx/metadata/rich-values-vm.xlsx` |
+| Workbook → metadata relationship Type | `http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
+| Workbook → richValue relationship Type | `http://schemas.microsoft.com/office/2017/06/relationships/richValue` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
+| Workbook → richValueRel relationship Type | `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
+| Workbook → rdRichValue relationship Type | `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue` | `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs` (asserted substring) |
+| Workbook → richValueRel relationship Type | `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel` | `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs` (asserted substring) |
+| `richValueRel.xml` namespace | `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
+| `richValue.xml` namespace | `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
+| `metadata.xml` content type override | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml` | `fixtures/xlsx/metadata/rich-values-vm.xlsx` |
+| `metadata.xml` content type override | `application/vnd.openxmlformats-officedocument.spreadsheetml.metadata+xml` | `crates/formula-xlsx/tests/metadata_rich_value_roundtrip.rs` |
+| No override for metadata/richData XML parts (default `application/xml`) | (none) | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
+
 #### Minimal `.rels` skeletons (best-effort)
 
 `xl/_rels/workbook.xml.rels` (workbook → metadata and/or richData):
