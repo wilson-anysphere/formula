@@ -7429,28 +7429,24 @@ export class SpreadsheetApp {
         const scrollableHeight = Math.max(0, viewport.height - viewport.frozenHeight);
         const scrollableWidth = Math.max(0, viewport.width - viewport.frozenWidth);
 
-        const headerRows = this.sharedHeaderRows();
-        const headerCols = this.sharedHeaderCols();
         const rowAxis = this.sharedGrid.renderer.scroll.rows;
         const colAxis = this.sharedGrid.renderer.scroll.cols;
-        const maxGridRowInclusive = Math.max(headerRows, headerRows + this.limits.maxRows - 1);
-        const maxGridColInclusive = Math.max(headerCols, headerCols + this.limits.maxCols - 1);
-
-        const gridActive = this.gridCellFromDocCell(this.selection.active);
+        const pageRows = Math.max(1, Math.floor(scrollableHeight / rowAxis.defaultSize));
+        const pageCols = Math.max(1, Math.floor(scrollableWidth / colAxis.defaultSize));
 
         if (e.altKey) {
-          const origin = colAxis.positionOf(gridActive.col);
-          const target = origin + dir * scrollableWidth;
-          const nextGridCol = colAxis.indexAt(target, { min: headerCols, maxInclusive: maxGridColInclusive });
-          const col = Math.max(0, Math.min(this.limits.maxCols - 1, nextGridCol - headerCols));
+          const col = Math.max(
+            0,
+            Math.min(this.limits.maxCols - 1, this.selection.active.col + dir * pageCols)
+          );
           this.selection = e.shiftKey
             ? extendSelectionToCell(this.selection, { row: this.selection.active.row, col }, this.limits)
             : setActiveCell(this.selection, { row: this.selection.active.row, col }, this.limits);
         } else {
-          const origin = rowAxis.positionOf(gridActive.row);
-          const target = origin + dir * scrollableHeight;
-          const nextGridRow = rowAxis.indexAt(target, { min: headerRows, maxInclusive: maxGridRowInclusive });
-          const row = Math.max(0, Math.min(this.limits.maxRows - 1, nextGridRow - headerRows));
+          const row = Math.max(
+            0,
+            Math.min(this.limits.maxRows - 1, this.selection.active.row + dir * pageRows)
+          );
           this.selection = e.shiftKey
             ? extendSelectionToCell(this.selection, { row, col: this.selection.active.col }, this.limits)
             : setActiveCell(this.selection, { row, col: this.selection.active.col }, this.limits);
@@ -7506,15 +7502,7 @@ export class SpreadsheetApp {
             ? (this.colIndexByVisual[0] ?? 0)
             : (this.colIndexByVisual[this.colIndexByVisual.length - 1] ?? 0);
         }
-
-        const viewport = this.sharedGrid.renderer.scroll.getViewportState();
-        const headerCols = this.sharedHeaderCols();
-        const colAxis = this.sharedGrid.renderer.scroll.cols;
-        const maxGridColInclusive = Math.max(headerCols, headerCols + this.limits.maxCols - 1);
-
-        const target = e.key === "Home" ? 0 : viewport.totalWidth;
-        const nextGridCol = colAxis.indexAt(target, { min: headerCols, maxInclusive: maxGridColInclusive });
-        return Math.max(0, Math.min(this.limits.maxCols - 1, nextGridCol - headerCols));
+        return e.key === "Home" ? 0 : this.limits.maxCols - 1;
       })();
       this.selection = e.shiftKey
         ? extendSelectionToCell(this.selection, { row, col }, this.limits)
