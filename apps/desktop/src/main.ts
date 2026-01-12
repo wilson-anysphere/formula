@@ -2782,14 +2782,8 @@ function renderSheetTabs(): void {
         await invoke("set_sheet_tab_color", { sheet_id: sheetId, tab_color: tabColor ?? null });
       },
       onSheetsReordered: () => restoreFocusAfterSheetNavigation(),
-      onSheetDeleted: ({ sheetId, name, sheetOrder }) => {
+      onSheetDeleted: ({ sheetId: _sheetId, name, sheetOrder }) => {
         const doc = app.getDocument() as any;
-        try {
-          doc?.model?.sheets?.delete?.(sheetId);
-        } catch {
-          // ignore
-        }
-
         try {
           rewriteDocumentFormulasForSheetDelete(doc, name, sheetOrder);
         } catch (err) {
