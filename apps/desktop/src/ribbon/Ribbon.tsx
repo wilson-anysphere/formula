@@ -127,7 +127,15 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
         if (!target) return;
         if (target.closest(".ribbon__tabs")) return;
         if (!target.closest(".ribbon__content")) return;
-        if (target.closest(".ribbon-dropdown__menu")) return;
+        const dropdownRoot = target.closest(".ribbon-dropdown");
+        // If a dropdown menu is open (or we're on a dropdown trigger), let the
+        // dropdown own Escape/ArrowUp handling (menu closes on Escape; ArrowUp may
+        // open/focus within the menu).
+        if (dropdownRoot) {
+          const menuOpen = dropdownRoot.querySelector(".ribbon-dropdown__menu");
+          if (menuOpen) return;
+          if (event.key === "ArrowUp") return;
+        }
         event.preventDefault();
         tabButtonRefs.current[activeTabId]?.focus();
       }}
