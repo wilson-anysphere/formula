@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-import type { CellData, CellProvider, CellRange, CellStyle } from "../model/CellProvider";
+import type { CellBorderSpec, CellData, CellProvider, CellRange, CellStyle } from "../model/CellProvider";
 import { CanvasGrid, type GridApi } from "../react/CanvasGrid";
 
 function rangesIntersect(a: CellRange, b: CellRange): boolean {
@@ -13,6 +13,7 @@ function rangeContains(range: CellRange, row: number, col: number): boolean {
 
 class MergedDemoProvider implements CellProvider {
   private readonly mergedRanges: CellRange[];
+  private readonly mergedBorder: CellBorderSpec = { width: 3, style: "double", color: "#a855f7" };
 
   constructor() {
     this.mergedRanges = [
@@ -45,7 +46,12 @@ class MergedDemoProvider implements CellProvider {
         row,
         col,
         value: "Merged header (B2:D3)",
-        style: { fill: "#dbeafe", fontWeight: "600", textAlign: "center" }
+        style: {
+          fill: "#dbeafe",
+          fontWeight: "600",
+          textAlign: "center",
+          borders: { top: this.mergedBorder, right: this.mergedBorder, bottom: this.mergedBorder, left: this.mergedBorder }
+        }
       };
     }
 
@@ -54,7 +60,13 @@ class MergedDemoProvider implements CellProvider {
         row,
         col,
         value: "Merged + overflow →",
-        style: { fill: "#fef3c7", fontWeight: "600", textAlign: "start", wrapMode: "none" }
+        style: {
+          fill: "#fef3c7",
+          fontWeight: "600",
+          textAlign: "start",
+          wrapMode: "none",
+          borders: { top: this.mergedBorder, right: this.mergedBorder, bottom: this.mergedBorder, left: this.mergedBorder }
+        }
       };
     }
 
