@@ -75,6 +75,8 @@ function mergeClipboardContent(target, source) {
         ? source.pngBase64
         : typeof source.png_base64 === "string"
           ? source.png_base64
+          : typeof source.image_png_base64 === "string"
+            ? source.image_png_base64
           : undefined;
     if (typeof pngBase64 === "string") target.pngBase64 = pngBase64;
   }
@@ -117,6 +119,8 @@ function createTauriClipboardProvider() {
                 ? r.pngBase64
                 : typeof r.png_base64 === "string"
                   ? r.png_base64
+                  : typeof r.image_png_base64 === "string"
+                    ? r.image_png_base64
                   : undefined;
             if (typeof pngBase64 === "string") native.pngBase64 = pngBase64;
 
@@ -160,20 +164,20 @@ function createTauriClipboardProvider() {
     async write(payload) {
       // 1) Prefer rich writes via the native clipboard command when available (Tauri IPC).
       let wrote = false;
-        if (typeof tauriInvoke === "function") {
-          try {
-            await tauriInvoke("clipboard_write", {
+      if (typeof tauriInvoke === "function") {
+        try {
+          await tauriInvoke("clipboard_write", {
             payload: {
               text: payload.text,
               html: payload.html,
               rtf: payload.rtf,
               pngBase64: payload.pngBase64,
             },
-            });
-            wrote = true;
-          } catch {
-            wrote = false;
-          }
+          });
+          wrote = true;
+        } catch {
+          wrote = false;
+        }
       }
 
       if (!wrote) {
