@@ -193,6 +193,32 @@ fn days360_matches_excel_examples() {
         359.0,
     );
     assert_number(&sheet.eval("=DAYS360(\"2020-02-01\",\"2020-02-29\")"), 30.0);
+
+    // Leap-day / end-of-month regression cases.
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2020,2,29),DATE(2020,3,31))"),
+        30.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2020,2,29),DATE(2020,3,31),TRUE)"),
+        31.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2020,1,31),DATE(2020,2,29))"),
+        30.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2020,1,31),DATE(2020,2,29),TRUE)"),
+        29.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2019,1,31),DATE(2019,2,28))"),
+        30.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2019,1,31),DATE(2019,2,28),TRUE)"),
+        28.0,
+    );
     assert_eq!(
         sheet.eval("=DAYS360(\"nope\",DATE(2020,1,1))"),
         Value::Error(ErrorKind::Value)
@@ -228,6 +254,30 @@ fn yearfrac_matches_basis_conventions() {
     assert_number(
         &sheet.eval("=YEARFRAC(DATE(2020,3,1),DATE(2021,3,1),1)"),
         1.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,2,29),DATE(2021,2,28),1)"),
+        1.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,2,29),DATE(2021,3,1),1)"),
+        1.0 + 1.0 / 365.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2019,2,28),DATE(2020,2,29),1)"),
+        1.0 + 1.0 / 366.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,2,29),DATE(2020,2,29),1)"),
+        0.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2021,2,28),DATE(2020,2,29),1)"),
+        -1.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2021,3,1),DATE(2020,2,29),1)"),
+        -(1.0 + 1.0 / 365.0),
     );
 
     assert_eq!(

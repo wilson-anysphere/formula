@@ -69,6 +69,23 @@ fn days360_matches_excel_examples() {
     let end = ymd_to_serial(ExcelDate::new(2020, 2, 29), system).unwrap();
     assert_eq!(date_time::days360(start, end, false, system).unwrap(), 30);
     assert_eq!(date_time::days360(start, end, true, system).unwrap(), 28);
+
+    // Leap-day and end-of-month edge cases: US/NASD and European methods diverge
+    // based on how they treat February month-end and 31st-of-month dates.
+    let start = ymd_to_serial(ExcelDate::new(2020, 2, 29), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2020, 3, 31), system).unwrap();
+    assert_eq!(date_time::days360(start, end, false, system).unwrap(), 30);
+    assert_eq!(date_time::days360(start, end, true, system).unwrap(), 31);
+
+    let start = ymd_to_serial(ExcelDate::new(2020, 1, 31), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2020, 2, 29), system).unwrap();
+    assert_eq!(date_time::days360(start, end, false, system).unwrap(), 30);
+    assert_eq!(date_time::days360(start, end, true, system).unwrap(), 29);
+
+    let start = ymd_to_serial(ExcelDate::new(2019, 1, 31), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap();
+    assert_eq!(date_time::days360(start, end, false, system).unwrap(), 30);
+    assert_eq!(date_time::days360(start, end, true, system).unwrap(), 28);
 }
 
 #[test]
@@ -98,6 +115,32 @@ fn yearfrac_respects_basis_conventions() {
     let end = ymd_to_serial(ExcelDate::new(2021, 3, 1), system).unwrap();
     assert!((date_time::yearfrac(start, end, 1, system).unwrap() - 1.0).abs() < 1e-12);
     assert!((date_time::yearfrac(end, start, 1, system).unwrap() + 1.0).abs() < 1e-12);
+
+    // Regression tests around Feb 29 / end-of-month clamping.
+    let a = ymd_to_serial(ExcelDate::new(2020, 2, 29), system).unwrap();
+    let b = ymd_to_serial(ExcelDate::new(2021, 2, 28), system).unwrap();
+    let c = ymd_to_serial(ExcelDate::new(2021, 3, 1), system).unwrap();
+    let d = ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap();
+    let e = ymd_to_serial(ExcelDate::new(2020, 2, 29), system).unwrap();
+
+    assert_eq!(date_time::yearfrac(a, a, 1, system).unwrap(), 0.0);
+
+    let ab = date_time::yearfrac(a, b, 1, system).unwrap();
+    assert!((ab - 1.0).abs() < 1e-12);
+    assert!((ab + date_time::yearfrac(b, a, 1, system).unwrap()).abs() < 1e-12);
+    assert!((0.0..=2.0).contains(&ab));
+
+    let ac = date_time::yearfrac(a, c, 1, system).unwrap();
+    let expected_ac = 1.0 + 1.0 / 365.0;
+    assert!((ac - expected_ac).abs() < 1e-12);
+    assert!((ac + date_time::yearfrac(c, a, 1, system).unwrap()).abs() < 1e-12);
+    assert!((0.0..=2.0).contains(&ac));
+
+    let de = date_time::yearfrac(d, e, 1, system).unwrap();
+    let expected_de = 1.0 + 1.0 / 366.0;
+    assert!((de - expected_de).abs() < 1e-12);
+    assert!((de + date_time::yearfrac(e, d, 1, system).unwrap()).abs() < 1e-12);
+    assert!((0.0..=2.0).contains(&de));
 
     assert_eq!(date_time::yearfrac(start, end, 9, system).unwrap_err(), ExcelError::Num);
 }
