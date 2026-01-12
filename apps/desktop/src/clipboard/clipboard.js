@@ -249,6 +249,39 @@ export function getCellGridFromRange(doc, sheetId, range) {
       }
     }
 
+    // DocumentController internal model shape (layered formatting).
+    // - Sheet style layer: `sheet.sheetStyleId`
+    // - Column style layer: `sheet.colStyles`
+    // - Row style layer: `sheet.rowStyles`
+    //
+    // The public `getCellFormat()` API returns the merged style, but does not expose
+    // the style-id tuple needed for caching. When possible, derive it from the
+    // internal sheet model maps.
+    const sheetModel =
+      doc?.model?.sheets?.get && typeof doc.model.sheets.get === "function" ? doc.model.sheets.get(sheetId) : null;
+    if (sheetModel && typeof sheetModel === "object") {
+      const sheetDefaultStyleId = normalizeStyleId(
+        sheetModel.sheetStyleId ?? sheetModel.sheetDefaultStyleId ?? sheetModel.defaultStyleId
+      );
+
+      const rowStyles = sheetModel.rowStyles ?? sheetModel.rowStyleIds ?? sheetModel.rowStyleIdByRow;
+      const colStyles = sheetModel.colStyles ?? sheetModel.colStyleIds ?? sheetModel.colStyleIdByCol;
+
+      const rowStyleId = (() => {
+        if (!rowStyles) return 0;
+        if (typeof rowStyles.get === "function") return normalizeStyleId(rowStyles.get(row));
+        return normalizeStyleId(rowStyles[String(row)] ?? rowStyles[row]);
+      })();
+
+      const colStyleId = (() => {
+        if (!colStyles) return 0;
+        if (typeof colStyles.get === "function") return normalizeStyleId(colStyles.get(col));
+        return normalizeStyleId(colStyles[String(col)] ?? colStyles[col]);
+      })();
+
+      return [sheetDefaultStyleId, rowStyleId, colStyleId, normalizeStyleId(cellStyleId)];
+    }
+
     // Best-effort fallback: query per-layer style ids if exposed.
     let sheetDefaultStyleId = 0;
     let rowStyleId = 0;
@@ -322,10 +355,13 @@ export function getCellGridFromRange(doc, sheetId, range) {
     (typeof doc.getSheetDefaultStyleId === "function" ||
       typeof doc.getRowStyleId === "function" ||
       typeof doc.getColStyleId === "function");
+  const hasInternalLayeredStyleMaps = Boolean(doc?.model?.sheets?.get && typeof doc.model.sheets.get === "function");
 
   // Initialize cachedSheetViewHasStyleLayers (at most one call).
   getSheetViewForStyleLayers();
-  const canDeriveStyleIdTuple = Boolean(hasStyleIdTupleHelper || hasPerLayerStyleIdMethods || cachedSheetViewHasStyleLayers);
+  const canDeriveStyleIdTuple = Boolean(
+    hasStyleIdTupleHelper || hasPerLayerStyleIdMethods || hasInternalLayeredStyleMaps || cachedSheetViewHasStyleLayers
+  );
 
   for (let row = r.start.row; row <= r.end.row; row++) {
     /** @type {CellState[]} */
