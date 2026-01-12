@@ -376,6 +376,49 @@ fn bytecode_ifs_is_lazy() {
 }
 
 #[test]
+fn bytecode_eval_ast_ifs_is_lazy() {
+    // `bytecode::eval_ast` should match VM semantics and avoid evaluating unused IFS branches.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IFS(TRUE, 7, A2, 8)", origin).expect("parse");
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let value = bytecode::eval_ast(
+        &expr,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(7.0));
+}
+
+#[test]
+fn bytecode_eval_ast_ifs_error_short_circuits() {
+    // If an IFS condition is an error, IFS should return that error without evaluating any value
+    // expressions.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IFS(1/0, A2, TRUE, 7)", origin).expect("parse");
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let value = bytecode::eval_ast(
+        &expr,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::Div0));
+}
+
+#[test]
 fn bytecode_switch_is_lazy_for_unmatched_values() {
     // SWITCH(1, 2, <unused_value>, 1, 7) must not evaluate the value for the non-matching case.
     let origin = CellCoord::new(0, 0);
@@ -395,6 +438,50 @@ fn bytecode_switch_is_lazy_for_unmatched_values() {
         &formula_engine::LocaleConfig::en_us(),
     );
     assert_eq!(value, Value::Number(7.0));
+}
+
+#[test]
+fn bytecode_eval_ast_switch_is_lazy_for_unmatched_values() {
+    // `bytecode::eval_ast` should match VM semantics and avoid evaluating the result expression for
+    // a non-matching SWITCH case.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=SWITCH(1, 2, A2, 1, 7)", origin).expect("parse");
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let value = bytecode::eval_ast(
+        &expr,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(7.0));
+}
+
+#[test]
+fn bytecode_eval_ast_switch_discriminant_error_short_circuits() {
+    // If the SWITCH discriminant expression is an error, SWITCH should return it without
+    // evaluating any case values/results or the default branch.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=SWITCH(1/0, 1, A2, A2)", origin).expect("parse");
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let value = bytecode::eval_ast(
+        &expr,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::Div0));
 }
 
 #[test]
