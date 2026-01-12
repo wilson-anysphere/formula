@@ -141,7 +141,7 @@ describe("SpreadsheetApp collab persistence", () => {
     mocks.bindCollabSessionToDocumentController.mockResolvedValue({ destroy: () => {} });
   });
 
-  it("constructs CollabSession with IndexedDbCollabPersistence when offlineEnabled is true", () => {
+  it("constructs CollabSession with IndexedDbCollabPersistence when persistenceEnabled is true", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -168,7 +168,7 @@ describe("SpreadsheetApp collab persistence", () => {
     root.remove();
   });
 
-  it("does not enable persistence when offlineEnabled is false", () => {
+  it("does not enable persistence when persistenceEnabled is false", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
