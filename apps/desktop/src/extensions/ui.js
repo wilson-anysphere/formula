@@ -136,9 +136,6 @@ export async function showInputBox(options = {}) {
       textarea.value = options.value ?? "";
       if (options.placeHolder) textarea.placeholder = options.placeHolder;
       textarea.rows = Math.max(3, options.rows ?? 10);
-      textarea.style.resize = "vertical";
-      textarea.style.fontFamily =
-        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
       // The dialog title doubles as the textarea label.
       textarea.setAttribute("aria-labelledby", title.id);
       textarea.dataset.testid = "input-box-field";
@@ -214,6 +211,7 @@ export async function showInputBox(options = {}) {
         }
         return;
       }
+
       if (e.key === "Enter") {
         e.preventDefault();
         closeDialog(dialog, "ok");
@@ -237,6 +235,8 @@ export async function showInputBox(options = {}) {
  * @returns {Promise<T | null>}
  */
 export async function showQuickPick(items, options = {}) {
+  if (typeof document === "undefined" || !document.body) return null;
+
   const dialog = document.createElement("dialog");
   dialog.className = "dialog extensions-ui";
   dialog.dataset.testid = "quick-pick";
