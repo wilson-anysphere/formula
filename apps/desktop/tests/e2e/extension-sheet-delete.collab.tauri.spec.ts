@@ -132,6 +132,33 @@ test.describe("collab: extension sheet deletion (tauri)", () => {
     await gotoDesktop(page);
 
     await installCollabSessionStub(page);
+    // Seed a second sheet so the extension delete call does not trip the "cannot delete the last
+    // sheet" guard. Also force a `syncSheetUi()` pass so the desktop sheet metadata store sees it.
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      const session = app?.getCollabSession?.();
+      if (!session) throw new Error("Missing collab session");
+
+      const existing = session.sheets?.toArray?.() ?? [];
+      const hasSheet2 = Array.isArray(existing) && existing.some((s: any) => String(s?.id ?? s?.get?.("id") ?? "") === "Sheet2");
+      if (!hasSheet2) {
+        session.transactLocal(() => {
+          session.sheets.insert(1, [{ id: "Sheet2", name: "Sheet2" }]);
+        });
+      }
+
+      try {
+        // Ensure the DocumentController sheet exists (it creates sheets lazily).
+        app.getDocument().getCell("Sheet2", { row: 0, col: 0 });
+      } catch {
+        // ignore
+      }
+
+      // `activateSheet()` is wrapped in main.ts to call `syncSheetUi()`, which rebuilds the
+      // workbook sheet store from `session.sheets`.
+      app.activateSheet(app.getCurrentSheetId());
+    });
 
     await page.evaluate(async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -155,12 +182,11 @@ test.describe("collab: extension sheet deletion (tauri)", () => {
       };
 
       const code = `
-        const formula = globalThis[Symbol.for("formula.extensionApi.api")];
-        if (!formula) throw new Error("Missing formula extension API runtime");
-        export async function activate(context) {
-          context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(commandId)}, async () => {
-            await formula.sheets.createSheet("TempDelete");
-            await formula.sheets.deleteSheet("TempDelete");
+          const formula = globalThis[Symbol.for("formula.extensionApi.api")];
+          if (!formula) throw new Error("Missing formula extension API runtime");
+          export async function activate(context) {
+            context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(commandId)}, async () => {
+            await formula.sheets.deleteSheet("Sheet2");
             return true;
           }));
         }
@@ -194,4 +220,3 @@ test.describe("collab: extension sheet deletion (tauri)", () => {
       .toBe(false);
   });
 });
-
