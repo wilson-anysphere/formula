@@ -1362,6 +1362,7 @@ test("clipboard provider", async (t) => {
 
   await t.test("tauri: read ignores oversized legacy text payloads", async () => {
     const largeText = "x".repeat(3 * 1024 * 1024);
+    let readTextCalls = 0;
 
     await withGlobals(
       {
@@ -1377,7 +1378,12 @@ test("clipboard provider", async (t) => {
               throw new Error(`Unexpected command: ${cmd}`);
             },
           },
-          clipboard: {},
+          clipboard: {
+            async readText() {
+              readTextCalls += 1;
+              throw new Error("should not call readText when oversized legacy text is detected");
+            },
+          },
         },
         navigator: {
           clipboard: {
@@ -1394,6 +1400,7 @@ test("clipboard provider", async (t) => {
         const provider = await createClipboardProvider();
         const content = await provider.read();
         assert.ok(content.imagePng instanceof Uint8Array);
+        assert.equal(readTextCalls, 0);
         assert.equal(content.text, undefined);
         assert.deepEqual(content, {
           text: undefined,
@@ -1407,6 +1414,7 @@ test("clipboard provider", async (t) => {
 
   await t.test("tauri: read ignores oversized legacy UTF-8 text payloads", async () => {
     const largeText = "€".repeat(700_000);
+    let readTextCalls = 0;
 
     await withGlobals(
       {
@@ -1422,7 +1430,12 @@ test("clipboard provider", async (t) => {
               throw new Error(`Unexpected command: ${cmd}`);
             },
           },
-          clipboard: {},
+          clipboard: {
+            async readText() {
+              readTextCalls += 1;
+              throw new Error("should not call readText when oversized legacy text is detected");
+            },
+          },
         },
         navigator: {
           clipboard: {
@@ -1439,6 +1452,7 @@ test("clipboard provider", async (t) => {
         const provider = await createClipboardProvider();
         const content = await provider.read();
         assert.ok(content.imagePng instanceof Uint8Array);
+        assert.equal(readTextCalls, 0);
         assert.equal(content.text, undefined);
         assert.deepEqual(content, {
           text: undefined,

@@ -430,6 +430,9 @@ function createTauriClipboardProvider() {
             if (result && typeof result === "object") {
               /** @type {any} */
               const r = result;
+              if (typeof r.text === "string" && !utf8WithinLimit(r.text, MAX_RICH_TEXT_BYTES)) {
+                skippedOversizedPlainText = true;
+              }
               native = {};
               if (isStringWithinUtf8Limit(r.text, MAX_RICH_TEXT_BYTES)) native.text = r.text;
               if (isStringWithinUtf8Limit(r.html, MAX_RICH_TEXT_BYTES)) native.html = r.html;
@@ -490,6 +493,11 @@ function createTauriClipboardProvider() {
       if (clipboardReadErrored && typeof tauriInvoke === "function") {
         try {
           const legacy = await tauriInvoke("read_clipboard");
+          if (legacy && typeof legacy === "object" && typeof legacy.text === "string") {
+            if (!utf8WithinLimit(legacy.text, MAX_RICH_TEXT_BYTES)) {
+              skippedOversizedPlainText = true;
+            }
+          }
           mergeClipboardContent(merged, legacy);
         } catch {
           // Ignore.
