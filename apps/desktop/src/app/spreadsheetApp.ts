@@ -1337,10 +1337,50 @@ export class SpreadsheetApp {
       if (!this.sharedGrid) {
         this.refresh("scroll");
       }
-      // External edits can affect the active cell's computed value even when the active cell itself
-      // wasn't directly edited (e.g. a dependency cell changes). Ensure the status bar + formula bar
-      // stay in sync without forcing a full re-render.
-      this.scheduleStatusUpdate();
+      // External edits can affect the active cell's displayed value (e.g. direct edits to the active
+      // cell, edits inside the current selection affecting summary stats, or formula dependency
+      // changes). Schedule a debounced status/formula bar update when it is likely to matter.
+      const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
+      if (deltas.length > 0) {
+        const active = this.selection?.active ?? null;
+        const touchesActive =
+          active != null &&
+          deltas.some(
+            (d: any) =>
+              d &&
+              String(d.sheetId ?? "") === this.sheetId &&
+              Number(d.row) === active.row &&
+              Number(d.col) === active.col
+          );
+
+        const activeState =
+          active != null ? (this.document.getCell(this.sheetId, active) as { formula: string | null } | null) : null;
+        const activeIsFormula = activeState?.formula != null;
+
+        const wantsSelectionStats = Boolean(this.status.selectionSum || this.status.selectionAverage || this.status.selectionCount);
+
+        const touchesSelection = wantsSelectionStats
+          ? deltas.some((d: any) => {
+              if (!d) return false;
+              if (String(d.sheetId ?? "") !== this.sheetId) return false;
+              const row = Number(d.row);
+              const col = Number(d.col);
+              if (!Number.isInteger(row) || row < 0) return false;
+              if (!Number.isInteger(col) || col < 0) return false;
+              return this.selection?.ranges?.some((r) => {
+                const startRow = Math.min(r.startRow, r.endRow);
+                const endRow = Math.max(r.startRow, r.endRow);
+                const startCol = Math.min(r.startCol, r.endCol);
+                const endCol = Math.max(r.startCol, r.endCol);
+                return row >= startRow && row <= endRow && col >= startCol && col <= endCol;
+              });
+            })
+          : false;
+
+        if (touchesActive || activeIsFormula || touchesSelection) {
+          this.scheduleStatusUpdate();
+        }
+      }
       // Similarly, chart SVG content is only rendered on "full" refreshes. Schedule a debounced
       // chart-content update so charts reflect remote data edits in real time.
       this.scheduleChartContentRefresh(payload);
@@ -3703,6 +3743,14 @@ export class SpreadsheetApp {
   }
 
   private hideCommentTooltip(): void {
+    // Some unit tests construct a SpreadsheetApp instance by `Object.create(SpreadsheetApp.prototype)`
+    // and only populate a subset of fields. Be defensive so helper methods can run without the full
+    // DOM scaffold created by the constructor.
+    if (!this.commentTooltip) {
+      this.lastHoveredCommentCellKey = null;
+      this.lastHoveredCommentIndexVersion = -1;
+      return;
+    }
     if (
       this.lastHoveredCommentCellKey == null &&
       !this.commentTooltip.classList.contains("comment-tooltip--visible")
