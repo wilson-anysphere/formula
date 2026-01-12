@@ -38,12 +38,24 @@ case ":$PATH:" in
   *) export PATH="$CARGO_HOME/bin:$PATH" ;;
 esac
 
-# Get smart job count
-if [ -x "$SCRIPT_DIR/smart-jobs.sh" ]; then
+# Job count:
+# - Respect explicit caller overrides first (`FORMULA_CARGO_JOBS` / `CARGO_BUILD_JOBS`).
+# - Fall back to the adaptive helper when no explicit job count is configured.
+if [ -n "${FORMULA_CARGO_JOBS:-}" ]; then
+  JOBS="${FORMULA_CARGO_JOBS}"
+elif [ -n "${CARGO_BUILD_JOBS:-}" ]; then
+  JOBS="${CARGO_BUILD_JOBS}"
+elif [ -x "$SCRIPT_DIR/smart-jobs.sh" ]; then
   JOBS=$("$SCRIPT_DIR/smart-jobs.sh")
 else
-  JOBS=${CARGO_BUILD_JOBS:-4}
+  JOBS=4
 fi
+
+export CARGO_BUILD_JOBS="${JOBS}"
+export MAKEFLAGS="${MAKEFLAGS:--j${JOBS}}"
+export CARGO_PROFILE_DEV_CODEGEN_UNITS="${CARGO_PROFILE_DEV_CODEGEN_UNITS:-${JOBS}}"
+export CARGO_PROFILE_RELEASE_CODEGEN_UNITS="${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-${JOBS}}"
+export RAYON_NUM_THREADS="${RAYON_NUM_THREADS:-${JOBS}}"
 
 echo "🔎 Checking with -j${JOBS} (based on available memory)..."
 cargo check -j"$JOBS" "$@"

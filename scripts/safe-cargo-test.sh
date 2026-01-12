@@ -40,10 +40,51 @@ case ":$PATH:" in
 esac
 
 # Get smart job count
-if [ -x "$SCRIPT_DIR/smart-jobs.sh" ]; then
+# Job count:
+# - Respect explicit caller overrides first (`FORMULA_CARGO_JOBS` / `CARGO_BUILD_JOBS`).
+# - Fall back to the adaptive helper when no explicit job count is configured.
+if [ -n "${FORMULA_CARGO_JOBS:-}" ]; then
+  JOBS="${FORMULA_CARGO_JOBS}"
+elif [ -n "${CARGO_BUILD_JOBS:-}" ]; then
+  JOBS="${CARGO_BUILD_JOBS}"
+elif [ -x "$SCRIPT_DIR/smart-jobs.sh" ]; then
   JOBS=$("$SCRIPT_DIR/smart-jobs.sh")
 else
-  JOBS=${CARGO_BUILD_JOBS:-4}
+  JOBS=4
+fi
+
+# Detect nproc (for RUST_TEST_THREADS default).
+nproc_val=""
+if command -v nproc >/dev/null 2>&1; then
+  nproc_val="$(nproc 2>/dev/null || true)"
+fi
+if ! [[ "${nproc_val}" =~ ^[0-9]+$ ]] || [[ "${nproc_val}" -lt 1 ]]; then
+  nproc_val="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+fi
+if ! [[ "${nproc_val}" =~ ^[0-9]+$ ]] || [[ "${nproc_val}" -lt 1 ]]; then
+  nproc_val=4
+fi
+
+export CARGO_BUILD_JOBS="${JOBS}"
+export MAKEFLAGS="${MAKEFLAGS:--j${JOBS}}"
+
+# Reduce rustc's internal codegen parallelism during tests to avoid spawning large numbers of
+# helper threads on high-core-count hosts.
+export CARGO_PROFILE_DEV_CODEGEN_UNITS="${CARGO_PROFILE_DEV_CODEGEN_UNITS:-1}"
+export CARGO_PROFILE_TEST_CODEGEN_UNITS="${CARGO_PROFILE_TEST_CODEGEN_UNITS:-1}"
+export CARGO_PROFILE_RELEASE_CODEGEN_UNITS="${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-1}"
+
+# Rayon defaults to spawning one worker per core; cap it unless callers explicitly override it.
+export RAYON_NUM_THREADS="${RAYON_NUM_THREADS:-${JOBS}}"
+
+# Rust's test harness defaults to running one thread per core. Cap it for stability unless callers
+# explicitly override it.
+if [ -z "${RUST_TEST_THREADS:-}" ]; then
+  if [ "${nproc_val}" -lt 16 ]; then
+    export RUST_TEST_THREADS="${nproc_val}"
+  else
+    export RUST_TEST_THREADS=16
+  fi
 fi
 
 echo "🧪 Testing with -j${JOBS} (based on available memory)..."
