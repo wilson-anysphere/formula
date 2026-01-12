@@ -2,7 +2,7 @@ import path from "node:path";
 import { loadConfig } from "../config";
 import { createPool } from "../db/pool";
 import { runMigrations } from "../db/migrations";
-import { putSecret } from "../secrets/secretStore";
+import { putSecret, secretExists } from "../secrets/secretStore";
 import { totpSecretName } from "../auth/mfa";
 
 async function main(): Promise<void> {
@@ -30,8 +30,7 @@ async function main(): Promise<void> {
 
       const name = totpSecretName(userId);
 
-      const exists = await pool.query("SELECT 1 FROM secrets WHERE name = $1", [name]);
-      if (exists.rowCount === 0) {
+      if (!(await secretExists(pool, name))) {
         await putSecret(pool, config.secretStoreKeys, name, secret);
       }
 
