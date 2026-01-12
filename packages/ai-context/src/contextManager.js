@@ -1,6 +1,6 @@
 import { extractSheetSchema } from "./schema.js";
 import { RagIndex } from "./rag.js";
-import { DEFAULT_TOKEN_ESTIMATOR, packSectionsToTokenBudget } from "./tokenBudget.js";
+import { DEFAULT_TOKEN_ESTIMATOR, packSectionsToTokenBudget, stableJsonStringify } from "./tokenBudget.js";
 import { randomSampleRows, stratifiedSampleRows } from "./sampling.js";
 import { classifyText, redactText } from "./dlp.js";
 
@@ -162,13 +162,13 @@ export class ContextManager {
       {
         key: "schema",
         priority: 3,
-        text: this.redactor(`Sheet schema (schema-first):\n${JSON.stringify(schema, null, 2)}`),
+        text: this.redactor(`Sheet schema (schema-first):\n${stableJsonStringify(schema)}`),
       },
       {
         key: "attachments",
         priority: 2,
         text: params.attachments?.length
-          ? this.redactor(`User-provided attachments:\n${JSON.stringify(params.attachments, null, 2)}`)
+          ? this.redactor(`User-provided attachments:\n${stableJsonStringify(params.attachments)}`)
           : "",
       },
       {
@@ -181,7 +181,7 @@ export class ContextManager {
       {
         key: "retrieved",
         priority: 4,
-        text: retrieved.length ? this.redactor(`Retrieved context:\n${JSON.stringify(retrieved, null, 2)}`) : "",
+        text: retrieved.length ? this.redactor(`Retrieved context:\n${stableJsonStringify(retrieved)}`) : "",
       },
     ].filter((s) => s.text);
 
@@ -573,31 +573,27 @@ export class ContextManager {
         key: "workbook_summary",
         priority: 3,
         text: this.redactor(
-          `Workbook summary:\n${JSON.stringify(
-            {
-              id: params.workbook.id,
-              sheets: (params.workbook.sheets ?? []).map((s) => s.name),
-              tables: (params.workbook.tables ?? []).map((t) => ({
-                name: t.name,
-                sheetName: t.sheetName,
-                rect: t.rect,
-              })),
-              namedRanges: (params.workbook.namedRanges ?? []).map((r) => ({
-                name: r.name,
-                sheetName: r.sheetName,
-                rect: r.rect,
-              })),
-            },
-            null,
-            2
-          )}`
+          `Workbook summary:\n${stableJsonStringify({
+            id: params.workbook.id,
+            sheets: (params.workbook.sheets ?? []).map((s) => s.name),
+            tables: (params.workbook.tables ?? []).map((t) => ({
+              name: t.name,
+              sheetName: t.sheetName,
+              rect: t.rect,
+            })),
+            namedRanges: (params.workbook.namedRanges ?? []).map((r) => ({
+              name: r.name,
+              sheetName: r.sheetName,
+              rect: r.rect,
+            })),
+          })}`
         ),
       },
       {
         key: "attachments",
         priority: 2,
         text: params.attachments?.length
-          ? this.redactor(`User-provided attachments:\n${JSON.stringify(params.attachments, null, 2)}`)
+          ? this.redactor(`User-provided attachments:\n${stableJsonStringify(params.attachments)}`)
           : "",
       },
       {
