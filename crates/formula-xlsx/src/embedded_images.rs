@@ -9,6 +9,7 @@ use crate::openxml;
 use crate::package::{XlsxError, XlsxPackage};
 use crate::path;
 use crate::rich_data::{scan_cells_with_metadata_indices, RichDataError};
+use crate::rich_data::rich_value::parse_rich_value_relationship_indices;
 
 const REL_TYPE_SHEET_METADATA: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata";
@@ -18,6 +19,7 @@ const REL_TYPE_RD_RICH_VALUE: &str =
     "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue";
 const REL_TYPE_RD_RICH_VALUE_STRUCTURE: &str =
     "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure";
+const REL_TYPE_RICH_VALUE: &str = "http://schemas.microsoft.com/office/2017/06/relationships/richValue";
 const REL_TYPE_RICH_VALUE_REL: &str =
     "http://schemas.microsoft.com/office/2022/10/relationships/richValueRel";
 const REL_TYPE_RICH_VALUE_REL_2017: &str =
@@ -70,6 +72,7 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
 
     let relationships = openxml::parse_relationships(workbook_rels_xml)?;
     let mut metadata_part: Option<String> = None;
+    let mut rich_value_part: Option<String> = None;
     let mut rdrichvalue_part: Option<String> = None;
     let mut rdrichvaluestructure_part: Option<String> = None;
     let mut rich_value_rel_part: Option<String> = None;
@@ -81,6 +84,11 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
         {
             let target = path::resolve_target("xl/workbook.xml", &rel.target);
             metadata_part = Some(target);
+        } else if rich_value_part.is_none()
+            && rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE)
+        {
+            let target = path::resolve_target("xl/workbook.xml", &rel.target);
+            rich_value_part = Some(target);
         } else if rdrichvalue_part.is_none() && rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE)
         {
             let target = path::resolve_target("xl/workbook.xml", &rel.target);
@@ -105,6 +113,9 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
     // expected rich-data relationships (best-effort).
     if metadata_part.is_none() && pkg.part("xl/metadata.xml").is_some() {
         metadata_part = Some("xl/metadata.xml".to_string());
+    }
+    if rich_value_part.is_none() && pkg.part("xl/richData/richValue.xml").is_some() {
+        rich_value_part = Some("xl/richData/richValue.xml".to_string());
     }
     if rdrichvalue_part.is_none() && pkg.part("xl/richData/rdrichvalue.xml").is_some() {
         rdrichvalue_part = Some("xl/richData/rdrichvalue.xml".to_string());
@@ -139,6 +150,14 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
     {
         Some((_part, bytes)) => parse_rdrichvalue(bytes, local_image_structure_positions.as_deref())?,
         None => HashMap::new(),
+    };
+
+    let rich_value_rel_indices = match rich_value_part
+        .as_deref()
+        .and_then(|part| pkg.part(part).map(|bytes| (part, bytes)))
+    {
+        Some((_part, bytes)) => parse_rich_value_relationship_indices(bytes)?,
+        None => Vec::new(),
     };
 
     let local_image_identifier_to_rid = match rich_value_rel_part
@@ -216,11 +235,26 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
             let Some(rich_value_index) = vm_to_rich_value_index.get(&vm).copied() else {
                 continue;
             };
-            let Some(rich_value) = rich_values.get(&rich_value_index) else {
+            let (local_image_identifier, alt_text, decorative) =
+                if let Some(rich_value) = rich_values.get(&rich_value_index) {
+                    (
+                        Some(rich_value.local_image_identifier),
+                        rich_value.alt_text.clone(),
+                        rich_value.calc_origin == 5,
+                    )
+                } else {
+                    let idx = rich_value_rel_indices
+                        .get(rich_value_index as usize)
+                        .copied()
+                        .flatten()
+                        .and_then(|idx| u32::try_from(idx).ok());
+                    (idx, None, false)
+                };
+            let Some(local_image_identifier) = local_image_identifier else {
                 continue;
             };
 
-            let rid = match local_image_identifier_to_rid.get(rich_value.local_image_identifier as usize) {
+            let rid = match local_image_identifier_to_rid.get(local_image_identifier as usize) {
                 Some(rid) => rid,
                 None => continue,
             };
@@ -240,8 +274,8 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
                 cell,
                 image_target: target.clone(),
                 bytes,
-                alt_text: rich_value.alt_text.clone(),
-                decorative: rich_value.calc_origin == 5,
+                alt_text,
+                decorative,
             });
         }
     }
@@ -444,7 +478,11 @@ fn parse_vm_to_rich_value_index(xml: &[u8]) -> Result<HashMap<u32, u32>, XlsxErr
         };
 
         for offset in 0..count {
-            vm_to_rich_value_index.insert(vm_idx_1_based.saturating_add(offset), rich_value_index);
+            let vm = vm_idx_1_based.saturating_add(offset);
+            vm_to_rich_value_index.insert(vm, rich_value_index);
+            if vm > 0 {
+                vm_to_rich_value_index.entry(vm - 1).or_insert(rich_value_index);
+            }
         }
         vm_idx_1_based = vm_idx_1_based.saturating_add(count);
     }

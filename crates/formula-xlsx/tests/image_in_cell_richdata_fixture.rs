@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use formula_model::CellRef;
+use formula_xlsx::extract_embedded_images;
 use formula_xlsx::XlsxPackage;
 
 #[test]
@@ -52,5 +54,23 @@ fn image_in_cell_richdata_fixture_contains_expected_parts() {
             "expected [Content_Types].xml to contain {needle}, got: {content_types}"
         );
     }
-}
 
+    let embedded = extract_embedded_images(&pkg).expect("extract embedded images");
+    assert_eq!(embedded.len(), 1, "expected one embedded image");
+    let entry = &embedded[0];
+
+    assert_eq!(entry.sheet_part, "xl/worksheets/sheet1.xml");
+    assert_eq!(entry.cell, CellRef::from_a1("A1").unwrap());
+    assert_eq!(entry.image_target, "xl/media/image1.png");
+
+    let image_bytes = pkg
+        .part("xl/media/image1.png")
+        .expect("fixture image bytes exist")
+        .to_vec();
+    assert_eq!(entry.bytes, image_bytes);
+
+    // This fixture uses `richValue.xml` and doesn't include the `_localImage` fields used by the
+    // alternate `rdrichvalue.xml` schema, so we don't expect alt text / decorative metadata.
+    assert_eq!(entry.alt_text, None);
+    assert!(!entry.decorative);
+}
