@@ -385,20 +385,6 @@ export function bindYjsToDocumentController(options) {
   // Y.Maps into local constructors). This origin is intentionally distinct from the
   // undoService origin so collaborative undo only captures the user's actual edit.
   const normalizeOrigin = { type: "document-controller:binder:normalize" };
-  // Origins that should be treated as "local" to this binder (i.e. changes that
-  // originated from DocumentController and therefore should not be echoed back
-  // into DocumentController via Yjs observers).
-  //
-  // When a CollabUndoService is provided, prefer its `localOrigins` set (which
-  // includes its stable origin token + the UndoManager instance).
-  const localOrigins = (() => {
-    const out = new Set([binderOrigin, normalizeOrigin]);
-    const extra = undoService?.localOrigins;
-    if (extra && typeof extra[Symbol.iterator] === "function") {
-      for (const origin of extra) out.add(origin);
-    }
-    return out;
-  })();
   /** @type {Map<string, NormalizedCell>} */
   let cache = new Map();
 
