@@ -135,10 +135,29 @@ test("encodeState/applyState preserves sheet insertion order", () => {
   assert.deepEqual(doc.getSheetIds(), ["Sheet2", "Sheet1"]);
 
   const snapshot = doc.encodeState();
+  const decoded =
+    typeof TextDecoder !== "undefined"
+      ? new TextDecoder().decode(snapshot)
+      : // eslint-disable-next-line no-undef
+        Buffer.from(snapshot).toString("utf8");
+  const parsed = JSON.parse(decoded);
+  assert.deepEqual(parsed.sheetOrder, ["Sheet2", "Sheet1"]);
 
   const restored = new DocumentController();
   restored.applyState(snapshot);
   assert.deepEqual(restored.getSheetIds(), ["Sheet2", "Sheet1"]);
+
+  // `sheetOrder` should be authoritative even if the `sheets` array is reordered (defensive).
+  // Simulate a consumer that sorts the sheet objects but preserves the explicit order field.
+  parsed.sheets.reverse();
+  const tamperedSnapshot =
+    typeof TextEncoder !== "undefined"
+      ? new TextEncoder().encode(JSON.stringify(parsed))
+      : // eslint-disable-next-line no-undef
+        Buffer.from(JSON.stringify(parsed), "utf8");
+  const restoredFromTampered = new DocumentController();
+  restoredFromTampered.applyState(tamperedSnapshot);
+  assert.deepEqual(restoredFromTampered.getSheetIds(), ["Sheet2", "Sheet1"]);
 
   // Also ensure applyState can reorder an existing controller to match the snapshot.
   const differentOrder = new DocumentController();

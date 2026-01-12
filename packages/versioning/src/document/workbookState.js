@@ -233,6 +233,7 @@ export function workbookStateFromDocumentSnapshot(snapshot) {
   }
 
   const sheetsList = Array.isArray(parsed?.sheets) ? parsed.sheets : [];
+  const explicitSheetOrder = Array.isArray(parsed?.sheetOrder) ? parsed.sheetOrder : [];
 
   /** @type {SheetMeta[]} */
   const sheets = [];
@@ -430,6 +431,33 @@ export function workbookStateFromDocumentSnapshot(snapshot) {
     }
 
     cellsBySheet.set(id, { cells });
+  }
+
+  // Prefer an explicit `sheetOrder` field when present (newer DocumentController snapshots),
+  // while remaining compatible with legacy snapshots that only encoded ordering via the
+  // `sheets` array order.
+  if (explicitSheetOrder.length > 0 && sheetOrder.length > 0) {
+    const fallbackOrder = sheetOrder.slice();
+    const known = new Set(fallbackOrder);
+    /** @type {string[]} */
+    const normalized = [];
+    const seen = new Set();
+    for (const raw of explicitSheetOrder) {
+      if (typeof raw !== "string") continue;
+      const id = raw;
+      if (!known.has(id) || seen.has(id)) continue;
+      seen.add(id);
+      normalized.push(id);
+    }
+    for (const id of fallbackOrder) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      normalized.push(id);
+    }
+    if (normalized.length > 0) {
+      sheetOrder.length = 0;
+      sheetOrder.push(...normalized);
+    }
   }
 
   sheets.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));

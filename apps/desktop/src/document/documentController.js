@@ -2631,7 +2631,9 @@ export class DocumentController {
       return out;
     });
 
-    return encodeUtf8(JSON.stringify({ schemaVersion: 1, sheets }));
+    // Include a redundant explicit `sheetOrder` so downstream snapshot consumers can preserve
+    // ordering even if they manipulate/sort the `sheets` array.
+    return encodeUtf8(JSON.stringify({ schemaVersion: 1, sheetOrder: sheetIds, sheets }));
   }
 
   /**
@@ -2647,13 +2649,13 @@ export class DocumentController {
     const sheets = Array.isArray(parsed?.sheets) ? parsed.sheets : [];
 
     /** @type {Map<string, Map<string, CellState>>} */
-    const nextSheets = new Map();
+    let nextSheets = new Map();
     /** @type {Map<string, SheetViewState>} */
-    const nextViews = new Map();
+    let nextViews = new Map();
     /** @type {Map<string, { defaultStyleId: number, rowStyleIds: Map<number, number>, colStyleIds: Map<number, number> }>} */
-    const nextFormats = new Map();
+    let nextFormats = new Map();
     /** @type {Map<string, Map<number, FormatRun[]>>} */
-    const nextRangeRuns = new Map();
+    let nextRangeRuns = new Map();
 
     const normalizeFormatOverrides = (raw, axisKey) => {
       /** @type {Map<number, number>} */
@@ -2765,6 +2767,44 @@ export class DocumentController {
         colStyleIds: normalizeFormatOverrides(sheet?.colFormats, "col"),
       });
       nextRangeRuns.set(sheet.id, normalizeFormatRunsByCol(sheet?.formatRunsByCol));
+    }
+
+    // Prefer an explicit sheet order field when present, falling back to the ordering
+    // of the `sheets` array itself (legacy behavior).
+    const rawSheetOrder = Array.isArray(parsed?.sheetOrder) ? parsed.sheetOrder : [];
+    if (rawSheetOrder.length > 0 && nextSheets.size > 0) {
+      /** @type {string[]} */
+      const desiredOrder = [];
+      const seen = new Set();
+      for (const raw of rawSheetOrder) {
+        if (typeof raw !== "string") continue;
+        const id = raw;
+        if (seen.has(id)) continue;
+        if (!nextSheets.has(id)) continue;
+        seen.add(id);
+        desiredOrder.push(id);
+      }
+      if (desiredOrder.length > 0) {
+        for (const id of nextSheets.keys()) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+          desiredOrder.push(id);
+        }
+
+        const reorderBySheetIds = (map) => {
+          const out = new Map();
+          for (const id of desiredOrder) {
+            if (!map.has(id)) continue;
+            out.set(id, map.get(id));
+          }
+          return out;
+        };
+
+        nextSheets = reorderBySheetIds(nextSheets);
+        nextViews = reorderBySheetIds(nextViews);
+        nextFormats = reorderBySheetIds(nextFormats);
+        nextRangeRuns = reorderBySheetIds(nextRangeRuns);
+      }
     }
 
     const existingSheetIds = new Set(this.model.sheets.keys());
