@@ -34,3 +34,33 @@ test("pasteClipboardContent normalizes flat clipboard formats into canonical Doc
   assert.equal(style.backgroundColor, undefined);
 });
 
+test("pasteClipboardContent converts rgb()/rgba() + #AARRGGBB CSS colors to ARGB", () => {
+  const doc = new DocumentController();
+
+  const html = `<!DOCTYPE html><html><body><table>
+    <tr>
+      <td style="color:rgb(255,0,0);background-color:rgb(0 255 0)">A</td>
+      <td style="color:rgba(0,0,255,0.5);background-color:rgba(255,0,0,0.25)">B</td>
+      <td style="color:#80FF0000;background-color:#4000FF00">C</td>
+    </tr>
+  </table></body></html>`;
+
+  const pasted = pasteClipboardContent(doc, "Sheet1", "A1", { html });
+  assert.equal(pasted, true);
+
+  const a1 = doc.getCell("Sheet1", "A1");
+  const b1 = doc.getCell("Sheet1", "B1");
+  const c1 = doc.getCell("Sheet1", "C1");
+
+  const styleA1 = doc.styleTable.get(a1.styleId);
+  assert.equal(styleA1.font?.color, "#FFFF0000");
+  assert.equal(styleA1.fill?.fgColor, "#FF00FF00");
+
+  const styleB1 = doc.styleTable.get(b1.styleId);
+  assert.equal(styleB1.font?.color, "#800000FF");
+  assert.equal(styleB1.fill?.fgColor, "#40FF0000");
+
+  const styleC1 = doc.styleTable.get(c1.styleId);
+  assert.equal(styleC1.font?.color, "#80FF0000");
+  assert.equal(styleC1.fill?.fgColor, "#4000FF00");
+});
