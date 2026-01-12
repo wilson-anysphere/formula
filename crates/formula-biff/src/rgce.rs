@@ -953,6 +953,7 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
             }
         }
         Expr::Call(_) => return Err(EncodeRgceError::Unsupported("call expressions")),
+        Expr::FieldAccess(_) => return Err(EncodeRgceError::Unsupported("field access expressions")),
         Expr::Missing => {
             out.push(0x16); // PtgMissArg
         }

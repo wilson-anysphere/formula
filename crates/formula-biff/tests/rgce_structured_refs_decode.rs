@@ -115,6 +115,34 @@ fn decodes_structured_ref_value_class_emits_explicit_implicit_intersection() {
 }
 
 #[test]
+fn decodes_structured_ref_value_class_headers_single_does_not_add_implicit_intersection() {
+    // Headers+single column resolves to a single cell, so value-class should not force '@'.
+    let rgce = ptg_list(1, 0x0002, 2, 2, 0x38);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table1[[#Headers],[Column2]]");
+    assert_eq!(normalize(&text), normalize("Table1[[#Headers],[Column2]]"));
+}
+
+#[test]
+fn decodes_structured_ref_value_class_this_row_single_does_not_add_implicit_intersection() {
+    // This-row+single column resolves to a single cell.
+    let rgce = ptg_list(1, 0x0010, 2, 2, 0x38);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "[@Column2]");
+    assert_eq!(normalize(&text), normalize("[@Column2]"));
+}
+
+#[test]
+fn decodes_structured_ref_value_class_this_row_all_columns_adds_implicit_intersection() {
+    // This-row+all columns resolves to a row range; value-class should preserve legacy implicit
+    // intersection by prefixing '@'.
+    let rgce = ptg_list(1, 0x0010, 0, 0, 0x38);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "@[@]");
+    assert_eq!(normalize(&text), normalize("@[@]"));
+}
+
+#[test]
 fn decodes_structured_ref_unknown_flags_are_ignored() {
     // Unknown flag bits should not hard-fail decode.
     let rgce = ptg_list(1, 0x8000, 2, 2, 0x18);
