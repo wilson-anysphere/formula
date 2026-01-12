@@ -7749,8 +7749,7 @@ export class SpreadsheetApp {
         const colCount = range.endCol - range.startCol + 1;
         if (rowCount <= 0 || colCount <= 0) continue;
 
-        const row = new Array(colCount).fill(value);
-        const values = new Array(rowCount).fill(row);
+        const values = Array.from({ length: rowCount }, () => Array(colCount).fill(value));
         this.document.setRangeValues(this.sheetId, { row: range.startRow, col: range.startCol }, values);
         this.document.setRangeFormat(
           this.sheetId,
