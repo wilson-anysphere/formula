@@ -170,16 +170,35 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
     try:
         from xml.etree import ElementTree as ET
 
+        import re
+
+        REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+        rid_re = re.compile(r"^rId\d+$")
+
         cellimages_root = ET.fromstring(z.read(part_name))
         root_local_name, root_namespace = _split_etree_tag(cellimages_root.tag)
         embed_rids_count = 0
         for el in cellimages_root.iter():
-            if el.tag.split("}")[-1] != "blip":
-                continue
-            for attr_name in el.attrib:
-                # Count `r:embed` (or any namespace-qualified `embed`) attributes on blips.
-                if attr_name.split("}")[-1] == "embed":
-                    embed_rids_count += 1
+            el_local_name, _ = _split_etree_tag(el.tag)
+            for attr_name, attr_value in el.attrib.items():
+                attr_local_name, attr_ns = _split_etree_tag(attr_name)
+
+                # Count relationship-id references in a schema-agnostic way. Some cellImages
+                # variants put the relationship ID on a top-level <cellImage r:embed="..."/> or
+                # <cellImage r:id="..."/> rather than a nested <a:blip r:embed="..."/>.
+                #
+                # Keep the legacy heuristic as a subset: count any `embed` attribute on a `blip`
+                # element, even if it's not namespace-qualified (some producers are sloppy).
+                if not (
+                    (attr_ns == REL_NS and attr_local_name in ("embed", "id"))
+                    or (el_local_name == "blip" and attr_local_name == "embed")
+                ):
+                    continue
+
+                if not rid_re.match((attr_value or "").strip()):
+                    continue
+
+                embed_rids_count += 1
     except Exception:
         root_local_name = None
         root_namespace = None
