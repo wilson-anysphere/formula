@@ -28,11 +28,15 @@ fn bytecode_if_distinguishes_omitted_false_branch_from_explicit_missing_false_br
     let grid = EmptyGrid;
 
     // IF(FALSE, 1) => defaults to FALSE.
-    let omitted = Expr::FuncCall {
-        func: Function::If,
-        args: vec![Expr::Literal(Value::Bool(false)), Expr::Literal(Value::Number(1.0))],
-    };
-    let omitted_program = bytecode::Compiler::compile(Arc::from("if_omitted_false_branch"), &omitted);
+    let omitted_formula = "=IF(FALSE,1)";
+    let omitted = bytecode::parse_formula(omitted_formula, origin).expect("parse");
+    if let Expr::FuncCall { func, args } = &omitted {
+        assert_eq!(func, &Function::If);
+        assert_eq!(args.len(), 2, "omitted IF should have 2 args");
+    } else {
+        panic!("expected IF func call: {omitted_formula}");
+    }
+    let omitted_program = bytecode::Compiler::compile(Arc::from(omitted_formula), &omitted);
     let mut vm = bytecode::Vm::with_capacity(32);
     let omitted_vm = vm.eval(&omitted_program, &grid, 0, origin, &locale);
     let omitted_ast = bytecode::eval_ast(&omitted, &grid, 0, origin, &locale);
@@ -40,16 +44,18 @@ fn bytecode_if_distinguishes_omitted_false_branch_from_explicit_missing_false_br
     assert_eq!(omitted_ast, Value::Bool(false));
 
     // IF(FALSE, 1, ) => explicit empty argument yields a blank result.
-    let explicit_missing = Expr::FuncCall {
-        func: Function::If,
-        args: vec![
-            Expr::Literal(Value::Bool(false)),
-            Expr::Literal(Value::Number(1.0)),
-            Expr::Literal(Value::Missing),
-        ],
-    };
+    let explicit_missing_formula = "=IF(FALSE,1,)";
+    let explicit_missing =
+        bytecode::parse_formula(explicit_missing_formula, origin).expect("parse");
+    if let Expr::FuncCall { func, args } = &explicit_missing {
+        assert_eq!(func, &Function::If);
+        assert_eq!(args.len(), 3, "explicit-missing IF should have 3 args");
+        assert_eq!(args[2], Expr::Literal(Value::Missing));
+    } else {
+        panic!("expected IF func call: {explicit_missing_formula}");
+    }
     let missing_program =
-        bytecode::Compiler::compile(Arc::from("if_explicit_missing_false_branch"), &explicit_missing);
+        bytecode::Compiler::compile(Arc::from(explicit_missing_formula), &explicit_missing);
     let mut vm = bytecode::Vm::with_capacity(32);
     let missing_vm = vm.eval(&missing_program, &grid, 0, origin, &locale);
     let missing_ast = bytecode::eval_ast(&explicit_missing, &grid, 0, origin, &locale);
@@ -64,15 +70,15 @@ fn bytecode_choose_returns_blank_for_selected_missing_choice() {
     let grid = EmptyGrid;
 
     // CHOOSE(1, , 7) => blank.
-    let expr = Expr::FuncCall {
-        func: Function::Choose,
-        args: vec![
-            Expr::Literal(Value::Number(1.0)),
-            Expr::Literal(Value::Missing),
-            Expr::Literal(Value::Number(7.0)),
-        ],
-    };
-    let program = bytecode::Compiler::compile(Arc::from("choose_selected_missing"), &expr);
+    let formula = "=CHOOSE(1,,7)";
+    let expr = bytecode::parse_formula(formula, origin).expect("parse");
+    if let Expr::FuncCall { func, args } = &expr {
+        assert_eq!(func, &Function::Choose);
+        assert_eq!(args.get(1), Some(&Expr::Literal(Value::Missing)));
+    } else {
+        panic!("expected CHOOSE func call: {formula}");
+    }
+    let program = bytecode::Compiler::compile(Arc::from(formula), &expr);
     let mut vm = bytecode::Vm::with_capacity(32);
     let vm_value = vm.eval(&program, &grid, 0, origin, &locale);
     let ast_value = bytecode::eval_ast(&expr, &grid, 0, origin, &locale);
@@ -89,16 +95,15 @@ fn bytecode_preserves_missing_for_address_optional_args() {
     let locale = formula_engine::LocaleConfig::en_us();
     let grid = EmptyGrid;
 
-    let expr = Expr::FuncCall {
-        func: Function::Address,
-        args: vec![
-            Expr::Literal(Value::Number(1.0)),
-            Expr::Literal(Value::Number(1.0)),
-            Expr::Literal(Value::Missing),
-            Expr::Literal(Value::Bool(false)),
-        ],
-    };
-    let program = bytecode::Compiler::compile(Arc::from("address_missing_abs_num"), &expr);
+    let formula = "=ADDRESS(1,1,,FALSE)";
+    let expr = bytecode::parse_formula(formula, origin).expect("parse");
+    if let Expr::FuncCall { func, args } = &expr {
+        assert_eq!(func, &Function::Address);
+        assert_eq!(args.get(2), Some(&Expr::Literal(Value::Missing)));
+    } else {
+        panic!("expected ADDRESS func call: {formula}");
+    }
+    let program = bytecode::Compiler::compile(Arc::from(formula), &expr);
     let mut vm = bytecode::Vm::with_capacity(32);
     let vm_value = vm.eval(&program, &grid, 0, origin, &locale);
     let ast_value = bytecode::eval_ast(&expr, &grid, 0, origin, &locale);
@@ -106,4 +111,3 @@ fn bytecode_preserves_missing_for_address_optional_args() {
     assert_eq!(vm_value, Value::Text(Arc::from("R1C1")));
     assert_eq!(ast_value, Value::Text(Arc::from("R1C1")));
 }
-

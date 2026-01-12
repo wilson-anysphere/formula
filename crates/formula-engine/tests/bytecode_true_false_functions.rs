@@ -9,7 +9,12 @@ fn bytecode_true_false_zero_arg_functions_match_eval_ast() {
     let locale = formula_engine::LocaleConfig::en_us();
     let grid = ColumnarGrid::new(1, 1);
 
-    for (formula, expected) in [("=TRUE()", Value::Bool(true)), ("=FALSE()", Value::Bool(false))] {
+    for (formula, expected) in [
+        ("=TRUE()", Value::Bool(true)),
+        ("=FALSE()", Value::Bool(false)),
+        ("=_xlfn.TRUE()", Value::Bool(true)),
+        ("=_xlfn.FALSE()", Value::Bool(false)),
+    ] {
         let expr = bytecode::parse_formula(formula, origin).expect("parse");
         let program = bytecode::Compiler::compile(Arc::from(formula), &expr);
 
@@ -28,7 +33,7 @@ fn bytecode_true_false_reject_extra_args() {
     let locale = formula_engine::LocaleConfig::en_us();
     let grid = ColumnarGrid::new(1, 1);
 
-    for formula in ["=TRUE(1)", "=FALSE(1)"] {
+    for formula in ["=TRUE(1)", "=FALSE(1)", "=_xlfn.TRUE(1)", "=_xlfn.FALSE(1)"] {
         let expr = bytecode::parse_formula(formula, origin).expect("parse");
         let program = bytecode::Compiler::compile(Arc::from(formula), &expr);
 
@@ -40,4 +45,3 @@ fn bytecode_true_false_reject_extra_args() {
         assert_eq!(ast_value, Value::Error(bytecode::ErrorKind::Value));
     }
 }
-

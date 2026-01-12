@@ -34,6 +34,20 @@ fn true_false_support_literal_and_zero_arg_function_forms() {
 }
 
 #[test]
+fn true_false_accept_xlfn_prefix_and_compile_to_bytecode() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(sheet.bytecode_program_count(), 0);
+
+    assert_eq!(sheet.eval("=_xlfn.TRUE()"), Value::Bool(true));
+    assert_eq!(sheet.eval("=_xlfn.FALSE()"), Value::Bool(false));
+    assert_eq!(
+        sheet.bytecode_program_count(),
+        2,
+        "expected _xlfn.TRUE()/_xlfn.FALSE() to compile to bytecode"
+    );
+}
+
+#[test]
 fn if_selects_branch_and_defaults_false() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=IF(TRUE, 1, 2)"), 1.0);
