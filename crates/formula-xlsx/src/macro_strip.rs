@@ -64,7 +64,12 @@ fn compute_macro_delete_set(
 
     // Parts referenced by `xl/_rels/vbaProject.bin.rels` (e.g. signature payloads).
     if let Some(rels_bytes) = parts.get("xl/_rels/vbaProject.bin.rels") {
-        let targets = parse_internal_relationship_targets(rels_bytes, "xl/vbaProject.bin")?;
+        let targets = parse_internal_relationship_targets(
+            rels_bytes,
+            "xl/vbaProject.bin",
+            "xl/_rels/vbaProject.bin.rels",
+            parts,
+        )?;
         delete.extend(targets);
     }
 
@@ -273,7 +278,7 @@ fn clean_relationship_parts(
         };
 
         let (updated, removed_ids) =
-            strip_deleted_relationships(&rels_name, &source_part, &bytes, delete_parts)?;
+            strip_deleted_relationships(&rels_name, &source_part, &bytes, delete_parts, parts)?;
 
         if let Some(updated) = updated {
             parts.insert(rels_name.clone(), updated);
@@ -303,11 +308,46 @@ fn clean_content_types(
     Ok(())
 }
 
+fn resolve_target_best_effort<F>(
+    source_part: &str,
+    rels_part: &str,
+    target: &str,
+    mut is_present: F,
+) -> String
+where
+    F: FnMut(&str) -> bool,
+{
+    // OPC relationship targets are typically resolved relative to the source part's directory.
+    // However, some producers appear to emit paths relative to the `.rels` directory instead
+    // (e.g. `../media/*` from a workbook-level part). When the standard resolution doesn't match
+    // an existing part, try alternative interpretations so macro stripping doesn't delete shared
+    // parts that are still required elsewhere (for example by `xl/cellimages.xml`).
+    let direct = resolve_target_for_source(source_part, target);
+    if is_present(&direct) {
+        return direct;
+    }
+
+    let rels_relative = crate::path::resolve_target(rels_part, target);
+    if is_present(&rels_relative) {
+        return rels_relative;
+    }
+
+    if !direct.starts_with("xl/") {
+        let xl_prefixed = format!("xl/{direct}");
+        if is_present(&xl_prefixed) {
+            return xl_prefixed;
+        }
+    }
+
+    direct
+}
+
 fn strip_deleted_relationships(
     rels_part_name: &str,
     source_part: &str,
     xml: &[u8],
     delete_parts: &BTreeSet<String>,
+    parts: &BTreeMap<String, Vec<u8>>,
 ) -> Result<(Option<Vec<u8>>, BTreeSet<String>), XlsxError> {
     let mut reader = XmlReader::from_reader(xml);
     reader.config_mut().trim_text(false);
@@ -337,7 +377,8 @@ fn strip_deleted_relationships(
         match ev {
             Event::Eof => break,
             Event::Empty(e) if crate::openxml::local_name(e.name().as_ref()) == b"Relationship" => {
-                if should_remove_relationship(rels_part_name, source_part, &e, delete_parts)? {
+                if should_remove_relationship(rels_part_name, source_part, &e, delete_parts, parts)?
+                {
                     changed = true;
                     if let Some(id) = relationship_id(&e)? {
                         removed_ids.insert(id);
@@ -348,7 +389,8 @@ fn strip_deleted_relationships(
                 writer.write_event(Event::Empty(e.to_owned()))?;
             }
             Event::Start(e) if crate::openxml::local_name(e.name().as_ref()) == b"Relationship" => {
-                if should_remove_relationship(rels_part_name, source_part, &e, delete_parts)? {
+                if should_remove_relationship(rels_part_name, source_part, &e, delete_parts, parts)?
+                {
                     changed = true;
                     if let Some(id) = relationship_id(&e)? {
                         removed_ids.insert(id);
@@ -379,6 +421,7 @@ fn should_remove_relationship(
     source_part: &str,
     e: &BytesStart<'_>,
     delete_parts: &BTreeSet<String>,
+    parts: &BTreeMap<String, Vec<u8>>,
 ) -> Result<bool, XlsxError> {
     let mut target = None;
     let mut target_mode = None;
@@ -414,7 +457,9 @@ fn should_remove_relationship(
     };
 
     let target = strip_fragment(&target);
-    let resolved = resolve_target_for_source(source_part, target);
+    let resolved = resolve_target_best_effort(source_part, rels_part_name, target, |candidate| {
+        parts.contains_key(candidate) || delete_parts.contains(candidate)
+    });
     Ok(delete_parts.contains(&resolved))
 }
 
@@ -553,6 +598,8 @@ fn patched_override(
 fn parse_internal_relationship_targets(
     xml: &[u8],
     source_part: &str,
+    rels_part: &str,
+    parts: &BTreeMap<String, Vec<u8>>,
 ) -> Result<Vec<String>, XlsxError> {
     let mut reader = XmlReader::from_reader(xml);
     reader.config_mut().trim_text(false);
@@ -587,7 +634,9 @@ fn parse_internal_relationship_targets(
                     continue;
                 };
                 let target = strip_fragment(&target);
-                out.push(resolve_target_for_source(source_part, target));
+                out.push(resolve_target_best_effort(source_part, rels_part, target, |candidate| {
+                    parts.contains_key(candidate)
+                }));
             }
             _ => {}
         }
@@ -864,7 +913,7 @@ impl RelationshipGraph {
                 continue;
             }
 
-            let targets = parse_internal_relationship_targets(bytes, &source_part)?;
+            let targets = parse_internal_relationship_targets(bytes, &source_part, rels_part, parts)?;
             for target in targets {
                 outgoing
                     .entry(source_part.clone())
@@ -899,7 +948,7 @@ pub fn validate_opc_relationships(
             .get(rels_part)
             .ok_or_else(|| XlsxError::MissingPart(rels_part.to_string()))?;
         let ids = parse_relationship_ids(xml)?;
-        let targets = parse_internal_relationship_targets(xml, &source_part)?;
+        let targets = parse_internal_relationship_targets(xml, &source_part, rels_part, parts)?;
         for target in targets {
             if !parts.contains_key(&target) {
                 return Err(XlsxError::Invalid(format!(

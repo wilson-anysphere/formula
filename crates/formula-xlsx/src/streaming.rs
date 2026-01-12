@@ -590,8 +590,14 @@ mod macro_strip_streaming {
 
         // Parts referenced by `xl/_rels/vbaProject.bin.rels` (e.g. signature payloads).
         if part_names.contains("xl/_rels/vbaProject.bin.rels") {
-            let rels_bytes = read_zip_part(archive, "xl/_rels/vbaProject.bin.rels", read_cache)?;
-            let targets = parse_internal_relationship_targets(&rels_bytes, "xl/vbaProject.bin")?;
+            let rels_bytes =
+                read_zip_part(archive, "xl/_rels/vbaProject.bin.rels", read_cache)?;
+            let targets = parse_internal_relationship_targets(
+                &rels_bytes,
+                "xl/vbaProject.bin",
+                "xl/_rels/vbaProject.bin.rels",
+                part_names,
+            )?;
             delete.extend(targets);
         }
 
@@ -813,7 +819,7 @@ mod macro_strip_streaming {
 
             let bytes = read_zip_part(archive, &rels_name, read_cache)?;
             let (updated, removed_ids) =
-                strip_deleted_relationships(&rels_name, &source_part, &bytes, delete_parts)?;
+                strip_deleted_relationships(&rels_name, &source_part, &bytes, delete_parts, part_names)?;
 
             if let Some(updated) = updated {
                 updated_parts.insert(rels_name.clone(), updated);
@@ -867,6 +873,7 @@ mod macro_strip_streaming {
         source_part: &str,
         xml: &[u8],
         delete_parts: &BTreeSet<String>,
+        part_names: &BTreeSet<String>,
     ) -> Result<(Option<Vec<u8>>, BTreeSet<String>), StreamingPatchError> {
         let mut reader = XmlReader::from_reader(xml);
         reader.config_mut().trim_text(false);
@@ -898,7 +905,13 @@ mod macro_strip_streaming {
                 Event::Empty(e)
                     if crate::openxml::local_name(e.name().as_ref()) == b"Relationship" =>
                 {
-                    if should_remove_relationship(rels_part_name, source_part, &e, delete_parts)? {
+                    if should_remove_relationship(
+                        rels_part_name,
+                        source_part,
+                        &e,
+                        delete_parts,
+                        part_names,
+                    )? {
                         changed = true;
                         if let Some(id) = relationship_id(&e)? {
                             removed_ids.insert(id);
@@ -911,7 +924,13 @@ mod macro_strip_streaming {
                 Event::Start(e)
                     if crate::openxml::local_name(e.name().as_ref()) == b"Relationship" =>
                 {
-                    if should_remove_relationship(rels_part_name, source_part, &e, delete_parts)? {
+                    if should_remove_relationship(
+                        rels_part_name,
+                        source_part,
+                        &e,
+                        delete_parts,
+                        part_names,
+                    )? {
                         changed = true;
                         if let Some(id) = relationship_id(&e)? {
                             removed_ids.insert(id);
@@ -942,6 +961,7 @@ mod macro_strip_streaming {
         source_part: &str,
         e: &BytesStart<'_>,
         delete_parts: &BTreeSet<String>,
+        part_names: &BTreeSet<String>,
     ) -> Result<bool, StreamingPatchError> {
         let mut target = None;
         let mut target_mode = None;
@@ -977,7 +997,7 @@ mod macro_strip_streaming {
         };
 
         let target = strip_fragment(&target);
-        let resolved = resolve_target_for_source(source_part, target);
+        let resolved = resolve_target_best_effort(source_part, rels_part_name, target, part_names);
         Ok(delete_parts.contains(&resolved))
     }
 
@@ -1260,6 +1280,8 @@ mod macro_strip_streaming {
     fn parse_internal_relationship_targets(
         xml: &[u8],
         source_part: &str,
+        rels_part: &str,
+        part_names: &BTreeSet<String>,
     ) -> Result<Vec<String>, StreamingPatchError> {
         let mut reader = XmlReader::from_reader(xml);
         reader.config_mut().trim_text(false);
@@ -1296,7 +1318,12 @@ mod macro_strip_streaming {
                         continue;
                     };
                     let target = strip_fragment(&target);
-                    out.push(resolve_target_for_source(source_part, target));
+                    out.push(resolve_target_best_effort(
+                        source_part,
+                        rels_part,
+                        target,
+                        part_names,
+                    ));
                 }
                 _ => {}
             }
@@ -1319,6 +1346,35 @@ mod macro_strip_streaming {
         } else {
             crate::path::resolve_target(source_part, target)
         }
+    }
+
+    fn resolve_target_best_effort(
+        source_part: &str,
+        rels_part: &str,
+        target: &str,
+        part_names: &BTreeSet<String>,
+    ) -> String {
+        // Match the in-memory macro stripper: prefer the standard source-relative resolution, but
+        // fall back to interpreting the target as relative to the `.rels` directory when the
+        // canonical path doesn't exist (common in some producers for workbook-level parts).
+        let direct = resolve_target_for_source(source_part, target);
+        if part_names.contains(&direct) {
+            return direct;
+        }
+
+        let rels_relative = crate::path::resolve_target(rels_part, target);
+        if part_names.contains(&rels_relative) {
+            return rels_relative;
+        }
+
+        if !direct.starts_with("xl/") {
+            let xl_prefixed = format!("xl/{direct}");
+            if part_names.contains(&xl_prefixed) {
+                return xl_prefixed;
+            }
+        }
+
+        direct
     }
 
     fn source_part_from_rels_part(rels_part: &str) -> Option<String> {
@@ -1366,7 +1422,7 @@ mod macro_strip_streaming {
                 }
 
                 let bytes = read_zip_part(archive, rels_part, read_cache)?;
-                let targets = parse_internal_relationship_targets(&bytes, &source_part)?;
+                let targets = parse_internal_relationship_targets(&bytes, &source_part, rels_part, part_names)?;
                 for target in targets {
                     outgoing
                         .entry(source_part.clone())

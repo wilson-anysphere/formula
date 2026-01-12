@@ -260,10 +260,10 @@ fn verifies_project_digest_binding_with_external_signature_part() {
         .vba_project_signature_binding()
         .expect("binding verification")
         .expect("project present");
-    assert!(matches!(
-        binding,
-        VbaProjectBindingVerification::BoundVerified(_)
-    ));
+    assert!(
+        matches!(binding, VbaProjectBindingVerification::BoundVerified(_)),
+        "expected BoundVerified, got {binding:?}"
+    );
 
     // Mutate a covered project stream (module byte) and ensure binding fails even though the
     // PKCS#7 signature remains valid (it signs the old digest).
