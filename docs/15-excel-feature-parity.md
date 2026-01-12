@@ -132,7 +132,7 @@ This document tracks every Excel feature and our implementation status. Features
 | TAKE | ✅ | Dynamic array |
 | TOCOL | ✅ | Dynamic array |
 | TOROW | ✅ | Dynamic array |
-| TRANSPOSE | ⬜ | |
+| TRANSPOSE | ✅ | Dynamic array |
 | UNIQUE | ✅ | Dynamic array, critical |
 | VLOOKUP | ✅ | Includes wildcard exact match + approximate modes |
 | VSTACK | ✅ | Dynamic array |

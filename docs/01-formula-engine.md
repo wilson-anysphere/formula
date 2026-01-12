@@ -494,9 +494,13 @@ interface ArgSpec {
 | Cube | 7 | CUBEVALUE, CUBEMEMBER, CUBERANKEDMEMBER |
 | Web | 3 | WEBSERVICE, ENCODEURL, FILTERXML |
 | Dynamic Array | 8 | FILTER, SORT, SORTBY, UNIQUE, SEQUENCE |
-| Lambda | 6 | LAMBDA, LET, MAP, REDUCE, SCAN, MAKEARRAY |
+| Lambda | 9 | LAMBDA, LET, ISOMITTED, MAP, REDUCE, SCAN, MAKEARRAY, BYROW, BYCOL |
 
 **Total: ~500 functions**
+
+The parser also supports **invoking lambdas** using both postfix call syntax (`expr(args)`, e.g.
+`LAMBDA(x, x+1)(2)`) and calling a name bound to a lambda (`LET(f, LAMBDA(...), f(2))`). See
+[docs/19-lambda-functions.md](./19-lambda-functions.md) for the full semantics and error behavior.
 
 ### Critical Edge Cases
 
