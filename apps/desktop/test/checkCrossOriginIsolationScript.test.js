@@ -68,7 +68,7 @@ test("pnpm check:coi script builds via cargo_agent and targets the desktop tauri
   );
   assert.match(
     src,
-    /falling back to `cargo`[^]*run\(\s*["']cargo["']/,
+    /err\.code\s*===\s*["']ENOENT["'][^]*run\(\s*["']cargo["']\s*,\s*cargoArgs/,
     "expected COI smoke-check script to fall back to `cargo` on Windows when bash is unavailable",
   );
 });
