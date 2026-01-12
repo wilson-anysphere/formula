@@ -8,6 +8,7 @@ use quick_xml::Reader;
 use crate::openxml;
 use crate::package::{XlsxError, XlsxPackage};
 use crate::path;
+use crate::rich_data::{scan_cells_with_metadata_indices, RichDataError};
 
 const REL_TYPE_SHEET_METADATA: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata";
@@ -197,74 +198,51 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
             None => continue,
         };
 
-        let mut reader = Reader::from_reader(Cursor::new(sheet_bytes));
-        reader.config_mut().trim_text(true);
+        let cells_with_metadata =
+            scan_cells_with_metadata_indices(sheet_bytes).map_err(|err| match err {
+                RichDataError::Xlsx(err) => err,
+                RichDataError::XmlNonUtf8 { source, .. } => XlsxError::Invalid(format!(
+                    "worksheet xml contains invalid UTF-8: {source}"
+                )),
+                RichDataError::XmlParse { source, .. } => XlsxError::RoXml(source),
+            })?;
 
-        let mut buf = Vec::new();
-        loop {
-            match reader.read_event_into(&mut buf)? {
-                Event::Eof => break,
-                Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"c" => {
-                    let mut cell_ref: Option<CellRef> = None;
-                    let mut vm: Option<u32> = None;
+        // Most worksheets contain very few `vm`-annotated cells (only those that actually reference
+        // rich values). By streaming-scan filtering first, we avoid parsing `CellRef` for every
+        // plain cell in large sheets.
+        for (cell, vm, _cm) in cells_with_metadata {
+            let Some(vm) = vm else { continue };
 
-                    for attr in e.attributes() {
-                        let attr = attr?;
-                        let value = attr.unescape_value()?.into_owned();
-                        match attr.key.as_ref() {
-                            b"r" => {
-                                if let Ok(parsed) = CellRef::from_a1(&value) {
-                                    cell_ref = Some(parsed);
-                                }
-                            }
-                            b"vm" => {
-                                if let Ok(parsed) = value.parse::<u32>() {
-                                    vm = Some(parsed);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
+            let Some(rich_value_index) = vm_to_rich_value_index.get(&vm).copied() else {
+                continue;
+            };
+            let Some(rich_value) = rich_values.get(&rich_value_index) else {
+                continue;
+            };
 
-                    let Some(cell) = cell_ref else { continue };
-                    let Some(vm) = vm else { continue };
+            let rid = match local_image_identifier_to_rid.get(rich_value.local_image_identifier as usize) {
+                Some(rid) => rid,
+                None => continue,
+            };
 
-                    let Some(rich_value_index) = vm_to_rich_value_index.get(&vm).copied() else {
-                        continue;
-                    };
-                    let Some(rich_value) = rich_values.get(&rich_value_index) else {
-                        continue;
-                    };
+            let target = match rid_to_target.get(rid) {
+                Some(target) => target,
+                None => continue,
+            };
 
-                    let rid = match local_image_identifier_to_rid
-                        .get(rich_value.local_image_identifier as usize)
-                    {
-                        Some(rid) => rid,
-                        None => continue,
-                    };
+            let bytes = match pkg.part(target) {
+                Some(bytes) => bytes.to_vec(),
+                None => continue,
+            };
 
-                    let target = match rid_to_target.get(rid) {
-                        Some(target) => target,
-                        None => continue,
-                    };
-
-                    let bytes = match pkg.part(target) {
-                        Some(bytes) => bytes.to_vec(),
-                        None => continue,
-                    };
-
-                    out.push(EmbeddedImageCell {
-                        sheet_part: worksheet_part.clone(),
-                        cell,
-                        image_target: target.clone(),
-                        bytes,
-                        alt_text: rich_value.alt_text.clone(),
-                        decorative: rich_value.calc_origin == 5,
-                    });
-                }
-                _ => {}
-            }
-            buf.clear();
+            out.push(EmbeddedImageCell {
+                sheet_part: worksheet_part.clone(),
+                cell,
+                image_target: target.clone(),
+                bytes,
+                alt_text: rich_value.alt_text.clone(),
+                decorative: rich_value.calc_origin == 5,
+            });
         }
     }
 
