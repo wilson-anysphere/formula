@@ -2327,13 +2327,22 @@ window.addEventListener(
       }
     }
 
-    const visible = workbookSheetStore.listVisible();
-    const ordered = visible.length > 0 ? visible : workbookSheetStore.listAll();
+    const ordered = workbookSheetStore.listVisible();
     if (ordered.length === 0) return;
 
     const current = app.getCurrentSheetId();
     const idx = ordered.findIndex((sheet) => sheet.id === current);
-    if (idx === -1) return;
+    if (idx === -1) {
+      // Current sheet is no longer visible (should be rare; typically we auto-fallback
+      // elsewhere). Treat Ctrl/Cmd+PgUp/PgDn as a "jump to first visible sheet".
+      const first = ordered[0];
+      if (!first) return;
+      e.preventDefault();
+      e.stopPropagation();
+      app.activateSheet(first.id);
+      restoreFocusAfterSheetNavigation();
+      return;
+    }
 
     e.preventDefault();
     e.stopPropagation();
