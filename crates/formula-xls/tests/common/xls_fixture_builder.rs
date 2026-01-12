@@ -827,6 +827,17 @@ fn build_autofilter_filtermode_workbook_stream() -> Vec<u8> {
     push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
     let boundsheet_offset_pos = boundsheet_start + 4;
 
+    // `_xlnm._FilterDatabase` (built-in name id 0x0D) scoped to the sheet (`itab=1`).
+    //
+    // Use a smaller filter range than the sheet's DIMENSIONS bounding box so tests can verify we
+    // prefer `_FilterDatabase` (canonical) over DIMENSIONS-based heuristics.
+    let filter_db_rgce = ptg_area(0, 2, 0, 1); // $A$1:$B$3
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &builtin_name_record(true, 1, 0x0D, &filter_db_rgce),
+    );
+
     push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
 
     // -- Sheet -------------------------------------------------------------------
@@ -846,10 +857,10 @@ fn build_autofilter_filtermode_sheet_stream(xf_cell: u16) -> Vec<u8> {
 
     push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
 
-    // DIMENSIONS: rows [0, 3) cols [0, 2) => A1:B3.
+    // DIMENSIONS: rows [0, 5) cols [0, 2) => A1:B5.
     let mut dims = Vec::<u8>::new();
     dims.extend_from_slice(&0u32.to_le_bytes()); // first row
-    dims.extend_from_slice(&3u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&5u32.to_le_bytes()); // last row + 1
     dims.extend_from_slice(&0u16.to_le_bytes()); // first col
     dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1 (A..B)
     dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
