@@ -52,6 +52,11 @@ function hasExtension(pathLike) {
   return lastDot > lastSlash;
 }
 
+function isResolutionMiss(error) {
+  const code = /** @type {any} */ (error)?.code;
+  return code === "ERR_MODULE_NOT_FOUND" || code === "ERR_UNSUPPORTED_DIR_IMPORT";
+}
+
 export async function resolve(specifier, context, defaultResolve) {
   try {
     return await defaultResolve(specifier, context, defaultResolve);
@@ -59,8 +64,7 @@ export async function resolve(specifier, context, defaultResolve) {
     if (!isPathLike(specifier)) throw err;
     // Only fall back for missing modules; other resolution errors (like invalid exports)
     // should be surfaced to the caller.
-    const code = /** @type {any} */ (err)?.code;
-    if (code !== "ERR_MODULE_NOT_FOUND") throw err;
+    if (!isResolutionMiss(err)) throw err;
 
     const { base, suffix } = splitSpecifier(specifier);
 
@@ -69,14 +73,12 @@ export async function resolve(specifier, context, defaultResolve) {
       try {
         return await defaultResolve(base.slice(0, -3) + ".ts" + suffix, context, defaultResolve);
       } catch (candidateErr) {
-        const candidateCode = /** @type {any} */ (candidateErr)?.code;
-        if (candidateCode !== "ERR_MODULE_NOT_FOUND") throw candidateErr;
+        if (!isResolutionMiss(candidateErr)) throw candidateErr;
       }
       try {
         return await defaultResolve(base.slice(0, -3) + ".tsx" + suffix, context, defaultResolve);
       } catch (candidateErr) {
-        const candidateCode = /** @type {any} */ (candidateErr)?.code;
-        if (candidateCode !== "ERR_MODULE_NOT_FOUND") throw candidateErr;
+        if (!isResolutionMiss(candidateErr)) throw candidateErr;
       }
     }
 
@@ -85,8 +87,7 @@ export async function resolve(specifier, context, defaultResolve) {
       try {
         return await defaultResolve(base.slice(0, -4) + ".tsx" + suffix, context, defaultResolve);
       } catch (candidateErr) {
-        const candidateCode = /** @type {any} */ (candidateErr)?.code;
-        if (candidateCode !== "ERR_MODULE_NOT_FOUND") throw candidateErr;
+        if (!isResolutionMiss(candidateErr)) throw candidateErr;
       }
     }
 
@@ -95,20 +96,26 @@ export async function resolve(specifier, context, defaultResolve) {
       try {
         return await defaultResolve(base + ".ts" + suffix, context, defaultResolve);
       } catch (candidateErr) {
-        const candidateCode = /** @type {any} */ (candidateErr)?.code;
-        if (candidateCode !== "ERR_MODULE_NOT_FOUND") throw candidateErr;
+        if (!isResolutionMiss(candidateErr)) throw candidateErr;
       }
       try {
         return await defaultResolve(base + ".tsx" + suffix, context, defaultResolve);
       } catch (candidateErr) {
-        const candidateCode = /** @type {any} */ (candidateErr)?.code;
-        if (candidateCode !== "ERR_MODULE_NOT_FOUND") throw candidateErr;
+        if (!isResolutionMiss(candidateErr)) throw candidateErr;
       }
       try {
         return await defaultResolve(base + ".js" + suffix, context, defaultResolve);
       } catch (candidateErr) {
-        const candidateCode = /** @type {any} */ (candidateErr)?.code;
-        if (candidateCode !== "ERR_MODULE_NOT_FOUND") throw candidateErr;
+        if (!isResolutionMiss(candidateErr)) throw candidateErr;
+      }
+
+      // Directory imports: `./foo` -> `./foo/index.ts` (bundler-style resolution).
+      for (const idx of ["index.ts", "index.tsx", "index.js"]) {
+        try {
+          return await defaultResolve(`${base}/${idx}${suffix}`, context, defaultResolve);
+        } catch (candidateErr) {
+          if (!isResolutionMiss(candidateErr)) throw candidateErr;
+        }
       }
     }
 

@@ -53,6 +53,14 @@ function hasExtension(pathLike) {
 }
 
 /**
+ * @param {unknown} error
+ */
+function isResolutionMiss(error) {
+  const code = /** @type {any} */ (error)?.code;
+  return code === "ERR_MODULE_NOT_FOUND" || code === "ERR_UNSUPPORTED_DIR_IMPORT";
+}
+
+/**
  * @param {string} specifier
  * @param {any} context
  * @param {(specifier: string, context: any, nextResolve: any) => Promise<any>} defaultResolve
@@ -81,8 +89,7 @@ export async function resolve(specifier, context, defaultResolve) {
   try {
     return await defaultResolve(specifier, context, defaultResolve);
   } catch (err) {
-    const code = /** @type {any} */ (err)?.code;
-    if (code !== "ERR_MODULE_NOT_FOUND") throw err;
+    if (!isResolutionMiss(err)) throw err;
 
     if (isJs || isJsx) {
       const baseNoExt = isJs ? base.slice(0, -3) : base.slice(0, -4);
@@ -91,8 +98,7 @@ export async function resolve(specifier, context, defaultResolve) {
         try {
           return await defaultResolve(`${baseNoExt}${ext}${suffix}`, context, defaultResolve);
         } catch (candidateErr) {
-          const candidateCode = /** @type {any} */ (candidateErr)?.code;
-          if (candidateCode !== "ERR_MODULE_NOT_FOUND") throw candidateErr;
+          if (!isResolutionMiss(candidateErr)) throw candidateErr;
         }
       }
     }
@@ -102,8 +108,16 @@ export async function resolve(specifier, context, defaultResolve) {
         try {
           return await defaultResolve(`${base}${ext}${suffix}`, context, defaultResolve);
         } catch (candidateErr) {
-          const candidateCode = /** @type {any} */ (candidateErr)?.code;
-          if (candidateCode !== "ERR_MODULE_NOT_FOUND") throw candidateErr;
+          if (!isResolutionMiss(candidateErr)) throw candidateErr;
+        }
+      }
+
+      // Directory imports: `./foo` -> `./foo/index.ts` (bundler-style resolution).
+      for (const idx of ["index.ts", "index.tsx", "index.js"]) {
+        try {
+          return await defaultResolve(`${base}/${idx}${suffix}`, context, defaultResolve);
+        } catch (candidateErr) {
+          if (!isResolutionMiss(candidateErr)) throw candidateErr;
         }
       }
     }

@@ -20,6 +20,8 @@ test(
     const mod = await import("./__fixtures__/resolve-ts-loader/param-prop.ts");
     const instance = new mod.ParamProp();
     assert.equal(instance.value, 42);
+
+    const dirMod = await import("./__fixtures__/resolve-ts-loader/dir-import.ts");
+    assert.equal(dirMod.getDirValue(), 99);
   },
 );
-
