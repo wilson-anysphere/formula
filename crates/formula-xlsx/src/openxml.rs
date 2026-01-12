@@ -38,7 +38,7 @@ pub fn resolve_relationship_target(
             if rel
                 .target_mode
                 .as_deref()
-                .is_some_and(|mode| mode.eq_ignore_ascii_case("External"))
+                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
             {
                 return Ok(None);
             }

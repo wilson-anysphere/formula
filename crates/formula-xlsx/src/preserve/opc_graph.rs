@@ -49,7 +49,7 @@ pub(crate) fn collect_transitive_related_parts(
             if rel
                 .target_mode
                 .as_deref()
-                .is_some_and(|mode| mode.eq_ignore_ascii_case("External"))
+                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
             {
                 continue;
             }
