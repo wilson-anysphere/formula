@@ -33,4 +33,26 @@ describe("tokenizeFormula", () => {
     const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
     expect(refs).toEqual(["A1"]);
   });
+
+  it("tokenizes spill operator (#) and percent operator (%)", () => {
+    const tokens = tokenizeFormula("=A1# + 1%").filter((t) => t.type !== "whitespace");
+    expect(tokens.map((t) => [t.type, t.text])).toEqual([
+      ["operator", "="],
+      ["reference", "A1"],
+      ["operator", "#"],
+      ["operator", "+"],
+      ["number", "1"],
+      ["operator", "%"],
+    ]);
+  });
+
+  it("does not include trailing brackets in error literals", () => {
+    const tokens = tokenizeFormula("=[#REF!]").filter((t) => t.type !== "whitespace");
+    expect(tokens.map((t) => [t.type, t.text])).toEqual([
+      ["operator", "="],
+      ["punctuation", "["],
+      ["error", "#REF!"],
+      ["punctuation", "]"],
+    ]);
+  });
 });

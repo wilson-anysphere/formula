@@ -16,6 +16,17 @@ function isIdentifierPart(ch: string): boolean {
   return isIdentifierStart(ch) || isDigit(ch) || ch === ".";
 }
 
+function isErrorBodyChar(ch: string): boolean {
+  return (
+    ch === "_" ||
+    ch === "/" ||
+    ch === "." ||
+    (ch >= "0" && ch <= "9") ||
+    (ch >= "A" && ch <= "Z") ||
+    (ch >= "a" && ch <= "z")
+  );
+}
+
 function tryReadString(input: string, start: number): { text: string; end: number } | null {
   if (input[start] !== '"') return null;
   let i = start + 1;
@@ -34,15 +45,18 @@ function tryReadString(input: string, start: number): { text: string; end: numbe
 
 function tryReadErrorCode(input: string, start: number): { text: string; end: number } | null {
   if (input[start] !== "#") return null;
+
+  // Mirror the engine lexer: treat `#` as an error literal when followed by a
+  // plausible error body (letters/digits/_/./). Stop before the first
+  // non-body character so we don't accidentally consume trailing punctuation
+  // like `]` in `Table1[#All]`.
+  if (!isErrorBodyChar(input[start + 1] ?? "")) return null;
+
   let i = start + 1;
-  while (i < input.length) {
-    const ch = input[i];
-    if (isWhitespace(ch) || ch === "," || ch === ")" || ch === "(" || ch === "+" || ch === "-" || ch === "*" || ch === "/") {
-      break;
-    }
-    i += 1;
-  }
-  if (i === start + 1) return null;
+  while (i < input.length && isErrorBodyChar(input[i] ?? "")) i += 1;
+  // Error literals may optionally end in `!` or `?` (e.g. `#REF!`, `#NAME?`).
+  if (input[i] === "!" || input[i] === "?") i += 1;
+
   return { text: input.slice(start, i), end: i };
 }
 
@@ -173,10 +187,35 @@ export function tokenizeFormula(input: string): FormulaToken[] {
       continue;
     }
 
-    const err = tryReadErrorCode(input, i);
-    if (err) {
-      tokens.push({ type: "error", text: err.text, start: i, end: err.end });
-      i = err.end;
+    if (ch === "#") {
+      // Spill-range postfix operator (`A1#`) vs error literal (`#REF!`).
+      // Best-effort: treat `#` as a postfix operator only when immediately after
+      // an expression-like token (no intervening whitespace).
+      const prev = tokens[tokens.length - 1];
+      const isPostfixSpill =
+        prev &&
+        prev.end === i &&
+        prev.type !== "whitespace" &&
+        (prev.type === "reference" ||
+          prev.type === "identifier" ||
+          prev.type === "function" ||
+          (prev.type === "punctuation" && (prev.text === ")" || prev.text === "]")));
+      if (isPostfixSpill) {
+        tokens.push({ type: "operator", text: "#", start: i, end: i + 1 });
+        i += 1;
+        continue;
+      }
+
+      const err = tryReadErrorCode(input, i);
+      if (err) {
+        tokens.push({ type: "error", text: err.text, start: i, end: err.end });
+        i = err.end;
+        continue;
+      }
+
+      // Standalone `#` (or followed by whitespace) is still a spill operator.
+      tokens.push({ type: "operator", text: "#", start: i, end: i + 1 });
+      i += 1;
       continue;
     }
 
@@ -230,13 +269,13 @@ export function tokenizeFormula(input: string): FormulaToken[] {
       continue;
     }
 
-    if ("+-*/^&=><".includes(ch)) {
+    if ("+-*/^&=><%@".includes(ch)) {
       tokens.push({ type: "operator", text: ch, start: i, end: i + 1 });
       i += 1;
       continue;
     }
 
-    if ("(),;:".includes(ch)) {
+    if ("(),;:[]{}.!".includes(ch)) {
       tokens.push({ type: "punctuation", text: ch, start: i, end: i + 1 });
       i += 1;
       continue;
