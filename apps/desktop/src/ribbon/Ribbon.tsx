@@ -455,6 +455,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                 className="ribbon__tab-menu"
                 role="menu"
                 aria-label="Ribbon tabs"
+                data-keybinding-barrier="true"
                 data-testid="ribbon-tab-menu"
                 ref={tabMenuRef}
                 onKeyDown={(event) => {
