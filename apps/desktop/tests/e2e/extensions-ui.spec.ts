@@ -114,6 +114,7 @@ test.describe("Extensions UI integration", () => {
       try {
         document.addEventListener("DOMContentLoaded", injectTauriGlobals, { once: true });
         window.addEventListener("load", injectTauriGlobals, { once: true });
+        setTimeout(injectTauriGlobals, 500);
       } catch {
         // Ignore.
       }

@@ -123,6 +123,8 @@ const HARDEN_TAURI_GLOBALS_SOURCE = `(() => {
   try {
     setTimeout(scrubTauriGlobals, 0);
     setTimeout(scrubTauriGlobals, 50);
+    setTimeout(scrubTauriGlobals, 250);
+    setTimeout(scrubTauriGlobals, 1000);
     document.addEventListener("DOMContentLoaded", scrubTauriGlobals, { once: true });
     window.addEventListener("load", scrubTauriGlobals, { once: true });
   } catch {
