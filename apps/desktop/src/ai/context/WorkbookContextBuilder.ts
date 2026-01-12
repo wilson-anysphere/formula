@@ -63,6 +63,37 @@ export interface WorkbookContextBudgetInfo {
   usedPromptContextTokens: number;
 }
 
+export interface WorkbookContextBuildStats {
+  /**
+   * Monotonic-ish start time (uses `performance.now()` when available).
+   * Only meant for comparing with `durationMs`.
+   */
+  startedAtMs: number;
+  durationMs: number;
+  mode: ContextBudgetMode;
+  model: string;
+  sheetCountSummarized: number;
+  blockCount: number;
+  readBlockCount: number;
+  readBlockCountByKind: Record<WorkbookContextBlockKind, number>;
+  cache: {
+    schema: { hits: number; misses: number };
+    block: { hits: number; misses: number };
+  };
+  rag: {
+    enabled: boolean;
+    retrievedCount: number;
+    retrievedBlockCount: number;
+  };
+  timingsMs: {
+    ragMs: number;
+    schemaMs: number;
+    readBlockMs: number;
+    promptContextMs: number;
+    readBlockMsByKind: Record<WorkbookContextBlockKind, number>;
+  };
+}
+
 export interface WorkbookContextPayload {
   version: 1;
   workbookId: string;
@@ -223,6 +254,11 @@ export interface WorkbookContextBuilderOptions {
    * When omitted, a mode-based heuristic derived from `contextBudget.ts` is used.
    */
   maxPromptContextTokens?: number;
+  /**
+   * Optional perf instrumentation hook for workbook context building.
+   * Default behavior is unchanged when this is not provided.
+   */
+  onBuildStats?: (stats: WorkbookContextBuildStats) => void;
 }
 
 export class WorkbookContextBuilder {
@@ -236,12 +272,20 @@ export class WorkbookContextBuilder {
       | "contextWindowTokens"
       | "reserveForOutputTokens"
       | "schemaProvider"
+      | "onBuildStats"
     >
   > &
     Pick<
       WorkbookContextBuilderOptions,
-      "ragService" | "dlp" | "tokenEstimator" | "maxPromptContextTokens" | "contextWindowTokens" | "reserveForOutputTokens" | "schemaProvider"
-  >;
+      | "ragService"
+      | "dlp"
+      | "tokenEstimator"
+      | "maxPromptContextTokens"
+      | "contextWindowTokens"
+      | "reserveForOutputTokens"
+      | "schemaProvider"
+      | "onBuildStats"
+    >;
   private readonly estimator: TokenEstimator;
 
   private readonly sheetSummaryCache = new Map<string, { contentVersion: number; summary: WorkbookContextSheetSummary }>();
@@ -276,6 +320,32 @@ export class WorkbookContextBuilder {
   }
 
   async build(input: BuildWorkbookContextInput): Promise<BuildWorkbookContextResult> {
+    const onBuildStats = this.options.onBuildStats;
+    const stats: WorkbookContextBuildStats | null = onBuildStats
+      ? {
+          startedAtMs: nowMs(),
+          durationMs: 0,
+          mode: this.options.mode,
+          model: this.options.model,
+          sheetCountSummarized: 0,
+          blockCount: 0,
+          readBlockCount: 0,
+          readBlockCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
+          cache: {
+            schema: { hits: 0, misses: 0 },
+            block: { hits: 0, misses: 0 },
+          },
+          rag: { enabled: false, retrievedCount: 0, retrievedBlockCount: 0 },
+          timingsMs: {
+            ragMs: 0,
+            schemaMs: 0,
+            readBlockMs: 0,
+            promptContextMs: 0,
+            readBlockMsByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
+          },
+        }
+      : null;
+
     const sheetIds =
       this.options.mode === "inline_edit" ? [input.activeSheetId] : this.resolveSheetIds({ activeSheetId: input.activeSheetId });
 
@@ -312,33 +382,42 @@ export class WorkbookContextBuilder {
     });
 
     // Retrieval (semantic search) is optional and query-driven.
-    const ragResult =
-      input.focusQuestion && this.options.ragService
-        ? await this.options.ragService.buildWorkbookContextFromSpreadsheetApi({
-            spreadsheet: this.options.spreadsheet,
-            workbookId: this.options.workbookId,
-            query: input.focusQuestion,
-            attachments: input.attachments,
-            // WorkbookContextBuilder builds its own promptContext; avoid redundant string formatting
-            // + token estimation work inside the underlying RAG service.
-            includePromptContext: false,
-            dlp,
-          })
-        : null;
+    const ragEnabled = Boolean(input.focusQuestion && this.options.ragService);
+    if (stats) stats.rag.enabled = ragEnabled;
+    let ragResult: any = null;
+    if (ragEnabled) {
+      const startedAt = stats ? nowMs() : 0;
+      ragResult = await this.options.ragService!.buildWorkbookContextFromSpreadsheetApi({
+        spreadsheet: this.options.spreadsheet,
+        workbookId: this.options.workbookId,
+        query: input.focusQuestion!,
+        attachments: input.attachments,
+        // WorkbookContextBuilder builds its own promptContext; avoid redundant string formatting
+        // + token estimation work inside the underlying RAG service.
+        includePromptContext: false,
+        dlp,
+      });
+      if (stats) stats.timingsMs.ragMs += nowMs() - startedAt;
+    }
 
     const retrieved: unknown[] = Array.isArray(ragResult?.retrieved) ? ragResult.retrieved : [];
     const indexStats = ragResult?.indexStats;
+    if (stats) stats.rag.retrievedCount = retrieved.length;
 
     const selectionBlock = selection
-      ? await this.readBlock(executor, {
-          dlpCacheKey,
-          kind: "selection",
-          sheetId: selection.sheetId,
-          range: selection.range,
-          // Selection-first: inline edit should prefer showing selection content even if large.
-          maxRows: this.options.maxBlockRows,
-          maxCols: this.options.maxBlockCols,
-        })
+      ? await this.readBlock(
+          executor,
+          {
+            dlpCacheKey,
+            kind: "selection",
+            sheetId: selection.sheetId,
+            range: selection.range,
+            // Selection-first: inline edit should prefer showing selection content even if large.
+            maxRows: this.options.maxBlockRows,
+            maxCols: this.options.maxBlockCols,
+          },
+          stats,
+        )
       : null;
 
     const sheetsToSummarize =
@@ -356,7 +435,7 @@ export class WorkbookContextBuilder {
         schemaVersion: schemaMetadata.schemaVersion,
         namedRanges: schemaNamedRangesBySheet.get(sheetId),
         tables: schemaTablesBySheet.get(sheetId),
-      });
+      }, stats);
       sheetSummaries.push(summary);
 
       // Only include an explicit sample block for the active sheet (or for inline edit, the only sheet).
@@ -368,13 +447,19 @@ export class WorkbookContextBuilder {
           startCol: summary.analyzedRange.startCol,
           endCol: summary.analyzedRange.endCol,
         };
-        blocks.push(await this.buildSheetSampleBlock(executor, { dlpCacheKey, sheetId, analyzedRange: sampleRange }));
+        blocks.push(await this.buildSheetSampleBlock(executor, { dlpCacheKey, sheetId, analyzedRange: sampleRange }, stats));
       }
     }
 
     // Add sampled blocks for retrieved chunks (query-aware).
     if (retrieved.length && this.options.maxRetrievedBlocks > 0) {
-      const retrievedBlocks = await this.blocksFromRetrievedChunks(executor, retrieved, this.options.maxRetrievedBlocks, { dlpCacheKey });
+      const retrievedBlocks = await this.blocksFromRetrievedChunks(
+        executor,
+        retrieved,
+        this.options.maxRetrievedBlocks,
+        { dlpCacheKey },
+        stats,
+      );
       blocks.push(...retrievedBlocks);
     }
 
@@ -436,14 +521,28 @@ export class WorkbookContextBuilder {
       },
     };
 
+    const promptStartedAt = stats ? nowMs() : 0;
     const promptContext = this.buildPromptContext({
       payload,
       ragResult,
       maxTokens: budget.maxPromptContextTokens,
     });
+    if (stats) stats.timingsMs.promptContextMs += nowMs() - promptStartedAt;
 
     const usedPromptContextTokens = this.estimator.estimateTextTokens(promptContext);
     payload.budget.usedPromptContextTokens = usedPromptContextTokens;
+
+    if (stats) {
+      stats.durationMs = nowMs() - stats.startedAtMs;
+      stats.sheetCountSummarized = sheetSummaries.length;
+      stats.blockCount = blocks.length;
+      stats.rag.retrievedBlockCount = blocks.filter((b) => b.kind === "retrieved").length;
+      try {
+        onBuildStats?.(stats);
+      } catch {
+        // Ignore instrumentation failures; context building should be robust.
+      }
+    }
 
     return { payload, promptContext, retrieved, indexStats };
   }
@@ -550,7 +649,10 @@ export class WorkbookContextBuilder {
       namedRanges?: Array<{ name: string; range: string }>;
       tables?: Array<{ name: string; range: string }>;
     },
+    stats?: WorkbookContextBuildStats | null,
   ): Promise<WorkbookContextSheetSummary> {
+    if (stats) stats.sheetCountSummarized += 1;
+
     const contentVersion = this.options.documentController.getSheetContentVersion?.(sheetId) ?? 0;
     const schemaVersion =
       typeof extras?.schemaVersion === "number" && Number.isFinite(extras.schemaVersion) ? Math.trunc(extras.schemaVersion) : 0;
@@ -572,8 +674,10 @@ export class WorkbookContextBuilder {
       // Bump recency for eviction.
       this.sheetSummaryCache.delete(cacheKey);
       this.sheetSummaryCache.set(cacheKey, cached);
+      if (stats) stats.cache.schema.hits += 1;
       return cached.summary;
     }
+    if (stats) stats.cache.schema.misses += 1;
 
     const used = this.options.documentController.getUsedRange(sheetId);
     if (!used) {
@@ -593,14 +697,18 @@ export class WorkbookContextBuilder {
       { maxRows: this.options.maxSchemaRows, maxCols: this.options.maxSchemaCols },
     );
 
-    const block = await this.readBlock(executor, {
-      dlpCacheKey: extras.dlpCacheKey,
-      kind: "sheet_sample",
-      sheetId,
-      range: analyzedRange,
-      maxRows: this.options.maxSchemaRows,
-      maxCols: this.options.maxSchemaCols,
-    });
+    const block = await this.readBlock(
+      executor,
+      {
+        dlpCacheKey: extras.dlpCacheKey,
+        kind: "sheet_sample",
+        sheetId,
+        range: analyzedRange,
+        maxRows: this.options.maxSchemaRows,
+        maxCols: this.options.maxSchemaCols,
+      },
+      stats,
+    );
 
     // If we couldn't read the sheet sample (DLP denied, runtime error, etc), do not attempt
     // schema extraction from placeholder values (it would create misleading fake tables).
@@ -617,6 +725,7 @@ export class WorkbookContextBuilder {
     }
 
     const schemaValues: unknown[][] = block.values;
+    const schemaStart = stats ? nowMs() : 0;
     const schema = extractSheetSchema({
       name: sheetId,
       values: schemaValues,
@@ -625,6 +734,7 @@ export class WorkbookContextBuilder {
       ...(extras?.namedRanges?.length ? { namedRanges: extras.namedRanges } : {}),
       ...(extras?.tables?.length ? { tables: extras.tables } : {}),
     } as any);
+    if (stats) stats.timingsMs.schemaMs += nowMs() - schemaStart;
 
     const summary = { sheetId, analyzedRange, schema };
     this.rememberSheetSummary(cacheKey, { contentVersion, summary });
@@ -634,6 +744,7 @@ export class WorkbookContextBuilder {
   private async buildSheetSampleBlock(
     executor: ToolExecutor,
     params: { dlpCacheKey: string; sheetId: string; analyzedRange: Range },
+    stats?: WorkbookContextBuildStats | null,
   ): Promise<WorkbookContextDataBlock> {
     const sampleRange = clampRange(params.analyzedRange, { maxRows: this.options.maxBlockRows, maxCols: this.options.maxBlockCols });
 
@@ -649,6 +760,7 @@ export class WorkbookContextBuilder {
     });
 
     if (cachedSchemaSample) {
+      if (stats) stats.cache.block.hits += 1;
       return sliceBlock({
         block: cachedSchemaSample,
         kind: "sheet_sample",
@@ -661,14 +773,18 @@ export class WorkbookContextBuilder {
 
     // If the schema sample isn't cached (e.g. sheet summary served from cache but block cache evicted),
     // fall back to reading just the smaller prompt sample.
-    return this.readBlock(executor, {
-      dlpCacheKey: params.dlpCacheKey,
-      kind: "sheet_sample",
-      sheetId: params.sheetId,
-      range: params.analyzedRange,
-      maxRows: this.options.maxBlockRows,
-      maxCols: this.options.maxBlockCols,
-    });
+    return this.readBlock(
+      executor,
+      {
+        dlpCacheKey: params.dlpCacheKey,
+        kind: "sheet_sample",
+        sheetId: params.sheetId,
+        range: params.analyzedRange,
+        maxRows: this.options.maxBlockRows,
+        maxCols: this.options.maxBlockCols,
+      },
+      stats,
+    );
   }
 
   private async blocksFromRetrievedChunks(
@@ -676,6 +792,7 @@ export class WorkbookContextBuilder {
     retrieved: unknown[],
     maxBlocks: number,
     params: { dlpCacheKey: string },
+    stats?: WorkbookContextBuildStats | null,
   ): Promise<WorkbookContextDataBlock[]> {
     const out: WorkbookContextDataBlock[] = [];
     const seen = new Set<string>();
@@ -698,17 +815,22 @@ export class WorkbookContextBuilder {
       seen.add(dedupeKey);
 
       out.push(
-        await this.readBlock(executor, {
-          dlpCacheKey: params.dlpCacheKey,
-          kind: "retrieved",
-          sheetId,
-          range,
-          maxRows: this.options.maxBlockRows,
-          maxCols: this.options.maxBlockCols,
-        }),
+        await this.readBlock(
+          executor,
+          {
+            dlpCacheKey: params.dlpCacheKey,
+            kind: "retrieved",
+            sheetId,
+            range,
+            maxRows: this.options.maxBlockRows,
+            maxCols: this.options.maxBlockCols,
+          },
+          stats,
+        ),
       );
     }
 
+    if (stats) stats.rag.retrievedBlockCount = out.length;
     return out;
   }
 
@@ -821,6 +943,7 @@ export class WorkbookContextBuilder {
       maxRows: number;
       maxCols: number;
     },
+    stats?: WorkbookContextBuildStats | null,
   ): Promise<WorkbookContextDataBlock> {
     const contentVersion = this.options.documentController.getSheetContentVersion?.(params.sheetId) ?? 0;
     const { key: cacheKey, clamped, rangeRef } = this.getReadBlockCacheKey(params);
@@ -830,6 +953,7 @@ export class WorkbookContextBuilder {
       // Bump recency for eviction.
       this.blockCache.delete(cacheKey);
       this.blockCache.set(cacheKey, cached);
+      if (stats) stats.cache.block.hits += 1;
       return cached.block;
     }
     if (cached && cached.contentVersion !== contentVersion) {
@@ -837,10 +961,22 @@ export class WorkbookContextBuilder {
       this.blockCache.delete(cacheKey);
     }
 
+    if (stats) {
+      stats.cache.block.misses += 1;
+      stats.readBlockCount += 1;
+      stats.readBlockCountByKind[params.kind] += 1;
+    }
+    const startedAt = stats ? nowMs() : 0;
     const toolResult = await executor.execute({
       name: "read_range",
       parameters: { range: rangeRef, include_formulas: false },
     } as any);
+
+    if (stats) {
+      const elapsed = nowMs() - startedAt;
+      stats.timingsMs.readBlockMs += elapsed;
+      stats.timingsMs.readBlockMsByKind[params.kind] += elapsed;
+    }
 
     if (toolResult.ok && toolResult.data && (toolResult.data as any).values) {
       const values = ((toolResult.data as any).values ?? []) as CellScalar[][];
@@ -993,6 +1129,11 @@ export class WorkbookContextBuilder {
   private schemaRangeRef(sheetId: string, range: Range): string {
     return `${formatSheetNameForA1(sheetId)}!${rangeToA1Selection(range)}`;
   }
+}
+
+function nowMs(): number {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") return performance.now();
+  return Date.now();
 }
 
 function safeList<T>(fn: () => T[] | null | undefined): T[] {

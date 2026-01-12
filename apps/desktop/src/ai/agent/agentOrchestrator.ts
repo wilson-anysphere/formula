@@ -265,6 +265,16 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
     const toolPolicy = getDesktopToolPolicy({ mode: "agent" });
 
     const dlp = maybeGetAiCloudDlpOptions({ documentId: params.workbookId, sheetId: defaultSheetId }) ?? undefined;
+    const onBuildStats =
+      import.meta.env.MODE === "development"
+        ? (stats: any) => {
+            try {
+              console.debug("[ai] WorkbookContextBuilder build stats (agent)", stats);
+            } catch {
+              // ignore
+            }
+          }
+        : undefined;
 
     const toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
       default_sheet: defaultSheetId,
@@ -314,7 +324,8 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       model: modelName,
       contextWindowTokens,
       reserveForOutputTokens,
-      tokenEstimator: estimator as any
+      tokenEstimator: estimator as any,
+      onBuildStats
     });
 
     async function refreshSystemMessage(targetMessages: any[]): Promise<void> {

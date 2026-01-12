@@ -221,6 +221,16 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
   const keepLastMessages = options.keepLastMessages ?? 40;
 
   const spreadsheet = new DocumentControllerSpreadsheetApi(options.documentController, { createChart: options.createChart });
+  const onBuildStats =
+    import.meta.env.MODE === "development"
+      ? (stats: any) => {
+          try {
+            console.debug("[ai] WorkbookContextBuilder build stats (chat)", stats);
+          } catch {
+            // ignore
+          }
+        }
+      : undefined;
 
   // If no context provider is passed, we create a default DesktopRagService backed by
   // persistent local storage + DocumentController listeners. In that case the
@@ -252,7 +262,8 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     model: options.model,
     contextWindowTokens,
     reserveForOutputTokens,
-    tokenEstimator: estimator as any
+    tokenEstimator: estimator as any,
+    onBuildStats
   });
 
   let disposePromise: Promise<void> | null = null;
@@ -318,13 +329,13 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
 
     const dlp = maybeGetAiCloudDlpOptions({ documentId: options.workbookId, sheetId: activeSheetId }) ?? undefined;
 
-    let workbookContext: any;
-    try {
-      throwIfAborted(signal);
-      workbookContext = await withAbort(
-        signal,
-        contextBuilder.build({
-          activeSheetId,
+      let workbookContext: any;
+      try {
+        throwIfAborted(signal);
+        workbookContext = await withAbort(
+          signal,
+          contextBuilder.build({
+            activeSheetId,
           dlp,
           ...(selectedRange ? { selectedRange } : {}),
           focusQuestion: text,

@@ -501,6 +501,45 @@ describe("WorkbookContextBuilder", () => {
     expect(WorkbookContextBuilder.serializePayload(snapshotPayload as any)).toMatchSnapshot();
   });
 
+  it("invokes onBuildStats with sane counters", async () => {
+    const documentController = new DocumentController();
+    documentController.setRangeValues("Sheet1", "A1", [["hello"]]);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+    const onBuildStats = vi.fn();
+    const builder = new WorkbookContextBuilder({
+      workbookId: "wb_stats",
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+      maxSheets: 1,
+      onBuildStats,
+    });
+
+    await builder.build({ activeSheetId: "Sheet1" });
+    await builder.build({ activeSheetId: "Sheet1" });
+
+    expect(onBuildStats).toHaveBeenCalledTimes(2);
+    const first = onBuildStats.mock.calls[0]![0];
+    const second = onBuildStats.mock.calls[1]![0];
+
+    expect(first.mode).toBe("chat");
+    expect(first.model).toBe("unit-test-model");
+    expect(first.durationMs).toBeGreaterThanOrEqual(0);
+    expect(first.sheetCountSummarized).toBe(1);
+    expect(first.blockCount).toBe(1);
+    expect(first.cache.schema.misses).toBeGreaterThanOrEqual(1);
+    expect(first.cache.block.misses).toBeGreaterThanOrEqual(1);
+    expect(first.rag.enabled).toBe(false);
+    expect(first.rag.retrievedCount).toBe(0);
+
+    // Second build should reuse cached schema + sampled blocks.
+    expect(second.cache.schema.hits).toBeGreaterThanOrEqual(1);
+    expect(second.cache.block.hits).toBeGreaterThanOrEqual(1);
+  });
+
   it("builds a deterministic promptContext with compact stable JSON", async () => {
     const documentController = new DocumentController();
     const header = Array.from({ length: 8 }, (_v, idx) => `Col${idx + 1}`);
