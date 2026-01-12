@@ -621,6 +621,9 @@ test.describe("split view", () => {
       await expect(input).toHaveValue("=SUM(A1:A2");
       await expect(secondaryStatus).toContainText("Selection A1:A2");
       await expect(input).toBeFocused();
+      await expect
+        .poll(() => page.evaluate(() => (window as any).__formulaSecondaryGrid?.renderer?.referenceHighlights?.length ?? 0))
+        .toBeGreaterThan(0);
 
       // Cancel should clear the split-view range selection overlay and not apply the edit.
       await page.keyboard.press("Escape");
@@ -634,6 +637,9 @@ test.describe("split view", () => {
       });
       expect(c1FormulaAfterCancel).toBeNull();
       await expect(secondaryStatus).toContainText("Selection C1");
+      await expect
+        .poll(() => page.evaluate(() => (window as any).__formulaSecondaryGrid?.renderer?.referenceHighlights?.length ?? 0))
+        .toBe(0);
 
       // Start editing again.
       await page.getByTestId("formula-highlight").click();
@@ -648,6 +654,9 @@ test.describe("split view", () => {
 
       await expect(input).toHaveValue("=SUM(A1:A2");
       await expect(input).toBeFocused();
+      await expect
+        .poll(() => page.evaluate(() => (window as any).__formulaSecondaryGrid?.renderer?.referenceHighlights?.length ?? 0))
+        .toBeGreaterThan(0);
 
       // Commit the formula; the split-view transient range selection overlay should clear.
       await page.keyboard.type(")");
@@ -666,6 +675,9 @@ test.describe("split view", () => {
       expect(c1Value).toBe("3");
 
       await expect(secondaryStatus).toContainText("Selection C1");
+      await expect
+        .poll(() => page.evaluate(() => (window as any).__formulaSecondaryGrid?.renderer?.referenceHighlights?.length ?? 0))
+        .toBe(0);
     });
 
     test(`secondary-pane range insertion on another sheet inserts a sheet-qualified reference (${mode})`, async ({ page }) => {

@@ -2654,9 +2654,22 @@ if (
         onSelectionChange: () => syncPrimarySelectionFromSecondary(),
         onSelectionRangeChange: () => syncPrimarySelectionFromSecondary(),
         callbacks: {
-          onRangeSelectionStart: (range) => (app as any).onSharedRangeSelectionStart(range),
-          onRangeSelectionChange: (range) => (app as any).onSharedRangeSelectionChange(range),
-          onRangeSelectionEnd: () => (app as any).onSharedRangeSelectionEnd(),
+          // When dragging a range in the secondary pane during formula editing, SpreadsheetApp
+          // updates the formula bar draft and emits reference highlights for the active reference.
+          // Those formula-bar updates are programmatic (no textarea input events), so explicitly
+          // resync highlights here so the secondary pane mirrors the primary pane behavior.
+          onRangeSelectionStart: (range) => {
+            (app as any).onSharedRangeSelectionStart(range);
+            syncSecondaryGridReferenceHighlights();
+          },
+          onRangeSelectionChange: (range) => {
+            (app as any).onSharedRangeSelectionChange(range);
+            syncSecondaryGridReferenceHighlights();
+          },
+          onRangeSelectionEnd: () => {
+            (app as any).onSharedRangeSelectionEnd();
+            syncSecondaryGridReferenceHighlights();
+          },
         },
         initialScroll,
         initialZoom,
