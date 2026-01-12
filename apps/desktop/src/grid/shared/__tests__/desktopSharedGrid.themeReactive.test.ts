@@ -293,6 +293,14 @@ describe("DesktopSharedGrid theme reactivity", () => {
     const observedTargets = records.map((r) => (r.observe.mock.calls[0]?.[0] as Element | undefined) ?? null);
     expect(observedTargets).toEqual(expect.arrayContaining([container, document.documentElement, document.body]));
 
+    for (const record of records) {
+      const options = record.observe.mock.calls[0]?.[1] as MutationObserverInit | undefined;
+      expect(options?.attributes).toBe(true);
+      expect(options?.attributeFilter).toEqual(
+        expect.arrayContaining(["style", "class", "data-theme", "data-reduced-motion"])
+      );
+    }
+
     // Simulate a CSS var change on the container.
     container.style.setProperty("--formula-grid-bg", "rgb(40, 50, 60)");
 
