@@ -349,10 +349,19 @@ export function branchStateFromYjsDoc(doc) {
     } else {
       const frozenRows = readYMapOrObject(entry, "frozenRows");
       const frozenCols = readYMapOrObject(entry, "frozenCols");
-      if (frozenRows !== undefined || frozenCols !== undefined) {
+      const colWidths = readYMapOrObject(entry, "colWidths");
+      const rowHeights = readYMapOrObject(entry, "rowHeights");
+      if (
+        frozenRows !== undefined ||
+        frozenCols !== undefined ||
+        colWidths !== undefined ||
+        rowHeights !== undefined
+      ) {
         meta.view = {
           frozenRows: yjsValueToJson(frozenRows) ?? 0,
           frozenCols: yjsValueToJson(frozenCols) ?? 0,
+          ...(colWidths !== undefined ? { colWidths: yjsValueToJson(colWidths) } : {}),
+          ...(rowHeights !== undefined ? { rowHeights: yjsValueToJson(rowHeights) } : {}),
         };
       }
     }
