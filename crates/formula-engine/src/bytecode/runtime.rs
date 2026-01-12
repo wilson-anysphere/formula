@@ -8115,6 +8115,9 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     ) {
         return Value::Error(ErrorKind::Spill);
     }
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Value::Error(ErrorKind::Value);
+    }
 
     let match_type = if args.len() == 3 {
         match coerce_to_i64(&args[2]) {
@@ -8297,6 +8300,9 @@ fn fn_xmatch(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     ) {
         return Value::Error(ErrorKind::Spill);
     }
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Value::Error(ErrorKind::Value);
+    }
 
     let match_mode = match parse_xmatch_match_mode(args.get(2)) {
         Ok(m) => m,
@@ -8401,6 +8407,9 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_)
     ) {
         return Value::Error(ErrorKind::Spill);
+    }
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Value::Error(ErrorKind::Value);
     }
 
     let if_not_found_arg = match args.get(3) {
