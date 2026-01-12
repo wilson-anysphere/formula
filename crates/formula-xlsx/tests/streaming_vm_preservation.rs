@@ -2,10 +2,8 @@ use std::fs;
 use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
-use formula_model::{CellRef, CellValue};
-use formula_xlsx::{
-    patch_xlsx_streaming_workbook_cell_patches, CellPatch, WorkbookCellPatches,
-};
+use formula_model::{CellRef, CellValue, ErrorValue};
+use formula_xlsx::{patch_xlsx_streaming_workbook_cell_patches, CellPatch, WorkbookCellPatches};
 use zip::ZipArchive;
 
 fn build_minimal_xlsx(sheet_xml: &str) -> Vec<u8> {
@@ -41,8 +39,7 @@ fn build_minimal_xlsx(sheet_xml: &str) -> Vec<u8> {
 }
 
 #[test]
-fn streaming_patch_drops_vm_attribute_on_value_update(
-) -> Result<(), Box<dyn std::error::Error>> {
+fn streaming_patch_drops_vm_attribute_on_value_update() -> Result<(), Box<dyn std::error::Error>> {
     let fixture_path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/row-col-attrs.xlsx");
     let bytes = fs::read(&fixture_path)?;
@@ -81,7 +78,10 @@ fn streaming_patch_drops_vm_attribute_on_value_update(
         .find(|n| n.has_tag_name((ns, "v")))
         .and_then(|n| n.text())
         .unwrap_or_default();
-    assert_eq!(v_text, "99", "expected patched value in <v>, got: {sheet_xml}");
+    assert_eq!(
+        v_text, "99",
+        "expected patched value in <v>, got: {sheet_xml}"
+    );
 
     Ok(())
 }
@@ -132,6 +132,73 @@ fn streaming_patch_drops_vm_but_preserves_cm_on_value_update(
         .and_then(|n| n.text())
         .unwrap_or_default();
     assert_eq!(v_text, "2");
+
+    Ok(())
+}
+
+#[test]
+fn streaming_patch_preserves_vm_on_rich_value_placeholder_error(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" vm="1" cm="2"><v>1</v></c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+    let bytes = build_minimal_xlsx(worksheet_xml);
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("A1")?,
+        CellPatch::set_value(CellValue::Error(ErrorValue::Value)),
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming_workbook_cell_patches(Cursor::new(bytes), &mut out, &patches)?;
+
+    let mut archive = ZipArchive::new(Cursor::new(out.into_inner()))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+
+    let doc = roxmltree::Document::parse(&sheet_xml)?;
+    let ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    let cell = doc
+        .descendants()
+        .find(|n| n.has_tag_name((ns, "c")) && n.attribute("r") == Some("A1"))
+        .expect("expected cell A1 to exist");
+
+    assert_eq!(
+        cell.attribute("vm"),
+        Some("1"),
+        "vm should be preserved when patching to the rich-value placeholder error (#VALUE!), got: {sheet_xml}"
+    );
+    assert_eq!(
+        cell.attribute("cm"),
+        Some("2"),
+        "expected cm attribute to be preserved (sanity check), got: {sheet_xml}"
+    );
+    assert_eq!(
+        cell.attribute("t"),
+        Some("e"),
+        "expected patched cell to use error cell type (t=\"e\"), got: {sheet_xml}"
+    );
+
+    let v_text = cell
+        .children()
+        .find(|n| n.has_tag_name((ns, "v")))
+        .and_then(|n| n.text())
+        .unwrap_or_default();
+    assert_eq!(
+        v_text,
+        ErrorValue::Value.as_str(),
+        "expected patched value in <v> to be #VALUE!, got: {sheet_xml}"
+    );
 
     Ok(())
 }

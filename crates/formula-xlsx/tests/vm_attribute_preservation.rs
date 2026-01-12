@@ -1,6 +1,6 @@
 use std::io::{Cursor, Read as _, Write as _};
 
-use formula_model::{CellRef, CellValue};
+use formula_model::{CellRef, CellValue, ErrorValue};
 use formula_xlsx::{CellPatch, PackageCellPatch, WorkbookCellPatches, XlsxPackage};
 
 fn build_minimal_xlsx(sheet_xml: &str) -> Vec<u8> {
@@ -90,9 +90,37 @@ fn assert_a2_value_and_drops_vm(worksheet_xml: &str, expected_value: &str) {
     );
 }
 
+fn assert_a2_error_value_and_preserves_vm(worksheet_xml: &str, expected_vm: &str) {
+    let doc = roxmltree::Document::parse(worksheet_xml).expect("parse worksheet xml");
+    let cell = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A2"))
+        .expect("expected A2 cell");
+    assert_eq!(
+        cell.attribute("vm"),
+        Some(expected_vm),
+        "vm should be preserved when patching to the rich-value placeholder error (#VALUE!), got: {worksheet_xml}"
+    );
+    assert_eq!(
+        cell.attribute("t"),
+        Some("e"),
+        "expected patched A2 to use error cell type (t=\"e\"), got: {worksheet_xml}"
+    );
+    let v = cell
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "v")
+        .and_then(|n| n.text())
+        .unwrap_or_default();
+    assert_eq!(
+        v,
+        ErrorValue::Value.as_str(),
+        "expected patched cached error value in A2 to be #VALUE!, got: {worksheet_xml}"
+    );
+}
+
 #[test]
-fn apply_cell_patches_to_bytes_drops_vm_attribute_on_patched_cell() -> Result<(), Box<dyn std::error::Error>>
-{
+fn apply_cell_patches_to_bytes_drops_vm_attribute_on_patched_cell(
+) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = build_minimal_vm_xlsx();
     let pkg = XlsxPackage::from_bytes(&bytes)?;
 
@@ -126,6 +154,46 @@ fn apply_cell_patches_drops_vm_attribute_on_patched_cell() -> Result<(), Box<dyn
 
     let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap())?;
     assert_a2_value_and_drops_vm(out_xml, "9");
+
+    Ok(())
+}
+
+#[test]
+fn apply_cell_patches_to_bytes_preserves_vm_attribute_on_rich_value_placeholder_error(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_minimal_vm_xlsx();
+    let pkg = XlsxPackage::from_bytes(&bytes)?;
+
+    let patch = PackageCellPatch::for_sheet_name(
+        "Sheet1",
+        CellRef::from_a1("A2")?,
+        CellValue::Error(ErrorValue::Value),
+        None,
+    );
+
+    let out_bytes = pkg.apply_cell_patches_to_bytes(&[patch])?;
+    let out_xml = read_zip_part_to_string(&out_bytes, "xl/worksheets/sheet1.xml");
+    assert_a2_error_value_and_preserves_vm(&out_xml, "1");
+
+    Ok(())
+}
+
+#[test]
+fn apply_cell_patches_preserves_vm_attribute_on_rich_value_placeholder_error(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_minimal_vm_xlsx();
+    let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("A2")?,
+        CellPatch::set_value(CellValue::Error(ErrorValue::Value)),
+    );
+    pkg.apply_cell_patches(&patches)?;
+
+    let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap())?;
+    assert_a2_error_value_and_preserves_vm(out_xml, "1");
 
     Ok(())
 }
