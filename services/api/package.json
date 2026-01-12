@@ -20,9 +20,11 @@
   "dependencies": {
     "@fastify/cookie": "^10.0.1",
     "@fastify/cors": "^10.0.2",
-    "@formula/audit-core": "workspace:*",
     "@fastify/formbody": "^8.0.2",
     "@node-saml/node-saml": "^5.1.0",
+    "@fastify/helmet": "^13.0.2",
+    "@fastify/rate-limit": "^10.3.0",
+    "@formula/audit-core": "workspace:*",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/context-async-hooks": "^2.3.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.209.0",

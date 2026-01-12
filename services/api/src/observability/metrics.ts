@@ -7,6 +7,7 @@ export type ApiMetrics = {
   registry: Registry;
   httpRequestsTotal: Counter<"method" | "route" | "status">;
   httpRequestDurationSeconds: Histogram<"method" | "route" | "status">;
+  rateLimitedRequestsTotal: Counter<"method" | "route" | "scope">;
   dbQueriesTotal: Counter<"operation" | "status">;
   dbQueryDurationSeconds: Histogram<"operation" | "status">;
   authFailuresTotal: Counter<"reason">;
@@ -63,6 +64,13 @@ export function createMetrics(): ApiMetrics {
     help: "HTTP request latency (seconds)",
     labelNames: ["method", "route", "status"],
     buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+    registers: [registry]
+  });
+
+  const rateLimitedRequestsTotal = new Counter({
+    name: "rate_limited_requests_total",
+    help: "Requests rejected due to rate limiting",
+    labelNames: ["method", "route", "scope"],
     registers: [registry]
   });
 
@@ -164,6 +172,7 @@ export function createMetrics(): ApiMetrics {
     registry,
     httpRequestsTotal,
     httpRequestDurationSeconds,
+    rateLimitedRequestsTotal,
     dbQueriesTotal,
     dbQueryDurationSeconds,
     authFailuresTotal,
@@ -205,6 +214,15 @@ export function registerMetrics(app: FastifyInstance, metrics: ApiMetrics): void
 
     metrics.httpRequestsTotal.inc(labels);
     metrics.httpRequestDurationSeconds.observe(labels, durationSeconds);
+
+    if (reply.statusCode === 429) {
+      const routeConfig = (request.routeOptions as { config?: Record<string, unknown> } | undefined)?.config;
+      const scope =
+        ((request as any).rateLimitScope as string | undefined) ??
+        (typeof routeConfig?.rateLimitScope === "string" ? (routeConfig.rateLimitScope as string) : "global");
+      metrics.rateLimitedRequestsTotal.inc({ method: request.method, route: labels.route, scope });
+    }
+
     done();
   });
 }

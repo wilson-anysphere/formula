@@ -40,6 +40,14 @@ export interface AppConfig {
    * - In dev/test, defaults to common localhost origins for the web UI.
    */
   corsAllowedOrigins: string[];
+  /**
+   * Whether to send `Access-Control-Allow-Credentials: true` for allowed origins.
+   *
+   * Defaults to true because the API supports cookie-based sessions.
+   *
+   * Env: `CORS_ALLOW_CREDENTIALS` (true/false)
+   */
+  corsAllowCredentials?: boolean;
   syncTokenSecret: string;
   syncTokenTtlSeconds: number;
   /**
@@ -126,6 +134,14 @@ function readStringEnv(value: string | undefined, fallback: string): string {
   if (typeof value !== "string") return fallback;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : fallback;
+}
+
+function readBooleanEnv(value: string | undefined, fallback: boolean): boolean {
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim().toLowerCase();
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  return fallback;
 }
 
 function parseCorsAllowedOrigins(value: string | undefined, nodeEnv: string): string[] {
@@ -316,6 +332,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const publicBaseUrlHostAllowlist = parseHostAllowlist(env.PUBLIC_BASE_URL_HOST_ALLOWLIST);
 
   const corsAllowedOrigins = parseCorsAllowedOrigins(env.CORS_ALLOWED_ORIGINS, nodeEnv);
+  const corsAllowCredentials = readBooleanEnv(env.CORS_ALLOW_CREDENTIALS, true);
   const syncTokenSecret = readStringEnv(env.SYNC_TOKEN_SECRET, DEV_SYNC_TOKEN_SECRET);
   const syncTokenTtlSeconds = parseIntEnv(env.SYNC_TOKEN_TTL_SECONDS, 60 * 5);
 
@@ -349,6 +366,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     publicBaseUrl,
     publicBaseUrlHostAllowlist,
     corsAllowedOrigins,
+    corsAllowCredentials,
     syncTokenSecret,
     syncTokenTtlSeconds,
     secretStoreKeys,

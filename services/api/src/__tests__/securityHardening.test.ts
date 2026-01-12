@@ -72,13 +72,15 @@ describe("security hardening", () => {
 
   it("rate limits repeated login attempts and returns Retry-After", async () => {
     let limited: any = null;
-    for (let i = 0; i < 20; i++) {
+    const limit = 20;
+    for (let i = 0; i < limit + 10; i++) {
       const res = await app.inject({
         method: "POST",
         url: "/auth/login",
         remoteAddress: "198.51.100.10",
         payload: { email: "does-not-exist@example.com", password: "wrong-password" }
       });
+      expect(res.headers["x-ratelimit-limit"]).toBe(String(limit));
 
       if (res.statusCode === 429) {
         limited = res;
@@ -95,19 +97,21 @@ describe("security hardening", () => {
 
   it("rate limits repeated registration attempts and returns Retry-After", async () => {
     let limited: any = null;
+    const limit = 20;
     const payload = {
       email: "rate-limited-register@example.com",
       password: "password1234",
       name: "Register Rate Limit"
     };
 
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < limit + 20; i++) {
       const res = await app.inject({
         method: "POST",
         url: "/auth/register",
         remoteAddress: "198.51.100.30",
         payload
       });
+      expect(res.headers["x-ratelimit-limit"]).toBe(String(limit));
 
       if (res.statusCode === 429) {
         limited = res;

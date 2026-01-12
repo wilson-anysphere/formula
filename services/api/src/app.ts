@@ -1,5 +1,7 @@
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
+import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import type { AppConfig } from "./config";
@@ -45,6 +47,28 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
 
   registerRequestId(app);
   registerMetrics(app, metrics);
+
+  app.register(helmet, {
+    global: true,
+    // HSTS must only be enabled behind HTTPS. We rely on our explicit security header
+    // hook to set it conditionally, so keep helmet's built-in HSTS disabled.
+    hsts: false,
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        defaultSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+        baseUri: ["'none'"],
+        formAction: ["'none'"]
+      }
+    },
+    frameguard: { action: "deny" },
+    referrerPolicy: { policy: "no-referrer" },
+    // These are primarily relevant to web pages; avoid impacting browser auth flows.
+    crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: false
+  });
+
   registerSecurityHeaders(app);
 
   app.register(cookie);
@@ -95,23 +119,40 @@ export function buildApp(options: BuildAppOptions): FastifyInstance {
       if (!allowedOrigins.has(normalized)) return cb(null, false);
       return cb(null, normalized);
     },
-    credentials: true
+    credentials: options.config.corsAllowCredentials ?? true
   });
 
-  app.get("/health", async () => ({ status: "ok" }));
+  app.register(rateLimit, {
+    global: true,
+    max: 1000,
+    timeWindow: "1 minute",
+    addHeaders: {
+      "x-ratelimit-limit": true,
+      "x-ratelimit-remaining": true,
+      "x-ratelimit-reset": true,
+      "retry-after": true
+    },
+    errorResponseBuilder: (_request, context) => ({ statusCode: context.statusCode, error: "too_many_requests" })
+  });
 
-  registerAuthRoutes(app);
-  registerOrgRoutes(app);
-  registerSamlProviderRoutes(app);
-  registerApiKeyRoutes(app);
-  registerScimAdminRoutes(app);
-  registerScimRoutes(app);
-  registerDocRoutes(app);
-  registerDlpRoutes(app);
-  registerAuditRoutes(app);
-  registerSiemRoutes(app);
-  registerInternalRoutes(app);
-  registerOidcProviderRoutes(app);
+  // Routes must be registered after the rate-limit plugin is loaded so its `onRoute`
+  // hook can attach per-route limiters.
+  app.register(async (scoped) => {
+    scoped.get("/health", async () => ({ status: "ok" }));
+
+    registerAuthRoutes(scoped);
+    registerOrgRoutes(scoped);
+    registerSamlProviderRoutes(scoped);
+    registerApiKeyRoutes(scoped);
+    registerScimAdminRoutes(scoped);
+    registerScimRoutes(scoped);
+    registerDocRoutes(scoped);
+    registerDlpRoutes(scoped);
+    registerAuditRoutes(scoped);
+    registerSiemRoutes(scoped);
+    registerInternalRoutes(scoped);
+    registerOidcProviderRoutes(scoped);
+  });
 
   app.addHook("onReady", async () => {
     await app.auditStreamHub.start();

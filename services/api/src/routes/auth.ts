@@ -25,6 +25,17 @@ type AuthCredentials =
   | { kind: "session"; token: string }
   | { kind: "api_key"; token: string };
 
+const apiKeyAuthFailureLimiters = new WeakMap<FastifyInstance, TokenBucketRateLimiter>();
+
+function getApiKeyAuthFailureLimiter(app: FastifyInstance): TokenBucketRateLimiter {
+  let limiter = apiKeyAuthFailureLimiters.get(app);
+  if (!limiter) {
+    limiter = new TokenBucketRateLimiter({ capacity: 20, refillMs: 60_000 });
+    apiKeyAuthFailureLimiters.set(app, limiter);
+  }
+  return limiter;
+}
+
 function extractAuthCredentials(request: FastifyRequest): AuthCredentials | null {
   const cookieName = request.server.config.sessionCookieName;
   const cookieToken = request.cookies?.[cookieName];
@@ -133,6 +144,19 @@ async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promis
   });
 
   if (!apiKeyResult.ok) {
+    if (apiKeyResult.value.statusCode === 401 && apiKeyResult.value.error === "unauthorized") {
+      const limiter = getApiKeyAuthFailureLimiter(request.server);
+      const ip = getClientIp(request) ?? "unknown";
+      const limited = limiter.take(ip);
+      if (!limited.ok) {
+        request.rateLimitScope = "api_key_auth_failure";
+        reply
+          .header("Retry-After", String(Math.max(1, Math.ceil(limited.retryAfterMs / 1000))))
+          .code(429)
+          .send({ error: "too_many_requests" });
+        return;
+      }
+    }
     request.server.metrics.authFailuresTotal.inc({ reason: apiKeyResult.value.error });
     reply.code(apiKeyResult.value.statusCode).send({ error: apiKeyResult.value.error });
     return;
@@ -190,105 +214,114 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     orgName: z.string().min(1).optional()
   });
 
-  app.post("/auth/register", async (request, reply) => {
-    const body = RegisterBody.safeParse(request.body);
-    if (!body.success) return reply.code(400).send({ error: "invalid_request" });
+  app.post(
+    "/auth/register",
+    {
+      config: {
+        rateLimit: { max: 20, timeWindow: "1 minute" },
+        rateLimitScope: "auth_register"
+      }
+    },
+    async (request, reply) => {
+      const body = RegisterBody.safeParse(request.body);
+      if (!body.success) return reply.code(400).send({ error: "invalid_request" });
 
-    const email = body.data.email.trim().toLowerCase();
-    const name = body.data.name.trim();
-    const password = body.data.password;
+      const email = body.data.email.trim().toLowerCase();
+      const name = body.data.name.trim();
+      const password = body.data.password;
 
-    const ip = getClientIp(request) ?? "unknown";
-    const limited = registerIpLimiter.take(ip);
-    if (!limited.ok) {
-      app.metrics.rateLimitedTotal.inc({ route: "/auth/register", reason: "ip" });
-      return rateLimited(reply, limited.retryAfterMs);
-    }
+      const ip = getClientIp(request) ?? "unknown";
+      const limited = registerIpLimiter.take(ip);
+      if (!limited.ok) {
+        app.metrics.rateLimitedTotal.inc({ route: "/auth/register", reason: "ip" });
+        return rateLimited(reply, limited.retryAfterMs);
+      }
 
-    const existing = await app.db.query("SELECT 1 FROM users WHERE email = $1", [email]);
-    if (existing.rowCount && existing.rowCount > 0) {
-      return reply.code(409).send({ error: "email_in_use" });
-    }
+      const existing = await app.db.query("SELECT 1 FROM users WHERE email = $1", [email]);
+      if (existing.rowCount && existing.rowCount > 0) {
+        return reply.code(409).send({ error: "email_in_use" });
+      }
 
-    const userId = crypto.randomUUID();
-    const orgId = crypto.randomUUID();
-    const orgName = body.data.orgName?.trim() ?? `${name}'s org`;
-    const passwordHash = await hashPassword(password);
-    const now = new Date();
-    const sessionExpiresAt = new Date(now.getTime() + app.config.sessionTtlSeconds * 1000);
+      const userId = crypto.randomUUID();
+      const orgId = crypto.randomUUID();
+      const orgName = body.data.orgName?.trim() ?? `${name}'s org`;
+      const passwordHash = await hashPassword(password);
+      const now = new Date();
+      const sessionExpiresAt = new Date(now.getTime() + app.config.sessionTtlSeconds * 1000);
 
-    const { sessionId, token } = await withTransaction(app.db, async (client) => {
-      await client.query(
-        `
-          INSERT INTO users (id, email, name, password_hash)
-          VALUES ($1, $2, $3, $4)
-        `,
-        [userId, email, name, passwordHash]
-      );
+      const { sessionId, token } = await withTransaction(app.db, async (client) => {
+        await client.query(
+          `
+            INSERT INTO users (id, email, name, password_hash)
+            VALUES ($1, $2, $3, $4)
+          `,
+          [userId, email, name, passwordHash]
+        );
 
-      await client.query(
-        `
-          INSERT INTO organizations (id, name)
-          VALUES ($1, $2)
-        `,
-        [orgId, orgName]
-      );
+        await client.query(
+          `
+            INSERT INTO organizations (id, name)
+            VALUES ($1, $2)
+          `,
+          [orgId, orgName]
+        );
 
-      await client.query(
-        `
-          INSERT INTO org_settings (org_id)
-          VALUES ($1)
-        `,
-        [orgId]
-      );
+        await client.query(
+          `
+            INSERT INTO org_settings (org_id)
+            VALUES ($1)
+          `,
+          [orgId]
+        );
 
-      await client.query(
-        `
-          INSERT INTO org_members (org_id, user_id, role)
-          VALUES ($1, $2, 'owner')
-        `,
-        [orgId, userId]
-      );
+        await client.query(
+          `
+            INSERT INTO org_members (org_id, user_id, role)
+            VALUES ($1, $2, 'owner')
+          `,
+          [orgId, userId]
+        );
 
-      return createSession(client, {
-        userId,
-        expiresAt: sessionExpiresAt,
-        ipAddress: getClientIp(request),
-        userAgent: getUserAgent(request)
-      });
-    });
-
-    reply.setCookie(app.config.sessionCookieName, token, {
-      path: "/",
-      httpOnly: true,
-      sameSite: "lax",
-      secure: app.config.cookieSecure
-    });
-
-    await writeAuditEvent(
-      app.db,
-      createAuditEvent({
-        eventType: "auth.login",
-        actor: { type: "user", id: userId },
-        context: {
-          orgId,
+        return createSession(client, {
           userId,
-          userEmail: email,
-          sessionId,
+          expiresAt: sessionExpiresAt,
           ipAddress: getClientIp(request),
           userAgent: getUserAgent(request)
-        },
-        resource: { type: "session", id: sessionId },
-        success: true,
-        details: { method: "password", operation: "register" }
-      })
-    );
+        });
+      });
 
-    return reply.send({
-      user: { id: userId, email, name },
-      organization: { id: orgId, name: orgName }
-    });
-  });
+      reply.setCookie(app.config.sessionCookieName, token, {
+        path: "/",
+        httpOnly: true,
+        sameSite: "lax",
+        secure: app.config.cookieSecure
+      });
+
+      await writeAuditEvent(
+        app.db,
+        createAuditEvent({
+          eventType: "auth.login",
+          actor: { type: "user", id: userId },
+          context: {
+            orgId,
+            userId,
+            userEmail: email,
+            sessionId,
+            ipAddress: getClientIp(request),
+            userAgent: getUserAgent(request)
+          },
+          resource: { type: "session", id: sessionId },
+          success: true,
+          details: { method: "password", operation: "register" }
+        })
+      );
+
+      return reply.send({
+        user: { id: userId, email, name },
+        organization: { id: orgId, name: orgName }
+      });
+    }
+  );
 
   const LoginBody = z.object({
     email: z.string().email(),
@@ -297,9 +330,17 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     mfaRecoveryCode: z.string().min(1).optional()
   });
 
-  app.post("/auth/login", async (request, reply) => {
-    const body = LoginBody.safeParse(request.body);
-    if (!body.success) return reply.code(400).send({ error: "invalid_request" });
+  app.post(
+    "/auth/login",
+    {
+      config: {
+        rateLimit: { max: 20, timeWindow: "1 minute" },
+        rateLimitScope: "auth_login"
+      }
+    },
+    async (request, reply) => {
+      const body = LoginBody.safeParse(request.body);
+      if (!body.success) return reply.code(400).send({ error: "invalid_request" });
 
     const email = body.data.email.trim().toLowerCase();
     const password = body.data.password;
@@ -505,8 +546,9 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       })
     );
 
-    return reply.send({ user: { id: row.id, email: row.email, name: row.name } });
-  });
+      return reply.send({ user: { id: row.id, email: row.email, name: row.name } });
+    }
+  );
 
   app.post("/auth/logout", { preHandler: requireAuth }, async (request, reply) => {
     const sessionId = request.session?.id;
@@ -678,9 +720,15 @@ export function registerAuthRoutes(app: FastifyInstance): void {
 
   const TotpConfirmBody = z.object({ code: z.string().min(1) });
 
-  app.post("/auth/mfa/totp/confirm", { preHandler: [requireAuth, requireSessionAuth] }, async (request, reply) => {
-    const parsed = TotpConfirmBody.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+  app.post(
+    "/auth/mfa/totp/confirm",
+    {
+      preHandler: [requireAuth, requireSessionAuth],
+      config: { rateLimit: { max: 60, timeWindow: "1 minute" }, rateLimitScope: "mfa_confirm" }
+    },
+    async (request, reply) => {
+      const parsed = TotpConfirmBody.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
 
     const ok = await withTransaction(app.db, async (client) => {
       const secret = await getOrMigrateTotpSecret(client, app.config.secretStoreKeys, request.user!.id);
@@ -720,12 +768,19 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       })
     );
 
-    return reply.send({ ok: true });
-  });
+      return reply.send({ ok: true });
+    }
+  );
 
-  app.post("/auth/mfa/totp/disable", { preHandler: [requireAuth, requireSessionAuth] }, async (request, reply) => {
-    const parsed = MfaChallengeBody.safeParse(request.body ?? {});
-    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+  app.post(
+    "/auth/mfa/totp/disable",
+    {
+      preHandler: [requireAuth, requireSessionAuth],
+      config: { rateLimit: { max: 60, timeWindow: "1 minute" }, rateLimitScope: "mfa_disable" }
+    },
+    async (request, reply) => {
+      const parsed = MfaChallengeBody.safeParse(request.body ?? {});
+      if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
 
     const txResult = await withTransaction(app.db, async (client) => {
       const status = await client.query("SELECT mfa_totp_enabled FROM users WHERE id = $1", [request.user!.id]);
@@ -807,8 +862,9 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       );
     }
 
-    return reply.send({ ok: true });
-  });
+      return reply.send({ ok: true });
+    }
+  );
 
   app.get("/auth/mfa/recovery-codes", { preHandler: [requireAuth, requireSessionAuth] }, async (request, reply) => {
     const res = await app.db.query(

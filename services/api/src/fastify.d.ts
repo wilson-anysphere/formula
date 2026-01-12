@@ -23,5 +23,6 @@ declare module "fastify" {
     authMethod?: "session" | "api_key" | "scim";
     authOrgId?: string;
     scim?: { orgId: string };
+    rateLimitScope?: string;
   }
 }
