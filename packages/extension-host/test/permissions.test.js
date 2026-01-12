@@ -107,3 +107,49 @@ test("permission storage: migrates legacy string-array grants to v2 permission r
     }
   });
 });
+
+test("permission storage: resetPermissions clears a single extension and forces re-prompt", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-perms-reset-"));
+  const storePath = path.join(dir, "permissions.json");
+  const extensionId = "pub.ext";
+
+  const pm = new PermissionManager({
+    storagePath: storePath,
+    prompt: async () => true
+  });
+
+  await pm.ensurePermissions(
+    {
+      extensionId,
+      displayName: "Ext",
+      declaredPermissions: ["cells.write"]
+    },
+    ["cells.write"]
+  );
+
+  assert.deepEqual(await pm.getGrantedPermissions(extensionId), { "cells.write": true });
+
+  await pm.resetPermissions(extensionId);
+  assert.deepEqual(await pm.getGrantedPermissions(extensionId), {});
+
+  let promptCalls = 0;
+  const pm2 = new PermissionManager({
+    storagePath: storePath,
+    prompt: async ({ permissions }) => {
+      promptCalls += 1;
+      assert.deepEqual(permissions, ["cells.write"]);
+      return true;
+    }
+  });
+
+  await pm2.ensurePermissions(
+    {
+      extensionId,
+      displayName: "Ext",
+      declaredPermissions: ["cells.write"]
+    },
+    ["cells.write"]
+  );
+
+  assert.equal(promptCalls, 1);
+});
