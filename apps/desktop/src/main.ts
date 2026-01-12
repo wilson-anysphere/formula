@@ -1660,33 +1660,6 @@ app.getDocument().on("change", () => {
   syncSheetUi();
 });
 
-// Excel-like keyboard navigation: Ctrl+PgUp/PgDn cycles through visible sheets.
-window.addEventListener("keydown", (e) => {
-  if (e.defaultPrevented) return;
-  if (!e.ctrlKey) return;
-  if (e.key !== "PageUp" && e.key !== "PageDown") return;
-
-  const target = e.target as HTMLElement | null;
-  if (target) {
-    const tag = target.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
-  }
-
-  const visibleSheets = workbookSheetStore.listVisible();
-  if (visibleSheets.length === 0) return;
-
-  const activeSheetId = app.getCurrentSheetId();
-  const idx = visibleSheets.findIndex((sheet) => sheet.id === activeSheetId);
-  if (idx === -1) return;
-
-  e.preventDefault();
-  const delta = e.key === "PageUp" ? -1 : 1;
-  const next = visibleSheets[(idx + delta + visibleSheets.length) % visibleSheets.length];
-  if (!next) return;
-  app.activateSheet(next.id);
-  app.focus();
-});
-
 // --- Dock layout + persistence (minimal shell wiring for e2e + demos) ----------
 
 const dockLeft = document.getElementById("dock-left");
