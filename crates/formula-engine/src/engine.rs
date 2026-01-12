@@ -8725,6 +8725,86 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_sparse_iteration_matches_ast_for_huge_sparse_3d_ranges_counta_countblank() {
+        fn setup(engine: &mut Engine) {
+            for sheet in ["Sheet1", "Sheet2", "Sheet3"] {
+                engine.set_cell_value(sheet, "A1", 1.0).unwrap();
+                engine.set_cell_value(sheet, "A2", "").unwrap(); // empty string
+                engine.set_cell_value(sheet, "A500000", 2.0).unwrap();
+                engine.set_cell_value(sheet, "A1048576", 3.0).unwrap();
+            }
+
+            engine
+                .set_cell_formula("Sheet1", "B1", "=COUNTA(Sheet1:Sheet3!A:A)")
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B2", "=COUNTBLANK(Sheet1:Sheet3!A:A)")
+                .unwrap();
+        }
+
+        let mut bytecode_engine = Engine::new();
+        setup(&mut bytecode_engine);
+
+        // Ensure the COUNTA formula is actually bytecode-compiled.
+        let sheet1_id = bytecode_engine.workbook.sheet_id("Sheet1").unwrap();
+        let b1 = parse_a1("B1").unwrap();
+        let cell_b1 = bytecode_engine.workbook.sheets[sheet1_id]
+            .cells
+            .get(&b1)
+            .and_then(|c| c.compiled.as_ref())
+            .expect("compiled formula");
+        assert!(
+            matches!(cell_b1, CompiledFormula::Bytecode(_)),
+            "expected COUNTA(Sheet1:Sheet3!A:A) to compile to bytecode"
+        );
+
+        // Column caches should *not* allocate full-column buffers for 3D spans over `A:A`.
+        let snapshot = Snapshot::from_workbook(
+            &bytecode_engine.workbook,
+            &bytecode_engine.spills,
+            bytecode_engine.external_value_provider.clone(),
+            bytecode_engine.external_data_provider.clone(),
+        );
+        let key_b1 = CellKey {
+            sheet: sheet1_id,
+            addr: b1,
+        };
+        let tasks = vec![(key_b1, cell_b1.clone())];
+        let column_cache =
+            BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
+
+        for sheet_name in ["Sheet1", "Sheet2", "Sheet3"] {
+            let sheet_id = bytecode_engine.workbook.sheet_id(sheet_name).unwrap();
+            assert!(
+                !column_cache
+                    .by_sheet
+                    .get(sheet_id)
+                    .map(|cols| cols.contains_key(&0))
+                    .unwrap_or(false),
+                "expected full-column 3D span to skip column-slice cache allocation for {sheet_name}"
+            );
+        }
+
+        bytecode_engine.recalculate_single_threaded();
+        let bc_counta = bytecode_engine.get_cell_value("Sheet1", "B1");
+        let bc_countblank = bytecode_engine.get_cell_value("Sheet1", "B2");
+
+        let mut ast_engine = Engine::new();
+        ast_engine.set_bytecode_enabled(false);
+        setup(&mut ast_engine);
+        ast_engine.recalculate_single_threaded();
+        let ast_counta = ast_engine.get_cell_value("Sheet1", "B1");
+        let ast_countblank = ast_engine.get_cell_value("Sheet1", "B2");
+
+        assert_eq!(bc_counta, ast_counta, "COUNTA mismatch");
+        assert_eq!(bc_countblank, ast_countblank, "COUNTBLANK mismatch");
+
+        // Sanity check expected values.
+        assert_eq!(bc_counta, Value::Number(12.0));
+        assert_eq!(bc_countblank, Value::Number(3_145_719.0));
+    }
+
+    #[test]
     fn bytecode_sparse_iteration_matches_ast_for_huge_sparse_3d_ranges() {
         fn setup(engine: &mut Engine) {
             for (sheet, values) in [
