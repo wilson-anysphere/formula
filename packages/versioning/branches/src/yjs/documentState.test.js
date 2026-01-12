@@ -80,6 +80,37 @@ test("yjs document adapter: normalizes formulas + handles legacy cell keys", () 
   assert.deepEqual(b1.get("format"), { bold: true });
 });
 
+test("yjs document adapter: applyDocumentStateToYjsDoc uses value/formula null markers for format-only cells", () => {
+  const doc = new Y.Doc();
+
+  applyDocumentStateToYjsDoc(
+    doc,
+    {
+      schemaVersion: 1,
+      sheets: {
+        order: ["Sheet1"],
+        metaById: { Sheet1: { id: "Sheet1", name: "Sheet1" } },
+      },
+      cells: { Sheet1: { A1: { format: { bold: true } } } },
+      metadata: {},
+      namedRanges: {},
+      comments: {},
+    },
+    { origin: { test: true } },
+  );
+
+  const cell = doc.getMap("cells").get("Sheet1:0:0");
+  assert.ok(cell instanceof Y.Map);
+  assert.equal(cell.get("formula"), null);
+  assert.equal(cell.get("value"), null);
+  assert.deepEqual(cell.get("format"), { bold: true });
+
+  // Ensure the logical snapshot representation doesn't include plaintext content,
+  // while preserving the format-only cell.
+  const roundTrip = yjsDocToDocumentState(doc);
+  assert.deepEqual(roundTrip.cells.Sheet1.A1, { format: { bold: true } });
+});
+
 test("yjs document adapter: reads comments from map, array, and clobbered roots", () => {
   {
     const doc = new Y.Doc();
