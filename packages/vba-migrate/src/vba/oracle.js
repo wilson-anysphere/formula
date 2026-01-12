@@ -144,7 +144,13 @@ async function ensureBuilt({ repoRoot, binPath }) {
           ? path.join(repoRoot, "target", "cargo-home")
           : envCargoHome;
       await mkdir(cargoHome, { recursive: true });
-      const jobs = process.env.FORMULA_CARGO_JOBS ?? process.env.CARGO_BUILD_JOBS ?? "4";
+      // Default to conservative parallelism. On very high core-count hosts, the Rust linker
+      // (lld) can spawn many worker threads per link step; combining that with Cargo-level
+      // parallelism can exceed sandbox process/thread limits and cause flaky
+      // "Resource temporarily unavailable" failures.
+      const cpuCount = os.cpus().length;
+      const defaultJobs = cpuCount >= 64 ? "2" : "4";
+      const jobs = process.env.FORMULA_CARGO_JOBS ?? process.env.CARGO_BUILD_JOBS ?? defaultJobs;
       const rayonThreads = process.env.RAYON_NUM_THREADS ?? process.env.FORMULA_RAYON_NUM_THREADS ?? jobs;
       const baseEnv = {
         ...process.env,
