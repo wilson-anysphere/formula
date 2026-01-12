@@ -74,7 +74,8 @@ describe("DesktopSharedGrid scrollbars", () => {
     frozenCols?: number;
     defaultRowHeight?: number;
     defaultColWidth?: number;
-  }): { grid: DesktopSharedGrid; container: HTMLDivElement } {
+    enableWheel?: boolean;
+  }): { grid: DesktopSharedGrid; container: HTMLDivElement; selectionCanvas: HTMLCanvasElement } {
     const { rowCount, colCount } = options;
     const provider = new MockCellProvider({ rowCount, colCount });
 
@@ -86,6 +87,12 @@ describe("DesktopSharedGrid scrollbars", () => {
       content: document.createElement("canvas"),
       selection: document.createElement("canvas")
     };
+
+    // Mirror production DOM structure: the grid canvases live inside the container so wheel events
+    // bubble to the container listener.
+    container.appendChild(canvases.grid);
+    container.appendChild(canvases.content);
+    container.appendChild(canvases.selection);
 
     const scrollbars = {
       vTrack: document.createElement("div"),
@@ -110,12 +117,12 @@ describe("DesktopSharedGrid scrollbars", () => {
       frozenCols: options.frozenCols,
       defaultRowHeight: options.defaultRowHeight,
       defaultColWidth: options.defaultColWidth,
-      enableWheel: false,
+      enableWheel: options.enableWheel ?? false,
       enableKeyboard: false,
       enableResize: false
     });
 
-    return { grid, container };
+    return { grid, container, selectionCanvas: canvases.selection };
   }
 
   it("avoids getBoundingClientRect during scroll-driven scrollbar sync", () => {
@@ -274,5 +281,30 @@ describe("DesktopSharedGrid scrollbars", () => {
     grid.destroy();
     container.remove();
   });
-});
 
+  it("uses offsetX/offsetY for ctrl+wheel zoom without reading layout", () => {
+    const { grid, container, selectionCanvas } = createGrid({
+      rowCount: 100,
+      colCount: 100,
+      defaultRowHeight: 10,
+      defaultColWidth: 10,
+      enableWheel: true
+    });
+
+    grid.resize(300, 200, 1);
+
+    const rectSpy = vi.spyOn(selectionCanvas, "getBoundingClientRect");
+    rectSpy.mockClear();
+
+    const event = new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true });
+    Object.defineProperty(event, "offsetX", { value: 100 });
+    Object.defineProperty(event, "offsetY", { value: 50 });
+    selectionCanvas.dispatchEvent(event);
+
+    expect(grid.getZoom()).toBeGreaterThan(1);
+    expect(rectSpy).not.toHaveBeenCalled();
+
+    grid.destroy();
+    container.remove();
+  });
+});

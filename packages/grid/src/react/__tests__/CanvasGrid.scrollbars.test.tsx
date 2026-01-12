@@ -218,7 +218,7 @@ describe("CanvasGrid scrollbars", () => {
   });
 
   it("uses ctrl+wheel to zoom the grid", async () => {
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect200);
+    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect200);
 
     const apiRef = React.createRef<GridApi>();
 
@@ -233,11 +233,16 @@ describe("CanvasGrid scrollbars", () => {
     const container = host.querySelector('[data-testid="canvas-grid"]') as HTMLDivElement;
     expect(apiRef.current?.getZoom()).toBe(1);
 
+    // Initial mount/resize may read layout; we only care about the ctrl+wheel zoom path.
+    rectSpy.mockClear();
+
     await act(async () => {
       container.dispatchEvent(
         new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, clientX: 100, clientY: 100, bubbles: true, cancelable: true })
       );
     });
+
+    expect(rectSpy).not.toHaveBeenCalled();
 
     const zoom = apiRef.current?.getZoom() ?? 0;
     expect(zoom).toBeGreaterThan(1);
