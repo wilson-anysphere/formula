@@ -159,6 +159,7 @@ export class LayoutController {
    * @param {{ name?: string, makeActive?: boolean }} [options]
    */
   saveWorkspace(workspaceId, options = {}) {
+    if (options.makeActive && this.#needsPersist) this.persistNow();
     this.workspaceManager.saveWorkbookWorkspace(this.workbookId, workspaceId, {
       name: options.name,
       layout: this.layout,
@@ -175,6 +176,10 @@ export class LayoutController {
    * @param {string} workspaceId
    */
   deleteWorkspace(workspaceId) {
+    // Deleting a workspace triggers a reload. If the deletion does not affect the
+    // currently-active workspace, flush any pending ephemeral updates first so
+    // we don't discard them during reload.
+    if (this.#needsPersist && this.workspaceId !== workspaceId) this.persistNow();
     this.workspaceManager.deleteWorkbookWorkspace(this.workbookId, workspaceId);
     if (this.workspaceId === workspaceId) {
       this.workspaceId = this.workspaceManager.getActiveWorkbookWorkspaceId(this.workbookId);
