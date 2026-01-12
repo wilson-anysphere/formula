@@ -13,11 +13,15 @@ import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
 describe("observability: request-id, log correlation, db spans", () => {
   let db: Pool;
   let app: any;
-  const logs: string[] = [];
+  const logs: any[] = [];
   const exporter = new InMemorySpanExporter();
+  let otelShutdown: (() => Promise<void>) | null = null;
 
   beforeAll(async () => {
-    initOpenTelemetry({ serviceName: "api-test", spanExporter: exporter });
+    // This suite intentionally builds a minimal Fastify instance (instead of the
+    // full API app) to keep `beforeAll` fast and avoid hook timeouts under
+    // full-suite Vitest contention.
+    otelShutdown = initOpenTelemetry({ serviceName: "api-test", spanExporter: exporter }).shutdown;
 
     const mem = newDb({ autoCreateForeignKeyIndices: true });
     const pgAdapter = mem.adapters.createPg();
@@ -34,7 +38,14 @@ describe("observability: request-id, log correlation, db spans", () => {
         while (idx !== -1) {
           const line = buffer.slice(0, idx).trim();
           buffer = buffer.slice(idx + 1);
-          if (line) logs.push(line);
+          if (line) {
+            try {
+              logs.push(JSON.parse(line));
+            } catch {
+              // Defensive: if logging output is ever non-JSON, keep it for debugging.
+              logs.push(line);
+            }
+          }
           idx = buffer.indexOf("\n");
         }
         callback();
@@ -69,6 +80,7 @@ describe("observability: request-id, log correlation, db spans", () => {
   afterAll(async () => {
     await app?.close?.();
     await db?.end?.();
+    await otelShutdown?.();
   });
 
   it("sets x-request-id and respects incoming x-request-id", async () => {
@@ -99,9 +111,14 @@ describe("observability: request-id, log correlation, db spans", () => {
       }
     });
 
-    const entry = logs
-      .map((line) => JSON.parse(line) as any)
-      .find((line) => line.msg === "test_log");
+    // Pino writes asynchronously; in contended runs the log line may arrive a
+    // tick later. Poll briefly to avoid flakes.
+    const deadline = Date.now() + 1000;
+    let entry: any | undefined;
+    while (!entry && Date.now() < deadline) {
+      entry = logs.find((line) => typeof line === "object" && line && line.msg === "test_log");
+      if (!entry) await new Promise((resolve) => setTimeout(resolve, 5));
+    }
 
     expect(entry).toBeTruthy();
     expect(entry.requestId).toBe(requestId);
