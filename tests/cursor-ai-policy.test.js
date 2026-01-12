@@ -203,6 +203,27 @@ test("cursor AI policy guard scans .gitkeep files", async () => {
   }
 });
 
+test(
+  "cursor AI policy guard rejects symlinked files (avoid scan bypass)",
+  { skip: process.platform === "win32" },
+  async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-symlink-fail-"));
+    try {
+      await writeFixtureFile(tmpRoot, "packages/example/src/index.js", "export const answer = 42;\n");
+
+      const linkPath = path.join(tmpRoot, "packages", "example", "src", "link");
+      // Use a dangling symlink: the target does not need to exist for lstat() to detect it.
+      await fs.symlink("does-not-exist", linkPath);
+
+      const proc = runPolicy(tmpRoot);
+      assert.notEqual(proc.status, 0);
+      assert.match(`${proc.stdout}\n${proc.stderr}`, /symlink/i);
+    } finally {
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    }
+  },
+);
+
 test("cursor AI policy guard scans markdown readmes for provider strings", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-readme-fail-"));
   try {

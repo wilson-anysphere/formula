@@ -12,7 +12,7 @@
  * exits non-zero when any are found.
  */
 import { spawnSync } from "node:child_process";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { lstat, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -401,7 +401,7 @@ async function walkDir(absoluteDir, rootDir, onFile) {
         continue;
       }
 
-      if (!entry.isFile()) continue;
+      if (!(entry.isFile() || entry.isSymbolicLink())) continue;
       await onFile(fullPath);
     }
   }
@@ -452,14 +452,25 @@ export async function checkCursorAiPolicy(options = {}) {
       return;
     }
 
-    if (!shouldScanFile(filePath)) return;
-
+    // Symlinks are disallowed because they can bypass root-based scanning by
+    // pointing into excluded/unscanned directories.
     let st;
     try {
-      st = await stat(filePath);
+      st = await lstat(filePath);
     } catch {
       return;
     }
+    if (st.isSymbolicLink()) {
+      record({
+        file: rel,
+        ruleId: "symlink",
+        message: "Forbidden: symlinked files/directories are not allowed (can bypass Cursor-only AI policy scans).",
+      });
+      return;
+    }
+
+    if (!shouldScanFile(filePath)) return;
+
     if (!st.isFile()) return;
     if (st.size > MAX_BYTES_TO_SCAN) return;
 
@@ -531,12 +542,12 @@ export async function checkCursorAiPolicy(options = {}) {
       await scanFile(path.join(rootDir, rel));
     }
   } else {
-    const dirsToScan = [];
-    for (const dir of includedDirs) {
-      const abs = path.join(rootDir, dir);
-      try {
-        const st = await stat(abs);
-        if (st.isDirectory()) dirsToScan.push(abs);
+      const dirsToScan = [];
+      for (const dir of includedDirs) {
+        const abs = path.join(rootDir, dir);
+        try {
+          const st = await stat(abs);
+          if (st.isDirectory()) dirsToScan.push(abs);
       } catch {
         // ignore missing
       }
@@ -549,17 +560,17 @@ export async function checkCursorAiPolicy(options = {}) {
 
     // Also scan root-level config files (package.json, Cargo.toml, etc). Those can
     // reintroduce forbidden dependencies without touching the main code trees.
-    if (violations.length < maxViolations) {
-      try {
-        const rootEntries = await readdir(rootDir, { withFileTypes: true });
-        for (const entry of rootEntries) {
-          if (violations.length >= maxViolations) break;
-          if (!entry.isFile()) continue;
-          await scanFile(path.join(rootDir, entry.name));
+      if (violations.length < maxViolations) {
+        try {
+          const rootEntries = await readdir(rootDir, { withFileTypes: true });
+          for (const entry of rootEntries) {
+            if (violations.length >= maxViolations) break;
+            if (!(entry.isFile() || entry.isSymbolicLink())) continue;
+            await scanFile(path.join(rootDir, entry.name));
+          }
+        } catch {
+          // ignore
         }
-      } catch {
-        // ignore
-      }
     }
   }
 
