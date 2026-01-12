@@ -11,6 +11,7 @@ function argbToCss(argb) {
  */
 export function renderCellStyle(style) {
   const rules = [];
+  const rgb = "rgb";
 
   const font = style.font ?? {};
   if (font.bold) rules.push("font-weight:bold");
@@ -41,7 +42,8 @@ export function renderCellStyle(style) {
   if (border.left?.style) rules.push(`border-left:${border.left.style} ${argbToCss(border.left.color) ?? defaultBorderColor}`);
   if (border.right?.style) rules.push(`border-right:${border.right.style} ${argbToCss(border.right.color) ?? defaultBorderColor}`);
   if (border.top?.style) rules.push(`border-top:${border.top.style} ${argbToCss(border.top.color) ?? defaultBorderColor}`);
-  if (border.bottom?.style) rules.push(`border-bottom:${border.bottom.style} ${argbToCss(border.bottom.color) ?? defaultBorderColor}`);
+  if (border.bottom?.style)
+    rules.push(`border-bottom:${border.bottom.style} ${argbToCss(border.bottom.color) ?? defaultBorderColor}`);
 
   if (style.numberFormat) rules.push(`number-format:${style.numberFormat}`);
 
