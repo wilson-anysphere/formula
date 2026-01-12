@@ -119,6 +119,76 @@ fn calcchain_related_rels_and_content_types_downgrade_to_warning() {
 }
 
 #[test]
+fn calcchain_bin_related_rels_and_content_types_downgrade_to_warning() {
+    let expected_zip = zip_bytes(&[
+        (
+            "[Content_Types].xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="bin" ContentType="application/octet-stream"/>
+  <Override PartName="/xl/calcChain.bin" ContentType="application/vnd.ms-excel.calcChain"/>
+</Types>"#,
+        ),
+        (
+            "xl/_rels/workbook.bin.rels",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.bin"/>
+</Relationships>"#,
+        ),
+        ("xl/calcChain.bin", b"dummy"),
+    ]);
+
+    let actual_zip = zip_bytes(&[
+        (
+            "[Content_Types].xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="bin" ContentType="application/octet-stream"/>
+</Types>"#,
+        ),
+        (
+            "xl/_rels/workbook.bin.rels",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+</Relationships>"#,
+        ),
+    ]);
+
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let report = xlsx_diff::diff_archives(&expected, &actual);
+    assert_eq!(report.count(Severity::Critical), 0, "{:#?}", report.differences);
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|d| d.kind == "missing_part"
+                && d.part == "xl/calcChain.bin"
+                && d.severity == Severity::Warning),
+        "expected calcChain.bin missing_part to be a warning, got {:#?}",
+        report.differences
+    );
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|d| d.part == "[Content_Types].xml" && d.severity == Severity::Warning),
+        "expected content types calcChain.bin diff to be warning, got {:#?}",
+        report.differences
+    );
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|d| d.part.ends_with(".rels") && d.severity == Severity::Warning),
+        "expected rels calcChain.bin diff to be warning, got {:#?}",
+        report.differences
+    );
+}
+
+#[test]
 fn non_calcchain_rels_diffs_remain_critical() {
     let expected_zip = zip_bytes(&[(
         "xl/_rels/workbook.xml.rels",
