@@ -956,8 +956,8 @@ inventory::submit! {
         max_args: 5,
         volatility: Volatility::Volatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
-        return_type: ValueType::Any,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
         arg_types: &[
             ValueType::Number,
             ValueType::Number,
