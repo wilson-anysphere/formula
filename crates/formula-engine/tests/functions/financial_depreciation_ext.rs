@@ -30,6 +30,13 @@ fn db_month_proration() {
 }
 
 #[test]
+fn db_extra_period_when_month_is_not_12() {
+    // When `month` is not 12, Excel includes an extra (final) period for the remaining months.
+    let dep = db(10_000.0, 1_000.0, 5.0, 6.0, Some(7.0)).unwrap();
+    assert_close(dep, 191.27749950985103, 1e-9);
+}
+
+#[test]
 fn db_errors() {
     assert_eq!(
         db(1_000.0, 0.0, 5.0, 1.0, Some(13.0)).unwrap_err(),
@@ -97,8 +104,11 @@ fn builtins_db_and_vdb_wiring() {
 
     assert_number(&sheet.eval("=DB(10000,1000,5,1)"), 3690.0);
     assert_number(
+        &sheet.eval("=DB(10000,1000,5,6,7)"),
+        191.27749950985103,
+    );
+    assert_number(
         &sheet.eval("=VDB(2400,0,10,6,10,2,TRUE)"),
         371.44756224,
     );
 }
-

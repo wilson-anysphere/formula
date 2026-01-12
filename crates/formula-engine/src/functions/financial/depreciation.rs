@@ -101,8 +101,10 @@ pub fn db(
         return Err(ExcelError::Num);
     }
 
-    // Excel returns #NUM! if `period` is greater than `life`.
-    if (target_period as f64) > life {
+    // Excel returns #NUM! if `period` is greater than `life` (or `life + 1` when the first year
+    // is partial, i.e. `month != 12`).
+    let max_period = if month == 12.0 { life } else { life + 1.0 };
+    if (target_period as f64) > max_period {
         return Err(ExcelError::Num);
     }
 
@@ -122,6 +124,10 @@ pub fn db(
             dep = 0.0;
         } else if p == 1 {
             dep = cost * rate * (month / 12.0);
+        } else if month != 12.0 && (p as f64) > life {
+            // When the first year is partial (month < 12), Excel adds one extra depreciation
+            // period for the remaining months in the last year.
+            dep = remaining * rate * ((12.0 - month) / 12.0);
         } else {
             dep = remaining * rate;
         }
