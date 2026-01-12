@@ -13,6 +13,9 @@ import { ThemeController } from "./theme/themeController.js";
 
 import { mountRibbon } from "./ribbon/index.js";
 
+import { computeSelectionFormatState } from "./ribbon/selectionFormatState.js";
+import { setRibbonPressedOverrides } from "./ribbon/ribbonPressedOverrides.js";
+
 import { LayoutController } from "./layout/layoutController.js";
 import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
@@ -402,6 +405,52 @@ window.addEventListener("unload", () => {
   unsubscribeTitlebarHistory();
   titlebar.dispose();
 });
+
+// --- Ribbon selection formatting state ----------------------------------------
+// The ribbon UI maintains internal toggle state for user interactions, but we want
+// formatting-related controls (Bold/Italic/Underline/Wrap/Align) to reflect the
+// current selection's formatting, similar to Excel.
+//
+// Selection can change at pointer-move frequency while dragging. Keep updates
+// responsive by throttling to one computation per animation frame.
+let ribbonFormatStateUpdateScheduled = false;
+let ribbonFormatStateUpdateRequested = false;
+let lastRibbonPressedOverridesKey: string | null = null;
+
+function scheduleRibbonSelectionFormatStateUpdate(): void {
+  ribbonFormatStateUpdateRequested = true;
+  if (ribbonFormatStateUpdateScheduled) return;
+  ribbonFormatStateUpdateScheduled = true;
+
+  requestAnimationFrame(() => {
+    ribbonFormatStateUpdateScheduled = false;
+    if (!ribbonFormatStateUpdateRequested) return;
+    ribbonFormatStateUpdateRequested = false;
+
+    const sheetId = app.getCurrentSheetId();
+    const ranges = app.getSelectionRanges();
+    const formatState = computeSelectionFormatState(app.getDocument(), sheetId, ranges);
+
+    const pressedOverrides = {
+      "home.font.bold": formatState.bold,
+      "home.font.italic": formatState.italic,
+      "home.font.underline": formatState.underline,
+      "home.alignment.wrapText": formatState.wrapText,
+      "home.alignment.alignLeft": formatState.align === "left",
+      "home.alignment.center": formatState.align === "center",
+      "home.alignment.alignRight": formatState.align === "right",
+    };
+
+    const nextKey = JSON.stringify(pressedOverrides);
+    if (nextKey === lastRibbonPressedOverridesKey) return;
+    lastRibbonPressedOverridesKey = nextKey;
+    setRibbonPressedOverrides(pressedOverrides);
+  });
+}
+
+app.subscribeSelection(() => scheduleRibbonSelectionFormatStateUpdate());
+app.getDocument().on("change", () => scheduleRibbonSelectionFormatStateUpdate());
+scheduleRibbonSelectionFormatStateUpdate();
 
 openComments.addEventListener("click", () => app.toggleCommentsPanel());
 auditPrecedents.addEventListener("click", () => {

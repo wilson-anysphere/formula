@@ -3,6 +3,7 @@ import React from "react";
 import type { RibbonActions, RibbonButtonDefinition, RibbonSchema } from "./ribbonSchema.js";
 import { defaultRibbonSchema } from "./ribbonSchema.js";
 import { RibbonGroup } from "./RibbonGroup.js";
+import { getRibbonPressedOverridesSnapshot, subscribeRibbonPressedOverrides } from "./ribbonPressedOverrides.js";
 
 import "../styles/ribbon.css";
 
@@ -52,11 +53,22 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
   const [pressedById, setPressedById] = React.useState<Record<string, boolean>>(() => computeInitialPressed(schema));
   const pressedByIdRef = React.useRef<Record<string, boolean>>(pressedById);
 
+  const pressedOverrides = React.useSyncExternalStore(
+    subscribeRibbonPressedOverrides,
+    getRibbonPressedOverridesSnapshot,
+    getRibbonPressedOverridesSnapshot,
+  );
+
   const tabButtonRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
 
   React.useEffect(() => {
     pressedByIdRef.current = pressedById;
   }, [pressedById]);
+
+  const mergedPressedById = React.useMemo(() => {
+    // Spread here is fine: there are only ~tens of ribbon controls.
+    return { ...pressedById, ...pressedOverrides };
+  }, [pressedById, pressedOverrides]);
 
   React.useEffect(() => {
     // Keep internal toggle state in sync with schema changes (e.g. when tabs/groups
@@ -83,7 +95,10 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
       const kind = button.kind ?? "button";
 
       if (kind === "toggle") {
-        const nextPressed = !pressedByIdRef.current[button.id];
+        const currentPressed = Object.prototype.hasOwnProperty.call(pressedOverrides, button.id)
+          ? pressedOverrides[button.id]
+          : pressedByIdRef.current[button.id];
+        const nextPressed = !currentPressed;
         setPressedById((prev) => ({ ...prev, [button.id]: !prev[button.id] }));
         actions.onToggle?.(button.id, nextPressed);
         actions.onCommand?.(button.id);
@@ -92,7 +107,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
 
       actions.onCommand?.(button.id);
     },
-    [actions],
+    [actions, pressedOverrides],
   );
 
   const selectTabByIndex = React.useCallback(
@@ -233,9 +248,9 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
           const isActive = tab.id === activeTabId;
           return (
             <div
-              key={tab.id}
-              id={`ribbon-panel-${tab.id}`}
-              role="tabpanel"
+                  key={tab.id}
+                  id={`ribbon-panel-${tab.id}`}
+                  role="tabpanel"
               aria-labelledby={`ribbon-tab-${tab.id}`}
               aria-label={tab.label}
               tabIndex={-1}
@@ -243,7 +258,12 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
               className="ribbon__tabpanel"
             >
               {tab.groups.map((group) => (
-                <RibbonGroup key={group.id} group={group} pressedById={pressedById} onActivateButton={activateButton} />
+                <RibbonGroup
+                  key={group.id}
+                  group={group}
+                  pressedById={mergedPressedById}
+                  onActivateButton={activateButton}
+                />
               ))}
             </div>
           );
