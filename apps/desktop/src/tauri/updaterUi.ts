@@ -811,7 +811,7 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
       // "Later" on the startup prompt).
       const treatAsManual = source === "manual" || manualUpdateCheckFollowUp;
       setManualUpdateCheckFollowUp(false);
-      const isManualRequest = source === "manual";
+      const isManualRequest = treatAsManual;
       // Only show the in-app update dialog for manual checks. Startup checks should be silent
       // (the shell shows a system notification instead). One exception: if the user triggers a
       // manual check while a startup check is already in-flight, the backend will report the
