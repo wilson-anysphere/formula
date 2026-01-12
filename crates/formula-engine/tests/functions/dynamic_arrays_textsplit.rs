@@ -37,6 +37,48 @@ fn textsplit_rows_and_columns() {
 }
 
 #[test]
+fn textsplit_column_delimiters_can_be_array_literals() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=TEXTSPLIT(\"a,b;c,d\",{\",\",\";\"})")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("D1").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::from("a"));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::from("b"));
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::from("c"));
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::from("d"));
+}
+
+#[test]
+fn textsplit_row_delimiters_can_be_array_literals() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            "=TEXTSPLIT(\"a,b|c,d;e,f\",\",\",{\"|\",\";\"})",
+        )
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("B3").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::from("a"));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::from("b"));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::from("c"));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::from("d"));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::from("e"));
+    assert_eq!(engine.get_cell_value("Sheet1", "B3"), Value::from("f"));
+}
+
+#[test]
 fn textsplit_ignore_empty() {
     let mut engine = Engine::new();
     engine
