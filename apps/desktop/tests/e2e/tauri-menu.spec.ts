@@ -25,20 +25,36 @@ test.describe("tauri native menu integration", () => {
 
       // Ensure the menu fallback logic uses the Tauri clipboard IPC (deterministic) rather than
       // Chromium's clipboard implementation (which can vary across CI/headless environments).
-      const stubClipboard = {
-        readText: async () => {
-          throw new Error("clipboard read blocked");
-        },
-        writeText: async () => {
-          throw new Error("clipboard write blocked");
-        },
+      //
+      // Avoid redefining `window.navigator` / `navigator.clipboard` entirely because those are
+      // non-configurable in real browsers. Instead, patch readText/writeText when possible.
+      const stubReadText = async () => {
+        throw new Error("clipboard read blocked");
+      };
+      const stubWriteText = async () => {
+        throw new Error("clipboard write blocked");
       };
 
-      try {
-        Object.defineProperty(navigator, "clipboard", { value: stubClipboard, configurable: true });
-      } catch {
-        const platform = (navigator as any)?.platform ?? "";
-        Object.defineProperty(window, "navigator", { value: { platform, clipboard: stubClipboard }, configurable: true });
+      const clipboard = (navigator as any)?.clipboard;
+      if (clipboard && typeof clipboard === "object") {
+        try {
+          Object.defineProperty(clipboard, "readText", { value: stubReadText, configurable: true });
+        } catch {
+          try {
+            clipboard.readText = stubReadText;
+          } catch {
+            // ignore
+          }
+        }
+        try {
+          Object.defineProperty(clipboard, "writeText", { value: stubWriteText, configurable: true });
+        } catch {
+          try {
+            clipboard.writeText = stubWriteText;
+          } catch {
+            // ignore
+          }
+        }
       }
 
       (window as any).__TAURI__ = {
