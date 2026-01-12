@@ -1390,7 +1390,18 @@ class DocumentControllerRangeAdapter {
 
   setFormat(format) {
     const patch = docStylePatchFromScriptFormat(format);
-    this.sheet.workbook.documentController.setRangeFormat(this.sheet.sheetId, this.address, patch, { label: "Script: set format" });
+    const applied = this.sheet.workbook.documentController.setRangeFormat(this.sheet.sheetId, this.address, patch, {
+      label: "Script: set format",
+    });
+    if (applied === false) {
+      const rows = this.coords.endRow - this.coords.startRow + 1;
+      const cols = this.coords.endCol - this.coords.startCol + 1;
+      const area = rows * cols;
+      throw new Error(
+        `setFormat skipped for range ${this.address} (rows=${rows}, cols=${cols}, area=${area}). ` +
+          "Select fewer cells/rows and try again.",
+      );
+    }
     this.sheet.workbook._notifyMutate();
   }
 
