@@ -1337,14 +1337,61 @@ impl AppState {
         sheet_id: &str,
         tab_color: Option<TabColor>,
     ) -> Result<(), AppStateError> {
-        {
+        let current = {
             let workbook = self.get_workbook()?;
             let sheet = workbook
                 .sheet(sheet_id)
                 .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
-            if sheet.tab_color == tab_color {
-                return Ok(());
+            sheet.tab_color.clone()
+        };
+
+        let tab_color = match tab_color {
+            None => None,
+            Some(mut color) => {
+                // We currently only support setting sheet tab colors via explicit ARGB hex values.
+                // Theme/indexed colors can still be loaded and round-tripped from XLSX, but are not
+                // accepted as updates via the host APIs yet.
+                if color.theme.is_some()
+                    || color.indexed.is_some()
+                    || color.tint.is_some()
+                    || color.auto.is_some()
+                {
+                    return Err(AppStateError::WhatIf(
+                        "tab color must be specified using an ARGB hex value in `rgb` (AARRGGBB)"
+                            .to_string(),
+                    ));
+                }
+
+                if let Some(rgb) = color.rgb.as_deref() {
+                    let trimmed = rgb.trim();
+                    if trimmed.is_empty() {
+                        color.rgb = None;
+                    } else {
+                        let hex = trimmed.strip_prefix('#').unwrap_or(trimmed);
+                        if hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+                            color.rgb = Some(format!("FF{}", hex.to_ascii_uppercase()));
+                        } else if hex.len() == 8 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+                            color.rgb = Some(hex.to_ascii_uppercase());
+                        } else {
+                            return Err(AppStateError::WhatIf(
+                                "tab color rgb must be 6-digit (RRGGBB) or 8-digit ARGB (AARRGGBB) hex"
+                                    .to_string(),
+                            ));
+                        }
+                    }
+                }
+
+                // Treat an all-empty payload as clearing the tab color.
+                if color.rgb.is_none() {
+                    None
+                } else {
+                    Some(color)
+                }
             }
+        };
+
+        if current == tab_color {
+            return Ok(());
         }
 
         // The UI/setters currently only support direct ARGB (CT_Color rgb="AARRGGBB") updates.
