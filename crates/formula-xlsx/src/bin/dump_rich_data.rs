@@ -168,9 +168,10 @@ fn dump_required_part_presence(pkg: &XlsxPackage) {
     let mut rich_data_parts: Vec<(&str, usize)> = pkg
         .part_names()
         .filter_map(|name| {
-            let lower = name.to_ascii_lowercase();
+            let canonical = name.strip_prefix('/').unwrap_or(name);
+            let lower = canonical.to_ascii_lowercase();
             if lower.starts_with("xl/richdata/") {
-                Some((name, pkg.part(name).map(|b| b.len()).unwrap_or(0)))
+                Some((canonical, pkg.part(name).map(|b| b.len()).unwrap_or(0)))
             } else {
                 None
             }
@@ -189,8 +190,9 @@ fn dump_required_part_presence(pkg: &XlsxPackage) {
     let mut image_parts: Vec<(&str, usize)> = pkg
         .part_names()
         .filter_map(|name| {
-            if is_in_cell_image_candidate_part(name) {
-                Some((name, pkg.part(name).map(|b| b.len()).unwrap_or(0)))
+            let canonical = name.strip_prefix('/').unwrap_or(name);
+            if is_in_cell_image_candidate_part(canonical) {
+                Some((canonical, pkg.part(name).map(|b| b.len()).unwrap_or(0)))
             } else {
                 None
             }
@@ -209,6 +211,7 @@ fn dump_required_part_presence(pkg: &XlsxPackage) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn is_in_cell_image_candidate_part(part_name: &str) -> bool {
+    let part_name = part_name.strip_prefix('/').unwrap_or(part_name);
     let lower = part_name.to_ascii_lowercase();
 
     // Common/known in-cell image parts.
@@ -856,8 +859,11 @@ fn list_sheets_best_effort(pkg: &XlsxPackage) -> Vec<SheetInfo> {
             );
             let mut worksheet_parts: Vec<String> = pkg
                 .part_names()
-                .filter(|name| name.starts_with("xl/worksheets/") && name.ends_with(".xml"))
-                .map(|s| s.to_string())
+                .filter_map(|name| {
+                    let canonical = name.strip_prefix('/').unwrap_or(name);
+                    (canonical.starts_with("xl/worksheets/") && canonical.ends_with(".xml"))
+                        .then_some(canonical.to_string())
+                })
                 .collect();
             worksheet_parts.sort();
             worksheet_parts
@@ -958,10 +964,13 @@ fn dump_rich_data_parts(pkg: &XlsxPackage) {
     let mut parts: Vec<&str> = pkg
         .part_names()
         .filter(|name| {
-            *name == "xl/metadata.xml"
-                || name.starts_with("xl/richData/")
-                || name.starts_with("xl/richData/_rels/")
+            let canonical = name.strip_prefix('/').unwrap_or(name);
+            let lower = canonical.to_ascii_lowercase();
+            lower == "xl/metadata.xml"
+                || lower.starts_with("xl/richdata/")
+                || lower.starts_with("xl/richdata/_rels/")
         })
+        .map(|name| name.strip_prefix('/').unwrap_or(name))
         .collect();
     parts.sort();
 
