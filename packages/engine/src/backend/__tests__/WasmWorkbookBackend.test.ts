@@ -59,6 +59,8 @@ describe("WasmWorkbookBackend", () => {
       setRange: vi.fn(async () => {}),
       setLocale: vi.fn(async () => true),
       recalculate: vi.fn(async () => []),
+      setSheetDimensions: vi.fn(async () => {}),
+      getSheetDimensions: vi.fn(async () => ({ rows: 1_048_576, cols: 16_384 })),
       lexFormula: vi.fn(async () => []),
       parseFormulaPartial: vi.fn(async () => ({ ast: null, error: null, context: { function: null } })),
       terminate: vi.fn(),
@@ -124,6 +126,8 @@ describe("WasmWorkbookBackend", () => {
         calls.push("recalculate");
         return [];
       }),
+      setSheetDimensions: vi.fn(async () => {}),
+      getSheetDimensions: vi.fn(async () => ({ rows: 1_048_576, cols: 16_384 })),
       lexFormula: vi.fn(async () => []),
       parseFormulaPartial: vi.fn(async () => ({ ast: null, error: null, context: { function: null } })),
       terminate: vi.fn(),
@@ -191,6 +195,8 @@ describe("WasmWorkbookBackend", () => {
       setRange: vi.fn(async () => {}),
       setLocale: vi.fn(async () => true),
       recalculate: vi.fn(async () => []),
+      setSheetDimensions: vi.fn(async () => {}),
+      getSheetDimensions: vi.fn(async () => ({ rows: 1_048_576, cols: 16_384 })),
       lexFormula: vi.fn(async () => []),
       parseFormulaPartial: vi.fn(async () => ({ ast: null, error: null, context: { function: null } })),
       terminate: vi.fn(),
