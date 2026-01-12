@@ -44,7 +44,7 @@ export interface Workbook {
    * Save the workbook to a specific path.
    *
    * If the user cancels, the Promise rejects with an Error whose `name` is `"AbortError"`.
-   * The host throws if `path` is empty/whitespace.
+   * The API throws if `path` is empty/whitespace (or otherwise not a usable non-empty string).
    */
   saveAs(path: string): Promise<void>;
   /**
@@ -103,7 +103,7 @@ export namespace workbook {
   /**
    * Open a workbook from a file path.
    *
-   * The host throws if `path` is empty/whitespace. In desktop builds this may prompt the user
+   * The API throws if `path` is empty/whitespace (or otherwise not a usable non-empty string). In desktop builds this may prompt the user
    * to discard unsaved changes; cancellations reject with `AbortError`.
    */
   function openWorkbook(path: string): Promise<Workbook>;
@@ -121,7 +121,7 @@ export namespace workbook {
   /**
    * Save the active workbook to a specific path (Save As).
    *
-   * The host throws if `path` is empty/whitespace.
+   * The API throws if `path` is empty/whitespace (or otherwise not a usable non-empty string).
    */
   function saveAs(path: string): Promise<void>;
   /**

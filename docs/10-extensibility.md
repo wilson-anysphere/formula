@@ -829,7 +829,7 @@ involve **user prompts** (discard-unsaved-changes confirmation, Save As dialogs,
 - Most workbook lifecycle operations require the `workbook.manage` permission:
   - requires `workbook.manage`: `openWorkbook`, `createWorkbook`, `save`, `saveAs`, `close`
   - no permission required: `getActiveWorkbook`
-- `formula.workbook.openWorkbook(path)` / `saveAs(path)` require a **non-empty** path string.
+- `formula.workbook.openWorkbook(path)` / `saveAs(path)` require a **non-empty** path string (whitespace-only rejected).
 - If the user cancels a workbook UI prompt, the Promise rejects with an error whose `name` is **`"AbortError"`**.
   - Cancellation does **not** emit `events.onWorkbookOpened` / `events.onBeforeSave`.
 - `events.onWorkbookOpened` is emitted after a workbook is successfully opened/created/closed.
