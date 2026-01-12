@@ -20,6 +20,7 @@ use zip::ZipArchive;
 
 use crate::autofilter::{parse_worksheet_autofilter, AutoFilterParseError};
 use crate::calc_settings::read_calc_settings_from_workbook_xml;
+use crate::conditional_formatting::parse_worksheet_conditional_formatting_streaming;
 use crate::path::{rels_for_part, resolve_target};
 use crate::shared_strings::parse_shared_strings_xml;
 use crate::sheet_metadata::parse_sheet_tab_color;
@@ -131,6 +132,12 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
         .unwrap_or_else(|| "xl/styles.xml".to_string());
     let styles_bytes = read_zip_part_optional(archive, &styles_part_name)?;
     let styles_part = StylesPart::parse_or_default(styles_bytes.as_deref(), &mut workbook.styles)?;
+    let conditional_formatting_dxfs: Vec<formula_model::CfStyleOverride> = styles_bytes
+        .as_deref()
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        .and_then(|xml| crate::styles::Styles::parse(xml).ok())
+        .map(|s| s.dxfs)
+        .unwrap_or_default();
 
     let shared_strings_part_name = rels_info
         .shared_strings_target
@@ -166,6 +173,15 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
 
         // Optional metadata: best-effort.
         ws.tab_color = parse_sheet_tab_color(sheet_xml_str).unwrap_or(None);
+
+        // Conditional formatting: best-effort. This is parsed via a streaming extractor so we
+        // don't DOM-parse the entire worksheet XML.
+        if let Ok(parsed) = parse_worksheet_conditional_formatting_streaming(sheet_xml_str) {
+            if !parsed.rules.is_empty() {
+                ws.conditional_formatting_rules = parsed.rules;
+                ws.conditional_formatting_dxfs = conditional_formatting_dxfs.clone();
+            }
+        }
 
         // Merged cells (must be parsed before cell content so we don't treat interior
         // cells as value-bearing).
@@ -370,6 +386,12 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         .as_deref()
         .map(|target| resolve_target(WORKBOOK_PART, target))
         .unwrap_or_else(|| "xl/styles.xml".to_string());
+    let conditional_formatting_dxfs: Vec<formula_model::CfStyleOverride> = parts
+        .get(&styles_part_name)
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        .and_then(|xml| crate::styles::Styles::parse(xml).ok())
+        .map(|s| s.dxfs)
+        .unwrap_or_default();
     let styles_part = StylesPart::parse_or_default(
         parts.get(&styles_part_name).map(|b| b.as_slice()),
         &mut workbook.styles,
@@ -411,6 +433,15 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         let sheet_xml_str = std::str::from_utf8(sheet_xml)?;
 
         ws.tab_color = parse_sheet_tab_color(sheet_xml_str)?;
+
+        // Conditional formatting. Parsed via a streaming extractor so we don't DOM-parse the
+        // full worksheet XML.
+        let parsed_cf = parse_worksheet_conditional_formatting_streaming(sheet_xml_str)
+            .unwrap_or_default();
+        if !parsed_cf.rules.is_empty() {
+            ws.conditional_formatting_rules = parsed_cf.rules;
+            ws.conditional_formatting_dxfs = conditional_formatting_dxfs.clone();
+        }
 
         // Merged cells (must be parsed before cell content so we don't treat interior
         // cells as value-bearing).
