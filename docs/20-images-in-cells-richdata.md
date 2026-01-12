@@ -39,16 +39,47 @@ xl/
 
 The RichData parts above are workbook-global tables. A worksheet cell does **not** point directly at `xl/richData/richValue.xml`.
 
-Instead, Excel uses **cell metadata**:
+Instead, Excel uses **cell metadata** in `xl/metadata.xml`:
 
-* Worksheet cells use a `vm="…"` attribute on `<c>` (cell) elements.
-* `vm` refers to a record in `xl/metadata.xml` (not covered here in depth).
-* That metadata record contains (directly or indirectly) the **rich value index** into `xl/richData/richValue.xml`.
+1. Worksheet cells use `c/@vm` (value-metadata index).
+2. `vm` selects a `<valueMetadata><bk>` record in `xl/metadata.xml`.
+3. That `<bk>` contains an `<rc t="…" v="…"/>` record pointing at `futureMetadata name="XLRICHVALUE"`.
+4. The `futureMetadata` record contains an extension element (commonly `xlrd:rvb`) with `i="…"`, which is the
+   **0-based rich value index** into `xl/richData/richValue.xml`.
+
+Minimal representative shape (index bases are important; see below):
+
+```xml
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes>
+    <!-- `t` in <rc> is a 1-based index into this list -->
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+
+  <futureMetadata name="XLRICHVALUE">
+    <!-- `v` in <rc> is a 0-based index into this bk list -->
+    <bk>
+      <extLst>
+        <ext uri="{...}">
+          <!-- `i` is the 0-based index into xl/richData/richValue.xml -->
+          <xlrd:rvb i="0"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+
+  <valueMetadata>
+    <!-- vm=1 (1-based) selects the first <bk> -->
+    <bk><rc t="1" v="0"/></bk>
+  </valueMetadata>
+</metadata>
+```
 
 This indirection is important for engineering because:
 
 * `vm` indexes are **independent** from `richValue.xml` indexes.
-* `vm` appears to be **1-based** in Excel-generated worksheets (see [Index bases](#index-bases--indirection)).
+* `vm` is **1-based** in Excel’s `xl/metadata.xml` model (see [Index bases](#index-bases--indirection)).
 
 ---
 
@@ -56,7 +87,7 @@ This indirection is important for engineering because:
 
 Excel uses multiple indices; mixing bases is a common source of bugs.
 
-### `vm` (worksheet cell attribute) — likely **1-based**
+### `vm` (worksheet cell attribute) — **1-based**
 
 In worksheet XML, cells can carry `vm="n"` to attach value metadata:
 
@@ -66,15 +97,24 @@ In worksheet XML, cells can carry `vm="n"` to attach value metadata:
 </c>
 ```
 
-Best current assumption (verify on real files):
+Notes:
 
-* `vm` is **1-based** (i.e. `vm="1"` refers to the *first* metadata record).
+* `vm` is **1-based** (i.e. `vm="1"` refers to the *first* `<valueMetadata><bk>` record in `xl/metadata.xml`).
 * Missing `vm` means “no metadata”.
 * Treat `vm="0"` as suspicious/uncommon; preserve if encountered.
 
+### Indices inside `xl/metadata.xml` used by `XLRICHVALUE`
+
+| Index | Location | Base | Meaning |
+|------:|----------|------|---------|
+| `t` | `<valueMetadata><bk><rc t="…">` | 1-based | index into `<metadataTypes>` (selects `metadataType name="XLRICHVALUE"`) |
+| `v` | `<valueMetadata><bk><rc v="…">` | 0-based | index into `<futureMetadata name="XLRICHVALUE"><bk>` |
+| `i` | `<xlrd:rvb i="…"/>` | 0-based | rich value index into `xl/richData/richValue.xml` |
+
 ### `richValue.xml` rich value table — **0-based**
 
-Rich values are stored in a list; the **index is the element position**, starting at `0`.
+Rich values are stored in a list; the rich value index is **0-based** and is referenced from `xl/metadata.xml`
+via `xlrd:rvb/@i`.
 
 ### `richValueRel.xml` relationship table — **0-based**
 
@@ -202,7 +242,8 @@ Stores the actual rich value instances. Each instance references a type (and/or 
 
 Notes:
 
-* The “rich value index” is the 0-based position of the `<rv>` within the values table.
+* The “rich value index” is 0-based and is referenced from `xl/metadata.xml` via `xlrd:rvb/@i`. In practice,
+  Excel appears to treat this as the record’s 0-based index within the `richValue.xml` table.
 * The “relationship index” stored in the payload is 0-based and indexes into `richValueRel.xml`.
 
 ---
@@ -258,11 +299,11 @@ For images-in-cell, the minimum viable read path usually looks like:
 4. Parse `richValueRel.xml` into `rel_index -> rId`.
 5. Parse `xl/richData/_rels/richValueRel.xml.rels` into `rId -> target` (image path).
 6. Parse `richValue.xml` into a table of `rich_value_index -> {type_id, payload...}`.
-7. Use worksheet cell metadata (`vm`) to map cells → `rich_value_index`.
+7. Parse `xl/metadata.xml` to resolve `vm` (cell attribute) → `rich_value_index` (`xlrd:rvb/@i`).
+8. Use worksheet cell `vm` values to map cells → `rich_value_index`.
 
 For writing, the safest approach is typically “append-only”:
 
 * Append new relationships to `richValueRel.xml` + `.rels`
 * Append new rich values to `richValue.xml`
 * Avoid renumbering existing indices unless you fully rebuild all referencing metadata
-

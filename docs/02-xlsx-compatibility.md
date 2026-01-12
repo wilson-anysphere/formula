@@ -60,7 +60,7 @@ workbook.xlsx (ZIP archive)
 ```
 
 See also:
-- [`docs/20-xlsx-richdata-images-in-cell.md`](./20-xlsx-richdata-images-in-cell.md) — Excel RichData (`richValue*`) parts used by “Images in Cell” / `IMAGE()`.
+- [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md) — Excel RichData (`richValue*`) parts used by “Images in Cell” / `IMAGE()`.
 
 ---
 

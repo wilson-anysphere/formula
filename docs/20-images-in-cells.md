@@ -236,6 +236,11 @@ For images-in-cells, these rich values are expected to contain (directly or indi
 At minimum, `xl/richData/richValue.xml` is expected to exist when `xl/metadata.xml` contains
 `<futureMetadata name="XLRICHVALUE">` entries with `xlrd:rvb i="…"` references (see mapping details above).
 
+See also:
+
+- [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md) — concrete notes on the
+  `richValue*` parts (types/structures/values/relationship indirection) and index bases used by Excel.
+
 Because the exact file set and schemas vary across Excel builds, Formula’s short-term strategy is:
 
 - **preserve all `xl/richData/*` parts and their `*.rels`**, and
@@ -286,7 +291,10 @@ workbook (and corresponding fixture + tests).
 
   <!-- TODO: confirm these from an Excel fixture -->
   <Override PartName="/xl/metadata.xml" ContentType="TODO"/>
+  <Override PartName="/xl/richData/richValueTypes.xml" ContentType="TODO"/>
+  <Override PartName="/xl/richData/richValueStructure.xml" ContentType="TODO"/>
   <Override PartName="/xl/richData/richValue.xml" ContentType="TODO"/>
+  <Override PartName="/xl/richData/richValueRel.xml" ContentType="TODO"/>
 </Types>
 ```
 
