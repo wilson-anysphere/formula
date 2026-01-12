@@ -4,7 +4,15 @@ use formula_xlsx::XlsxPackage;
 
 #[test]
 fn macro_strip_preserves_comment_vml_when_removing_ole_shape() {
-    let bytes = build_mixed_vml_package();
+    assert_mixed_vml_stripping(build_mixed_vml_package_with_o_relid());
+}
+
+#[test]
+fn macro_strip_preserves_comment_vml_when_removing_ole_shape_with_r_id() {
+    assert_mixed_vml_stripping(build_mixed_vml_package_with_r_id());
+}
+
+fn assert_mixed_vml_stripping(bytes: Vec<u8>) {
     let mut pkg = XlsxPackage::from_bytes(&bytes).expect("parse pkg");
 
     assert!(pkg.part("xl/embeddings/oleObject1.bin").is_some());
@@ -70,7 +78,15 @@ fn macro_strip_preserves_comment_vml_when_removing_ole_shape() {
     );
 }
 
-fn build_mixed_vml_package() -> Vec<u8> {
+fn build_mixed_vml_package_with_o_relid() -> Vec<u8> {
+    build_mixed_vml_package(r#"o:relid="rIdOle""#, false)
+}
+
+fn build_mixed_vml_package_with_r_id() -> Vec<u8> {
+    build_mixed_vml_package(r#"r:id="rIdOle""#, true)
+}
+
+fn build_mixed_vml_package(ole_rel_attr: &str, include_r_ns: bool) -> Vec<u8> {
     let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -82,9 +98,15 @@ fn build_mixed_vml_package() -> Vec<u8> {
   <Relationship Id="rIdVml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing1.vml"/>
 </Relationships>"#;
 
-    let vml = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml"
+    let r_ns = if include_r_ns {
+        r#" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+    } else {
+        ""
+    };
+
+    let vml_template = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml"
      xmlns:o="urn:schemas-microsoft-com:office:office"
-     xmlns:x="urn:schemas-microsoft-com:office:excel">
+     xmlns:x="urn:schemas-microsoft-com:office:excel"__R_NS__>
   <o:shapelayout v:ext="edit">
     <o:idmap v:ext="edit" data="1"/>
   </o:shapelayout>
@@ -111,10 +133,14 @@ fn build_mixed_vml_package() -> Vec<u8> {
   </v:shape>
   <v:shape id="_x0000_s2048" type="#_x0000_t202"
            style="position:absolute;margin-left:0;margin-top:0;width:50pt;height:20pt;z-index:2">
-    <o:OLEObject Type="Embed" ProgID="Forms.CommandButton.1" ShapeID="_x0000_s2048" DrawAspect="Content" ObjectID="_1234" o:relid="rIdOle"/>
+    <o:OLEObject Type="Embed" ProgID="Forms.CommandButton.1" ShapeID="_x0000_s2048" DrawAspect="Content" ObjectID="_1234" __OLE_REL_ATTR__/>
     <x:ClientData ObjectType="Pict"/>
   </v:shape>
  </xml>"##;
+
+    let vml = vml_template
+        .replace("__R_NS__", r_ns)
+        .replace("__OLE_REL_ATTR__", ole_rel_attr);
 
     let vml_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
