@@ -825,7 +825,7 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
   }
 }
 
-export function installUpdaterUi(listenArg?: TauriListen): void {
+export async function installUpdaterUi(listenArg?: TauriListen): Promise<void> {
   const listen = listenArg ?? getTauriListen();
   if (!listen) return;
 
@@ -837,12 +837,22 @@ export function installUpdaterUi(listenArg?: TauriListen): void {
     "update-available",
   ];
 
-  for (const eventName of events) {
-    void listen(eventName, (event) => {
-      const payload = (event as any)?.payload as UpdaterEventPayload;
-      void handleUpdaterEvent(eventName, payload);
-    });
-  }
+  const installs = events.map((eventName) => {
+    try {
+      return listen(eventName, (event) => {
+        const payload = (event as any)?.payload as UpdaterEventPayload;
+        void handleUpdaterEvent(eventName, payload);
+      }).catch((err) => {
+        console.error(`[formula][updater-ui] Failed to listen for ${eventName}:`, err);
+        return () => {};
+      });
+    } catch (err) {
+      console.error(`[formula][updater-ui] Failed to listen for ${eventName}:`, err);
+      return Promise.resolve(() => {});
+    }
+  });
+
+  await Promise.all(installs);
 }
 
 /**

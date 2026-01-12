@@ -4955,7 +4955,7 @@ try {
     });
   };
 
-  installUpdaterUi(listen);
+  const updaterUiListeners = installUpdaterUi(listen);
 
   registerAppQuitHandlers({
     isDirty: () => app.getDocument().isDirty,
@@ -5201,7 +5201,7 @@ try {
     void notify({ title: "Update available", body: message });
   });
 
-  void updateAvailableListener
+  void Promise.all([updaterUiListeners, updateAvailableListener])
     .then(() => {
       if (!emit) return;
       return Promise.resolve(emit("updater-ui-ready"));

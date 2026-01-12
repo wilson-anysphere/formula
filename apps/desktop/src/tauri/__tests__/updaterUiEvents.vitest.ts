@@ -76,7 +76,7 @@ describe("updaterUi (events)", () => {
       return () => {};
     });
 
-    installUpdaterUi(listen);
+    await installUpdaterUi(listen);
 
     expect(listen).toHaveBeenCalledWith("update-check-already-running", expect.any(Function));
 
