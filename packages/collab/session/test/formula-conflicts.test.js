@@ -217,6 +217,71 @@ test("CollabSession formula conflict monitor treats remoteUserId as unknown when
   docB.destroy();
 });
 
+test("CollabSession formula conflict monitor detects value conflicts for cleared values after restart (formula+value mode)", async () => {
+  // Ensure deterministic tie-breaking: higher clientID wins.
+  const docA = new Y.Doc();
+  docA.clientID = 1;
+  const docB = new Y.Doc();
+  docB.clientID = 2;
+  let disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+
+  let sessionA = createCollabSession({
+    doc: docA,
+    formulaConflicts: {
+      localUserId: "user-a",
+      mode: "formula+value",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+  const sessionB = createCollabSession({
+    doc: docB,
+    formulaConflicts: {
+      localUserId: "user-b",
+      mode: "formula+value",
+      onConflict: () => {},
+    },
+  });
+
+  // Establish base.
+  await sessionA.setCellValue("Sheet1:0:0", "base");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "base");
+
+  // Offline concurrent edits: A clears; B overwrites with a new value (B wins).
+  disconnect();
+  await sessionA.setCellValue("Sheet1:0:0", null);
+
+  // Simulate app reload: recreate the session (and conflict monitor) before reconnecting.
+  sessionA.destroy();
+  conflictsA.length = 0;
+  sessionA = createCollabSession({
+    doc: docA,
+    formulaConflicts: {
+      localUserId: "user-a",
+      mode: "formula+value",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+
+  await sessionB.setCellValue("Sheet1:0:0", "theirs");
+
+  // Reconnect and sync state.
+  disconnect = connectDocs(docA, docB);
+
+  const conflict = conflictsA.find((c) => c.kind === "value") ?? null;
+  assert.ok(conflict, "expected a value conflict after restart");
+  assert.equal(conflict.localValue, null);
+  assert.equal(conflict.remoteValue, "theirs");
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
 test("CollabSession formula conflict monitor does not emit conflicts for sequential overwrites", async () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
