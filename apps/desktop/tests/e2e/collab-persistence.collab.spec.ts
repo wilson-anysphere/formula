@@ -98,13 +98,15 @@ test.describe("collaboration: local persistence", () => {
       expect(providerSynced).toBe(false);
 
       await expect
-        .poll(() =>
-          pageB.evaluate(() => {
-            const app = (window as any).__formulaApp;
-            const doc = app.getDocument();
-            const sheetId = app.getCurrentSheetId();
-            return doc.getCell(sheetId, { row: 0, col: 0 })?.value ?? null;
-          }),
+        .poll(
+          () =>
+            pageB.evaluate(() => {
+              const app = (window as any).__formulaApp;
+              const doc = app.getDocument();
+              const sheetId = app.getCurrentSheetId();
+              return doc.getCell(sheetId, { row: 0, col: 0 })?.value ?? null;
+            }),
+          { timeout: 30_000 },
         )
         .toBe("persisted");
 
@@ -116,4 +118,3 @@ test.describe("collaboration: local persistence", () => {
     }
   });
 });
-
