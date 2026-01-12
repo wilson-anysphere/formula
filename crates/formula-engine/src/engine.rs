@@ -25,6 +25,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use thiserror::Error;
 
+mod bytecode_diagnostics;
+pub use bytecode_diagnostics::{
+    BytecodeCompileReason, BytecodeCompileReportEntry, BytecodeCompileStats,
+};
+
 pub type SheetId = usize;
 
 #[derive(Debug, Error)]
@@ -108,6 +113,7 @@ struct Cell {
     value: Value,
     formula: Option<String>,
     compiled: Option<CompiledFormula>,
+    bytecode_compile_reason: Option<BytecodeCompileReason>,
     volatile: bool,
     thread_safe: bool,
     dynamic_deps: bool,
@@ -119,6 +125,7 @@ impl Default for Cell {
             value: Value::Blank,
             formula: None,
             compiled: None,
+            bytecode_compile_reason: None,
             volatile: false,
             thread_safe: true,
             dynamic_deps: false,
@@ -386,6 +393,86 @@ impl Engine {
         self.bytecode_cache.program_count()
     }
 
+    /// Returns aggregate bytecode compilation coverage statistics for the current workbook.
+    ///
+    /// This is an introspection-only API; it does not affect evaluation behavior.
+    pub fn bytecode_compile_stats(&self) -> BytecodeCompileStats {
+        let mut stats = BytecodeCompileStats::default();
+
+        for sheet in &self.workbook.sheets {
+            for cell in sheet.cells.values() {
+                if cell.formula.is_none() {
+                    continue;
+                }
+
+                stats.total_formula_cells += 1;
+                match cell.compiled.as_ref() {
+                    Some(CompiledFormula::Bytecode(_)) => {
+                        stats.compiled += 1;
+                    }
+                    Some(CompiledFormula::Ast(_)) => {
+                        stats.fallback += 1;
+                        if let Some(reason) = cell.bytecode_compile_reason.as_ref() {
+                            *stats.fallback_reasons.entry(reason.clone()).or_insert(0) += 1;
+                        }
+                    }
+                    None => {
+                        // Formula cells should always have a compiled representation, but avoid
+                        // panicking in this introspection API.
+                        stats.fallback += 1;
+                        *stats
+                            .fallback_reasons
+                            .entry(BytecodeCompileReason::IneligibleExpr)
+                            .or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+
+        stats
+    }
+
+    /// Returns a per-cell list of formulas that were not compiled to bytecode.
+    ///
+    /// The results are deterministically ordered by `(sheet_id, row, col)` and truncated to `limit`.
+    pub fn bytecode_compile_report(&self, limit: usize) -> Vec<BytecodeCompileReportEntry> {
+        if limit == 0 {
+            return Vec::new();
+        }
+
+        let mut entries: Vec<(SheetId, CellAddr, BytecodeCompileReason)> = Vec::new();
+
+        for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
+            for (addr, cell) in &sheet.cells {
+                if cell.formula.is_none() {
+                    continue;
+                }
+                if matches!(cell.compiled.as_ref(), Some(CompiledFormula::Bytecode(_))) {
+                    continue;
+                }
+                let reason = cell
+                    .bytecode_compile_reason
+                    .clone()
+                    .unwrap_or(BytecodeCompileReason::IneligibleExpr);
+                entries.push((sheet_id, *addr, reason));
+            }
+        }
+
+        entries.sort_by_key(|(sheet_id, addr, _)| (*sheet_id, addr.row, addr.col));
+
+        let mut out = Vec::new();
+        for (sheet_id, addr, reason) in entries.into_iter().take(limit) {
+            let sheet = self
+                .workbook
+                .sheet_names
+                .get(sheet_id)
+                .cloned()
+                .unwrap_or_default();
+            out.push(BytecodeCompileReportEntry { sheet, addr, reason });
+        }
+        out
+    }
+
     pub fn set_bytecode_enabled(&mut self, enabled: bool) {
         if self.bytecode_enabled == enabled {
             return;
@@ -394,7 +481,7 @@ impl Engine {
 
         // Rebuild compiled formula variants to match the new bytecode setting. This ensures tests
         // (and callers) can force AST vs bytecode evaluation deterministically.
-        let mut updates: Vec<(CellKey, CompiledFormula)> = Vec::new();
+        let mut updates: Vec<(CellKey, CompiledFormula, Option<BytecodeCompileReason>)> = Vec::new();
         for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
             for (addr, cell) in &sheet.cells {
                 let Some(formula) = cell.formula.as_deref() else {
@@ -411,7 +498,11 @@ impl Engine {
                 let ast = compiled.ast().clone();
 
                 if !enabled {
-                    updates.push((key, CompiledFormula::Ast(ast)));
+                    updates.push((
+                        key,
+                        CompiledFormula::Ast(ast),
+                        Some(BytecodeCompileReason::Disabled),
+                    ));
                     continue;
                 }
 
@@ -426,25 +517,32 @@ impl Engine {
                 ) {
                     Ok(parsed) => parsed,
                     Err(_) => {
-                        updates.push((key, CompiledFormula::Ast(ast)));
+                        updates.push((
+                            key,
+                            CompiledFormula::Ast(ast),
+                            Some(BytecodeCompileReason::IneligibleExpr),
+                        ));
                         continue;
                     }
                 };
 
-                let compiled_formula = match self.try_compile_bytecode(
+                let (compiled_formula, bytecode_compile_reason) = match self.try_compile_bytecode(
                     &parsed.expr,
                     key,
                     cell.volatile,
                     cell.thread_safe,
                 ) {
-                    Some(program) => CompiledFormula::Bytecode(BytecodeFormula { ast, program }),
-                    None => CompiledFormula::Ast(ast),
+                    Ok(program) => (
+                        CompiledFormula::Bytecode(BytecodeFormula { ast, program }),
+                        None,
+                    ),
+                    Err(reason) => (CompiledFormula::Ast(ast), Some(reason)),
                 };
-                updates.push((key, compiled_formula));
+                updates.push((key, compiled_formula, bytecode_compile_reason));
             }
         }
 
-        for (key, compiled) in updates {
+        for (key, compiled, bytecode_compile_reason) in updates {
             if let Some(cell) = self
                 .workbook
                 .sheets
@@ -452,6 +550,7 @@ impl Engine {
                 .and_then(|sheet| sheet.cells.get_mut(&key.addr))
             {
                 cell.compiled = Some(compiled);
+                cell.bytecode_compile_reason = bytecode_compile_reason;
             }
         }
 
@@ -552,6 +651,7 @@ impl Engine {
         cell.value = value.into();
         cell.formula = None;
         cell.compiled = None;
+        cell.bytecode_compile_reason = None;
         cell.volatile = false;
         cell.thread_safe = true;
         cell.dynamic_deps = false;
@@ -831,18 +931,22 @@ impl Engine {
         let deps = CellDeps::new(calc_vec).volatile(volatile);
         self.calc_graph.update_cell_dependencies(cell_id, deps);
 
-        let compiled_formula =
+        let (compiled_formula, bytecode_compile_reason) =
             match self.try_compile_bytecode(&parsed.expr, key, volatile, thread_safe) {
-                Some(program) => CompiledFormula::Bytecode(BytecodeFormula {
-                    ast: compiled.clone(),
-                    program,
-                }),
-                None => CompiledFormula::Ast(compiled),
+                Ok(program) => (
+                    CompiledFormula::Bytecode(BytecodeFormula {
+                        ast: compiled.clone(),
+                        program,
+                    }),
+                    None,
+                ),
+                Err(reason) => (CompiledFormula::Ast(compiled), Some(reason)),
             };
 
         let cell = self.workbook.get_or_create_cell_mut(key);
         cell.formula = Some(formula.to_string());
         cell.compiled = Some(compiled_formula);
+        cell.bytecode_compile_reason = bytecode_compile_reason;
         cell.volatile = volatile;
         cell.thread_safe = thread_safe;
         cell.dynamic_deps = dynamic_deps;
@@ -2444,12 +2548,15 @@ impl Engine {
         key: CellKey,
         volatile: bool,
         thread_safe: bool,
-    ) -> Option<Arc<bytecode::Program>> {
+    ) -> Result<Arc<bytecode::Program>, BytecodeCompileReason> {
         if !self.bytecode_enabled {
-            return None;
+            return Err(BytecodeCompileReason::Disabled);
         }
-        if volatile || !thread_safe {
-            return None;
+        if volatile {
+            return Err(BytecodeCompileReason::Volatile);
+        }
+        if !thread_safe {
+            return Err(BytecodeCompileReason::NotThreadSafe);
         }
 
         let origin_ast = crate::CellAddr::new(key.addr.row, key.addr.col);
@@ -2458,15 +2565,13 @@ impl Engine {
             col: key.addr.col as i32,
         };
         let mut resolve_sheet = |name: &str| self.workbook.sheet_id(name);
-        let expr =
-            bytecode::lower_canonical_expr(expr, origin_ast, key.sheet, &mut resolve_sheet).ok()?;
+        let expr = bytecode::lower_canonical_expr(expr, origin_ast, key.sheet, &mut resolve_sheet)
+            .map_err(BytecodeCompileReason::LowerError)?;
         if !bytecode_expr_is_eligible(&expr) {
-            return None;
+            return Err(BytecodeCompileReason::IneligibleExpr);
         }
-        if !bytecode_expr_within_grid_limits(&expr, origin) {
-            return None;
-        }
-        Some(self.bytecode_cache.get_or_compile(&expr))
+        bytecode_expr_within_grid_limits(&expr, origin)?;
+        Ok(self.bytecode_cache.get_or_compile(&expr))
     }
 
     fn begin_recalc_context(&mut self) -> crate::eval::RecalcContext {
@@ -4486,15 +4591,23 @@ fn bytecode_expr_is_eligible(expr: &bytecode::Expr) -> bool {
     bytecode_expr_is_eligible_inner(expr, false)
 }
 
-fn bytecode_expr_within_grid_limits(expr: &bytecode::Expr, origin: bytecode::CellCoord) -> bool {
+fn bytecode_expr_within_grid_limits(
+    expr: &bytecode::Expr,
+    origin: bytecode::CellCoord,
+) -> Result<(), BytecodeCompileReason> {
     match expr {
-        bytecode::Expr::Literal(_) => true,
+        bytecode::Expr::Literal(_) => Ok(()),
         bytecode::Expr::CellRef(r) => {
             let coord = r.resolve(origin);
-            coord.row >= 0
+            if coord.row >= 0
                 && coord.col >= 0
                 && coord.row < EXCEL_MAX_ROWS_I32
                 && coord.col < EXCEL_MAX_COLS_I32
+            {
+                Ok(())
+            } else {
+                Err(BytecodeCompileReason::ExceedsGridLimits)
+            }
         }
         bytecode::Expr::RangeRef(r) => {
             let resolved = r.resolve(origin);
@@ -4503,19 +4616,27 @@ fn bytecode_expr_within_grid_limits(expr: &bytecode::Expr, origin: bytecode::Cel
                 || resolved.row_end >= EXCEL_MAX_ROWS_I32
                 || resolved.col_end >= EXCEL_MAX_COLS_I32
             {
-                return false;
+                return Err(BytecodeCompileReason::ExceedsGridLimits);
             }
             let cells = (resolved.rows() as i64) * (resolved.cols() as i64);
-            cells <= BYTECODE_MAX_RANGE_CELLS
+            if cells <= BYTECODE_MAX_RANGE_CELLS {
+                Ok(())
+            } else {
+                Err(BytecodeCompileReason::ExceedsRangeCellLimit)
+            }
         }
         bytecode::Expr::Unary { expr, .. } => bytecode_expr_within_grid_limits(expr, origin),
         bytecode::Expr::Binary { left, right, .. } => {
-            bytecode_expr_within_grid_limits(left, origin)
-                && bytecode_expr_within_grid_limits(right, origin)
+            bytecode_expr_within_grid_limits(left, origin)?;
+            bytecode_expr_within_grid_limits(right, origin)?;
+            Ok(())
         }
-        bytecode::Expr::FuncCall { args, .. } => args
-            .iter()
-            .all(|arg| bytecode_expr_within_grid_limits(arg, origin)),
+        bytecode::Expr::FuncCall { args, .. } => {
+            for arg in args {
+                bytecode_expr_within_grid_limits(arg, origin)?;
+            }
+            Ok(())
+        }
     }
 }
 

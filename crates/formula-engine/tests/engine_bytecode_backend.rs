@@ -4,7 +4,7 @@ use formula_engine::eval::{
 use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::value::NumberLocale;
-use formula_engine::{Engine, ErrorKind, ExternalValueProvider, Value};
+use formula_engine::{BytecodeCompileReason, Engine, ErrorKind, ExternalValueProvider, Value};
 use proptest::prelude::*;
 use std::sync::Arc;
 
@@ -550,4 +550,91 @@ fn bytecode_backend_coerces_scalar_text_using_engine_value_locale() {
 
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected as f64));
     assert_engine_matches_ast(&engine, r#"="1.5.2020"+0"#, "A1");
+}
+
+#[test]
+fn bytecode_compile_diagnostics_reports_fallback_reasons() {
+    let mut engine = Engine::new();
+
+    // Supported + eligible.
+    engine.set_cell_formula("Sheet1", "A1", "=1+1").unwrap();
+    // Volatile.
+    engine.set_cell_formula("Sheet1", "A2", "=RAND()").unwrap();
+    // Cross-sheet reference.
+    engine.set_cell_value("Sheet2", "A1", 42.0).unwrap();
+    engine.set_cell_formula("Sheet1", "A3", "=Sheet2!A1").unwrap();
+    // Unsupported operator (intersection).
+    engine
+        .set_cell_formula("Sheet1", "A4", "=A1:A2 B1:B2")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 4);
+    assert_eq!(stats.compiled, 1);
+    assert_eq!(stats.fallback, 3);
+
+    assert_eq!(
+        stats
+            .fallback_reasons
+            .get(&BytecodeCompileReason::Volatile)
+            .copied()
+            .unwrap_or(0),
+        1
+    );
+    assert_eq!(
+        stats
+            .fallback_reasons
+            .get(&BytecodeCompileReason::LowerError(
+                formula_engine::bytecode::LowerError::CrossSheetReference
+            ))
+            .copied()
+            .unwrap_or(0),
+        1
+    );
+
+    // Intersection can fail in lowering (Unsupported) or by failing the eligibility gate.
+    let unsupported = stats
+        .fallback_reasons
+        .get(&BytecodeCompileReason::LowerError(
+            formula_engine::bytecode::LowerError::Unsupported,
+        ))
+        .copied()
+        .unwrap_or(0);
+    let ineligible = stats
+        .fallback_reasons
+        .get(&BytecodeCompileReason::IneligibleExpr)
+        .copied()
+        .unwrap_or(0);
+    assert_eq!(unsupported + ineligible, 1);
+
+    let report = engine.bytecode_compile_report(usize::MAX);
+    assert_eq!(report.len(), 3);
+
+    let a2 = parse_a1("A2").unwrap();
+    let a3 = parse_a1("A3").unwrap();
+    let a4 = parse_a1("A4").unwrap();
+
+    let reason_for = |addr| {
+        report
+            .iter()
+            .find(|e| e.sheet == "Sheet1" && e.addr == addr)
+            .map(|e| e.reason.clone())
+    };
+
+    assert_eq!(reason_for(a2), Some(BytecodeCompileReason::Volatile));
+    assert_eq!(
+        reason_for(a3),
+        Some(BytecodeCompileReason::LowerError(
+            formula_engine::bytecode::LowerError::CrossSheetReference
+        ))
+    );
+    let a4_reason = reason_for(a4).expect("A4 should appear in fallback report");
+    assert!(
+        matches!(
+            a4_reason,
+            BytecodeCompileReason::IneligibleExpr
+                | BytecodeCompileReason::LowerError(formula_engine::bytecode::LowerError::Unsupported)
+        ),
+        "unexpected A4 bytecode compile reason: {a4_reason:?}"
+    );
 }

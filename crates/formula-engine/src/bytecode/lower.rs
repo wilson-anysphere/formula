@@ -2,7 +2,7 @@ use super::ast::{BinaryOp, Expr as BytecodeExpr, Function, UnaryOp};
 use super::value::{RangeRef, Ref, Value};
 use std::sync::Arc;
 
-#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LowerError {
     #[error("unsupported expression")]
     Unsupported,

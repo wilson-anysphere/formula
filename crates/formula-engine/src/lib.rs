@@ -49,8 +49,8 @@ pub use editing::{
     CellChange, CellSnapshot, EditError, EditOp, EditResult, FormulaRewrite, MovedRange,
 };
 pub use engine::{
-    Engine, EngineError, ExternalValueProvider, NameDefinition, NameScope, PrecedentNode,
-    RecalcMode, RecalcValueChange,
+    BytecodeCompileReason, BytecodeCompileReportEntry, BytecodeCompileStats, Engine, EngineError,
+    ExternalValueProvider, NameDefinition, NameScope, PrecedentNode, RecalcMode, RecalcValueChange,
 };
 pub use parser::{
     lex, parse_formula_partial, FunctionContext, ParseContext, PartialParse, Token, TokenKind,
