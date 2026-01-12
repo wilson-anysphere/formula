@@ -10,16 +10,6 @@ import type {
 } from "../model/CellProvider";
 import { CanvasGrid, type GridApi } from "../react/CanvasGrid";
 
-type DemoCellData = CellData & {
-  /**
-   * Optional formatted display string for number formats (Task 68).
-   * Not currently used by the renderer; included for manual verification once supported.
-   */
-  displayValue?: string;
-  formattedValue?: string;
-  numberFormat?: string;
-};
-
 function toColumnName(col0: number): string {
   let value = col0 + 1;
   let name = "";
@@ -38,7 +28,7 @@ function cellKey(row: number, col: number): string {
 class CellFormattingDemoProvider implements CellProvider {
   private readonly rowCount: number;
   private readonly colCount: number;
-  private readonly cells = new Map<string, DemoCellData>();
+  private readonly cells = new Map<string, CellData>();
 
   private readonly headerStyle: CellStyle = { fontWeight: "600", textAlign: "center" };
   private readonly rowHeaderStyle: CellStyle = { fontWeight: "600", textAlign: "end" };
@@ -52,9 +42,9 @@ class CellFormattingDemoProvider implements CellProvider {
       col: number,
       value: CellData["value"],
       style?: CellStyle,
-      extras?: Partial<DemoCellData>
+      extras?: Partial<CellData>
     ) => {
-      const cell: DemoCellData = { row, col, value, style, ...(extras ?? {}) };
+      const cell: CellData = { ...(extras ?? {}), row, col, value, style };
       this.cells.set(cellKey(row, col), cell);
     };
 
@@ -266,24 +256,13 @@ class CellFormattingDemoProvider implements CellProvider {
     );
 
     // ---------------------------------------------------------------------------------------------
-    // Number format display strings (if Task 68 lands)
+    // Number format display strings (Task 68)
     // ---------------------------------------------------------------------------------------------
-    put(
-      22,
-      1,
-      1234.56,
-      {
-        textAlign: "end",
-        fontWeight: "600",
-        fill: "rgba(148, 163, 184, 0.08)"
-      },
-      {
-        // Candidate names for display strings (implementation may choose one).
-        displayValue: "$1,234.56",
-        formattedValue: "$1,234.56",
-        numberFormat: "$#,##0.00"
-      }
-    );
+    put(22, 1, "Number formats", { fill: sectionHeaderFill, fontWeight: "700" });
+    const formatCellStyle: CellStyle = { textAlign: "end", fontWeight: "600", fill: "rgba(148, 163, 184, 0.08)" };
+    put(23, 1, "$1,234.56", formatCellStyle);
+    put(23, 2, "50%", formatCellStyle);
+    put(23, 3, "1/2/2024", formatCellStyle);
   }
 
   prefetch(): void {
@@ -380,7 +359,7 @@ export function CellFormattingDemo(): React.ReactElement {
                 <code>A20</code>: rich text runs (if Task 84 lands)
               </li>
               <li>
-                <code>A22</code>: number format display strings (if Task 68 lands)
+                <code>A22:C23</code>: number format display strings (Task 68)
               </li>
             </ul>
           </div>
