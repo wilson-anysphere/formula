@@ -1871,6 +1871,32 @@ mod tests {
     }
 
     #[test]
+    fn renders_unknown_ptgfuncvar_ids_with_arguments_as_parseable_function_calls() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // _UNKNOWN_FUNC_0xFFFF(1,2):
+        //   PtgInt 1
+        //   PtgInt 2
+        //   PtgFuncVar argc=2 iftab=0xFFFF (unknown)
+        let rgce = [
+            0x1E, 0x01, 0x00, // 1
+            0x1E, 0x02, 0x00, // 2
+            0x22, 0x02, 0xFF, 0xFF, // funcvar(argc=2, iftab=0xFFFF)
+        ];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "_UNKNOWN_FUNC_0xFFFF(1,2)");
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("0xFFFF")),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn renders_user_defined_ptgfuncvar_calls_with_unresolved_namex_as_parseable_formulas() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = Vec::new();
