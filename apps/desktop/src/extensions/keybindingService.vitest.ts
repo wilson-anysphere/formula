@@ -103,6 +103,7 @@ describe("KeybindingService", () => {
     const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
     service.setExtensionKeybindings([
       { extensionId: "ext", command: "ext.stealEscape", key: "escape", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealEnter", key: "enter", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+c", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+cmd+c", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealPasteSpecial", key: "ctrl+shift+v", mac: null, when: null },
@@ -164,10 +165,22 @@ describe("KeybindingService", () => {
       weight: 0,
       order: 10000,
     });
+    (service as any).extensions.push({
+      source: { kind: "extension", extensionId: "ext" },
+      binding: parseKeybinding("ext.stealCopy", "enter", null)!,
+      weight: 0,
+      order: 10001,
+    });
     const escapeEvent = makeKeydownEvent({ key: "Escape" });
     const escapeHandled = await service.dispatchKeydown(escapeEvent);
     expect(escapeHandled).toBe(false);
     expect(escapeEvent.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    const enterEvent = makeKeydownEvent({ key: "Enter" });
+    const enterHandled = await service.dispatchKeydown(enterEvent);
+    expect(enterHandled).toBe(false);
+    expect(enterEvent.defaultPrevented).toBe(false);
     expect(extRun).not.toHaveBeenCalled();
 
     const event = makeKeydownEvent({ key: "c", ctrlKey: true });
@@ -430,6 +443,7 @@ describe("KeybindingService", () => {
 
     service.setExtensionKeybindings([
       { extensionId: "ext", command: "ext.stealEscape", key: "escape", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealEnter", key: "enter", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+c", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealPasteSpecial", key: "ctrl+cmd+shift+v", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealQuickOpen", key: "ctrl+shift+o", mac: null, when: null },
@@ -484,6 +498,7 @@ describe("KeybindingService", () => {
     expect(index.get("ext.stealAIChat")).toBeUndefined();
     expect(index.get("ext.stealCommentsPanel")).toBeUndefined();
     expect(index.get("ext.stealEscape")).toBeUndefined();
+    expect(index.get("ext.stealEnter")).toBeUndefined();
     expect(index.get("ext.stealNew")).toBeUndefined();
     expect(index.get("ext.stealOpen")).toBeUndefined();
     expect(index.get("ext.stealSave")).toBeUndefined();

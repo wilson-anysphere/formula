@@ -82,6 +82,9 @@ export const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   // Core cancellation key (closing dialogs/menus, canceling interactions, etc).
   // Extensions should never be able to claim this.
   "escape",
+  // Core activation/navigation key (e.g. committing edits, dialog default actions).
+  // Extensions should never be able to claim this.
+  "enter",
   // Copy/Cut/Paste (core text handling should not be overrideable by extensions).
   "ctrl+c",
   "cmd+c",
