@@ -427,6 +427,15 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                     }
                     if (!contentVisible) return;
                     event.preventDefault();
+                    if (!contentVisible) {
+                      if (!isActive) {
+                        setActiveTabId(tab.id);
+                        actions.onTabChange?.(tab.id);
+                      }
+                      setFlyoutOpen(true);
+                      requestAnimationFrame(() => focusFirstControl(tab.id));
+                      return;
+                    }
                     if (!isActive) {
                       setActiveTabId(tab.id);
                       setBackstageOpen(false);

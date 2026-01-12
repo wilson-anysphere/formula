@@ -8,6 +8,12 @@ import type { RibbonActions } from "../ribbonSchema";
 
 afterEach(() => {
   document.body.innerHTML = "";
+  try {
+    globalThis.localStorage?.removeItem?.("formula.ui.ribbonCollapsed");
+  } catch {
+    // Ignore storage failures.
+  }
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 

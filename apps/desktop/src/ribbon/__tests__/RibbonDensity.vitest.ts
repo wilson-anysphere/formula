@@ -151,6 +151,45 @@ describe("Ribbon density + collapse toggle", () => {
     act(() => root.unmount());
   });
 
+  it("moves focus into the flyout panel when pressing Tab on an active tab (density hidden)", async () => {
+    vi.stubGlobal("localStorage", createStorageMock());
+    const { root, ribbonRoot, container } = renderRibbon();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => {
+      setRibbonWidth(ribbonRoot, 700);
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(ribbonRoot.dataset.density).toBe("hidden");
+
+    const content = container.querySelector<HTMLElement>(".ribbon__content");
+    if (!content) throw new Error("Missing ribbon content");
+    expect(content.hidden).toBe(true);
+
+    const activeTab = container.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]');
+    if (!activeTab) throw new Error("Missing active tab");
+    activeTab.focus();
+
+    await act(async () => {
+      activeTab.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    expect(content.hidden).toBe(false);
+    expect(ribbonRoot.dataset.flyoutOpen).toBe("true");
+
+    const focused = document.activeElement as HTMLElement | null;
+    expect(focused).not.toBeNull();
+    if (focused) {
+      expect(content.contains(focused)).toBe(true);
+    }
+
+    act(() => root.unmount());
+  });
+
   it("supports double-clicking the active tab to toggle collapse", async () => {
     vi.stubGlobal("localStorage", createStorageMock());
     const { root, ribbonRoot, container } = renderRibbon();
