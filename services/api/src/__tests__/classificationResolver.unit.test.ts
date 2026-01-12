@@ -295,6 +295,35 @@ describe("classificationResolver: selector precedence", () => {
     });
   });
 
+  it("table column classification (tableId + columnId) applies to cells when table context is provided", async () => {
+    await insertClassification({ scope: "document", documentId: docId }, { level: "Restricted", labels: ["Doc"] });
+
+    const tableColumnSelector = {
+      scope: "column",
+      documentId: docId,
+      sheetId: "Sheet1",
+      tableId: "Table1",
+      columnId: "ColA"
+    };
+    const columnKey = await insertClassification(tableColumnSelector, { level: "Internal", labels: ["TableCol"] });
+
+    const cellSelector = {
+      scope: "cell",
+      documentId: docId,
+      sheetId: "Sheet1",
+      row: 10,
+      col: 3,
+      tableId: "Table1",
+      columnId: "ColA"
+    };
+
+    const resolved = await getEffectiveClassificationForSelector(db, docId, cellSelector);
+    expect(resolved).toEqual({
+      classification: { level: "Internal", labels: ["TableCol"] },
+      source: { scope: "column", selectorKey: columnKey }
+    });
+  });
+
   it("returns Public/default when no classifications exist", async () => {
     const resolved = await getEffectiveClassificationForSelector(db, docId, {
       scope: "cell",

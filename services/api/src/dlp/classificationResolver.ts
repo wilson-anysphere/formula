@@ -119,11 +119,13 @@ export function normalizeSelectorColumns(selector: unknown): NormalizedSelectorC
         const sheetId = requireNonEmptyString(selector.sheetId, "Selector.sheetId");
         const row = requireNonNegativeInt(selector.row, "Selector.row");
         const col = requireNonNegativeInt(selector.col, "Selector.col");
+        const tableId = selector.tableId == null ? null : requireNonEmptyString(selector.tableId, "Selector.tableId");
+        const columnId = selector.columnId == null ? null : requireNonEmptyString(selector.columnId, "Selector.columnId");
 
         return {
           scope,
           sheetId,
-          tableId: null,
+          tableId,
           row,
           col,
           startRow: null,
@@ -131,7 +133,7 @@ export function normalizeSelectorColumns(selector: unknown): NormalizedSelectorC
           endRow: null,
           endCol: null,
           columnIndex: null,
-          columnId: null
+          columnId
         };
       }
     case "range": {
@@ -356,7 +358,9 @@ async function queryCandidatesForCell(
   docId: string,
   sheetId: string,
   row: number,
-  col: number
+  col: number,
+  tableId: string | null,
+  columnId: string | null
 ): Promise<CellResolutionCandidateRow[]> {
   const res = await db.query(
     `
@@ -384,13 +388,40 @@ async function queryCandidatesForCell(
       UNION ALL
       SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
       FROM document_classifications
+      WHERE
+        document_id = $1
+        AND scope = 'column'
+        AND sheet_id = $2
+        AND table_id IS NULL
+        AND column_id = $6
+      UNION ALL
+      SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
+      FROM document_classifications
+      WHERE
+        document_id = $1
+        AND scope = 'column'
+        AND sheet_id = $2
+        AND table_id = $5
+        AND column_index = $4
+      UNION ALL
+      SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
+      FROM document_classifications
+      WHERE
+        document_id = $1
+        AND scope = 'column'
+        AND sheet_id = $2
+        AND table_id = $5
+        AND column_id = $6
+      UNION ALL
+      SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
+      FROM document_classifications
       WHERE document_id = $1 AND scope = 'sheet' AND sheet_id = $2
       UNION ALL
       SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
       FROM document_classifications
       WHERE document_id = $1 AND scope = 'document'
     `,
-    [docId, sheetId, row, col]
+    [docId, sheetId, row, col, tableId, columnId]
   );
 
   return res.rows as CellResolutionCandidateRow[];
@@ -522,7 +553,9 @@ export async function getEffectiveClassificationForSelector(
         docId,
         normalized.sheetId!,
         normalized.row!,
-        normalized.col!
+        normalized.col!,
+        normalized.tableId,
+        normalized.columnId
       );
 
       const cellRows = candidateRows
