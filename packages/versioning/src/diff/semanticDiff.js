@@ -80,10 +80,8 @@ function stableStringify(value) {
  * @returns {{ encrypted: boolean, keyId: string | null }}
  */
 function encryptionMeta(cell) {
-  if (!cell || !Object.prototype.hasOwnProperty.call(cell, "enc")) {
-    return { encrypted: false, keyId: null };
-  }
-  const enc = cell.enc;
+  const enc = cell?.enc;
+  if (enc === null || enc === undefined) return { encrypted: false, keyId: null };
   const keyId = enc && typeof enc === "object" && typeof enc.keyId === "string" ? enc.keyId : null;
   return { encrypted: true, keyId };
 }

@@ -204,3 +204,59 @@ test("diffYjsWorkbookSnapshots: encrypted format-only changes work even when for
   assert.equal(sheetDiff.formatOnly[0].newKeyId, "k1");
   assert.equal(sheetDiff.modified.length, 0);
 });
+
+test("diffYjsWorkbookSnapshots: encrypted cell additions include encrypted metadata", () => {
+  const enc = { v: 1, alg: "AES-256-GCM", keyId: "k1", ivBase64: "iv", tagBase64: "tag", ciphertextBase64: "ct" };
+
+  const doc = createWorkbookDoc();
+  const cells = doc.getMap("cells");
+
+  const beforeSnapshot = Y.encodeStateAsUpdate(doc);
+
+  doc.transact(() => {
+    const cell = new Y.Map();
+    cell.set("enc", enc);
+    cells.set("Sheet1:0:0", cell);
+  });
+
+  const afterSnapshot = Y.encodeStateAsUpdate(doc);
+  const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  const sheetDiff = diff.cellsBySheet.find((entry) => entry.sheetId === "Sheet1")?.diff;
+  assert.ok(sheetDiff);
+
+  assert.equal(sheetDiff.added.length, 1);
+  assert.deepEqual(sheetDiff.added[0].cell, { row: 0, col: 0 });
+  assert.equal(sheetDiff.added[0].newEncrypted, true);
+  assert.equal(sheetDiff.added[0].newKeyId, "k1");
+  assert.equal("enc" in sheetDiff.added[0], false);
+});
+
+test("diffYjsWorkbookSnapshots: encrypted cell removals include encrypted metadata", () => {
+  const enc = { v: 1, alg: "AES-256-GCM", keyId: "k1", ivBase64: "iv", tagBase64: "tag", ciphertextBase64: "ct" };
+
+  const doc = createWorkbookDoc();
+  const cells = doc.getMap("cells");
+
+  doc.transact(() => {
+    const cell = new Y.Map();
+    cell.set("enc", enc);
+    cells.set("Sheet1:0:0", cell);
+  });
+
+  const beforeSnapshot = Y.encodeStateAsUpdate(doc);
+
+  doc.transact(() => {
+    cells.delete("Sheet1:0:0");
+  });
+
+  const afterSnapshot = Y.encodeStateAsUpdate(doc);
+  const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  const sheetDiff = diff.cellsBySheet.find((entry) => entry.sheetId === "Sheet1")?.diff;
+  assert.ok(sheetDiff);
+
+  assert.equal(sheetDiff.removed.length, 1);
+  assert.deepEqual(sheetDiff.removed[0].cell, { row: 0, col: 0 });
+  assert.equal(sheetDiff.removed[0].oldEncrypted, true);
+  assert.equal(sheetDiff.removed[0].oldKeyId, "k1");
+  assert.equal("enc" in sheetDiff.removed[0], false);
+});
