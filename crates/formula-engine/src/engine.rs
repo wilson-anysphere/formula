@@ -7160,7 +7160,7 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 1 {
                     return false;
                 }
-                bytecode_expr_is_eligible_inner(&args[0], false, false, lexical_scopes)
+                bytecode_expr_is_eligible_inner(&args[0], true, true, lexical_scopes)
             }
             bytecode::ast::Function::Na => args.is_empty(),
             bytecode::ast::Function::Switch => {

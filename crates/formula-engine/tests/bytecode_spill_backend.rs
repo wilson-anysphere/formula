@@ -19,6 +19,19 @@ fn setup_info_engine(bytecode_enabled: bool) -> Engine {
     engine
 }
 
+fn setup_error_engine(bytecode_enabled: bool) -> Engine {
+    let mut engine = Engine::new();
+    engine.set_bytecode_enabled(bytecode_enabled);
+    engine
+        .set_cell_value("Sheet1", "A1", Value::Error(ErrorKind::Div0))
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "A2", Value::Error(ErrorKind::NA))
+        .unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+    engine
+}
+
 #[test]
 fn bytecode_spills_match_ast_for_range_reference_and_elementwise_ops() {
     for (formula, expected) in [
@@ -129,6 +142,57 @@ fn bytecode_spills_match_ast_for_information_functions_over_ranges() {
         ast.recalculate_single_threaded();
 
         let mut bytecode = setup_info_engine(true);
+        bytecode.set_cell_formula("Sheet1", "C1", formula).unwrap();
+        assert_eq!(
+            bytecode.bytecode_program_count(),
+            1,
+            "expected formula {formula} to compile to bytecode"
+        );
+        bytecode.recalculate_single_threaded();
+
+        assert_eq!(
+            bytecode.spill_range("Sheet1", "C1"),
+            Some((parse_a1("C1").unwrap(), parse_a1("C3").unwrap())),
+            "expected spill range for bytecode formula {formula}"
+        );
+        assert_eq!(
+            ast.spill_range("Sheet1", "C1"),
+            Some((parse_a1("C1").unwrap(), parse_a1("C3").unwrap())),
+            "expected spill range for AST formula {formula}"
+        );
+
+        for (addr, expected_value) in ["C1", "C2", "C3"].into_iter().zip(expected) {
+            assert_eq!(
+                bytecode.get_cell_value("Sheet1", addr),
+                expected_value,
+                "bytecode mismatch at {addr} for {formula}"
+            );
+            assert_eq!(
+                ast.get_cell_value("Sheet1", addr),
+                expected_value,
+                "AST mismatch at {addr} for {formula}"
+            );
+        }
+    }
+}
+
+#[test]
+fn bytecode_spills_match_ast_for_iserror_and_isna_over_ranges() {
+    for (formula, expected) in [
+        (
+            "=ISERROR(A1:A3)",
+            vec![Value::Bool(true), Value::Bool(true), Value::Bool(false)],
+        ),
+        (
+            "=ISNA(A1:A3)",
+            vec![Value::Bool(false), Value::Bool(true), Value::Bool(false)],
+        ),
+    ] {
+        let mut ast = setup_error_engine(false);
+        ast.set_cell_formula("Sheet1", "C1", formula).unwrap();
+        ast.recalculate_single_threaded();
+
+        let mut bytecode = setup_error_engine(true);
         bytecode.set_cell_formula("Sheet1", "C1", formula).unwrap();
         assert_eq!(
             bytecode.bytecode_program_count(),

@@ -1058,8 +1058,8 @@ pub fn call_function(
         Function::Xor => fn_xor(args, grid, base),
         Function::IfError => fn_iferror(args),
         Function::IfNa => fn_ifna(args),
-        Function::IsError => fn_iserror(args),
-        Function::IsNa => fn_isna(args),
+        Function::IsError => fn_iserror(args, grid, base),
+        Function::IsNa => fn_isna(args, grid, base),
         Function::Na => fn_na(args),
         Function::Switch => fn_switch(args, grid, base),
         Function::Sum => fn_sum(args, grid, base),
@@ -1557,18 +1557,24 @@ fn fn_ifna(args: &[Value]) -> Value {
     }
 }
 
-fn fn_iserror(args: &[Value]) -> Value {
+fn fn_iserror(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    Value::Bool(matches!(args[0], Value::Error(_)))
+    match &args[0] {
+        // Multi-sheet spans are lowered as `Value::MultiRange` in bytecode. The AST evaluator
+        // treats these as a reference-union argument which evaluates to `#VALUE!`, and then
+        // ISERROR returns TRUE for that error value.
+        Value::MultiRange(r) if r.areas.len() != 1 => Value::Bool(true),
+        other => map_arg(other, grid, base, |v| Value::Bool(matches!(v, Value::Error(_)))),
+    }
 }
 
-fn fn_isna(args: &[Value]) -> Value {
+fn fn_isna(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    Value::Bool(matches!(args[0], Value::Error(ErrorKind::NA)))
+    map_arg(&args[0], grid, base, |v| Value::Bool(matches!(v, Value::Error(ErrorKind::NA))))
 }
 
 fn fn_na(args: &[Value]) -> Value {
@@ -2027,10 +2033,59 @@ where
             }
             Value::Array(ArrayValue::new(rows, cols, values))
         }
+        Value::MultiRange(r) => {
+            // Multi-range values generally represent 3D sheet spans. For single-sheet spans,
+            // treat this like a normal range reference; for multi-sheet spans, we cannot spill
+            // a single rectangular array, so surface `#VALUE!` (matching the AST evaluator's
+            // reference-union behavior).
+            let [area] = r.areas.as_ref() else {
+                return Value::Error(ErrorKind::Value);
+            };
+
+            let resolved = area.range.resolve(base);
+            if !range_in_bounds_on_sheet(grid, area.sheet, resolved) {
+                return map_value(&Value::Error(ErrorKind::Ref), f);
+            }
+
+            if resolved.rows() == 1 && resolved.cols() == 1 {
+                let v = grid.get_value_on_sheet(
+                    area.sheet,
+                    CellCoord {
+                        row: resolved.row_start,
+                        col: resolved.col_start,
+                    },
+                );
+                return map_value(&v, f);
+            }
+
+            let rows = match usize::try_from(resolved.rows()) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::Num),
+            };
+            let cols = match usize::try_from(resolved.cols()) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::Num),
+            };
+            let total = match rows.checked_mul(cols) {
+                Some(v) => v,
+                None => return Value::Error(ErrorKind::Num),
+            };
+            let mut values = Vec::new();
+            if values.try_reserve_exact(total).is_err() {
+                return Value::Error(ErrorKind::Num);
+            }
+            for row in resolved.row_start..=resolved.row_end {
+                for col in resolved.col_start..=resolved.col_end {
+                    let v = grid.get_value_on_sheet(area.sheet, CellCoord { row, col });
+                    values.push(f(&v));
+                }
+            }
+
+            Value::Array(ArrayValue::new(rows, cols, values))
+        }
         // Multi-sheet ranges (3D sheet spans) are lowered to a MultiRange value, which matches the
         // evaluator's "reference union" behavior. Information functions treat these as invalid
         // arguments (#VALUE!) rather than spilling arrays.
-        Value::MultiRange(_) => Value::Error(ErrorKind::Value),
         other => map_value(other, f),
     }
 }
