@@ -32,5 +32,28 @@ describe("FormulaBarView hover previews", () => {
 
     host.remove();
   });
-});
 
+  it("emits a range for sheet-qualified references while editing", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    let hovered = null as ReturnType<typeof parseA1Range>;
+    const view = new FormulaBarView(host, {
+      onCommit: () => {},
+      onHoverRange: (range) => {
+        hovered = range;
+      },
+    });
+
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+
+    view.textarea.value = "=Sheet2!A1:B2";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    expect(hovered).toEqual(parseA1Range("A1:B2"));
+
+    host.remove();
+  });
+});
