@@ -68,7 +68,7 @@ test.describe("sheet navigation shortcuts", () => {
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
   });
 
-  test("Ctrl/Cmd+PageDown is global (works from ribbon focus) and restores grid focus", async ({ page }) => {
+  test("Ctrl/Cmd+PageUp/PageDown is global (works from ribbon focus) and restores grid focus", async ({ page }) => {
     await gotoDesktop(page);
     await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
 
@@ -114,6 +114,28 @@ test.describe("sheet navigation shortcuts", () => {
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
 
     // After switching sheets, focus should return to the grid so keyboard workflows keep working.
+    await expect
+      .poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.id))
+      .toBe("grid");
+
+    // Repeat in the opposite direction (Sheet2 -> Sheet1) while focus is outside the grid.
+    await bold.focus();
+    await expect(bold).toBeFocused();
+
+    await page.evaluate((isMac) => {
+      const target = document.activeElement ?? window;
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "PageUp",
+          metaKey: isMac,
+          ctrlKey: !isMac,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, process.platform === "darwin");
+
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
     await expect
       .poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.id))
       .toBe("grid");
