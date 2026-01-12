@@ -49,6 +49,7 @@ import {
   normalizeSelectionRange,
 } from "../formatting/selectionSizeGuard.js";
 import { formatValueWithNumberFormat } from "../formatting/numberFormat.ts";
+import { dateToExcelSerial } from "../shared/valueParsing.js";
 import { createDesktopDlpContext } from "../dlp/desktopDlp.js";
 import { enforceClipboardCopy } from "../dlp/enforceClipboardCopy.js";
 import { DlpViolationError } from "../../../../packages/security/dlp/src/errors.js";
@@ -7502,19 +7503,22 @@ export class SpreadsheetApp {
   private insertCurrentDateTimeIntoSelection(kind: "date" | "time"): void {
     const now = new Date();
 
-    const stringValue = (() => {
+    const value = (() => {
       if (kind === "date") {
-        const month = now.getMonth() + 1;
-        const day = now.getDate();
-        const year = now.getFullYear();
-        return `${month}/${day}/${year}`;
+        // Excel stores dates as integer serials (1900 date system).
+        // Interpret the "current date" in local time, but convert to a UTC midnight
+        // date for deterministic serial conversion.
+        const y = now.getFullYear();
+        const m = now.getMonth();
+        const d = now.getDate();
+        return dateToExcelSerial(new Date(Date.UTC(y, m, d)));
       }
 
-      const hour = now.getHours();
-      const minutes = String(now.getMinutes()).padStart(2, "0");
-      return `${hour}:${minutes}`;
+      const seconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+      return seconds / 86_400;
     })();
 
+    const numberFormat = kind === "date" ? "yyyy-mm-dd" : "hh:mm:ss";
     const label = kind === "date" ? t("command.edit.insertDate") : t("command.edit.insertTime");
 
     const normalizeRange = (range: Range): Range => ({
@@ -7558,8 +7562,13 @@ export class SpreadsheetApp {
         const colCount = range.endCol - range.startCol + 1;
         if (rowCount <= 0 || colCount <= 0) continue;
 
-        const values = Array.from({ length: rowCount }, () => Array(colCount).fill(stringValue));
+        const values = Array.from({ length: rowCount }, () => Array(colCount).fill(value));
         this.document.setRangeValues(this.sheetId, { row: range.startRow, col: range.startCol }, values);
+        this.document.setRangeFormat(
+          this.sheetId,
+          { start: { row: range.startRow, col: range.startCol }, end: { row: range.endRow, col: range.endCol } },
+          { numberFormat },
+        );
       }
     } finally {
       this.document.endBatch();
