@@ -643,7 +643,10 @@ export function SheetTabStrip({
               const initialValue = (() => {
                 const normalized = String(currentCss ?? "").trim();
                 if (/^#[0-9a-fA-F]{6}$/.test(normalized)) return normalized.toLowerCase();
-                const tokenFallback = resolveCssVar("--sheet-tab-gray", { fallback: defaultValue }).trim();
+                const grayFallbackArgb =
+                  SHEET_TAB_COLOR_PALETTE.find((entry) => entry.token === "--sheet-tab-gray")?.excelArgb ?? "";
+                const grayFallbackCss = excelArgbToCssHex(grayFallbackArgb) ?? defaultValue;
+                const tokenFallback = resolveCssVar("--sheet-tab-gray", { fallback: grayFallbackCss }).trim();
                 if (/^#[0-9a-fA-F]{6}$/.test(tokenFallback)) return tokenFallback.toLowerCase();
                 return defaultValue;
               })();
