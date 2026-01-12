@@ -612,6 +612,112 @@ impl<'a> CompileCtx<'a> {
         }
     }
 
+    fn compile_choose(&mut self, args: &[Expr], allow_range: bool) {
+        // CHOOSE(index, value1, value2, ...)
+        if args.len() < 2 {
+            self.push_error_const(ErrorKind::Value);
+            return;
+        }
+
+        // Evaluate the index expression once. Excel truncates non-integer indices toward zero,
+        // matching `ROUNDDOWN(index, 0)`.
+        self.compile_expr_inner(&args[0], false);
+        let zero_idx = self.program.consts.len() as u32;
+        self.program
+            .consts
+            .push(ConstValue::Value(Value::Number(0.0)));
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::PushConst, zero_idx, 0));
+        let rounddown_idx = intern_func(self.program, Function::RoundDown);
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::CallFunc, rounddown_idx, 2));
+
+        let idx_local = self.alloc_temp_local("\u{0}CHOOSE_IDX");
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::StoreLocal, idx_local, 0));
+
+        // If the index is an error, return it without evaluating any choice expressions.
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::LoadLocal, idx_local, 0));
+        let jump_not_error_idx = self.program.instrs.len();
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::JumpIfNotError, 0, 0));
+        // Error path: reload the error and jump to end.
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::LoadLocal, idx_local, 0));
+        let jump_error_end_idx = self.program.instrs.len();
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::Jump, 0, 0));
+
+        let cases_start = self.program.instrs.len() as u32;
+        self.program.instrs[jump_not_error_idx] =
+            Instruction::new(OpCode::JumpIfNotError, cases_start, 0);
+
+        let mut jump_if_idxs: Vec<usize> = Vec::new();
+        let mut jump_end_idxs: Vec<usize> = vec![jump_error_end_idx];
+
+        // Case i corresponds to the i-th choice argument, where i starts at 1.
+        for (idx, choice) in args[1..].iter().enumerate() {
+            let case_idx = (idx + 1) as f64;
+
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::LoadLocal, idx_local, 0));
+            let const_idx = self.program.consts.len() as u32;
+            self.program
+                .consts
+                .push(ConstValue::Value(Value::Number(case_idx)));
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::PushConst, const_idx, 0));
+            self.program.instrs.push(Instruction::new(OpCode::Eq, 0, 0));
+
+            let jump_idx = self.program.instrs.len();
+            // Patched below: a=next_case_target, b=end_target (for error propagation).
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::JumpIfFalseOrError, 0, 0));
+
+            // Match branch: evaluate the selected choice and jump to end.
+            //
+            // Choice arguments follow "argument mode" semantics when CHOOSE appears in a
+            // range-allowed context (e.g. `SUM(CHOOSE(..., A1, B1))` should treat the cell
+            // reference like a reference argument, not a scalar).
+            self.compile_expr_inner(choice, allow_range);
+            let jump_end_idx = self.program.instrs.len();
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::Jump, 0, 0));
+
+            let next_case_target = self.program.instrs.len() as u32;
+            self.program.instrs[jump_idx] =
+                Instruction::new(OpCode::JumpIfFalseOrError, next_case_target, 0);
+
+            jump_if_idxs.push(jump_idx);
+            jump_end_idxs.push(jump_end_idx);
+        }
+
+        // No match (including idx < 1 or out of range): return #VALUE!.
+        self.push_error_const(ErrorKind::Value);
+        let end_target = self.program.instrs.len() as u32;
+
+        for idx in jump_if_idxs {
+            let a = self.program.instrs[idx].a();
+            self.program.instrs[idx] =
+                Instruction::new(OpCode::JumpIfFalseOrError, a, end_target);
+        }
+        for idx in jump_end_idxs {
+            self.program.instrs[idx] = Instruction::new(OpCode::Jump, end_target, 0);
+        }
+    }
+
     fn compile_func_arg(&mut self, func: &Function, arg_idx: usize, arg: &Expr) {
         // Preserve `Missing` for *direct* blank arguments so functions can distinguish a
         // syntactically omitted argument from a blank cell value.
