@@ -64,9 +64,11 @@ export function parseKeybinding(command: string, binding: string, when: string |
   const isModifierToken = (token: string): boolean =>
     token === "ctrl" ||
     token === "control" ||
+    token === "ctl" ||
     token === "shift" ||
     token === "alt" ||
     token === "option" ||
+    token === "opt" ||
     token === "cmd" ||
     token === "command" ||
     token === "meta" ||
@@ -87,9 +89,9 @@ export function parseKeybinding(command: string, binding: string, when: string |
   };
 
   for (const part of parts.slice(0, -1)) {
-    if (part === "ctrl" || part === "control") out.ctrl = true;
+    if (part === "ctrl" || part === "control" || part === "ctl") out.ctrl = true;
     else if (part === "shift") out.shift = true;
-    else if (part === "alt" || part === "option") out.alt = true;
+    else if (part === "alt" || part === "option" || part === "opt") out.alt = true;
     else if (part === "cmd" || part === "command" || part === "meta" || part === "win" || part === "super") out.meta = true;
     else return null;
   }

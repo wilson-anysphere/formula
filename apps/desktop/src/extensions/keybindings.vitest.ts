@@ -49,6 +49,22 @@ describe("keybindings", () => {
       key: "k",
     });
 
+    expect(parseKeybinding("cmd", "ctl+shift+y")).toMatchObject({
+      ctrl: true,
+      alt: false,
+      shift: true,
+      meta: false,
+      key: "y",
+    });
+
+    expect(parseKeybinding("cmd", "opt+shift+k")).toMatchObject({
+      ctrl: false,
+      alt: true,
+      shift: true,
+      meta: false,
+      key: "k",
+    });
+
     expect(parseKeybinding("cmd", "win+shift+k")).toMatchObject({
       ctrl: false,
       alt: false,
