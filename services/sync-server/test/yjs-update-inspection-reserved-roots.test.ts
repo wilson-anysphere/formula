@@ -7,6 +7,141 @@ import { Y } from "./yjs-interop.ts";
 const reservedRootNames = new Set<string>(["versions", "versionsMeta"]);
 const reservedRootPrefixes = ["branching:"];
 
+function setDeterministicClientId(doc: Y.Doc, clientId: number): void {
+  // Yjs generates random clientIDs; for regression tests we'd rather have stable,
+  // deterministic struct IDs across runs.
+  (doc as any).clientID = clientId;
+}
+
+function createBaselineReservedRootDoc(): Y.Doc {
+  const doc = new Y.Doc();
+  setDeterministicClientId(doc, 1);
+
+  doc.transact(() => {
+    const versions = doc.getMap("versions");
+
+    const makeRecord = (id: string) => {
+      const record = new Y.Map<any>();
+      record.set("schemaVersion", 1);
+      record.set("id", id);
+      record.set("checkpointLocked", false);
+      record.set("snapshotChunks", new Y.Array<Uint8Array>());
+      return record;
+    };
+
+    versions.set("v1", makeRecord("v1"));
+    versions.set("v2", makeRecord("v2"));
+
+    const meta = doc.getMap("versionsMeta");
+    const order = new Y.Array<string>();
+    order.push(["v1", "v2"]);
+    meta.set("order", order);
+  }, "baseline-reserved-roots");
+
+  return doc;
+}
+
+function collectKeyPathsFromObserveDeep(params: {
+  baselineUpdate: Uint8Array;
+  update: Uint8Array;
+}): Map<string, Set<string>> {
+  const shadow = new Y.Doc();
+  Y.applyUpdate(shadow, params.baselineUpdate);
+
+  const touchedByRoot = new Map<string, Set<string>>([
+    ["versions", new Set<string>()],
+    ["versionsMeta", new Set<string>()],
+  ]);
+
+  const makeObserver =
+    (root: string) =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (events: any[]) => {
+      const out = touchedByRoot.get(root);
+      if (!out) return;
+      for (const event of events) {
+        const rawPath = event?.path;
+        const path =
+          Array.isArray(rawPath) && rawPath.length > 0
+            ? rawPath.filter((p: unknown): p is string => typeof p === "string")
+            : [];
+
+        const keys = event?.changes?.keys;
+        if (keys) {
+          let addedKey = false;
+          if (typeof keys.entries === "function") {
+            for (const [key] of keys.entries()) {
+              if (typeof key === "string") {
+                out.add(JSON.stringify([...path, key]));
+                addedKey = true;
+              }
+            }
+          } else if (typeof keys.keys === "function") {
+            for (const key of keys.keys()) {
+              if (typeof key === "string") {
+                out.add(JSON.stringify([...path, key]));
+                addedKey = true;
+              }
+            }
+          }
+          if (addedKey) continue;
+        }
+
+        // Array/text updates don't have `changes.keys`, but still represent a touch
+        // of the map key that holds the nested type.
+        if (path.length > 0) {
+          out.add(JSON.stringify(path));
+        }
+      }
+    };
+
+  const versions = shadow.getMap("versions");
+  const meta = shadow.getMap("versionsMeta");
+  const versionsObserver = makeObserver("versions");
+  const metaObserver = makeObserver("versionsMeta");
+
+  versions.observeDeep(versionsObserver);
+  meta.observeDeep(metaObserver);
+
+  try {
+    Y.applyUpdate(shadow, params.update);
+  } finally {
+    versions.unobserveDeep(versionsObserver);
+    meta.unobserveDeep(metaObserver);
+    shadow.destroy();
+  }
+
+  return touchedByRoot;
+}
+
+function collectKeyPathsFromInspector(params: {
+  serverDoc: Y.Doc;
+  update: Uint8Array;
+}): Map<string, Set<string>> {
+  const res = inspectUpdate({
+    ydoc: params.serverDoc,
+    update: params.update,
+    reservedRootNames,
+    reservedRootPrefixes,
+    maxTouches: 1000,
+  });
+
+  assert.equal(
+    res.unknownReason,
+    undefined,
+    `inspector unexpectedly failed closed: ${res.unknownReason}`
+  );
+
+  const out = new Map<string, Set<string>>();
+  for (const touch of res.touches) {
+    const existing = out.get(touch.root);
+    const set = existing ?? new Set<string>();
+    set.add(JSON.stringify(touch.keyPath));
+    if (!existing) out.set(touch.root, set);
+  }
+  return out;
+}
+
 test("yjs update inspection: direct root write flags reserved root", () => {
   const serverDoc = new Y.Doc();
   const clientDoc = new Y.Doc();
@@ -31,6 +166,139 @@ test("yjs update inspection: direct root write flags reserved root", () => {
 
   serverDoc.destroy();
   clientDoc.destroy();
+});
+
+test("yjs update inspection: matches observeDeep ground truth for reserved roots", () => {
+  const serverDoc = createBaselineReservedRootDoc();
+  const baselineUpdate = Y.encodeStateAsUpdate(serverDoc);
+  const serverStateVector = Y.encodeStateVector(serverDoc);
+
+  const makeUpdate = (
+    clientId: number,
+    mutate: (clientDoc: Y.Doc) => void
+  ): Uint8Array => {
+    const clientDoc = new Y.Doc();
+    setDeterministicClientId(clientDoc, clientId);
+    Y.applyUpdate(clientDoc, baselineUpdate);
+    mutate(clientDoc);
+    const update = Y.encodeStateAsUpdate(clientDoc, serverStateVector);
+    clientDoc.destroy();
+    return update;
+  };
+
+  const scenarios: Array<{ name: string; update: Uint8Array }> = [
+    {
+      name: "overwrite same map key twice (origin-copy)",
+      update: makeUpdate(2, (doc) => {
+        const versions = doc.getMap("versions");
+        doc.transact(() => {
+          versions.set("v3", 1);
+          versions.set("v3", 2);
+        }, "origin-copy");
+
+        // Ensure this scenario actually exercises the tricky "parent omitted, copy from origin" encoding.
+        const update = Y.encodeStateAsUpdate(doc, serverStateVector);
+        const decoded = Y.decodeUpdate(update);
+        const sawParentOmitted = decoded.structs.some(
+          (s) => s.constructor.name === "Item" && (s as any).parent == null
+        );
+        assert.equal(sawParentOmitted, true);
+      }),
+    },
+    {
+      name: "mutate nested record field",
+      update: makeUpdate(3, (doc) => {
+        const v1 = doc.getMap("versions").get("v1") as any;
+        assert.ok(v1 && typeof v1.set === "function");
+        doc.transact(() => {
+          v1.set("checkpointLocked", true);
+        }, "nested-record-field");
+      }),
+    },
+    {
+      name: "mutate nested array (order.push)",
+      update: makeUpdate(4, (doc) => {
+        const order = doc.getMap("versionsMeta").get("order") as any;
+        assert.ok(order && typeof order.push === "function");
+        doc.transact(() => {
+          order.push(["v3"]);
+        }, "order-push");
+
+        // Ensure this scenario actually encodes leaf items with parentSub=null (array insertions).
+        const update = Y.encodeStateAsUpdate(doc, serverStateVector);
+        const decoded = Y.decodeUpdate(update);
+        const sawArrayLeaf = decoded.structs.some(
+          (s) => s.constructor.name === "Item" && (s as any).parentSub === null
+        );
+        assert.equal(sawArrayLeaf, true);
+      }),
+    },
+    {
+      name: "delete a key (delete set)",
+      update: makeUpdate(5, (doc) => {
+        doc.transact(() => {
+          doc.getMap("versionsMeta").delete("order");
+        }, "delete-order-key");
+      }),
+    },
+    {
+      name: "merged update touches both versions + versionsMeta",
+      update: (() => {
+        const u1 = makeUpdate(6, (doc) => {
+          const v2 = doc.getMap("versions").get("v2") as any;
+          assert.ok(v2 && typeof v2.set === "function");
+          doc.transact(() => {
+            v2.set("checkpointLocked", true);
+          }, "u1-versions");
+        });
+
+        const u2 = makeUpdate(7, (doc) => {
+          const order = doc.getMap("versionsMeta").get("order") as any;
+          assert.ok(order && typeof order.push === "function");
+          doc.transact(() => {
+            order.push(["v3"]);
+          }, "u2-versionsMeta");
+        });
+
+        return Y.mergeUpdates([u1, u2]);
+      })(),
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const groundTruth = collectKeyPathsFromObserveDeep({
+      baselineUpdate,
+      update: scenario.update,
+    });
+    const inspected = collectKeyPathsFromInspector({
+      serverDoc,
+      update: scenario.update,
+    });
+
+    const rootsFromGroundTruth = Array.from(groundTruth.entries())
+      .filter(([_root, paths]) => paths.size > 0)
+      .map(([root]) => root)
+      .sort();
+    const rootsFromInspector = Array.from(inspected.keys()).sort();
+
+    assert.deepEqual(
+      rootsFromInspector,
+      rootsFromGroundTruth,
+      `${scenario.name}: reserved roots touched mismatch`
+    );
+
+    for (const root of rootsFromGroundTruth) {
+      const expected = Array.from(groundTruth.get(root) ?? []).sort();
+      const actual = Array.from(inspected.get(root) ?? []).sort();
+      assert.deepEqual(
+        actual,
+        expected,
+        `${scenario.name}: keyPaths mismatch for ${root}`
+      );
+    }
+  }
+
+  serverDoc.destroy();
 });
 
 test("yjs update inspection: nested write resolves root + keyPath", () => {
