@@ -622,7 +622,9 @@ const sheetSwitcherEl = sheetSwitcher;
 const zoomControlEl = zoomControl;
 const sheetPositionEl = sheetPosition;
 
-const workbookId = "local-workbook";
+const docIdParam = new URL(window.location.href).searchParams.get("docId");
+const docId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docIdParam : null;
+const workbookId = docId ?? "local-workbook";
 const app = new SpreadsheetApp(
   gridRoot,
   { activeCell, selectionRange, activeValue, selectionSum, selectionAverage, selectionCount },

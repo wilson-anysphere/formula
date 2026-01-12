@@ -26,6 +26,27 @@ test.describe("dockable panels layout persistence", () => {
     await expect(page.getByTestId("dock-right").getByTestId("panel-aiChat")).toHaveCount(0);
   });
 
+  test("different docId values isolate persisted layout", async ({ page }) => {
+    await gotoDesktop(page, "/?docId=doc-a");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+
+    // Persist a non-default layout under doc-a.
+    await page.getByTestId("open-panel-ai-chat").click();
+    await page.getByTestId("dock-ai-panel-left").click();
+    await expect(page.getByTestId("dock-left").getByTestId("panel-aiChat")).toBeVisible();
+
+    // Load a different collab document; it should not pick up doc-a's layout.
+    await gotoDesktop(page, "/?docId=doc-b");
+    await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
+
+    // Reload doc-b to ensure it remains isolated.
+    await page.reload();
+    await waitForDesktopReady(page);
+    await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
+  });
+
   test("dock tab strip switches between multiple open panels", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
