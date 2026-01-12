@@ -177,11 +177,20 @@ function currentSelectionRect(): SelectionRect {
   const sheetId = app.getCurrentSheetId();
   const active = app.getActiveCell();
   const ranges = app.getSelectionRanges();
+  const normalize = (range: { startRow: number; startCol: number; endRow: number; endCol: number }) => {
+    const startRow = Math.min(range.startRow, range.endRow);
+    const endRow = Math.max(range.startRow, range.endRow);
+    const startCol = Math.min(range.startCol, range.endCol);
+    const endCol = Math.max(range.startCol, range.endCol);
+    return { startRow, startCol, endRow, endCol };
+  };
+
+  const normalizedRanges = ranges.map(normalize);
   const containing =
-    ranges.find(
+    normalizedRanges.find(
       (r) =>
-        active.row >= r.startRow && active.row <= r.endRow && active.col >= r.startCol && active.col <= r.endCol
-    ) ?? ranges[0];
+        active.row >= r.startRow && active.row <= r.endRow && active.col >= r.startCol && active.col <= r.endCol,
+    ) ?? normalizedRanges[0];
   if (containing) {
     return {
       sheetId,

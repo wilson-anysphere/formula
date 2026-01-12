@@ -157,7 +157,13 @@ function getUiSelectionRect(app: SpreadsheetAppLike): Rect {
 async function setMacroUiContext(args: InstallVbaEventMacrosArgs, context?: UiContext): Promise<void> {
   const sheetId = context?.sheetId ?? args.app.getCurrentSheetId();
   const active = context ? { row: context.activeRow, col: context.activeCol } : args.app.getActiveCell();
-  const selection = context?.selection ?? getUiSelectionRect(args.app);
+  const selectionRaw = context?.selection ?? getUiSelectionRect(args.app);
+  const selection = normalizeRect({
+    startRow: nonNegativeInt(selectionRaw.startRow),
+    startCol: nonNegativeInt(selectionRaw.startCol),
+    endRow: nonNegativeInt(selectionRaw.endRow),
+    endCol: nonNegativeInt(selectionRaw.endCol),
+  });
 
   try {
     await args.invoke("set_macro_ui_context", {
@@ -166,10 +172,10 @@ async function setMacroUiContext(args: InstallVbaEventMacrosArgs, context?: UiCo
       active_row: nonNegativeInt(active.row),
       active_col: nonNegativeInt(active.col),
       selection: {
-        start_row: nonNegativeInt(selection.startRow),
-        start_col: nonNegativeInt(selection.startCol),
-        end_row: nonNegativeInt(selection.endRow),
-        end_col: nonNegativeInt(selection.endCol),
+        start_row: selection.startRow,
+        start_col: selection.startCol,
+        end_row: selection.endRow,
+        end_col: selection.endCol,
       },
     });
   } catch (err) {

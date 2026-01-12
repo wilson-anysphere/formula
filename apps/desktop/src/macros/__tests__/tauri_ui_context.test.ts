@@ -110,7 +110,7 @@ describe("Tauri macro backend UI context", () => {
       sheet_id: "Sheet1",
       active_row: 0,
       active_col: 1,
-      selection: { start_row: 0, start_col: 2, end_row: 3, end_col: 0 },
+      selection: { start_row: 0, start_col: 0, end_row: 3, end_col: 2 },
     });
   });
 });

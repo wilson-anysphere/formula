@@ -213,14 +213,19 @@ export class TauriMacroBackend implements MacroBackend {
   }
 
   async setMacroUiContext(options: { workbookId: string } & MacroUiContext): Promise<void> {
-    const selection = options.selection
-      ? {
-          start_row: nonNegativeInt(options.selection.startRow),
-          start_col: nonNegativeInt(options.selection.startCol),
-          end_row: nonNegativeInt(options.selection.endRow),
-          end_col: nonNegativeInt(options.selection.endCol),
-        }
-      : null;
+    const selection = (() => {
+      if (!options.selection) return null;
+      const startRow = nonNegativeInt(options.selection.startRow);
+      const endRow = nonNegativeInt(options.selection.endRow);
+      const startCol = nonNegativeInt(options.selection.startCol);
+      const endCol = nonNegativeInt(options.selection.endCol);
+      return {
+        start_row: Math.min(startRow, endRow),
+        start_col: Math.min(startCol, endCol),
+        end_row: Math.max(startRow, endRow),
+        end_col: Math.max(startCol, endCol),
+      };
+    })();
 
     try {
       await this.invoke("set_macro_ui_context", {
