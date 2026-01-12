@@ -79,6 +79,13 @@ test.describe("command palette shortcut hints", () => {
     const comments = page.locator("li.command-palette__item", { hasText: "Toggle Comments Panel" }).first();
     await expect(comments).toBeVisible();
     await expect(comments.locator(".command-palette__shortcut")).toHaveText(expectedFallbackCommentsShortcut);
+
+    // Add Comment (Shift+F2).
+    const expectedAddCommentShortcut = process.platform === "darwin" ? "⇧F2" : "Shift+F2";
+    await input.fill("/ shift+f2");
+    const addComment = page.locator("li.command-palette__item", { hasText: "Add Comment" }).first();
+    await expect(addComment).toBeVisible();
+    await expect(addComment.locator(".command-palette__shortcut")).toHaveText(expectedAddCommentShortcut);
   });
 
   test("renders the platform shortcut hint for Replace", async ({ page }) => {
