@@ -690,32 +690,55 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let func_id = u16::from_le_bytes([input[0], input[1]]);
                 input = &input[2..];
 
-                let Some(spec) = formula_biff::function_spec_from_id(func_id) else {
-                    warnings.push(format!(
-                        "unknown BIFF function id 0x{func_id:04X} (PtgFunc) in rgce"
-                    ));
-                    return unsupported(ptg, warnings);
-                };
+                if let Some(spec) = formula_biff::function_spec_from_id(func_id) {
+                    // Only handle fixed arity here.
+                    if spec.min_args != spec.max_args {
+                        warnings.push(format!(
+                            "unsupported variable-arity BIFF function id 0x{func_id:04X} (PtgFunc) in rgce"
+                        ));
+                        // Best-effort: treat as a unary function call so the formula remains
+                        // parseable.
+                        let name = spec.name;
+                        let mut args = Vec::new();
+                        if let Some(arg) = stack.pop() {
+                            args.push(arg);
+                        }
+                        stack.push(format_function_call(name, args));
+                        continue;
+                    }
 
-                // Only handle fixed arity here.
-                if spec.min_args != spec.max_args {
+                    let argc = spec.min_args as usize;
+                    if stack.len() < argc {
+                        warnings.push("rgce stack underflow".to_string());
+                        return unsupported(ptg, warnings);
+                    }
+                    let mut args = Vec::with_capacity(argc);
+                    for _ in 0..argc {
+                        args.push(stack.pop().expect("len checked"));
+                    }
+                    args.reverse();
+                    stack.push(format_function_call(spec.name, args));
+                } else {
+                    // Unknown function metadata: we can still emit a parseable call expression, but
+                    // we don't know the argument count because `PtgFunc` is fixed-arity and does
+                    // not store argc. Best-effort: assume a unary call if possible.
+                    let name_owned;
+                    let name = match formula_biff::function_id_to_name(func_id) {
+                        Some(name) => name,
+                        None => {
+                            name_owned = format!("_UNKNOWN_FUNC_0x{func_id:04X}");
+                            &name_owned
+                        }
+                    };
                     warnings.push(format!(
-                        "unsupported variable-arity BIFF function id 0x{func_id:04X} (PtgFunc) in rgce"
+                        "unknown BIFF function id 0x{func_id:04X} (PtgFunc) in rgce; assuming unary"
                     ));
-                    return unsupported(ptg, warnings);
+                    let mut args = Vec::new();
+                    if let Some(arg) = stack.pop() {
+                        args.push(arg);
+                    }
+                    stack.push(format_function_call(name, args));
                 }
-
-                let argc = spec.min_args as usize;
-                if stack.len() < argc {
-                    warnings.push("rgce stack underflow".to_string());
-                    return unsupported(ptg, warnings);
-                }
-                let mut args = Vec::with_capacity(argc);
-                for _ in 0..argc {
-                    args.push(stack.pop().expect("len checked"));
-                }
-                args.reverse();
-                stack.push(format_function_call(spec.name, args));
             }
             // PtgFuncVar: [argc: u8][iftab: u16]
             0x22 | 0x42 | 0x62 => {
@@ -2742,6 +2765,47 @@ mod tests {
         assert_eq!(decoded.text, "_UNKNOWN_FUNC_0xFFFF()");
         assert!(
             decoded.warnings.iter().any(|w| w.contains("0xFFFF")),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn renders_unknown_ptgfunc_ids_as_parseable_function_calls_best_effort_unary() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // Best-effort: unknown PtgFunc with one stack argument should be rendered as a unary call.
+        // _UNKNOWN_FUNC_0xFFFF(1):
+        //   PtgInt 1
+        //   PtgFunc iftab=0xFFFF (unknown)
+        let rgce = [0x1E, 0x01, 0x00, 0x21, 0xFF, 0xFF];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "_UNKNOWN_FUNC_0xFFFF(1)");
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("PtgFunc")),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn renders_unknown_ptgfunc_ids_with_empty_stack_as_parseable_function_calls() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // Unknown PtgFunc with no arguments on stack => `_UNKNOWN_FUNC_0xFFFF()`.
+        let rgce = [0x21, 0xFF, 0xFF];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "_UNKNOWN_FUNC_0xFFFF()");
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("PtgFunc")),
             "warnings={:?}",
             decoded.warnings
         );
