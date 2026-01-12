@@ -6180,6 +6180,70 @@ fn bytecode_backend_matches_ast_for_sumif_error_criteria_and_optional_sum_range(
 }
 
 #[test]
+fn bytecode_backend_supports_array_ranges_for_sumif_and_averageif() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=SUMIF({1,2,3,4},">2")"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", r#"=AVERAGEIF({1,2,3,4},">2")"#)
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            r#"=SUMIF({1,2,3,4},">2",{10,20,30,40})"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A4",
+            r#"=AVERAGEIF({1,2,3,4},">2",{10,20,30,40})"#,
+        )
+        .unwrap();
+
+    // Array expression used as the criteria_range.
+    engine.set_cell_value("Sheet1", "D1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "D2", -2.0).unwrap();
+    engine.set_cell_value("Sheet1", "D3", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "E1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "E2", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "E3", 30.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A5", "=SUMIF(D1:D3>0,TRUE,E1:E3)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A6", "=AVERAGEIF(D1:D3>0,TRUE,E1:E3)")
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        6,
+        "expected SUMIF/AVERAGEIF array-range formulas to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(7.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(3.5));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(70.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Number(35.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A5"), Value::Number(40.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A6"), Value::Number(20.0));
+
+    for (formula, cell) in [
+        (r#"=SUMIF({1,2,3,4},">2")"#, "A1"),
+        (r#"=AVERAGEIF({1,2,3,4},">2")"#, "A2"),
+        (r#"=SUMIF({1,2,3,4},">2",{10,20,30,40})"#, "A3"),
+        (r#"=AVERAGEIF({1,2,3,4},">2",{10,20,30,40})"#, "A4"),
+        ("=SUMIF(D1:D3>0,TRUE,E1:E3)", "A5"),
+        ("=AVERAGEIF(D1:D3>0,TRUE,E1:E3)", "A6"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_sumifs_countifs_and_averageifs() {
     let mut engine = Engine::new();
 

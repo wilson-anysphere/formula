@@ -4983,6 +4983,10 @@ fn fn_sumif(
         return Value::Error(ErrorKind::Value);
     }
 
+    // Fast path: range-only SUMIF (existing optimized implementation).
+    if matches!(args[0], Value::Range(_))
+        && matches!(args.get(2), None | Some(Value::Missing) | Some(Value::Range(_)))
+    {
     let criteria_range_ref = match &args[0] {
         Value::Range(r) => *r,
         _ => return Value::Error(ErrorKind::Value),
@@ -5124,6 +5128,62 @@ fn fn_sumif(
             }
         }
     }
+    return Value::Number(sum);
+    }
+
+    // Generic path: support array arguments and mixed array/range cases (matching the AST
+    // evaluator's Range2D semantics).
+    let criteria_range = match range2d_from_value(&args[0], grid, base) {
+        Ok(r) => r,
+        Err(e) => return Value::Error(e),
+    };
+    let criteria = match parse_countif_criteria(&args[1], locale) {
+        Ok(c) => c,
+        Err(e) => return Value::Error(e),
+    };
+
+    let sum_range = match args.get(2) {
+        None | Some(Value::Missing) => criteria_range,
+        Some(v) => match range2d_from_value(v, grid, base) {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        },
+    };
+
+    let rows = criteria_range.rows();
+    let cols = criteria_range.cols();
+    if sum_range.rows() != rows || sum_range.cols() != cols {
+        return Value::Error(ErrorKind::Value);
+    }
+    if rows <= 0 || cols <= 0 {
+        return Value::Number(0.0);
+    }
+
+    let mut sum = 0.0;
+    for row_off in 0..rows {
+        for col_off in 0..cols {
+            let crit_v = criteria_range.get_value_at(grid, row_off, col_off);
+            let engine_value = bytecode_value_to_engine_ref(&crit_v);
+            if !criteria.matches(&engine_value) {
+                continue;
+            }
+
+            match sum_range.get_value_at(grid, row_off, col_off) {
+                Value::Number(v) => sum += v,
+                Value::Error(e) => return Value::Error(e),
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
+                | Value::Empty
+                | Value::Missing
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
+            }
+        }
+    }
+
     Value::Number(sum)
 }
 
@@ -5675,6 +5735,10 @@ fn fn_averageif(
         return Value::Error(ErrorKind::Value);
     }
 
+    // Fast path: range-only AVERAGEIF (existing optimized implementation).
+    if matches!(args[0], Value::Range(_))
+        && matches!(args.get(2), None | Some(Value::Missing) | Some(Value::Range(_)))
+    {
     let criteria_range_ref = match &args[0] {
         Value::Range(r) => *r,
         _ => return Value::Error(ErrorKind::Value),
@@ -5818,6 +5882,68 @@ fn fn_averageif(
                 col: avg_range.col_start + col_off,
             };
             match grid.get_value(avg_cell) {
+                Value::Number(v) => {
+                    sum += v;
+                    count += 1;
+                }
+                Value::Error(e) => return Value::Error(e),
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
+                | Value::Empty
+                | Value::Missing
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
+            }
+        }
+    }
+
+    if count == 0 {
+        return Value::Error(ErrorKind::Div0);
+    }
+    return Value::Number(sum / count as f64);
+    }
+
+    // Generic path: support array arguments and mixed array/range cases.
+    let criteria_range = match range2d_from_value(&args[0], grid, base) {
+        Ok(r) => r,
+        Err(e) => return Value::Error(e),
+    };
+    let criteria = match parse_countif_criteria(&args[1], locale) {
+        Ok(c) => c,
+        Err(e) => return Value::Error(e),
+    };
+
+    let avg_range = match args.get(2) {
+        None | Some(Value::Missing) => criteria_range,
+        Some(v) => match range2d_from_value(v, grid, base) {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        },
+    };
+
+    let rows = criteria_range.rows();
+    let cols = criteria_range.cols();
+    if avg_range.rows() != rows || avg_range.cols() != cols {
+        return Value::Error(ErrorKind::Value);
+    }
+    if rows <= 0 || cols <= 0 {
+        return Value::Error(ErrorKind::Div0);
+    }
+
+    let mut sum = 0.0;
+    let mut count = 0usize;
+    for row_off in 0..rows {
+        for col_off in 0..cols {
+            let crit_v = criteria_range.get_value_at(grid, row_off, col_off);
+            let engine_value = bytecode_value_to_engine_ref(&crit_v);
+            if !criteria.matches(&engine_value) {
+                continue;
+            }
+
+            match avg_range.get_value_at(grid, row_off, col_off) {
                 Value::Number(v) => {
                     sum += v;
                     count += 1;
@@ -7541,6 +7667,63 @@ enum RangeArg<'a> {
     Array(&'a ArrayValue),
 }
 
+#[derive(Clone, Copy, Debug)]
+enum Range2DArg<'a> {
+    Range(ResolvedRange),
+    Array(&'a ArrayValue),
+}
+
+impl<'a> Range2DArg<'a> {
+    fn rows(self) -> i32 {
+        match self {
+            Range2DArg::Range(r) => r.rows(),
+            Range2DArg::Array(a) => i32::try_from(a.rows).unwrap_or(i32::MAX),
+        }
+    }
+
+    fn cols(self) -> i32 {
+        match self {
+            Range2DArg::Range(r) => r.cols(),
+            Range2DArg::Array(a) => i32::try_from(a.cols).unwrap_or(i32::MAX),
+        }
+    }
+
+    fn get_value_at(self, grid: &dyn Grid, row_off: i32, col_off: i32) -> Value {
+        match self {
+            Range2DArg::Range(r) => {
+                let row = r.row_start + row_off;
+                let col = r.col_start + col_off;
+                grid.get_value(CellCoord { row, col })
+            }
+            Range2DArg::Array(a) => {
+                let row = row_off as usize;
+                let col = col_off as usize;
+                let idx = row * a.cols + col;
+                a.values.get(idx).cloned().unwrap_or(Value::Empty)
+            }
+        }
+    }
+}
+
+fn range2d_from_value<'a>(
+    v: &'a Value,
+    grid: &dyn Grid,
+    base: CellCoord,
+) -> Result<Range2DArg<'a>, ErrorKind> {
+    match v {
+        Value::Range(r) => {
+            let range = r.resolve(base);
+            if !range_in_bounds(grid, range) {
+                return Err(ErrorKind::Ref);
+            }
+            Ok(Range2DArg::Range(range))
+        }
+        Value::Array(a) => Ok(Range2DArg::Array(a)),
+        Value::Error(e) => Err(*e),
+        Value::MultiRange(_) => Err(ErrorKind::Value),
+        _ => Err(ErrorKind::Value),
+    }
+}
 fn bytecode_value_to_engine(value: Value) -> EngineValue {
     match value {
         Value::Number(n) => EngineValue::Number(n),
@@ -7558,6 +7741,21 @@ fn bytecode_value_to_engine(value: Value) -> EngineValue {
         Value::Error(e) => EngineValue::Error(e.into()),
         // Array/range values are not valid scalar values, but the bytecode runtime uses `#SPILL!`
         // for "range-as-scalar" cases elsewhere.
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => {
+            EngineValue::Error(EngineErrorKind::Spill)
+        }
+    }
+}
+
+fn bytecode_value_to_engine_ref(value: &Value) -> EngineValue {
+    match value {
+        Value::Number(n) => EngineValue::Number(*n),
+        Value::Bool(b) => EngineValue::Bool(*b),
+        Value::Text(s) => EngineValue::Text(s.to_string()),
+        Value::Entity(v) => EngineValue::Entity(v.as_ref().clone()),
+        Value::Record(v) => EngineValue::Record(v.as_ref().clone()),
+        Value::Empty | Value::Missing => EngineValue::Blank,
+        Value::Error(e) => EngineValue::Error((*e).into()),
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => {
             EngineValue::Error(EngineErrorKind::Spill)
         }

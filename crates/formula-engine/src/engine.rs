@@ -7756,26 +7756,14 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 2 && args.len() != 3 {
                     return false;
                 }
-                let range_ok = match &args[0] {
-                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) => true,
-                    bytecode::Expr::NameRef(name) => matches!(
-                        local_binding_kind(lexical_scopes, name),
-                        Some(BytecodeLocalBindingKind::Range)
-                    ),
-                    _ => false,
-                };
+                let range_ok = bytecode_expr_is_eligible_inner(&args[0], true, true, lexical_scopes);
                 let criteria_ok =
                     bytecode_expr_is_eligible_inner(&args[1], false, false, lexical_scopes);
                 let sum_range_ok = match args.get(2) {
                     None => true,
                     // Excel treats an explicitly missing optional range arg as "omitted".
                     Some(bytecode::Expr::Literal(bytecode::Value::Missing)) => true,
-                    Some(bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)) => true,
-                    Some(bytecode::Expr::NameRef(name)) => matches!(
-                        local_binding_kind(lexical_scopes, name),
-                        Some(BytecodeLocalBindingKind::Range)
-                    ),
-                    _ => false,
+                    Some(arg) => bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes),
                 };
 
                 range_ok && criteria_ok && sum_range_ok
