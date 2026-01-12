@@ -4,7 +4,7 @@ use super::runtime::{apply_binary, apply_unary, call_function};
 use super::value::{CellCoord, Value};
 use crate::date::ExcelDateSystem;
 use crate::locale::ValueLocaleConfig;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 
 use super::program::{OpCode, Program};
 
@@ -106,11 +106,19 @@ impl Vm {
         // Preserve the existing public API while ensuring locale-aware coercion for text values
         // matches the main evaluator. This uses Excel's default 1900 date system and the current
         // wall-clock time for any date strings that omit a year.
-        let _guard = super::runtime::set_thread_eval_context(
-            ExcelDateSystem::EXCEL_1900,
-            value_locale,
-            Utc::now(),
-        );
+        self.eval_with_coercion_context(program, grid, base, ExcelDateSystem::EXCEL_1900, value_locale, Utc::now())
+    }
+
+    pub fn eval_with_coercion_context(
+        &mut self,
+        program: &Program,
+        grid: &dyn Grid,
+        base: CellCoord,
+        date_system: ExcelDateSystem,
+        value_locale: ValueLocaleConfig,
+        now_utc: DateTime<Utc>,
+    ) -> Value {
+        let _guard = super::runtime::set_thread_eval_context(date_system, value_locale, now_utc);
         self.eval(program, grid, base)
     }
 }
@@ -118,6 +126,8 @@ impl Vm {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::date::{ymd_to_serial, ExcelDate};
+    use chrono::TimeZone;
 
     #[test]
     fn eval_with_value_locale_parses_numeric_text_using_locale() {
@@ -137,6 +147,61 @@ mod tests {
 
         match value {
             Value::Number(n) => assert!((n - 1235.56).abs() < 1e-9, "got {n}"),
+            other => panic!("expected Value::Number, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn eval_with_coercion_context_respects_date_system() {
+        let origin = CellCoord::new(0, 0);
+        let expr = super::super::parse_formula("=\"2020-01-01\"+0", origin).expect("parse");
+        let cache = super::super::BytecodeCache::new();
+        let program = cache.get_or_compile(&expr);
+        let grid = super::super::grid::ColumnarGrid::new(1, 1);
+
+        let expected =
+            ymd_to_serial(ExcelDate::new(2020, 1, 1), ExcelDateSystem::Excel1904).unwrap() as f64;
+
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval_with_coercion_context(
+            &program,
+            &grid,
+            origin,
+            ExcelDateSystem::Excel1904,
+            ValueLocaleConfig::en_us(),
+            Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
+        );
+
+        match value {
+            Value::Number(n) => assert!((n - expected).abs() < 1e-9, "got {n}"),
+            other => panic!("expected Value::Number, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn eval_with_coercion_context_uses_now_year_for_missing_year_dates() {
+        let origin = CellCoord::new(0, 0);
+        let expr = super::super::parse_formula("=\"1/2\"+0", origin).expect("parse");
+        let cache = super::super::BytecodeCache::new();
+        let program = cache.get_or_compile(&expr);
+        let grid = super::super::grid::ColumnarGrid::new(1, 1);
+
+        let now_utc = Utc.with_ymd_and_hms(2024, 6, 15, 0, 0, 0).unwrap();
+        let expected = ymd_to_serial(ExcelDate::new(2024, 1, 2), ExcelDateSystem::EXCEL_1900)
+            .unwrap() as f64;
+
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval_with_coercion_context(
+            &program,
+            &grid,
+            origin,
+            ExcelDateSystem::EXCEL_1900,
+            ValueLocaleConfig::en_us(),
+            now_utc,
+        );
+
+        match value {
+            Value::Number(n) => assert!((n - expected).abs() < 1e-9, "got {n}"),
             other => panic!("expected Value::Number, got {other:?}"),
         }
     }
