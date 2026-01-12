@@ -184,3 +184,65 @@ fn discount_security_functions_validate_dates_and_basis() {
     );
     assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Error(ErrorKind::Div0));
 }
+
+#[test]
+fn discount_security_functions_validate_additional_constraints() {
+    let mut engine = Engine::new();
+
+    // pr must be > 0
+    engine
+        .set_cell_formula("Sheet1", "A1", "=DISC(DATE(2020,1,1),DATE(2021,1,1),0,100)")
+        .unwrap();
+
+    // Discount too large -> non-positive price => #NUM!
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            "=PRICEDISC(DATE(2020,1,1),DATE(2021,1,1),2,100)",
+        )
+        .unwrap();
+
+    // RECEIVED denominator < 0 => #NUM!
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            "=RECEIVED(DATE(2020,1,1),DATE(2021,1,1),100,2)",
+        )
+        .unwrap();
+
+    // TBILL* dsm must be <= 365
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A4",
+            "=TBILLPRICE(DATE(2020,1,1),DATE(2021,1,1),0.05)",
+        )
+        .unwrap();
+
+    // PRICEMAT/YIELDMAT issue must be <= settlement
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A5",
+            "=PRICEMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2020,6,1),0.05,0.04)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A6",
+            "=YIELDMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2020,6,1),0.05,100)",
+        )
+        .unwrap();
+
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Num));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Error(ErrorKind::Num));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Error(ErrorKind::Num));
+    assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Error(ErrorKind::Num));
+    assert_eq!(engine.get_cell_value("Sheet1", "A5"), Value::Error(ErrorKind::Num));
+    assert_eq!(engine.get_cell_value("Sheet1", "A6"), Value::Error(ErrorKind::Num));
+}
