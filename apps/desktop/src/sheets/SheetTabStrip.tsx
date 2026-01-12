@@ -1,9 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ContextMenu, type ContextMenuItem } from "../menus/contextMenu.js";
+import { normalizeExcelColorToCss } from "../shared/colors.js";
 import * as nativeDialogs from "../tauri/nativeDialogs";
-import type { SheetMeta, TabColor, WorkbookSheetStore } from "./workbookSheetStore";
+import type { SheetMeta, WorkbookSheetStore } from "./workbookSheetStore";
 import { computeWorkbookSheetMoveIndex } from "./sheetReorder";
+
+const SHEET_TAB_COLOR_PALETTE: Array<{ label: string; rgb: string }> = [
+  { label: "Red", rgb: "#ff0000" },
+  { label: "Orange", rgb: "#ff9900" },
+  { label: "Yellow", rgb: "#ffff00" },
+  { label: "Green", rgb: "#00b050" },
+  { label: "Blue", rgb: "#0070c0" },
+  { label: "Purple", rgb: "#7030a0" },
+  { label: "Gray", rgb: "#7f7f7f" },
+];
 
 type Props = {
   store: WorkbookSheetStore;
@@ -222,9 +233,16 @@ export function SheetTabStrip({
       },
       {
         type: "item",
-        label: "Hide sheet",
+        label: "Hide",
         enabled: canHide,
         onSelect: () => {
+          const wasActive = sheet.id === activeSheetIdRef.current;
+          let nextActiveId: string | null = null;
+          if (wasActive) {
+            const idx = visibleSheets.findIndex((s) => s.id === sheet.id);
+            nextActiveId = idx === -1 ? null : (visibleSheets[idx + 1]?.id ?? visibleSheets[idx - 1]?.id ?? null);
+          }
+
           try {
             store.hide(sheet.id);
           } catch (err) {
@@ -233,33 +251,24 @@ export function SheetTabStrip({
             return;
           }
 
-          // If we hid the active sheet, activate the first remaining visible sheet.
-          if (sheet.id === activeSheetIdRef.current) {
-            const nextVisible = store.listVisible().at(0)?.id ?? null;
-            if (nextVisible) {
-              onActivateSheet(nextVisible);
+          if (wasActive) {
+            const fallback = store.listVisible().at(0)?.id ?? null;
+            const next = nextActiveId ?? fallback;
+            if (next && next !== sheet.id) {
+              onActivateSheet(next);
             }
-          } else {
-            onActivateSheet(activeSheetIdRef.current);
+            return;
           }
+          onActivateSheet(activeSheetIdRef.current);
         },
       },
       {
-        type: "item",
-        label: "Delete",
-        enabled: canDelete,
-        onSelect: () => {
-          void deleteSheet(sheet);
-        },
-      },
-    ];
-
-    if (hiddenSheets.length > 0) {
-      items.push({ type: "separator" });
-      for (const hidden of hiddenSheets) {
-        items.push({
-          type: "item",
-          label: `Unhide ${hidden.name}`,
+        type: "submenu",
+        label: "Unhide…",
+        enabled: hiddenSheets.length > 0,
+        items: hiddenSheets.map((hidden) => ({
+          type: "item" as const,
+          label: hidden.name,
           onSelect: () => {
             try {
               store.unhide(hidden.id);
@@ -270,9 +279,51 @@ export function SheetTabStrip({
             }
             onActivateSheet(activeSheetIdRef.current);
           },
-        });
-      }
-    }
+        })),
+      },
+      {
+        type: "submenu",
+        label: "Tab Color",
+        items: [
+          {
+            type: "item",
+            label: "No Color",
+            onSelect: () => {
+              try {
+                store.setTabColor(sheet.id, undefined);
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                onError?.(message);
+              }
+            },
+          },
+          { type: "separator" },
+          ...SHEET_TAB_COLOR_PALETTE.map((entry) => ({
+            type: "item" as const,
+            label: entry.label,
+            leading: { type: "swatch" as const, color: entry.rgb },
+            onSelect: () => {
+              try {
+                store.setTabColor(sheet.id, { rgb: entry.rgb });
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                onError?.(message);
+              }
+            },
+          })),
+        ],
+      },
+    ];
+
+    items.push({ type: "separator" });
+    items.push({
+      type: "item",
+      label: "Delete",
+      enabled: canDelete,
+      onSelect: () => {
+        void deleteSheet(sheet);
+      },
+    });
 
     tabContextMenu.open({ x: anchor.x, y: anchor.y, items });
   };
@@ -585,6 +636,7 @@ function SheetTab(props: {
 }) {
   const { sheet, active, editing, draftName, renameError } = props;
   const cancelBlurCommitRef = useRef(false);
+  const tabColorCss = !editing ? (normalizeExcelColorToCss(sheet.tabColor?.rgb) ?? null) : null;
   const ariaLabel = sheet.visibility === "visible" ? sheet.name : `${sheet.name} (${sheet.visibility})`;
 
   return (
@@ -598,6 +650,7 @@ function SheetTab(props: {
       data-testid={`sheet-tab-${sheet.id}`}
       data-sheet-id={sheet.id}
       data-active={active ? "true" : "false"}
+      data-tab-color={tabColorCss ?? undefined}
       draggable={!editing}
       ref={props.tabRef}
       onClick={() => {
@@ -663,68 +716,9 @@ function SheetTab(props: {
       ) : (
         <>
           <span className="sheet-tab__name">{sheet.name}</span>
-          {sheet.tabColor?.rgb ? <TabColorUnderline tabColor={sheet.tabColor} /> : null}
+          {tabColorCss ? <span className="sheet-tab__color" style={{ background: tabColorCss }} /> : null}
         </>
       )}
     </button>
   );
-}
-
-function TabColorUnderline({ tabColor }: { tabColor: TabColor }) {
-  const rgb = tabColor.rgb;
-  if (!rgb) return null;
-  const css = tabColorRgbToCss(rgb);
-  return <span className="sheet-tab__color" style={{ background: css }} />;
-}
-
-function tabColorRgbToCss(raw: string): string {
-  const rgb = String(raw ?? "").trim();
-  if (!rgb) return "transparent";
-  if (/^#[0-9A-Fa-f]{6}$/.test(rgb)) return rgb;
-  if (/^[0-9A-Fa-f]{6}$/.test(rgb)) return `#${rgb}`;
-  if (/^#[0-9A-Fa-f]{8}$/.test(rgb)) return argbToCssHsl(rgb.slice(1));
-  if (/^[0-9A-Fa-f]{8}$/.test(rgb)) return argbToCssHsl(rgb);
-  // Best-effort fallback (handles named colors, rgb/rgba strings, etc).
-  return rgb;
-}
-
-function argbToCssHsl(argb: string): string {
-  if (!/^([0-9A-Fa-f]{8})$/.test(argb)) return "transparent";
-  const alpha = parseInt(argb.slice(0, 2), 16) / 255;
-  const r = parseInt(argb.slice(2, 4), 16);
-  const g = parseInt(argb.slice(4, 6), 16);
-  const b = parseInt(argb.slice(6, 8), 16);
-
-  const rn = r / 255;
-  const gn = g / 255;
-  const bn = b / 255;
-  const max = Math.max(rn, gn, bn);
-  const min = Math.min(rn, gn, bn);
-  const delta = max - min;
-  const light = (max + min) / 2;
-
-  let hue = 0;
-  let sat = 0;
-
-  if (delta !== 0) {
-    sat = delta / (1 - Math.abs(2 * light - 1));
-    switch (max) {
-      case rn:
-        hue = ((gn - bn) / delta + (gn < bn ? 6 : 0)) * 60;
-        break;
-      case gn:
-        hue = ((bn - rn) / delta + 2) * 60;
-        break;
-      default:
-        hue = ((rn - gn) / delta + 4) * 60;
-        break;
-    }
-  }
-
-  const h = Math.round(hue);
-  const s = Math.round(sat * 100);
-  const l = Math.round(light * 100);
-  const a = Math.max(0, Math.min(1, alpha));
-
-  return a < 1 ? `hsla(${h}, ${s}%, ${l}%, ${a.toFixed(3)})` : `hsl(${h}, ${s}%, ${l}%)`;
 }

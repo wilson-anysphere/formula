@@ -1,10 +1,16 @@
 export type ContextMenuSeparator = { type: "separator" };
 
+export type ContextMenuLeading = {
+  type: "swatch";
+  color: string;
+};
+
 export type ContextMenuActionItem = {
   type: "item";
   label: string;
   enabled?: boolean;
   shortcut?: string;
+  leading?: ContextMenuLeading;
   /**
    * Invoked when the item is selected.
    *
@@ -18,6 +24,7 @@ export type ContextMenuSubmenuItem = {
   label: string;
   enabled?: boolean;
   shortcut?: string;
+  leading?: ContextMenuLeading;
   items: ContextMenuItem[];
 };
 
@@ -439,6 +446,14 @@ export class ContextMenu {
         btn.dataset.contextMenuSubmenu = "true";
         btn.setAttribute("aria-haspopup", "menu");
         btn.setAttribute("aria-expanded", "false");
+      }
+
+      if (item.leading?.type === "swatch") {
+        const swatch = document.createElement("span");
+        swatch.className = "context-menu__leading context-menu__leading--swatch";
+        swatch.setAttribute("aria-hidden", "true");
+        swatch.style.backgroundColor = item.leading.color;
+        btn.appendChild(swatch);
       }
 
       const label = document.createElement("span");

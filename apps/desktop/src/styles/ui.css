@@ -711,6 +711,7 @@
   padding: 0 12px;
   display: inline-flex;
   align-items: center;
+  position: relative;
   border: 1px solid var(--border);
   border-bottom: none;
   border-radius: 6px 6px 0 0;
@@ -719,7 +720,6 @@
   cursor: pointer;
   white-space: nowrap;
   font-size: 12px;
-  position: relative;
 }
 
 #sheet-tabs.sheet-bar .sheet-tab:hover {
