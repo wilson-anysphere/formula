@@ -70,3 +70,37 @@ fn merges_into_existing_pivot_tables_instead_of_creating_duplicates() {
         "<pivotTables> should remain before <extLst>"
     );
 }
+
+#[test]
+fn inserts_prefixed_pivot_tables_when_worksheet_uses_prefix_only_namespaces() {
+    let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:sheetData/>
+  <x:extLst><x:ext/></x:extLst>
+</x:worksheet>"#;
+    // Note: the fragment intentionally omits the `xmlns:x` declaration; in real
+    // worksheets it is supplied on the worksheet root.
+    let pivot_tables = br#"<x:pivotTables><x:pivotTable r:id="rId7"/></x:pivotTables>"#;
+
+    let updated =
+        ensure_sheet_xml_has_pivot_tables(xml, "xl/worksheets/sheet1.xml", pivot_tables).unwrap();
+    let updated_str = std::str::from_utf8(&updated).unwrap();
+
+    roxmltree::Document::parse(updated_str).expect("output should be valid XML");
+    assert!(updated_str.contains("<x:pivotTables"), "expected <x:pivotTables>");
+    assert!(updated_str.contains("<x:pivotTable"), "expected <x:pivotTable>");
+    assert!(
+        !updated_str.contains("<pivotTables"),
+        "should not introduce unprefixed <pivotTables> in prefix-only worksheets, got:\n{updated_str}"
+    );
+    assert!(
+        updated_str.contains(
+            r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+        ),
+        "xmlns:r should be added when inserting r:id attributes"
+    );
+
+    let pivot_pos = updated_str.find("<x:pivotTables").unwrap();
+    let ext_pos = updated_str.find("<x:extLst").unwrap();
+    assert!(pivot_pos < ext_pos, "pivotTables should be inserted before extLst");
+}
