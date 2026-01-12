@@ -31,6 +31,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Run excel-oracle python unit tests
+        run: python -m unittest discover -s tools/excel-oracle/tests
       - name: Run excel-oracle corpus coverage guards
         run: cargo test -p formula-engine --test excel_oracle_coverage --test function_catalog_sync --locked
       - name: Run compatibility gate (engine vs pinned Excel dataset)
