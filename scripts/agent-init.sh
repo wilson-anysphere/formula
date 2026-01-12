@@ -153,6 +153,7 @@ echo "║  Agent Environment Initialized                                  ║"
 echo "╠════════════════════════════════════════════════════════════════╣"
 echo "║  NODE_OPTIONS:      ${NODE_OPTIONS}"
 echo "║  CARGO_BUILD_JOBS:  ${CARGO_BUILD_JOBS}"
+echo "║  RAYON_NUM_THREADS: ${RAYON_NUM_THREADS}"
 echo "║  CARGO_HOME:        ${CARGO_HOME}"
 echo "║  MAKEFLAGS:         ${MAKEFLAGS}"
 if [ -n "$DISPLAY" ]; then

@@ -67,13 +67,17 @@ The wrapper script:
 2. Limits parallelism to **-j4** by default
 3. Caps **RUST_TEST_THREADS** to avoid spawning hundreds of threads
 4. Caps **RAYON_NUM_THREADS** (defaults to `FORMULA_CARGO_JOBS`) to avoid huge per-process Rayon thread pools on high-core agent hosts
-5. Uses a **repo-local CARGO_HOME** to avoid lock contention
+5. Defaults `MAKEFLAGS=-j<jobs>` and `CARGO_PROFILE_*_CODEGEN_UNITS=<jobs>` to keep non-Rust build steps + rustc/LLVM parallelism aligned
+6. Uses a **repo-local CARGO_HOME** to avoid lock contention
 
 ### Environment Setup (Optional but Recommended)
 
 ```bash
-# Initialize safe defaults (sets NODE_OPTIONS, CARGO_BUILD_JOBS, etc.)
+# Initialize safe defaults (sets NODE_OPTIONS, CARGO_BUILD_JOBS, MAKEFLAGS, RAYON_NUM_THREADS, etc.)
 source scripts/agent-init.sh  # or: . scripts/agent-init.sh
+
+# Optional: override default Cargo parallelism for the session
+FORMULA_CARGO_JOBS=8 source scripts/agent-init.sh
 ```
 
 ### Running Commands with Memory Limits
