@@ -370,8 +370,9 @@ cannot reliably resolve relative imports, the browser entrypoint (`manifest.brow
 - **Desktop/Tauri network behavior:** in packaged desktop builds, the app CSP is configured in
   `apps/desktop/src-tauri/tauri.conf.json` and currently allows `connect-src 'self' https: wss: blob: data:` (TLS-only
   outbound network from the WebView; no `http:` / `ws:`).
-  - Marketplace HTTP requests are performed by the Rust backend via Tauri IPC commands
-    (`marketplace_search`, `marketplace_get_extension`, `marketplace_download_package`).
+  - `MarketplaceClient` prefers making HTTP requests via the Rust backend (Tauri IPC:
+    `marketplace_search`, `marketplace_get_extension`, `marketplace_download_package`) when running under Tauri with an
+    absolute `http(s)` marketplace base URL; otherwise it falls back to `fetch()`.
   - Extension HTTP requests (`formula.network.fetch(...)`) are proxied by the browser extension host through the Rust backend
     via `network_fetch`.
   - See [`docs/11-desktop-shell.md`](./11-desktop-shell.md) (“Network strategy”) for details.
