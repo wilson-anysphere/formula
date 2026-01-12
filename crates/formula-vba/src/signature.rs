@@ -100,7 +100,7 @@ pub enum VbaSignatureBinding {
 pub struct VbaDigitalSignatureBound {
     /// The parsed signature stream, including PKCS#7 verification result.
     pub signature: VbaDigitalSignature,
-    /// Project digest binding verification result.
+    /// Contents Hash binding verification result.
     pub binding: VbaProjectBindingVerification,
 }
 
@@ -743,9 +743,11 @@ pub fn verify_vba_signature_binding_with_stream_path(
 
         let stream_kind = signature_path_stream_kind(signature_stream_path);
         // Prefer v3 when the stream kind indicates `DigitalSignatureExt`. If the stream kind is
-        // unknown (or not provided), fall back to a digest-length heuristic (v3 digests are
-        // typically 32-byte SHA-256; legacy binding digests are always 16-byte MD5 per MS-OSHARED
-        // §4.3).
+        // unknown (or not provided), fall back to digest-length heuristics.
+        //
+        // Note: per MS-OSHARED §4.3 (and MS-OVBA §2.4.2.7), the **binding digest bytes** embedded in
+        // the VBA signature are always a 16-byte MD5. Non-16-byte digests should be treated as
+        // non-spec/legacy behavior and only used for best-effort inference.
         let treat_as_v3 = match stream_kind {
             Some(VbaSignatureStreamKind::DigitalSignatureExt) => true,
             Some(VbaSignatureStreamKind::DigitalSignature)
