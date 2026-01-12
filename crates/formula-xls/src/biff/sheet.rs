@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use formula_model::{CellRef, ColProperties, RowProperties, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 
+use super::records;
+
 #[derive(Debug, Default)]
 pub(crate) struct SheetRowColProperties {
     pub(crate) rows: BTreeMap<u32, RowProperties>,
@@ -13,26 +15,22 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
     start: usize,
 ) -> Result<SheetRowColProperties, String> {
     let mut props = SheetRowColProperties::default();
-    let mut offset = start;
 
-    loop {
-        let Some((record_id, data)) = super::read_biff_record(workbook_stream, offset) else {
-            break;
-        };
+    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
+    while let Some(record) = iter.next() {
+        let record = record?;
+
         // Stop once we reach the BOF record for the next substream. This allows
         // us to recover row/col metadata even if the worksheet EOF record is
         // missing/corrupt.
-        if offset != start && (record_id == 0x0809 || record_id == 0x0009) {
+        if record.offset != start && records::is_bof_record(record.record_id) {
             break;
         }
-        offset = offset
-            .checked_add(4)
-            .and_then(|o| o.checked_add(data.len()))
-            .ok_or_else(|| "BIFF record offset overflow".to_string())?;
 
-        match record_id {
+        match record.record_id {
             // ROW [MS-XLS 2.4.184]
             0x0208 => {
+                let data = record.data;
                 if data.len() < 16 {
                     continue;
                 }
@@ -58,6 +56,7 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
             }
             // COLINFO [MS-XLS 2.4.48]
             0x007D => {
+                let data = record.data;
                 if data.len() < 12 {
                     continue;
                 }
@@ -96,7 +95,6 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
     xf_is_interesting: Option<&[bool]>,
 ) -> Result<HashMap<CellRef, u16>, String> {
     let mut out = HashMap::new();
-    let mut offset = start;
 
     let mut maybe_insert = |row: u32, col: u32, xf: u16| {
         if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
@@ -116,22 +114,19 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
         out.insert(CellRef::new(row, col), xf);
     };
 
-    loop {
-        let Some((record_id, data)) = super::read_biff_record(workbook_stream, offset) else {
-            break;
-        };
+    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
+    while let Some(record) = iter.next() {
+        let record = record?;
+
         // Stop once we reach the BOF record for the next substream. This allows
         // us to recover XF indices even if the worksheet EOF record is
         // missing/corrupt.
-        if offset != start && (record_id == 0x0809 || record_id == 0x0009) {
+        if record.offset != start && records::is_bof_record(record.record_id) {
             break;
         }
-        offset = offset
-            .checked_add(4)
-            .and_then(|o| o.checked_add(data.len()))
-            .ok_or_else(|| "BIFF record offset overflow".to_string())?;
 
-        match record_id {
+        let data = record.data;
+        match record.record_id {
             // Cell records with a `Cell` header (rw, col, ixfe) [MS-XLS 2.5.14].
             //
             // We only care about extracting the XF index (`ixfe`) so we can resolve
@@ -427,4 +422,3 @@ mod tests {
         assert_eq!(xfs.get(&CellRef::new(0, 0)).copied(), Some(7));
     }
 }
-

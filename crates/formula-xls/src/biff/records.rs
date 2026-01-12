@@ -3,6 +3,10 @@ use std::borrow::Cow;
 /// BIFF `CONTINUE` record id.
 pub(crate) const RECORD_CONTINUE: u16 = 0x003C;
 
+pub(crate) fn is_bof_record(record_id: u16) -> bool {
+    record_id == 0x0809 || record_id == 0x0009
+}
+
 /// Read a single physical BIFF record at `offset`.
 pub(crate) fn read_biff_record(workbook_stream: &[u8], offset: usize) -> Option<(u16, &[u8])> {
     let header = workbook_stream.get(offset..offset + 4)?;
@@ -12,6 +16,95 @@ pub(crate) fn read_biff_record(workbook_stream: &[u8], offset: usize) -> Option<
     let data_end = data_start.checked_add(len)?;
     let data = workbook_stream.get(data_start..data_end)?;
     Some((record_id, data))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BiffRecord<'a> {
+    /// Offset of the record header in the parent stream.
+    pub(crate) offset: usize,
+    pub(crate) record_id: u16,
+    pub(crate) data: &'a [u8],
+}
+
+/// Iterator over physical BIFF records.
+///
+/// This performs bounds checking on the record header and length. A truncated
+/// header or payload yields an `Err` and terminates iteration.
+pub(crate) struct BiffRecordIter<'a> {
+    stream: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> BiffRecordIter<'a> {
+    pub(crate) fn from_offset(stream: &'a [u8], offset: usize) -> Result<Self, String> {
+        if offset > stream.len() {
+            return Err(format!(
+                "BIFF record offset {offset} out of bounds (len={})",
+                stream.len()
+            ));
+        }
+        Ok(Self { stream, offset })
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn offset(&self) -> usize {
+        self.offset
+    }
+}
+
+impl<'a> Iterator for BiffRecordIter<'a> {
+    type Item = Result<BiffRecord<'a>, String>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.offset >= self.stream.len() {
+            return None;
+        }
+
+        let remaining = self.stream.len().saturating_sub(self.offset);
+        if remaining < 4 {
+            self.offset = self.stream.len();
+            return Some(Err("truncated BIFF record header".to_string()));
+        }
+
+        let header = &self.stream[self.offset..self.offset + 4];
+        let record_id = u16::from_le_bytes([header[0], header[1]]);
+        let len = u16::from_le_bytes([header[2], header[3]]) as usize;
+
+        let data_start = match self.offset.checked_add(4) {
+            Some(v) => v,
+            None => {
+                self.offset = self.stream.len();
+                return Some(Err("BIFF record offset overflow".to_string()));
+            }
+        };
+        let data_end = match data_start.checked_add(len) {
+            Some(v) => v,
+            None => {
+                self.offset = self.stream.len();
+                return Some(Err("BIFF record length overflow".to_string()));
+            }
+        };
+
+        let data = match self.stream.get(data_start..data_end) {
+            Some(data) => data,
+            None => {
+                let offset = self.offset;
+                self.offset = self.stream.len();
+                return Some(Err(format!(
+                    "BIFF record 0x{record_id:04X} at offset {offset} extends past end of stream (len={}, end={data_end})",
+                    self.stream.len()
+                )));
+            }
+        };
+
+        let offset = self.offset;
+        self.offset = data_end;
+        Some(Ok(BiffRecord {
+            offset,
+            record_id,
+            data,
+        }))
+    }
 }
 
 /// A logical BIFF record. Some BIFF record types may be split across one or more
@@ -186,6 +279,45 @@ mod tests {
     }
 
     #[test]
+    fn iterates_physical_records_with_bounds_checks() {
+        let stream = [record(0x0001, &[1, 2, 3]), record(0x0002, &[4])].concat();
+        let mut iter = BiffRecordIter::from_offset(&stream, 0).unwrap();
+
+        let r1 = iter.next().unwrap().unwrap();
+        assert_eq!(r1.offset, 0);
+        assert_eq!(r1.record_id, 0x0001);
+        assert_eq!(r1.data, &[1, 2, 3]);
+
+        let r2 = iter.next().unwrap().unwrap();
+        assert_eq!(r2.record_id, 0x0002);
+        assert_eq!(r2.data, &[4]);
+
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn physical_iter_errors_on_truncated_header() {
+        let stream = vec![0x01, 0x02, 0x03];
+        let mut iter = BiffRecordIter::from_offset(&stream, 0).unwrap();
+        let err = iter.next().unwrap().unwrap_err();
+        assert!(err.contains("truncated BIFF record header"), "err={err}");
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn physical_iter_errors_on_truncated_payload() {
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&0x0001u16.to_le_bytes());
+        stream.extend_from_slice(&4u16.to_le_bytes());
+        stream.extend_from_slice(&[1, 2]);
+
+        let mut iter = BiffRecordIter::from_offset(&stream, 0).unwrap();
+        let err = iter.next().unwrap().unwrap_err();
+        assert!(err.contains("extends past end of stream"), "err={err}");
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
     fn coalesces_continues_for_allowed_record_ids() {
         let stream = [
             record(0x00AA, &[1, 2]),
@@ -225,4 +357,3 @@ mod tests {
         assert_eq!(second.data.as_ref(), &[3]);
     }
 }
-
