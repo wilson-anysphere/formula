@@ -939,6 +939,49 @@ impl AppState {
                 }
             }
 
+            // Keep preserved XLSX artifacts (pivots/drawings) keyed by sheet name aligned with any
+            // in-app rename. These maps are used when regenerating an XLSX package after structural
+            // edits (renames drop `origin_xlsx_bytes`). If we don't update the keys, downstream
+            // preservation logic may fall back to stale sheet indices and incorrectly attach parts
+            // after subsequent sheet mutations (delete/reorder).
+            if let Some(preserved) = workbook.preserved_pivot_parts.as_mut() {
+                let key = preserved
+                    .sheet_pivot_tables
+                    .keys()
+                    .find(|k| sheet_name_eq_case_insensitive(k, &old_name))
+                    .cloned();
+                if let Some(key) = key {
+                    if let Some(value) = preserved.sheet_pivot_tables.remove(&key) {
+                        preserved.sheet_pivot_tables.insert(new_name.clone(), value);
+                    }
+                }
+            }
+
+            if let Some(preserved) = workbook.preserved_drawing_parts.as_mut() {
+                fn rename_preserved_map_key<V>(
+                    map: &mut std::collections::BTreeMap<String, V>,
+                    old_name: &str,
+                    new_name: &str,
+                ) {
+                    let key = map
+                        .keys()
+                        .find(|k| sheet_name_eq_case_insensitive(k, old_name))
+                        .cloned();
+                    if let Some(key) = key {
+                        if let Some(value) = map.remove(&key) {
+                            map.insert(new_name.to_string(), value);
+                        }
+                    }
+                }
+
+                rename_preserved_map_key(&mut preserved.sheet_drawings, &old_name, &new_name);
+                rename_preserved_map_key(&mut preserved.sheet_pictures, &old_name, &new_name);
+                rename_preserved_map_key(&mut preserved.sheet_ole_objects, &old_name, &new_name);
+                rename_preserved_map_key(&mut preserved.sheet_controls, &old_name, &new_name);
+                rename_preserved_map_key(&mut preserved.sheet_drawing_hfs, &old_name, &new_name);
+                rename_preserved_map_key(&mut preserved.chart_sheets, &old_name, &new_name);
+            }
+
             // Renaming sheets is a structural XLSX edit. The patch-based save path cannot rewrite
             // workbook.xml relationships/sheet names, so drop origin bytes to force regeneration
             // from storage on the next save.
@@ -1033,6 +1076,45 @@ impl AppState {
                 !table.sheet_id.eq_ignore_ascii_case(&deleted_id)
                     && !sheet_name_eq_case_insensitive(&table.sheet_id, &deleted_name)
             });
+
+            // Drop preserved worksheet artifacts (pivots/drawings) keyed by the deleted sheet so
+            // regeneration-based XLSX saves don't re-attach them to a different sheet.
+            if let Some(preserved) = workbook.preserved_pivot_parts.as_mut() {
+                let keys: Vec<String> = preserved
+                    .sheet_pivot_tables
+                    .keys()
+                    .filter(|k| sheet_name_eq_case_insensitive(k, &deleted_name))
+                    .cloned()
+                    .collect();
+                for key in keys {
+                    preserved.sheet_pivot_tables.remove(&key);
+                }
+            }
+
+            if let Some(preserved) = workbook.preserved_drawing_parts.as_mut() {
+                fn remove_preserved_map_keys<V>(
+                    map: &mut std::collections::BTreeMap<String, V>,
+                    deleted_name: &str,
+                ) {
+                    let keys: Vec<String> = map
+                        .keys()
+                        .filter(|k| sheet_name_eq_case_insensitive(k, deleted_name))
+                        .cloned()
+                        .collect();
+                    for key in keys {
+                        map.remove(&key);
+                    }
+                }
+
+                remove_preserved_map_keys(&mut preserved.sheet_drawings, &deleted_name);
+                remove_preserved_map_keys(&mut preserved.sheet_pictures, &deleted_name);
+                remove_preserved_map_keys(&mut preserved.sheet_ole_objects, &deleted_name);
+                remove_preserved_map_keys(&mut preserved.sheet_controls, &deleted_name);
+                remove_preserved_map_keys(&mut preserved.sheet_drawing_hfs, &deleted_name);
+                // `chart_sheets` represent chartsheet tabs (not worksheets), but remove any
+                // preserved entry if it somehow matches the deleted name to avoid index fallback.
+                remove_preserved_map_keys(&mut preserved.chart_sheets, &deleted_name);
+            }
 
             // Rewrite formulas that referenced the deleted sheet.
             for sheet in &mut workbook.sheets {
@@ -4418,6 +4500,13 @@ mod tests {
     };
     use formula_engine::what_if::monte_carlo::{Distribution, InputDistribution};
     use formula_model::import::{import_csv_to_columnar_table, CsvOptions};
+    use formula_xlsx::drawingml::{
+        PreservedChartSheet, PreservedDrawingParts, PreservedSheetControls, PreservedSheetDrawingHF,
+        PreservedSheetDrawings, PreservedSheetOleObjects, PreservedSheetPicture,
+        SheetDrawingRelationship, SheetRelationshipStub, SheetRelationshipStubWithType,
+    };
+    use formula_xlsx::pivots::preserve::PreservedSheetPivotTables;
+    use formula_xlsx::{PreservedPivotParts, RelationshipStub};
 
     #[test]
     fn add_sheet_inserts_after_middle_sheet() {
@@ -4682,6 +4771,330 @@ mod tests {
                 ("Sheet2".to_string(), "Sheet2".to_string())
             ]
         );
+    }
+
+    #[test]
+    fn rename_sheet_updates_preserved_sheet_keys() {
+        use std::collections::BTreeMap;
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+
+        let pivot_tables = BTreeMap::from([
+            (
+                "Sheet1".to_string(),
+                PreservedSheetPivotTables {
+                    sheet_index: 0,
+                    sheet_id: Some(1),
+                    pivot_tables_xml: b"<pivotTables/>".to_vec(),
+                    pivot_table_rels: vec![RelationshipStub {
+                        rel_id: "rId1".to_string(),
+                        target: "xl/pivotTables/pivotTable1.xml".to_string(),
+                    }],
+                },
+            ),
+            (
+                "Sheet2".to_string(),
+                PreservedSheetPivotTables {
+                    sheet_index: 1,
+                    sheet_id: Some(2),
+                    pivot_tables_xml: b"<pivotTables/>".to_vec(),
+                    pivot_table_rels: vec![RelationshipStub {
+                        rel_id: "rId2".to_string(),
+                        target: "xl/pivotTables/pivotTable2.xml".to_string(),
+                    }],
+                },
+            ),
+        ]);
+
+        workbook.preserved_pivot_parts = Some(PreservedPivotParts {
+            content_types_xml: b"<Types/>".to_vec(),
+            parts: BTreeMap::new(),
+            workbook_pivot_caches: None,
+            workbook_pivot_cache_rels: Vec::new(),
+            sheet_pivot_tables: pivot_tables,
+        });
+
+        workbook.preserved_drawing_parts = Some(PreservedDrawingParts {
+            content_types_xml: b"<Types/>".to_vec(),
+            parts: BTreeMap::new(),
+            sheet_drawings: BTreeMap::from([
+                (
+                    "Sheet1".to_string(),
+                    PreservedSheetDrawings {
+                        sheet_index: 0,
+                        sheet_id: Some(1),
+                        drawings: vec![SheetDrawingRelationship {
+                            rel_id: "rIdDrawing1".to_string(),
+                            target: "xl/drawings/drawing1.xml".to_string(),
+                        }],
+                    },
+                ),
+                (
+                    "Sheet2".to_string(),
+                    PreservedSheetDrawings {
+                        sheet_index: 1,
+                        sheet_id: Some(2),
+                        drawings: vec![SheetDrawingRelationship {
+                            rel_id: "rIdDrawing2".to_string(),
+                            target: "xl/drawings/drawing2.xml".to_string(),
+                        }],
+                    },
+                ),
+            ]),
+            sheet_pictures: BTreeMap::from([(
+                "Sheet1".to_string(),
+                PreservedSheetPicture {
+                    sheet_index: 0,
+                    sheet_id: Some(1),
+                    picture_xml: b"<picture/>".to_vec(),
+                    picture_rel: SheetRelationshipStub {
+                        rel_id: "rIdPic1".to_string(),
+                        target: "xl/media/image1.png".to_string(),
+                    },
+                },
+            )]),
+            sheet_ole_objects: BTreeMap::from([(
+                "Sheet1".to_string(),
+                PreservedSheetOleObjects {
+                    sheet_index: 0,
+                    sheet_id: Some(1),
+                    ole_objects_xml: b"<oleObjects/>".to_vec(),
+                    ole_object_rels: vec![SheetRelationshipStub {
+                        rel_id: "rIdOle1".to_string(),
+                        target: "xl/embeddings/oleObject1.bin".to_string(),
+                    }],
+                },
+            )]),
+            sheet_controls: BTreeMap::from([(
+                "Sheet1".to_string(),
+                PreservedSheetControls {
+                    sheet_index: 0,
+                    sheet_id: Some(1),
+                    controls_xml: b"<controls/>".to_vec(),
+                    control_rels: vec![SheetRelationshipStubWithType {
+                        rel_id: "rIdCtl1".to_string(),
+                        type_: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/control".to_string(),
+                        target: "xl/controls/control1.xml".to_string(),
+                    }],
+                },
+            )]),
+            sheet_drawing_hfs: BTreeMap::from([(
+                "Sheet1".to_string(),
+                PreservedSheetDrawingHF {
+                    sheet_index: 0,
+                    sheet_id: Some(1),
+                    drawing_hf_xml: b"<drawingHF/>".to_vec(),
+                    drawing_hf_rels: vec![SheetRelationshipStubWithType {
+                        rel_id: "rIdHeader1".to_string(),
+                        type_: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image".to_string(),
+                        target: "xl/media/header1.png".to_string(),
+                    }],
+                },
+            )]),
+            chart_sheets: BTreeMap::from([(
+                "Chart1".to_string(),
+                PreservedChartSheet {
+                    sheet_index: 2,
+                    sheet_id: Some(3),
+                    rel_id: "rIdChart1".to_string(),
+                    rel_target: "chartsheets/sheet1.xml".to_string(),
+                    state: None,
+                    part_name: "xl/chartsheets/sheet1.xml".to_string(),
+                },
+            )]),
+        });
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+        state
+            .rename_sheet("Sheet1", "Budget".to_string())
+            .expect("rename sheet succeeds");
+
+        let workbook = state.get_workbook().expect("workbook loaded");
+
+        let pivots = workbook
+            .preserved_pivot_parts
+            .as_ref()
+            .expect("pivot parts preserved");
+        assert!(!pivots.sheet_pivot_tables.contains_key("Sheet1"));
+        assert!(pivots.sheet_pivot_tables.contains_key("Budget"));
+        assert!(pivots.sheet_pivot_tables.contains_key("Sheet2"));
+
+        let drawings = workbook
+            .preserved_drawing_parts
+            .as_ref()
+            .expect("drawing parts preserved");
+        assert!(!drawings.sheet_drawings.contains_key("Sheet1"));
+        assert!(drawings.sheet_drawings.contains_key("Budget"));
+        assert!(!drawings.sheet_pictures.contains_key("Sheet1"));
+        assert!(drawings.sheet_pictures.contains_key("Budget"));
+        assert!(!drawings.sheet_ole_objects.contains_key("Sheet1"));
+        assert!(drawings.sheet_ole_objects.contains_key("Budget"));
+        assert!(!drawings.sheet_controls.contains_key("Sheet1"));
+        assert!(drawings.sheet_controls.contains_key("Budget"));
+        assert!(!drawings.sheet_drawing_hfs.contains_key("Sheet1"));
+        assert!(drawings.sheet_drawing_hfs.contains_key("Budget"));
+        assert!(drawings.chart_sheets.contains_key("Chart1"));
+    }
+
+    #[test]
+    fn delete_sheet_removes_preserved_parts_for_deleted_sheet() {
+        use std::collections::BTreeMap;
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+
+        workbook.preserved_pivot_parts = Some(PreservedPivotParts {
+            content_types_xml: b"<Types/>".to_vec(),
+            parts: BTreeMap::new(),
+            workbook_pivot_caches: None,
+            workbook_pivot_cache_rels: Vec::new(),
+            sheet_pivot_tables: BTreeMap::from([
+                (
+                    "Sheet1".to_string(),
+                    PreservedSheetPivotTables {
+                        sheet_index: 0,
+                        sheet_id: Some(1),
+                        pivot_tables_xml: b"<pivotTables/>".to_vec(),
+                        pivot_table_rels: vec![RelationshipStub {
+                            rel_id: "rId1".to_string(),
+                            target: "xl/pivotTables/pivotTable1.xml".to_string(),
+                        }],
+                    },
+                ),
+                (
+                    "Sheet2".to_string(),
+                    PreservedSheetPivotTables {
+                        sheet_index: 1,
+                        sheet_id: Some(2),
+                        pivot_tables_xml: b"<pivotTables/>".to_vec(),
+                        pivot_table_rels: vec![RelationshipStub {
+                            rel_id: "rId2".to_string(),
+                            target: "xl/pivotTables/pivotTable2.xml".to_string(),
+                        }],
+                    },
+                ),
+            ]),
+        });
+
+        workbook.preserved_drawing_parts = Some(PreservedDrawingParts {
+            content_types_xml: b"<Types/>".to_vec(),
+            parts: BTreeMap::new(),
+            sheet_drawings: BTreeMap::from([
+                (
+                    "Sheet1".to_string(),
+                    PreservedSheetDrawings {
+                        sheet_index: 0,
+                        sheet_id: Some(1),
+                        drawings: vec![SheetDrawingRelationship {
+                            rel_id: "rIdDrawing1".to_string(),
+                            target: "xl/drawings/drawing1.xml".to_string(),
+                        }],
+                    },
+                ),
+                (
+                    "Sheet2".to_string(),
+                    PreservedSheetDrawings {
+                        sheet_index: 1,
+                        sheet_id: Some(2),
+                        drawings: vec![SheetDrawingRelationship {
+                            rel_id: "rIdDrawing2".to_string(),
+                            target: "xl/drawings/drawing2.xml".to_string(),
+                        }],
+                    },
+                ),
+            ]),
+            sheet_pictures: BTreeMap::from([(
+                "Sheet1".to_string(),
+                PreservedSheetPicture {
+                    sheet_index: 0,
+                    sheet_id: Some(1),
+                    picture_xml: b"<picture/>".to_vec(),
+                    picture_rel: SheetRelationshipStub {
+                        rel_id: "rIdPic1".to_string(),
+                        target: "xl/media/image1.png".to_string(),
+                    },
+                },
+            )]),
+            sheet_ole_objects: BTreeMap::from([(
+                "Sheet1".to_string(),
+                PreservedSheetOleObjects {
+                    sheet_index: 0,
+                    sheet_id: Some(1),
+                    ole_objects_xml: b"<oleObjects/>".to_vec(),
+                    ole_object_rels: vec![SheetRelationshipStub {
+                        rel_id: "rIdOle1".to_string(),
+                        target: "xl/embeddings/oleObject1.bin".to_string(),
+                    }],
+                },
+            )]),
+            sheet_controls: BTreeMap::from([(
+                "Sheet1".to_string(),
+                PreservedSheetControls {
+                    sheet_index: 0,
+                    sheet_id: Some(1),
+                    controls_xml: b"<controls/>".to_vec(),
+                    control_rels: vec![SheetRelationshipStubWithType {
+                        rel_id: "rIdCtl1".to_string(),
+                        type_: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/control".to_string(),
+                        target: "xl/controls/control1.xml".to_string(),
+                    }],
+                },
+            )]),
+            sheet_drawing_hfs: BTreeMap::from([(
+                "Sheet1".to_string(),
+                PreservedSheetDrawingHF {
+                    sheet_index: 0,
+                    sheet_id: Some(1),
+                    drawing_hf_xml: b"<drawingHF/>".to_vec(),
+                    drawing_hf_rels: vec![SheetRelationshipStubWithType {
+                        rel_id: "rIdHeader1".to_string(),
+                        type_: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image".to_string(),
+                        target: "xl/media/header1.png".to_string(),
+                    }],
+                },
+            )]),
+            chart_sheets: BTreeMap::from([(
+                "Chart1".to_string(),
+                PreservedChartSheet {
+                    sheet_index: 2,
+                    sheet_id: Some(3),
+                    rel_id: "rIdChart1".to_string(),
+                    rel_target: "chartsheets/sheet1.xml".to_string(),
+                    state: None,
+                    part_name: "xl/chartsheets/sheet1.xml".to_string(),
+                },
+            )]),
+        });
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+        state.delete_sheet("Sheet1").expect("delete sheet succeeds");
+
+        let workbook = state.get_workbook().expect("workbook loaded");
+
+        let pivots = workbook
+            .preserved_pivot_parts
+            .as_ref()
+            .expect("pivot parts preserved");
+        assert!(!pivots.sheet_pivot_tables.contains_key("Sheet1"));
+        assert!(pivots.sheet_pivot_tables.contains_key("Sheet2"));
+
+        let drawings = workbook
+            .preserved_drawing_parts
+            .as_ref()
+            .expect("drawing parts preserved");
+        assert!(!drawings.sheet_drawings.contains_key("Sheet1"));
+        assert!(drawings.sheet_drawings.contains_key("Sheet2"));
+        assert!(!drawings.sheet_pictures.contains_key("Sheet1"));
+        assert!(!drawings.sheet_ole_objects.contains_key("Sheet1"));
+        assert!(!drawings.sheet_controls.contains_key("Sheet1"));
+        assert!(!drawings.sheet_drawing_hfs.contains_key("Sheet1"));
+        // Chart sheets are not deleted by the worksheet delete operation.
+        assert!(drawings.chart_sheets.contains_key("Chart1"));
     }
 
     #[test]
