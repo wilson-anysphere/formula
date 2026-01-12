@@ -29,7 +29,13 @@ fn transpose_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             ctx.record_reference(&r);
             let rows = (r.end.row - r.start.row + 1) as usize;
             let cols = (r.end.col - r.start.col + 1) as usize;
-            let total = rows.saturating_mul(cols);
+            let total = match rows.checked_mul(cols) {
+                Some(v) => v,
+                None => return Value::Error(ErrorKind::Spill),
+            };
+            if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
             let mut values = Vec::new();
             if values.try_reserve_exact(total).is_err() {
                 return Value::Error(ErrorKind::Num);
@@ -45,6 +51,9 @@ fn transpose_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let total = input.rows.saturating_mul(input.cols);
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
     let mut out_values = Vec::new();
     if out_values.try_reserve_exact(total).is_err() {
         return Value::Error(ErrorKind::Num);
@@ -121,6 +130,9 @@ fn sequence_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Some(v) => v,
         None => return Value::Error(ErrorKind::Num),
     };
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
 
     let mut values = Vec::new();
     if values.try_reserve_exact(total).is_err() {
