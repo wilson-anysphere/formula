@@ -210,6 +210,10 @@ fn setup_sparse_huge_range_engine() -> (Engine, String, String) {
 
 fn setup_range_aggregate_engine_ast(size: usize) -> (Engine, String, String) {
     let mut engine = Engine::new();
+    // This benchmark exists specifically to cover the AST evaluator (and the scalar/array
+    // aggregation paths it exercises). Disable the bytecode backend so improvements/regressions in
+    // the AST path remain visible even as bytecode coverage expands over time.
+    engine.set_bytecode_enabled(false);
 
     for row in 1..=size {
         let addr = format!("A{row}");
@@ -221,7 +225,8 @@ fn setup_range_aggregate_engine_ast(size: usize) -> (Engine, String, String) {
     let sum_cell = "C1".to_string();
     let countif_cell = "C2".to_string();
 
-    // Wrap in LET to force the AST evaluator (bytecode backend does not currently compile LET).
+    // Wrap in LET to model real-world non-bytecode sheets (LET/LAMBDA heavy formulas). Bytecode is
+    // explicitly disabled above, so this stays on the AST evaluator.
     engine
         .set_cell_formula("Sheet1", &sum_cell, &format!("=LET(r,A1:A{size},SUM(r))"))
         .expect("set SUM/LET formula");
