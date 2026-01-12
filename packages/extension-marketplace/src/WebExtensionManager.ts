@@ -155,35 +155,68 @@ function getLocalStorage(): Storage | null {
 }
 
 function readContributedPanelSeedStore(storage: Storage): Record<string, ContributedPanelSeed> {
+  let raw: string | null = null;
   try {
-    const raw = storage.getItem(CONTRIBUTED_PANELS_SEED_STORE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const out: Record<string, ContributedPanelSeed> = {};
-    for (const [panelId, value] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof panelId !== "string" || panelId.trim().length === 0) continue;
-      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-      const record = value as any;
-      const extensionId = typeof record.extensionId === "string" ? record.extensionId.trim() : "";
-      const title = typeof record.title === "string" ? record.title.trim() : "";
-      if (!extensionId || !title) continue;
-      const icon = record.icon === undefined ? undefined : record.icon === null ? null : String(record.icon);
-      const defaultDock =
-        record.defaultDock === "left" || record.defaultDock === "right" || record.defaultDock === "bottom"
-          ? record.defaultDock
-          : undefined;
-      out[panelId] = {
-        extensionId,
-        title,
-        ...(icon !== undefined ? { icon } : {}),
-        ...(defaultDock ? { defaultDock } : {})
-      };
-    }
-    return out;
+    raw = storage.getItem(CONTRIBUTED_PANELS_SEED_STORE_KEY);
   } catch {
     return {};
   }
+  if (raw == null) return {};
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // Corrupted JSON: remove the key so future installs start clean.
+    try {
+      storage.removeItem(CONTRIBUTED_PANELS_SEED_STORE_KEY);
+    } catch {
+      // ignore
+    }
+    return {};
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    // Invalid top-level type: clear it.
+    try {
+      storage.removeItem(CONTRIBUTED_PANELS_SEED_STORE_KEY);
+    } catch {
+      // ignore
+    }
+    return {};
+  }
+
+  const out: Record<string, ContributedPanelSeed> = {};
+  for (const [panelId, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof panelId !== "string" || panelId.trim().length === 0) continue;
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const record = value as any;
+    const extensionId = typeof record.extensionId === "string" ? record.extensionId.trim() : "";
+    const title = typeof record.title === "string" ? record.title.trim() : "";
+    if (!extensionId || !title) continue;
+    const icon = record.icon === undefined ? undefined : record.icon === null ? null : String(record.icon);
+    const defaultDock =
+      record.defaultDock === "left" || record.defaultDock === "right" || record.defaultDock === "bottom"
+        ? record.defaultDock
+        : undefined;
+    out[panelId] = {
+      extensionId,
+      title,
+      ...(icon !== undefined ? { icon } : {}),
+      ...(defaultDock ? { defaultDock } : {})
+    };
+  }
+
+  // If the normalized store is empty, remove the key entirely (cleans up legacy "{}" records and
+  // stores with only invalid entries).
+  if (Object.keys(out).length === 0) {
+    try {
+      storage.removeItem(CONTRIBUTED_PANELS_SEED_STORE_KEY);
+    } catch {
+      // ignore
+    }
+  }
+  return out;
 }
 
 function writeContributedPanelSeedStore(storage: Storage, data: Record<string, ContributedPanelSeed>): void {
