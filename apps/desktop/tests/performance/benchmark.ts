@@ -12,6 +12,17 @@ export interface BenchmarkOptions {
    */
   targetMs: number;
   unit?: 'ms';
+  /**
+   * Timing source for the benchmark loop.
+   *
+   * - `"wall"`: Wall-clock duration via `performance.now()` (default).
+   * - `"cpu"`: CPU time via `process.cpuUsage()`, which is more stable on noisy CI runners
+   *   because it ignores time spent descheduled by the OS.
+   *
+   * Note: `"cpu"` is best suited for synchronous, CPU-bound benchmarks. It does *not* include
+   * time spent waiting (e.g. timers, I/O).
+   */
+  clock?: 'wall' | 'cpu';
 }
 
 export interface BenchmarkResult {
@@ -59,6 +70,7 @@ export async function runBenchmark(
   const warmup = options.warmup ?? 10;
   const targetMs = options.targetMs;
   const unit: 'ms' = options.unit ?? 'ms';
+  const clock = options.clock ?? 'wall';
 
   for (let i = 0; i < warmup; i++) {
     await fn();
@@ -66,9 +78,16 @@ export async function runBenchmark(
 
   const results: number[] = [];
   for (let i = 0; i < iterations; i++) {
-    const start = performance.now();
-    await fn();
-    results.push(performance.now() - start);
+    if (clock === 'cpu') {
+      const start = process.cpuUsage();
+      await fn();
+      const diff = process.cpuUsage(start);
+      results.push((diff.user + diff.system) / 1000);
+    } else {
+      const start = performance.now();
+      await fn();
+      results.push(performance.now() - start);
+    }
   }
 
   const sorted = [...results].sort((a, b) => a - b);
@@ -98,4 +117,3 @@ export function formatMs(value: number): string {
   if (value >= 10) return `${value.toFixed(1)}ms`;
   return `${value.toFixed(3)}ms`;
 }
-

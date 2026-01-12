@@ -59,6 +59,7 @@ export function createRenderBenchmarks(): Array<{
   targetMs: number;
   iterations?: number;
   warmup?: number;
+  clock?: 'wall' | 'cpu';
 }> {
   // Use a reasonably large backing grid to keep cache behavior realistic, while
   // benchmarking only the visible region.
@@ -87,4 +88,3 @@ export function createRenderBenchmarks(): Array<{
     },
   ];
 }
-

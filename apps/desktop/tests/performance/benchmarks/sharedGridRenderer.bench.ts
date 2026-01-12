@@ -8,6 +8,7 @@ type BenchmarkDef = {
   targetMs: number;
   iterations?: number;
   warmup?: number;
+  clock?: 'wall' | 'cpu';
 };
 
 /**
@@ -191,6 +192,7 @@ export function createSharedGridRendererBenchmarks(): BenchmarkDef[] {
       },
       // 60fps budget.
       targetMs: 16,
+      clock: 'cpu',
       // Use enough samples that occasional Node/V8 GC pauses don't dominate p95.
       iterations: 100,
       warmup: 10,
@@ -203,6 +205,7 @@ export function createSharedGridRendererBenchmarks(): BenchmarkDef[] {
         renderer.renderImmediately();
       },
       targetMs: 16,
+      clock: 'cpu',
       // Use enough samples that occasional Node/V8 GC pauses don't dominate p95.
       iterations: 200,
       warmup: 20,
@@ -215,6 +218,7 @@ export function createSharedGridRendererBenchmarks(): BenchmarkDef[] {
         renderer.renderImmediately();
       },
       targetMs: 16,
+      clock: 'cpu',
       // Use enough samples that occasional Node/V8 GC pauses don't dominate p95.
       iterations: 200,
       warmup: 20,

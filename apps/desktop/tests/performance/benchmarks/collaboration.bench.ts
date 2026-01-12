@@ -47,6 +47,7 @@ export function createCollaborationBenchmarks(): Array<{
   targetMs: number;
   iterations?: number;
   warmup?: number;
+  clock?: 'wall' | 'cpu';
 }> {
   const a = createClient('a');
   const b = createClient('b');
@@ -89,4 +90,3 @@ export function createCollaborationBenchmarks(): Array<{
     },
   ];
 }
-

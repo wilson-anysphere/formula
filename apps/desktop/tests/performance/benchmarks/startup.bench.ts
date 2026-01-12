@@ -6,6 +6,7 @@ export function createStartupBenchmarks(): Array<{
   targetMs: number;
   iterations?: number;
   warmup?: number;
+  clock?: 'wall' | 'cpu';
 }> {
   const [renderFrame] = createRenderBenchmarks();
 
@@ -42,4 +43,3 @@ export function createStartupBenchmarks(): Array<{
     },
   ];
 }
-

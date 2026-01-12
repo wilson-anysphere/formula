@@ -130,6 +130,7 @@ async function main(): Promise<void> {
         iterations: bench.iterations,
         warmup: bench.warmup,
         targetMs: bench.targetMs,
+        clock: bench.clock,
       }),
     );
   }

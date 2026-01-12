@@ -10,6 +10,7 @@ type Bench = {
   targetMs: number;
   iterations?: number;
   warmup?: number;
+  clock?: 'wall' | 'cpu';
 };
 
 type CellState = { value: unknown; formula: string | null; styleId?: number };
