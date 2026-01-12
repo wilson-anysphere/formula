@@ -171,9 +171,13 @@ test.describe("tauri workbookSync sheet metadata undo/redo", () => {
     await page.addInitScript(installTauriStubForTests);
     await gotoDesktop(page);
 
-    await page.evaluate(() => {
-      (window as any).__formulaApp.getWorkbookSheetStore().hide("Sheet2");
-    });
+    const tab = page.getByTestId("sheet-tab-Sheet2");
+    await expect(tab).toBeVisible();
+    await tab.click({ button: "right" });
+
+    const menu = page.getByTestId("sheet-tab-context-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Hide" }).click();
 
     await expect
       .poll(
@@ -199,9 +203,13 @@ test.describe("tauri workbookSync sheet metadata undo/redo", () => {
     await page.addInitScript(installTauriStubForTests);
     await gotoDesktop(page);
 
-    await page.evaluate(() => {
-      (window as any).__formulaApp.getWorkbookSheetStore().setTabColor("Sheet1", { rgb: "FF00FF00" });
-    });
+    const tab = page.getByTestId("sheet-tab-Sheet1");
+    await expect(tab).toBeVisible();
+    await tab.click({ button: "right" });
+    const menu = page.getByTestId("sheet-tab-context-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Tab Color" }).click();
+    await menu.getByRole("button", { name: "Green" }).click();
 
     await expect
       .poll(async () => (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_tab_color").length, { timeout: 10_000 })

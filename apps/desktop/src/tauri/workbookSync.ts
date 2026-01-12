@@ -130,17 +130,12 @@ function normalizeSheetMeta(raw: unknown, fallbackSheetId: string): SheetMetaSta
   return tabColor ? { name, visibility, tabColor } : { name, visibility };
 }
 
-function tabColorToBackendArg(tabColor: unknown): TabColor | null {
-  if (!tabColor || typeof tabColor !== "object") return null;
-  const raw = tabColor as any;
-  const out: TabColor = {};
-  if (typeof raw.rgb === "string" && raw.rgb.trim()) out.rgb = raw.rgb.trim();
-  if (typeof raw.theme === "number") out.theme = raw.theme;
-  if (typeof raw.indexed === "number") out.indexed = raw.indexed;
-  if (typeof raw.tint === "number") out.tint = raw.tint;
-  if (typeof raw.auto === "boolean") out.auto = raw.auto;
-  return Object.keys(out).length > 0 ? out : null;
-}
+// NOTE: In desktop mode, sheet metadata operations (rename/reorder/add/delete/hide/tabColor)
+// are persisted to the backend by `main.ts` (both for direct UI actions and doc-driven
+// undo/redo/applyState reconciliations). Workbook sync only needs to:
+// - track sheet ids to avoid sending cell edits for deleted sheets
+// - ensure `mark_saved` runs when undo/redo returns to the last-saved state, even when the
+//   last change was sheet-metadata-only (no cell deltas).
 
 type PendingEdit = { sheetId: string; row: number; col: number; edit: RangeCellEdit };
 
@@ -494,141 +489,19 @@ export function startWorkbookSync(args: {
         const cellBatch = Array.from(pendingCellEdits.values());
         pendingCellEdits.clear();
 
-        // Apply sheet add/delete/rename/reorder deltas *before* sending cell edits so the backend
-        // has the correct sheet structure for set_cell/set_range (especially for undo/redo of sheet deletes).
-        if (sheetActions.length > 0) {
-          try {
-            for (const action of sheetActions) {
-              if (action.kind === "applyState") {
-                if (!sheetMirror) {
-                  sheetMirror = action.snapshot;
-                  continue;
-                }
-                const next = action.snapshot;
-                const existing = new Set(sheetMirror.order);
-                const desired = new Set(next.order);
-
-                // Delete removed sheets first so we never apply cell edits to them.
-                for (const sheetId of sheetMirror.order) {
-                  if (!desired.has(sheetId)) {
-                    await invokeFn("delete_sheet", { sheet_id: sheetId });
-                  }
-                }
-
-                // Insert added sheets (stable ids).
-                for (let i = 0; i < next.order.length; i++) {
-                  const sheetId = next.order[i]!;
-                  if (existing.has(sheetId)) continue;
-                  const meta = next.metaById.get(sheetId) ?? { name: sheetId, visibility: "visible" };
-                  await invokeFn("add_sheet", { sheet_id: sheetId, name: meta.name, index: i });
-                  if (meta.visibility && meta.visibility !== "visible") {
-                    await invokeFn("set_sheet_visibility", { sheet_id: sheetId, visibility: meta.visibility });
-                  }
-                  const tabColor = tabColorToBackendArg(meta.tabColor);
-                  await invokeFn("set_sheet_tab_color", { sheet_id: sheetId, tab_color: tabColor });
-                }
-
-                // Update metadata on remaining sheets.
-                for (const sheetId of next.order) {
-                  if (!existing.has(sheetId)) continue;
-                  const before = sheetMirror.metaById.get(sheetId);
-                  const after = next.metaById.get(sheetId);
-                  if (!before || !after) continue;
-                  if (before.name !== after.name) {
-                    await invokeFn("rename_sheet", { sheet_id: sheetId, name: after.name });
-                  }
-                  if (before.visibility !== after.visibility) {
-                    await invokeFn("set_sheet_visibility", { sheet_id: sheetId, visibility: after.visibility });
-                  }
-                  if (!tabColorEquals(before.tabColor, after.tabColor)) {
-                    await invokeFn("set_sheet_tab_color", { sheet_id: sheetId, tab_color: tabColorToBackendArg(after.tabColor) });
-                  }
-                }
-
-                // Apply canonical ordering.
-                for (let i = 0; i < next.order.length; i++) {
-                  const sheetId = next.order[i]!;
-                  await invokeFn("move_sheet", { sheet_id: sheetId, to_index: i });
-                }
-
-                sheetMirror = next;
-                continue;
-              }
-
-              // action.kind === "delta"
-              const sheetMetaDeltas = action.sheetMetaDeltas;
-              const sheetOrderDelta = action.sheetOrderDelta;
-
-              // Delete sheets first.
-              for (const delta of sheetMetaDeltas) {
-                const sheetId = String((delta as any)?.sheetId ?? "").trim();
-                if (!sheetId) continue;
-                const before = (delta as any)?.before;
-                const after = (delta as any)?.after;
-                if (before && !after) {
-                  await invokeFn("delete_sheet", { sheet_id: sheetId });
-                }
-              }
-
-              // Insert sheets with stable ids.
-              for (const delta of sheetMetaDeltas) {
-                const sheetId = String((delta as any)?.sheetId ?? "").trim();
-                if (!sheetId) continue;
-                const before = (delta as any)?.before;
-                const after = (delta as any)?.after;
-                if (!before && after) {
-                  const meta = normalizeSheetMeta(after, sheetId);
-                  const desiredIndex = sheetOrderDelta?.after?.indexOf(sheetId) ?? -1;
-                  const toIndex = desiredIndex >= 0 ? desiredIndex : (sheetMirror?.order.length ?? 0);
-                  await invokeFn("add_sheet", { sheet_id: sheetId, name: meta.name, index: toIndex });
-                  if (meta.visibility && meta.visibility !== "visible") {
-                    await invokeFn("set_sheet_visibility", { sheet_id: sheetId, visibility: meta.visibility });
-                  }
-                  const tabColor = tabColorToBackendArg(meta.tabColor);
-                  await invokeFn("set_sheet_tab_color", { sheet_id: sheetId, tab_color: tabColor });
-                }
-              }
-
-              // Apply metadata updates (rename, visibility, tabColor).
-              for (const delta of sheetMetaDeltas) {
-                const sheetId = String((delta as any)?.sheetId ?? "").trim();
-                if (!sheetId) continue;
-                const before = (delta as any)?.before;
-                const after = (delta as any)?.after;
-                if (!before || !after) continue;
-                const beforeMeta = normalizeSheetMeta(before, sheetId);
-                const afterMeta = normalizeSheetMeta(after, sheetId);
-
-                if (beforeMeta.name !== afterMeta.name) {
-                  await invokeFn("rename_sheet", { sheet_id: sheetId, name: afterMeta.name });
-                }
-                if (beforeMeta.visibility !== afterMeta.visibility) {
-                  await invokeFn("set_sheet_visibility", { sheet_id: sheetId, visibility: afterMeta.visibility });
-                }
-                if (!tabColorEquals(beforeMeta.tabColor, afterMeta.tabColor)) {
-                  await invokeFn("set_sheet_tab_color", { sheet_id: sheetId, tab_color: tabColorToBackendArg(afterMeta.tabColor) });
-                }
-              }
-
-              // Apply canonical ordering.
-              if (sheetOrderDelta && Array.isArray(sheetOrderDelta.after)) {
-                for (let i = 0; i < sheetOrderDelta.after.length; i++) {
-                  const sheetId = String(sheetOrderDelta.after[i] ?? "").trim();
-                  if (!sheetId) continue;
-                  await invokeFn("move_sheet", { sheet_id: sheetId, to_index: i });
-                }
-              }
-
-              if (sheetMirror) {
-                sheetMirror = applySheetDeltaToSnapshot(sheetMirror, sheetMetaDeltas, sheetOrderDelta);
-              }
-            }
-          } catch (err) {
-            console.error("[formula][desktop] Failed to sync sheet changes to backend:", err);
-            safeShowToast("Failed to sync workbook sheet changes to the desktop backend. Saving may be inconsistent.");
-            throw err;
-          }
-        }
+         // Update our local sheet snapshot for undo/redo/applyState events so we can avoid
+         // sending cell edits for deleted sheets (and include cell restores for re-inserted sheets).
+         if (sheetActions.length > 0) {
+           for (const action of sheetActions) {
+             if (action.kind === "applyState") {
+               sheetMirror = action.snapshot;
+               continue;
+             }
+             if (sheetMirror) {
+               sheetMirror = applySheetDeltaToSnapshot(sheetMirror, action.sheetMetaDeltas, action.sheetOrderDelta);
+             }
+           }
+         }
 
         const existingSheetIds = sheetMirror ? new Set(sheetMirror.order) : null;
         const filteredCellBatch = existingSheetIds ? cellBatch.filter((e) => existingSheetIds.has(e.sheetId)) : cellBatch;

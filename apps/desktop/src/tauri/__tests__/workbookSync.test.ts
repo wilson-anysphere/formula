@@ -252,8 +252,7 @@ describe("workbookSync", () => {
     await flushMicrotasks(8);
 
     const cmds = invoke.mock.calls.map((c) => c[0]);
-    expect(cmds[0]).toBe("rename_sheet");
-    expect(cmds[1]).toBe("mark_saved");
+    expect(cmds).toEqual(["mark_saved"]);
 
     sync.stop();
   });
