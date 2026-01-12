@@ -503,6 +503,12 @@ export function startWorkbookSync(args: {
            }
          }
 
+        // DocumentController materializes sheets lazily (the sheet map can be empty until the first cell is accessed).
+        // Refresh our local sheet snapshot here so we don't accidentally drop the first edits to a newly-created sheet.
+        // (Without this, `sheetMirror.order` can be `[]` at startup and we'd filter out all cell edits.)
+        const refreshedSnapshot = captureSheetSnapshot(args.document);
+        if (refreshedSnapshot) sheetMirror = refreshedSnapshot;
+
         const existingSheetIds = sheetMirror ? new Set(sheetMirror.order) : null;
         const filteredCellBatch = existingSheetIds ? cellBatch.filter((e) => existingSheetIds.has(e.sheetId)) : cellBatch;
         const updates = await sendEditsViaTauri(invokeFn, filteredCellBatch);
