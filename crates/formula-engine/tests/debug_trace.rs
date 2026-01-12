@@ -250,6 +250,37 @@ fn debug_trace_supports_array_arithmetic_broadcasting() {
 }
 
 #[test]
+fn debug_trace_supports_concat_operator_and_precedence() {
+    let mut engine = Engine::new();
+    engine.set_cell_formula("Sheet1", "A1", "=1+2&3").unwrap();
+    engine.recalculate();
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(dbg.value, Value::Text("33".to_string()));
+    assert_eq!(slice(&dbg.formula, dbg.trace.span), "1+2&3");
+    assert_eq!(
+        dbg.trace.kind,
+        TraceKind::Binary {
+            op: formula_engine::eval::BinaryOp::Concat
+        }
+    );
+
+    // Left side should be `1+2` (add has higher precedence than `&`).
+    assert_eq!(slice(&dbg.formula, dbg.trace.children[0].span), "1+2");
+    assert_eq!(
+        dbg.trace.children[0].kind,
+        TraceKind::Binary {
+            op: formula_engine::eval::BinaryOp::Add
+        }
+    );
+    assert_eq!(dbg.trace.children[0].value, Value::Number(3.0));
+
+    // Right side is `3`.
+    assert_eq!(slice(&dbg.formula, dbg.trace.children[1].span), "3");
+    assert_eq!(dbg.trace.children[1].value, Value::Number(3.0));
+}
+
+#[test]
 fn debug_trace_supports_3d_sheet_range_refs() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
