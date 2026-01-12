@@ -91,6 +91,12 @@ class CellFormattingDemoProvider implements CellProvider {
       strike: true
     });
 
+    put(2, 5, "Double underline", {
+      ...baseTextStyle,
+      underline: true,
+      underlineStyle: "double"
+    });
+
     put(3, 1, "Bold+Italic", {
       ...baseTextStyle,
       fontWeight: "700",
