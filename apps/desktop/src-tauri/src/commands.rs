@@ -655,7 +655,24 @@ pub async fn add_sheet_with_id(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn rename_sheet(sheet_id: String, name: String, state: State<'_, SharedAppState>) -> Result<(), String> {
+pub async fn reorder_sheets(sheet_ids: Vec<String>, state: State<'_, SharedAppState>) -> Result<(), String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        state.reorder_sheets(sheet_ids).map_err(app_error)?;
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn rename_sheet(
+    sheet_id: String,
+    name: String,
+    state: State<'_, SharedAppState>,
+) -> Result<(), String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();

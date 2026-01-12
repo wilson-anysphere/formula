@@ -569,8 +569,9 @@ impl AppState {
         after_sheet_id: Option<String>,
         index: Option<usize>,
     ) -> Result<(), AppStateError> {
-        let (sheet_id, name, insert_index) = {
+        let (sheet_id, name, insert_index, sheet_count_before) = {
             let workbook = self.get_workbook()?;
+            let sheet_count_before = workbook.sheets.len();
 
             let sheet_id = sheet_id.trim();
             if sheet_id.is_empty() {
@@ -613,7 +614,12 @@ impl AppState {
                 .unwrap_or_else(|| index.unwrap_or(workbook.sheets.len()))
                 .min(workbook.sheets.len());
 
-            (sheet_id.to_string(), trimmed.to_string(), insert_index)
+            (
+                sheet_id.to_string(),
+                trimmed.to_string(),
+                insert_index,
+                sheet_count_before,
+            )
         };
 
         if let Some(persistent) = self.persistent.as_mut() {
@@ -643,7 +649,172 @@ impl AppState {
             workbook.origin_xlsb_path = None;
         }
 
-        self.engine.ensure_sheet(&name);
+        // The formula engine indexes sheets by insertion order. When we insert a new sheet into
+        // the middle of the workbook, we need to rebuild the engine so:
+        // - sheet indices match the workbook order (important for 3D references)
+        // - dependency graphs are updated to include the newly inserted sheet
+        if insert_index < sheet_count_before {
+            self.rebuild_engine_from_workbook()?;
+            let recalc_changes = self.engine.recalculate_with_value_changes_multi_threaded();
+            let _ = self.refresh_computed_values_from_recalc_changes(&recalc_changes)?;
+        } else {
+            self.engine.ensure_sheet(&name);
+        }
+
+        self.dirty = true;
+        self.redo_stack.clear();
+        Ok(())
+    }
+
+    pub fn reorder_sheets(&mut self, sheet_ids: Vec<String>) -> Result<(), AppStateError> {
+        let desired: Vec<String> = sheet_ids
+            .into_iter()
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty())
+            .collect();
+        if desired.is_empty() {
+            return Ok(());
+        }
+
+        let (ctx, active_sheet_id, selection_sheet_id, before_order, ordered_ids) = {
+            let workbook = self.get_workbook()?;
+            if workbook.sheets.len() <= 1 {
+                return Ok(());
+            }
+
+            let before_order: Vec<String> = workbook.sheets.iter().map(|s| s.id.clone()).collect();
+
+            let mut seen = HashSet::new();
+            let mut ordered_ids: Vec<String> = Vec::with_capacity(before_order.len());
+
+            for raw in &desired {
+                if raw.is_empty() {
+                    continue;
+                }
+                if seen.contains(raw) {
+                    continue;
+                }
+                if !workbook.sheets.iter().any(|sheet| sheet.id == *raw) {
+                    continue;
+                }
+                seen.insert(raw.clone());
+                ordered_ids.push(raw.clone());
+            }
+
+            for id in &before_order {
+                if seen.contains(id) {
+                    continue;
+                }
+                seen.insert(id.clone());
+                ordered_ids.push(id.clone());
+            }
+
+            if ordered_ids.len() <= 1
+                || (ordered_ids.len() == before_order.len()
+                    && ordered_ids
+                        .iter()
+                        .zip(before_order.iter())
+                        .all(|(a, b)| a == b))
+            {
+                return Ok(());
+            }
+
+            let ctx = self.macro_host.runtime_context();
+            let active_sheet_id = workbook.sheets.get(ctx.active_sheet).map(|s| s.id.clone());
+            let selection_sheet_id = ctx
+                .selection
+                .as_ref()
+                .and_then(|sel| workbook.sheets.get(sel.sheet).map(|s| s.id.clone()));
+
+            (
+                ctx,
+                active_sheet_id,
+                selection_sheet_id,
+                before_order,
+                ordered_ids,
+            )
+        };
+
+        // Update persistent storage first so we can fail fast without mutating the in-memory workbook.
+        if let Some(persistent) = self.persistent.as_ref() {
+            for (idx, sheet_id) in ordered_ids.iter().enumerate() {
+                let sheet_uuid = persistent.sheet_uuid(sheet_id).ok_or_else(|| {
+                    AppStateError::Persistence(format!(
+                        "missing persistence mapping for sheet id {sheet_id}"
+                    ))
+                })?;
+                persistent
+                    .storage
+                    .reorder_sheet(sheet_uuid, idx as i64)
+                    .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+            }
+        }
+
+        {
+            let workbook = self.get_workbook_mut()?;
+
+            let mut remaining = std::mem::take(&mut workbook.sheets);
+            let mut next = Vec::with_capacity(remaining.len());
+            for id in &ordered_ids {
+                if let Some(idx) = remaining.iter().position(|s| s.id == *id) {
+                    next.push(remaining.remove(idx));
+                }
+            }
+            next.extend(remaining);
+            workbook.sheets = next;
+
+            // NOTE: Reordering sheets is a structural edit for XLSB inputs. The `.xlsb` writer
+            // cannot currently reorder workbook metadata, so treat this as a conversion to XLSX
+            // on the next save (consistent with other structural edits like add/delete/rename).
+            if workbook.origin_xlsb_path.is_some() {
+                workbook.origin_xlsb_path = None;
+            }
+        }
+
+        // The macro runtime context stores sheet indices; keep them stable so it continues to
+        // point at the same sheet(s) after reordering.
+        {
+            let workbook = self
+                .workbook
+                .as_ref()
+                .ok_or(AppStateError::NoWorkbookLoaded)?;
+            let mut new_ctx = ctx;
+
+            if let Some(active_sheet_id) = active_sheet_id {
+                if let Some(idx) = workbook
+                    .sheets
+                    .iter()
+                    .position(|s| s.id == active_sheet_id)
+                {
+                    new_ctx.active_sheet = idx;
+                }
+            }
+
+            if let (Some(sel), Some(selection_sheet_id)) =
+                (new_ctx.selection.as_mut(), selection_sheet_id)
+            {
+                if let Some(idx) = workbook
+                    .sheets
+                    .iter()
+                    .position(|s| s.id == selection_sheet_id)
+                {
+                    sel.sheet = idx;
+                }
+            }
+
+            self.macro_host.sync_with_workbook(workbook);
+            self.macro_host.set_runtime_context(new_ctx);
+        }
+
+        // Sheet order affects some Excel semantics (e.g. 3D references like `Sheet1:Sheet3!A1`).
+        // Rebuild to ensure evaluations reflect the updated sheet ordering.
+        self.rebuild_engine_from_workbook()?;
+        self.engine.recalculate();
+        let _ = self.refresh_computed_values()?;
+
+        // Defensive: the reorder list we applied may have ignored some unknown ids; keep the
+        // caller-visible ordering in sync with the actual workbook model.
+        debug_assert_ne!(before_order, ordered_ids);
 
         self.dirty = true;
         self.redo_stack.clear();

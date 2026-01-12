@@ -890,6 +890,7 @@ fn main() {
             commands::rename_sheet,
             commands::move_sheet,
             commands::delete_sheet,
+            commands::reorder_sheets,
             commands::set_sheet_visibility,
             commands::set_sheet_tab_color,
             commands::read_text_file,

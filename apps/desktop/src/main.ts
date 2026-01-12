@@ -2223,47 +2223,6 @@ let lastSheetStoreSnapshot: SheetStoreSnapshot | null = null;
 
 type SheetUiInfo = { id: string; name: string; visibility?: SheetVisibility; tabColor?: TabColor };
 
-function detectSingleSheetMove(
-  prevOrder: readonly string[],
-  nextOrder: readonly string[],
-): { sheetId: string; toIndex: number } | null {
-  if (prevOrder.length !== nextOrder.length) return null;
-  if (prevOrder.length < 2) return null;
-
-  const prevSet = new Set(prevOrder);
-  if (prevSet.size !== prevOrder.length) return null;
-  for (const id of nextOrder) {
-    if (!prevSet.has(id)) return null;
-  }
-
-  // We treat the reorder as a single "remove + insert" move:
-  // - remove one sheet id from prev
-  // - insert it at a different index
-  // - all other sheet ids preserve their relative order
-  for (const sheetId of prevOrder) {
-    const fromIndex = prevOrder.indexOf(sheetId);
-    const toIndex = nextOrder.indexOf(sheetId);
-    if (toIndex === -1) continue;
-    if (fromIndex === toIndex) continue;
-
-    const prevWithout = prevOrder.filter((id) => id !== sheetId);
-    const nextWithout = nextOrder.filter((id) => id !== sheetId);
-    if (prevWithout.length !== nextWithout.length) continue;
-
-    let matches = true;
-    for (let i = 0; i < prevWithout.length; i += 1) {
-      if (prevWithout[i] !== nextWithout[i]) {
-        matches = false;
-        break;
-      }
-    }
-    if (!matches) continue;
-    return { sheetId, toIndex };
-  }
-
-  return null;
-}
-
 function emitSheetMetadataChanged(): void {
   if (typeof window === "undefined") return;
   try {
@@ -2434,8 +2393,6 @@ async function handleAddSheet(): Promise<void> {
     const activeId = app.getCurrentSheetId();
     const allSheets = workbookSheetStore.listAll();
     const desiredName = generateDefaultSheetName(allSheets);
-    const activeIndex = allSheets.findIndex((sheet) => sheet.id === activeId);
-    const insertIndex = activeIndex >= 0 ? activeIndex + 1 : allSheets.length;
     const doc = app.getDocument();
 
     const collabSession = app.getCollabSession?.() ?? null;
@@ -2479,35 +2436,26 @@ async function handleAddSheet(): Promise<void> {
       return;
     }
 
-    const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-    if (typeof baseInvoke === "function") {
-      // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
-      const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
-
-      // Allow any microtask-batched workbook edits to enqueue before we request a new sheet id.
-      await new Promise<void>((resolve) => queueMicrotask(resolve));
-
-      const info = (await invoke("add_sheet", { name: desiredName, after_sheet_id: activeId, index: insertIndex })) as SheetUiInfo;
-      const id = String((info as any)?.id ?? "").trim();
-      const name = String((info as any)?.name ?? "").trim();
-      if (!id) throw new Error("Backend returned empty sheet id");
-
-      // Backend may adjust the name for uniqueness; trust it.
-      workbookSheetStore.addAfter(activeId, { id, name: name || desiredName });
-
-      // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
-      doc.getCell(id, { row: 0, col: 0 });
-      app.activateSheet(id);
-      restoreFocusAfterSheetNavigation();
-      return;
+    // In local (non-collab) mode, the UI sheet store is the authoritative sheet list.
+    // Mutate it first so sheet-tab operations remain undoable in the DocumentController.
+    // The workbook sync bridge will persist the structural change to the native backend.
+    const existingIdCi = new Set(allSheets.map((s) => s.id.trim().toLowerCase()));
+    const baseId = desiredName;
+    let newSheetId = baseId;
+    let counter = 1;
+    while (existingIdCi.has(newSheetId.toLowerCase())) {
+      counter += 1;
+      newSheetId = `${baseId}-${counter}`;
     }
 
-    // Web-only behavior: create a local DocumentController sheet lazily.
-    // (In the desktop-web test harness there is no workbook backend, so we synthesize a stable
-    // sheet id locally.)
-    const newSheetId = desiredName;
     workbookSheetStore.addAfter(activeId, { id: newSheetId, name: desiredName });
-    doc.getCell(newSheetId, { row: 0, col: 0 });
+
+    // Best-effort: ensure the sheet is materialized (DocumentController can create sheets lazily).
+    try {
+      doc.getCell(newSheetId, { row: 0, col: 0 });
+    } catch {
+      // ignore
+    }
     app.activateSheet(newSheetId);
     restoreFocusAfterSheetNavigation();
   } catch (err) {
@@ -2520,12 +2468,6 @@ async function handleAddSheet(): Promise<void> {
 async function renameSheetById(
   sheetId: string,
   newName: string,
-  opts: {
-    /**
-     * Source label used for undo/telemetry. Defaults to "ui".
-     */
-    source?: string;
-  } = {},
 ): Promise<{ id: string; name: string }> {
   const id = String(sheetId ?? "").trim();
   if (!id) throw new Error("Sheet id cannot be empty");
@@ -2548,20 +2490,6 @@ async function renameSheetById(
   // No-op rename; preserve the same return shape as other sheet APIs.
   if (oldDisplayName === normalizedNewName) {
     return { id, name: oldDisplayName };
-  }
-
-  const collabSession = app.getCollabSession?.() ?? null;
-  const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  if (!collabSession && typeof baseInvoke === "function") {
-    // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
-    const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
-
-    // Allow any microtask-batched workbook edits to enqueue before we rename.
-    await new Promise<void>((resolve) => queueMicrotask(resolve));
-
-    // Persist the rename first; only update UI state once the backend succeeds so we
-    // don't need a rollback path on failure.
-    await invoke("rename_sheet", { sheet_id: id, name: normalizedNewName });
   }
 
   // Update UI metadata first so follow-up operations observe the new name.
@@ -2614,24 +2542,7 @@ function renderSheetTabs(): void {
       },
       onAddSheet: handleAddSheet,
       onRenameSheet: async (sheetId: string, newName: string) => {
-        await renameSheetById(sheetId, newName, { source: "ui" });
-      },
-      onPersistSheetDelete: async (sheetId: string) => {
-        // In collab mode, sheet metadata changes are persisted to the shared Yjs document.
-        // Skip the local workbook backend.
-        const session = app.getCollabSession?.() ?? null;
-        if (session) return;
-
-        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-        if (typeof baseInvoke !== "function") return;
-
-        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
-        const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
-
-        // Allow any microtask-batched workbook edits to enqueue before we request deletion.
-        await new Promise<void>((resolve) => queueMicrotask(resolve));
-
-        await invoke("delete_sheet", { sheet_id: sheetId });
+        await renameSheetById(sheetId, newName);
       },
       onPersistSheetVisibility: async (sheetId: string, visibility: SheetVisibility) => {
         // In collab mode, sheet metadata changes are persisted to the shared Yjs document.
@@ -2669,20 +2580,6 @@ function renderSheetTabs(): void {
       },
       onSheetsReordered: () => restoreFocusAfterSheetNavigation(),
       onSheetDeleted: handleSheetDeletedFromTabs,
-      onSheetMoved: async ({ sheetId, toIndex }) => {
-        const collabSession = app.getCollabSession?.() ?? null;
-        if (collabSession) return;
-
-        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-        if (typeof baseInvoke !== "function") return;
-
-        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
-        const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
-
-        // Allow any microtask-batched workbook edits to enqueue before we move the sheet.
-        await new Promise<void>((resolve) => queueMicrotask(resolve));
-        await invoke("move_sheet", { sheet_id: sheetId, to_index: toIndex });
-      },
       onError: (message: string) => showToast(message, "error"),
     }),
   );
@@ -2806,214 +2703,11 @@ function installSheetStoreSubscription(): void {
   };
 
   lastSheetStoreSnapshot = captureSnapshot();
-  // Sheet reorders triggered by DocumentController undo/redo (doc -> store sync) should persist
-  // to the local workbook backend, but the doc->store sync can apply a single reorder as multiple
-  // `store.move(...)` calls. Coalesce those into one backend `move_sheet` call.
-  let pendingDocDrivenReorder: { before: string[]; after: string[] } | null = null;
-  let pendingDocDrivenReorderFlushScheduled = false;
-  const schedulePersistDocDrivenReorder = (before: string[], after: string[]): void => {
-    if (!pendingDocDrivenReorder) {
-      pendingDocDrivenReorder = { before: before.slice(), after: after.slice() };
-    } else {
-      pendingDocDrivenReorder.after = after.slice();
-    }
-
-    if (pendingDocDrivenReorderFlushScheduled) return;
-    pendingDocDrivenReorderFlushScheduled = true;
-
-    queueMicrotask(() => {
-      pendingDocDrivenReorderFlushScheduled = false;
-      const pending = pendingDocDrivenReorder;
-      pendingDocDrivenReorder = null;
-      if (!pending) return;
-
-      void (async () => {
-        const collabSession = app.getCollabSession?.() ?? null;
-        if (collabSession) return;
-
-        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-        if (typeof baseInvoke !== "function") return;
-
-        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
-        const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
-
-        // Allow any microtask-batched workbook edits to enqueue before we move the sheet.
-        await new Promise<void>((resolve) => queueMicrotask(resolve));
-
-        const beforeOrder = pending.before;
-        const afterOrder = pending.after;
-
-        // Prefer a single move when possible; full reorder can otherwise be extremely expensive
-        // because the backend `move_sheet` rebuilds the engine each time.
-        const singleMove = detectSingleSheetMove(beforeOrder, afterOrder);
-        if (singleMove) {
-          await invoke("move_sheet", { sheet_id: singleMove.sheetId, to_index: singleMove.toIndex });
-          return;
-        }
-
-        // Fall back to persisting a multi-move reorder.
-        //
-        // If the reorder is a pure permutation (no added/removed sheets), we can compute a minimal-ish
-        // sequence of `move_sheet` ops to transform `beforeOrder` into `afterOrder` by simulating the
-        // backend order as we go and only moving sheets that are out of place.
-        //
-        // This is still potentially expensive (each backend `move_sheet` rebuilds the engine), but it
-        // avoids the worst-case "move every sheet" behavior for common reorder patterns.
-        const isPureReorder = (() => {
-          if (beforeOrder.length !== afterOrder.length) return false;
-          const beforeSet = new Set(beforeOrder);
-          const afterSet = new Set(afterOrder);
-          if (beforeSet.size !== beforeOrder.length) return false;
-          if (afterSet.size !== afterOrder.length) return false;
-          if (beforeSet.size !== afterSet.size) return false;
-          for (const id of beforeSet) {
-            if (!afterSet.has(id)) return false;
-          }
-          return true;
-        })();
-
-        if (isPureReorder) {
-          const current = beforeOrder.slice();
-          for (let targetIndex = 0; targetIndex < afterOrder.length; targetIndex += 1) {
-            const desiredId = afterOrder[targetIndex];
-            if (!desiredId) continue;
-            if (current[targetIndex] === desiredId) continue;
-            const fromIndex = current.indexOf(desiredId);
-            if (fromIndex === -1) continue;
-
-            current.splice(fromIndex, 1);
-            current.splice(targetIndex, 0, desiredId);
-            await invoke("move_sheet", { sheet_id: desiredId, to_index: targetIndex });
-          }
-          return;
-        }
-
-        // Mixed reorder (sheet add/delete + order changes): force the backend into the desired order.
-        // The algorithm is: for each desired index, move that sheet id to the target index. This
-        // converges on the target order regardless of the current backend order.
-        for (let targetIndex = 0; targetIndex < afterOrder.length; targetIndex += 1) {
-          const sheetId = afterOrder[targetIndex];
-          if (!sheetId) continue;
-          await invoke("move_sheet", { sheet_id: sheetId, to_index: targetIndex });
-        }
-      })().catch((err) => {
-        showToast(`Failed to persist sheet reorder: ${String((err as any)?.message ?? err)}`, "error");
-      });
-    });
-  };
 
   stopSheetStoreListener = workbookSheetStore.subscribe(() => {
     const prevSnapshot = lastSheetStoreSnapshot;
     const nextSnapshot = captureSnapshot();
     lastSheetStoreSnapshot = nextSnapshot;
-
-    // In desktop (Tauri) mode, sheet operations can originate from `DocumentController` undo/redo and
-    // `applyState` restores. Those mutations flow doc -> sheet store inside `syncingSheetUi`
-    // transactions (see `installSheetStoreDocSync()`), which intentionally bypasses the normal
-    // "store -> doc" (and UI-hook backend) pathways.
-    //
-    // Mirror those doc-driven sheet mutations back into the backend workbook so:
-    // - `save_workbook` persists the same sheet list/order the user sees in the UI
-    // - subsequent `set_cell`/`set_range` flushes do not target a sheet the backend considers deleted
-    if (syncingSheetUi && prevSnapshot) {
-      const session = app.getCollabSession?.() ?? null;
-      if (!session) {
-        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-        const invoke =
-          typeof queuedInvoke === "function"
-            ? queuedInvoke
-            : typeof baseInvoke === "function"
-              ? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)))
-              : null;
-
-        if (invoke) {
-          const tabColorEqual = (a: TabColor | undefined, b: TabColor | undefined): boolean => {
-            if (a === b) return true;
-            if (!a || !b) return !a && !b;
-            return (
-              (a.rgb ?? null) === (b.rgb ?? null) &&
-              (a.theme ?? null) === (b.theme ?? null) &&
-              (a.indexed ?? null) === (b.indexed ?? null) &&
-              (a.tint ?? null) === (b.tint ?? null) &&
-              (a.auto ?? null) === (b.auto ?? null)
-            );
-          };
-
-          const prevOrder = prevSnapshot.order;
-          const nextOrder = nextSnapshot.order;
-          const prevById = prevSnapshot.byId;
-          const nextById = nextSnapshot.byId;
-
-          const removed = prevOrder.filter((id) => !nextById.has(id));
-          const added = nextOrder.filter((id) => !prevById.has(id));
-          const addedSet = new Set(added);
-          const removedSet = new Set(removed);
-
-          // Remove sheets first so name uniqueness checks for restored sheets pass cleanly.
-          for (const sheetId of removed) {
-            void invoke("delete_sheet", { sheet_id: sheetId }).catch(() => {
-              // ignore (error is reported via the queued backend sync logger)
-            });
-          }
-
-          // Add restored/new sheets with stable ids (required for undo of renamed sheet deletion).
-          for (let idx = 0; idx < nextOrder.length; idx += 1) {
-            const sheetId = nextOrder[idx]!;
-            if (!addedSet.has(sheetId)) continue;
-            const meta = nextById.get(sheetId);
-            if (!meta) continue;
-            void invoke("add_sheet_with_id", { sheet_id: sheetId, name: meta.name, index: idx }).catch(() => {
-              // ignore
-            });
-          }
-
-          // Metadata changes.
-          for (const sheetId of nextOrder) {
-            if (removedSet.has(sheetId)) continue;
-            const after = nextById.get(sheetId);
-            if (!after) continue;
-            const before = prevById.get(sheetId) ?? null;
-
-            if (!addedSet.has(sheetId) && before && before.name !== after.name) {
-              void invoke("rename_sheet", { sheet_id: sheetId, name: after.name }).catch(() => {
-                // ignore
-              });
-            }
-
-            const beforeVisibility = before?.visibility ?? "visible";
-            if (beforeVisibility !== after.visibility) {
-              // Note: backend support is implemented in Task 319. Keep this best-effort so older
-              // binaries don't break undo/redo of visibility toggles.
-              void invoke("set_sheet_visibility", { sheet_id: sheetId, visibility: after.visibility }).catch(() => {
-                // ignore
-              });
-            }
-
-            if (!tabColorEqual(before?.tabColor, after.tabColor)) {
-              // Note: backend support is implemented in Task 319. Keep this best-effort so older
-              // binaries don't break undo/redo of tab color changes.
-              void invoke("set_sheet_tab_color", { sheet_id: sheetId, tab_color: after.tabColor ?? null }).catch(() => {
-                // ignore
-              });
-            }
-          }
-
-          // Order changes.
-          const prevKey = prevOrder.join("|");
-          const nextKey = nextOrder.join("|");
-          // Avoid spamming `move_sheet` calls during add/remove flows. When sheets are added we
-          // already pass an explicit insertion index to `add_sheet`, and when sheets are removed
-          // the remaining sheets keep their relative order.
-          //
-          // We still need to persist true reorder operations (undo/redo/applyState reorder) which
-          // surface as "same ids, different order" diffs (no added/removed).
-          const shouldPersistReorder = added.length === 0 && removed.length === 0;
-          if (shouldPersistReorder && prevKey && nextKey && prevKey !== nextKey) {
-            schedulePersistDocDrivenReorder(prevOrder, nextOrder);
-          }
-        }
-      }
-    }
 
     // Keep DocumentController in sync with sheet UI store mutations so sheet-tab operations are
     // undoable via the existing Ctrl+Z/Ctrl+Y stack.
@@ -3196,150 +2890,6 @@ function installSheetStoreSubscription(): void {
               doc.setSheetTabColor(sheetId, after.tabColor);
             } catch {
               // ignore
-            }
-          }
-        }
-      }
-    }
-
-    // When the sheet store is mutated as a *result* of DocumentController-driven state changes
-    // (undo/redo/applyState/script-driven edits), reconcile the local workbook backend so future
-    // saves reflect the restored sheet structure.
-    if (syncingSheetUi && prevSnapshot) {
-      const session = app.getCollabSession?.() ?? null;
-      if (!session) {
-        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
-        const invoke =
-          queuedInvoke ??
-          (typeof baseInvoke === "function" ? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args))) : null);
-
-        if (typeof invoke === "function") {
-          const tabColorEqual = (a: TabColor | undefined, b: TabColor | undefined): boolean => {
-            if (a === b) return true;
-            if (!a || !b) return !a && !b;
-            return (
-              (a.rgb ?? null) === (b.rgb ?? null) &&
-              (a.theme ?? null) === (b.theme ?? null) &&
-              (a.indexed ?? null) === (b.indexed ?? null) &&
-              (a.tint ?? null) === (b.tint ?? null) &&
-              (a.auto ?? null) === (b.auto ?? null)
-            );
-          };
-
-          const prevOrder = prevSnapshot.order;
-          const nextOrder = nextSnapshot.order;
-          const prevById = prevSnapshot.byId;
-          const nextById = nextSnapshot.byId;
-
-          const added = nextOrder.filter((id) => !prevById.has(id));
-          const removed = prevOrder.filter((id) => !nextById.has(id));
-
-          const hasMetaChange = nextOrder.some((sheetId) => {
-            if (added.includes(sheetId)) return false;
-            if (removed.includes(sheetId)) return false;
-            const before = prevById.get(sheetId);
-            const after = nextById.get(sheetId);
-            if (!before || !after) return false;
-            return (
-              before.name !== after.name ||
-              before.visibility !== after.visibility ||
-              !tabColorEqual(before.tabColor, after.tabColor)
-            );
-          });
-
-          const prevKey = prevOrder.join("|");
-          const nextKey = nextOrder.join("|");
-          const hasOrderChange = prevKey !== nextKey;
-
-          if (added.length > 0 || removed.length > 0 || hasMetaChange || hasOrderChange) {
-            const reportError = (label: string, err: unknown): void => {
-              console.error(`[formula][desktop] Failed to reconcile sheet ${label} to backend:`, err);
-              const message = err instanceof Error ? err.message : String(err);
-              showToast(`Failed to sync sheet changes to workbook: ${message}`, "error");
-            };
-
-            // Deletes.
-            for (const sheetId of removed) {
-              void invoke("delete_sheet", { sheet_id: sheetId }).catch((err) => reportError("delete", err));
-            }
-
-            // Adds.
-            for (const sheetId of added) {
-              const meta = nextById.get(sheetId);
-              if (!meta) continue;
-              const idx = nextOrder.indexOf(sheetId);
-              const afterSheetId = idx > 0 ? nextOrder[idx - 1] : null;
-              void invoke("add_sheet_with_id", {
-                sheet_id: sheetId,
-                name: meta.name,
-                after_sheet_id: afterSheetId,
-                index: idx,
-              }).catch((err) => reportError("add", err));
-
-              // New sheets can also carry non-default metadata (e.g. undo restore of a deleted
-              // hidden sheet, or applyState restores). Ensure we persist those too.
-              if (meta.visibility !== "visible") {
-                void invoke("set_sheet_visibility", { sheet_id: sheetId, visibility: meta.visibility }).catch((err) =>
-                  reportError("visibility", err),
-                );
-              }
-              if (meta.tabColor) {
-                void invoke("set_sheet_tab_color", { sheet_id: sheetId, tab_color: meta.tabColor ?? null }).catch((err) =>
-                  reportError("tab color", err),
-                );
-              }
-            }
-
-            // Metadata updates.
-            for (const sheetId of nextOrder) {
-              if (added.includes(sheetId)) continue;
-              if (removed.includes(sheetId)) continue;
-              const before = prevById.get(sheetId);
-              const after = nextById.get(sheetId);
-              if (!before || !after) continue;
-
-              if (before.name !== after.name) {
-                void invoke("rename_sheet", { sheet_id: sheetId, name: after.name }).catch((err) => reportError("rename", err));
-              }
-
-              if (before.visibility !== after.visibility) {
-                void invoke("set_sheet_visibility", { sheet_id: sheetId, visibility: after.visibility }).catch((err) =>
-                  reportError("visibility", err),
-                );
-              }
-
-              if (!tabColorEqual(before.tabColor, after.tabColor)) {
-                void invoke("set_sheet_tab_color", { sheet_id: sheetId, tab_color: after.tabColor ?? null }).catch((err) =>
-                  reportError("tab color", err),
-                );
-              }
-            }
-
-            // Reorder (including hidden sheets).
-            if (hasOrderChange) {
-              // Compute a sequence of `move_sheet` operations that transforms the previous order
-              // into the desired next order. This mirrors the `WorkbookSheetStore.move` semantics
-              // used by `sheetStoreDocumentSync.ts`.
-              const working = prevOrder.filter((id) => !removed.includes(id));
-              for (const sheetId of added) {
-                const idx = nextOrder.indexOf(sheetId);
-                if (idx < 0) continue;
-                const insert = Math.max(0, Math.min(idx, working.length));
-                working.splice(insert, 0, sheetId);
-              }
-
-              for (let targetIndex = 0; targetIndex < nextOrder.length; targetIndex += 1) {
-                const sheetId = nextOrder[targetIndex]!;
-                const currentIndex = working.indexOf(sheetId);
-                if (currentIndex === -1) continue;
-                if (currentIndex === targetIndex) continue;
-                working.splice(currentIndex, 1);
-                working.splice(targetIndex, 0, sheetId);
-                void invoke("move_sheet", { sheet_id: sheetId, to_index: targetIndex }).catch((err) =>
-                  reportError("reorder", err),
-                );
-              }
             }
           }
         }
@@ -4735,43 +4285,31 @@ if (
         return { id, name: normalizedName };
       }
 
-      const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-      if (typeof baseInvoke === "function") {
-        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
-        const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
-
-        // Allow any microtask-batched workbook edits to enqueue before we request a new sheet id.
-        await new Promise<void>((resolve) => queueMicrotask(resolve));
-
-        const sheets = workbookSheetStore.listAll();
-        const activeIndex = sheets.findIndex((sheet) => sheet.id === activeId);
-        const insertIndex = activeIndex >= 0 ? activeIndex + 1 : sheets.length;
-
-        const info = (await invoke("add_sheet", { name: validatedName, after_sheet_id: activeId, index: insertIndex })) as SheetUiInfo;
-        const id = String((info as any)?.id ?? "").trim();
-        const resolvedName = String((info as any)?.name ?? "").trim();
-        if (!id) throw new Error("Backend returned empty sheet id");
-
-        // Backend may adjust the name for uniqueness; trust it.
-        workbookSheetStore.addAfter(activeId, { id, name: resolvedName || validatedName });
-        // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
-        doc.getCell(id, { row: 0, col: 0 });
-        app.activateSheet(id);
-        restoreFocusAfterSheetNavigation();
-        const storedName = workbookSheetStore.getName(id);
-        return { id, name: storedName ?? (resolvedName || validatedName || id) };
+      // Local (non-collab) behavior: update the UI sheet store first so the corresponding
+      // DocumentController sheet op becomes undoable (Ctrl+Z/Ctrl+Y). The workbook sync bridge
+      // will persist the structural change to the native backend.
+      const existingIdCi = new Set(workbookSheetStore.listAll().map((s) => s.id.trim().toLowerCase()));
+      const baseId = validatedName;
+      let id = baseId;
+      let counter = 1;
+      while (existingIdCi.has(id.toLowerCase())) {
+        counter += 1;
+        id = `${baseId}-${counter}`;
       }
 
-      // Web-only behavior: create a local DocumentController sheet lazily.
-      // (In the desktop-web test harness there is no workbook backend, so we synthesize a stable
-      // sheet id locally.)
-      const newSheetId = validatedName;
-      workbookSheetStore.addAfter(activeId, { id: newSheetId, name: validatedName });
-      doc.getCell(newSheetId, { row: 0, col: 0 });
-      app.activateSheet(newSheetId);
+      workbookSheetStore.addAfter(activeId, { id, name: validatedName });
+
+      // Best-effort: ensure the sheet exists for follow-up APIs.
+      try {
+        doc.getCell(id, { row: 0, col: 0 });
+      } catch {
+        // ignore
+      }
+
+      app.activateSheet(id);
       restoreFocusAfterSheetNavigation();
-      const storedName = workbookSheetStore.getName(newSheetId);
-      return { id: newSheetId, name: storedName ?? validatedName };
+      const storedName = workbookSheetStore.getName(id);
+      return { id, name: storedName ?? validatedName };
     },
     async renameSheet(_oldName: string, _newName: string) {
       const oldName = String(_oldName ?? "");
@@ -4779,7 +4317,7 @@ if (
       if (!sheetId) {
         throw new Error(`Unknown sheet: ${oldName}`);
       }
-      return await renameSheetById(sheetId, String(_newName ?? ""), { source: "extension" });
+      return await renameSheetById(sheetId, String(_newName ?? ""));
     },
     async deleteSheet(_name: string) {
       const name = String(_name ?? "");
@@ -4793,24 +4331,8 @@ if (
       const deletedName = workbookSheetStore.getName(sheetId) ?? sheetId;
       const sheetOrder = workbookSheetStore.listAll().map((s) => s.name);
 
-      // In collab mode, sheet operations are persisted through the shared Yjs document.
-      // Avoid mutating the local Tauri workbook backend (if present).
-      const collabSession = app.getCollabSession?.() ?? null;
-      if (!collabSession) {
-        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-        if (typeof baseInvoke === "function") {
-          // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
-          const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
-
-          // Allow any microtask-batched workbook edits to enqueue before we request deletion.
-          await new Promise<void>((resolve) => queueMicrotask(resolve));
-          await invoke("delete_sheet", { sheet_id: sheetId });
-        }
-      }
-
       // Update sheet metadata to enforce workbook invariants (e.g. last-sheet guard) and drive UI
-      // reconciliation. In desktop mode we perform the backend delete first so a failure does not
-      // leave the frontend store out of sync with the host workbook.
+      // reconciliation. The workbook sync bridge will persist the structural change to the native backend.
       workbookSheetStore.remove(sheetId);
       if (wasActive) {
         const next =

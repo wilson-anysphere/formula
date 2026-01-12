@@ -276,3 +276,4 @@ describe("Tauri capabilities", () => {
     expect(identifiers.some((permission) => permission.startsWith("core:notification:"))).toBe(false);
   });
 });
+

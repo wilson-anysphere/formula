@@ -313,10 +313,8 @@ describe("workbookSync", () => {
     document.renameSheet("Sheet1", "RenamedSheet1");
     expect(document.isDirty).toBe(true);
 
-    // Renames are persisted to the backend via main.ts in desktop mode, so workbookSync should
-    // only mirror the undo/redo direction.
     await flushMicrotasks();
-    expect(invoke).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith("rename_sheet", { sheet_id: "Sheet1", name: "RenamedSheet1" });
 
     expect(document.undo()).toBe(true);
     expect(document.isDirty).toBe(false);
@@ -325,7 +323,9 @@ describe("workbookSync", () => {
     await flushNextTick();
 
     const cmds = invoke.mock.calls.map((c) => c[0]);
-    expect(cmds).toEqual(["mark_saved"]);
+    expect(cmds[0]).toBe("rename_sheet");
+    expect(cmds[1]).toBe("rename_sheet");
+    expect(cmds[2]).toBe("mark_saved");
 
     sync.stop();
   });

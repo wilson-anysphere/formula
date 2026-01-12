@@ -295,7 +295,7 @@ async function sendEditsViaTauri(invoke: TauriInvoke, edits: PendingEdit[]): Pro
 type SheetSnapshot = { order: string[]; metaById: Map<string, SheetMetaState> };
 
 type SheetSyncAction =
-  | { kind: "delta"; sheetMetaDeltas: SheetMetaDelta[]; sheetOrderDelta: SheetOrderDelta | null; source: "undo" | "redo" }
+  | { kind: "delta"; sheetMetaDeltas: SheetMetaDelta[]; sheetOrderDelta: SheetOrderDelta | null; source?: string }
   | { kind: "applyState"; snapshot: SheetSnapshot };
 
 function captureSheetSnapshot(document: DocumentControllerLike): SheetSnapshot | null {
@@ -408,16 +408,14 @@ export function startWorkbookSync(args: {
     const hasSheetMetaDeltas = Array.isArray(sheetMetaDeltas) && sheetMetaDeltas.length > 0;
     const hasSheetOrderDelta = Boolean(sheetOrderDelta);
 
-    // Queue sheet structure/metadata updates for undo/redo events (DocumentController-driven).
-    if ((source === "undo" || source === "redo") && (hasSheetMetaDeltas || hasSheetOrderDelta)) {
-      pendingSheetActions.push({
-        kind: "delta",
-        sheetMetaDeltas: (sheetMetaDeltas ?? []) as SheetMetaDelta[],
-        sheetOrderDelta: (sheetOrderDelta as SheetOrderDelta | null) ?? null,
-        source,
-      });
-      scheduleFlush();
-    } else if (source === "applyState") {
+    const backendOriginated = source === "macro" || source === "python" || source === "pivot" || source === "backend";
+
+    // Queue sheet structure/metadata updates (DocumentController-driven). Historically the desktop UI
+    // persisted sheet tab operations directly via `invoke(...)` calls in main.ts. That approach can
+    // easily drift out of sync with the DocumentController undo/redo stack, so we now treat the
+    // DocumentController sheet deltas as the single source of truth and mirror them to the backend
+    // here (while still ignoring changes that originated in the backend itself).
+    if (source === "applyState") {
       // `applyState` replaces the entire DocumentController snapshot. It can create/delete sheets
       // without emitting sheetMetaDeltas/sheetOrderDelta, so reconcile against a post-applyState
       // snapshot in a microtask (after the controller finishes removing deleted sheets).
@@ -434,21 +432,32 @@ export function startWorkbookSync(args: {
         pendingSheetActions.push({ kind: "applyState", snapshot: snap });
         scheduleFlush();
       });
-    } else if (sheetMirror && (hasSheetMetaDeltas || hasSheetOrderDelta)) {
-      // For non-undo/redo sheet changes, assume the UI already persisted them to the backend
-      // via direct Tauri invocations (main.ts). Keep our local mirror in sync so future applyState
-      // reconciliations have a reasonable baseline.
-      sheetMirror = applySheetDeltaToSnapshot(
-        sheetMirror,
-        (sheetMetaDeltas ?? []) as SheetMetaDelta[],
-        (sheetOrderDelta as SheetOrderDelta | null) ?? null,
-      );
+    } else if (hasSheetMetaDeltas || hasSheetOrderDelta) {
+      if (backendOriginated) {
+        // Backend already performed these operations. Track them in the mirror so future
+        // applyState reconciliations start from the correct baseline.
+        if (sheetMirror) {
+          sheetMirror = applySheetDeltaToSnapshot(
+            sheetMirror,
+            (sheetMetaDeltas ?? []) as SheetMetaDelta[],
+            (sheetOrderDelta as SheetOrderDelta | null) ?? null,
+          );
+        }
+      } else {
+        pendingSheetActions.push({
+          kind: "delta",
+          sheetMetaDeltas: (sheetMetaDeltas ?? []) as SheetMetaDelta[],
+          sheetOrderDelta: (sheetOrderDelta as SheetOrderDelta | null) ?? null,
+          source,
+        });
+        scheduleFlush();
+      }
     }
 
     // Some subsystems (VBA runtime, native Python) execute in the backend and then return
     // cell updates to apply to the frontend DocumentController. Those should not be echoed
     // back to the backend via set_cell/set_range.
-    if (source === "macro" || source === "python" || source === "pivot" || source === "backend") return;
+    if (backendOriginated) return;
     if (!Array.isArray(deltas) || deltas.length === 0) return;
 
     // Sheet deletion emits per-cell deltas that clear the deleted sheet's sparse cell map.
@@ -495,6 +504,32 @@ export function startWorkbookSync(args: {
     });
   }
 
+  async function applyBackendSheetOrder(order: ReadonlyArray<string>): Promise<void> {
+    if (order.length <= 1) return;
+
+    const desired: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of order) {
+      const id = String(raw ?? "").trim();
+      if (!id) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      desired.push(id);
+    }
+    if (desired.length <= 1) return;
+
+    try {
+      await invokeFn("reorder_sheets", { sheet_ids: desired });
+      return;
+    } catch {
+      // Graceful degradation: older backends may not implement reorder_sheets yet.
+      for (let i = 0; i < desired.length; i++) {
+        const sheetId = desired[i]!;
+        await invokeFn("move_sheet", { sheet_id: sheetId, to_index: i });
+      }
+    }
+  }
+
   function startFlush(): void {
     if (stopped) return;
 
@@ -513,19 +548,132 @@ export function startWorkbookSync(args: {
         const cellBatch = Array.from(pendingCellEdits.values());
         pendingCellEdits.clear();
 
-         // Update our local sheet snapshot for undo/redo/applyState events so we can avoid
-         // sending cell edits for deleted sheets (and include cell restores for re-inserted sheets).
-         if (sheetActions.length > 0) {
-           for (const action of sheetActions) {
-             if (action.kind === "applyState") {
-               sheetMirror = action.snapshot;
-               continue;
-             }
-             if (sheetMirror) {
-               sheetMirror = applySheetDeltaToSnapshot(sheetMirror, action.sheetMetaDeltas, action.sheetOrderDelta);
-             }
-           }
-         }
+        // Apply sheet add/delete/rename/reorder deltas *before* sending cell edits so the backend
+        // has the correct sheet structure for set_cell/set_range (especially for undo/redo of sheet deletes).
+        if (sheetActions.length > 0) {
+          try {
+            for (const action of sheetActions) {
+              if (action.kind === "applyState") {
+                if (!sheetMirror) {
+                  sheetMirror = action.snapshot;
+                  continue;
+                }
+                const next = action.snapshot;
+                const existing = new Set(sheetMirror.order);
+                const desired = new Set(next.order);
+
+                // Delete removed sheets first so we never apply cell edits to them.
+                for (const sheetId of sheetMirror.order) {
+                  if (!desired.has(sheetId)) {
+                    await invokeFn("delete_sheet", { sheet_id: sheetId });
+                  }
+                }
+
+                // Insert added sheets (stable ids).
+                for (let i = 0; i < next.order.length; i++) {
+                  const sheetId = next.order[i]!;
+                  if (existing.has(sheetId)) continue;
+                  const meta = next.metaById.get(sheetId) ?? { name: sheetId, visibility: "visible" };
+                  await invokeFn("add_sheet", { sheet_id: sheetId, name: meta.name, index: i });
+                  if (meta.visibility && meta.visibility !== "visible") {
+                    await invokeFn("set_sheet_visibility", { sheet_id: sheetId, visibility: meta.visibility });
+                  }
+                  const tabColor = tabColorToBackendArg(meta.tabColor);
+                  await invokeFn("set_sheet_tab_color", { sheet_id: sheetId, tab_color: tabColor });
+                }
+
+                // Update metadata on remaining sheets.
+                for (const sheetId of next.order) {
+                  if (!existing.has(sheetId)) continue;
+                  const before = sheetMirror.metaById.get(sheetId);
+                  const after = next.metaById.get(sheetId);
+                  if (!before || !after) continue;
+                  if (before.name !== after.name) {
+                    await invokeFn("rename_sheet", { sheet_id: sheetId, name: after.name });
+                  }
+                  if (before.visibility !== after.visibility) {
+                    await invokeFn("set_sheet_visibility", { sheet_id: sheetId, visibility: after.visibility });
+                  }
+                  if (!tabColorEquals(before.tabColor, after.tabColor)) {
+                    await invokeFn("set_sheet_tab_color", { sheet_id: sheetId, tab_color: tabColorToBackendArg(after.tabColor) });
+                  }
+                }
+
+                // Apply canonical ordering.
+                await applyBackendSheetOrder(next.order);
+
+                sheetMirror = next;
+                continue;
+              }
+
+              // action.kind === "delta"
+              const sheetMetaDeltas = action.sheetMetaDeltas;
+              const sheetOrderDelta = action.sheetOrderDelta;
+
+              // Delete sheets first.
+              for (const delta of sheetMetaDeltas) {
+                const sheetId = String((delta as any)?.sheetId ?? "").trim();
+                if (!sheetId) continue;
+                const before = (delta as any)?.before;
+                const after = (delta as any)?.after;
+                if (before && !after) {
+                  await invokeFn("delete_sheet", { sheet_id: sheetId });
+                }
+              }
+
+              // Insert sheets with stable ids.
+              for (const delta of sheetMetaDeltas) {
+                const sheetId = String((delta as any)?.sheetId ?? "").trim();
+                if (!sheetId) continue;
+                const before = (delta as any)?.before;
+                const after = (delta as any)?.after;
+                if (!before && after) {
+                  const meta = normalizeSheetMeta(after, sheetId);
+                  const desiredIndex = sheetOrderDelta?.after?.indexOf(sheetId) ?? -1;
+                  const toIndex = desiredIndex >= 0 ? desiredIndex : (sheetMirror?.order.length ?? 0);
+                  await invokeFn("add_sheet", { sheet_id: sheetId, name: meta.name, index: toIndex });
+                  if (meta.visibility && meta.visibility !== "visible") {
+                    await invokeFn("set_sheet_visibility", { sheet_id: sheetId, visibility: meta.visibility });
+                  }
+                  const tabColor = tabColorToBackendArg(meta.tabColor);
+                  await invokeFn("set_sheet_tab_color", { sheet_id: sheetId, tab_color: tabColor });
+                }
+              }
+
+              // Apply metadata updates (rename, visibility, tabColor).
+              for (const delta of sheetMetaDeltas) {
+                const sheetId = String((delta as any)?.sheetId ?? "").trim();
+                if (!sheetId) continue;
+                const before = (delta as any)?.before;
+                const after = (delta as any)?.after;
+                if (!before || !after) continue;
+                const beforeMeta = normalizeSheetMeta(before, sheetId);
+                const afterMeta = normalizeSheetMeta(after, sheetId);
+
+                if (beforeMeta.name !== afterMeta.name) {
+                  await invokeFn("rename_sheet", { sheet_id: sheetId, name: afterMeta.name });
+                }
+                if (beforeMeta.visibility !== afterMeta.visibility) {
+                  await invokeFn("set_sheet_visibility", { sheet_id: sheetId, visibility: afterMeta.visibility });
+                }
+                if (!tabColorEquals(beforeMeta.tabColor, afterMeta.tabColor)) {
+                  await invokeFn("set_sheet_tab_color", { sheet_id: sheetId, tab_color: tabColorToBackendArg(afterMeta.tabColor) });
+                }
+              }
+
+              // Apply canonical ordering.
+              if (sheetOrderDelta && Array.isArray(sheetOrderDelta.after)) await applyBackendSheetOrder(sheetOrderDelta.after);
+
+              if (sheetMirror) {
+                sheetMirror = applySheetDeltaToSnapshot(sheetMirror, sheetMetaDeltas, sheetOrderDelta);
+              }
+            }
+          } catch (err) {
+            console.error("[formula][desktop] Failed to sync sheet changes to backend:", err);
+            safeShowToast("Failed to sync workbook sheet changes to the desktop backend. Saving may be inconsistent.");
+            throw err;
+          }
+        }
 
         // DocumentController materializes sheets lazily (the sheet map can be empty until the first cell is accessed).
         // Refresh our local sheet snapshot here so we don't accidentally drop the first edits to a newly-created sheet.
