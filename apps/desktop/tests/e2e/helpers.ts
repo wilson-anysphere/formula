@@ -13,6 +13,14 @@ export async function gotoDesktop(page: Page, path: string = "/"): Promise<void>
     try {
       await page.goto(path);
       await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 60_000 });
+      // `__formulaApp` is assigned early in `main.ts` so tests can still introspect failures,
+      // but that means we need to explicitly wait for the app to settle before interacting.
+      await page.evaluate(async () => {
+        const app = (window as any).__formulaApp;
+        if (app && typeof app.whenIdle === "function") {
+          await app.whenIdle();
+        }
+      });
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -29,6 +37,12 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 60_000 });
+      await page.evaluate(async () => {
+        const app = (window as any).__formulaApp;
+        if (app && typeof app.whenIdle === "function") {
+          await app.whenIdle();
+        }
+      });
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

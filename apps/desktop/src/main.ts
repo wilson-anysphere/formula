@@ -1147,6 +1147,7 @@ function renderSheetTabs(sheets: SheetUiInfo[] = listSheetsForUi()) {
 
         // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
         doc.getCell(id, { row: 0, col: 0 });
+        doc.markDirty();
         app.activateSheet(id);
         app.focus();
         return;
@@ -1158,6 +1159,7 @@ function renderSheetTabs(sheets: SheetUiInfo[] = listSheetsForUi()) {
       const newSheetId = desiredName;
       workbookSheetStore.addAfter(activeId, { id: newSheetId, name: desiredName });
       doc.getCell(newSheetId, { row: 0, col: 0 });
+      doc.markDirty();
       app.activateSheet(newSheetId);
       app.focus();
     })().catch((err) => {
