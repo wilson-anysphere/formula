@@ -1,4 +1,5 @@
 import { applyFormatCells } from "./formatCellsDialog.js";
+import { getEffectiveCellStyle } from "./getEffectiveCellStyle.js";
 
 export type FormatCellsDialogHost = {
   isEditing: () => boolean;
@@ -76,8 +77,7 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
   const doc = host.getDocument();
   const sheetId = host.getSheetId();
   const active = host.getActiveCell();
-  const activeCellState = doc.getCell(sheetId, { row: active.row, col: active.col });
-  const activeStyle = doc.styleTable.get(activeCellState?.styleId ?? 0) ?? {};
+  const activeStyle = getEffectiveCellStyle(doc, sheetId, { row: active.row, col: active.col });
 
   const dialog = document.createElement("dialog");
   dialog.className = "format-cells-dialog";
@@ -442,8 +442,7 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
   function applyFromUi(): void {
     const sheetIdNow = host.getSheetId();
     const activeNow = host.getActiveCell();
-    const stateNow = doc.getCell(sheetIdNow, { row: activeNow.row, col: activeNow.col });
-    const styleNow = doc.styleTable.get(stateNow?.styleId ?? 0) ?? {};
+    const styleNow = getEffectiveCellStyle(doc, sheetIdNow, { row: activeNow.row, col: activeNow.col });
     const changes = computeChanges(styleNow);
     if (!changes) return;
 
@@ -496,4 +495,3 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
   dialog.showModal();
   numberSelect.focus();
 }
-
