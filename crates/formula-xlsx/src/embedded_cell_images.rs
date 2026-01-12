@@ -134,35 +134,6 @@ impl XlsxPackage {
             worksheet_parts.dedup();
         }
 
-        // Excel has been observed to encode worksheet `c/@vm` as both 0-based and 1-based indices
-        // into `xl/metadata.xml`'s `<valueMetadata>` `<bk>` list. The metadata parser returns a
-        // *1-based* mapping.
-        //
-        // If we see any `vm="0"` in the worksheets, treat the sheet values as 0-based and add 1
-        // before looking up in the parsed map. This avoids key-collision bugs that occur if we
-        // try to store both 0- and 1-based mappings in the same `HashMap` when multiple images are
-        // present.
-        let vm_offset: u32 = if has_vm_mapping {
-            let mut saw_zero = false;
-            for worksheet_part in &worksheet_parts {
-                let Some(sheet_xml_bytes) = self.part(worksheet_part) else {
-                    continue;
-                };
-                let vm_cells = parse_sheet_vm_image_cells(sheet_xml_bytes)?;
-                if vm_cells.iter().any(|(_, vm)| *vm == 0) {
-                    saw_zero = true;
-                    break;
-                }
-            }
-            if saw_zero {
-                1
-            } else {
-                0
-            }
-        } else {
-            0
-        };
-
         // When we *don't* have `xl/metadata.xml`, we interpret `vm` as a relationship-slot index into
         // `xl/richData/richValueRel.xml`. Some producers encode this slot index as:
         // - 0-based (vm="0" for the first slot), or
@@ -273,7 +244,82 @@ impl XlsxPackage {
             let hyperlinks =
                 parse_worksheet_hyperlinks(sheet_xml, sheet_rels_xml).unwrap_or_default();
 
-            for (cell_ref, vm) in parse_sheet_vm_image_cells(sheet_xml_bytes)? {
+            let vm_cells = parse_sheet_vm_image_cells(sheet_xml_bytes)?;
+            if vm_cells.is_empty() {
+                continue;
+            }
+
+            // Excel typically stores worksheet `c/@vm` as a 1-based index into `xl/metadata.xml`
+            // `<valueMetadata>` `<bk>` records, but some producers have been observed to use 0-based
+            // indices instead.
+            //
+            // The metadata parser returns a canonical 1-based `vm -> richValue` mapping. To tolerate
+            // 0-based worksheets we choose a per-worksheet offset (0 or 1) that yields the most
+            // successfully-resolved images. If the result is ambiguous, we still treat `vm="0"` as
+            // strong evidence of 0-based indexing.
+            let vm_offset: u32 = if has_vm_mapping {
+                let has_vm_zero = vm_cells.iter().any(|(_, vm)| *vm == 0);
+                let mut resolved_offset_0 = 0usize;
+                let mut resolved_offset_1 = 0usize;
+
+                let resolves_image = |vm_raw: u32, offset: u32| -> bool {
+                    let vm = vm_raw.saturating_add(offset);
+                    let Some(&rich_value_index) = vm_to_rich_value.get(&vm) else {
+                        return false;
+                    };
+
+                    let mut slot_candidates: Vec<u32> = Vec::new();
+                    if let Some(local_image) = local_image_by_rich_value_index.get(&rich_value_index)
+                    {
+                        slot_candidates.push(local_image.local_image_identifier);
+                    } else if let Some(Some(rel_idx)) =
+                        rich_value_rel_indices.get(rich_value_index as usize)
+                    {
+                        slot_candidates.push(*rel_idx);
+                    } else if !has_rich_value_tables {
+                        slot_candidates.push(rich_value_index);
+                    } else {
+                        return false;
+                    }
+
+                    for slot in slot_candidates {
+                        let Some(rel_id) = rich_value_rel_ids.get(slot as usize) else {
+                            continue;
+                        };
+                        let Some(target_part) = image_targets_by_rel_id.get(rel_id) else {
+                            continue;
+                        };
+                        if self.part(target_part).is_some() {
+                            return true;
+                        }
+                    }
+
+                    false
+                };
+
+                for (_cell_ref, vm) in &vm_cells {
+                    if resolves_image(*vm, 0) {
+                        resolved_offset_0 += 1;
+                    }
+                    if resolves_image(*vm, 1) {
+                        resolved_offset_1 += 1;
+                    }
+                }
+
+                if resolved_offset_1 > resolved_offset_0 {
+                    1
+                } else if resolved_offset_0 > resolved_offset_1 {
+                    0
+                } else if has_vm_zero {
+                    1
+                } else {
+                    0
+                }
+            } else {
+                0
+            };
+
+            for (cell_ref, vm) in vm_cells {
                 // First resolve the cell's `vm` into a rich value index when possible.
                 let rich_value_index = if has_vm_mapping {
                     let vm = vm.saturating_add(vm_offset);
