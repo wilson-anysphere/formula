@@ -64,29 +64,39 @@ test.describe("dockable panels layout persistence", () => {
 
     // Tab strip should be visible and allow switching between panels.
     await expect(rightDock.getByRole("tablist")).toBeVisible();
+    await expect(rightDock.getByRole("tablist")).toHaveAttribute("aria-label", "Docked panels");
     await expect(rightDock.getByTestId("dock-tab-aiChat")).toBeVisible();
     await expect(rightDock.getByTestId("dock-tab-macros")).toBeVisible();
+    await expect(rightDock.getByTestId("dock-tab-macros")).toHaveAttribute("aria-selected", "true");
+    await expect(rightDock.getByTestId("dock-tab-aiChat")).toHaveAttribute("aria-selected", "false");
 
     await rightDock.getByTestId("dock-tab-aiChat").click();
     await expect(rightDock.getByTestId("panel-aiChat")).toBeVisible();
     await expect(rightDock.getByTestId("panel-macros")).toHaveCount(0);
+    await expect(rightDock.getByTestId("dock-tab-aiChat")).toHaveAttribute("aria-selected", "true");
+    await expect(rightDock.getByTestId("dock-tab-macros")).toHaveAttribute("aria-selected", "false");
 
     await rightDock.getByTestId("dock-tab-macros").click();
     await expect(rightDock.getByTestId("panel-macros")).toBeVisible();
     await expect(rightDock.getByTestId("panel-aiChat")).toHaveCount(0);
+    await expect(rightDock.getByTestId("dock-tab-macros")).toHaveAttribute("aria-selected", "true");
+    await expect(rightDock.getByTestId("dock-tab-aiChat")).toHaveAttribute("aria-selected", "false");
 
     // Keyboard navigation (roving tabindex).
     await rightDock.getByTestId("dock-tab-macros").press("Home");
     await expect(rightDock.getByTestId("panel-aiChat")).toBeVisible();
     await expect(rightDock.getByTestId("panel-macros")).toHaveCount(0);
+    await expect(rightDock.getByTestId("dock-tab-aiChat")).toHaveAttribute("aria-selected", "true");
 
     await rightDock.getByTestId("dock-tab-aiChat").press("End");
     await expect(rightDock.getByTestId("panel-macros")).toBeVisible();
     await expect(rightDock.getByTestId("panel-aiChat")).toHaveCount(0);
+    await expect(rightDock.getByTestId("dock-tab-macros")).toHaveAttribute("aria-selected", "true");
 
     await rightDock.getByTestId("dock-tab-macros").press("ArrowLeft");
     await expect(rightDock.getByTestId("panel-aiChat")).toBeVisible();
     await expect(rightDock.getByTestId("panel-macros")).toHaveCount(0);
+    await expect(rightDock.getByTestId("dock-tab-aiChat")).toHaveAttribute("aria-selected", "true");
   });
 
   test("Ctrl/Cmd+Shift+A toggles AI chat panel open/closed", async ({ page }) => {
