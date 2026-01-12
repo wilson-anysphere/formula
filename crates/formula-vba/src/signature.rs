@@ -181,6 +181,51 @@ pub fn list_vba_digital_signatures(
     Ok(out)
 }
 
+/// Parsed + verified metadata for a raw VBA signature blob (PKCS#7/CMS).
+///
+/// Some XLSM producers store the VBA signature payload in a dedicated OOXML part
+/// (commonly `xl/vbaProjectSignature.bin`) as raw bytes rather than as an OLE
+/// compound file containing `\u{0005}DigitalSignature*` streams.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VbaSignatureBlobInfo {
+    /// Best-effort signer certificate subject (e.g. `CN=...`), if found.
+    pub signer_subject: Option<String>,
+    /// Raw signature bytes.
+    pub signature: Vec<u8>,
+    /// Verification state (best-effort).
+    pub verification: VbaSignatureVerification,
+}
+
+/// Parse and cryptographically verify a raw VBA signature blob (PKCS#7/CMS).
+///
+/// This is intended for signature payloads that are stored outside the VBA
+/// project's OLE container (for example in the OOXML part
+/// `xl/vbaProjectSignature.bin`).
+pub fn parse_and_verify_vba_signature_blob(signature_blob: &[u8]) -> VbaSignatureBlobInfo {
+    let signer_subject = extract_first_certificate_subject(signature_blob);
+    let verification = verify_signature_blob(signature_blob);
+    VbaSignatureBlobInfo {
+        signer_subject,
+        signature: signature_blob.to_vec(),
+        verification,
+    }
+}
+
+/// Cryptographically verify a raw VBA signature blob (PKCS#7/CMS).
+///
+/// Returns `(verification, signer_subject)`.
+///
+/// On wasm targets `openssl` is unavailable; in that case this always returns
+/// [`VbaSignatureVerification::SignedButUnverified`] but still attempts to
+/// extract a signer subject via a best-effort X.509 scan.
+pub fn verify_vba_signature_blob(
+    signature_blob: &[u8],
+) -> (VbaSignatureVerification, Option<String>) {
+    let signer_subject = extract_first_certificate_subject(signature_blob);
+    let verification = verify_signature_blob(signature_blob);
+    (verification, signer_subject)
+}
+
 /// Best-effort detection + parsing of a VBA digital signature.
 ///
 /// Returns `Ok(None)` when the project appears unsigned.
