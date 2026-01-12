@@ -132,12 +132,14 @@ export function detectDataRegions(values) {
       let minCol = c;
       let maxCol = c;
 
-      /** @type {[number, number][]} */
-      const queue = [[r, c]];
+      // Use a flat number queue to avoid allocating `[row, col]` tuples for every enqueued cell.
+      /** @type {number[]} */
+      const queue = [r, c];
       let head = 0;
 
       while (head < queue.length) {
-        const [qr, qc] = queue[head++];
+        const qr = queue[head++];
+        const qc = queue[head++];
         if (qr < minRow) minRow = qr;
         if (qr > maxRow) maxRow = qr;
         if (qc < minCol) minCol = qc;
@@ -147,22 +149,22 @@ export function detectDataRegions(values) {
         // Up
         if (qr > 0 && !visited[qr - 1][qc]) {
           visited[qr - 1][qc] = 1;
-          if (!isCellEmpty(values[qr - 1]?.[qc])) queue.push([qr - 1, qc]);
+          if (!isCellEmpty(values[qr - 1]?.[qc])) queue.push(qr - 1, qc);
         }
         // Down
         if (qr + 1 < rowCount && !visited[qr + 1][qc]) {
           visited[qr + 1][qc] = 1;
-          if (!isCellEmpty(values[qr + 1]?.[qc])) queue.push([qr + 1, qc]);
+          if (!isCellEmpty(values[qr + 1]?.[qc])) queue.push(qr + 1, qc);
         }
         // Left
         if (qc > 0 && !visited[qr][qc - 1]) {
           visited[qr][qc - 1] = 1;
-          if (!isCellEmpty(values[qr]?.[qc - 1])) queue.push([qr, qc - 1]);
+          if (!isCellEmpty(values[qr]?.[qc - 1])) queue.push(qr, qc - 1);
         }
         // Right
         if (qc + 1 < colCount && !visited[qr][qc + 1]) {
           visited[qr][qc + 1] = 1;
-          if (!isCellEmpty(values[qr]?.[qc + 1])) queue.push([qr, qc + 1]);
+          if (!isCellEmpty(values[qr]?.[qc + 1])) queue.push(qr, qc + 1);
         }
       }
 
