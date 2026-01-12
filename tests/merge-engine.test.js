@@ -224,3 +224,38 @@ test("merge: sheet view merges independent keys (frozen panes + range-run format
     ],
   });
 });
+
+test("merge: sheet view merges range-run formatting across different columns", () => {
+  const base = {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: { Sheet1: { id: "Sheet1", name: "Sheet1", view: { frozenRows: 0, frozenCols: 0, formatRunsByCol: [] } } },
+    },
+    cells: { Sheet1: {} },
+    metadata: {},
+    namedRanges: {},
+    comments: {},
+  };
+
+  const ours = structuredClone(base);
+  ours.sheets.metaById.Sheet1.view.formatRunsByCol = [
+    { col: 0, runs: [{ startRow: 0, endRowExclusive: 5, format: { font: { bold: true } } }] },
+  ];
+
+  const theirs = structuredClone(base);
+  theirs.sheets.metaById.Sheet1.view.formatRunsByCol = [
+    { col: 1, runs: [{ startRow: 0, endRowExclusive: 5, format: { font: { italic: true } } }] },
+  ];
+
+  const result = mergeDocumentStates({ base, ours, theirs });
+  assert.equal(result.conflicts.length, 0);
+  assert.deepEqual(result.merged.sheets.metaById.Sheet1.view, {
+    frozenRows: 0,
+    frozenCols: 0,
+    formatRunsByCol: [
+      { col: 0, runs: [{ startRow: 0, endRowExclusive: 5, format: { font: { bold: true } } }] },
+      { col: 1, runs: [{ startRow: 0, endRowExclusive: 5, format: { font: { italic: true } } }] },
+    ],
+  });
+});

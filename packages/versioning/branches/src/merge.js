@@ -27,6 +27,124 @@ function isRecord(value) {
 }
 
 /**
+ * Merge sparse maps keyed by strings (e.g. row/col indices encoded as strings).
+ *
+ * This is used for sheet view state like column widths, row heights, and row/col format
+ * override maps so independent edits (different indices) merge without clobbering.
+ *
+ * Conflicts (both sides changed the same key differently) are resolved by preferring
+ * `ours` (consistent with existing view-state semantics).
+ *
+ * @param {any} baseRecord
+ * @param {any} oursRecord
+ * @param {any} theirsRecord
+ * @returns {Record<string, any> | undefined}
+ */
+function mergeSparseRecord(baseRecord, oursRecord, theirsRecord) {
+  const base = isRecord(baseRecord) ? baseRecord : {};
+  const ours = isRecord(oursRecord) ? oursRecord : {};
+  const theirs = isRecord(theirsRecord) ? theirsRecord : {};
+
+  /** @type {Record<string, any>} */
+  const out = {};
+
+  const keys = new Set([...Object.keys(base), ...Object.keys(ours), ...Object.keys(theirs)]);
+  for (const key of keys) {
+    const baseVal = base[key];
+    const oursVal = ours[key];
+    const theirsVal = theirs[key];
+
+    if (deepEqual(oursVal, theirsVal)) {
+      if (oursVal !== undefined) out[key] = structuredClone(oursVal);
+      continue;
+    }
+    if (deepEqual(baseVal, oursVal)) {
+      if (theirsVal !== undefined) out[key] = structuredClone(theirsVal);
+      continue;
+    }
+    if (deepEqual(baseVal, theirsVal)) {
+      if (oursVal !== undefined) out[key] = structuredClone(oursVal);
+      continue;
+    }
+
+    // Both changed this key differently; prefer ours.
+    if (oursVal !== undefined) out[key] = structuredClone(oursVal);
+  }
+
+  return Object.keys(out).length === 0 ? undefined : out;
+}
+
+/**
+ * Merge the `formatRunsByCol` sheet view structure.
+ *
+ * `formatRunsByCol` is represented as a sorted array of `{ col, runs }` entries.
+ * We merge per-column so formatting edits to different columns don't clobber.
+ *
+ * Conflicts (both sides changed the same column differently) are resolved by
+ * preferring `ours` (consistent with existing view-state semantics).
+ *
+ * @param {any} baseValue
+ * @param {any} oursValue
+ * @param {any} theirsValue
+ * @returns {Array<{ col: number, runs: any[] }> | undefined}
+ */
+function mergeFormatRunsByCol(baseValue, oursValue, theirsValue) {
+  const baseArr = Array.isArray(baseValue) ? baseValue : undefined;
+  const oursArr = Array.isArray(oursValue) ? oursValue : undefined;
+  const theirsArr = Array.isArray(theirsValue) ? theirsValue : undefined;
+
+  // Preserve explicit presence (including explicit empty arrays) when any side has the key.
+  const hadKey = baseArr !== undefined || oursArr !== undefined || theirsArr !== undefined;
+
+  /**
+   * @param {any[] | undefined} arr
+   * @returns {Map<number, any[]>}
+   */
+  const toMap = (arr) => {
+    /** @type {Map<number, any[]>} */
+    const map = new Map();
+    if (!Array.isArray(arr)) return map;
+    for (const entry of arr) {
+      const col = entry?.col;
+      const runs = entry?.runs;
+      if (!Number.isInteger(col) || col < 0) continue;
+      if (!Array.isArray(runs) || runs.length === 0) continue;
+      map.set(col, runs);
+    }
+    return map;
+  };
+
+  const baseMap = toMap(baseArr);
+  const oursMap = toMap(oursArr);
+  const theirsMap = toMap(theirsArr);
+
+  const cols = new Set([...baseMap.keys(), ...oursMap.keys(), ...theirsMap.keys()]);
+  const sortedCols = Array.from(cols).sort((a, b) => a - b);
+
+  /** @type {Array<{ col: number, runs: any[] }>} */
+  const out = [];
+
+  for (const col of sortedCols) {
+    const baseRuns = baseMap.get(col);
+    const oursRuns = oursMap.get(col);
+    const theirsRuns = theirsMap.get(col);
+
+    let nextRuns = oursRuns;
+    if (deepEqual(oursRuns, theirsRuns)) nextRuns = oursRuns;
+    else if (deepEqual(baseRuns, oursRuns)) nextRuns = theirsRuns;
+    else if (deepEqual(baseRuns, theirsRuns)) nextRuns = oursRuns;
+    // else: both changed differently; prefer ours (existing behavior for view state).
+
+    if (Array.isArray(nextRuns) && nextRuns.length > 0) {
+      out.push({ col, runs: structuredClone(nextRuns) });
+    }
+  }
+
+  if (out.length === 0) return hadKey ? [] : undefined;
+  return out;
+}
+
+/**
  * Merge per-sheet view state (frozen panes, axis sizes, default formatting, range-run formatting).
  *
  * Treat missing keys as "no change" (important for older clients).
@@ -67,6 +185,20 @@ function mergeSheetView(baseView, oursView, theirsView) {
     // Treat omissions as "no change" when base has a value.
     if (baseVal !== undefined && oursVal === undefined) oursVal = baseVal;
     if (baseVal !== undefined && theirsVal === undefined) theirsVal = baseVal;
+
+    if (key === "colWidths" || key === "rowHeights" || key === "rowFormats" || key === "colFormats") {
+      const mergedRecord = mergeSparseRecord(baseVal, oursVal, theirsVal);
+      if (mergedRecord !== undefined) merged[key] = mergedRecord;
+      else delete merged[key];
+      continue;
+    }
+
+    if (key === "formatRunsByCol") {
+      const mergedRuns = mergeFormatRunsByCol(baseVal, oursVal, theirsVal);
+      if (mergedRuns !== undefined) merged[key] = mergedRuns;
+      else delete merged[key];
+      continue;
+    }
 
     let nextVal = oursVal;
     if (deepEqual(oursVal, theirsVal)) nextVal = oursVal;
