@@ -565,6 +565,7 @@ export class SpreadsheetApp {
   private height = 0;
   private rootLeft = 0;
   private rootTop = 0;
+  private rootPosLastMeasuredAtMs = 0;
 
   // Scroll offsets in CSS pixels relative to the sheet data origin (A1 at 0,0).
   private scrollX = 0;
@@ -1295,11 +1296,7 @@ export class SpreadsheetApp {
       });
       this.root.addEventListener(
         "pointerenter",
-        () => {
-          const rect = this.root.getBoundingClientRect();
-          this.rootLeft = rect.left;
-          this.rootTop = rect.top;
-        },
+        () => this.maybeRefreshRootPosition({ force: true }),
         { passive: true, signal: this.domAbort.signal }
       );
       this.root.addEventListener(
@@ -1324,11 +1321,7 @@ export class SpreadsheetApp {
       });
       this.root.addEventListener(
         "pointerenter",
-        () => {
-          const rect = this.root.getBoundingClientRect();
-          this.rootLeft = rect.left;
-          this.rootTop = rect.top;
-        },
+        () => this.maybeRefreshRootPosition({ force: true }),
         { passive: true, signal: this.domAbort.signal }
       );
       this.root.addEventListener(
@@ -3481,6 +3474,7 @@ export class SpreadsheetApp {
       return;
     }
 
+    this.maybeRefreshRootPosition();
     const x = e.clientX - this.rootLeft;
     const y = e.clientY - this.rootTop;
     if (x < 0 || y < 0 || x > this.width || y > this.height) {
@@ -3991,6 +3985,25 @@ export class SpreadsheetApp {
     this.sharedHoverCellCommentIndexVersion = -1;
   }
 
+  private maybeRefreshRootPosition(opts: { force?: boolean } = {}): void {
+    const root = this.root as unknown as HTMLElement | undefined;
+    if (!root) return;
+    if (typeof root.getBoundingClientRect !== "function") return;
+
+    const now =
+      typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+    const last = this.rootPosLastMeasuredAtMs;
+    const force = opts.force ?? false;
+    // Root position changes (e.g. window scroll / layout shifts) are rare compared to pointermove.
+    // Refresh at most a few times per second to avoid reintroducing per-move layout reads.
+    if (!force && now - last < 250) return;
+
+    const rect = root.getBoundingClientRect();
+    this.rootLeft = rect.left;
+    this.rootTop = rect.top;
+    this.rootPosLastMeasuredAtMs = now;
+  }
+
   private commentCellRefFromA1(sheetId: string, a1: string): string {
     return this.collabMode ? `${sheetId}!${a1}` : a1;
   }
@@ -4277,6 +4290,8 @@ export class SpreadsheetApp {
     this.height = rect.height;
     this.rootLeft = rect.left;
     this.rootTop = rect.top;
+    this.rootPosLastMeasuredAtMs =
+      typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
     this.clearSharedHoverCellCache();
     this.dpr = window.devicePixelRatio || 1;
 
@@ -6475,6 +6490,10 @@ export class SpreadsheetApp {
     if (this.editor.isOpen()) return;
 
     const rect = this.root.getBoundingClientRect();
+    this.rootLeft = rect.left;
+    this.rootTop = rect.top;
+    this.rootPosLastMeasuredAtMs =
+      typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
@@ -6664,6 +6683,8 @@ export class SpreadsheetApp {
           return;
         }
       }
+
+      this.maybeRefreshRootPosition();
     }
 
     const x = e.clientX - this.rootLeft;
