@@ -459,6 +459,48 @@ impl XlsxPackage {
             ensure_vba_project_rels_has_signature(&mut parts)?;
         }
 
+        // Ensure `[Content_Types].xml` contains `<Default>` entries for common image extensions
+        // when the package includes image/media payloads (e.g. `xl/media/image1.png`).
+        //
+        // This is intentionally conservative: we only insert defaults for extensions that appear
+        // in the package to avoid touching `[Content_Types].xml` unnecessarily.
+        let mut needs_png = false;
+        let mut needs_jpg = false;
+        let mut needs_jpeg = false;
+        let mut needs_gif = false;
+        let mut needs_webp = false;
+        for name in parts.keys() {
+            let name = name.strip_prefix('/').unwrap_or(name);
+            let lower = name.to_ascii_lowercase();
+            if lower.ends_with(".png") {
+                needs_png = true;
+            } else if lower.ends_with(".jpg") {
+                needs_jpg = true;
+            } else if lower.ends_with(".jpeg") {
+                needs_jpeg = true;
+            } else if lower.ends_with(".gif") {
+                needs_gif = true;
+            } else if lower.ends_with(".webp") {
+                needs_webp = true;
+            }
+        }
+
+        if needs_png {
+            ensure_content_types_default(&mut parts, "png", "image/png")?;
+        }
+        if needs_jpg {
+            ensure_content_types_default(&mut parts, "jpg", "image/jpeg")?;
+        }
+        if needs_jpeg {
+            ensure_content_types_default(&mut parts, "jpeg", "image/jpeg")?;
+        }
+        if needs_gif {
+            ensure_content_types_default(&mut parts, "gif", "image/gif")?;
+        }
+        if needs_webp {
+            ensure_content_types_default(&mut parts, "webp", "image/webp")?;
+        }
+
         let cursor = Cursor::new(Vec::new());
         let mut zip = zip::ZipWriter::new(cursor);
         let options = zip::write::FileOptions::<()>::default()
@@ -1377,6 +1419,115 @@ fn ensure_workbook_content_type(
     Ok(())
 }
 
+pub(crate) fn ensure_content_types_default(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    ext: &str,
+    content_type: &str,
+) -> Result<(), XlsxError> {
+    let ct_name = "[Content_Types].xml";
+    let Some(existing) = parts.get(ct_name).cloned() else {
+        // Match `ensure_workbook_content_type` behavior: we don't synthesize a full content types
+        // file for existing packages.
+        return Ok(());
+    };
+
+    let normalized_ext = ext.trim().trim_start_matches('.').to_ascii_lowercase();
+    if normalized_ext.is_empty() {
+        return Ok(());
+    }
+
+    let mut reader = XmlReader::from_reader(existing.as_slice());
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(existing.len() + 128));
+    let mut buf = Vec::new();
+
+    let mut default_tag_name: Option<String> = None;
+    let mut found = false;
+    let mut changed = false;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Start(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Default") => {
+                if default_tag_name.is_none() {
+                    default_tag_name = Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                }
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr?;
+                    if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"Extension") {
+                        let ext = attr.unescape_value()?.into_owned();
+                        if ext.trim().eq_ignore_ascii_case(normalized_ext.as_str()) {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                writer.write_event(Event::Start(e))?;
+            }
+            Event::Empty(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Default") => {
+                if default_tag_name.is_none() {
+                    default_tag_name = Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                }
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr?;
+                    if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"Extension") {
+                        let ext = attr.unescape_value()?.into_owned();
+                        if ext.trim().eq_ignore_ascii_case(normalized_ext.as_str()) {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                writer.write_event(Event::Empty(e))?;
+            }
+            Event::End(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Types") => {
+                if !found {
+                    changed = true;
+                    let default_tag_name = default_tag_name
+                        .clone()
+                        .unwrap_or_else(|| prefixed_tag(e.name().as_ref(), "Default"));
+                    let mut default_el = BytesStart::new(default_tag_name.as_str());
+                    default_el.push_attribute(("Extension", normalized_ext.as_str()));
+                    default_el.push_attribute(("ContentType", content_type));
+                    writer.write_event(Event::Empty(default_el))?;
+                }
+                writer.write_event(Event::End(e))?;
+            }
+            Event::Empty(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Types") => {
+                // Degenerate case: a self-closing `<Types/>` root. Expand it so we can inject the
+                // required Default.
+                if !found {
+                    changed = true;
+                    let types_tag_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    let default_tag_name = default_tag_name
+                        .clone()
+                        .unwrap_or_else(|| prefixed_tag(types_tag_name.as_bytes(), "Default"));
+
+                    writer.write_event(Event::Start(e))?;
+
+                    let mut default_el = BytesStart::new(default_tag_name.as_str());
+                    default_el.push_attribute(("Extension", normalized_ext.as_str()));
+                    default_el.push_attribute(("ContentType", content_type));
+                    writer.write_event(Event::Empty(default_el))?;
+
+                    writer.write_event(Event::End(BytesEnd::new(types_tag_name.as_str())))?;
+                } else {
+                    writer.write_event(Event::Empty(e))?;
+                }
+            }
+            Event::Eof => break,
+            other => writer.write_event(other)?,
+        }
+
+        buf.clear();
+    }
+
+    if changed {
+        parts.insert(ct_name.to_string(), writer.into_inner());
+    }
+    Ok(())
+}
+
 fn patched_workbook_override(
     e: &BytesStart<'_>,
     workbook_content_type: &str,
@@ -1656,7 +1807,7 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use roxmltree::Document;
-    use std::collections::HashSet;
+    use std::collections::{BTreeMap, HashSet};
 
     fn build_package(files: &[(&str, &[u8])]) -> Vec<u8> {
         let cursor = Cursor::new(Vec::new());
@@ -1704,6 +1855,94 @@ mod tests {
             "/../../fixtures/xlsx/macros/basic.xlsm"
         ))
         .expect("fixture exists")
+    }
+
+    #[test]
+    fn ensure_content_types_default_inserts_png() {
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+</Types>"#;
+
+        let mut parts = BTreeMap::new();
+        parts.insert(
+            "[Content_Types].xml".to_string(),
+            content_types.as_bytes().to_vec(),
+        );
+
+        ensure_content_types_default(&mut parts, "png", "image/png").expect("ensure png default");
+
+        let updated =
+            std::str::from_utf8(parts.get("[Content_Types].xml").unwrap()).expect("utf8");
+        let doc = Document::parse(updated).expect("parse content types");
+        assert!(
+            doc.descendants().any(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "Default"
+                    && n.attribute("Extension") == Some("png")
+                    && n.attribute("ContentType") == Some("image/png")
+            }),
+            "expected png Default to be inserted, got:\n{updated}"
+        );
+    }
+
+    #[test]
+    fn ensure_content_types_default_does_not_duplicate_existing_default() {
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
+</Types>"#;
+
+        let mut parts = BTreeMap::new();
+        parts.insert(
+            "[Content_Types].xml".to_string(),
+            content_types.as_bytes().to_vec(),
+        );
+
+        ensure_content_types_default(&mut parts, "png", "image/png").expect("ensure png default");
+        ensure_content_types_default(&mut parts, "png", "image/png").expect("ensure png default");
+
+        let updated =
+            std::str::from_utf8(parts.get("[Content_Types].xml").unwrap()).expect("utf8");
+        let doc = Document::parse(updated).expect("parse content types");
+        let count = doc
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name() == "Default" && n.attribute("Extension") == Some("png"))
+            .count();
+        assert_eq!(count, 1, "expected png Default to not duplicate, got:\n{updated}");
+    }
+
+    #[test]
+    fn ensure_content_types_default_preserves_prefix_when_root_is_prefixed() {
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
+  <ct:Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <ct:Default Extension="xml" ContentType="application/xml"/>
+</ct:Types>"#;
+
+        let mut parts = BTreeMap::new();
+        parts.insert(
+            "[Content_Types].xml".to_string(),
+            content_types.as_bytes().to_vec(),
+        );
+
+        ensure_content_types_default(&mut parts, "png", "image/png").expect("ensure png default");
+
+        let updated =
+            std::str::from_utf8(parts.get("[Content_Types].xml").unwrap()).expect("utf8");
+        let doc = Document::parse(updated).expect("parse content types");
+
+        let ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types";
+        let node = doc
+            .descendants()
+            .find(|n| {
+                n.is_element() && n.tag_name().name() == "Default" && n.attribute("Extension") == Some("png")
+            })
+            .expect("inserted Default");
+        assert_eq!(node.tag_name().namespace(), Some(ct_ns));
     }
 
     #[test]
