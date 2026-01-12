@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use crate::date::ExcelDateSystem;
+use crate::date::{serial_to_ymd, ExcelDateSystem};
 use crate::error::{ExcelError, ExcelResult};
 use crate::eval::CompiledExpr;
 use crate::functions::date_time;
@@ -29,9 +29,9 @@ fn datevalue_from_value(
     system: ExcelDateSystem,
     now_utc: DateTime<Utc>,
 ) -> Result<i32, ErrorKind> {
-    match value {
+    let serial = match value {
         Value::Text(s) => {
-            date_time::datevalue(s, ctx.value_locale(), now_utc, system).map_err(excel_error_kind)
+            date_time::datevalue(s, ctx.value_locale(), now_utc, system).map_err(excel_error_kind)?
         }
         _ => {
             let n = value.coerce_to_number_with_ctx(ctx)?;
@@ -42,9 +42,14 @@ fn datevalue_from_value(
             if serial < (i32::MIN as f64) || serial > (i32::MAX as f64) {
                 return Err(ErrorKind::Num);
             }
-            Ok(serial as i32)
+            serial as i32
         }
-    }
+    };
+
+    // Ensure the resulting serial is representable in the workbook date system.
+    serial_to_ymd(serial, system).map_err(excel_error_kind)?;
+
+    Ok(serial)
 }
 
 fn coerce_to_finite_number(ctx: &dyn FunctionContext, v: &Value) -> Result<f64, ErrorKind> {
