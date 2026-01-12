@@ -1170,6 +1170,7 @@ export class ToolExecutor {
           if (selector.sheetId !== ref.sheetId) break;
           if (typeof selector.columnIndex === "number") {
             const colIndex = selector.columnIndex;
+            if (colIndex < selectionRange.start.col || colIndex > selectionRange.end.col) break;
             const existing = columnClassificationByIndex.get(colIndex);
             columnClassificationByIndex.set(
               colIndex,

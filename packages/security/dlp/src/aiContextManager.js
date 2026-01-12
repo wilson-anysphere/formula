@@ -207,6 +207,7 @@ function buildDlpRangeIndex(ref, records) {
       case "column": {
         if (selector.sheetId !== ref.sheetId) break;
         if (typeof selector.columnIndex === "number") {
+          if (selector.columnIndex < selectionRange.start.col || selector.columnIndex > selectionRange.end.col) break;
           const existing = columnClassificationByIndex.get(selector.columnIndex);
           columnClassificationByIndex.set(
             selector.columnIndex,
