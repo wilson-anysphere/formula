@@ -52,7 +52,7 @@ fn vm_cm_are_recorded_in_cell_meta_and_survive_roundtrip(
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheetData>
     <row r="1">
-      <c r="A1" vm="3" cm="4"><v>1</v></c>
+      <c r="A1" t="e" vm="3" cm="4"><v>#VALUE!</v></c>
     </row>
   </sheetData>
 </worksheet>"#;
