@@ -25603,6 +25603,26 @@
       "id": "thai_069fcbbf18de"
     },
     {
+      "formula": "=BAHTTEXT(0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "BAHTTEXT"
+      ],
+      "id": "thai_bfb29f1ab0d4"
+    },
+    {
+      "formula": "=BAHTTEXT(-11.25)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "BAHTTEXT"
+      ],
+      "id": "thai_a20f566ab461"
+    },
+    {
       "formula": "=THAIDIGIT(\"123\")",
       "outputCell": "C1",
       "inputs": [],
@@ -25611,6 +25631,16 @@
         "THAIDIGIT"
       ],
       "id": "thai_d4a11c47141a"
+    },
+    {
+      "formula": "=THAIDIGIT(1234)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "THAIDIGIT"
+      ],
+      "id": "thai_31c56d061ad9"
     },
     {
       "formula": "=ISTHAIDIGIT(THAIDIGIT(\"123\"))",
@@ -25624,6 +25654,16 @@
       "id": "thai_9f9a50e82a56"
     },
     {
+      "formula": "=ISTHAIDIGIT(\"๑๒๓\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "ISTHAIDIGIT"
+      ],
+      "id": "thai_dd49a2c49f49"
+    },
+    {
       "formula": "=THAINUMSTRING(1234.5)",
       "outputCell": "C1",
       "inputs": [],
@@ -25634,6 +25674,16 @@
       "id": "thai_959abe135b90"
     },
     {
+      "formula": "=THAINUMSTRING(-1234.5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "THAINUMSTRING"
+      ],
+      "id": "thai_ce388cb82446"
+    },
+    {
       "formula": "=THAINUMSOUND(1234.5)",
       "outputCell": "C1",
       "inputs": [],
@@ -25642,6 +25692,16 @@
         "THAINUMSOUND"
       ],
       "id": "thai_6b997365ec98"
+    },
+    {
+      "formula": "=THAINUMSOUND(-1234.5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "THAINUMSOUND"
+      ],
+      "id": "thai_0bca4ff14c82"
     },
     {
       "formula": "=THAISTRINGLENGTH(\"เก้า\")",
@@ -25674,6 +25734,26 @@
       "id": "thai_2ffc96d30ff1"
     },
     {
+      "formula": "=ROUNDBAHTDOWN(-1.26)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "ROUNDBAHTDOWN"
+      ],
+      "id": "thai_55de0e20af85"
+    },
+    {
+      "formula": "=ROUNDBAHTUP(-1.26)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "ROUNDBAHTUP"
+      ],
+      "id": "thai_9fad3e947a04"
+    },
+    {
       "formula": "=THAIDAYOFWEEK(DATE(2020,1,1))",
       "outputCell": "C1",
       "inputs": [],
@@ -25683,6 +25763,17 @@
         "DATE"
       ],
       "id": "thai_cec3b3faf981"
+    },
+    {
+      "formula": "=THAIDAYOFWEEK(DATE(2020,1,5))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "THAIDAYOFWEEK",
+        "DATE"
+      ],
+      "id": "thai_7e0203755dfa"
     },
     {
       "formula": "=THAIMONTHOFYEAR(DATE(2020,1,1))",
@@ -25696,6 +25787,17 @@
       "id": "thai_b01b1aaf649a"
     },
     {
+      "formula": "=THAIMONTHOFYEAR(DATE(2020,12,31))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "THAIMONTHOFYEAR",
+        "DATE"
+      ],
+      "id": "thai_44e86e4e49e9"
+    },
+    {
       "formula": "=THAIYEAR(DATE(2020,1,1))",
       "outputCell": "C1",
       "inputs": [],
@@ -25705,6 +25807,17 @@
         "DATE"
       ],
       "id": "thai_bff36ef1b3d1"
+    },
+    {
+      "formula": "=THAIYEAR(DATE(1900,1,1))",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "thai",
+        "THAIYEAR",
+        "DATE"
+      ],
+      "id": "thai_6d5dab1aaeff"
     },
     {
       "formula": "=CONCAT(A1:A2,\"c\")",
