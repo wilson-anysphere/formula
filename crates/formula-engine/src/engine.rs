@@ -4011,7 +4011,14 @@ impl Engine {
         let separators = self.value_locale.separators;
         recalc_ctx.number_locale =
             crate::value::NumberLocale::new(separators.decimal_sep, Some(separators.thousands_sep));
-        let (value, trace) = crate::debug::evaluate_with_trace(&snapshot, ctx, &recalc_ctx, &compiled);
+        let (value, trace) = crate::debug::evaluate_with_trace(
+            &snapshot,
+            ctx,
+            &recalc_ctx,
+            self.date_system,
+            self.value_locale,
+            &compiled,
+        );
 
         Ok(crate::debug::DebugEvaluation {
             formula: formula.to_string(),

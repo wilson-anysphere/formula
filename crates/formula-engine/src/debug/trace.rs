@@ -3,7 +3,7 @@ use crate::eval::{
     parse_a1, CellAddr, CompareOp, EvalContext, FormulaParseError, SheetReference, UnaryOp,
 };
 use crate::functions::{ArgValue as FnArgValue, FunctionContext, SheetId as FnSheetId};
-use crate::value::{Array, ErrorKind, NumberLocale, Value};
+use crate::value::{Array, ErrorKind, Value};
 use std::cmp::Ordering;
 
 /// Half-open byte span into the original formula string.
@@ -200,12 +200,16 @@ pub(crate) fn evaluate_with_trace<R: crate::eval::ValueResolver>(
     resolver: &R,
     ctx: EvalContext,
     recalc_ctx: &crate::eval::RecalcContext,
+    date_system: crate::date::ExcelDateSystem,
+    value_locale: crate::locale::ValueLocaleConfig,
     expr: &SpannedExpr<usize>,
 ) -> (Value, TraceNode) {
     let evaluator = TracedEvaluator {
         resolver,
         ctx,
         recalc_ctx,
+        date_system,
+        value_locale,
     };
     evaluator.eval_formula(expr)
 }
@@ -1553,6 +1557,8 @@ struct TracedEvaluator<'a, R: crate::eval::ValueResolver> {
     resolver: &'a R,
     ctx: EvalContext,
     recalc_ctx: &'a crate::eval::RecalcContext,
+    date_system: crate::date::ExcelDateSystem,
+    value_locale: crate::locale::ValueLocaleConfig,
 }
 
 impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
@@ -2153,8 +2159,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             SpannedExprKind::Unary { op, expr: inner } => {
                 let (ev, child) = self.eval_value(inner);
                 let value = self.deref_eval_value_dynamic(ev);
-                let locale = self.recalc_ctx.number_locale;
-                let out = elementwise_unary(&value, |elem| numeric_unary(*op, elem, locale));
+                let out = elementwise_unary(&value, |elem| self.numeric_unary(*op, elem));
                 (
                     EvalValue::Scalar(out.clone()),
                     TraceNode {
@@ -2172,7 +2177,6 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
 
                 let l = self.deref_eval_value_dynamic(l_ev);
                 let r = self.deref_eval_value_dynamic(r_ev);
-                let locale = self.recalc_ctx.number_locale;
 
                 let out = match op {
                     crate::eval::BinaryOp::Add
@@ -2180,9 +2184,11 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     | crate::eval::BinaryOp::Mul
                     | crate::eval::BinaryOp::Div
                     | crate::eval::BinaryOp::Pow => {
-                        elementwise_binary(&l, &r, |a, b| numeric_binary(*op, a, b, locale))
+                        elementwise_binary(&l, &r, |a, b| self.numeric_binary(*op, a, b))
                     }
-                    crate::eval::BinaryOp::Concat => elementwise_binary(&l, &r, concat_binary),
+                    crate::eval::BinaryOp::Concat => {
+                        elementwise_binary(&l, &r, |a, b| self.concat_binary(a, b))
+                    }
                     crate::eval::BinaryOp::Range
                     | crate::eval::BinaryOp::Intersect
                     | crate::eval::BinaryOp::Union => Value::Error(ErrorKind::Value),
@@ -2592,7 +2598,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
         if let Value::Error(e) = rank {
             return (Value::Error(e), traces);
         }
-        let rank = match rank.coerce_to_number_with_locale(self.recalc_ctx.number_locale) {
+        let rank = match self.coerce_to_number_with_ctx(&rank) {
             Ok(n) => n.trunc() as i64,
             Err(e) => return (Value::Error(e), traces),
         };
@@ -2673,7 +2679,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             if let Value::Error(e) = order {
                 return (Value::Error(e), traces);
             }
-            let order = match order.coerce_to_number_with_locale(self.recalc_ctx.number_locale) {
+            let order = match self.coerce_to_number_with_ctx(&order) {
                 Ok(n) => n.trunc() as i64,
                 Err(e) => return (Value::Error(e), traces),
             };
@@ -2803,7 +2809,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
         if let Value::Error(e) = cond_val {
             return (Value::Error(e), vec![cond_trace]);
         }
-        let cond = match cond_val.coerce_to_bool() {
+        let cond = match self.coerce_to_bool_with_ctx(&cond_val) {
             Ok(b) => b,
             Err(e) => return (Value::Error(e), vec![cond_trace]),
         };
@@ -2859,7 +2865,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     Value::Bool(b) => acc += if b { 1.0 } else { 0.0 },
                     Value::Blank => {}
                     Value::Text(s) => {
-                        let n = match Value::Text(s).coerce_to_number() {
+                        let n = match self.coerce_text_to_number(&s) {
                             Ok(n) => n,
                             Err(e) => return (Value::Error(e), traces),
                         };
@@ -2946,11 +2952,11 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
         if let Value::Error(e) = col_index_val {
             return (Value::Error(e), traces);
         }
-        let col_index_num = match col_index_val.coerce_to_number() {
+        let col_index_num = match self.coerce_to_number_with_ctx(&col_index_val) {
             Ok(n) => n,
             Err(e) => return (Value::Error(e), traces),
         };
-        let col_index = col_index_num as i64;
+        let col_index = col_index_num.trunc() as i64;
         if col_index <= 0 {
             return (Value::Error(ErrorKind::Value), traces);
         }
@@ -2962,7 +2968,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             if let Value::Error(e) = v {
                 return (Value::Error(e), traces);
             }
-            match v.coerce_to_bool() {
+            match self.coerce_to_bool_with_ctx(&v) {
                 Ok(b) => b,
                 Err(e) => return (Value::Error(e), traces),
             }
@@ -3035,85 +3041,167 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             }
         }
     }
-}
 
-fn numeric_unary(op: UnaryOp, value: &Value, locale: NumberLocale) -> Value {
-    match value {
-        Value::Error(e) => Value::Error(*e),
-        other => {
-            let n = match other.coerce_to_number_with_locale(locale) {
-                Ok(n) => n,
-                Err(e) => return Value::Error(e),
-            };
-            match op {
-                UnaryOp::Plus => Value::Number(n),
-                UnaryOp::Minus => Value::Number(-n),
-            }
+    fn coerce_text_to_number(&self, text: &str) -> Result<f64, ErrorKind> {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return Ok(0.0);
+        }
+
+        crate::coercion::datetime::parse_value_text(
+            trimmed,
+            self.value_locale,
+            self.recalc_ctx.now_utc,
+            self.date_system,
+        )
+        .map_err(map_excel_error)
+    }
+
+    fn coerce_to_number_with_ctx(&self, value: &Value) -> Result<f64, ErrorKind> {
+        match value {
+            Value::Number(n) => Ok(*n),
+            Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
+            Value::Blank => Ok(0.0),
+            Value::Text(s) => self.coerce_text_to_number(s),
+            Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
+            Value::Error(e) => Err(*e),
+            Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => Err(ErrorKind::Value),
         }
     }
-}
 
-fn concat_binary(left: &Value, right: &Value) -> Value {
-    if let Value::Error(e) = left {
-        return Value::Error(*e);
-    }
-    if let Value::Error(e) = right {
-        return Value::Error(*e);
-    }
-
-    let ls = match left.coerce_to_string() {
-        Ok(s) => s,
-        Err(e) => return Value::Error(e),
-    };
-    let rs = match right.coerce_to_string() {
-        Ok(s) => s,
-        Err(e) => return Value::Error(e),
-    };
-    Value::Text(format!("{ls}{rs}"))
-}
-
-fn numeric_binary(
-    op: crate::eval::BinaryOp,
-    left: &Value,
-    right: &Value,
-    locale: NumberLocale,
-) -> Value {
-    if let Value::Error(e) = left {
-        return Value::Error(*e);
-    }
-    if let Value::Error(e) = right {
-        return Value::Error(*e);
-    }
-
-    let ln = match left.coerce_to_number_with_locale(locale) {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-    let rn = match right.coerce_to_number_with_locale(locale) {
-        Ok(n) => n,
-        Err(e) => return Value::Error(e),
-    };
-
-    match op {
-        crate::eval::BinaryOp::Add => Value::Number(ln + rn),
-        crate::eval::BinaryOp::Sub => Value::Number(ln - rn),
-        crate::eval::BinaryOp::Mul => Value::Number(ln * rn),
-        crate::eval::BinaryOp::Div => {
-            if rn == 0.0 {
-                Value::Error(ErrorKind::Div0)
-            } else {
-                Value::Number(ln / rn)
+    fn coerce_to_bool_with_ctx(&self, value: &Value) -> Result<bool, ErrorKind> {
+        match value {
+            Value::Bool(b) => Ok(*b),
+            Value::Number(n) => Ok(*n != 0.0),
+            Value::Blank => Ok(false),
+            Value::Text(s) => {
+                let t = s.trim();
+                if t.is_empty() {
+                    return Ok(false);
+                }
+                if t.eq_ignore_ascii_case("TRUE") {
+                    return Ok(true);
+                }
+                if t.eq_ignore_ascii_case("FALSE") {
+                    return Ok(false);
+                }
+                Ok(self.coerce_text_to_number(t)? != 0.0)
             }
+            Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
+            Value::Error(e) => Err(*e),
+            Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => Err(ErrorKind::Value),
         }
-        crate::eval::BinaryOp::Pow => match crate::functions::math::power(ln, rn) {
-            Ok(n) => Value::Number(n),
-            Err(e) => Value::Error(match e {
-                ExcelError::Div0 => ErrorKind::Div0,
-                ExcelError::Value => ErrorKind::Value,
-                ExcelError::Num => ErrorKind::Num,
-            }),
-        },
-        _ => Value::Error(ErrorKind::Value),
+    }
+
+    fn coerce_to_string_with_ctx(&self, value: &Value) -> Result<String, ErrorKind> {
+        match value {
+            Value::Text(s) => Ok(s.clone()),
+            Value::Entity(v) => Ok(v.display.clone()),
+            Value::Record(v) => Ok(v.display.clone()),
+            Value::Number(n) => {
+                let options = formula_format::FormatOptions {
+                    locale: self.value_locale.separators,
+                    date_system: match self.date_system {
+                        crate::date::ExcelDateSystem::Excel1900 { .. } => {
+                            formula_format::DateSystem::Excel1900
+                        }
+                        crate::date::ExcelDateSystem::Excel1904 => {
+                            formula_format::DateSystem::Excel1904
+                        }
+                    },
+                };
+                Ok(formula_format::format_value(
+                    formula_format::Value::Number(*n),
+                    None,
+                    &options,
+                )
+                .text)
+            }
+            Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
+            Value::Blank => Ok(String::new()),
+            Value::Error(e) => Err(*e),
+            Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => Err(ErrorKind::Value),
+        }
+    }
+
+    fn numeric_unary(&self, op: UnaryOp, value: &Value) -> Value {
+        match value {
+            Value::Error(e) => Value::Error(*e),
+            other => match self.coerce_to_number_with_ctx(other) {
+                Ok(n) => match op {
+                    UnaryOp::Plus => Value::Number(n),
+                    UnaryOp::Minus => Value::Number(-n),
+                },
+                Err(e) => Value::Error(e),
+            },
+        }
+    }
+
+    fn concat_binary(&self, left: &Value, right: &Value) -> Value {
+        if let Value::Error(e) = left {
+            return Value::Error(*e);
+        }
+        if let Value::Error(e) = right {
+            return Value::Error(*e);
+        }
+
+        let ls = match self.coerce_to_string_with_ctx(left) {
+            Ok(s) => s,
+            Err(e) => return Value::Error(e),
+        };
+        let rs = match self.coerce_to_string_with_ctx(right) {
+            Ok(s) => s,
+            Err(e) => return Value::Error(e),
+        };
+        Value::Text(format!("{ls}{rs}"))
+    }
+
+    fn numeric_binary(&self, op: crate::eval::BinaryOp, left: &Value, right: &Value) -> Value {
+        if let Value::Error(e) = left {
+            return Value::Error(*e);
+        }
+        if let Value::Error(e) = right {
+            return Value::Error(*e);
+        }
+
+        let ln = match self.coerce_to_number_with_ctx(left) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+        let rn = match self.coerce_to_number_with_ctx(right) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        };
+
+        match op {
+            crate::eval::BinaryOp::Add => Value::Number(ln + rn),
+            crate::eval::BinaryOp::Sub => Value::Number(ln - rn),
+            crate::eval::BinaryOp::Mul => Value::Number(ln * rn),
+            crate::eval::BinaryOp::Div => {
+                if rn == 0.0 {
+                    Value::Error(ErrorKind::Div0)
+                } else {
+                    Value::Number(ln / rn)
+                }
+            }
+            crate::eval::BinaryOp::Pow => match crate::functions::math::power(ln, rn) {
+                Ok(n) => Value::Number(n),
+                Err(e) => Value::Error(map_excel_error(e)),
+            },
+            _ => Value::Error(ErrorKind::Value),
+        }
     }
 }
 
@@ -3174,6 +3262,14 @@ fn elementwise_binary(left: &Value, right: &Value, f: impl Fn(&Value, &Value) ->
             right_arr.values.iter().map(|b| f(left_scalar, b)).collect(),
         )),
         (left_scalar, right_scalar) => f(left_scalar, right_scalar),
+    }
+}
+
+fn map_excel_error(error: ExcelError) -> ErrorKind {
+    match error {
+        ExcelError::Div0 => ErrorKind::Div0,
+        ExcelError::Value => ErrorKind::Value,
+        ExcelError::Num => ErrorKind::Num,
     }
 }
 

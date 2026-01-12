@@ -347,6 +347,25 @@ fn debug_trace_respects_value_locale_for_cube_numeric_args() {
 }
 
 #[test]
+fn debug_trace_respects_value_locale_for_concat_number_formatting() {
+    let mut engine = Engine::new();
+    assert!(engine.set_value_locale_id("de-DE"));
+
+    // Formula is stored canonically with '.', but de-DE value locale should render ',' when
+    // coercing numbers to text via concatenation.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=1.5&\"\"")
+        .unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(computed, Value::Text("1,5".to_string()));
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(dbg.value, computed);
+}
+
+#[test]
 fn trace_preserves_reference_context_for_sum() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
