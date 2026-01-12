@@ -4456,25 +4456,6 @@ if (
     executeBuiltinCommand("clipboard.pasteSpecial");
   });
 
-  // Ctrl/Cmd+Shift+A toggles the AI sidebar (chat panel).
-  // Keep this as a global shortcut so it works even when focus isn't on the grid.
-  window.addEventListener("keydown", (e) => {
-    if (e.defaultPrevented) return;
-    if (e.repeat) return;
-    const primary = e.ctrlKey || e.metaKey;
-    if (!primary || e.altKey || !e.shiftKey) return;
-    if (e.key !== "A" && e.key !== "a") return;
-
-    const target = (e.target instanceof HTMLElement ? e.target : null) ?? (document.activeElement as HTMLElement | null);
-    if (target) {
-      const tag = target.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
-    }
-
-    e.preventDefault();
-    executeCommand("view.togglePanel.aiChat");
-  });
-
   layoutController.on("change", () => {
     renderLayout();
     scheduleRibbonSelectionFormatStateUpdate();

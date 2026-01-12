@@ -15,6 +15,8 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("edit.redo", otherIndex)).toBe("Ctrl+Y");
     expect(getPrimaryCommandKeybindingDisplay("audit.tracePrecedents", otherIndex)).toBe("Ctrl+[");
     expect(getPrimaryCommandKeybindingDisplay("audit.traceDependents", otherIndex)).toBe("Ctrl+]");
+    expect(getPrimaryCommandKeybindingDisplay("view.togglePanel.aiChat", otherIndex)).toBe("Ctrl+Shift+A");
+    expect(getPrimaryCommandKeybindingDisplay("format.toggleItalic", otherIndex)).toBe("Ctrl+I");
 
     const macIndex = buildCommandKeybindingDisplayIndex({ platform: "mac", contributed: [], builtin: builtinKeybindings });
     expect(getPrimaryCommandKeybindingDisplay("workbench.showCommandPalette", macIndex)).toBe("⇧⌘P");
@@ -26,5 +28,7 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("edit.redo", macIndex)).toBe("⇧⌘Z");
     expect(getPrimaryCommandKeybindingDisplay("audit.tracePrecedents", macIndex)).toBe("⌘[");
     expect(getPrimaryCommandKeybindingDisplay("audit.traceDependents", macIndex)).toBe("⌘]");
+    expect(getPrimaryCommandKeybindingDisplay("view.togglePanel.aiChat", macIndex)).toBe("⇧⌘A");
+    expect(getPrimaryCommandKeybindingDisplay("format.toggleItalic", macIndex)).toBe("⌘I");
   });
 });

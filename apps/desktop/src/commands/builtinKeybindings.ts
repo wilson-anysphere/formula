@@ -63,10 +63,8 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
   },
   {
     command: "view.togglePanel.aiChat",
-    // macOS-only shortcut (Cmd+Shift+I) — avoid advertising a non-mac binding
-    // until we wire one up.
-    key: "",
-    mac: "cmd+shift+i",
+    key: "ctrl+shift+a",
+    mac: "cmd+shift+a",
     when: null,
   },
   {
@@ -191,9 +189,9 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: null,
   },
   {
-    // Cmd+I is reserved for toggling the AI sidebar; use Excel-style Ctrl+I on macOS.
     command: "format.toggleItalic",
     key: "ctrl+i",
+    mac: "cmd+i",
     when: null,
   },
   {
