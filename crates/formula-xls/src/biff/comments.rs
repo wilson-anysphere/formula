@@ -475,7 +475,11 @@ fn parse_txo_text_biff5(
         .get(TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2)
         .map(|v| u16::from_le_bytes([v[0], v[1]]) as usize)
         .filter(|&cch| cch != 0 && cch <= TXO_MAX_TEXT_CHARS);
-    let cch_text = detect_txo_cch_text(first, capacity_raw).or(spec_cch_text);
+    // Prefer the spec-defined cchText field (offset 6) when present, even if it exceeds the
+    // observed continuation capacity (truncated/corrupt files). This preserves truncation
+    // warnings and avoids accidentally selecting another header field that happens to fit the
+    // available payload.
+    let cch_text = spec_cch_text.or_else(|| detect_txo_cch_text(first, capacity_raw));
 
     let skip_leading_flag_bytes = match cch_text {
         Some(cch) => first_continue_has_flag && cch <= capacity_without_flags,
@@ -1252,6 +1256,43 @@ mod tests {
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1252).expect("parse");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "Hello");
+        assert!(
+            warnings.iter().any(|w| w.contains("truncated text")),
+            "expected truncation warning; warnings={warnings:?}"
+        );
+    }
+
+    #[test]
+    fn biff5_prefers_spec_cchtext_even_when_another_offset_fits_capacity() {
+        // Some sources disagree on the TXO header layout and place `cchText` at offset 4.
+        //
+        // If the spec-defined `cchText` at offset 6 is present but larger than the continuation
+        // payload (truncated file), we still want to trust it so we:
+        // - decode all available bytes, and
+        // - emit a truncation warning.
+        //
+        // If we instead pick the smaller offset-4 field just because it fits the observed payload,
+        // we'd silently drop bytes and miss the truncation warning.
+        let mut txo_payload = vec![0u8; 18];
+        // Spec-defined field says 5 chars (but the continuation will only contain 3).
+        txo_payload[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2].copy_from_slice(&5u16.to_le_bytes());
+        // Alternate offset 4 contains a smaller plausible value.
+        txo_payload[4..6].copy_from_slice(&2u16.to_le_bytes());
+
+        let stream = [
+            bof_biff5(),
+            note_biff5(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            record(RECORD_TXO, &txo_payload),
+            continue_text_biff5(b"ABC"),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "ABC");
         assert!(
             warnings.iter().any(|w| w.contains("truncated text")),
             "expected truncation warning; warnings={warnings:?}"
