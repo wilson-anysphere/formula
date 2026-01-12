@@ -339,37 +339,62 @@ impl AppState {
     }
 
     pub fn create_sheet(&mut self, name: String) -> Result<String, AppStateError> {
-        let workbook = self.get_workbook_mut()?;
-        let trimmed = name.trim();
-        formula_model::validate_sheet_name(trimmed)
-            .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
-        if workbook
-            .sheets
-            .iter()
-            .any(|sheet| sheet.name.eq_ignore_ascii_case(trimmed))
+        let (candidate_id, sheet_name, position) = {
+            let workbook = self.get_workbook()?;
+            let trimmed = name.trim();
+            formula_model::validate_sheet_name(trimmed)
+                .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
+            if workbook
+                .sheets
+                .iter()
+                .any(|sheet| sheet.name.eq_ignore_ascii_case(trimmed))
+            {
+                return Err(AppStateError::WhatIf(
+                    formula_model::SheetNameError::DuplicateName.to_string(),
+                ));
+            }
+
+            let base_id = trimmed.to_string();
+            let mut candidate = base_id.clone();
+            let mut counter = 1usize;
+            while workbook.sheets.iter().any(|s| s.id == candidate) {
+                counter += 1;
+                candidate = format!("{base_id}-{counter}");
+            }
+
+            // Append by default.
+            let position = workbook.sheets.len() as i64;
+
+            (candidate, trimmed.to_string(), position)
+        };
+
+        if let Some(persistent) = self.persistent.as_mut() {
+            let sheet = persistent
+                .storage
+                .create_sheet(persistent.workbook_id, &sheet_name, position, None)
+                .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+            persistent.sheet_map.insert(candidate_id.clone(), sheet.id);
+        }
+
         {
-            return Err(AppStateError::WhatIf(
-                formula_model::SheetNameError::DuplicateName.to_string(),
+            let workbook = self.get_workbook_mut()?;
+            workbook.sheets.push(crate::file_io::Sheet::new(
+                candidate_id.clone(),
+                sheet_name.clone(),
             ));
+
+            // Adding sheets is a structural XLSX edit. The patch-based save path (which relies on
+            // `origin_xlsx_bytes`) can only patch existing worksheet parts; it cannot add new sheets.
+            // Drop the origin bytes so the next save/export regenerates from storage.
+            workbook.origin_xlsx_bytes = None;
+            workbook.origin_xlsb_path = None;
         }
 
-        let base_id = trimmed.to_string();
-        let mut candidate = base_id.clone();
-        let mut counter = 1usize;
-        while workbook.sheets.iter().any(|s| s.id == candidate) {
-            counter += 1;
-            candidate = format!("{base_id}-{counter}");
-        }
-
-        workbook.sheets.push(crate::file_io::Sheet::new(
-            candidate.clone(),
-            trimmed.to_string(),
-        ));
-        self.engine.ensure_sheet(trimmed);
+        self.engine.ensure_sheet(&sheet_name);
 
         self.dirty = true;
         self.redo_stack.clear();
-        Ok(candidate)
+        Ok(candidate_id)
     }
 
     pub fn add_sheet(

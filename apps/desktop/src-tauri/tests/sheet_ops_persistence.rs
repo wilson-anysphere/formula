@@ -28,6 +28,32 @@ fn add_sheet_creates_persistence_mapping_for_cell_edits() {
 }
 
 #[test]
+fn create_sheet_creates_persistence_mapping_for_cell_edits() {
+    let mut state = AppState::new();
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("Sheet1".to_string());
+
+    state
+        .load_workbook_persistent(workbook, WorkbookPersistenceLocation::InMemory)
+        .expect("load workbook");
+
+    let sheet_id = state
+        .create_sheet("Data".to_string())
+        .expect("create sheet should succeed");
+
+    let updates = state
+        .set_cell(&sheet_id, 0, 0, Some(json!(123)), None)
+        .expect("set cell should succeed on newly-created sheet");
+
+    assert!(
+        updates
+            .iter()
+            .any(|u| u.sheet_id == sheet_id && u.row == 0 && u.col == 0),
+        "expected set_cell to report an update for the edited cell"
+    );
+}
+
+#[test]
 fn rename_sheet_rewrites_formula_references() {
     let mut state = AppState::new();
     let mut workbook = Workbook::new_empty(None);
