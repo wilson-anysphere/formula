@@ -16,12 +16,15 @@ struct ModuleUnicodePresence {
     module_help_filepath: bool,
 }
 
-/// Build the MS-OVBA §2.4.2 `ProjectNormalizedData` byte sequence for a VBA project as used by
-/// `ContentsHashV3` (dir-record based).
+/// Build a dir-record-only v3 project/module metadata transcript derived from selected `VBA/dir`
+/// records (MS-OVBA §2.4.2.6).
 ///
-/// This is the dir-record based transcript of project/module metadata records. It is intended as a
-/// building block for MS-OVBA "Contents Hash V3"; it does **not** include module source
-/// normalization or designer storage data.
+/// This helper is useful for debugging/spec work, but it does **not** include:
+/// - v3 module source normalization (`V3ContentNormalizedData`), or
+/// - designer storage bytes (`FormsNormalizedData`).
+///
+/// For the transcript used by `ContentsHashV3` / `\x05DigitalSignatureExt` binding, use
+/// [`crate::project_normalized_data_v3`].
 ///
 /// Notes / invariants enforced for hashing:
 /// - Records are processed in the **stored order** from the decompressed `VBA/dir` stream.

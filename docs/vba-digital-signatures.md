@@ -233,7 +233,8 @@ At a high level:
 
 - **v1 / `DigitalSignature`**: `ContentHash = MD5(ContentNormalizedData)`
 - **v2 / `DigitalSignatureEx`**: `AgileContentHash = MD5(ContentNormalizedData || FormsNormalizedData)`
-- **v3 / `DigitalSignatureExt`**: `V3ContentHash = SHA-256(ProjectNormalizedData || V3ContentNormalizedData || FormsNormalizedData)`
+- **v3 / `DigitalSignatureExt`**: `V3ContentHash = SHA-256(ProjectNormalizedData)` where
+  `ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData`
 
 Reference record normalization note:
 
@@ -255,22 +256,24 @@ V3 spec references:
 
 ### ProjectNormalizedData (MS-OVBA §2.4.2, ContentsHashV3)
 
-This section documents **MS-OVBA §2.4.2.6 `ProjectNormalizedData`** (normalized project/module
-metadata derived from selected `VBA/dir` records), which is used as a building block for the
-**v3 / `DigitalSignatureExt`** contents-hash transcript.
+For **v3 / `\x05DigitalSignatureExt`**, MS-OVBA defines the `ContentsHashV3` digest as SHA-256 over
+`ProjectNormalizedData`.
 
-In MS-OVBA v3, the overall SHA-256 transcript is:
+At a high level:
 
 ```text
-V3ContentHashInput = ProjectNormalizedData || V3ContentNormalizedData || FormsNormalizedData
-V3ContentHash      = SHA-256(V3ContentHashInput)
+ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData
+V3ContentHash         = SHA-256(ProjectNormalizedData)
 ```
 
 In this repo:
 
-- The `ProjectNormalizedData` bytes derived from the `VBA/dir` record allowlist are exposed as
-  `formula_vba::project_normalized_data_v3_dir_records` (implemented in
-  `crates/formula-vba/src/project_normalized_data.rs`).
+- `formula_vba::v3_content_normalized_data` builds `V3ContentNormalizedData`.
+- `formula_vba::forms_normalized_data` builds `FormsNormalizedData`.
+- `formula_vba::project_normalized_data_v3` concatenates them into `ProjectNormalizedData`.
+- `formula_vba::contents_hash_v3` computes the spec-defined SHA-256 digest.
+- `formula_vba::project_normalized_data_v3_dir_records` exposes a dir-record-only project/module
+  metadata transcript derived from selected `VBA/dir` records (useful for debugging/spec work).
 
 #### Dir record format (record header excluded)
 
@@ -282,8 +285,8 @@ len: u32le
 data: [u8; len]
 ```
 
-`ProjectNormalizedData` concatenates **normalized `data` bytes only**. The `(id, len)` header bytes
-are never included.
+`project_normalized_data_v3_dir_records` concatenates **normalized `data` bytes only**. The
+`(id, len)` header bytes are never included.
 
 #### `VBA/dir` record IDs included (project info + module metadata)
 
@@ -332,7 +335,8 @@ For string-like fields that have both ANSI/MBCS and Unicode record variants:
 #### `MODULESTREAMNAME` reserved trimming
 
 For the ANSI `MODULESTREAMNAME` record (`0x001A`), some producers append a trailing reserved `u16`
-(`0x0000`). `ProjectNormalizedData` trims this reserved `u16` before appending the bytes.
+(`0x0000`). `project_normalized_data_v3_dir_records` trims this reserved `u16` before appending the
+bytes.
 
 ### `formula-vba` binding implementation (high level)
 
