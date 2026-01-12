@@ -1619,7 +1619,6 @@ app.activateSheet = (sheetId: string): void => {
 
 const originalActivateCell = app.activateCell.bind(app);
 app.activateCell = (...args: Parameters<SpreadsheetApp["activateCell"]>): void => {
-  const target = args[0];
   const prevSheet = app.getCurrentSheetId();
   originalActivateCell(...args);
   const nextSheet = app.getCurrentSheetId();
@@ -1631,7 +1630,6 @@ app.activateCell = (...args: Parameters<SpreadsheetApp["activateCell"]>): void =
 
 const originalSelectRange = app.selectRange.bind(app);
 app.selectRange = (...args: Parameters<SpreadsheetApp["selectRange"]>): void => {
-  const target = args[0];
   const prevSheet = app.getCurrentSheetId();
   originalSelectRange(...args);
   const nextSheet = app.getCurrentSheetId();
@@ -2176,6 +2174,125 @@ if (
   window.addEventListener("formula:comments-panel-visibility-changed", () => updateContextKeys());
   window.addEventListener("formula:comments-changed", () => updateContextKeys());
 
+  type ExtensionSelectionChangedEvent = {
+    selection: {
+      startRow: number;
+      startCol: number;
+      endRow: number;
+      endCol: number;
+      address: string;
+      values: Array<Array<string | number | boolean | null>>;
+    };
+  };
+
+  type ExtensionCellChangedEvent = {
+    sheetId: string;
+    row: number;
+    col: number;
+    value: string | number | boolean | null;
+  };
+
+  const selectionChangedEventListeners = new Set<(event: ExtensionSelectionChangedEvent) => void>();
+  let selectionSubscription: (() => void) | null = null;
+  let lastSelectionEventKey = "";
+  let lastSelectionEventSheetId = app.getCurrentSheetId();
+  let selectionSubscriptionInitialized = false;
+
+  function ensureSelectionSubscription(): void {
+    if (selectionSubscription) return;
+    selectionSubscription = app.subscribeSelection(() => {
+      const rect = currentSelectionRect();
+      const range = { startRow: rect.startRow, startCol: rect.startCol, endRow: rect.endRow, endCol: rect.endCol };
+      const address = formatRangeAddress(range);
+      const key = `${rect.sheetId}:${address}`;
+      if (!selectionSubscriptionInitialized) {
+        selectionSubscriptionInitialized = true;
+        lastSelectionEventKey = key;
+        lastSelectionEventSheetId = rect.sheetId;
+        return;
+      }
+
+      // Mirror the Node/InMemorySpreadsheet semantics: sheet activation emits `sheetActivated`
+      // but does not implicitly emit `selectionChanged`.
+      if (rect.sheetId !== lastSelectionEventSheetId) {
+        lastSelectionEventSheetId = rect.sheetId;
+        lastSelectionEventKey = key;
+        return;
+      }
+
+      if (key === lastSelectionEventKey) return;
+      lastSelectionEventKey = key;
+
+      const values: Array<Array<string | number | boolean | null>> = [];
+      for (let r = range.startRow; r <= range.endRow; r++) {
+        const row: Array<string | number | boolean | null> = [];
+        for (let c = range.startCol; c <= range.endCol; c++) {
+          const cell = app.getDocument().getCell(rect.sheetId, { row: r, col: c }) as any;
+          row.push(normalizeExtensionCellValue(cell?.value ?? null));
+        }
+        values.push(row);
+      }
+
+      const payload: ExtensionSelectionChangedEvent = { selection: { ...range, address, values } };
+      for (const listener of [...selectionChangedEventListeners]) {
+        try {
+          listener(payload);
+        } catch {
+          // ignore
+        }
+      }
+    });
+  }
+
+  const cellChangedEventListeners = new Set<(event: ExtensionCellChangedEvent) => void>();
+  let cellSubscription: (() => void) | null = null;
+  let cellFlushScheduled = false;
+  const pendingCellChanges = new Map<string, ExtensionCellChangedEvent>();
+
+  function ensureCellSubscription(): void {
+    if (cellSubscription) return;
+    cellSubscription = app.getDocument().on("change", (payload: any) => {
+      const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
+      if (deltas.length === 0) return;
+
+      for (const delta of deltas) {
+        const sheetId = typeof delta?.sheetId === "string" ? delta.sheetId : app.getCurrentSheetId();
+        const row = Number(delta?.row);
+        const col = Number(delta?.col);
+        if (!Number.isInteger(row) || row < 0) continue;
+        if (!Number.isInteger(col) || col < 0) continue;
+
+        const beforeValue = normalizeExtensionCellValue(delta?.before?.value ?? null);
+        const afterValue = normalizeExtensionCellValue(delta?.after?.value ?? null);
+        const beforeFormula = typeof delta?.before?.formula === "string" ? delta.before.formula : null;
+        const afterFormula = typeof delta?.after?.formula === "string" ? delta.after.formula : null;
+        if (beforeValue === afterValue && beforeFormula === afterFormula) continue;
+
+        const event: ExtensionCellChangedEvent = { sheetId, row, col, value: afterValue };
+        pendingCellChanges.set(`${sheetId}:${row},${col}`, event);
+      }
+
+      if (pendingCellChanges.size === 0) return;
+      if (cellFlushScheduled) return;
+      cellFlushScheduled = true;
+      queueMicrotask(() => {
+        cellFlushScheduled = false;
+        if (pendingCellChanges.size === 0) return;
+        const batch = Array.from(pendingCellChanges.values());
+        pendingCellChanges.clear();
+        for (const event of batch) {
+          for (const listener of [...cellChangedEventListeners]) {
+            try {
+              listener(event);
+            } catch {
+              // ignore
+            }
+          }
+        }
+      });
+    });
+  }
+
   let extensionPanelBridge: ExtensionPanelBridge | null = null;
 
   // The desktop UI is used both inside the Tauri shell and as a pure-web fallback (e2e, local dev).
@@ -2193,6 +2310,23 @@ if (
       const sheets = workbookSheetStore.listAll();
       if (sheets.length > 0) return sheets.map((sheet) => ({ id: sheet.id, name: sheet.name }));
       return [{ id: "Sheet1", name: "Sheet1" }];
+    },
+    onSelectionChanged(handler: (event: ExtensionSelectionChangedEvent) => void) {
+      if (typeof handler !== "function") return () => {};
+      selectionChangedEventListeners.add(handler);
+      ensureSelectionSubscription();
+      return () => selectionChangedEventListeners.delete(handler);
+    },
+    onCellChanged(handler: (event: ExtensionCellChangedEvent) => void) {
+      if (typeof handler !== "function") return () => {};
+      cellChangedEventListeners.add(handler);
+      ensureCellSubscription();
+      return () => cellChangedEventListeners.delete(handler);
+    },
+    onSheetActivated(handler: (event: SheetActivatedEvent) => void) {
+      if (typeof handler !== "function") return () => {};
+      sheetActivatedListeners.add(handler);
+      return () => sheetActivatedListeners.delete(handler);
     },
     async getSheet(name: string) {
       const sheetId = findSheetIdByName(name);
@@ -2328,91 +2462,6 @@ if (
       }
 
       app.getDocument().setCellInputs(inputs, { label: "Extension setRange" });
-    },
-    onSelectionChanged(callback: (e: { selection: any }) => void) {
-      let disposed = false;
-      let initialized = false;
-      let lastKey = "";
-      let lastSheetId = app.getCurrentSheetId();
-      const unsubscribe = app.subscribeSelection((selection: SelectionState) => {
-        if (disposed) return;
-        const sheetId = app.getCurrentSheetId();
-        const range = selection?.ranges?.[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
-        const startRow = Math.min(range.startRow, range.endRow);
-        const endRow = Math.max(range.startRow, range.endRow);
-        const startCol = Math.min(range.startCol, range.endCol);
-        const endCol = Math.max(range.startCol, range.endCol);
-        const key = `${startRow},${startCol}:${endRow},${endCol}`;
-        if (!initialized) {
-          initialized = true;
-          lastSheetId = sheetId;
-          lastKey = key;
-          return;
-        }
-        // Mirror the Node/InMemorySpreadsheet behavior: sheet activation emits `sheetActivated`
-        // but does not implicitly emit `selectionChanged`.
-        if (sheetId !== lastSheetId) {
-          lastSheetId = sheetId;
-          lastKey = key;
-          return;
-        }
-        if (key === lastKey) return;
-        lastKey = key;
-
-        const values: Array<Array<string | number | boolean | null>> = [];
-        for (let r = startRow; r <= endRow; r++) {
-          const row: Array<string | number | boolean | null> = [];
-          for (let c = startCol; c <= endCol; c++) {
-            const cell = app.getDocument().getCell(sheetId, { row: r, col: c }) as any;
-            row.push(normalizeExtensionCellValue(cell?.value ?? null));
-          }
-          values.push(row);
-        }
-
-        try {
-          callback({ selection: { startRow, startCol, endRow, endCol, values } });
-        } catch {
-          // ignore
-        }
-      });
-
-      return {
-        dispose() {
-          if (disposed) return;
-          disposed = true;
-          unsubscribe();
-        },
-      };
-    },
-    onCellChanged(callback: (e: { row: number; col: number; value: any }) => void) {
-      const unsubscribe = app.getDocument().on("change", ({ deltas }) => {
-        const sheetId = app.getCurrentSheetId();
-        if (!Array.isArray(deltas) || deltas.length === 0) return;
-        for (const delta of deltas as any[]) {
-          if (!delta || typeof delta !== "object") continue;
-          if (delta.sheetId !== sheetId) continue;
-          const row = delta.row;
-          const col = delta.col;
-          if (!Number.isInteger(row) || row < 0) continue;
-          if (!Number.isInteger(col) || col < 0) continue;
-          const beforeFormula = delta.before?.formula ?? null;
-          const afterFormula = delta.after?.formula ?? null;
-          const beforeValue = delta.before?.value ?? null;
-          const afterValue = delta.after?.value ?? null;
-          if (beforeFormula === afterFormula && beforeValue === afterValue) continue;
-          const value = normalizeExtensionCellValue(afterValue);
-          try {
-            callback({ row, col, value });
-          } catch {
-            // ignore
-          }
-        }
-      });
-      return { dispose: unsubscribe };
-    },
-    onSheetActivated(callback: (e: SheetActivatedEvent) => void) {
-      sheetActivatedListeners.add(callback);
-      return { dispose: () => sheetActivatedListeners.delete(callback) };
     },
   };
 

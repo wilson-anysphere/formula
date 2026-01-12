@@ -9,6 +9,8 @@ import { validateExtensionManifest } from "../../../../packages/extension-host/s
 
 import sampleHelloManifestJson from "../../../../extensions/sample-hello/package.json";
 import sampleHelloEntrypointSource from "../../../../extensions/sample-hello/dist/extension.mjs?raw";
+import e2eEventsManifestJson from "../../../../extensions/e2e-events/package.json";
+import e2eEventsEntrypointSource from "../../../../extensions/e2e-events/dist/extension.mjs?raw";
 
 type ExtensionHostUiApi = {
   showMessage?: (message: string, type?: string) => Promise<void> | void;
@@ -97,6 +99,7 @@ export class DesktopExtensionHostManager {
 
     try {
       await this.loadBuiltInSampleHello();
+      await this.loadBuiltInE2eEvents();
     } catch (err) {
       error = err;
     }
@@ -128,6 +131,33 @@ export class DesktopExtensionHostManager {
     this._extensionApiModule ??= createModuleUrlFromText(EXTENSION_API_SHIM_SOURCE);
 
     const rewritten = rewriteEntrypointSource(sampleHelloEntrypointSource, {
+      extensionApiUrl: this._extensionApiModule.url,
+    });
+    const { url: mainUrl, revoke } = createModuleUrlFromText(rewritten);
+
+    await this.host.loadExtension({
+      extensionId,
+      extensionPath: `builtin://formula/extensions/${extensionId}/`,
+      manifest,
+      mainUrl,
+    });
+
+    this._loadedBuiltIns.set(extensionId, { mainUrl, revoke });
+  }
+
+  private async loadBuiltInE2eEvents(): Promise<void> {
+    const manifest = validateExtensionManifest(e2eEventsManifestJson as any, {
+      engineVersion: this.engineVersion,
+      enforceEngine: true,
+    }) as any;
+    const extensionId = `${String(manifest.publisher)}.${String(manifest.name)}`;
+    if (this._loadedBuiltIns.has(extensionId)) return;
+
+    // E2E extension code imports `@formula/extension-api` and must run without Vite's import
+    // rewriting in production/preview builds. Use the same shim + rewrite flow as sample-hello.
+    this._extensionApiModule ??= createModuleUrlFromText(EXTENSION_API_SHIM_SOURCE);
+
+    const rewritten = rewriteEntrypointSource(e2eEventsEntrypointSource, {
       extensionApiUrl: this._extensionApiModule.url,
     });
     const { url: mainUrl, revoke } = createModuleUrlFromText(rewritten);

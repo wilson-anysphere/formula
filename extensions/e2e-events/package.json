@@ -1,0 +1,17 @@
+{
+  "name": "e2e-events",
+  "displayName": "E2E Events",
+  "version": "1.0.0",
+  "description": "Internal extension used by Playwright to validate formula.events.* wiring.",
+  "publisher": "formula",
+  "license": "MIT",
+  "main": "./dist/extension.js",
+  "module": "./dist/extension.mjs",
+  "browser": "./dist/extension.mjs",
+  "engines": {
+    "formula": "^1.0.0"
+  },
+  "activationEvents": ["onStartupFinished", "onView:sampleHello.panel"],
+  "contributes": {},
+  "permissions": ["storage"]
+}
