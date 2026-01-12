@@ -91,6 +91,8 @@ const SHORTCUT_TOKEN_SYNONYMS: Record<string, string> = {
   pgdn: "pagedown",
 };
 
+import { t } from "../i18n/index.js";
+
 function normalizeQuery(query: string): string {
   return String(query ?? "")
     .trim()
@@ -100,7 +102,7 @@ function normalizeQuery(query: string): string {
 
 function normalizeCategory(category: string | null): string {
   const value = String(category ?? "").trim();
-  return value ? value : "Other";
+  return value ? value : t("commandPalette.group.other");
 }
 
 function extractShortcutTokens(text: string): string[] {
