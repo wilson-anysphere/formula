@@ -57,7 +57,7 @@ test.describe("global keybindings", () => {
       });
     });
 
-    await page.getByTestId("open-extensions-panel").click();
+    await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
     await expect(page.getByTestId("run-command-sampleHello.sumSelection")).toBeVisible();
 
     await page.keyboard.press(`${primary}+Shift+Y`);

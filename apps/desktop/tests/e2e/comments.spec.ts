@@ -25,8 +25,8 @@ test.describe("comments", () => {
     await grid.click({ position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
-    // There are multiple comments toggles in the shell (e.g. ribbon + debug/statusbar).
-    // Scope to the ribbon control to avoid Playwright strict-mode ambiguity.
+    // The "open comments panel" toggle is provided by the ribbon UI. Scope this locator to the
+    // ribbon so it stays stable even if other parts of the UI introduce additional toggles.
     await page.getByTestId("ribbon-root").getByTestId("open-comments-panel").click();
     const panel = page.getByTestId("comments-panel");
     await expect(panel).toBeVisible();

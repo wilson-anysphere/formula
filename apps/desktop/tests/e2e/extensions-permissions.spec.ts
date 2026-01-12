@@ -250,7 +250,7 @@ test.describe("Extensions permissions UI", () => {
       });
     });
 
-    await page.getByTestId("open-extensions-panel").click();
+    await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
     await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
     await page.getByTestId("run-command-sampleHello.sumSelection").click();
@@ -318,7 +318,7 @@ test.describe("Extensions permissions UI", () => {
 
       await gotoDesktop(page);
 
-      await page.getByTestId("open-extensions-panel").click();
+      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       // First run: allow permissions so network allowlist gets seeded for 127.0.0.1.
@@ -388,7 +388,7 @@ test.describe("Extensions permissions UI", () => {
         }
       });
 
-      await page.getByTestId("open-extensions-panel").click();
+      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       await expect(page.getByTestId(`extension-card-${extensionId}`)).toBeVisible();
@@ -413,7 +413,7 @@ test.describe("Extensions permissions UI", () => {
       await page.reload();
       await waitForDesktopReady(page);
 
-      await page.getByTestId("open-extensions-panel").click();
+      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("not granted");
@@ -468,7 +468,7 @@ test.describe("Extensions permissions UI", () => {
 
       await gotoDesktop(page);
 
-      await page.getByTestId("open-extensions-panel").click();
+      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       // First host.

@@ -3,9 +3,9 @@ import { expect, test, type Page } from "@playwright/test";
 import { gotoDesktop, waitForDesktopReady } from "./helpers";
 
 function getOpenExtensionsPanelButton(page: Page) {
-  // `index.html` includes a fallback toolbar with `data-testid="open-extensions-panel"`, and the
-  // ribbon UI also exposes a command button with the same test id. Prefer the ribbon button to
-  // keep selectors stable.
+  // The "open extensions panel" toggle is provided by the ribbon UI (React). The static
+  // `apps/desktop/index.html` should not include legacy debug buttons with the same test id
+  // (Playwright strict-mode locators would become ambiguous), so scope this locator to the ribbon.
   return page.getByTestId("ribbon-root").getByTestId("open-extensions-panel");
 }
 

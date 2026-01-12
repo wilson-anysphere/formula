@@ -88,7 +88,7 @@ test.describe("formula.events desktop wiring", () => {
     await gotoDesktop(page);
 
     // Ensure the extension host is loaded (deferred until Extensions panel is opened).
-    await page.getByTestId("open-extensions-panel").click();
+    await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
     await expect(page.getByTestId("panel-extensions")).toBeVisible();
     await expect(page.getByTestId("run-command-sampleHello.sumSelection")).toBeVisible();
 
