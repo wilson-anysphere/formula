@@ -500,6 +500,11 @@ Related frontend → backend events used as acknowledgements:
 - `updater-ui-ready` (signals the updater UI listeners are installed; triggers the startup update check)
 - `coi-check-result` (used by the packaged cross-origin isolation smoke check mode, e.g. `pnpm -C apps/desktop check:coi`)
 
+Security note: these event names are **explicitly allowlisted** in
+`apps/desktop/src-tauri/capabilities/main.json`. If you add a new desktop event, you must update
+that allowlist (and the guardrail test `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts`)
+or the event will fail with a permissions error in hardened desktop builds.
+
 ---
 
 ## Clipboard
