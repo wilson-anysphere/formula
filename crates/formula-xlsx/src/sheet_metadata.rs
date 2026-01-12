@@ -79,7 +79,10 @@ pub fn write_workbook_sheets(
 ) -> Result<String, XlsxError> {
     let (sheet_tag, rel_id_attr) = detect_workbook_sheet_qnames(workbook_xml)?;
     let sheet_tag = sheet_tag.unwrap_or_else(|| "sheet".to_string());
-    let rel_id_attr = rel_id_attr.unwrap_or_else(|| "r:id".to_string());
+    // Avoid emitting undeclared namespace prefixes. We will attempt to infer the correct
+    // relationships prefix from the workbook root / sheets element; if one can't be found,
+    // fall back to an unprefixed `id` attribute.
+    let rel_id_attr = rel_id_attr.unwrap_or_else(|| "id".to_string());
 
     let mut reader = Reader::from_str(workbook_xml);
     reader.config_mut().trim_text(false);
@@ -106,6 +109,21 @@ pub fn write_workbook_sheets(
                         sheet,
                     )))?;
                 }
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"sheets" => {
+                // Expand a self-closing `<sheets/>` element so that we can insert `<sheet/>`
+                // children.
+                replaced_sheets = true;
+                let sheets_tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                writer.write_event(Event::Start(e.to_owned()))?;
+                for sheet in sheets {
+                    writer.write_event(Event::Empty(build_sheet_element(
+                        sheet_tag.as_str(),
+                        rel_id_attr.as_str(),
+                        sheet,
+                    )))?;
+                }
+                writer.write_event(Event::End(BytesEnd::new(sheets_tag.as_str())))?;
             }
             Event::Empty(ref e) if in_sheets && e.local_name().as_ref() == b"sheet" => {}
             Event::Start(ref e) if in_sheets && e.local_name().as_ref() == b"sheet" => {
@@ -163,20 +181,31 @@ fn detect_workbook_sheet_qnames(
     let mut sheets_prefix: Option<String> = None;
     let mut sheet_tag: Option<String> = None;
     let mut rel_id_attr: Option<String> = None;
+    let mut office_relationships_prefix: Option<String> = None;
     let mut in_sheets = false;
 
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Eof => break,
+            Event::Start(ref e) | Event::Empty(ref e) if e.local_name().as_ref() == b"workbook" => {
+                let ns = crate::xml::workbook_xml_namespaces_from_workbook_start(e)?;
+                office_relationships_prefix = ns.office_relationships_prefix;
+            }
             Event::Start(ref e) if e.local_name().as_ref() == b"sheets" => {
                 if sheets_prefix.is_none() {
                     sheets_prefix = name_prefix(e.name().as_ref());
+                }
+                if office_relationships_prefix.is_none() {
+                    office_relationships_prefix = office_relationships_prefix_from_xmlns(e)?;
                 }
                 in_sheets = true;
             }
             Event::Empty(ref e) if e.local_name().as_ref() == b"sheets" => {
                 if sheets_prefix.is_none() {
                     sheets_prefix = name_prefix(e.name().as_ref());
+                }
+                if office_relationships_prefix.is_none() {
+                    office_relationships_prefix = office_relationships_prefix_from_xmlns(e)?;
                 }
             }
             Event::End(ref e) if e.local_name().as_ref() == b"sheets" => {
@@ -210,6 +239,13 @@ fn detect_workbook_sheet_qnames(
     let sheet_tag =
         sheet_tag.or_else(|| Some(crate::xml::prefixed_tag(sheets_prefix.as_deref(), "sheet")));
 
+    let rel_id_attr = rel_id_attr.or_else(|| {
+        Some(crate::xml::prefixed_tag(
+            office_relationships_prefix.as_deref(),
+            "id",
+        ))
+    });
+
     Ok((sheet_tag, rel_id_attr))
 }
 
@@ -218,6 +254,20 @@ fn name_prefix(name: &[u8]) -> Option<String> {
         .rposition(|b| *b == b':')
         .and_then(|idx| std::str::from_utf8(&name[..idx]).ok())
         .map(|s| s.to_string())
+}
+
+fn office_relationships_prefix_from_xmlns(e: &BytesStart<'_>) -> Result<Option<String>, XlsxError> {
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        let key = attr.key.as_ref();
+        let Some(prefix) = key.strip_prefix(b"xmlns:") else {
+            continue;
+        };
+        if attr.value.as_ref() == crate::xml::OFFICE_RELATIONSHIPS_NS.as_bytes() {
+            return Ok(Some(String::from_utf8_lossy(prefix).into_owned()));
+        }
+    }
+    Ok(None)
 }
 
 pub fn parse_sheet_tab_color(worksheet_xml: &str) -> Result<Option<TabColor>, XlsxError> {
@@ -561,9 +611,87 @@ mod tests {
     }
 
     #[test]
+    fn write_workbook_sheets_expands_self_closing_sheets_prefixed() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:sheets xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>
+</x:workbook>
+"#;
+
+        let sheets = vec![WorkbookSheetInfo {
+            name: "Sheet1".to_string(),
+            sheet_id: 1,
+            rel_id: "rId1".to_string(),
+            visibility: SheetVisibility::Visible,
+        }];
+
+        let rewritten = write_workbook_sheets(workbook_xml, &sheets).unwrap();
+
+        roxmltree::Document::parse(&rewritten).expect("rewritten workbook.xml should be valid XML");
+        assert!(
+            rewritten.contains("<x:sheets") && rewritten.contains("</x:sheets>"),
+            "expected output to expand <x:sheets/>, got:\n{rewritten}"
+        );
+        assert!(rewritten.contains(r#"<x:sheet name=""#));
+        assert!(rewritten.contains(r#"name="Sheet1""#));
+        assert!(rewritten.contains(r#"rel:id="rId1""#));
+        assert!(!rewritten.contains(" r:id="));
+    }
+
+    #[test]
+    fn write_workbook_sheets_expands_self_closing_sheets_default_ns() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets/>
+</workbook>"#;
+
+        let sheets = vec![WorkbookSheetInfo {
+            name: "Sheet1".to_string(),
+            sheet_id: 1,
+            rel_id: "rId1".to_string(),
+            visibility: SheetVisibility::Visible,
+        }];
+
+        let rewritten = write_workbook_sheets(workbook_xml, &sheets).unwrap();
+
+        roxmltree::Document::parse(&rewritten).expect("rewritten workbook.xml should be valid XML");
+        assert!(rewritten.contains(r#"<sheet name=""#));
+        assert!(rewritten.contains(r#"name="Sheet1""#));
+        assert!(rewritten.contains(r#"r:id="rId1""#));
+    }
+
+    #[test]
+    fn write_workbook_sheets_no_undeclared_relationship_prefix_fallback() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:sheets/>
+</x:workbook>
+"#;
+
+        let sheets = vec![WorkbookSheetInfo {
+            name: "Sheet1".to_string(),
+            sheet_id: 1,
+            rel_id: "rId1".to_string(),
+            visibility: SheetVisibility::Visible,
+        }];
+
+        let rewritten = write_workbook_sheets(workbook_xml, &sheets).unwrap();
+
+        roxmltree::Document::parse(&rewritten).expect("rewritten workbook.xml should be valid XML");
+        assert!(
+            rewritten.contains(r#"id="rId1""#),
+            "expected output to fall back to an unprefixed id attribute, got:\n{rewritten}"
+        );
+        assert!(rewritten.contains(r#"<x:sheet name=""#));
+        assert!(!rewritten.contains(" r:id="));
+        assert!(!rewritten.contains(" rel:id="));
+    }
+
+    #[test]
     fn sheet_tab_color_round_trip() {
         let sheet_xml = r#"
-<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+ <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheetPr>
     <tabColor rgb="FFFF0000"/>
