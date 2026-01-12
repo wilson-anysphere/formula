@@ -34,14 +34,16 @@ pub fn parse_rich_value_types_xml(xml: &[u8]) -> Result<RichValueTypes, XlsxErro
     // <rvTypes> <types> <type .../>* </types> </rvTypes>
     let Some(types_el) = doc
         .descendants()
-        .find(|n| n.is_element() && n.tag_name().name() == "types")
+        .find(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("types"))
     else {
         return Ok(out);
     };
 
+    // Use `descendants()` (not `children()`) so we can tolerate additional wrapper/container nodes
+    // under `<types>`.
     for type_el in types_el
-        .children()
-        .filter(|n| n.is_element() && n.tag_name().name() == "type")
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("type"))
     {
         let id = attr_no_ns(type_el, "id").and_then(|v| v.parse::<u32>().ok());
         let Some(id) = id else {
@@ -152,4 +154,3 @@ mod tests {
         );
     }
 }
-

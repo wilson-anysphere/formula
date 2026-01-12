@@ -37,14 +37,16 @@ pub fn parse_rich_value_structure_xml(xml: &[u8]) -> Result<RichValueStructures,
     // <rvStruct> <structures> <structure id="..."> <member .../>* </structure>* </structures> </rvStruct>
     let Some(structures_el) = doc
         .descendants()
-        .find(|n| n.is_element() && n.tag_name().name() == "structures")
+        .find(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("structures"))
     else {
         return Ok(out);
     };
 
+    // Use `descendants()` (not `children()`) so we can tolerate additional wrapper/container nodes
+    // under `<structures>`.
     for structure_el in structures_el
-        .children()
-        .filter(|n| n.is_element() && n.tag_name().name() == "structure")
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("structure"))
     {
         let Some(id) = attr_no_ns(structure_el, "id").map(|s| s.to_string()) else {
             // Best-effort: ignore malformed/unrecognized <structure> entries.
@@ -53,9 +55,19 @@ pub fn parse_rich_value_structure_xml(xml: &[u8]) -> Result<RichValueStructures,
 
         let mut members = Vec::new();
         for member_el in structure_el
-            .children()
-            .filter(|n| n.is_element() && n.tag_name().name() == "member")
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("member"))
         {
+            // Ensure this member belongs to the current structure (and not a nested structure).
+            if member_el
+                .ancestors()
+                .filter(|n| n.is_element())
+                .find(|n| n.tag_name().name().eq_ignore_ascii_case("structure"))
+                .is_some_and(|s| s != structure_el)
+            {
+                continue;
+            }
+
             let Some(name) = attr_no_ns(member_el, "name").map(|s| s.to_string()) else {
                 // Best-effort: ignore malformed/unrecognized <member> entries.
                 continue;
@@ -174,4 +186,3 @@ mod tests {
         );
     }
 }
-

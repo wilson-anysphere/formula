@@ -7,9 +7,68 @@
 
 use roxmltree::Document;
 
-use crate::XlsxError;
+use crate::{XlsxError, XlsxPackage};
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const RICH_VALUE_REL_XML: &str = "xl/richData/richValueRel.xml";
+
+/// A parsed `xl/richData/richValueRel.xml` part.
+///
+/// This is a thin wrapper over the dense relationship-id table returned by
+/// [`parse_rich_value_rel_table`], with a convenience method for resolving a given `rId*` to its
+/// OPC target part.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RichValueRels {
+    /// Ordered relationship IDs (`r:id="rId*"`), where the index corresponds to the 0-based
+    /// relationship table index referenced by `richValue.xml`.
+    pub r_ids: Vec<String>,
+}
+
+impl RichValueRels {
+    /// Parse `xl/richData/richValueRel.xml` from an [`XlsxPackage`].
+    pub fn from_package(pkg: &XlsxPackage) -> Result<Option<Self>, XlsxError> {
+        let Some(bytes) = pkg.part(RICH_VALUE_REL_XML) else {
+            return Ok(None);
+        };
+        Ok(Some(Self::parse(bytes)?))
+    }
+
+    /// Parse a `richValueRel.xml` payload.
+    pub fn parse(xml_bytes: &[u8]) -> Result<Self, XlsxError> {
+        Ok(Self {
+            r_ids: parse_rich_value_rel_table(xml_bytes)?,
+        })
+    }
+
+    /// Resolve the relationship target for `self.r_ids[idx]`.
+    ///
+    /// This resolves against the OPC relationships for `xl/richData/richValueRel.xml`:
+    /// `xl/richData/_rels/richValueRel.xml.rels`.
+    ///
+    /// Returns `None` if:
+    /// - `idx` is out of range
+    /// - the entry is empty (`<rel/>`)
+    /// - the `.rels` part is missing/malformed
+    /// - the relationship is external
+    pub fn resolve_target(&self, pkg: &XlsxPackage, idx: usize) -> Option<String> {
+        let r_id = self.r_ids.get(idx)?;
+        if r_id.is_empty() {
+            return None;
+        }
+
+        // Use the existing relationship resolver, but strip URI fragments (Excel can emit
+        // `Target="...#something"` for rich data).
+        let target = crate::openxml::resolve_relationship_target(pkg, RICH_VALUE_REL_XML, r_id)
+            .ok()
+            .flatten()?;
+        let target = strip_fragment(&target);
+        if target.is_empty() {
+            None
+        } else {
+            Some(target.to_string())
+        }
+    }
+}
 
 /// Parse `xl/richData/richValueRel.xml` into a dense table of relationship IDs.
 ///
@@ -45,6 +104,13 @@ fn get_rel_id(node: &roxmltree::Node<'_, '_>) -> Option<String> {
             node.attribute(clark.as_str())
         })
         .map(|s| s.to_string())
+}
+
+fn strip_fragment(target: &str) -> &str {
+    target
+        .split_once('#')
+        .map(|(base, _)| base)
+        .unwrap_or(target)
 }
 
 #[cfg(test)]
@@ -83,4 +149,3 @@ mod tests {
         assert_eq!(parsed, vec!["".to_string(), "rId9".to_string()]);
     }
 }
-

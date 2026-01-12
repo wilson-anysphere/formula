@@ -7,7 +7,9 @@
 
 use roxmltree::Document;
 
-use crate::XlsxError;
+use crate::{XlsxError, XlsxPackage};
+
+const RICH_VALUE_XML: &str = "xl/richData/richValue.xml";
 
 /// Parse `xl/richData/richValue.xml` and return a vector where each entry corresponds to a rich
 /// value record (0-based index).
@@ -51,6 +53,105 @@ fn parse_rv_relationship_index(rv: &roxmltree::Node<'_, '_>) -> Option<usize> {
         }
     }
 
+    None
+}
+
+/// Parsed representation of `xl/richData/richValue.xml`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RichValues {
+    pub values: Vec<RichValueInstance>,
+}
+
+/// A single `<rv>` entry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RichValueInstance {
+    /// Best-effort parsed `type=` / `t=` attribute.
+    pub type_id: Option<u32>,
+    /// Best-effort raw `s=` / `structure=` attribute (if present).
+    pub structure_id: Option<String>,
+    /// Ordered field values discovered under this `<rv>` element.
+    pub fields: Vec<RichValueFieldValue>,
+}
+
+/// A single field value (commonly a `<v>` element) under a `<rv>` entry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RichValueFieldValue {
+    /// Best-effort type/kind discriminator (e.g. `kind="rel"`).
+    pub kind: Option<String>,
+    /// Raw value text payload.
+    pub value: Option<String>,
+}
+
+impl RichValues {
+    /// Parse `xl/richData/richValue.xml` from an [`XlsxPackage`].
+    pub fn from_package(pkg: &XlsxPackage) -> Result<Option<Self>, XlsxError> {
+        let Some(bytes) = pkg.part(RICH_VALUE_XML) else {
+            return Ok(None);
+        };
+        Ok(Some(parse_rich_values_xml(bytes)?))
+    }
+}
+
+/// Parse `xl/richData/richValue.xml` into a structured representation.
+///
+/// This parser is intentionally tolerant:
+/// - element/attribute namespaces and prefixes are ignored (matching is done by local name)
+/// - unknown nodes/attributes are ignored
+/// - `<v>` elements are collected in document order even if wrapped in additional containers
+pub fn parse_rich_values_xml(xml_bytes: &[u8]) -> Result<RichValues, XlsxError> {
+    let xml = std::str::from_utf8(xml_bytes)
+        .map_err(|e| XlsxError::Invalid(format!("richValue.xml not utf-8: {e}")))?;
+    let doc = Document::parse(xml)?;
+
+    let mut values = Vec::new();
+    for rv in doc
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rv"))
+    {
+        let type_id = attr_local(&rv, &["t", "type", "id"])
+            .and_then(|v| v.trim().parse::<u32>().ok());
+        let structure_id = attr_local(&rv, &["s", "structure", "structureId", "structure_id"]);
+
+        let mut fields = Vec::new();
+        for v in rv
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("v"))
+        {
+            // Ensure `v` belongs to this `rv` (and not a nested one).
+            if v.ancestors()
+                .filter(|n| n.is_element())
+                .find(|n| n.tag_name().name().eq_ignore_ascii_case("rv"))
+                .is_some_and(|closest_rv| closest_rv != rv)
+            {
+                continue;
+            }
+
+            let kind = attr_local(&v, &["kind", "k", "t", "type"]);
+            let value = v
+                .text()
+                .map(|t| t.to_string())
+                .or_else(|| attr_local(&v, &["v", "val", "value"]));
+
+            fields.push(RichValueFieldValue { kind, value });
+        }
+
+        values.push(RichValueInstance {
+            type_id,
+            structure_id,
+            fields,
+        });
+    }
+
+    Ok(RichValues { values })
+}
+
+fn attr_local(node: &roxmltree::Node<'_, '_>, names: &[&str]) -> Option<String> {
+    for attr in node.attributes() {
+        let local = attr.name().rsplit(':').next().unwrap_or(attr.name());
+        if names.iter().any(|n| local.eq_ignore_ascii_case(n)) {
+            return Some(attr.value().to_string());
+        }
+    }
     None
 }
 
