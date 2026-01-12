@@ -58,7 +58,7 @@ export interface EngineClient {
    * `setCell` for compatibility; `setCellRich` exists for entity/record/image
    * rich values.
    */
-  setCellRich?(address: string, value: CellValueRich | null, sheet?: string): Promise<void>;
+  setCellRich?(address: string, value: CellValueRich | null, sheet?: string, options?: RpcOptions): Promise<void>;
   /**
    * Set multiple cells in a single RPC call.
    *
@@ -235,8 +235,8 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     getRange: async (range, sheet, rpcOptions) =>
       await withEngine((connected) => connected.getRange(range, sheet, rpcOptions)),
     setCell: async (address, value, sheet) => await withEngine((connected) => connected.setCell(address, value, sheet)),
-    setCellRich: async (address, value, sheet) =>
-      await withEngine((connected) => connected.setCellRich(address, value, sheet)),
+    setCellRich: async (address, value, sheet, rpcOptions) =>
+      await withEngine((connected) => connected.setCellRich(address, value, sheet, rpcOptions)),
     setCells: async (updates, rpcOptions) => await withEngine((connected) => connected.setCells(updates, rpcOptions)),
     setRange: async (range, values, sheet, rpcOptions) =>
       await withEngine((connected) => connected.setRange(range, values, sheet, rpcOptions)),
