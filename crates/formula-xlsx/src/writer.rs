@@ -220,6 +220,10 @@ fn workbook_defined_names_xml(workbook: &Workbook) -> String {
     let mut out = String::new();
     out.push_str("<definedNames>");
     for defined in &workbook.defined_names {
+        // Defined name `refersTo` values are stored in workbook.xml without a leading '=' but still
+        // use the same `_xlfn.`-prefixed function naming as cell formulas for forward-compatible
+        // functions.
+        let refers_to = crate::formula_text::add_xlfn_prefixes(&defined.refers_to);
         out.push_str(r#"<definedName"#);
         out.push_str(&format!(r#" name="{}""#, escape_xml(&defined.name)));
         if let Some(comment) = &defined.comment {
@@ -234,7 +238,7 @@ fn workbook_defined_names_xml(workbook: &Workbook) -> String {
             }
         }
         out.push('>');
-        out.push_str(&escape_xml(&defined.refers_to));
+        out.push_str(&escape_xml(&refers_to));
         out.push_str("</definedName>");
     }
     out.push_str("</definedNames>");
@@ -638,7 +642,8 @@ fn cell_xml(
 
     if let Some(formula) = &cell.formula {
         if let Some(formula) = normalize_formula_text(formula) {
-            value_xml.push_str(&format!(r#"<f>{}</f>"#, escape_xml(&formula)));
+            let file_formula = crate::formula_text::add_xlfn_prefixes(&formula);
+            value_xml.push_str(&format!(r#"<f>{}</f>"#, escape_xml(&file_formula)));
         }
     }
 
