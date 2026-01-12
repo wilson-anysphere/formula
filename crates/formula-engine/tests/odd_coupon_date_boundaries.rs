@@ -48,13 +48,13 @@ fn oddfprice_allows_first_coupon_equal_maturity() {
     let v = eval_formula(
         "=ODDFPRICE(DATE(2020,3,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
     );
-    assert!(matches!(v, Value::Number(n) if n.is_finite()));
+    assert!(matches!(v, Value::Number(n) if n.is_finite()), "got {v:?}");
 }
 
 #[test]
 fn oddfyield_allows_first_coupon_equal_maturity() {
     let v = eval_formula("=ODDFYIELD(DATE(2020,3,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,ODDFPRICE(DATE(2020,3,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0),100,2,0)");
-    assert!(matches!(v, Value::Number(n) if n.is_finite()));
+    assert!(matches!(v, Value::Number(n) if n.is_finite()), "got {v:?}");
 }
 
 #[test]
