@@ -1177,6 +1177,120 @@ def one_by_one_png_bytes() -> bytes:
     )
 
 
+def content_types_image_in_cell_richdata_xml() -> str:
+    # Minimal content types for an image-in-cell workbook. We intentionally keep
+    # richData parts as `application/xml` via the default so this fixture stays
+    # small and focuses on "unknown part preservation" in the reader/writer.
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>
+"""
+
+
+def sheet_image_in_cell_richdata_xml() -> str:
+    # `vm="0"` points at the first valueMetadata record in `xl/metadata.xml`. In
+    # modern Excel this can be used to associate an image-in-cell rich value.
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <dimension ref="A1"/>
+  <sheetData>
+    <row r="1">
+      <c r="A1" vm="0"><v>0</v></c>
+    </row>
+  </sheetData>
+</worksheet>
+"""
+
+
+def metadata_image_in_cell_richdata_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE" minSupportedVersion="0" copy="1" pasteAll="1" pasteValues="1" merge="1" splitFirst="1" rowColShift="1" clearFormats="1" clearComments="1" assign="1" coerce="1" cellMeta="1"/>
+  </metadataTypes>
+  <valueMetadata count="1">
+    <bk>
+      <rc t="1" v="0"/>
+    </bk>
+  </valueMetadata>
+</metadata>
+"""
+
+
+def rich_value_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <rv s="0" t="image">
+    <v>0</v>
+  </rv>
+</rvData>
+"""
+
+
+def rich_value_rel_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<richValueRel xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2"
+              xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rel r:id="rId1"/>
+</richValueRel>
+"""
+
+
+def rich_value_rel_rels_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>
+"""
+
+
+def write_image_in_cell_richdata_xlsx(path: pathlib.Path) -> None:
+    sheet_names = ["Sheet1"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+
+    with zipfile.ZipFile(path, "w") as zf:
+        _zip_write(zf, "[Content_Types].xml", content_types_image_in_cell_richdata_xml())
+        _zip_write(zf, "_rels/.rels", package_rels_xml())
+        _zip_write(zf, "docProps/core.xml", core_props_xml())
+        _zip_write(zf, "docProps/app.xml", app_props_xml(sheet_names))
+        _zip_write(zf, "xl/workbook.xml", workbook_xml(sheet_names))
+        _zip_write(
+            zf,
+            "xl/_rels/workbook.xml.rels",
+            workbook_rels_xml(
+                sheet_count=1,
+                include_shared_strings=False,
+                extra_relationships=[
+                    '  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata" Target="metadata.xml"/>',
+                    '  <Relationship Id="rId4" Type="http://schemas.microsoft.com/office/2017/06/relationships/richValue" Target="richData/richValue.xml"/>',
+                    '  <Relationship Id="rId5" Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueRel" Target="richData/richValueRel.xml"/>',
+                ],
+            ),
+        )
+        _zip_write(zf, "xl/worksheets/sheet1.xml", sheet_image_in_cell_richdata_xml())
+        _zip_write(zf, "xl/styles.xml", styles_minimal_xml())
+        _zip_write(zf, "xl/metadata.xml", metadata_image_in_cell_richdata_xml())
+        _zip_write(zf, "xl/richData/richValue.xml", rich_value_xml())
+        _zip_write(zf, "xl/richData/richValueRel.xml", rich_value_rel_xml())
+        _zip_write(
+            zf,
+            "xl/richData/_rels/richValueRel.xml.rels",
+            rich_value_rel_rels_xml(),
+        )
+        _zip_write_bytes(zf, "xl/media/image1.png", one_by_one_png_bytes())
+
+
 def content_types_background_image_xml() -> str:
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -1569,6 +1683,7 @@ def main() -> None:
     )
     write_chart_xlsx(ROOT / "charts" / "basic-chart.xlsx")
     write_image_xlsx(ROOT / "basic" / "image.xlsx")
+    write_image_in_cell_richdata_xlsx(ROOT / "basic" / "image-in-cell-richdata.xlsx")
     write_background_image_xlsx(ROOT / "basic" / "background-image.xlsx")
     write_ole_object_xlsx(ROOT / "basic" / "ole-object.xlsx")
     write_chart_sheet_xlsx(ROOT / "charts" / "chart-sheet.xlsx")
