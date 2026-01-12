@@ -20,6 +20,7 @@ test.describe("sheet switcher", () => {
     await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
     await expect(page.getByTestId("sheet-tab-Sheet3")).toBeVisible();
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
 
     const switcher = page.getByTestId("sheet-switcher");
 
@@ -28,6 +29,7 @@ test.describe("sheet switcher", () => {
 
     // Make Sheet2 active so hiding it exercises the "active sheet becomes hidden" path.
     await page.getByTestId("sheet-tab-Sheet2").click();
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 3");
 
     // Hide Sheet2 via context menu.
     await page.getByTestId("sheet-tab-Sheet2").click({ button: "right", position: { x: 10, y: 10 } });
@@ -49,6 +51,15 @@ test.describe("sheet switcher", () => {
       expect(activeSheetId).not.toEqual("Sheet2");
       expect(["Sheet1", "Sheet3"]).toContain(activeSheetId);
       await expect(switcher).toHaveValue(activeSheetId);
+
+      // The sheet position indicator should update to use visible sheets only.
+      if (activeSheetId === "Sheet1") {
+        await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
+      } else if (activeSheetId === "Sheet3") {
+        await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
+      } else {
+        throw new Error(`Unexpected active sheet after hide: ${activeSheetId}`);
+      }
     }
 
     // Unhide Sheet2 via context menu on any visible tab.
@@ -63,6 +74,17 @@ test.describe("sheet switcher", () => {
     {
       const optionLabels = await switcher.locator("option").allTextContents();
       expect(optionLabels).toEqual(["Sheet1", "Sheet2", "Sheet3"]);
+    }
+
+    const activeAfterUnhide = await page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId());
+    if (activeAfterUnhide === "Sheet1") {
+      await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
+    } else if (activeAfterUnhide === "Sheet2") {
+      await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 3");
+    } else if (activeAfterUnhide === "Sheet3") {
+      await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
+    } else {
+      throw new Error(`Unexpected active sheet after unhide: ${activeAfterUnhide}`);
     }
   });
 });
