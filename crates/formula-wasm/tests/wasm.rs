@@ -5,7 +5,31 @@ use serde_json::Value as JsonValue;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::wasm_bindgen_test;
 
-use formula_wasm::{WasmWorkbook, DEFAULT_SHEET};
+use formula_wasm::{parse_formula_partial, WasmWorkbook, DEFAULT_SHEET};
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PartialParseResult {
+    error: Option<PartialParseError>,
+    context: PartialParseContext,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PartialParseError {
+    message: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PartialParseContext {
+    function: Option<PartialParseFunctionContext>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PartialParseFunctionContext {
+    name: String,
+    arg_index: usize,
+}
 
 fn assert_json_number(value: &JsonValue, expected: f64) {
     let actual = value
@@ -36,6 +60,44 @@ fn debug_function_registry_contains_builtins() {
     let _ = WasmWorkbook::new();
     assert!(formula_engine::functions::lookup_function("SUM").is_some());
     assert!(formula_engine::functions::lookup_function("SEQUENCE").is_some());
+}
+
+#[wasm_bindgen_test]
+fn parse_formula_partial_fallback_context_in_unterminated_string() {
+    let formula = r#"=SUM("hello"#.to_string();
+    let cursor = formula.encode_utf16().count() as u32;
+
+    let parsed_js = parse_formula_partial(formula, cursor, None).unwrap();
+    let parsed: PartialParseResult = serde_wasm_bindgen::from_value(parsed_js).unwrap();
+
+    assert!(parsed.error.is_some());
+    assert_eq!(
+        parsed.error.unwrap().message,
+        "Unterminated string literal".to_string()
+    );
+
+    let ctx = parsed.context.function.unwrap();
+    assert_eq!(ctx.name, "SUM".to_string());
+    assert_eq!(ctx.arg_index, 0);
+}
+
+#[wasm_bindgen_test]
+fn parse_formula_partial_fallback_context_in_unterminated_sheet_quote() {
+    let formula = "=SUM('My Sheet".to_string();
+    let cursor = formula.encode_utf16().count() as u32;
+
+    let parsed_js = parse_formula_partial(formula, cursor, None).unwrap();
+    let parsed: PartialParseResult = serde_wasm_bindgen::from_value(parsed_js).unwrap();
+
+    assert!(parsed.error.is_some());
+    assert_eq!(
+        parsed.error.unwrap().message,
+        "Unterminated quoted identifier".to_string()
+    );
+
+    let ctx = parsed.context.function.unwrap();
+    assert_eq!(ctx.name, "SUM".to_string());
+    assert_eq!(ctx.arg_index, 0);
 }
 
 #[wasm_bindgen_test]

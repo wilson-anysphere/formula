@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use formula_engine::{Engine, ErrorKind, NameDefinition, NameScope, Value as EngineValue};
-use formula_engine::locale::{canonicalize_formula, get_locale, FormulaLocale, ValueLocaleConfig, EN_US};
+use formula_engine::locale::{
+    canonicalize_formula, get_locale, FormulaLocale, ValueLocaleConfig, EN_US,
+};
 use formula_model::{display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range};
 use js_sys::{Array, Object, Reflect};
 use serde::{Deserialize, Serialize};
@@ -352,7 +354,9 @@ impl WorkbookState {
             let key = FormulaCellKey::new(sheet.clone(), cell_ref);
             self.pending_formula_baselines
                 .entry(key)
-                .or_insert_with(|| engine_value_to_json(self.engine.get_cell_value(&sheet, &address)));
+                .or_insert_with(|| {
+                    engine_value_to_json(self.engine.get_cell_value(&sheet, &address))
+                });
 
             // Reset the stored value to blank so `getCell` returns null until the next recalc,
             // matching the existing worker semantics.
@@ -511,6 +515,343 @@ fn cell_change_to_js(change: &CellChange) -> Result<JsValue, JsValue> {
     Ok(obj.into())
 }
 
+fn utf16_cursor_to_byte_index(s: &str, cursor_utf16: u32) -> usize {
+    let cursor_utf16 = cursor_utf16 as usize;
+    if cursor_utf16 == 0 {
+        return 0;
+    }
+
+    let mut seen_utf16: usize = 0;
+    for (byte_idx, ch) in s.char_indices() {
+        let ch_utf16 = ch.len_utf16();
+        if seen_utf16 + ch_utf16 > cursor_utf16 {
+            // Cursor points into the middle of this char (possible for surrogate pairs).
+            // Clamp to the previous valid UTF-8 boundary.
+            return byte_idx;
+        }
+        seen_utf16 += ch_utf16;
+        if seen_utf16 == cursor_utf16 {
+            return byte_idx + ch.len_utf8();
+        }
+    }
+    s.len()
+}
+
+fn is_ident_start_char(c: char) -> bool {
+    matches!(c, '$' | '_' | '\\' | 'A'..='Z' | 'a'..='z') || (!c.is_ascii() && c.is_alphabetic())
+}
+
+fn is_ident_cont_char(c: char) -> bool {
+    matches!(
+        c,
+        '$' | '_' | '\\' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9'
+    ) || (!c.is_ascii() && c.is_alphanumeric())
+}
+
+#[derive(Debug)]
+struct FallbackFunctionFrame {
+    name: String,
+    paren_depth: usize,
+    arg_index: usize,
+    brace_depth: usize,
+    bracket_depth: usize,
+}
+
+fn scan_fallback_function_context(
+    formula_prefix: &str,
+    arg_separator: char,
+) -> Option<formula_engine::FunctionContext> {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Mode {
+        Normal,
+        String,
+        QuotedIdent,
+    }
+
+    let mut mode = Mode::Normal;
+    let mut paren_depth: usize = 0;
+    let mut brace_depth: usize = 0;
+    let mut bracket_depth: usize = 0;
+    let mut stack: Vec<FallbackFunctionFrame> = Vec::new();
+
+    let mut i: usize = 0;
+    while i < formula_prefix.len() {
+        let ch = formula_prefix[i..]
+            .chars()
+            .next()
+            .expect("char_indices iteration should always yield a char");
+        let ch_len = ch.len_utf8();
+
+        match mode {
+            Mode::String => {
+                if ch == '"' {
+                    let next_i = i + ch_len;
+                    if next_i < formula_prefix.len()
+                        && formula_prefix[next_i..].chars().next() == Some('"')
+                    {
+                        // Escaped quote within a string literal: `""`.
+                        i = next_i + 1;
+                    } else {
+                        // Closing quote.
+                        mode = Mode::Normal;
+                        i = next_i;
+                    }
+                    continue;
+                }
+
+                i += ch_len;
+                continue;
+            }
+            Mode::QuotedIdent => {
+                if ch == '\'' {
+                    let next_i = i + ch_len;
+                    if next_i < formula_prefix.len()
+                        && formula_prefix[next_i..].chars().next() == Some('\'')
+                    {
+                        // Escaped quote within a quoted identifier: `''`.
+                        i = next_i + 1;
+                    } else {
+                        mode = Mode::Normal;
+                        i = next_i;
+                    }
+                    continue;
+                }
+
+                i += ch_len;
+                continue;
+            }
+            Mode::Normal => {
+                // In the engine lexer, quotes are treated as literal characters inside
+                // structured reference brackets, so only treat them as string/quoted-ident
+                // openers when we're not in a bracket segment.
+                if bracket_depth == 0 {
+                    if ch == '"' {
+                        mode = Mode::String;
+                        i += ch_len;
+                        continue;
+                    }
+                    if ch == '\'' {
+                        mode = Mode::QuotedIdent;
+                        i += ch_len;
+                        continue;
+                    }
+                }
+
+                if bracket_depth > 0 {
+                    // Mirror `formula-engine`'s lexer behavior: inside structured-ref/workbook
+                    // brackets, treat everything as raw text except nested bracket open/close.
+                    match ch {
+                        '[' => bracket_depth += 1,
+                        ']' => {
+                            if bracket_depth > 0 {
+                                bracket_depth -= 1;
+                            }
+                        }
+                        _ => {}
+                    }
+                    i += ch_len;
+                    continue;
+                }
+
+                match ch {
+                    '[' => {
+                        bracket_depth += 1;
+                        i += ch_len;
+                    }
+                    ']' => {
+                        if bracket_depth > 0 {
+                            bracket_depth -= 1;
+                        }
+                        i += ch_len;
+                    }
+                    '{' => {
+                        brace_depth += 1;
+                        i += ch_len;
+                    }
+                    '}' => {
+                        if brace_depth > 0 {
+                            brace_depth -= 1;
+                        }
+                        i += ch_len;
+                    }
+                    '(' => {
+                        paren_depth += 1;
+                        i += ch_len;
+                    }
+                    ')' => {
+                        if paren_depth > 0 {
+                            if stack
+                                .last()
+                                .is_some_and(|frame| frame.paren_depth == paren_depth)
+                            {
+                                stack.pop();
+                            }
+                            paren_depth -= 1;
+                        }
+                        i += ch_len;
+                    }
+                    c if c == arg_separator => {
+                        if let Some(frame) = stack.last_mut() {
+                            // Count only separators that are at the "top level" within the call.
+                            if paren_depth == frame.paren_depth
+                                && brace_depth == frame.brace_depth
+                                && bracket_depth == frame.bracket_depth
+                            {
+                                frame.arg_index += 1;
+                            }
+                        }
+                        i += ch_len;
+                    }
+                    c if is_ident_start_char(c) => {
+                        let start = i;
+                        let mut end = i + ch_len;
+                        while end < formula_prefix.len() {
+                            let next = formula_prefix[end..]
+                                .chars()
+                                .next()
+                                .expect("slice must start at char boundary");
+                            if is_ident_cont_char(next) {
+                                end += next.len_utf8();
+                            } else {
+                                break;
+                            }
+                        }
+
+                        let ident = &formula_prefix[start..end];
+
+                        // Look ahead for `(`, allowing whitespace between.
+                        let mut j = end;
+                        while j < formula_prefix.len() {
+                            let next = formula_prefix[j..]
+                                .chars()
+                                .next()
+                                .expect("slice must start at char boundary");
+                            if next.is_whitespace() {
+                                j += next.len_utf8();
+                            } else {
+                                break;
+                            }
+                        }
+
+                        if j < formula_prefix.len()
+                            && formula_prefix[j..].chars().next() == Some('(')
+                        {
+                            paren_depth += 1;
+                            stack.push(FallbackFunctionFrame {
+                                name: ident.to_ascii_uppercase(),
+                                paren_depth,
+                                arg_index: 0,
+                                brace_depth,
+                                bracket_depth,
+                            });
+                            // Skip whitespace + `(`.
+                            i = j + 1;
+                        } else {
+                            i = end;
+                        }
+                    }
+                    _ => {
+                        i += ch_len;
+                    }
+                }
+            }
+        }
+    }
+
+    stack.last().map(|frame| formula_engine::FunctionContext {
+        name: frame.name.clone(),
+        arg_index: frame.arg_index,
+    })
+}
+
+#[derive(Debug, Serialize)]
+struct WasmSpan {
+    start: usize,
+    end: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct WasmParseError {
+    message: String,
+    span: WasmSpan,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WasmFunctionContext {
+    name: String,
+    arg_index: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct WasmParseContext {
+    function: Option<WasmFunctionContext>,
+}
+
+#[derive(Debug, Serialize)]
+struct WasmPartialParse {
+    ast: formula_engine::Ast,
+    error: Option<WasmParseError>,
+    context: WasmParseContext,
+}
+
+#[wasm_bindgen(js_name = "parseFormulaPartial")]
+pub fn parse_formula_partial(
+    formula: String,
+    cursor: u32,
+    opts: Option<JsValue>,
+) -> Result<JsValue, JsValue> {
+    ensure_rust_constructors_run();
+
+    let opts: formula_engine::ParseOptions = match opts {
+        Some(value) if !value.is_undefined() && !value.is_null() => {
+            serde_wasm_bindgen::from_value(value).map_err(|err| js_err(err.to_string()))?
+        }
+        _ => formula_engine::ParseOptions::default(),
+    };
+
+    // Cursor is expressed in UTF-16 code units by JS callers.
+    let byte_cursor = utf16_cursor_to_byte_index(&formula, cursor);
+    let prefix = &formula[..byte_cursor];
+
+    let mut parsed = formula_engine::parse_formula_partial(prefix, opts.clone());
+    if parsed.context.function.is_none() {
+        let lex_error = parsed.error.as_ref().is_some_and(|err| {
+            matches!(
+                err.message.as_str(),
+                "Unterminated string literal" | "Unterminated quoted identifier"
+            )
+        });
+        if lex_error {
+            parsed.context.function =
+                scan_fallback_function_context(prefix, opts.locale.arg_separator);
+        }
+    }
+
+    let error = parsed.error.map(|err| WasmParseError {
+        message: err.message,
+        span: WasmSpan {
+            start: err.span.start,
+            end: err.span.end,
+        },
+    });
+
+    let context = WasmParseContext {
+        function: parsed.context.function.map(|ctx| WasmFunctionContext {
+            name: ctx.name.to_ascii_uppercase(),
+            arg_index: ctx.arg_index,
+        }),
+    };
+
+    let out = WasmPartialParse {
+        ast: parsed.ast,
+        error,
+        context,
+    };
+
+    serde_wasm_bindgen::to_value(&out).map_err(|err| js_err(err.to_string()))
+}
+
 #[wasm_bindgen]
 pub struct WasmWorkbook {
     inner: WorkbookState,
@@ -542,8 +883,8 @@ impl WasmWorkbook {
             cells: BTreeMap<String, JsonValue>,
         }
 
-        let parsed: WorkbookJson =
-            serde_json::from_str(json).map_err(|err| js_err(format!("invalid workbook json: {err}")))?;
+        let parsed: WorkbookJson = serde_json::from_str(json)
+            .map_err(|err| js_err(format!("invalid workbook json: {err}")))?;
 
         let mut wb = WorkbookState::new_empty();
 
@@ -574,8 +915,8 @@ impl WasmWorkbook {
 
     #[wasm_bindgen(js_name = "fromXlsxBytes")]
     pub fn from_xlsx_bytes(bytes: &[u8]) -> Result<WasmWorkbook, JsValue> {
-        let model =
-            formula_xlsx::read_workbook_model_from_bytes(bytes).map_err(|err| js_err(err.to_string()))?;
+        let model = formula_xlsx::read_workbook_model_from_bytes(bytes)
+            .map_err(|err| js_err(err.to_string()))?;
 
         let mut wb = WorkbookState::new_empty();
 
@@ -597,7 +938,8 @@ impl WasmWorkbook {
                 .resolve_sheet(&sheet.name)
                 .expect("sheet just ensured must resolve")
                 .to_string();
-            wb.engine.set_sheet_tables(&sheet_name, sheet.tables.clone());
+            wb.engine
+                .set_sheet_tables(&sheet_name, sheet.tables.clone());
         }
 
         // Best-effort defined names.
@@ -923,10 +1265,12 @@ mod tests {
     #[test]
     fn recalculate_reports_formula_edit_to_blank_value() {
         let mut wb = WorkbookState::new_with_default_sheet();
-        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("=1")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("=1"))
+            .unwrap();
         let _ = wb.recalculate_internal(None).unwrap();
 
-        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("=A2")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("=A2"))
+            .unwrap();
         let changes = wb.recalculate_internal(None).unwrap();
         assert_eq!(
             changes,
@@ -942,15 +1286,19 @@ mod tests {
     fn recalculate_does_not_filter_changes_by_sheet_argument() {
         let mut wb = WorkbookState::new_with_default_sheet();
 
-        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0)).unwrap();
-        wb.set_cell_internal(DEFAULT_SHEET, "A2", json!("=A1*2")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A2", json!("=A1*2"))
+            .unwrap();
 
         wb.set_cell_internal("Sheet2", "A1", json!(10.0)).unwrap();
-        wb.set_cell_internal("Sheet2", "A2", json!("=A1*2")).unwrap();
+        wb.set_cell_internal("Sheet2", "A2", json!("=A1*2"))
+            .unwrap();
 
         wb.recalculate_internal(None).unwrap();
 
-        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(2.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(2.0))
+            .unwrap();
         wb.set_cell_internal("Sheet2", "A1", json!(11.0)).unwrap();
 
         // The wasm API accepts a `sheet` argument for symmetry, but recalc deltas are always
