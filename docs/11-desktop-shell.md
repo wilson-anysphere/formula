@@ -201,6 +201,11 @@ Frontend event contract (emitted by `apps/desktop/src-tauri/src/updater.rs`):
 - `update-not-available` – payload: `{ source }`
 - `update-check-error` – payload: `{ source, message }`
 
+The Rust host guards updater checks with a single in-flight flag so **only one network check runs at a
+time**. If a check is already running, additional **manual** triggers emit
+`update-check-already-running` so the UI can show “Already checking…”. Additional **startup** triggers
+are ignored silently.
+
 Release CI note: when `plugins.updater.active=true`, tagged releases will fail if `pubkey`/`endpoints`
 are still placeholders. You can validate locally with `node scripts/check-updater-config.mjs`.
 
