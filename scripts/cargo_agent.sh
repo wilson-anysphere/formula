@@ -211,9 +211,31 @@ elif [[ "${desktop_pkg_name}" == "formula-desktop-tauri" ]]; then
   remap_from="desktop"
   remap_to="formula-desktop-tauri"
 fi
+
+supports_jobs=0
+case "${subcommand}" in
+  bench|build|check|clippy|doc|install|run|rustc|test)
+    supports_jobs=1
+    ;;
+esac
+
+explicit_jobs=""
 remapped_args=()
 expect_pkg_name=false
-for arg in "$@"; do
+expect_jobs=false
+while [[ $# -gt 0 ]]; do
+  arg="$1"
+  shift
+
+  # Cargo treats `--` as "end of cargo flags", so stop rewriting there.
+  if [[ "${arg}" == "--" ]]; then
+    remapped_args+=("${arg}")
+    if [[ $# -gt 0 ]]; then
+      remapped_args+=("$@")
+    fi
+    break
+  fi
+
   if [[ "${expect_pkg_name}" == "true" ]]; then
     if [[ -n "${remap_from}" && "${arg}" == "${remap_from}" ]]; then
       remapped_args+=("${remap_to}")
@@ -221,6 +243,11 @@ for arg in "$@"; do
       remapped_args+=("${arg}")
     fi
     expect_pkg_name=false
+    continue
+  fi
+  if [[ "${expect_jobs}" == "true" ]]; then
+    explicit_jobs="${arg}"
+    expect_jobs=false
     continue
   fi
 
@@ -235,12 +262,56 @@ for arg in "$@"; do
     --package=${remap_from})
       remapped_args+=("--package=${remap_to}")
       ;;
+    -j|--jobs)
+      if [[ "${supports_jobs}" == "1" ]]; then
+        expect_jobs=true
+      else
+        remapped_args+=("${arg}")
+      fi
+      ;;
+    -j*)
+      if [[ "${supports_jobs}" == "1" ]]; then
+        explicit_jobs="${arg#-j}"
+      else
+        remapped_args+=("${arg}")
+      fi
+      ;;
+    --jobs=*)
+      if [[ "${supports_jobs}" == "1" ]]; then
+        explicit_jobs="${arg#--jobs=}"
+      else
+        remapped_args+=("${arg}")
+      fi
+      ;;
     *)
       remapped_args+=("${arg}")
       ;;
   esac
 done
+if [[ "${expect_pkg_name}" == "true" ]]; then
+  echo "cargo_agent: missing value for -p/--package" >&2
+  exit 2
+fi
+if [[ "${expect_jobs}" == "true" ]]; then
+  echo "cargo_agent: missing value for -j/--jobs" >&2
+  exit 2
+fi
 set -- "${remapped_args[@]}"
+
+# If the caller explicitly passed `-j/--jobs`, treat that as authoritative. Also mark it as
+# "explicitly configured" so we don't override it for `cargo test` runs.
+if [[ -n "${explicit_jobs}" ]]; then
+  if ! [[ "${explicit_jobs}" =~ ^[0-9]+$ ]] || [[ "${explicit_jobs}" -lt 1 ]]; then
+    echo "cargo_agent: invalid -j/--jobs value: ${explicit_jobs}" >&2
+    exit 2
+  fi
+  jobs="${explicit_jobs}"
+  caller_jobs_env="${jobs}"
+  export CARGO_BUILD_JOBS="${jobs}"
+  if [[ -z "${orig_rayon_num_threads}" && -z "${orig_formula_rayon_num_threads}" ]]; then
+    export RAYON_NUM_THREADS="${jobs}"
+  fi
+fi
 
 # For test runs, cap RUST_TEST_THREADS to avoid spawning hundreds of threads
 if [[ "${subcommand}" == "test" && -z "${RUST_TEST_THREADS:-}" ]]; then
