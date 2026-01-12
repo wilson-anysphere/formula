@@ -132,6 +132,20 @@ pub fn patch_xlsx_streaming<R: Read + Seek, W: Write + Seek>(
     output: W,
     cell_patches: &[WorksheetCellPatch],
 ) -> Result<(), StreamingPatchError> {
+    patch_xlsx_streaming_with_recalc_policy(input, output, cell_patches, RecalcPolicy::default())
+}
+
+/// Streaming XLSX/XLSM patcher with a configurable [`RecalcPolicy`].
+///
+/// `policy_on_formula_change` is applied **only** when the patch set changes formulas (including
+/// removing formulas). When no formulas change, [`RecalcPolicy::PRESERVE`] is used regardless of
+/// the provided policy.
+pub fn patch_xlsx_streaming_with_recalc_policy<R: Read + Seek, W: Write + Seek>(
+    input: R,
+    output: W,
+    cell_patches: &[WorksheetCellPatch],
+    policy_on_formula_change: RecalcPolicy,
+) -> Result<(), StreamingPatchError> {
     let mut patches_by_part: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
     for patch in cell_patches {
         patches_by_part
@@ -153,9 +167,7 @@ pub fn patch_xlsx_streaming<R: Read + Seek, W: Write + Seek>(
             streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
     }
     let recalc_policy = if formula_changed {
-        // Match `XlsxPackage::apply_cell_patches` default: dropping calcChain and requesting a full
-        // calc on load is the safest behavior after formula edits (including removing formulas).
-        RecalcPolicy::default()
+        policy_on_formula_change
     } else {
         RecalcPolicy::PRESERVE
     };
@@ -186,8 +198,31 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
     output: W,
     patches: &WorkbookCellPatches,
 ) -> Result<(), StreamingPatchError> {
+    patch_xlsx_streaming_workbook_cell_patches_with_recalc_policy(
+        input,
+        output,
+        patches,
+        RecalcPolicy::default(),
+    )
+}
+
+/// Apply [`WorkbookCellPatches`] (the part-preserving cell patch DSL) using the streaming ZIP
+/// rewriter with a configurable [`RecalcPolicy`].
+///
+/// `policy_on_formula_change` is applied **only** when the patch set changes formulas (including
+/// removing formulas). When no formulas change, [`RecalcPolicy::PRESERVE`] is used regardless of
+/// the provided policy.
+pub fn patch_xlsx_streaming_workbook_cell_patches_with_recalc_policy<
+    R: Read + Seek,
+    W: Write + Seek,
+>(
+    input: R,
+    output: W,
+    patches: &WorkbookCellPatches,
+    policy_on_formula_change: RecalcPolicy,
+) -> Result<(), StreamingPatchError> {
     if patches.is_empty() {
-        return patch_xlsx_streaming(input, output, &[]);
+        return patch_xlsx_streaming_with_recalc_policy(input, output, &[], policy_on_formula_change);
     }
 
     // StyleId patches require rewriting styles.xml; callers should use the style-aware variant.
@@ -257,7 +292,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
             streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
     }
     let recalc_policy = if formula_changed {
-        RecalcPolicy::default()
+        policy_on_formula_change
     } else {
         RecalcPolicy::PRESERVE
     };
@@ -395,8 +430,33 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles<R: Read + Seek, W:
     patches: &WorkbookCellPatches,
     style_table: &StyleTable,
 ) -> Result<(), StreamingPatchError> {
+    patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy(
+        input,
+        output,
+        patches,
+        style_table,
+        RecalcPolicy::default(),
+    )
+}
+
+/// Apply [`WorkbookCellPatches`] using the streaming ZIP rewriter, resolving `style_id` overrides
+/// via `styles.xml`, with a configurable [`RecalcPolicy`].
+///
+/// `policy_on_formula_change` is applied **only** when the patch set changes formulas (including
+/// removing formulas). When no formulas change, [`RecalcPolicy::PRESERVE`] is used regardless of
+/// the provided policy.
+pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy<
+    R: Read + Seek,
+    W: Write + Seek,
+>(
+    input: R,
+    output: W,
+    patches: &WorkbookCellPatches,
+    style_table: &StyleTable,
+    policy_on_formula_change: RecalcPolicy,
+) -> Result<(), StreamingPatchError> {
     if patches.is_empty() {
-        return patch_xlsx_streaming(input, output, &[]);
+        return patch_xlsx_streaming_with_recalc_policy(input, output, &[], policy_on_formula_change);
     }
 
     let mut archive = ZipArchive::new(input)?;
@@ -511,7 +571,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles<R: Read + Seek, W:
             streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
     }
     let recalc_policy = if formula_changed {
-        RecalcPolicy::default()
+        policy_on_formula_change
     } else {
         RecalcPolicy::PRESERVE
     };
@@ -1271,6 +1331,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
                 patches,
                 indices,
                 worksheet_meta,
+                recalc_policy,
             )?;
         } else if let Some(bytes) = updated_parts.get(&name) {
             zip.start_file(name.clone(), options)?;
@@ -1632,6 +1693,7 @@ struct CellPatchInternal {
     formula: Option<String>,
     xf_index: Option<u32>,
     shared_string_idx: Option<u32>,
+    clear_cached_value: bool,
     material_for_insertion: bool,
 }
 
@@ -1649,6 +1711,7 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
     patches: &[WorksheetCellPatch],
     shared_string_indices: Option<&HashMap<(u32, u32), u32>>,
     worksheet_meta: WorksheetXmlMetadata,
+    recalc_policy: RecalcPolicy,
 ) -> Result<(), StreamingPatchError> {
     let patch_bounds = bounds_for_patches(patches);
     let dimension_ref_to_insert = if worksheet_meta.has_dimension {
@@ -1667,6 +1730,8 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
         let col_0 = patch.cell.col;
         let shared_string_idx =
             shared_string_indices.and_then(|m| m.get(&(patch.cell.row, patch.cell.col)).copied());
+        let clear_cached_value = recalc_policy.clear_cached_values_on_formula_change
+            && formula_is_material(patch.formula.as_deref());
         let material_for_insertion = patch_is_material_for_insertion(patch);
         patches_by_row
             .entry(row_1)
@@ -1678,6 +1743,7 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 formula: patch.formula.clone(),
                 xf_index: patch.xf_index,
                 shared_string_idx,
+                clear_cached_value,
                 material_for_insertion,
             });
     }
@@ -2359,6 +2425,7 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         &inner_events,
         patch_formula,
         &body_kind,
+        patch.clear_cached_value && patch_formula.is_some(),
         &f_tag,
         &v_tag,
         &is_tag,
@@ -2373,13 +2440,14 @@ fn write_patched_cell_children<W: Write>(
     inner_events: &[Event<'static>],
     patch_formula: Option<&str>,
     body_kind: &CellBodyKind,
+    clear_cached_value: bool,
     f_tag: &str,
     v_tag: &str,
     is_tag: &str,
     t_tag: &str,
 ) -> Result<(), StreamingPatchError> {
     let mut formula_written = patch_formula.is_none();
-    let mut value_written = matches!(body_kind, CellBodyKind::None);
+    let mut value_written = matches!(body_kind, CellBodyKind::None) || clear_cached_value;
     let mut saw_formula = false;
     let mut saw_value = false;
 
@@ -2698,7 +2766,9 @@ fn write_patched_cell<W: Write>(
         write_formula_element(writer, None, formula, false, &formula_tag)?;
     }
 
-    write_value_element(writer, &body_kind, &v_tag, &is_tag, &t_tag)?;
+    if !(patch.clear_cached_value && patch_formula.is_some()) {
+        write_value_element(writer, &body_kind, &v_tag, &is_tag, &t_tag)?;
+    }
 
     writer.write_event(Event::End(BytesEnd::new(cell_tag_owned.as_str())))?;
     Ok(())
