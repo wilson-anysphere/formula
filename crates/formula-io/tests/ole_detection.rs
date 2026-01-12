@@ -34,3 +34,51 @@ fn ole_container_without_workbook_stream_is_not_classified_as_xls() {
     );
 }
 
+#[test]
+fn ole_container_with_xls_extension_falls_back_to_xls_open_error() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("document.xls");
+    std::fs::write(&path, non_xls_ole_bytes()).expect("write ole bytes");
+
+    // Content sniffing should not classify non-Excel OLE containers as `.xls`.
+    let fmt = detect_workbook_format(&path).expect("detect format");
+    assert_eq!(fmt, WorkbookFormat::Unknown);
+
+    // `open_workbook` should still attempt to open based on the `.xls` extension and surface an
+    // `.xls`-specific open error, rather than incorrectly claiming the extension is unsupported.
+    let err = open_workbook(&path).expect_err("expected open_workbook to fail");
+    assert!(
+        matches!(err, Error::OpenXls { .. }),
+        "expected OpenXls, got {err:?}"
+    );
+
+    let err = open_workbook_model(&path).expect_err("expected open_workbook_model to fail");
+    assert!(
+        matches!(err, Error::OpenXls { .. }),
+        "expected OpenXls, got {err:?}"
+    );
+}
+
+#[test]
+fn ole_container_with_xlsx_extension_falls_back_to_xlsx_open_error() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("document.xlsx");
+    std::fs::write(&path, non_xls_ole_bytes()).expect("write ole bytes");
+
+    let fmt = detect_workbook_format(&path).expect("detect format");
+    assert_eq!(fmt, WorkbookFormat::Unknown);
+
+    // `.xlsx` is a supported extension, so attempting to open it should yield an `.xlsx` open
+    // error (invalid ZIP/package), not UnsupportedExtension.
+    let err = open_workbook(&path).expect_err("expected open_workbook to fail");
+    assert!(
+        matches!(err, Error::OpenXlsx { .. }),
+        "expected OpenXlsx, got {err:?}"
+    );
+
+    let err = open_workbook_model(&path).expect_err("expected open_workbook_model to fail");
+    assert!(
+        matches!(err, Error::OpenXlsx { .. }),
+        "expected OpenXlsx, got {err:?}"
+    );
+}

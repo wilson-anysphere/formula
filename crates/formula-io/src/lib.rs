@@ -443,10 +443,16 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
 
             // Only treat OLE compound files as legacy `.xls` workbooks when they contain the BIFF
             // workbook stream. Other Office document types (and arbitrary OLE containers) should
-            // not be routed through the `.xls` importer.
+            // not be misclassified as `.xls`.
             let has_workbook_stream =
                 stream_exists(&mut ole, "Workbook") || stream_exists(&mut ole, "Book");
             if !has_workbook_stream {
+                // Not an Excel BIFF workbook. Fall back to extension-based dispatch so callers get
+                // the most specific open error (e.g. `OpenXlsx` for a `.xlsx` file that is actually
+                // some other OLE container).
+                if let Some(fmt) = ext_format {
+                    return Ok(fmt);
+                }
                 return Err(Error::UnsupportedExtension {
                     path: path.to_path_buf(),
                     extension: ext,
