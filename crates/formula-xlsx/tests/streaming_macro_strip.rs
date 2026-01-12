@@ -22,6 +22,8 @@ fn build_synthetic_macro_package() -> Vec<u8> {
   <Default Extension="png" ContentType="image/png"/>
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/cellimages.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml"/>
+  <Override PartName="/xl/controls/control1.xml" ContentType="application/vnd.ms-excel.control+xml"/>
   <Override PartName="/xl/vbaProject.bin" ContentType="application/vnd.ms-office.vbaProject"/>
   <Override PartName="/xl/vbaProjectSignature.bin" ContentType="application/vnd.ms-office.vbaProjectSignature"/>
   <Override PartName="/xl/vbaData.xml" ContentType="application/vnd.ms-office.vbaData+xml"/>
@@ -51,6 +53,7 @@ fn build_synthetic_macro_package() -> Vec<u8> {
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
   <Relationship Id="rId2" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject" Target="vbaProject.bin"/>
+  <Relationship Id="rId3" Type="http://schemas.microsoft.com/office/2020/relationships/cellImage" Target="cellimages.xml"/>
 </Relationships>"#;
 
     let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -60,6 +63,7 @@ fn build_synthetic_macro_package() -> Vec<u8> {
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/activeXControl" Target="../activeX/activeX1.xml#_x0000_s1025"/>
   <Relationship Id="rId2" Type="http://schemas.microsoft.com/office/2006/relationships/ctrlProp" Target="../ctrlProps/ctrlProp1.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/control" Target="../controls/control1.xml"/>
 </Relationships>"#;
 
     let vba_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -87,10 +91,30 @@ fn build_synthetic_macro_package() -> Vec<u8> {
     let ctrl_props_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <ctrlProp xmlns="http://schemas.microsoft.com/office/2006/activeX"></ctrlProp>"#;
 
+    let cellimages_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cellImages xmlns="http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <cellImage r:id="rId1"/>
+</cellImages>"#;
+
+    // Use `../media/*` to ensure macro stripping resolves relationship targets best-effort:
+    // some producers emit workbook-level targets relative to the `.rels` directory.
+    let cellimages_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>"#;
+
+    let control_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<control xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" name="Button1"/>"#;
+
+    let control_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>"#;
+
     let cursor = Cursor::new(Vec::new());
     let mut zip = ZipWriter::new(cursor);
-    let options =
-        FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
 
     zip.start_file("[Content_Types].xml", options).unwrap();
     zip.write_all(content_types.as_bytes()).unwrap();
@@ -101,7 +125,8 @@ fn build_synthetic_macro_package() -> Vec<u8> {
     zip.start_file("xl/workbook.xml", options).unwrap();
     zip.write_all(workbook_xml.as_bytes()).unwrap();
 
-    zip.start_file("xl/_rels/workbook.xml.rels", options).unwrap();
+    zip.start_file("xl/_rels/workbook.xml.rels", options)
+        .unwrap();
     zip.write_all(workbook_rels.as_bytes()).unwrap();
 
     zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
@@ -110,6 +135,23 @@ fn build_synthetic_macro_package() -> Vec<u8> {
     zip.start_file("xl/worksheets/_rels/sheet1.xml.rels", options)
         .unwrap();
     zip.write_all(sheet_rels.as_bytes()).unwrap();
+
+    zip.start_file("xl/cellimages.xml", options).unwrap();
+    zip.write_all(cellimages_xml).unwrap();
+
+    zip.start_file("xl/_rels/cellimages.xml.rels", options)
+        .unwrap();
+    zip.write_all(cellimages_rels).unwrap();
+
+    zip.start_file("xl/media/image1.png", options).unwrap();
+    zip.write_all(b"not-a-real-png").unwrap();
+
+    zip.start_file("xl/controls/control1.xml", options).unwrap();
+    zip.write_all(control_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/controls/_rels/control1.xml.rels", options)
+        .unwrap();
+    zip.write_all(control_rels).unwrap();
 
     zip.start_file("customUI/customUI.xml", options).unwrap();
     zip.write_all(custom_ui_xml.as_bytes()).unwrap();
@@ -127,10 +169,12 @@ fn build_synthetic_macro_package() -> Vec<u8> {
     zip.start_file("xl/vbaProject.bin", options).unwrap();
     zip.write_all(b"fake-vba-project").unwrap();
 
-    zip.start_file("xl/_rels/vbaProject.bin.rels", options).unwrap();
+    zip.start_file("xl/_rels/vbaProject.bin.rels", options)
+        .unwrap();
     zip.write_all(vba_rels.as_bytes()).unwrap();
 
-    zip.start_file("xl/vbaProjectSignature.bin", options).unwrap();
+    zip.start_file("xl/vbaProjectSignature.bin", options)
+        .unwrap();
     zip.write_all(b"fake-signature").unwrap();
 
     zip.start_file("xl/vbaData.xml", options).unwrap();
@@ -146,10 +190,12 @@ fn build_synthetic_macro_package() -> Vec<u8> {
     zip.start_file("xl/activeX/activeX1.bin", options).unwrap();
     zip.write_all(b"activex-binary").unwrap();
 
-    zip.start_file("xl/embeddings/oleObject1.bin", options).unwrap();
+    zip.start_file("xl/embeddings/oleObject1.bin", options)
+        .unwrap();
     zip.write_all(b"ole-embedding").unwrap();
 
-    zip.start_file("xl/ctrlProps/ctrlProp1.xml", options).unwrap();
+    zip.start_file("xl/ctrlProps/ctrlProp1.xml", options)
+        .unwrap();
     zip.write_all(ctrl_props_xml.as_bytes()).unwrap();
 
     zip.finish().unwrap().into_inner()
@@ -206,4 +252,3 @@ fn strip_vba_project_streaming_matches_in_memory_on_synthetic_macro_package() {
     let bytes = build_synthetic_macro_package();
     assert_streaming_matches_in_memory(&bytes);
 }
-
