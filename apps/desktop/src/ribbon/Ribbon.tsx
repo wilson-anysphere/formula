@@ -421,24 +421,24 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                         actions.onTabChange?.(tab.id);
                         return;
                       }
-                      setBackstageOpen(true);
-                      setFlyoutOpen(false);
-                      return;
-                    }
-                    event.preventDefault();
-                    if (!contentVisible) {
-                      if (!isActive) {
-                        setActiveTabId(tab.id);
-                        setBackstageOpen(false);
-                        actions.onTabChange?.(tab.id);
-                      }
-                      setFlyoutOpen(true);
-                      requestAnimationFrame(() => focusFirstControl(tab.id));
-                      return;
-                    }
-                    if (!isActive) {
-                      setActiveTabId(tab.id);
-                      setBackstageOpen(false);
+                       setBackstageOpen(true);
+                       setFlyoutOpen(false);
+                       return;
+                     }
+                     event.preventDefault();
+                     if (!contentVisible) {
+                       if (!isActive) {
+                         setActiveTabId(tab.id);
+                         setBackstageOpen(false);
+                         actions.onTabChange?.(tab.id);
+                       }
+                       setFlyoutOpen(true);
+                       requestAnimationFrame(() => focusFirstControl(tab.id));
+                       return;
+                     }
+                     if (!isActive) {
+                       setActiveTabId(tab.id);
+                       setBackstageOpen(false);
                       actions.onTabChange?.(tab.id);
                       requestAnimationFrame(() => focusFirstControl(tab.id));
                       return;

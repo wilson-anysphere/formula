@@ -107,7 +107,7 @@ describe("ai chat orchestrator (desktop integration)", () => {
     expect(firstRequest.messages?.[0]?.content).toContain("WORKBOOK_CONTEXT");
     expect(firstRequest.messages?.[0]?.content).toContain("Workbook summary");
     // WorkbookContextBuilder now uses stable, pretty-printed JSON for promptContext sections.
-    expect(firstRequest.messages?.[0]?.content).toContain('"kind": "selection"');
+    expect(firstRequest.messages?.[0]?.content ?? "").toMatch(/"kind"\s*:\s*"selection"/);
     expect(firstRequest.messages?.[0]?.content).toContain("Sheet1!A1:B3");
 
     const entries = await auditStore.listEntries({ session_id: "session_test" });
@@ -158,7 +158,7 @@ describe("ai chat orchestrator (desktop integration)", () => {
     const firstRequest = mock.requests[0];
     expect(firstRequest.messages?.[0]?.role).toBe("system");
     // WorkbookContextBuilder now uses stable, pretty-printed JSON for promptContext sections.
-    expect(firstRequest.messages?.[0]?.content).toContain('"kind": "selection"');
+    expect(firstRequest.messages?.[0]?.content ?? "").toMatch(/"kind"\s*:\s*"selection"/);
     expect(firstRequest.messages?.[0]?.content).toContain("Sheet1!A1:B3");
   });
 
