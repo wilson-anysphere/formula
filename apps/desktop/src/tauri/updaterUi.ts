@@ -416,6 +416,7 @@ function ensureUpdateDialog(): DialogElements {
   const dialog = document.createElement("dialog");
   dialog.className = "dialog updater-dialog";
   dialog.dataset.testid = "updater-dialog";
+  dialog.dataset.keybindingBarrier = "true";
 
   const title = document.createElement("div");
   title.className = "dialog__title";

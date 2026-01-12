@@ -80,6 +80,7 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
   const dialog = document.createElement("dialog");
   dialog.className = "format-cells-dialog";
   dialog.dataset.testid = "format-cells-dialog";
+  dialog.dataset.keybindingBarrier = "true";
 
   const header = document.createElement("div");
   header.className = "format-cells-dialog__header";

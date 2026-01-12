@@ -120,6 +120,7 @@ export async function showInputBox(options = {}) {
   const dialog = document.createElement("dialog");
   dialog.className = "dialog extensions-ui";
   dialog.dataset.testid = "input-box";
+  dialog.dataset.keybindingBarrier = "true";
 
   const title = document.createElement("div");
   title.className = "dialog__title";
@@ -242,6 +243,7 @@ export async function showQuickPick(items, options = {}) {
   const dialog = document.createElement("dialog");
   dialog.className = "dialog extensions-ui";
   dialog.dataset.testid = "quick-pick";
+  dialog.dataset.keybindingBarrier = "true";
 
   const title = document.createElement("div");
   title.className = "dialog__title";
