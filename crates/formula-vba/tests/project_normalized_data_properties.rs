@@ -1,5 +1,6 @@
 use std::io::{Cursor, Write};
 
+use encoding_rs::WINDOWS_1251;
 use formula_vba::{compress_container, project_normalized_data};
 
 fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
@@ -154,3 +155,71 @@ fn project_normalized_data_project_properties_parse_name_and_value_tokens_withou
     );
 }
 
+#[test]
+fn project_normalized_data_project_properties_preserves_non_ascii_mbcs_bytes_verbatim() {
+    // Regression test: `ProjectProperties` name/value tokens are appended as **raw MBCS bytes**.
+    // A naive implementation might decode to a Rust `String` and then append UTF-8 bytes, which
+    // would corrupt the binding transcript for non-ASCII projects.
+
+    let project_name = "Проект"; // "project" in Russian (non-ASCII)
+    let (mbcs, _, _) = WINDOWS_1251.encode(project_name);
+    let mbcs_bytes = mbcs.as_ref();
+    let utf8_bytes = project_name.as_bytes();
+    assert_ne!(
+        mbcs_bytes, utf8_bytes,
+        "test precondition: Windows-1251 bytes must differ from UTF-8 bytes"
+    );
+
+    let mut project_stream_bytes = Vec::new();
+    project_stream_bytes.extend_from_slice(b"Name=\"");
+    project_stream_bytes.extend_from_slice(mbcs_bytes);
+    project_stream_bytes.extend_from_slice(b"\"\r\n");
+
+    // `project_normalized_data()` requires a `VBA/dir` stream to exist, but this test does not need
+    // any dir record payload bytes.
+    let dir_container = compress_container(&[]);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(&project_stream_bytes)
+            .expect("write PROJECT bytes");
+    }
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized =
+        project_normalized_data(&vba_project_bin).expect("compute ProjectNormalizedData");
+
+    let expected = [b"Name".as_slice(), mbcs_bytes].concat();
+    let not_expected = [b"Name".as_slice(), utf8_bytes].concat();
+
+    assert!(
+        find_subslice(&normalized, &expected).is_some(),
+        "expected ProjectNormalizedData to contain Name token bytes in original MBCS encoding"
+    );
+    assert!(
+        find_subslice(&normalized, &not_expected).is_none(),
+        "expected ProjectNormalizedData to NOT contain UTF-8 bytes for the same Name value"
+    );
+
+    // Negative assertions for the token parsing: ensure no separators/quotes/newlines from the raw
+    // `PROJECT` stream line are included.
+    assert!(
+        !normalized.windows(b"Name=".len()).any(|w| w == b"Name="),
+        "expected ProjectNormalizedData to omit '=' separator bytes"
+    );
+    assert!(
+        !normalized.contains(&b'"'),
+        "expected ProjectNormalizedData to omit quote bytes"
+    );
+    assert!(
+        !normalized.contains(&b'\r') && !normalized.contains(&b'\n'),
+        "expected ProjectNormalizedData to omit NWLN bytes"
+    );
+}
