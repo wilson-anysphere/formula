@@ -67,8 +67,15 @@ const { setupWSConnection, setPersistence, getYDoc } = ywsUtils as {
 function pickIp(req: IncomingMessage, trustProxy: boolean): string {
   if (trustProxy) {
     const forwarded = req.headers["x-forwarded-for"];
-    if (typeof forwarded === "string" && forwarded.length > 0) {
-      return forwarded.split(",")[0]!.trim();
+    const raw =
+      typeof forwarded === "string"
+        ? forwarded
+        : Array.isArray(forwarded)
+          ? forwarded[0]
+          : null;
+    if (raw && raw.length > 0) {
+      const first = raw.split(",")[0]?.trim();
+      if (first) return first;
     }
   }
   return req.socket.remoteAddress ?? "unknown";

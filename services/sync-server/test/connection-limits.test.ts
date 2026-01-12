@@ -215,3 +215,43 @@ test("rejects websocket upgrade when max total connections is exceeded", async (
   // Use a distinct x-forwarded-for so the server treats it as a separate IP.
   await expectWebSocketUpgradeStatus(url, 429, "max_connections_exceeded");
 });
+
+test("trustProxy falls back to remoteAddress when x-forwarded-for is empty", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-trust-proxy-empty-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const base = createConfig(dataDir);
+  const logger = createLogger("silent");
+  const server = createSyncServer(
+    {
+      ...base,
+      trustProxy: true,
+      limits: {
+        ...base.limits,
+        maxConnectionsPerIp: 1,
+        // Disable attempt limiting so we only test per-IP connection tracking.
+        maxConnAttemptsPerWindow: 0,
+        connAttemptWindowMs: 0,
+      },
+    },
+    logger
+  );
+  await server.start();
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const url = `${server.getWsUrl()}/trust-proxy-empty?token=test-token`;
+
+  // A blank x-forwarded-for should be treated as invalid and fall back to the
+  // remote address (127.0.0.1 in this test environment).
+  const ws1 = new WebSocket(url, { headers: { "x-forwarded-for": " " } });
+  t.after(() => ws1.terminate());
+  await waitForWebSocketOpen(ws1);
+
+  // If the first connection used an empty-string IP key, this second connection
+  // would be allowed (different key). With the fallback it should be rejected.
+  await expectWebSocketUpgradeStatus(url, 429, "max_connections_per_ip_exceeded");
+});
