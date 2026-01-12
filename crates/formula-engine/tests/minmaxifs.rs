@@ -311,3 +311,73 @@ fn minmaxifs_accepts_reference_returning_functions() {
         Value::Error(ErrorKind::Ref)
     );
 }
+
+#[test]
+fn minmaxifs_error_precedence_is_row_major_for_sparse_iteration() {
+    let mut engine = Engine::new();
+
+    // Criteria range: include everything.
+    for (addr, v) in [("D1", 1.0), ("E1", 1.0), ("D2", 1.0), ("E2", 1.0)] {
+        engine
+            .set_cell_value("Sheet1", addr, v)
+            .expect("set value");
+    }
+
+    // Target range has multiple errors. We expect the *first* error in row-major order
+    // (B1, C1, B2, C2) to win, even if the sparse iterator yields cells in hash order.
+    engine
+        .set_cell_value("Sheet1", "B1", 10.0)
+        .expect("set value");
+    engine
+        .set_cell_value("Sheet1", "C1", Value::Error(ErrorKind::Ref))
+        .expect("set value");
+    engine
+        .set_cell_value("Sheet1", "B2", Value::Error(ErrorKind::Div0))
+        .expect("set value");
+    engine
+        .set_cell_value("Sheet1", "C2", 5.0)
+        .expect("set value");
+
+    assert_eq!(
+        eval(&mut engine, r#"=MINIFS(B1:C2,D1:E2,">0")"#),
+        Value::Error(ErrorKind::Ref)
+    );
+    assert_eq!(
+        eval(&mut engine, r#"=MAXIFS(B1:C2,D1:E2,">0")"#),
+        Value::Error(ErrorKind::Ref)
+    );
+}
+
+#[test]
+fn minmaxifs_accept_xlfn_prefix() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_value("Sheet1", "A1", 5.0)
+        .expect("set value");
+    engine
+        .set_cell_value("Sheet1", "A2", 3.0)
+        .expect("set value");
+    engine
+        .set_cell_value("Sheet1", "A3", 7.0)
+        .expect("set value");
+
+    engine
+        .set_cell_value("Sheet1", "B1", "A")
+        .expect("set value");
+    engine
+        .set_cell_value("Sheet1", "B2", "B")
+        .expect("set value");
+    engine
+        .set_cell_value("Sheet1", "B3", "A")
+        .expect("set value");
+
+    assert_eq!(
+        eval(&mut engine, r#"=_xlfn.MINIFS(A1:A3,B1:B3,"A")"#),
+        Value::Number(5.0)
+    );
+    assert_eq!(
+        eval(&mut engine, r#"=_xlfn.MAXIFS(A1:A3,B1:B3,"A")"#),
+        Value::Number(7.0)
+    );
+}
