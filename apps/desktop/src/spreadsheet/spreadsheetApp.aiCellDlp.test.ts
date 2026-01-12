@@ -147,4 +147,73 @@ describe("SpreadsheetApp AI cell functions (DLP wiring)", () => {
     app.destroy();
     root.remove();
   });
+
+  it("resolves sheet-qualified refs by display name for DLP classification (id !== name)", () => {
+    const workbookId = "dlp-test-workbook-sheet-rename";
+    const storage = window.localStorage as any;
+
+    const policyStore = new LocalPolicyStore({ storage });
+    const policy = createDefaultOrgPolicy();
+    policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING] = { ...policy.rules[DLP_ACTION.AI_CLOUD_PROCESSING], redactDisallowed: false };
+    policyStore.setDocumentPolicy(workbookId, policy);
+
+    // Classification is stored against the stable sheet id ("Sheet2"), not its display name ("Budget").
+    const classificationStore = new LocalClassificationStore({ storage });
+    classificationStore.upsert(
+      workbookId,
+      { scope: CLASSIFICATION_SCOPE.CELL, documentId: workbookId, sheetId: "Sheet2", row: 0, col: 0 },
+      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: [] },
+    );
+
+    const root = document.createElement("div");
+    root.tabIndex = 0;
+    root.getBoundingClientRect = () =>
+      ({
+        width: 800,
+        height: 600,
+        left: 0,
+        top: 0,
+        right: 800,
+        bottom: 600,
+        x: 0,
+        y: 0,
+        toJSON: () => {},
+      }) as any;
+    document.body.appendChild(root);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const namesById = new Map<string, string>([
+      ["Sheet1", "Sheet1"],
+      ["Sheet2", "Budget"],
+    ]);
+    const sheetNameResolver = {
+      getSheetNameById: (id: string) => namesById.get(id) ?? null,
+      getSheetIdByName: (name: string) => {
+        const needle = name.trim().toLowerCase();
+        if (!needle) return null;
+        for (const [id, sheetName] of namesById.entries()) {
+          if (sheetName.toLowerCase() === needle) return id;
+        }
+        return null;
+      },
+    };
+
+    const app = new SpreadsheetApp(root, status, { workbookId, sheetNameResolver });
+    const engine = (app as any).aiCellFunctions;
+
+    // Formula uses the *display name* ("Budget"), but DLP classifications are recorded under the stable sheet id ("Sheet2").
+    const value = evaluateFormula('=AI("summarize", Budget!A1)', (ref) => (ref === "Budget!A1" ? "top secret" : null), {
+      ai: engine,
+      cellAddress: "Sheet1!B1",
+    });
+    expect(value).toBe(AI_CELL_DLP_ERROR);
+
+    app.destroy();
+    root.remove();
+  });
 });

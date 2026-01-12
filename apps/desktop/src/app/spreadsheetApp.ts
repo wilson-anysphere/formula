@@ -1328,6 +1328,7 @@ export class SpreadsheetApp {
     this.aiCellFunctions = new AiCellFunctionEngine({
       onUpdate: () => this.refresh(),
       workbookId,
+      sheetNameResolver: this.sheetNameResolver,
       cache: { persistKey: "formula:ai_cell_cache" },
     });
 
