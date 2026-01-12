@@ -1475,6 +1475,26 @@ export class SpreadsheetApp {
           } catch {
             // Best-effort.
           }
+
+          // When offline persistence is enabled, the persisted doc state may be
+          // loaded before the WebSocket provider emits `sync=true`. If comments
+          // are present in that persisted state, attach the comments observer as
+          // soon as offline hydration completes so comment indicators/panels are
+          // populated immediately.
+          if (typeof session.offline?.whenLoaded === "function") {
+            void session.offline
+              .whenLoaded()
+              .then(() => {
+                try {
+                  if (this.commentsDoc.share.get("comments")) attach();
+                } catch {
+                  // Best-effort.
+                }
+              })
+              .catch(() => {
+                // ignore
+              });
+          }
         } else {
           attach();
         }
