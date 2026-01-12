@@ -190,5 +190,25 @@ test.describe("Print Preview (tauri)", () => {
       for (const handler of handlers) handler({ payload: null });
     });
     await expect(page.locator("dialog.print-preview-dialog")).toBeVisible();
+
+    // Keybinding wiring: Ctrl/Cmd+P should invoke the workbench.print command (desktop-style).
+    // Avoid using Playwright's `keyboard.press()` because Ctrl/Cmd+P can be intercepted by the
+    // browser shell in some environments; dispatch directly instead.
+    await page.keyboard.press("Escape");
+    await expect(page.locator("dialog.print-preview-dialog")).toHaveCount(0);
+    await page.locator("#grid").click();
+    await page.evaluate((isMac) => {
+      const target = document.activeElement ?? window;
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "p",
+          metaKey: isMac,
+          ctrlKey: !isMac,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, process.platform === "darwin");
+    await expect(page.locator("dialog.print-preview-dialog")).toBeVisible();
   });
 });
