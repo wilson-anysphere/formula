@@ -296,8 +296,8 @@ fn ber_total_len(bytes: &[u8]) -> Option<usize> {
     Some(bytes.len().saturating_sub(rem.len()))
 }
 
-/// If `bytes` starts with a PKCS#7/CMS `ContentInfo` for `signedData`, return the total BER length
-/// of that object (including the tag/length header).
+/// If `bytes` starts with a PKCS#7/CMS `ContentInfo` for `signedData`, return the total BER/DER
+/// length of that object (including the tag/length header).
 pub(crate) fn pkcs7_signed_data_len(bytes: &[u8]) -> Option<usize> {
     if !looks_like_pkcs7_signed_data(bytes) {
         return None;
@@ -310,17 +310,23 @@ fn looks_like_pkcs7_signed_data(bytes: &[u8]) -> bool {
     // For SignedData, contentType == 1.2.840.113549.1.7.2
     const SIGNED_DATA_OID: &[u8] = b"\x2A\x86\x48\x86\xF7\x0D\x01\x07\x02";
 
-    let (tag, _len, hdr_len) = match ber_header(bytes) {
+    let (tag, seq_len, hdr_len) = match ber_header(bytes) {
         Some(v) => v,
         None => return false,
     };
-    if tag.tag_byte != 0x30 {
+    if tag.tag_byte != 0x30 || !tag.constructed {
         return false;
     }
-
     let rest = match bytes.get(hdr_len..) {
         Some(v) => v,
         None => return false,
+    };
+    let rest = match seq_len {
+        BerLen::Definite(l) => match rest.get(..l) {
+            Some(v) => v,
+            None => return false,
+        },
+        BerLen::Indefinite => rest,
     };
 
     // ContentInfo.contentType OBJECT IDENTIFIER
@@ -341,83 +347,83 @@ fn looks_like_pkcs7_signed_data(bytes: &[u8]) -> bool {
     if oid_bytes != SIGNED_DATA_OID {
         return false;
     }
-
-    // Ensure the ContentInfo.content field is present and is `[0] EXPLICIT ...` (0xA0).
-    let after_oid = match rest.get(hdr2_len + oid_len..) {
+    let mut cur = match rest.get(hdr2_len + oid_len..) {
         Some(v) => v,
         None => return false,
     };
-    let (tag3, len3, hdr3_len) = match ber_header(after_oid) {
+
+    // ContentInfo.content [0] EXPLICIT
+    let (tag3, explicit_len, hdr3_len) = match ber_header(cur) {
         Some(v) => v,
         None => return false,
     };
-    tag3.tag_byte == 0xA0
-        && {
-            // SignedData ::= SEQUENCE { version INTEGER, digestAlgorithms SET, encapContentInfo SEQUENCE, ... }
-            let explicit_content = match after_oid.get(hdr3_len..) {
-                Some(v) => v,
-                None => return false,
-            };
-            let explicit_content = match len3 {
-                BerLen::Definite(l) => match explicit_content.get(..l) {
-                    Some(v) => v,
-                    None => return false,
-                },
-                BerLen::Indefinite => explicit_content,
-            };
+    if tag3.tag_byte != 0xA0 || !tag3.constructed {
+        return false;
+    }
+    cur = match cur.get(hdr3_len..) {
+        Some(v) => v,
+        None => return false,
+    };
+    let cur = match explicit_len {
+        BerLen::Definite(l) => match cur.get(..l) {
+            Some(v) => v,
+            None => return false,
+        },
+        BerLen::Indefinite => cur,
+    };
 
-            let (sd_tag, sd_len, sd_hdr_len) = match ber_header(explicit_content) {
-                Some(v) => v,
-                None => return false,
-            };
-            if sd_tag.tag_byte != 0x30 {
-                return false;
-            }
-            let sd_content = match explicit_content.get(sd_hdr_len..) {
-                Some(v) => v,
-                None => return false,
-            };
-            let mut sd_cur = match sd_len {
-                BerLen::Definite(l) => match sd_content.get(..l) {
-                    Some(v) => v,
-                    None => return false,
-                },
-                BerLen::Indefinite => sd_content,
-            };
+    // SignedData ::= SEQUENCE { version INTEGER, digestAlgorithms SET, encapContentInfo SEQUENCE, ... }
+    let (sd_tag, sd_len, sd_hdr_len) = match ber_header(cur) {
+        Some(v) => v,
+        None => return false,
+    };
+    if sd_tag.tag_byte != 0x30 || !sd_tag.constructed {
+        return false;
+    }
+    let sd_rest = match cur.get(sd_hdr_len..) {
+        Some(v) => v,
+        None => return false,
+    };
+    let sd_rest = match sd_len {
+        BerLen::Definite(l) => match sd_rest.get(..l) {
+            Some(v) => v,
+            None => return false,
+        },
+        BerLen::Indefinite => sd_rest,
+    };
 
-            // version INTEGER
-            let (ver_tag, _ver_len, _ver_hdr_len) = match ber_header(sd_cur) {
-                Some(v) => v,
-                None => return false,
-            };
-            if ver_tag.tag_byte != 0x02 {
-                return false;
-            }
-            sd_cur = match ber_skip_any(sd_cur) {
-                Some(v) => v,
-                None => return false,
-            };
+    // version INTEGER
+    let (ver_tag, _ver_len, _ver_hdr) = match ber_header(sd_rest) {
+        Some(v) => v,
+        None => return false,
+    };
+    if ver_tag.tag_byte != 0x02 || ver_tag.constructed {
+        return false;
+    }
+    let sd_rest = match ber_skip_any(sd_rest) {
+        Some(v) => v,
+        None => return false,
+    };
 
-            // digestAlgorithms SET
-            let (dig_tag, _dig_len, _dig_hdr_len) = match ber_header(sd_cur) {
-                Some(v) => v,
-                None => return false,
-            };
-            if dig_tag.tag_byte != 0x31 {
-                return false;
-            }
-            sd_cur = match ber_skip_any(sd_cur) {
-                Some(v) => v,
-                None => return false,
-            };
+    // digestAlgorithms SET
+    let (dig_tag, _dig_len, _dig_hdr) = match ber_header(sd_rest) {
+        Some(v) => v,
+        None => return false,
+    };
+    if dig_tag.tag_byte != 0x31 || !dig_tag.constructed {
+        return false;
+    }
+    let sd_rest = match ber_skip_any(sd_rest) {
+        Some(v) => v,
+        None => return false,
+    };
 
-            // encapContentInfo SEQUENCE
-            let (enc_tag, _enc_len, _enc_hdr_len) = match ber_header(sd_cur) {
-                Some(v) => v,
-                None => return false,
-            };
-            enc_tag.tag_byte == 0x30
-        }
+    // encapContentInfo SEQUENCE
+    let (enc_tag, _enc_len, _enc_hdr) = match ber_header(sd_rest) {
+        Some(v) => v,
+        None => return false,
+    };
+    enc_tag.tag_byte == 0x30 && enc_tag.constructed
 }
 
 #[cfg(test)]
