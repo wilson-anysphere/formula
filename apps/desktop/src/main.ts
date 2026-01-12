@@ -2767,6 +2767,44 @@ if (
       const doc = app.getDocument();
       const validatedName = validateSheetName(sheetName, { sheets: workbookSheetStore.listAll(), ignoreId: null });
 
+      const collabSession = app.getCollabSession?.() ?? null;
+      if (collabSession) {
+        const normalizedName = validateSheetName(sheetName, { sheets: workbookSheetStore.listAll() });
+
+        const existingIds = new Set(listSheetsFromCollabSession(collabSession).map((sheet) => sheet.id));
+
+        const randomUuid = (globalThis as any).crypto?.randomUUID as (() => string) | undefined;
+        const generateId = () => {
+          const uuid = typeof randomUuid === "function" ? randomUuid.call((globalThis as any).crypto) : null;
+          return uuid ? `sheet_${uuid}` : `sheet_${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`;
+        };
+
+        let id = generateId();
+        for (let i = 0; i < 10 && existingIds.has(id); i += 1) {
+          id = generateId();
+        }
+        while (existingIds.has(id)) {
+          id = `${id}_${Math.random().toString(16).slice(2)}`;
+        }
+
+        collabSession.transactLocal(() => {
+          const sheet = new Y.Map<unknown>();
+          sheet.set("id", id);
+          sheet.set("name", normalizedName);
+
+          const activeIdx = findCollabSheetIndexById(collabSession, activeId);
+          const insertIndex = activeIdx >= 0 ? activeIdx + 1 : collabSession.sheets.length;
+          collabSession.sheets.insert(insertIndex, [sheet as any]);
+        });
+
+        // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
+        doc.getCell(id, { row: 0, col: 0 });
+        doc.markDirty();
+        app.activateSheet(id);
+        restoreFocusAfterSheetNavigation();
+        return { id, name: normalizedName };
+      }
+
       const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
       if (typeof baseInvoke === "function") {
         // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
@@ -2821,15 +2859,18 @@ if (
         return { id: sheetId, name: oldDisplayName };
       }
 
-      const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-      if (typeof baseInvoke === "function") {
-        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
-        const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
+      const collabSession = app.getCollabSession?.() ?? null;
+      if (!collabSession) {
+        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+        if (typeof baseInvoke === "function") {
+          // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
+          const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
 
-        // Allow any microtask-batched workbook edits to enqueue before we rename.
-        await new Promise<void>((resolve) => queueMicrotask(resolve));
+          // Allow any microtask-batched workbook edits to enqueue before we rename.
+          await new Promise<void>((resolve) => queueMicrotask(resolve));
 
-        await invoke("rename_sheet", { sheet_id: sheetId, name: normalizedNewName });
+          await invoke("rename_sheet", { sheet_id: sheetId, name: normalizedNewName });
+        }
       }
 
       // Update UI metadata first so follow-up operations (eg: `getActiveSheet`) observe the new name.
