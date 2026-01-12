@@ -5316,6 +5316,7 @@ mountRibbon(ribbonRoot, {
       commandId === "home.font.bold" ||
       commandId === "home.font.italic" ||
       commandId === "home.font.underline" ||
+      commandId === "home.font.strikethrough" ||
       commandId === "home.alignment.wrapText" ||
       commandId === "view.show.showFormulas" ||
       commandId === "view.show.performanceStats" ||
