@@ -113,6 +113,9 @@ const MAX_CLIPBOARD_CELLS = 200_000;
 // source snapshot) in JS. Keep this bounded so users can't accidentally generate millions
 // of edits on Excel-scale sheets.
 const MAX_FILL_CELLS = 200_000;
+// Excel-style date/time insertion shortcuts (Ctrl+; / Ctrl+Shift+;) can target the full
+// selection. Cap enumeration so accidental large selections don't allocate huge 2D arrays.
+const MAX_DATE_TIME_INSERT_CELLS = 10_000;
 // Chart rendering is synchronous and (today) materializes the full series ranges into JS arrays.
 // Keep charts bounded so a large A1 range doesn't allocate millions of values on every render.
 const MAX_CHART_DATA_CELLS = 100_000;
@@ -7754,6 +7757,84 @@ export class SpreadsheetApp {
         this.document.setRangeFormat(
           this.sheetId,
           { start: { row: range.startRow, col: range.startCol }, end: { row: range.endRow, col: range.endCol } },
+          { numberFormat },
+        );
+      }
+    } finally {
+      this.document.endBatch();
+    }
+  }
+
+  private insertCurrentDateTimeIntoSelectionExcelSerial(kind: "date" | "time"): void {
+    const label = kind === "date" ? t("command.edit.insertDate") : t("command.edit.insertTime");
+    const numberFormat = kind === "date" ? "yyyy-mm-dd" : "hh:mm:ss";
+
+    const now = new Date();
+    const serial = (() => {
+      if (kind === "date") {
+        // Excel dates are stored as timezone-agnostic serial numbers. Interpret the current
+        // local calendar date as a UTC day for deterministic storage (mirrors parseScalar).
+        const utcDate = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+        return dateToExcelSerial(utcDate);
+      }
+
+      const seconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+      return seconds / 86_400;
+    })();
+
+    const selectionRanges =
+      this.selection.ranges.length > 0
+        ? this.selection.ranges
+        : [
+            {
+              startRow: this.selection.active.row,
+              endRow: this.selection.active.row,
+              startCol: this.selection.active.col,
+              endCol: this.selection.active.col,
+            },
+          ];
+
+    let totalCells = 0;
+    for (const range of selectionRanges) {
+      const r = normalizeSelectionRange(range);
+      const rows = Math.max(0, r.endRow - r.startRow + 1);
+      const cols = Math.max(0, r.endCol - r.startCol + 1);
+      totalCells += rows * cols;
+      if (totalCells > MAX_DATE_TIME_INSERT_CELLS) break;
+    }
+
+    const ranges =
+      totalCells > MAX_DATE_TIME_INSERT_CELLS
+        ? [
+            {
+              startRow: this.selection.active.row,
+              endRow: this.selection.active.row,
+              startCol: this.selection.active.col,
+              endCol: this.selection.active.col,
+            },
+          ]
+        : selectionRanges;
+
+    this.document.beginBatch({ label });
+    try {
+      for (const range of ranges) {
+        const r = normalizeSelectionRange(range);
+        const rowCount = Math.max(0, r.endRow - r.startRow + 1);
+        const colCount = Math.max(0, r.endCol - r.startCol + 1);
+        if (rowCount === 0 || colCount === 0) continue;
+
+        // Use shared row data to avoid allocating per-row arrays for uniform fills.
+        const rowValues = Array(colCount).fill(serial);
+        const values = Array(rowCount).fill(rowValues);
+
+        this.document.setRangeValues(
+          this.sheetId,
+          { start: { row: r.startRow, col: r.startCol }, end: { row: r.endRow, col: r.endCol } },
+          values,
+        );
+        this.document.setRangeFormat(
+          this.sheetId,
+          { start: { row: r.startRow, col: r.startCol }, end: { row: r.endRow, col: r.endCol } },
           { numberFormat },
         );
       }
