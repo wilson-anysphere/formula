@@ -600,6 +600,10 @@ fn parse_rich_value_rel_image_targets(
     let relationships = crate::openxml::parse_relationships(rels_xml)?;
     let mut out = HashMap::new();
     for rel in relationships {
+        let rel_id = rel.id.trim();
+        if rel_id.is_empty() {
+            continue;
+        }
         if rel
             .target_mode
             .as_deref()
@@ -607,7 +611,7 @@ fn parse_rich_value_rel_image_targets(
         {
             continue;
         }
-        if rel.type_uri != REL_TYPE_IMAGE {
+        if rel.type_uri.trim() != REL_TYPE_IMAGE {
             continue;
         }
         let target_raw = strip_uri_suffixes(&rel.target);
@@ -638,7 +642,7 @@ fn parse_rich_value_rel_image_targets(
         } else {
             resolve_target(source_part, target)
         };
-        out.insert(rel.id, resolved);
+        out.insert(rel_id.to_string(), resolved);
     }
     Ok(out)
 }
