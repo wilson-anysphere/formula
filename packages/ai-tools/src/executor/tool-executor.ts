@@ -243,7 +243,7 @@ type DlpRangeIndex = {
   /**
    * Range-scoped records for the sheet (normalized to ensure start <= end).
    */
-  rangeRecords: Array<{ range: DlpNormalizedRange; rank: number }>;
+  rangeRecords: Array<{ startRow: number; endRow: number; startCol: number; endCol: number; rank: number }>;
   /**
    * Records that cannot be indexed by (row,col)/(columnIndex) (e.g. tableId/columnId selectors).
    * These are evaluated via the slower `effectiveCellClassification` path when present.
@@ -1232,7 +1232,7 @@ export class ToolExecutor {
     let sheetRankMax = DEFAULT_CLASSIFICATION_RANK;
     const columnRankByIndex = new Map<number, number>();
     const cellRankByCoord = new Map<string, number>();
-    const rangeRecords: Array<{ range: DlpNormalizedRange; rank: number }> = [];
+    const rangeRecords: Array<{ startRow: number; endRow: number; startCol: number; endCol: number; rank: number }> = [];
     const fallbackRecords: Array<{ selector: any; classification: any }> = [];
 
     for (const record of records || []) {
@@ -1291,7 +1291,13 @@ export class ToolExecutor {
           const normalized = normalizeRange(selector.range);
           if (!rangesIntersectNormalized(normalized, selectionRange)) break;
           const recordRank = rankFromClassification(record.classification);
-          rangeRecords.push({ range: normalized, rank: recordRank });
+          rangeRecords.push({
+            startRow: normalized.start.row,
+            endRow: normalized.end.row,
+            startCol: normalized.start.col,
+            endCol: normalized.end.col,
+            rank: recordRank
+          });
           break;
         }
         default: {
@@ -1374,7 +1380,7 @@ export class ToolExecutor {
     }
 
     for (const record of index.rangeRecords) {
-      if (!cellInNormalizedRange(row0, col0, record.range)) continue;
+      if (row0 < record.startRow || row0 > record.endRow || col0 < record.startCol || col0 > record.endCol) continue;
       if (record.rank > rank) rank = record.rank;
       if (rank === RESTRICTED_CLASSIFICATION_RANK) {
         return decideAllowed(rank);
@@ -2009,15 +2015,6 @@ function buildPivotTableOutput(request: PivotBuildRequest): CellScalar[][] {
 function nowMs(): number {
   if (typeof performance !== "undefined" && typeof performance.now === "function") return performance.now();
   return Date.now();
-}
-
-function cellInNormalizedRange(row: number, col: number, range: DlpNormalizedRange): boolean {
-  return (
-    row >= range.start.row &&
-    row <= range.end.row &&
-    col >= range.start.col &&
-    col <= range.end.col
-  );
 }
 
 function rangesIntersectNormalized(a: DlpNormalizedRange, b: DlpNormalizedRange): boolean {
