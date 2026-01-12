@@ -3475,6 +3475,7 @@ export class CanvasGridRenderer {
         lineWidth: number;
         dash: number[];
         segments: number[];
+        lineCap: CanvasLineCap;
       };
 
       const borderBuckets: BorderBucket[] = [];
@@ -3512,13 +3513,15 @@ export class CanvasGridRenderer {
         if (bucket) return bucket;
 
         const dash = styleKey === "double" ? [] : dashForStyle(styleKey, lineWidth);
+        const lineCap: CanvasLineCap = styleKey === "dotted" ? "round" : "butt";
 
         bucket = {
           style: styleKey,
           color,
           lineWidth,
           dash,
-          segments: []
+          segments: [],
+          lineCap
         };
         byWidth.set(lineWidth, bucket);
         borderBuckets.push(bucket);
@@ -3668,6 +3671,7 @@ export class CanvasGridRenderer {
         if (bucket.segments.length === 0) continue;
         gridCtx.strokeStyle = bucket.color;
         gridCtx.lineWidth = bucket.lineWidth;
+        gridCtx.lineCap = bucket.lineCap;
         setLineDashSafe(bucket.dash);
         gridCtx.beginPath();
 
@@ -3682,6 +3686,8 @@ export class CanvasGridRenderer {
 
       // Ensure diagonal border rendering starts from a clean dash pattern.
       setLineDashSafe([]);
+      // Avoid leaking a rounded cap into diagonal borders / other strokes.
+      gridCtx.lineCap = "butt";
     };
 
     if (!hasMerges) {
@@ -3770,6 +3776,7 @@ export class CanvasGridRenderer {
       strokeStyle: string;
       lineWidth: number;
       lineDash: number[];
+      lineCap: CanvasLineCap;
       clipRects: Rect[];
       clipRectKeys: Set<string>;
       segments: DiagonalSegment[];
@@ -3802,16 +3809,18 @@ export class CanvasGridRenderer {
       strokeStyle: string;
       lineWidth: number;
       lineDash: number[];
+      lineCap: CanvasLineCap;
       segment: DiagonalSegment;
     }): void => {
       const dashKey = options.lineDash.length > 0 ? options.lineDash.join(",") : "solid";
-      const key = `${options.strokeStyle}|${options.lineWidth}|${dashKey}`;
+      const key = `${options.strokeStyle}|${options.lineWidth}|${dashKey}|${options.lineCap}`;
       let group = groups.get(key);
       if (!group) {
         group = {
           strokeStyle: options.strokeStyle,
           lineWidth: options.lineWidth,
           lineDash: options.lineDash,
+          lineCap: options.lineCap,
           clipRects: [],
           clipRectKeys: new Set<string>(),
           segments: []
@@ -3831,6 +3840,7 @@ export class CanvasGridRenderer {
       const strokeStyle = border.color;
       const totalWidth = border.width * zoom;
       if (!Number.isFinite(totalWidth) || totalWidth <= 0) return;
+      const lineCap: CanvasLineCap = border.style === "dotted" ? "round" : "butt";
 
       const x1 = rect.x;
       const y1 = direction === "up" ? rect.y + rect.height : rect.y;
@@ -3853,6 +3863,7 @@ export class CanvasGridRenderer {
           strokeStyle,
           lineWidth,
           lineDash: [],
+          lineCap,
           segment: { x1: x1 + nx * offset, y1: y1 + ny * offset, x2: x2 + nx * offset, y2: y2 + ny * offset }
         });
         addGroupSegment({
@@ -3860,6 +3871,7 @@ export class CanvasGridRenderer {
           strokeStyle,
           lineWidth,
           lineDash: [],
+          lineCap,
           segment: { x1: x1 - nx * offset, y1: y1 - ny * offset, x2: x2 - nx * offset, y2: y2 - ny * offset }
         });
         return;
@@ -3870,6 +3882,7 @@ export class CanvasGridRenderer {
         strokeStyle,
         lineWidth: totalWidth,
         lineDash: dashForStyle(border.style, totalWidth),
+        lineCap,
         segment: { x1, y1, x2, y2 }
       });
     };
@@ -3883,6 +3896,7 @@ export class CanvasGridRenderer {
       gridCtx.save();
       gridCtx.strokeStyle = group.strokeStyle;
       gridCtx.lineWidth = group.lineWidth;
+      gridCtx.lineCap = group.lineCap;
       (gridCtx as any).setLineDash?.(group.lineDash);
 
       // Clip to the union of cell rects for this group to keep strokes inside cells/merged cells.
