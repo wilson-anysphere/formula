@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 
 import { parseHtmlToCellGrid, serializeCellGridToHtml } from "../html.js";
 
-function buildCfHtmlPayload(innerHtml) {
+function buildCfHtmlPayload(innerHtml, { beforeFragmentHtml = "" } = {}) {
   const markerStart = "<!--StartFragment-->";
   const markerEnd = "<!--EndFragment-->";
-  const html = `<!DOCTYPE html><html><body>${markerStart}${innerHtml}${markerEnd}</body></html>`;
+  const html = `<!DOCTYPE html><html><body>${beforeFragmentHtml}${markerStart}${innerHtml}${markerEnd}</body></html>`;
 
   const pad8 = (n) => String(n).padStart(8, "0");
 
@@ -80,6 +80,17 @@ test("clipboard HTML parses Windows CF_HTML payloads", () => {
   assert.equal(grid[0].length, 2);
   assert.equal(grid[0][0].value, 1);
   assert.equal(grid[0][1].value, "two");
+});
+
+test("clipboard HTML prefers CF_HTML fragment offsets when multiple tables exist", () => {
+  const cfHtml = buildCfHtmlPayload("<table><tr><td>RIGHT</td></tr></table>", {
+    beforeFragmentHtml: "<table><tr><td>WRONG</td></tr></table>",
+  });
+
+  const grid = parseHtmlToCellGrid(cfHtml);
+  assert.ok(grid);
+
+  assert.equal(grid[0][0].value, "RIGHT");
 });
 
 test("clipboard HTML tolerates CF_HTML payloads with incorrect offsets", () => {
