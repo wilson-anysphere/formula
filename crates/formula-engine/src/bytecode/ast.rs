@@ -182,6 +182,8 @@ pub enum ParseError {
     UnexpectedEof,
     #[error("unexpected token at byte {0}")]
     UnexpectedToken(usize),
+    #[error("Too many arguments (max {0})")]
+    TooManyArguments(usize),
     #[error("invalid number")]
     InvalidNumber,
     #[error("invalid cell reference")]
@@ -445,6 +447,9 @@ impl<'a> Parser<'a> {
             self.skip_ws();
             if self.peek_byte() != Some(b')') {
                 loop {
+                    if args.len() == crate::EXCEL_MAX_ARGS {
+                        return Err(ParseError::TooManyArguments(crate::EXCEL_MAX_ARGS));
+                    }
                     args.push(self.parse_bp(0)?);
                     self.skip_ws();
                     match self.peek_byte() {
@@ -749,5 +754,20 @@ mod tests {
                 ],
             }
         );
+    }
+
+    #[test]
+    fn rejects_function_calls_with_more_than_255_args() {
+        let origin = CellCoord::new(0, 0);
+        let args = std::iter::repeat("1")
+            .take(crate::EXCEL_MAX_ARGS + 1)
+            .collect::<Vec<_>>()
+            .join(",");
+        let formula = format!("=SUM({args})");
+
+        assert!(matches!(
+            parse_formula(&formula, origin),
+            Err(ParseError::TooManyArguments(_))
+        ));
     }
 }
