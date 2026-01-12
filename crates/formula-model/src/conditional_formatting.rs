@@ -1074,13 +1074,23 @@ fn cell_value_truthy(value: &CellValue) -> bool {
         CellValue::Error(_) => false,
         CellValue::RichText(t) => !t.text.is_empty(),
         CellValue::Entity(e) => !e.display_value.is_empty(),
-        CellValue::Record(r) => match r.display_field.as_deref() {
-            Some(field) => r
-                .fields
-                .get(field)
-                .map_or(!r.display_value.is_empty(), cell_value_truthy),
-            None => !r.display_value.is_empty() || !r.fields.is_empty(),
-        },
+        // Record values are treated like text for conditional formatting truthiness:
+        // truthy iff their derived display string is non-empty.
+        CellValue::Record(r) => {
+            if let Some(field) = r.display_field.as_deref() {
+                if let Some(value) = r.fields.get(field) {
+                    return match value {
+                        CellValue::String(s) => !s.is_empty(),
+                        CellValue::RichText(rt) => !rt.text.is_empty(),
+                        // Scalar display strings for these variants are always non-empty.
+                        CellValue::Number(_) | CellValue::Boolean(_) | CellValue::Error(_) => true,
+                        // Non-scalar displayField values fall back to `display_value`.
+                        _ => !r.display_value.is_empty(),
+                    };
+                }
+            }
+            !r.display_value.is_empty()
+        }
         CellValue::Array(a) => !a.data.is_empty(),
         CellValue::Spill(_) => true,
     }
@@ -1412,14 +1422,7 @@ impl ValueKey {
                         CellValue::RichText(rt) => Some(rt.text.clone()),
                         _ => None,
                     });
-                let display = from_field.or_else(|| {
-                    if r.display_value.is_empty() {
-                        None
-                    } else {
-                        Some(r.display_value)
-                    }
-                });
-                display.map(ValueKey::String)
+                Some(ValueKey::String(from_field.unwrap_or(r.display_value)))
             }
             CellValue::Array(_) => None,
             CellValue::Spill(_) => None,
@@ -1534,6 +1537,18 @@ impl Iterator for RangeIter {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    struct CellMapFormulaEvaluator {
+        formula: String,
+        results: HashMap<CellRef, CellValue>,
+    }
+
+    impl FormulaEvaluator for CellMapFormulaEvaluator {
+        fn eval(&self, formula: &str, ctx: CellRef) -> Option<CellValue> {
+            assert_eq!(formula.trim(), self.formula);
+            self.results.get(&ctx).cloned()
+        }
+    }
 
     #[derive(Default)]
     struct TestValues {
@@ -1827,5 +1842,152 @@ mod tests {
         let eval = engine.evaluate_visible_range(&rules, visible, &values, None, None);
         let d1 = eval.get(CellRef::from_a1("D1").unwrap()).unwrap().data_bar.as_ref().unwrap();
         assert!((d1.fill_ratio - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn expression_truthiness_treats_entities_like_text_display_string() {
+        let visible = parse_range_a1("A1:A2").unwrap();
+
+        let rule = CfRule {
+            schema: CfRuleSchema::Office2007,
+            id: None,
+            priority: 1,
+            applies_to: vec![visible],
+            dxf_id: Some(0),
+            stop_if_true: false,
+            kind: CfRuleKind::Expression {
+                formula: "ENTITY".to_string(),
+            },
+            dependencies: vec![],
+        };
+
+        let dxfs = vec![CfStyleOverride {
+            fill: Some(Color::new_argb(0xFFFF0000)),
+            font_color: None,
+            bold: None,
+            italic: None,
+        }];
+
+        let evaluator = CellMapFormulaEvaluator {
+            formula: "ENTITY".to_string(),
+            results: HashMap::from([
+                (
+                    CellRef::from_a1("A1").unwrap(),
+                    CellValue::Entity(crate::EntityValue::new("Seattle")),
+                ),
+                (
+                    CellRef::from_a1("A2").unwrap(),
+                    CellValue::Entity(crate::EntityValue::new("")),
+                ),
+            ]),
+        };
+
+        let values = TestValues::default();
+        let mut engine = ConditionalFormattingEngine::new();
+        let eval = engine.evaluate_visible_range(&[rule], visible, &values, Some(&evaluator), Some(&dxfs));
+
+        assert_eq!(
+            eval.get(CellRef::from_a1("A1").unwrap()).unwrap().style.fill,
+            Some(Color::new_argb(0xFFFF0000))
+        );
+        assert_eq!(
+            eval.get(CellRef::from_a1("A2").unwrap()).unwrap().style.fill,
+            None
+        );
+    }
+
+    #[test]
+    fn expression_truthiness_treats_records_like_text_display_string() {
+        let visible = parse_range_a1("A1:A2").unwrap();
+
+        let rule = CfRule {
+            schema: CfRuleSchema::Office2007,
+            id: None,
+            priority: 1,
+            applies_to: vec![visible],
+            dxf_id: Some(0),
+            stop_if_true: false,
+            kind: CfRuleKind::Expression {
+                formula: "RECORD".to_string(),
+            },
+            dependencies: vec![],
+        };
+
+        let dxfs = vec![CfStyleOverride {
+            fill: Some(Color::new_argb(0xFFFF0000)),
+            font_color: None,
+            bold: None,
+            italic: None,
+        }];
+
+        let evaluator = CellMapFormulaEvaluator {
+            formula: "RECORD".to_string(),
+            results: HashMap::from([
+                (
+                    CellRef::from_a1("A1").unwrap(),
+                    CellValue::Record(crate::RecordValue {
+                        display_field: Some("name".to_string()),
+                        fields: HashMap::from([(
+                            "name".to_string(),
+                            CellValue::String("Ada".to_string()),
+                        )]),
+                        ..Default::default()
+                    }),
+                ),
+                (
+                    CellRef::from_a1("A2").unwrap(),
+                    CellValue::Record(crate::RecordValue::default()),
+                ),
+            ]),
+        };
+
+        let values = TestValues::default();
+        let mut engine = ConditionalFormattingEngine::new();
+        let eval = engine.evaluate_visible_range(&[rule], visible, &values, Some(&evaluator), Some(&dxfs));
+
+        assert_eq!(
+            eval.get(CellRef::from_a1("A1").unwrap()).unwrap().style.fill,
+            Some(Color::new_argb(0xFFFF0000))
+        );
+        assert_eq!(
+            eval.get(CellRef::from_a1("A2").unwrap()).unwrap().style.fill,
+            None
+        );
+    }
+
+    #[test]
+    fn value_key_maps_rich_values_to_display_string() {
+        let entity = crate::EntityValue::new("Seattle");
+        assert_eq!(
+            ValueKey::from_cell_value(CellValue::Entity(entity)),
+            Some(ValueKey::String("Seattle".to_string()))
+        );
+
+        let record = crate::RecordValue {
+            display_field: Some("name".to_string()),
+            fields: HashMap::from([("name".to_string(), CellValue::String("Ada".to_string()))]),
+            ..Default::default()
+        };
+        let record_display = record.to_string();
+        assert_eq!(
+            ValueKey::from_cell_value(CellValue::Record(record)),
+            Some(ValueKey::String(record_display))
+        );
+    }
+
+    #[test]
+    fn numeric_coercion_does_not_parse_rich_value_display_strings() {
+        assert_eq!(
+            cell_value_as_number(CellValue::Entity(crate::EntityValue::new("123"))),
+            None
+        );
+        assert_eq!(
+            cell_value_as_number(CellValue::Record(crate::RecordValue {
+                display_field: Some("n".to_string()),
+                fields: HashMap::from([("n".to_string(), CellValue::String("123".to_string()))]),
+                ..Default::default()
+            })),
+            None
+        );
     }
 }
