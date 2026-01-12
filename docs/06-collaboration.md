@@ -178,6 +178,8 @@ const session = createCollabSession({
 Notes:
 
 - Plaintext is JSON `{ value, formula, format? }` and is bound to `{ docId, sheetId, row, col }` via AES-GCM Additional Authenticated Data (AAD) to prevent replay across docs/cells.
+  - The encryption codec supports an optional `format` field, but the current session + binder implementations only encrypt `value`/`formula`.
+    Cell formatting remains stored separately under the shared `format` key.
 - When `enc` is present, plaintext `value`/`formula` fields are omitted.
 - If a collaborator does not have the right key, `@formula/collab-session` and the desktop binder will surface a masked value and **refuse plaintext writes** into that cell.
 
