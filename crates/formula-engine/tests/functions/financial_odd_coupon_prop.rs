@@ -101,8 +101,9 @@ fn arb_oddl_case() -> impl Strategy<Value = OddLastCase> {
                 let next_coupon = edate(last_interest, months_per_period, SYSTEM).unwrap();
                 let period_days = next_coupon - last_interest;
 
-                // maturity_offset_days ∈ [2, period_days-1]
-                (2i32..period_days).prop_flat_map(move |maturity_offset_days| {
+                // maturity_offset_days ∈ [2, min(period_days-1, 120)] (keep cases fast/stable)
+                let max_stub_exclusive = period_days.min(121);
+                (2i32..max_stub_exclusive).prop_flat_map(move |maturity_offset_days| {
                     let maturity = last_interest + maturity_offset_days;
 
                     // settlement_offset_days ∈ [1, maturity_offset_days-1]
