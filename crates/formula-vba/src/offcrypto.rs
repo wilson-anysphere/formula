@@ -1,19 +1,28 @@
-//! Parsers for a small subset of [MS-OSHARED] structures used by Office VBA project signatures.
+//! Parsers for Office digital-signature wrapper structures used by VBA project signatures.
 //!
 //! Excel stores a signed VBA project in an OLE stream named `\x05DigitalSignature*`.
-//! In many real-world files the PKCS#7/CMS `SignedData` payload is wrapped in a
-//! `[MS-OSHARED] DigSigInfoSerialized` header (VBA Digital Signature Storage, §2.3.2.1). The header
-//! contains size/offset fields for the surrounding metadata, making it possible to locate the
-//! PKCS#7 blob deterministically instead of scanning the whole stream (and works for both strict
-//! DER and BER/indefinite encodings).
+//! The stream payload is usually a PKCS#7/CMS `SignedData` `ContentInfo`, optionally wrapped in an
+//! Office-specific header that includes size/offset metadata.
 //!
-//! Spec note: Some third-party references attribute `DigSigInfoSerialized` to MS-OFFCRYPTO, but the
-//! Office Open Specifications define the VBA signature wrapper in MS-OSHARED.
+//! Office produces (at least) two related wrapper shapes:
 //!
-//! https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/
-//! https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/30a00273-dbee-422f-b488-f4b8430ae046
+//! - `[MS-OSHARED] DigSigBlob` (§2.3.2.2), which contains a `[MS-OSHARED] DigSigInfoSerialized`
+//!   (§2.3.2.1) pointing at the PKCS#7 buffer via offsets.
+//! - A shorter *length-prefixed* DigSigInfoSerialized-like header (commonly seen in the wild) that
+//!   starts with `cbSignature`, `cbSigningCertStore`, and a project-name length/count, followed by
+//!   variable metadata blobs. This variant does **not** match the MS-OSHARED DigSigInfoSerialized
+//!   layout, and is sometimes attributed to `[MS-OFFCRYPTO]` in older references.
+//!
+//! We implement best-effort parsers for both, primarily to locate the embedded PKCS#7 bytes
+//! deterministically (instead of scanning for ASN.1 `SEQUENCE` tags) and to support
+//! BER/indefinite-length encodings.
+//!
+//! MS-OSHARED reference:
+//! - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/
+//! - DigSigInfoSerialized (§2.3.2.1): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/30a00273-dbee-422f-b488-f4b8430ae046
+//! - DigSigBlob (§2.3.2.2): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/bc21c922-b7ae-4736-90aa-86afb6403462
 
-/// Parsed information from a `[MS-OSHARED] DigSigInfoSerialized` prefix.
+/// Parsed information from the length-prefixed DigSigInfoSerialized-like prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DigSigInfoSerialized {
     /// Offset (from the start of the stream) where the PKCS#7 `ContentInfo` begins.
@@ -56,8 +65,8 @@ pub(crate) fn parse_digsig_blob(stream: &[u8]) -> Option<DigSigBlob> {
     let serialized_pointer = read_u32_le(stream, 4)? as usize;
 
     // MS-OSHARED examples use a fixed pointer to the serialized DigSigInfoSerialized at offset 8.
-    // Requiring this keeps the heuristic conservative and avoids mis-detecting MS-OFFCRYPTO's
-    // length-prefixed DigSigInfoSerialized wrapper.
+    // Requiring this keeps the heuristic conservative and avoids mis-detecting the other, distinct
+    // length-prefixed DigSigInfoSerialized-like wrapper format.
     if serialized_pointer != 8 {
         return None;
     }
@@ -92,7 +101,12 @@ pub(crate) fn parse_digsig_blob(stream: &[u8]) -> Option<DigSigBlob> {
     })
 }
 
-/// Best-effort parse of `[MS-OSHARED] DigSigInfoSerialized`.
+/// Best-effort parse of the *length-prefixed* DigSigInfoSerialized-like wrapper used by some
+/// `\x05DigitalSignature*` streams.
+///
+/// Spec note: MS-OSHARED defines a different DigSigInfoSerialized structure (§2.3.2.1) used inside
+/// DigSigBlob (§2.3.2.2) with offset fields (`signatureOffset`, `certStoreOffset`, ...). The
+/// length-prefixed wrapper parsed here is a separate, commonly-seen on-disk shape.
 ///
 /// Returns `None` if the stream does not look like a DigSigInfoSerialized-wrapped PKCS#7 payload.
 ///
