@@ -48,6 +48,21 @@ fn encodes_and_decodes_external_workbook_sheet_range_ref_in_function() {
 }
 
 #[test]
+fn encodes_and_decodes_external_workbook_ref() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet_external_workbook("Book2.xlsb", "Sheet1", "Sheet1", 0);
+
+    let encoded = encode_rgce_with_context(
+        "=[Book2.xlsb]Sheet1!A1+1",
+        &ctx,
+        CellCoord::new(0, 0),
+    )
+    .expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "[Book2.xlsb]Sheet1!A1+1");
+}
+
+#[test]
 fn encodes_and_decodes_workbook_name() {
     let mut ctx = WorkbookContext::default();
     ctx.add_workbook_name("MyNamedRange", 1);
