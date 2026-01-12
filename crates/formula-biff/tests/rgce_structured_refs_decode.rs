@@ -37,6 +37,18 @@ fn ptg_funcvar(argc: u8, iftab: u16) -> [u8; 4] {
     [0x22, argc, lo, hi] // PtgFuncVar
 }
 
+fn ptg_paren() -> [u8; 1] {
+    [0x15] // PtgParen
+}
+
+fn ptg_percent() -> [u8; 1] {
+    [0x14] // PtgPercent
+}
+
+fn ptg_spill_range() -> [u8; 1] {
+    [0x2F] // PtgSpillRange
+}
+
 #[test]
 fn decodes_structured_ref_ignores_reserved_field() {
     let mut rgce = ptg_list(1, 0x0000, 2, 2, 0x18);
@@ -55,6 +67,37 @@ fn decodes_structured_ref_uses_stable_placeholder_names_for_unknown_ids() {
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "Table42[Column7]");
     assert_eq!(normalize(&text), normalize("Table42[Column7]"));
+}
+
+#[test]
+fn decodes_structured_ref_with_postfix_ops() {
+    // Exercise postfix operators on a structured reference token.
+    let mut rgce = ptg_list(1, 0x0000, 2, 2, 0x18);
+    rgce.extend_from_slice(&ptg_percent());
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(normalize(&text), normalize("Table1[Column2]%"));
+
+    let mut rgce = ptg_list(1, 0x0000, 2, 2, 0x18);
+    rgce.extend_from_slice(&ptg_spill_range());
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(normalize(&text), normalize("Table1[Column2]#"));
+}
+
+#[test]
+fn decodes_structured_ref_with_paren() {
+    let mut rgce = ptg_list(1, 0x0000, 2, 2, 0x18);
+    rgce.extend_from_slice(&ptg_paren());
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(normalize(&text), normalize("(Table1[Column2])"));
+}
+
+#[test]
+fn decodes_value_class_structured_ref_with_postfix_ops() {
+    // Value-class structured refs may start with '@'; ensure postfix operators still work.
+    let mut rgce = ptg_list(1, 0x0000, 2, 2, 0x38);
+    rgce.extend_from_slice(&ptg_spill_range());
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(normalize(&text), normalize("@Table1[Column2]#"));
 }
 
 #[test]
