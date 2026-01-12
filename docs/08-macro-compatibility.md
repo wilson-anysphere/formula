@@ -1079,12 +1079,25 @@ stream (e.g. `\x05DigitalSignature/sig`). When searching for signatures, match o
 component, not just root-level streams.
 
 Common signature stream payload shapes we must handle:
- 
+  
 1. **Raw PKCS#7/CMS DER** (`ContentInfo`, usually begins with ASN.1 `SEQUENCE (0x30)`).
-2. **Office DigSig wrapper**, which contains (or points to) the DER-encoded PKCS#7/CMS payload:
-   - MS-OSHARED `DigSigBlob` / `DigSigInfoSerialized` (offset-based), or
-   - a length-prefixed DigSigInfoSerialized-like header commonly seen in the wild.
-3. **Detached `content || pkcs7`**, where the stream is `signed_content_bytes` followed by a
+2. **MS-OSHARED `DigSigBlob` wrapper (offset-based)**
+   - Some producers wrap the PKCS#7 bytes in a `DigSigBlob` (MS-OSHARED §2.3.2.2).
+   - The blob contains a `DigSigInfoSerialized` structure (MS-OSHARED §2.3.2.1) that points at the
+     embedded signature buffer via `signatureOffset`/`cbSignature`.
+3. **MS-OSHARED `WordSigBlob` wrapper (offset-based, Unicode length prefix)**
+   - Some producers wrap the PKCS#7 bytes in a `WordSigBlob` (MS-OSHARED §2.3.2.3).
+   - `WordSigBlob` is similar to `DigSigBlob` but starts with `cch: u16` (a UTF-16 character count /
+     half the byte count of the remainder of the structure).
+   - The embedded `DigSigInfoSerialized` still provides offsets to the signature buffer, but the
+     offsets are **relative to the start of the `cbSigInfo` field** (byte offset 2), not the start
+     of the structure.
+4. **Length-prefixed `DigSigInfoSerialized`-like wrapper/prefix**
+   - Many real-world Excel `\x05DigitalSignature*` streams start with a shorter, *length-prefixed*
+     header that does **not** match the MS-OSHARED `DigSigInfoSerialized` layout.
+   - The structure is little-endian and length-prefixed; parsing it lets us locate the embedded CMS
+     payload deterministically instead of scanning for a DER `SEQUENCE`.
+5. **Detached `content || pkcs7`**, where the stream is `signed_content_bytes` followed by a
    detached PKCS#7 signature over those bytes.
 
 How to obtain the signed digest for MS-OVBA signature binding:
@@ -1128,7 +1141,7 @@ For more detail, see [`vba-digital-signatures.md`](./vba-digital-signatures.md).
 Relevant specs:
 
 - MS-OVBA (VBA project storage + Contents Hash / Agile Content Hash): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/
-- MS-OSHARED (VBA digital signature storage / DigSigBlob + DigSigInfoSerialized + MD5 VBA project hash rule): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/
+- MS-OSHARED (VBA digital signature storage / DigSigBlob + WordSigBlob + DigSigInfoSerialized + MD5 VBA project hash rule): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/
 
 ### Script Sandboxing
 
