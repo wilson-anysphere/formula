@@ -255,7 +255,11 @@ previous version" after a successful upgrade.
 To satisfy the platform requirement **"Rollback capability"**, Formula supports a clear **manual
 downgrade path**:
 
-1. Open Formula's **Releases** page (in-app via the updater dialog's **"View all versions"** action,
+The updater dialog includes an **"Open release page"** action. If an update download/install fails,
+that action is relabeled/promoted to **"Download manually"** and the dialog surfaces manual
+download/downgrade instructions.
+
+1. Open Formula's **Releases** page (in-app via the updater dialog's **"Open release page"** action,
    or directly in your browser): https://github.com/wilson-anysphere/formula/releases
 2. Download the installer/bundle for the **older version** you want.
 3. Install it over your current install (or uninstall first if your platform's installer blocks
@@ -489,8 +493,10 @@ Events emitted by the Rust host (see `main.rs`, `menu.rs`, `tray.rs`, `updater.r
   - `update-available` (payload: `{ source, version, body }`)
 
 Updater events are consumed by the desktop frontend in `apps/desktop/src/tauri/updaterUi.ts` (installed
-from `apps/desktop/src/main.ts`). The update-available dialog includes a **"View all versions"**
-action that opens the GitHub Releases page for manual downgrade/rollback.
+from `apps/desktop/src/main.ts`). The update-available dialog includes an **"Open release page"**
+action that opens the GitHub Releases page for manual downgrade/rollback. If an update download or
+install fails, this action is relabeled/promoted to **"Download manually"** and the dialog’s status
+text includes manual download/downgrade instructions.
 
 Related frontend → backend events used as acknowledgements / readiness signals:
 
