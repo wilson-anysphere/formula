@@ -271,6 +271,8 @@
 }
 
 .collab-version-history {
+  flex: 1;
+  min-height: 0;
   padding: 12px;
   overflow: auto;
   font-family:
@@ -332,6 +334,9 @@
 }
 
 .branch-manager {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   padding: 12px;
   font-family:
     system-ui,
@@ -389,6 +394,9 @@
 }
 
 .branch-merge {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   padding: 12px;
   font-family:
     system-ui,
