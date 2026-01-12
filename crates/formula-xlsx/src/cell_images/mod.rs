@@ -434,4 +434,42 @@ mod tests {
         assert_eq!(part.images[1].embed_rel_id, "rId2");
         assert_eq!(part.images[1].target.as_deref(), Some("xl/media/image2.png"));
     }
+
+    #[test]
+    fn cell_images_part_preserves_document_order_when_mixing_schemas() {
+        // Mix a lightweight `<cellImage r:id="...">` entry with a `<cellImage><xdr:pic>...</xdr:pic>`
+        // entry and ensure we preserve document order (lightweight first).
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cx:cellImages xmlns:cx="http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages"
+               xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+               xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <cx:cellImage r:id="rId1"/>
+  <cx:cellImage>
+    <xdr:pic>
+      <xdr:blipFill><a:blip r:embed="rId2"/></xdr:blipFill>
+    </xdr:pic>
+  </cx:cellImage>
+</cx:cellImages>"#;
+
+        let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image2.png"/>
+</Relationships>"#;
+
+        let parts: BTreeMap<String, Vec<u8>> = [
+            ("xl/cellImages.xml".to_string(), xml.to_vec()),
+            ("xl/_rels/cellImages.xml.rels".to_string(), rels.to_vec()),
+        ]
+        .into_iter()
+        .collect();
+
+        let part = CellImagesPart::from_parts(&parts)
+            .expect("parse")
+            .expect("expected part");
+        assert_eq!(part.images.len(), 2);
+        assert_eq!(part.images[0].embed_rel_id, "rId1");
+        assert_eq!(part.images[1].embed_rel_id, "rId2");
+    }
 }
