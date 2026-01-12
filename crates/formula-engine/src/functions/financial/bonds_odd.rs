@@ -222,9 +222,8 @@
 //!
 //! Typical validation (Excel-style `#NUM!`):
 //!
-//! - Chronology: `L < S < M`, matching Excel’s odd-last-coupon boundary behavior.
-//!   - Boundary equalities like `L == S` and `S == M` are rejected with `#NUM!` (see
-//!     `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`).
+//! - Chronology: `S < M` and `L < M` (settlement may be **before, on, or after** `L`).
+//!   - `S == M` and `L == M` are rejected with `#NUM!`.
 //! - `rate >= 0`, `yld` (or `pr`) finite, `redemption > 0`
 //! - `frequency ∈ {1,2,4}`, `basis ∈ 0..=4`
 //!
@@ -232,26 +231,39 @@
 //!
 //! Day-count quantities:
 //!
-//! - `A = days(L, S)` accrued days in the last period
 //! - `DLM = days(L, M)` days in the odd last accrual period (last_interest → maturity)
+//! - `E = days(prev_coupon(L), L)` days in a regular coupon period
+//!
+//! If `S >= L` (settlement inside the odd last accrual period), also define:
+//!
+//! - `A = days(L, S)` accrued days in the last period
 //! - `DSM = days(S, M)` days from settlement to maturity
 //!   - For additive day-count conventions (the actual/actual bases `1/2/3`), `DSM == DLM - A`.
 //!   - For 30/360 bases (`0/4`), Excel’s 30/360 day-count is **not strictly additive** across
 //!     intermediate dates; compute `DSM` directly from `(S, M)`.
-//! - `E = days(prev_coupon(L), L)` days in a regular coupon period
+//!
+//! If `S < L`, pricing must include the remaining regular coupon payments through `L` (inclusive),
+//! plus the final odd-stub payment at `M`. Accrued interest is computed from the regular coupon
+//! period containing settlement.
 //!
 //! Cashflows:
 //!
-//! - At `M`: odd last coupon + redemption = `R + C*(DLM/E)`
+//! - At `M`: odd last coupon + redemption = `R + C*(DLM/E)` (always).
+//! - If `S < L`: additional regular coupon payments of `C` at each coupon date from the next
+//!   coupon date after settlement through `L` (inclusive).
 //!
-//! Discounting exponent:
+//! Discounting:
 //!
-//! - `DSM / E` (fraction of a regular period remaining), using the same per-period discount base
-//!   `1 + y` where `y = yld / frequency`:
+//! - Per-period discount base: `1 + y` where `y = yld / frequency`:
 //!   - Domain: require `1 + y > 0` (equivalently `yld > -frequency`).
 //!   - Excel-style errors: `yld == -frequency` → `#DIV/0!`, `yld < -frequency` → `#NUM!`.
+//! - If `S >= L`, the exponent is `DSM / E`.
+//! - If `S < L`, discount regular coupon payments using `PRICE`-style exponents `(DSC/E) + j`, and
+//!   discount the final maturity cashflow by the time to `L` plus the odd stub length `DLM/E`.
 //!
 //! Clean price per 100 face:
+//!
+//! For `S >= L`:
 //!
 //! ```text
 //! PV = ( R + C*(DLM/E) ) / (1+y)^(DSM/E)

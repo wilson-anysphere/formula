@@ -62,16 +62,17 @@ fn oddfyield_rejects_issue_equal_first_coupon() {
 }
 
 #[test]
-fn oddlprice_rejects_settlement_equal_last_interest() {
-    let v = eval_formula("=ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,0.04,100,2,0)");
-    assert_eq!(v, Value::Error(ErrorKind::Num));
+fn oddlprice_allows_settlement_equal_last_interest() {
+    let v = eval_formula(
+        "=ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,0.04,100,2,0)",
+    );
+    assert!(matches!(v, Value::Number(n) if n.is_finite()));
 }
 
 #[test]
-fn oddlyield_rejects_settlement_equal_last_interest() {
-    let v =
-        eval_formula("=ODDLYIELD(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,99,100,2,0)");
-    assert_eq!(v, Value::Error(ErrorKind::Num));
+fn oddlyield_allows_settlement_equal_last_interest() {
+    let v = eval_formula("=ODDLYIELD(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,0.04,100,2,0),100,2,0)");
+    assert!(matches!(v, Value::Number(n) if n.is_finite()));
 }
 
 #[test]

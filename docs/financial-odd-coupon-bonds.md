@@ -83,10 +83,15 @@ When adding odd-coupon coverage to the oracle corpus, prefer:
 - cases that cover both Excel 1900 and 1904 date systems (the engine should match in both)
 
 The generator includes a small set of boundary-date equality cases (e.g. `issue == settlement`,
-`settlement == first_coupon`, `settlement == last_interest`). The engine **rejects** these with
-`#NUM!` (it enforces strict chronology like `issue < settlement < first_coupon` and
-`last_interest < settlement < maturity`; see
-`crates/formula-engine/tests/odd_coupon_date_boundaries.rs`).
+`settlement == first_coupon`, `settlement == last_interest`).
+
+- For **ODDF\***, the engine currently enforces strict chronology like `issue < settlement < first_coupon`.
+- For **ODDL\***, the engine allows settlement dates **on or before** `last_interest` (as well as inside
+  the odd-last stub), matching Excel’s ability to price/yield an odd-last bond even when traded before
+  the final regular coupon date.
+
+See `crates/formula-engine/tests/odd_coupon_date_boundaries.rs` and
+`crates/formula-engine/tests/functions/financial_oddcoupons.rs`.
 
 These cases are tagged as `boundary` + `odd_coupon` and are included in the Excel-oracle CI smoke
 gate so regressions in date validation are caught early. Since the pinned dataset in CI is
@@ -140,13 +145,17 @@ Our implementation follows the standard Excel-style model:
   - Accrued interest: `AI = C * (A/E)`
   - Discount exponent for cashflow `i` on the coupon schedule: `t_i = (DSC/E) + (i-1)`
 - ODDL\*:
-  - `A = days(last_interest, settlement)`
-  - `DLM = days(last_interest, maturity)`
-  - `DSM = days(settlement, maturity)`
-  - `E = regular coupon period length (days)`
-  - Final coupon amount: `Clast = C * (DLM/E)` (so `DLM/E > 1` produces a long last coupon)
-  - Accrued interest: `AI = C * (A/E)`
-  - Discount exponent: `t = DSM/E`
+  - If `settlement >= last_interest` (settlement inside the odd-last stub):
+    - `A = days(last_interest, settlement)`
+    - `DLM = days(last_interest, maturity)`
+    - `DSM = days(settlement, maturity)`
+    - `E = regular coupon period length (days)`
+    - Final coupon amount: `Clast = C * (DLM/E)` (so `DLM/E > 1` produces a long last coupon)
+    - Accrued interest: `AI = C * (A/E)`
+    - Discount exponent: `t = DSM/E`
+  - If `settlement < last_interest`, pricing must include the remaining regular coupon payments through
+    `last_interest` (inclusive) plus the final odd-stub payment at maturity. Accrued interest is
+    computed from the regular coupon period containing settlement.
 
 ### Where the long-stub cases live
 
@@ -172,7 +181,7 @@ date-like inputs are truncated to integers before validation:
 The current engine implementation enforces:
 
 - ODDF\*: `issue < settlement < first_coupon <= maturity`
-- ODDL\*: `last_interest < settlement < maturity`
+- ODDL\*: `settlement < maturity` and `last_interest < maturity` (settlement may be before/at/after `last_interest`)
 
 These boundaries are covered by:
 
