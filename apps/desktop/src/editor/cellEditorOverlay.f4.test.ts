@@ -40,7 +40,7 @@ describe("CellEditorOverlay F4 absolute reference toggle", () => {
     overlay.element.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
 
     expect(overlay.element.value).toBe("=$A$1");
-    expect(overlay.element.selectionStart).toBe(5);
+    expect(overlay.element.selectionStart).toBe(1);
     expect(overlay.element.selectionEnd).toBe(5);
 
     overlay.close();
@@ -79,8 +79,8 @@ describe("CellEditorOverlay F4 absolute reference toggle", () => {
     overlay.element.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
 
     expect(overlay.element.value).toBe("='My Sheet'!$A$1:$B$2");
-    // Caret should still be at the end of the token after expansion.
-    expect(overlay.element.selectionStart).toBe(overlay.element.value.length);
+    // Keep the full toggled token selected.
+    expect(overlay.element.selectionStart).toBe(1);
     expect(overlay.element.selectionEnd).toBe(overlay.element.value.length);
 
     overlay.close();

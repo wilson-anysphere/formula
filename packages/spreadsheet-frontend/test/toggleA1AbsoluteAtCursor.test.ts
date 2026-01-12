@@ -30,8 +30,8 @@ describe("toggleA1AbsoluteAtCursor", () => {
   it("treats the end of a reference token as being inside the token", () => {
     const res = toggleA1AbsoluteAtCursor("=A1", 3, 3);
     expect(res?.text).toBe("=$A$1");
-    // Caret should stay at the end of the token after expansion.
-    expect(res?.cursorStart).toBe(5);
+    // Keep the full toggled token selected so repeated F4 presses keep cycling it.
+    expect(res?.cursorStart).toBe(1);
     expect(res?.cursorEnd).toBe(5);
   });
 

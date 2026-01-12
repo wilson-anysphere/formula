@@ -57,7 +57,6 @@ export function toggleA1AbsoluteAtCursor(
   // absolute/relative mode and selects the entire updated token so repeated presses keep
   // cycling the same reference (and range-drag insertion can replace it).
   const selectionIsCaret = selMin === selMax;
-  const caretAtTokenEnd = selectionIsCaret && selMin === active.end;
 
   const delta = toggled.text.length - oldTokenText.length;
 
@@ -86,13 +85,7 @@ export function toggleA1AbsoluteAtCursor(
   } else if (selectionIsCaret) {
     const tokenStart = active.start;
     const tokenEnd = active.start + toggled.text.length;
-    // Treat a caret at the end of the reference token as "inside" the token for toggling, but
-    // preserve the user's intent to continue typing after the token by keeping the caret at the
-    // end (rather than selecting the whole token).
-    if (caretAtTokenEnd) {
-      nextCursorStart = tokenEnd;
-      nextCursorEnd = tokenEnd;
-    } else if (start <= end) {
+    if (start <= end) {
       nextCursorStart = tokenStart;
       nextCursorEnd = tokenEnd;
     } else {
