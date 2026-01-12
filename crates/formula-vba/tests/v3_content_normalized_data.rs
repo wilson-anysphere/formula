@@ -1165,7 +1165,8 @@ fn v3_content_normalized_data_resolves_module_stream_name_from_unicode_record_va
 #[test]
 fn project_normalized_data_v3_includes_project_properties_and_resolves_unicode_module_stream_name() {
     let vba_bin = build_project_unicode_only_module_stream_name_with_project_stream();
-    let normalized = project_normalized_data_v3(&vba_bin).expect("ProjectNormalizedData v3");
+    let normalized =
+        project_normalized_data_v3_transcript(&vba_bin).expect("ProjectNormalizedData v3");
 
     let mut expected = Vec::new();
     // Filtered PROJECT stream properties (CRLF normalized).
