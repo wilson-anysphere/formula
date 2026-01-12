@@ -18,6 +18,7 @@ import * as Y from "yjs";
  *
  * @typedef {"none" | "gzip"} SnapshotCompression
  * @typedef {"chunks" | "base64"} SnapshotEncoding
+ * @typedef {"single" | "stream"} WriteMode
  */
 
 function bytesToBase64(bytes) {
@@ -232,6 +233,8 @@ export class YjsVersionStore {
    *   chunkSize?: number;
    *   compression?: SnapshotCompression;
    *   snapshotEncoding?: SnapshotEncoding;
+   *   writeMode?: WriteMode;
+   *   maxChunksPerTransaction?: number;
    * }} opts
    */
   constructor(opts) {
@@ -243,6 +246,9 @@ export class YjsVersionStore {
     this.compression = opts.compression ?? "none";
     /** @type {SnapshotEncoding} */
     this.snapshotEncoding = opts.snapshotEncoding ?? "chunks";
+    /** @type {WriteMode} */
+    this.writeMode = opts.writeMode ?? "single";
+    this.maxChunksPerTransaction = opts.maxChunksPerTransaction ?? null;
 
     if (this.chunkSize <= 0) throw new Error("YjsVersionStore: chunkSize must be > 0");
     if (this.compression !== "none" && this.compression !== "gzip") {
@@ -250,6 +256,18 @@ export class YjsVersionStore {
     }
     if (this.snapshotEncoding !== "chunks" && this.snapshotEncoding !== "base64") {
       throw new Error(`YjsVersionStore: invalid snapshotEncoding: ${this.snapshotEncoding}`);
+    }
+    if (this.writeMode !== "single" && this.writeMode !== "stream") {
+      throw new Error(`YjsVersionStore: invalid writeMode: ${this.writeMode}`);
+    }
+    if (this.maxChunksPerTransaction != null) {
+      if (
+        typeof this.maxChunksPerTransaction !== "number" ||
+        !Number.isFinite(this.maxChunksPerTransaction) ||
+        this.maxChunksPerTransaction <= 0
+      ) {
+        throw new Error("YjsVersionStore: maxChunksPerTransaction must be a positive number");
+      }
     }
 
     /** @type {Y.Map<any>} */
@@ -288,6 +306,24 @@ export class YjsVersionStore {
 
     const localModuleId = abstractTypeSuperclass(Y.Map);
     if (moduleId === localModuleId) return Y.Array;
+
+    // Fast path: probe the Yjs constructors used to create `doc` so we can
+    // allocate nested arrays even when different Yjs module instances are loaded
+    // (e.g. pnpm workspaces where y-websocket uses CJS `require("yjs")` and the
+    // app uses ESM `import "yjs"`).
+    const DocCtor = /** @type {any} */ (this.doc)?.constructor;
+    if (typeof DocCtor === "function") {
+      try {
+        const probe = new DocCtor();
+        const probeMapCtor = probe.getMap("__versioning_store_ctor_probe_map").constructor;
+        if (abstractTypeSuperclass(probeMapCtor) === moduleId) {
+          const probeArrayCtor = probe.getArray("__versioning_store_ctor_probe_array").constructor;
+          if (abstractTypeSuperclass(probeArrayCtor) === moduleId) return probeArrayCtor;
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     const existingOrder = this.meta.get("order");
     if (isYArray(existingOrder)) {
@@ -335,43 +371,138 @@ export class YjsVersionStore {
     const snapshot = normalizeSnapshotBytes(version.snapshot);
     const compression = this.compression;
     const snapshotBytes = await compressSnapshot(snapshot, compression);
-    const desiredSnapshotEncoding = this.snapshotEncoding;
+    const desiredSnapshotEncoding = this.writeMode === "stream" ? "chunks" : this.snapshotEncoding;
 
-    this.doc.transact(() => {
-      const MapCtor = mapConstructor(this.versions);
-      const arrayCtor =
-        desiredSnapshotEncoding === "chunks" ? this._inferArrayCtorForMapCtor(MapCtor) : null;
-      const actualSnapshotEncoding =
-        desiredSnapshotEncoding === "chunks" && arrayCtor ? "chunks" : "base64";
-      /** @type {Y.Map<any>} */
-      const record = new MapCtor();
-      record.set("schemaVersion", 1);
-      record.set("id", version.id);
-      record.set("kind", version.kind);
-      record.set("timestampMs", version.timestampMs);
-      record.set("userId", version.userId ?? null);
-      record.set("userName", version.userName ?? null);
-      record.set("description", version.description ?? null);
-      record.set("checkpointName", version.checkpointName ?? null);
-      record.set("checkpointLocked", version.checkpointLocked ?? null);
-      record.set("checkpointAnnotations", version.checkpointAnnotations ?? null);
+    if (this.writeMode !== "stream") {
+      this.doc.transact(() => {
+        const MapCtor = mapConstructor(this.versions);
+        const arrayCtor =
+          desiredSnapshotEncoding === "chunks" ? this._inferArrayCtorForMapCtor(MapCtor) : null;
+        const actualSnapshotEncoding =
+          desiredSnapshotEncoding === "chunks" && arrayCtor ? "chunks" : "base64";
+        /** @type {Y.Map<any>} */
+        const record = new MapCtor();
+        record.set("schemaVersion", 1);
+        record.set("id", version.id);
+        record.set("kind", version.kind);
+        record.set("timestampMs", version.timestampMs);
+        record.set("userId", version.userId ?? null);
+        record.set("userName", version.userName ?? null);
+        record.set("description", version.description ?? null);
+        record.set("checkpointName", version.checkpointName ?? null);
+        record.set("checkpointLocked", version.checkpointLocked ?? null);
+        record.set("checkpointAnnotations", version.checkpointAnnotations ?? null);
 
-      record.set("compression", compression);
-      record.set("snapshotEncoding", actualSnapshotEncoding);
+        record.set("compression", compression);
+        record.set("snapshotEncoding", actualSnapshotEncoding);
 
-      if (actualSnapshotEncoding === "base64") {
+        if (actualSnapshotEncoding === "base64") {
+          record.set("snapshotBase64", bytesToBase64(snapshotBytes));
+        } else {
+          const chunks = splitIntoChunks(snapshotBytes, this.chunkSize);
+          const arr = new arrayCtor();
+          arr.push(chunks);
+          record.set("snapshotChunks", arr);
+        }
+
+        this.versions.set(version.id, record);
+
+        const order = this._ensureOrderArray();
+        if (order) order.push([version.id]);
+      }, "versioning-store");
+      return;
+    }
+
+    // Streaming mode: write the record metadata first, then append snapshot chunks
+    // across multiple transactions so each Yjs update stays small enough for the
+    // sync-server's `SYNC_SERVER_MAX_MESSAGE_BYTES` limit.
+    const MapCtor = mapConstructor(this.versions);
+    const arrayCtor = this._inferArrayCtorForMapCtor(MapCtor);
+    if (!arrayCtor) {
+      // Fallback: if we can't create a compatible Y.Array constructor for nested
+      // chunk arrays (multiple yjs instances loaded), store as base64 in a single
+      // update. This matches legacy behavior (and may still exceed message limits
+      // for very large snapshots).
+      this.doc.transact(() => {
+        /** @type {Y.Map<any>} */
+        const record = new MapCtor();
+        record.set("schemaVersion", 1);
+        record.set("id", version.id);
+        record.set("kind", version.kind);
+        record.set("timestampMs", version.timestampMs);
+        record.set("userId", version.userId ?? null);
+        record.set("userName", version.userName ?? null);
+        record.set("description", version.description ?? null);
+        record.set("checkpointName", version.checkpointName ?? null);
+        record.set("checkpointLocked", version.checkpointLocked ?? null);
+        record.set("checkpointAnnotations", version.checkpointAnnotations ?? null);
+
+        record.set("compression", compression);
+        record.set("snapshotEncoding", "base64");
         record.set("snapshotBase64", bytesToBase64(snapshotBytes));
-      } else {
-        const chunks = splitIntoChunks(snapshotBytes, this.chunkSize);
-        const arr = new arrayCtor();
-        arr.push(chunks);
-        record.set("snapshotChunks", arr);
-      }
 
-      this.versions.set(version.id, record);
+        this.versions.set(version.id, record);
+        const order = this._ensureOrderArray();
+        if (order) order.push([version.id]);
+      }, "versioning-store");
+      return;
+    }
+
+    const chunks = splitIntoChunks(snapshotBytes, this.chunkSize);
+    const maxChunksPerTransaction =
+      this.maxChunksPerTransaction ?? Math.max(1, Math.floor((256 * 1024) / this.chunkSize));
+
+    /** @type {any} */
+    let record = null;
+    this.doc.transact(() => {
+      /** @type {Y.Map<any>} */
+      const r = new MapCtor();
+      r.set("schemaVersion", 1);
+      r.set("id", version.id);
+      r.set("kind", version.kind);
+      r.set("timestampMs", version.timestampMs);
+      r.set("userId", version.userId ?? null);
+      r.set("userName", version.userName ?? null);
+      r.set("description", version.description ?? null);
+      r.set("checkpointName", version.checkpointName ?? null);
+      r.set("checkpointLocked", version.checkpointLocked ?? null);
+      r.set("checkpointAnnotations", version.checkpointAnnotations ?? null);
+
+      r.set("compression", compression);
+      r.set("snapshotEncoding", "chunks");
+      r.set("snapshotChunkCountExpected", chunks.length);
+
+      const arr = new arrayCtor();
+      r.set("snapshotChunks", arr);
+      r.set("snapshotComplete", false);
+
+      this.versions.set(version.id, r);
 
       const order = this._ensureOrderArray();
       if (order) order.push([version.id]);
+      record = r;
+    }, "versioning-store");
+
+    // Append chunks in batches, each in its own Yjs transaction/update.
+    for (let i = 0; i < chunks.length; i += maxChunksPerTransaction) {
+      const batch = chunks.slice(i, Math.min(i + maxChunksPerTransaction, chunks.length));
+      this.doc.transact(() => {
+        const raw = record ?? this.versions.get(version.id);
+        if (!isYMap(raw)) {
+          throw new Error(`YjsVersionStore: missing streamed version record for ${version.id}`);
+        }
+        const chunksArr = raw.get("snapshotChunks");
+        if (!isYArray(chunksArr)) {
+          throw new Error(`YjsVersionStore: missing snapshotChunks for ${version.id}`);
+        }
+        chunksArr.push(batch);
+      }, "versioning-store");
+    }
+
+    this.doc.transact(() => {
+      const raw = record ?? this.versions.get(version.id);
+      if (!isYMap(raw)) return;
+      raw.set("snapshotComplete", true);
     }, "versioning-store");
   }
 
@@ -400,6 +531,11 @@ export class YjsVersionStore {
       throw new Error(`YjsVersionStore: invalid timestampMs for ${versionId}`);
     }
 
+    // Streaming writes may produce partially-written versions. Avoid surfacing
+    // these until the snapshot blob has been fully appended.
+    const snapshotCompleteRaw = raw.get("snapshotComplete");
+    if (snapshotCompleteRaw === false) return null;
+
     /** @type {SnapshotCompression} */
     const compression = raw.get("compression") ?? "none";
     /** @type {SnapshotEncoding} */
@@ -411,15 +547,13 @@ export class YjsVersionStore {
     let stored;
     if (snapshotEncoding === "base64") {
       const base64 = raw.get("snapshotBase64");
-      if (typeof base64 !== "string") {
-        throw new Error(`YjsVersionStore: missing snapshotBase64 for ${versionId}`);
-      }
+      if (typeof base64 !== "string") return null;
       stored = base64ToBytes(base64);
     } else if (snapshotEncoding === "chunks") {
       const chunksArr = raw.get("snapshotChunks");
-      if (!isYArray(chunksArr)) {
-        throw new Error(`YjsVersionStore: missing snapshotChunks for ${versionId}`);
-      }
+      if (!isYArray(chunksArr)) return null;
+      const expectedChunks = raw.get("snapshotChunkCountExpected");
+      if (typeof expectedChunks === "number" && chunksArr.length < expectedChunks) return null;
       const chunksRaw = chunksArr.toArray();
       /** @type {Uint8Array[]} */
       const chunks = [];
