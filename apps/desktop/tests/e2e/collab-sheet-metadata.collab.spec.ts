@@ -105,6 +105,7 @@ test.describe("collaboration: sheet metadata", () => {
         value: "Sheet1",
         options: [{ value: "Sheet1", label: "Sheet1" }],
       });
+      await expect(pageB.getByTestId("sheet-position")).toHaveText("Sheet 1 of 1", { timeout: 30_000 });
 
       // 1) Add a new sheet entry directly in Yjs (simulates version restore / branch checkout).
       await pageA.evaluate(() => {
@@ -154,6 +155,7 @@ test.describe("collaboration: sheet metadata", () => {
           { value: "Sheet2", label: "Sheet2" },
         ],
       });
+      await expect(pageB.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2", { timeout: 30_000 });
 
       // 1.5) Perform sheet-tab UI actions on client A and assert they propagate to client B
       // via the shared session.sheets schema (this exercises CollabWorkbookSheetStore write-backs).
@@ -180,6 +182,7 @@ test.describe("collaboration: sheet metadata", () => {
       await menuA.getByRole("button", { name: "Hide", exact: true }).click();
       await expect(pageA.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0);
       await expect(pageB.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0, { timeout: 30_000 });
+      await expect(pageB.getByTestId("sheet-position")).toHaveText("Sheet 1 of 1", { timeout: 30_000 });
 
       // Unhide Sheet2.
       const sheet1TabA = pageA.getByTestId("sheet-tab-Sheet1");
@@ -202,6 +205,7 @@ test.describe("collaboration: sheet metadata", () => {
       await menuA.getByRole("button", { name: "Sheet2" }).click();
       await expect(pageA.getByTestId("sheet-tab-Sheet2")).toBeVisible();
       await expect(pageB.getByTestId("sheet-tab-Sheet2")).toBeVisible({ timeout: 30_000 });
+      await expect(pageB.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2", { timeout: 30_000 });
 
       // Set Sheet2 tab color (pick a non-red color so we can distinguish from Sheet1 later).
       await pageA.evaluate(() => {
@@ -330,6 +334,7 @@ test.describe("collaboration: sheet metadata", () => {
           { value: "Sheet1", label: "Budget" },
         ],
       });
+      await expect(pageB.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2", { timeout: 30_000 });
 
       // 3.5) Mark Sheet2 as "veryHidden" and ensure it is not shown in the tab UI.
       await pageA.evaluate(() => {
@@ -355,6 +360,7 @@ test.describe("collaboration: sheet metadata", () => {
         value: "Sheet1",
         options: [{ value: "Sheet1", label: "Budget" }],
       });
+      await expect(pageB.getByTestId("sheet-position")).toHaveText("Sheet 1 of 1", { timeout: 30_000 });
 
       // 3.6) Restore Sheet2 to visible and ensure it reappears.
       await pageA.evaluate(() => {
@@ -389,6 +395,7 @@ test.describe("collaboration: sheet metadata", () => {
           { value: "Sheet1", label: "Budget" },
         ],
       });
+      await expect(pageB.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2", { timeout: 30_000 });
 
       // 4) Hide the currently active sheet (Sheet1) and ensure the UI auto-switches.
       await expect
@@ -420,6 +427,7 @@ test.describe("collaboration: sheet metadata", () => {
         value: "Sheet2",
         options: [{ value: "Sheet2", label: "Expenses" }],
       });
+      await expect(pageB.getByTestId("sheet-position")).toHaveText("Sheet 1 of 1", { timeout: 30_000 });
 
       // 5) Unhide Sheet1 and ensure the tab returns (while staying on Sheet2).
       await pageA.evaluate(() => {
@@ -453,6 +461,7 @@ test.describe("collaboration: sheet metadata", () => {
           { value: "Sheet1", label: "Budget" },
         ],
       });
+      await expect(pageB.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2", { timeout: 30_000 });
 
       // 6) Remove Sheet1 entirely and ensure the remaining client stays on Sheet2.
       await pageA.evaluate(() => {
@@ -480,6 +489,7 @@ test.describe("collaboration: sheet metadata", () => {
         value: "Sheet2",
         options: [{ value: "Sheet2", label: "Expenses" }],
       });
+      await expect(pageB.getByTestId("sheet-position")).toHaveText("Sheet 1 of 1", { timeout: 30_000 });
     } finally {
       await Promise.allSettled([contextA.close(), contextB.close()]);
       await server.stop().catch(() => {});
