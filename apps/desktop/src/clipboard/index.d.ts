@@ -19,6 +19,7 @@ export type ClipboardWritePayload = {
   imagePng?: Uint8Array | Blob;
   pngBase64?: string;
 };
+export type PasteSpecialMode = "all" | "values" | "formulas" | "formats";
 
 export type ClipboardProvider = {
   read(): Promise<ClipboardContent>;
@@ -36,6 +37,14 @@ export function getCellGridFromRange(doc: any, sheetId: string, range: any): any
 export function serializeCellGridToClipboardPayload(grid: any[][]): ClipboardWritePayload;
 
 export function serializeCellGridToRtf(grid: any[][]): string;
+
+export function pasteClipboardContent(
+  doc: any,
+  sheetId: string,
+  start: any,
+  content: ClipboardContent,
+  options?: { mode?: PasteSpecialMode },
+): boolean;
 
 export function copyRangeToClipboardPayload(
   doc: any,
