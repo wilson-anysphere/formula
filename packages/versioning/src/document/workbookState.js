@@ -149,14 +149,16 @@ function normalizeRangeRuns(raw) {
   if (!Array.isArray(raw)) return out;
   for (const run of raw) {
     if (!run || typeof run !== "object") continue;
-    const startRow = Number(run.startRow ?? run.start?.row ?? run.sr);
-    const startCol = Number(run.startCol ?? run.start?.col ?? run.sc);
-    const endRow = Number(run.endRow ?? run.end?.row ?? run.er);
-    const endCol = Number(run.endCol ?? run.end?.col ?? run.ec);
+    let startRow = Number(run.startRow ?? run.start?.row ?? run.sr);
+    let startCol = Number(run.startCol ?? run.start?.col ?? run.sc);
+    let endRow = Number(run.endRow ?? run.end?.row ?? run.er);
+    let endCol = Number(run.endCol ?? run.end?.col ?? run.ec);
     if (!Number.isInteger(startRow) || startRow < 0) continue;
     if (!Number.isInteger(startCol) || startCol < 0) continue;
     if (!Number.isInteger(endRow) || endRow < 0) continue;
     if (!Number.isInteger(endCol) || endCol < 0) continue;
+    if (endRow < startRow) [startRow, endRow] = [endRow, startRow];
+    if (endCol < startCol) [startCol, endCol] = [endCol, startCol];
     const format = extractStyleObject(run.format ?? run.style ?? run.value);
     if (!format) continue;
     out.push({ startRow, startCol, endRow, endCol, format });
@@ -325,6 +327,17 @@ export function workbookStateFromDocumentSnapshot(snapshot) {
 
     /** @type {Map<string, any>} */
     const cells = new Map();
+    /**
+     * Apply range format runs without enumerating the full sheet:
+     * - Build a sparse index of stored cells by row
+     * - For each run, visit only rows that contain stored cells
+     *
+     * Worst-case still depends on overlap (`#(runs ∩ cells)`), but avoids O(cells * runs)
+     * when runs are sparse/non-overlapping.
+     */
+    /** @type {Map<number, Array<{ row: number, col: number, key: string, value: any, formula: any, format: any, cellFormat: any }>>} */
+    const cellsByRow = new Map();
+
     const entries = Array.isArray(sheet?.cells) ? sheet.cells : [];
     for (const entry of entries) {
       const row = Number(entry?.row);
@@ -332,22 +345,69 @@ export function workbookStateFromDocumentSnapshot(snapshot) {
       if (!Number.isInteger(row) || row < 0) continue;
       if (!Number.isInteger(col) || col < 0) continue;
 
-      // Compute effective (layered) format without enumerating the full sheet.
-      // Precedence (low -> high): sheet default, column default, row default, range runs, cell override.
-      const cellFormat = extractStyleObject(entry?.format ?? entry?.style);
-      let merged = deepMerge(deepMerge(sheetDefaultFormat ?? {}, colFormats.get(col) ?? null), rowFormats.get(row) ?? null);
-      for (const run of formatRuns) {
-        if (row < run.startRow || row > run.endRow) continue;
-        if (col < run.startCol || col > run.endCol) continue;
-        merged = deepMerge(merged, run.format);
-      }
-      merged = deepMerge(merged, cellFormat);
-      const effective = normalizeFormat(merged);
-      cells.set(cellKey(row, col), {
+      const key = cellKey(row, col);
+      const base = deepMerge(deepMerge(sheetDefaultFormat ?? {}, colFormats.get(col) ?? null), rowFormats.get(row) ?? null);
+      const record = {
+        row,
+        col,
+        key,
         value: entry?.value ?? null,
         formula: entry?.formula ?? null,
-        format: effective,
-      });
+        format: base,
+        cellFormat: extractStyleObject(entry?.format ?? entry?.style),
+      };
+      const bucket = cellsByRow.get(row) ?? [];
+      bucket.push(record);
+      cellsByRow.set(row, bucket);
+    }
+
+    if (formatRuns.length > 0 && cellsByRow.size > 0) {
+      const sortedRows = Array.from(cellsByRow.keys()).sort((a, b) => a - b);
+      const lowerBound = (arr, value) => {
+        let lo = 0;
+        let hi = arr.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (arr[mid] < value) lo = mid + 1;
+          else hi = mid;
+        }
+        return lo;
+      };
+      const upperBound = (arr, value) => {
+        let lo = 0;
+        let hi = arr.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (arr[mid] <= value) lo = mid + 1;
+          else hi = mid;
+        }
+        return lo;
+      };
+
+      for (const run of formatRuns) {
+        const startIdx = lowerBound(sortedRows, run.startRow);
+        const endIdx = upperBound(sortedRows, run.endRow);
+        for (let i = startIdx; i < endIdx; i++) {
+          const row = sortedRows[i];
+          const bucket = cellsByRow.get(row);
+          if (!bucket) continue;
+          for (const record of bucket) {
+            if (record.col < run.startCol || record.col > run.endCol) continue;
+            record.format = deepMerge(record.format, run.format);
+          }
+        }
+      }
+    }
+
+    for (const bucket of cellsByRow.values()) {
+      for (const record of bucket) {
+        const merged = deepMerge(record.format, record.cellFormat);
+        cells.set(record.key, {
+          value: record.value,
+          formula: record.formula,
+          format: normalizeFormat(merged),
+        });
+      }
     }
 
     cellsBySheet.set(id, { cells });
