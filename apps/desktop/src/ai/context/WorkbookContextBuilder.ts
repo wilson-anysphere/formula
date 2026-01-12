@@ -363,19 +363,19 @@ export class WorkbookContextBuilder {
           readBlockCellCount: 0,
           readBlockCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
           readBlockCellCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
-          cache: {
-            schema: { hits: 0, misses: 0 },
-            block: { hits: 0, misses: 0 },
-          },
-           rag: { enabled: false, retrievedCount: 0, retrievedBlockCount: 0 },
-           timingsMs: {
-             ragMs: 0,
-             schemaMs: 0,
-             readBlockMs: 0,
+           cache: {
+             schema: { hits: 0, misses: 0 },
+             block: { hits: 0, misses: 0 },
+           },
+          rag: { enabled: false, retrievedCount: 0, retrievedBlockCount: 0 },
+          timingsMs: {
+            ragMs: 0,
+            schemaMs: 0,
+            readBlockMs: 0,
             promptContextMs: 0,
-           readBlockMsByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
-         },
-       }
+            readBlockMsByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
+          },
+        }
       : null;
     const selection = input.selectedRange;
     const schemaProvider = this.options.schemaProvider ?? null;
