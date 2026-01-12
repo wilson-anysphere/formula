@@ -82,10 +82,36 @@ export function registerBuiltinCommands(params: {
     }
   };
 
+  const getTextEditingTarget = (): HTMLElement | null => {
+    if (typeof document === "undefined") return null;
+    const target = document.activeElement as HTMLElement | null;
+    if (!target) return null;
+    const tag = target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return target;
+    return null;
+  };
+
+  const tryExecCommand = (command: string): boolean => {
+    if (typeof document === "undefined") return false;
+    try {
+      return document.execCommand(command, false);
+    } catch {
+      return false;
+    }
+  };
+
   commandRegistry.registerBuiltinCommand(
     "edit.undo",
     t("command.edit.undo"),
-    () => app.undo(),
+    () => {
+      // Excel-like behavior: when focus is in a text editing surface, undo/redo should
+      // apply to that surface instead of spreadsheet history.
+      if (getTextEditingTarget()) {
+        tryExecCommand("undo");
+        return;
+      }
+      app.undo();
+    },
     {
       category: t("commandCategory.editing"),
       icon: null,
@@ -97,7 +123,13 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "edit.redo",
     t("command.edit.redo"),
-    () => app.redo(),
+    () => {
+      if (getTextEditingTarget()) {
+        tryExecCommand("redo");
+        return;
+      }
+      app.redo();
+    },
     {
       category: t("commandCategory.editing"),
       icon: null,

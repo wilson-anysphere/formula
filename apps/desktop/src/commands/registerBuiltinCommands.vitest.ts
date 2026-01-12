@@ -210,4 +210,52 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
     expect(app.toggleAuditingPrecedents).toHaveBeenCalledTimes(1);
     expect(app.toggleAuditingDependents).toHaveBeenCalledTimes(1);
   });
+
+  it("uses document.execCommand for undo/redo when a text input is focused", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    const app = {
+      undo: vi.fn(),
+      redo: vi.fn(),
+      isEditing: vi.fn(() => false),
+      toggleShowFormulas: vi.fn(),
+      toggleAuditingPrecedents: vi.fn(),
+      toggleAuditingDependents: vi.fn(),
+    } as any;
+
+    const execCommand = vi.fn(() => true);
+    const prevDocument = (globalThis as any).document;
+    (globalThis as any).document = {
+      activeElement: { tagName: "INPUT", isContentEditable: false },
+      execCommand,
+    };
+
+    try {
+      registerBuiltinCommands({ commandRegistry, app, layoutController });
+      await commandRegistry.executeCommand("edit.undo");
+      await commandRegistry.executeCommand("edit.redo");
+    } finally {
+      if (prevDocument === undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (globalThis as any).document;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (globalThis as any).document = prevDocument;
+      }
+    }
+
+    expect(execCommand).toHaveBeenCalledWith("undo", false);
+    expect(execCommand).toHaveBeenCalledWith("redo", false);
+    expect(app.undo).not.toHaveBeenCalled();
+    expect(app.redo).not.toHaveBeenCalled();
+  });
 });
