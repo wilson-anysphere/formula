@@ -125,3 +125,43 @@ test("Ctrl/Cmd+1 triggers Format Cells shortcut", () => {
   assert.equal(count, 1);
   assert.equal(prevented, true);
 });
+
+test("toggleBold on a full column selection is fast + uses effective (layered) formats", () => {
+  const doc = new DocumentController();
+
+  // Ensure the sheet exists in the model.
+  doc.getCell("Sheet1", "A1");
+
+  // Simulate layered formats: column A is bold by default, while individual cells in the
+  // column keep `styleId=0` (no cell override).
+  const sheet = doc.model.sheets.get("Sheet1");
+  const boldStyleId = doc.styleTable.intern({ font: { bold: true } });
+  sheet.colStyleIds.set(0, boldStyleId);
+
+  // The regression here is a full-column range in Excel row space. This should not
+  // enumerate ~1 million rows just to determine the toggle state.
+  const fullColumnA = "A1:A1048576";
+
+  // Guardrail: the previous implementation called `getCell()` once per row; cap it.
+  const originalGetCell = doc.getCell.bind(doc);
+  let getCellCalls = 0;
+  doc.getCell = (...args) => {
+    getCellCalls += 1;
+    if (getCellCalls > 10_000) {
+      throw new Error(`toggleBold performed O(rows) getCell calls (${getCellCalls})`);
+    }
+    return originalGetCell(...args);
+  };
+
+  // Stub the write so the test only exercises the read-path (toggle state), not the
+  // implementation details of applying formats to huge ranges.
+  let lastPatch = null;
+  doc.setRangeFormat = (_sheetId, _range, patch) => {
+    lastPatch = patch;
+  };
+
+  toggleBold(doc, "Sheet1", fullColumnA);
+
+  // Column A is effectively bold, so toggleBold should toggle *off* (set bold=false).
+  assert.deepEqual(lastPatch, { font: { bold: false } });
+});

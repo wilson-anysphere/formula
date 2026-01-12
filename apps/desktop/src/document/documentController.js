@@ -1216,7 +1216,6 @@ export class DocumentController {
    */
   getCellFormat(sheetId, coord) {
     const c = typeof coord === "string" ? parseA1(coord) : coord;
-
     // Ensure the sheet is materialized (DocumentController is lazily sheet-creating).
     const cell = this.model.getCell(sheetId, c.row, c.col);
     const sheet = this.model.sheets.get(sheetId);
