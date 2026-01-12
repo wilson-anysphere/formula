@@ -7641,17 +7641,49 @@ export class SpreadsheetApp {
     }
 
     const fillCoordScratch = { row: 0, col: 0 };
+    const getCellComputedValue = (row: number, col: number) => {
+      fillCoordScratch.row = row;
+      fillCoordScratch.col = col;
+      return this.getCellComputedValue(fillCoordScratch) as any;
+    };
+
+    const wasm = this.wasmEngine;
+    if (wasm && mode !== "copy") {
+      const task = applyFillCommitToDocumentControllerWithFormulaRewrite({
+        document: this.document,
+        sheetId: this.sheetId,
+        sourceRange: source,
+        targetRange: deltaRange,
+        mode,
+        getCellComputedValue,
+        rewriteFormulasForCopyDelta: (requests) => wasm.rewriteFormulasForCopyDelta(requests),
+        label: "Fill",
+      })
+        .catch(() => {
+          applyFillCommitToDocumentController({
+            document: this.document,
+            sheetId: this.sheetId,
+            sourceRange: source,
+            targetRange: deltaRange,
+            mode,
+            getCellComputedValue,
+          });
+        })
+        .finally(() => {
+          this.refresh();
+          this.focus();
+        });
+      this.idle.track(task);
+      return true;
+    }
+
     applyFillCommitToDocumentController({
       document: this.document,
       sheetId: this.sheetId,
       sourceRange: source,
       targetRange: deltaRange,
       mode,
-      getCellComputedValue: (row, col) => {
-        fillCoordScratch.row = row;
-        fillCoordScratch.col = col;
-        return this.getCellComputedValue(fillCoordScratch) as any;
-      }
+      getCellComputedValue,
     });
     return true;
   }
