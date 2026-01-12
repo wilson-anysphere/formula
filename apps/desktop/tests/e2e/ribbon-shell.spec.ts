@@ -7,13 +7,14 @@ test.describe("ribbon shell smoke", () => {
     await gotoDesktop(page);
     await waitForDesktopReady(page);
 
+    // The desktop shell mounts the Titlebar component into `#titlebar-root`.
     await expect(page.getByTestId("titlebar").locator(".formula-titlebar")).toBeVisible();
 
     const ribbon = page.getByTestId("ribbon-root");
     await expect(ribbon).toBeVisible();
 
     // Ensure the AI panel toggle is available in the desktop shell.
-    const toggleAiChatPanel = page.getByTestId("open-panel-ai-chat");
+    const toggleAiChatPanel = ribbon.getByTestId("open-panel-ai-chat");
     await expect(toggleAiChatPanel).toBeVisible();
     await toggleAiChatPanel.click();
     await expect(page.getByTestId("dock-right").getByTestId("panel-aiChat")).toBeVisible();

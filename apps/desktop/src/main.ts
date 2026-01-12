@@ -2240,7 +2240,8 @@ if (
         app.activateSheet(id);
         app.focus();
 
-        return { id, name: workbookSheetStore.getName(id) ?? resolvedName || sheetName || id };
+        // Note: `??` cannot be mixed with `||` without parentheses (syntax error in JS).
+        return { id, name: workbookSheetStore.getName(id) ?? (resolvedName || sheetName || id) };
       }
 
       // Web-only behavior: create a local DocumentController sheet lazily.
@@ -3160,12 +3161,6 @@ if (
     openGridContextMenuAtPoint(anchorX, anchorY);
   });
 
-  const isEditableTarget = (target: EventTarget | null): boolean => {
-    const el = target as HTMLElement | null;
-    if (!el) return false;
-    return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
-  };
-
   const openGridContextMenuAtActiveCell = () => {
     const rect = app.getActiveCellRect();
     if (rect) {
@@ -3181,7 +3176,7 @@ if (
     "keydown",
     (e) => {
       if (e.defaultPrevented) return;
-      if (isEditableTarget(e.target)) return;
+      if (isEditableTarget(e.target as HTMLElement | null)) return;
 
       const shouldOpen = (e.shiftKey && e.key === "F10") || e.key === "ContextMenu" || e.code === "ContextMenu";
       if (!shouldOpen) return;
