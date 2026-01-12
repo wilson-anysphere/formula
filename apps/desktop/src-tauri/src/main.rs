@@ -88,11 +88,6 @@ fn apply_cross_origin_isolation_headers(response: &mut Response<Vec<u8>>) {
     );
 }
 
-#[derive(Debug, Default)]
-struct OpenFileState {
-    ready: bool,
-    pending_paths: Vec<String>,
-}
 type SharedOpenFileState = Arc<Mutex<OpenFileState>>;
 
 #[derive(Debug, Default)]
@@ -1136,7 +1131,7 @@ fn main() {
                     shared_array_buffer: bool,
                     worker_ok: bool,
                 }
- 
+
                 window.listen("coi-check-result", |event| {
                     let payload = event.payload();
                     if payload.trim().is_empty() {
@@ -1163,11 +1158,11 @@ fn main() {
                     std::process::exit(if ok { 0 } else { 1 });
                 });
 
-                     window
+                window
                     .eval(
                         r#"
-(() => {
-  const deadline = Date.now() + 10_000;
+ (() => {
+   const deadline = Date.now() + 10_000;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const runWorker = (url, opts) =>

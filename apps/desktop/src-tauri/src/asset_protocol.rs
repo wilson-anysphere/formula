@@ -20,6 +20,12 @@ use url::Url;
 /// large file.
 const MAX_NON_RANGE_ASSET_BYTES: u64 = 10 * 1024 * 1024; // 10 MiB
 
+/// Max length for the `Range:` request header.
+///
+/// This is a defense-in-depth limit to avoid pathological multi-range headers causing excessive
+/// CPU/memory usage during parsing.
+const MAX_RANGE_HEADER_BYTES: usize = 4 * 1024;
+
 /// Custom `asset:` protocol handler with COEP-friendly headers.
 ///
 /// Why:
@@ -198,11 +204,22 @@ fn get_response(
 
     // We only enforce this on non-range (full-body) requests. Range requests are clamped to
     // `MAX_LEN` below so they remain bounded per request.
-    let range_header = request
-        .headers()
-        .get("range")
-        .and_then(|r| r.to_str().ok())
-        .map(|r| r.to_string());
+    let range_header_value = request.headers().get("range");
+    if let Some(range_value) = range_header_value {
+        let nbytes = range_value.as_bytes().len();
+        if nbytes > MAX_RANGE_HEADER_BYTES {
+            eprintln!(
+                "[asset protocol] refusing overly large Range header: {path} (bytes={nbytes}, limit={MAX_RANGE_HEADER_BYTES})"
+            );
+            return resp
+                .status(StatusCode::PAYLOAD_TOO_LARGE)
+                .header(CONTENT_TYPE, "text/plain")
+                .body(b"range header is too large".to_vec())
+                .map_err(Into::into);
+        }
+    }
+
+    let range_header = range_header_value.and_then(|r| r.to_str().ok());
 
     if range_header.is_none()
         && request.method() != tauri::http::Method::HEAD
@@ -249,7 +266,7 @@ fn get_response(
                 .map_err(Into::into)
         };
 
-        let ranges = if let Ok(ranges) = http_range::HttpRange::parse(&range_header, len) {
+        let ranges = if let Ok(ranges) = http_range::HttpRange::parse(range_header, len) {
             ranges
                 .iter()
                 // Map to <start-end>, example: 0-499
