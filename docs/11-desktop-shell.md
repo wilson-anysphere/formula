@@ -704,6 +704,12 @@ We intentionally keep capabilities narrow and rely on explicit Rust commands + h
 - If you add a new event name used by `listen(...)` or `emit(...)`, update the `event:allow-listen` / `event:allow-emit` allowlists.
 - If the frontend starts using a new Tauri core/plugin API (dialog/window/clipboard/shell/updater), add the corresponding `*:allow-*` permission string.
 
+Guardrails (CI/tests):
+
+- `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs` ensures `core:allow-invoke` matches the command list registered in `apps/desktop/src-tauri/src/main.rs` (`generate_handler![...]`).
+- `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts` enforces that `event:allow-listen` / `event:allow-emit` are explicit (no allow-all) and match the events used by the desktop code.
+- `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` asserts the updater permission surface stays minimal (split `allow-check` / `allow-download` / `allow-install`).
+
 For background on capability syntax/semantics, see the upstream Tauri v2 docs:
 
 - https://tauri.app/v2/guides/security/capabilities/
