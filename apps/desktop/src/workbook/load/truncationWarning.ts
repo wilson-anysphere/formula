@@ -24,7 +24,9 @@ function normalizeIndex(value: number): number {
 function formatOneBasedInclusiveRange(start: number, end: number): string {
   const startInclusive = Math.max(0, normalizeIndex(start)) + 1;
   const endInclusive = Math.max(0, normalizeIndex(end)) + 1;
-  return `${formatInt(startInclusive)}-${formatInt(endInclusive)}`;
+  const a = Math.min(startInclusive, endInclusive);
+  const b = Math.max(startInclusive, endInclusive);
+  return `${formatInt(a)}-${formatInt(b)}`;
 }
 
 export function createWorkbookLoadTruncationWarning(
