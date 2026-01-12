@@ -1,3 +1,4 @@
+use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 
 pub use formula_xls as xls;
@@ -20,6 +21,18 @@ pub enum Error {
         path: PathBuf,
         #[source]
         source: std::io::Error,
+    },
+    #[error("failed to detect workbook format for `{path}`: {source}")]
+    DetectIo {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to detect workbook format for `{path}`: {source}")]
+    DetectZip {
+        path: PathBuf,
+        #[source]
+        source: zip::result::ZipError,
     },
     #[error("failed to open `.xlsx` workbook `{path}`: {source}")]
     OpenXlsx {
@@ -90,12 +103,105 @@ pub enum Workbook {
     Model(formula_model::Workbook),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WorkbookFormat {
+/// Best-effort workbook format classification.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum WorkbookFormat {
     Xlsx,
-    Xls,
+    Xlsm,
     Xlsb,
+    Xls,
     Csv,
+    Parquet,
+    Unknown,
+}
+
+/// Detect the workbook format based on file signatures (and ZIP part names when needed).
+///
+/// This is intended to support opening workbooks even when the file extension is missing
+/// or incorrect.
+pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, Error> {
+    let path = path.as_ref();
+
+    let mut file = std::fs::File::open(path).map_err(|source| Error::DetectIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let mut header = [0u8; 8];
+    let n = file.read(&mut header).map_err(|source| Error::DetectIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let header = &header[..n];
+
+    if header.len() >= OLE_MAGIC.len() && header[..OLE_MAGIC.len()] == OLE_MAGIC {
+        return Ok(WorkbookFormat::Xls);
+    }
+    if header.len() >= 4 && header[..4] == *b"PAR1" {
+        return Ok(WorkbookFormat::Parquet);
+    }
+
+    // ZIP-based formats (XLSX/XLSM/XLSB) all begin with a `PK` signature.
+    if header.len() >= 2 && header[..2] == *b"PK" {
+        file.rewind().map_err(|source| Error::DetectIo {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+        let archive = zip::ZipArchive::new(file).map_err(|source| Error::DetectZip {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+        let mut has_workbook_bin = false;
+        let mut has_workbook_xml = false;
+        let mut has_vba_project = false;
+
+        for name in archive.file_names() {
+            let mut normalized = name.trim_start_matches('/');
+            let replaced;
+            if normalized.contains('\\') {
+                replaced = normalized.replace('\\', "/");
+                normalized = &replaced;
+            }
+
+            if normalized.eq_ignore_ascii_case("xl/workbook.bin") {
+                has_workbook_bin = true;
+            } else if normalized.eq_ignore_ascii_case("xl/workbook.xml") {
+                has_workbook_xml = true;
+            } else if normalized.eq_ignore_ascii_case("xl/vbaProject.bin") {
+                has_vba_project = true;
+            }
+
+            if has_workbook_bin || (has_workbook_xml && has_vba_project) {
+                break;
+            }
+        }
+
+        if has_workbook_bin {
+            return Ok(WorkbookFormat::Xlsb);
+        }
+        if has_workbook_xml {
+            return Ok(if has_vba_project {
+                WorkbookFormat::Xlsm
+            } else {
+                WorkbookFormat::Xlsx
+            });
+        }
+        return Ok(WorkbookFormat::Unknown);
+    }
+
+    // Only consider CSV once we have ruled out known binary formats.
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if ext == "csv" {
+        return Ok(WorkbookFormat::Csv);
+    }
+
+    Ok(WorkbookFormat::Unknown)
 }
 
 fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
@@ -109,7 +215,8 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
         .to_ascii_lowercase();
 
     let ext_format = match ext.as_str() {
-        "xlsx" | "xlsm" => Some(WorkbookFormat::Xlsx),
+        "xlsx" => Some(WorkbookFormat::Xlsx),
+        "xlsm" => Some(WorkbookFormat::Xlsm),
         "xls" => Some(WorkbookFormat::Xls),
         "xlsb" => Some(WorkbookFormat::Xlsb),
         "csv" => Some(WorkbookFormat::Csv),
@@ -180,6 +287,8 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
         if let Ok(zip) = zip::ZipArchive::new(file) {
             let mut has_workbook_xml = false;
             let mut has_workbook_bin = false;
+            let mut has_vba_project = false;
+
             for name in zip.file_names() {
                 let mut normalized = name.trim_start_matches('/');
                 let replaced;
@@ -187,11 +296,14 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
                     replaced = normalized.replace('\\', "/");
                     normalized = &replaced;
                 }
+
                 if normalized.eq_ignore_ascii_case("xl/workbook.xml") {
                     has_workbook_xml = true;
                 } else if normalized.eq_ignore_ascii_case("xl/workbook.bin") {
                     has_workbook_bin = true;
                     break;
+                } else if normalized.eq_ignore_ascii_case("xl/vbaProject.bin") {
+                    has_vba_project = true;
                 }
             }
 
@@ -199,7 +311,11 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
                 return Ok(WorkbookFormat::Xlsb);
             }
             if has_workbook_xml {
-                return Ok(WorkbookFormat::Xlsx);
+                return Ok(if has_vba_project {
+                    WorkbookFormat::Xlsm
+                } else {
+                    WorkbookFormat::Xlsx
+                });
             }
         }
     }
@@ -227,9 +343,14 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
     use std::io::BufReader;
 
     let path = path.as_ref();
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
 
     match workbook_format(path)? {
-        WorkbookFormat::Xlsx => {
+        WorkbookFormat::Xlsx | WorkbookFormat::Xlsm => {
             let file = File::open(path).map_err(|source| Error::OpenIo {
                 path: path.to_path_buf(),
                 source,
@@ -295,6 +416,10 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
 
             Ok(workbook)
         }
+        _ => Err(Error::UnsupportedExtension {
+            path: path.to_path_buf(),
+            extension: ext.to_string(),
+        }),
     }
 }
 
@@ -322,8 +447,14 @@ fn stream_exists<R: std::io::Read + std::io::Write + std::io::Seek>(
 /// - `.csv` (via `formula-model` CSV import)
 pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
     let path = path.as_ref();
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
     match workbook_format(path)? {
-        WorkbookFormat::Xlsx => {
+        WorkbookFormat::Xlsx | WorkbookFormat::Xlsm => {
             let bytes = std::fs::read(path).map_err(|source| Error::OpenIo {
                 path: path.to_path_buf(),
                 source,
@@ -378,6 +509,10 @@ pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
 
             Ok(Workbook::Model(workbook))
         }
+        _ => Err(Error::UnsupportedExtension {
+            path: path.to_path_buf(),
+            extension: ext.to_string(),
+        }),
     }
 }
 
