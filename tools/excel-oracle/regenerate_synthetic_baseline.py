@@ -100,8 +100,14 @@ def main() -> int:
     args = p.parse_args()
 
     repo_root = Path(__file__).resolve().parents[2]
-    cases_path = repo_root / "tests/compatibility/excel-oracle/cases.json"
-    pinned_path = repo_root / "tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json"
+    # Use a *relative* cases path when invoking tools so the pinned dataset metadata stays stable
+    # (and doesn't capture developer/CI absolute paths).
+    cases_relpath = Path("tests/compatibility/excel-oracle/cases.json")
+    pinned_relpath = Path(
+        "tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json"
+    )
+    cases_path = repo_root / cases_relpath
+    pinned_path = repo_root / pinned_relpath
 
     env = _tool_env(repo_root)
 
@@ -118,7 +124,7 @@ def main() -> int:
                 sys.executable,
                 "tools/excel-oracle/generate_cases.py",
                 "--out",
-                str(cases_path),
+                str(cases_relpath),
             ),
             cwd=repo_root,
             env=env,
@@ -137,7 +143,7 @@ def main() -> int:
                     "--locked",
                     "--",
                     "--cases",
-                    str(cases_path),
+                    str(cases_relpath),
                     "--out",
                     str(engine_results_path),
                 ),
@@ -151,7 +157,7 @@ def main() -> int:
                     "--dataset",
                     str(engine_results_path),
                     "--pinned",
-                    str(pinned_path),
+                    str(pinned_relpath),
                 ),
                 cwd=repo_root,
                 env=env,
