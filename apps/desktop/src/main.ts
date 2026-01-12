@@ -2275,6 +2275,11 @@ function cloneCollabSheetMap(entry: unknown): Y.Map<unknown> {
   return out;
 }
 
+// Cached collab sheet ordering/name signature, used to avoid rebuilding the sheet store instance
+// when local sheet mutations have already updated the underlying Yjs data.
+let lastCollabSheetsKey: string | null = null;
+let lastCollabSheetsSession: CollabSession | null = null;
+
 class CollabWorkbookSheetStore extends WorkbookSheetStore {
   constructor(
     private readonly session: CollabSession,
@@ -4326,8 +4331,8 @@ if (
   // BrowserExtensionHost tracks read taint (API reads + event payloads) and passes those ranges to this
   // optional `clipboardWriteGuard`, which runs *before* any clipboard write. Enforce clipboard-copy DLP
   // against any workbook data the extension has observed (taintedRanges). Clipboard writes that are
-  // not derived from spreadsheet data (no taint) remain allowed, even if the current selection is
-  // Restricted.
+  // not derived from spreadsheet data (no taint) should still be blocked if the current selection is
+  // Restricted (selection-based DLP).
   const extensionClipboardDlp = createDesktopDlpContext({ documentId: workbookId });
 
   const normalizeSelectionRange = (range: { startRow: number; startCol: number; endRow: number; endCol: number }) => {
@@ -4356,8 +4361,36 @@ if (
 
   const clipboardWriteGuard = async (params: { extensionId: string; taintedRanges: any[] }) => {
     try {
+      // Always enforce selection-based clipboard DLP for extensions. Even if an extension writes a
+      // constant string, we treat clipboard writes as equivalent to a user copy operation from the
+      // currently selected range (and block if that selection contains Restricted data).
+      try {
+        const sheetId = app.getCurrentSheetId();
+        const selectionRanges = app.getSelectionRanges?.() ?? [];
+        for (const range of selectionRanges) {
+          if (!range || typeof range !== "object") continue;
+          const startRow = Number((range as any).startRow);
+          const startCol = Number((range as any).startCol);
+          const endRow = Number((range as any).endRow);
+          const endCol = Number((range as any).endCol);
+          if (![startRow, startCol, endRow, endCol].every((v) => Number.isFinite(v))) continue;
+          enforceExtensionClipboardDlpForRange({
+            sheetId,
+            range: normalizeSelectionRange({
+              startRow: Math.trunc(startRow),
+              startCol: Math.trunc(startCol),
+              endRow: Math.trunc(endRow),
+              endCol: Math.trunc(endCol),
+            }),
+          });
+        }
+      } catch (err) {
+        const isDlpViolation = err instanceof DlpViolationError || (err as any)?.name === "DlpViolationError";
+        if (isDlpViolation) throw err;
+        // Ignore selection query errors; if the selection is unavailable we'll fall back to taint-based DLP.
+      }
+
       const taintedRanges = Array.isArray(params.taintedRanges) ? params.taintedRanges : [];
-      if (taintedRanges.length === 0) return;
       for (const raw of taintedRanges) {
         if (!raw || typeof raw !== "object") continue;
         const sheetId = typeof (raw as any).sheetId === "string" ? String((raw as any).sheetId) : "";
