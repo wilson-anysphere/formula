@@ -269,10 +269,27 @@ impl<'a> Parser<'a> {
                     left: Box::new(lhs),
                     right: Box::new(rhs),
                 },
-                InfixOp::Concat => Expr::FuncCall {
-                    func: Function::Concat,
-                    args: vec![lhs, rhs],
-                },
+                InfixOp::Concat => {
+                    // Flatten concat chains (`a&b&c`) into a single CONCAT call.
+                    let mut args = match lhs {
+                        Expr::FuncCall {
+                            func: Function::Concat,
+                            args,
+                        } => args,
+                        other => vec![other],
+                    };
+                    match rhs {
+                        Expr::FuncCall {
+                            func: Function::Concat,
+                            args: rhs_args,
+                        } => args.extend(rhs_args),
+                        other => args.push(other),
+                    }
+                    Expr::FuncCall {
+                        func: Function::Concat,
+                        args,
+                    }
+                }
             };
         }
         Ok(lhs)
@@ -720,5 +737,35 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn concat_chains_flatten_into_single_call() {
+        let origin = CellCoord::new(0, 0);
+        let expr = parse_formula("=\"a\"&\"b\"&\"c\"", origin).expect("parse");
+        assert_eq!(
+            expr,
+            Expr::FuncCall {
+                func: Function::Concat,
+                args: vec![
+                    Expr::Literal(Value::Text(Arc::from("a"))),
+                    Expr::Literal(Value::Text(Arc::from("b"))),
+                    Expr::Literal(Value::Text(Arc::from("c"))),
+                ],
+            }
+        );
+
+        let expr = parse_formula("=\"a\"&(\"b\"&\"c\")", origin).expect("parse");
+        assert_eq!(
+            expr,
+            Expr::FuncCall {
+                func: Function::Concat,
+                args: vec![
+                    Expr::Literal(Value::Text(Arc::from("a"))),
+                    Expr::Literal(Value::Text(Arc::from("b"))),
+                    Expr::Literal(Value::Text(Arc::from("c"))),
+                ],
+            }
+        );
     }
 }

@@ -235,6 +235,17 @@ fn lower_array_literal(arr: &crate::ArrayLiteral) -> Result<Value, LowerError> {
 
     Ok(Value::Array(Array::new(rows, cols, values)))
 }
+
+fn collect_concat_operands<'a>(expr: &'a crate::Expr, out: &mut Vec<&'a crate::Expr>) {
+    match expr {
+        crate::Expr::Binary(b) if b.op == crate::BinaryOp::Concat => {
+            collect_concat_operands(&b.left, out);
+            collect_concat_operands(&b.right, out);
+        }
+        other => out.push(other),
+    }
+}
+
 pub fn lower_canonical_expr(
     expr: &crate::Expr,
     origin: crate::CellAddr,
@@ -260,13 +271,21 @@ pub fn lower_canonical_expr(
             crate::BinaryOp::Range => {
                 lower_range_ref(&b.left, &b.right, origin, current_sheet, resolve_sheet)
             }
-            crate::BinaryOp::Concat => Ok(BytecodeExpr::FuncCall {
-                func: Function::Concat,
-                args: vec![
-                    lower_canonical_expr(&b.left, origin, current_sheet, resolve_sheet)?,
-                    lower_canonical_expr(&b.right, origin, current_sheet, resolve_sheet)?,
-                ],
-            }),
+            crate::BinaryOp::Concat => {
+                // Flatten `a&b&c` into a single CONCAT call so we avoid intermediate allocations
+                // during evaluation and maximize cache sharing between equivalent concat chains.
+                let mut operands = Vec::new();
+                collect_concat_operands(&b.left, &mut operands);
+                collect_concat_operands(&b.right, &mut operands);
+                let args = operands
+                    .into_iter()
+                    .map(|expr| lower_canonical_expr(expr, origin, current_sheet, resolve_sheet))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(BytecodeExpr::FuncCall {
+                    func: Function::Concat,
+                    args,
+                })
+            }
             crate::BinaryOp::Add
             | crate::BinaryOp::Sub
             | crate::BinaryOp::Mul
