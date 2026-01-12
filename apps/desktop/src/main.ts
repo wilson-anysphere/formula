@@ -3182,7 +3182,13 @@ window.addEventListener(
       if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) {
         // Exception: allow sheet navigation while the formula bar is editing a formula
         // (range selection / cross-sheet references).
-        if (!formulaBarFormulaEditing || !formulaBarRoot.contains(target)) return;
+        if (
+          !formulaBarFormulaEditing ||
+          !formulaBarRoot.contains(target) ||
+          !target.classList.contains("formula-bar-input")
+        ) {
+          return;
+        }
       }
     }
     // Use the sheet UI's visible list ordering so the shortcut matches the tab strip.
