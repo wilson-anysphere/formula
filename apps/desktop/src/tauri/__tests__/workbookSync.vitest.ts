@@ -94,7 +94,7 @@ describe("workbookSync", () => {
     sync.stop();
   });
 
-  it("does not mirror DocumentController.deleteSheet sparse cell clears to the backend", async () => {
+  it("syncs deleteSheet via delete_sheet (without mirroring sparse cell clears)", async () => {
     const document = new DocumentController();
     const sync = startWorkbookSync({ document: document as any });
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
@@ -114,7 +114,8 @@ describe("workbookSync", () => {
     document.deleteSheet("Sheet2");
     await flushMicrotasks();
 
-    expect(invoke).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("delete_sheet", { sheet_id: "Sheet2" });
 
     sync.stop();
   });
