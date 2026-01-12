@@ -91,6 +91,7 @@ pub enum QueryError {
         right_type: ColumnType,
     },
     MissingDictionary { col: usize },
+    InternalInvariant(&'static str),
 }
 
 impl std::fmt::Display for QueryError {
@@ -125,6 +126,7 @@ impl std::fmt::Display for QueryError {
                 left_type, right_type
             ),
             Self::MissingDictionary { col } => write!(f, "missing dictionary for string column {}", col),
+            Self::InternalInvariant(msg) => write!(f, "internal invariant violated: {}", msg),
         }
     }
 }
@@ -1383,9 +1385,12 @@ impl GroupByEngine {
                     let scalar = if let Some(key_pos) = plan.from_key_pos {
                         self.scratch_key_scalars[key_pos]
                     } else {
-                        agg_cursors[plan_idx]
-                            .as_mut()
-                            .expect("cursor missing for non-key agg plan")
+                        agg_cursors
+                            .get_mut(plan_idx)
+                            .and_then(|cursor| cursor.as_mut())
+                            .ok_or(QueryError::InternalInvariant(
+                                "cursor missing for non-key agg plan",
+                            ))?
                             .next()
                     };
                     for &agg_idx in &plan.agg_indices {
@@ -1456,8 +1461,12 @@ impl GroupByEngine {
                         agg_chunk_refs.push(None);
                         continue;
                     }
-                    let chunks = agg_chunks[plan_idx]
-                        .expect("agg chunks populated for non-key agg plan");
+                    let chunks = agg_chunks
+                        .get(plan_idx)
+                        .and_then(|chunks| chunks.as_ref().copied())
+                        .ok_or(QueryError::InternalInvariant(
+                            "agg chunks missing for non-key agg plan",
+                        ))?;
                     let chunk = chunks
                         .get(chunk_idx)
                         .ok_or(QueryError::RowOutOfBounds { row, row_count })?;
@@ -1502,7 +1511,12 @@ impl GroupByEngine {
                 let scalar = if let Some(key_pos) = plan.from_key_pos {
                     self.scratch_key_scalars[key_pos]
                 } else {
-                    let chunk = agg_chunk_refs[plan_idx].expect("chunk missing for non-key agg plan");
+                    let chunk = agg_chunk_refs
+                        .get(plan_idx)
+                        .and_then(|chunk| chunk.as_ref().copied())
+                        .ok_or(QueryError::InternalInvariant(
+                            "chunk missing for non-key agg plan",
+                        ))?;
                     let ty = table.schema()[plan.col].column_type;
                     scalar_from_column_chunk_at(plan.col, ty, chunk, row_in_chunk)?
                 };

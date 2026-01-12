@@ -189,14 +189,14 @@ pub(crate) fn value_from_array(
                 let arr = array
                     .as_any()
                     .downcast_ref::<arrow_array::Float64Array>()
-                    .expect("Float64 array downcast");
+                    .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
                 Ok(Value::Number(arr.value(row)))
             }
             DataType::Int64 => {
                 let arr = array
                     .as_any()
                     .downcast_ref::<arrow_array::Int64Array>()
-                    .expect("Int64 array downcast");
+                    .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
                 Ok(Value::Number(arr.value(row) as f64))
             }
             other => Err(ArrowInteropError::UnsupportedDataType(other.clone())),
@@ -213,14 +213,14 @@ pub(crate) fn value_from_array(
                 let arr = array
                     .as_any()
                     .downcast_ref::<arrow_array::StringArray>()
-                    .expect("Utf8 array downcast");
+                    .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
                 Ok(Value::String(Arc::<str>::from(arr.value(row))))
             }
             DataType::LargeUtf8 => {
                 let arr = array
                     .as_any()
                     .downcast_ref::<arrow_array::LargeStringArray>()
-                    .expect("LargeUtf8 array downcast");
+                    .ok_or_else(|| ArrowInteropError::UnsupportedDataType(array.data_type().clone()))?;
                 Ok(Value::String(Arc::<str>::from(arr.value(row))))
             }
             DataType::Dictionary(key, value) => match value.as_ref() {
@@ -239,7 +239,11 @@ pub(crate) fn value_from_array(
                             .values()
                             .as_any()
                             .downcast_ref::<arrow_array::StringArray>()
-                            .expect("dictionary values utf8 downcast");
+                            .ok_or_else(|| {
+                                ArrowInteropError::UnsupportedDictionaryValueType(
+                                    dict.values().data_type().clone(),
+                                )
+                            })?;
                         let key = keys.value(row) as usize;
                         Ok(Value::String(Arc::<str>::from(dict_values.value(key))))
                     }
@@ -255,7 +259,11 @@ pub(crate) fn value_from_array(
                             .values()
                             .as_any()
                             .downcast_ref::<arrow_array::StringArray>()
-                            .expect("dictionary values utf8 downcast");
+                            .ok_or_else(|| {
+                                ArrowInteropError::UnsupportedDictionaryValueType(
+                                    dict.values().data_type().clone(),
+                                )
+                            })?;
                         Ok(Value::String(Arc::<str>::from(dict_values.value(key))))
                     }
                     other => Err(ArrowInteropError::UnsupportedDataType(other.clone())),
@@ -275,7 +283,11 @@ pub(crate) fn value_from_array(
                             .values()
                             .as_any()
                             .downcast_ref::<arrow_array::LargeStringArray>()
-                            .expect("dictionary values large utf8 downcast");
+                            .ok_or_else(|| {
+                                ArrowInteropError::UnsupportedDictionaryValueType(
+                                    dict.values().data_type().clone(),
+                                )
+                            })?;
                         let key = keys.value(row) as usize;
                         Ok(Value::String(Arc::<str>::from(dict_values.value(key))))
                     }
@@ -291,7 +303,11 @@ pub(crate) fn value_from_array(
                             .values()
                             .as_any()
                             .downcast_ref::<arrow_array::LargeStringArray>()
-                            .expect("dictionary values large utf8 downcast");
+                            .ok_or_else(|| {
+                                ArrowInteropError::UnsupportedDictionaryValueType(
+                                    dict.values().data_type().clone(),
+                                )
+                            })?;
                         Ok(Value::String(Arc::<str>::from(dict_values.value(key))))
                     }
                     other => Err(ArrowInteropError::UnsupportedDataType(other.clone())),
@@ -324,11 +340,11 @@ pub(crate) fn value_from_array(
     }
 }
 
-fn array_from_column(table: &ColumnarTable, col: usize) -> Result<ArrayRef, ArrowInteropError> {
-    let column_schema = table
-        .schema()
-        .get(col)
-        .expect("column index within schema");
+fn array_from_column(
+    table: &ColumnarTable,
+    col: usize,
+    column_schema: &ColumnSchema,
+) -> Result<ArrayRef, ArrowInteropError> {
     let rows = table.row_count();
 
     let array: ArrayRef = match column_schema.column_type {
@@ -416,7 +432,7 @@ pub fn columnar_to_record_batch(table: &ColumnarTable) -> Result<RecordBatch, Ar
             .stats(col_idx)
             .is_some_and(|stats| stats.null_count > 0);
         fields.push(arrow_field(col_schema, nullable));
-        arrays.push(array_from_column(table, col_idx)?);
+        arrays.push(array_from_column(table, col_idx, col_schema)?);
     }
 
     let schema = Arc::new(Schema::new(fields));

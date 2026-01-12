@@ -243,7 +243,10 @@ impl ColumnarTable {
             chunk: chunk_idx,
         };
 
-        let mut cache = self.cache.lock().expect("columnar page cache poisoned");
+        let mut cache = self
+            .cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(hit) = cache.get(&key) {
             return Some(hit);
         }
@@ -252,7 +255,10 @@ impl ColumnarTable {
         let decoded = self.columns.get(col)?.decode_chunk(chunk_idx)?;
         let decoded = Arc::new(decoded);
 
-        let mut cache = self.cache.lock().expect("columnar page cache poisoned");
+        let mut cache = self
+            .cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         cache.insert(key, decoded.clone());
         Some(decoded)
     }
@@ -260,7 +266,7 @@ impl ColumnarTable {
     pub fn cache_stats(&self) -> CacheStats {
         self.cache
             .lock()
-            .expect("columnar page cache poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .stats()
     }
 
@@ -599,7 +605,10 @@ impl MutableColumnarTable {
             chunk: chunk_idx,
         };
 
-        let mut cache = self.cache.lock().expect("columnar page cache poisoned");
+        let mut cache = self
+            .cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(hit) = cache.get(&key) {
             return Some(hit);
         }
@@ -608,7 +617,10 @@ impl MutableColumnarTable {
         let decoded = self.columns.get(col)?.decode_chunk(chunk_idx)?;
         let decoded = Arc::new(decoded);
 
-        let mut cache = self.cache.lock().expect("columnar page cache poisoned");
+        let mut cache = self
+            .cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         cache.insert(key, decoded.clone());
         Some(decoded)
     }
@@ -616,7 +628,7 @@ impl MutableColumnarTable {
     pub fn cache_stats(&self) -> CacheStats {
         self.cache
             .lock()
-            .expect("columnar page cache poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .stats()
     }
 
@@ -799,7 +811,7 @@ impl MutableColumnarTable {
         if dict_ref_count > 1 {
             self.cache
                 .lock()
-                .expect("columnar page cache poisoned")
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .remove_if(|key| key.col == col);
         }
     }
@@ -897,7 +909,7 @@ impl MutableColumnarTable {
                     let key = CacheKey { col, chunk: chunk_idx };
                     self.cache
                         .lock()
-                        .expect("columnar page cache poisoned")
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .remove(&key);
                 } else if chunk_idx == chunk_count {
                     self.columns[col].apply_overlays_to_current(&updates);
