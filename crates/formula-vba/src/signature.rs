@@ -750,20 +750,9 @@ pub fn verify_vba_signature_binding_with_stream_path(
         let content_normalized = match content_normalized_data(vba_project_bin) {
             Ok(v) => v,
             Err(_) => {
-                // Best-effort fallback: if we can't compute the MS-OVBA ContentNormalizedData
-                // transcript (e.g. minimal/incomplete VBA projects, unknown compression), fall back
-                // to our deterministic "project digest" over OLE streams. This keeps binding checks
-                // useful for synthetically-constructed fixtures while preserving the spec-ish path
-                // for real-world projects.
-                let digest = match compute_vba_project_digest(vba_project_bin, DigestAlg::Md5) {
-                    Ok(v) => v,
-                    Err(_) => return VbaSignatureBinding::Unknown,
-                };
-                return if signed_digest == digest.as_slice() {
-                    VbaSignatureBinding::Bound
-                } else {
-                    VbaSignatureBinding::NotBound
-                };
+                // If we can't compute the MS-OVBA ContentNormalizedData transcript, we can't verify
+                // binding.
+                return VbaSignatureBinding::Unknown;
             }
         };
 
@@ -1356,7 +1345,6 @@ pub fn verify_vba_project_signature_binding(
 
     let mut any_signed_digest = None::<VbaProjectDigestDebugInfo>;
     let mut first_comparison = None::<VbaProjectDigestDebugInfo>;
-    let mut first_comparison_is_fallback = false;
     // Lazily computed MS-OVBA Content/Agile hashes for the project bytes.
     let mut content_hash_md5: Option<[u8; 16]> = None;
     // Outer Option = attempted; inner Option = computed successfully.
@@ -1393,27 +1381,7 @@ pub fn verify_vba_project_signature_binding(
                         h.finalize().into()
                     }));
                 }
-                Err(_) => {
-                    // Best-effort fallback: if we can't compute the MS-OVBA ContentNormalizedData
-                    // transcript (e.g. minimal/incomplete VBA projects, unknown compression), fall
-                    // back to our deterministic "project digest" over OLE streams. This keeps
-                    // binding checks useful for synthetically-constructed fixtures while preserving
-                    // the spec-ish path for real-world projects.
-                    let digest = match compute_vba_project_digest(project_ole, DigestAlg::Md5) {
-                        Ok(v) => v,
-                        Err(_) => continue,
-                    };
-                    let digest_md5: [u8; 16] = match digest.as_slice().try_into() {
-                        Ok(v) => v,
-                        Err(_) => continue,
-                    };
-
-                    content_hash_md5 = Some(digest_md5);
-                    // There is no distinct "agile" digest in this fallback mode; treat it as
-                    // equivalent so mismatches are surfaced as `BoundMismatch` rather than
-                    // `BoundUnknown`.
-                    agile_hash_md5 = Some(Some(digest_md5));
-                }
+                Err(_) => continue,
             }
         }
 
@@ -1451,9 +1419,6 @@ pub fn verify_vba_project_signature_binding(
     }
 
     if let Some(debug) = first_comparison {
-        if first_comparison_is_fallback {
-            return Ok(VbaProjectBindingVerification::BoundMismatch(debug));
-        }
         // If we couldn't compute the Agile hash, we can't distinguish "truly unbound" from "bound
         // but forms data missing/unparseable", so treat binding as unknown.
         let agile_hash_md5 = agile_hash_md5.unwrap_or(None);
