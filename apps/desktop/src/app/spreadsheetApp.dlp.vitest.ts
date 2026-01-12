@@ -152,11 +152,10 @@ describe("SpreadsheetApp clipboard DLP UX", () => {
 
     const toast = document.querySelector('[data-testid="toast"]') as HTMLElement | null;
     expect(toast).not.toBeNull();
-    expect(toast?.dataset.type).toBe("error");
+    expect(toast?.dataset.type).toBe("warning");
     expect(write).not.toHaveBeenCalled();
 
     app.destroy();
     root.remove();
   });
 });
-
