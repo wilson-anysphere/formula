@@ -85,6 +85,15 @@ export class LayoutController {
   }
 
   /**
+   * Persist the current in-memory layout for the active workspace without emitting
+   * an additional "change" event. Useful for debounced flushes after applying
+   * ephemeral (non-persisted) updates at high frequency.
+   */
+  persistNow() {
+    this.workspaceManager.saveWorkbookLayoutForWorkspace(this.workbookId, this.workspaceId, this.layout);
+  }
+
+  /**
    * Reload the active workspace layout from persistence (discarding in-memory changes).
    */
   reload() {
@@ -197,12 +206,18 @@ export class LayoutController {
     this.#commit(setDockSize(this.layout, side, sizePx));
   }
 
-  setSplitDirection(direction, ratio) {
-    this.#commit(setSplitDirection(this.layout, direction, ratio));
+  setSplitDirection(direction, ratio, options) {
+    // Backwards compatible signature + convenience: allow omitting ratio and passing options
+    // as the second argument: setSplitDirection(direction, { persist: false }).
+    if (ratio !== null && typeof ratio === "object") {
+      options = ratio;
+      ratio = undefined;
+    }
+    this.#commit(setSplitDirection(this.layout, direction, ratio), options);
   }
 
-  setSplitRatio(ratio) {
-    this.#commit(setSplitRatio(this.layout, ratio));
+  setSplitRatio(ratio, options) {
+    this.#commit(setSplitRatio(this.layout, ratio), options);
   }
 
   setActiveSplitPane(pane) {
@@ -213,12 +228,12 @@ export class LayoutController {
     this.#commit(setSplitPaneSheet(this.layout, pane, sheetId));
   }
 
-  setSplitPaneScroll(pane, scroll) {
-    this.#commit(setSplitPaneScroll(this.layout, pane, scroll));
+  setSplitPaneScroll(pane, scroll, options) {
+    this.#commit(setSplitPaneScroll(this.layout, pane, scroll), options);
   }
 
-  setSplitPaneZoom(pane, zoom) {
-    this.#commit(setSplitPaneZoom(this.layout, pane, zoom));
+  setSplitPaneZoom(pane, zoom, options) {
+    this.#commit(setSplitPaneZoom(this.layout, pane, zoom), options);
   }
 
   saveAsGlobalDefault() {

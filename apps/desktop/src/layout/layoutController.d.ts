@@ -7,6 +7,7 @@ export class LayoutController {
   constructor(params: { workbookId: string; workspaceManager: any; primarySheetId?: string | null; workspaceId?: string });
 
   on(event: string, listener: (payload: any) => void): () => void;
+  persistNow(): void;
   reload(): void;
 
   readonly activeWorkspaceId: string;
@@ -29,13 +30,12 @@ export class LayoutController {
   setDockCollapsed(side: any, collapsed: boolean): void;
   setDockSize(side: any, sizePx: number): void;
 
-  setSplitDirection(direction: any, ratio?: number): void;
-  setSplitRatio(ratio: number): void;
+  setSplitDirection(direction: any, ratio?: number, options?: { persist?: boolean }): void;
+  setSplitRatio(ratio: number, options?: { persist?: boolean }): void;
   setActiveSplitPane(pane: any): void;
   setSplitPaneSheet(pane: any, sheetId: string): void;
-  setSplitPaneScroll(pane: any, scroll: any): void;
-  setSplitPaneZoom(pane: any, zoom: any): void;
+  setSplitPaneScroll(pane: any, scroll: any, options?: { persist?: boolean }): void;
+  setSplitPaneZoom(pane: any, zoom: any, options?: { persist?: boolean }): void;
 
   saveAsGlobalDefault(): void;
 }
-
