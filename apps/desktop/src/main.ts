@@ -1903,9 +1903,9 @@ function syncSheetStoreFromCollabSession(session: CollabSession): void {
 
 function listSheetsForUi(): SheetUiInfo[] {
   const visible = workbookSheetStore.listVisible();
-  if (visible.length > 0) return visible.map((s) => ({ id: s.id, name: s.name }));
-  const ids = listDocumentSheetIds();
-  return ids.map((id) => ({ id, name: id }));
+  // Only expose visible sheets to UI affordances like the sheet switcher. Hidden/veryHidden
+  // sheets should not be directly activatable via dropdowns.
+  return visible.map((s) => ({ id: s.id, name: s.name }));
 }
 
 function openSheetTabsContextMenu(sheetId: string, x: number, y: number): void {
