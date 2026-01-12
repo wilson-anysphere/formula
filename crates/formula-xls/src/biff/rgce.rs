@@ -650,7 +650,8 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let col1 = u16::from_le_bytes([input[4], input[5]]);
                 let col2 = u16::from_le_bytes([input[6], input[7]]);
                 input = &input[8..];
-                stack.push(ExprFragment::new(format_area_ref(row1, col1, row2, col2)));
+                let area = format_area_ref_ptg_area(row1, col1, row2, col2, &mut warnings);
+                stack.push(ExprFragment::new(area));
             }
             // PtgMem* tokens: no-op for printing, but consume payload to keep offsets aligned.
             //
@@ -777,7 +778,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 input = &input[10..];
 
                 let sheet_prefix = sheet_prefix_or_placeholder(ixti, ctx, &mut warnings);
-                let area = format_area_ref(row1, col1, row2, col2);
+                let area = format_area_ref_ptg_area(row1, col1, row2, col2, &mut warnings);
                 stack.push(ExprFragment::new(format!("{sheet_prefix}{area}")));
             }
             // PtgRefErr3d: consume payload and emit `#REF!`.
@@ -1109,6 +1110,75 @@ fn format_col_ref(col: u16, col_rel: bool) -> String {
     push_column(col as u32, &mut out);
     out
 }
+
+fn format_area_ref_ptg_area(
+    row1: u16,
+    col1: u16,
+    row2: u16,
+    col2: u16,
+    warnings: &mut Vec<String>,
+) -> String {
+    let col1_idx = col1 & COL_INDEX_MASK;
+    let col2_idx = col2 & COL_INDEX_MASK;
+
+    // Relative bits are stored in the upper bits of the `col` field.
+    let row1_rel = (col1 & ROW_RELATIVE_BIT) != 0;
+    let row2_rel = (col2 & ROW_RELATIVE_BIT) != 0;
+    let col1_rel = (col1 & COL_RELATIVE_BIT) != 0;
+    let col2_rel = (col2 & COL_RELATIVE_BIT) != 0;
+
+    // Best-effort whole-row / whole-column decoding for BIFF8 areas.
+    //
+    // Print titles (`_xlnm.Print_Titles`) are commonly stored as full-row/full-column areas; render
+    // them using Excel's canonical shorthand (`$1:$1`, `$A:$A`) rather than `A1:IV1` /
+    // `A1:A65536`.
+    let is_full_width = col2_idx == 0x00FF || col2_idx == 0x3FFF;
+    let is_full_height = row2 == 0xFFFF;
+
+    let is_whole_row = row1 == row2 && col1_idx == 0 && is_full_width;
+    let is_whole_col = col1_idx == col2_idx && row1 == 0 && is_full_height;
+
+    if is_whole_row && is_whole_col {
+        // Degenerate/garbage: avoid choosing one shorthand over the other.
+        warnings.push(format!(
+            "BIFF8 area matches both whole-row and whole-column patterns (rwFirst={row1}, rwLast={row2}, colFirst=0x{col1:04X}, colLast=0x{col2:04X}); rendering as explicit A1-style area"
+        ));
+        return format_area_ref(row1, col1, row2, col2);
+    }
+
+    if is_whole_row {
+        let row_rel = if row1_rel != row2_rel {
+            warnings.push(format!(
+                "BIFF8 whole-row area has mismatched row-relative flags (colFirst=0x{col1:04X}, colLast=0x{col2:04X}); using first"
+            ));
+            row1_rel
+        } else {
+            row1_rel
+        };
+
+        let r = format_row_ref(row1, row_rel);
+        // Excel includes the `:` even for a single-row span.
+        return format!("{r}:{r}");
+    }
+
+    if is_whole_col {
+        let col_rel = if col1_rel != col2_rel {
+            warnings.push(format!(
+                "BIFF8 whole-column area has mismatched col-relative flags (colFirst=0x{col1:04X}, colLast=0x{col2:04X}); using first"
+            ));
+            col1_rel
+        } else {
+            col1_rel
+        };
+
+        let c = format_col_ref(col1_idx as u16, col_rel);
+        // Excel includes the `:` even for a single-column span.
+        return format!("{c}:{c}");
+    }
+
+    format_area_ref(row1, col1, row2, col2)
+}
+
 fn format_area_ref(row1: u16, col1: u16, row2: u16, col2: u16) -> String {
     const BIFF8_MAX_ROW: u16 = 0xFFFF;
     const BIFF8_MAX_COL: u16 = 0x00FF;
@@ -1131,7 +1201,9 @@ fn format_area_ref(row1: u16, col1: u16, row2: u16, col2: u16) -> String {
     }
 
     // Whole-row references (`$1:$1`, `$1:$3`).
-    if col1_idx == 0 && col2_idx == BIFF8_MAX_COL {
+    // Some producers use `0x3FFF` as the "max column" sentinel (full 14-bit width); treat it as
+    // full-width for whole-row formatting too.
+    if col1_idx == 0 && (col2_idx == BIFF8_MAX_COL || col2_idx == 0x3FFF) {
         let start = format_row_ref(row1, row1_rel);
         let end = format_row_ref(row2, row2_rel);
         // Excel canonical form includes the `:` even for single-row ranges.
@@ -1827,6 +1899,27 @@ mod tests {
     }
 
     #[test]
+    fn decodes_whole_row_area_with_3fff_max_col_as_row_range() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // Some writers use colLast=0x3FFF (full 14-bit width) for whole-row spans.
+        let mut rgce = Vec::new();
+        rgce.push(0x25); // PtgArea
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rwLast
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        rgce.extend_from_slice(&0x3FFFu16.to_le_bytes()); // colLast
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "$1:$1");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn decodes_whole_column_area_as_col_range() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetRef> = Vec::new();
@@ -1930,6 +2023,30 @@ mod tests {
             "warnings={:?}",
             decoded.warnings
         );
+        assert_print_titles_parseable("Sheet1", &decoded.text);
+    }
+
+    #[test]
+    fn decodes_whole_row_area3d_with_3fff_max_col_as_row_range() {
+        let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
+        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        let mut rgce = Vec::new();
+        rgce.push(0x3B); // PtgArea3d
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // ixti
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rwLast
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        rgce.extend_from_slice(&0x3FFFu16.to_le_bytes()); // colLast (tolerant max col)
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "Sheet1!$1:$1");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
         assert_print_titles_parseable("Sheet1", &decoded.text);
     }
 
