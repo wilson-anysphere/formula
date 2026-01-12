@@ -16,7 +16,7 @@ export const deDE = {
   "commandPalette.searching": "Suche…",
   "updater.alreadyChecking": "Es wird bereits nach Updates gesucht…",
   "updater.checking": "Suche nach Updates…",
-  "updater.upToDate": "Du bist auf dem neuesten Stand.",
+  "updater.upToDate": "Sie sind auf dem neuesten Stand.",
   "updater.unknownError": "Unbekannter Fehler",
   "updater.checkFailedWithMessage": "Updateprüfung fehlgeschlagen: {message}",
   "updater.errorWithMessage": "Fehler: {message}",
