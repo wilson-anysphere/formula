@@ -3799,6 +3799,12 @@ pub fn check_for_updates(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn open_external_url(window: tauri::Window, url: String) -> Result<(), String> {
+    // Restrict URL opening to the main application window to avoid accidental abuse if we ever
+    // embed untrusted content in secondary webviews.
+    if window.label() != "main" {
+        return Err("external URL opening is only allowed from the main window".to_string());
+    }
+
     let parsed =
         tauri::Url::parse(url.trim()).map_err(|err| format!("Invalid URL: {err}"))?;
 
