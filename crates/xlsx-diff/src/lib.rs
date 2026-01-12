@@ -569,12 +569,32 @@ fn relationship_target_ignore_map(
 
 fn resolve_relationship_target(rels_part: &str, target: &str) -> String {
     let target = target.replace('\\', "/");
+    // Relationship targets are URIs; internal targets may include a fragment (e.g. `foo.xml#bar`).
+    // OPC part names do not include fragments, so strip them before resolving.
+    let target = target.split_once('#').map(|(t, _)| t).unwrap_or(&target);
     if let Some(rest) = target.strip_prefix('/') {
         return normalize_opc_path(rest);
     }
 
     let base_dir = rels_base_dir(rels_part);
     normalize_opc_path(&format!("{base_dir}{target}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_relationship_target_strips_uri_fragments() {
+        assert_eq!(
+            resolve_relationship_target("xl/_rels/workbook.xml.rels", "worksheets/sheet1.xml#frag"),
+            "xl/worksheets/sheet1.xml"
+        );
+        assert_eq!(
+            resolve_relationship_target("xl/_rels/workbook.xml.rels", "/xl/media/image1.png#frag"),
+            "xl/media/image1.png"
+        );
+    }
 }
 
 fn rels_base_dir(rels_part: &str) -> String {

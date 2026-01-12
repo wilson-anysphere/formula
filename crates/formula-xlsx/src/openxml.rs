@@ -60,6 +60,17 @@ fn strip_fragment(target: &str) -> &str {
 }
 
 pub fn resolve_target(base_part: &str, target: &str) -> String {
+    // Relationship targets are URIs; some producers include a fragment (e.g. `foo.xml#bar`).
+    // OPC part names do not include fragments, so strip them before resolving.
+    let target = target
+        .split_once('#')
+        .map(|(base, _)| base)
+        .unwrap_or(target);
+    if target.is_empty() {
+        // A target of just `#fragment` refers to the source part itself.
+        return base_part.to_string();
+    }
+
     // Relationship targets can be relative to the source part's folder (e.g. `worksheets/sheet1.xml`)
     // or absolute (e.g. `/xl/worksheets/sheet1.xml`). Absolute targets are rooted at the package
     // root and must not be prefixed with the source part directory.

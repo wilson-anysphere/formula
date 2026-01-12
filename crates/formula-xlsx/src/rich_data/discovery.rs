@@ -71,8 +71,8 @@ mod tests {
     fn discovers_rich_data_parts_from_metadata_relationships() {
         let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="urn:example:rich-data" Target="richData/rd2.xml"/>
-  <Relationship Id="rId2" Type="urn:example:rich-data" Target="richData/rd1.xml"/>
+  <Relationship Id="rId1" Type="urn:example:rich-data" Target="richData/rd2.xml#frag"/>
+  <Relationship Id="rId2" Type="urn:example:rich-data" Target="richData/rd1.xml#frag"/>
 </Relationships>"#;
 
         let pkg = build_package(&[
@@ -93,8 +93,8 @@ mod tests {
     fn ignores_missing_referenced_parts() {
         let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="urn:example:rich-data" Target="richData/present.xml"/>
-  <Relationship Id="rId2" Type="urn:example:rich-data" Target="richData/missing.xml"/>
+  <Relationship Id="rId1" Type="urn:example:rich-data" Target="richData/present.xml#frag"/>
+  <Relationship Id="rId2" Type="urn:example:rich-data" Target="richData/missing.xml#frag"/>
 </Relationships>"#;
 
         let pkg = build_package(&[
@@ -107,4 +107,3 @@ mod tests {
         assert_eq!(discovered, vec!["xl/richData/present.xml".to_string()]);
     }
 }
-
