@@ -3404,6 +3404,129 @@ fn bytecode_backend_tbill_numeric_text_respects_value_locale() {
 }
 
 #[test]
+fn bytecode_backend_standard_bond_basis_0_and_4_use_different_day_counts() {
+    let mut engine = Engine::new();
+
+    // Schedule designed so US vs EU DAYS360 diverge:
+    // maturity is month-end Aug 31, so the maturity-anchored schedule is EOM-pinned and the PCD is
+    // Feb 28. From Feb 28 to May 1, US DAYS360 counts 61 days, while EU counts 63.
+    let settlement = "2021-05-01";
+    let maturity = "2021-08-31";
+    let rate = 0.05;
+    let yld = 0.06;
+    let redemption = 100.0;
+    let frequency = 2;
+
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            &format!(r#"=PRICE("{settlement}","{maturity}",{rate},{yld},{redemption},{frequency},0)"#),
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            &format!(r#"=PRICE("{settlement}","{maturity}",{rate},{yld},{redemption},{frequency},4)"#),
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "B1",
+            &format!(
+                r#"=YIELD("{settlement}","{maturity}",{rate},A1,{redemption},{frequency},0)"#
+            ),
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "B2",
+            &format!(
+                r#"=YIELD("{settlement}","{maturity}",{rate},A2,{redemption},{frequency},4)"#
+            ),
+        )
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 4);
+    assert_eq!(stats.compiled, 4);
+    assert_eq!(stats.fallback, 0);
+    assert_eq!(engine.bytecode_program_count(), 4);
+
+    engine.recalculate_single_threaded();
+
+    let Value::Number(price0) = engine.get_cell_value("Sheet1", "A1") else {
+        panic!("expected PRICE basis=0 to return a number");
+    };
+    let Value::Number(price4) = engine.get_cell_value("Sheet1", "A2") else {
+        panic!("expected PRICE basis=4 to return a number");
+    };
+    assert!(
+        price0.is_finite() && price4.is_finite(),
+        "expected finite prices"
+    );
+    assert!(
+        (price0 - price4).abs() > 0.0,
+        "expected PRICE basis=0 vs basis=4 to differ for this Feb/EOM schedule"
+    );
+
+    let Value::Number(y0) = engine.get_cell_value("Sheet1", "B1") else {
+        panic!("expected YIELD basis=0 to return a number");
+    };
+    let Value::Number(y4) = engine.get_cell_value("Sheet1", "B2") else {
+        panic!("expected YIELD basis=4 to return a number");
+    };
+    assert!(
+        (y0 - yld).abs() <= 1e-10,
+        "expected YIELD basis=0 to recover yld={yld}, got {y0}"
+    );
+    assert!(
+        (y4 - yld).abs() <= 1e-10,
+        "expected YIELD basis=4 to recover yld={yld}, got {y4}"
+    );
+
+    // Guard: ensure US vs EU DAYS360 actually diverge for the PCD->settlement day count.
+    let system = engine.date_system();
+    let pcd = ymd_to_serial(ExcelDate::new(2021, 2, 28), system).unwrap();
+    let settlement_serial = ymd_to_serial(ExcelDate::new(2021, 5, 1), system).unwrap();
+    let a_us = formula_engine::functions::date_time::days360(pcd, settlement_serial, false, system)
+        .unwrap();
+    let a_eu =
+        formula_engine::functions::date_time::days360(pcd, settlement_serial, true, system).unwrap();
+    assert_eq!(a_us, 61);
+    assert_eq!(a_eu, 63);
+
+    // Bytecode-vs-AST parity.
+    assert_engine_matches_ast(
+        &engine,
+        &format!(r#"=PRICE("{settlement}","{maturity}",{rate},{yld},{redemption},{frequency},0)"#),
+        "A1",
+    );
+    assert_engine_matches_ast(
+        &engine,
+        &format!(r#"=PRICE("{settlement}","{maturity}",{rate},{yld},{redemption},{frequency},4)"#),
+        "A2",
+    );
+    assert_engine_matches_ast(
+        &engine,
+        &format!(
+            r#"=YIELD("{settlement}","{maturity}",{rate},A1,{redemption},{frequency},0)"#
+        ),
+        "B1",
+    );
+    assert_engine_matches_ast(
+        &engine,
+        &format!(
+            r#"=YIELD("{settlement}","{maturity}",{rate},A2,{redemption},{frequency},4)"#
+        ),
+        "B2",
+    );
+}
+
+#[test]
 fn bytecode_backend_financial_date_text_respects_value_locale() {
     let mut engine = Engine::new();
     let formula = r#"=DISC("01/02/2020","01/03/2020",97,100)"#;
