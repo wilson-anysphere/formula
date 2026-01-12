@@ -100,7 +100,9 @@ function formatNumeric(value: number, format: string): string {
   if (!Number.isFinite(value)) return "0";
 
   const isPercent = format.includes("%");
-  const isCurrency = format.includes("$");
+  const currencyMatch = /[$€£¥]/.exec(format);
+  const isCurrency = Boolean(currencyMatch);
+  const currencySymbol = currencyMatch?.[0] ?? "";
   const decimals = parseDecimalPlaces(format);
   const useThousands = hasThousandsSeparators(format);
 
@@ -117,7 +119,7 @@ function formatNumeric(value: number, format: string): string {
   const isNegative = scaled < 0 && !Object.is(Number(fixed), 0);
   const sign = isNegative ? "-" : "";
 
-  const prefix = isCurrency ? "$" : "";
+  const prefix = isCurrency ? currencySymbol : "";
   const suffix = isPercent ? "%" : "";
   return `${sign}${prefix}${numericText}${suffix}`;
 }

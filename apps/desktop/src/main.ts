@@ -1158,6 +1158,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       const format = formatState.numberFormat;
       if (format === "mixed") return "Mixed";
       if (format == null) return "General";
+      if (typeof format === "string" && /^[€£¥$]#,##0\\.00$/.test(format)) return "Currency";
       if (format === NUMBER_FORMATS.currency) return "Currency";
       if (format === NUMBER_FORMATS.percent) return "Percent";
       if (format === NUMBER_FORMATS.date) return "Date";
@@ -6450,7 +6451,7 @@ mountRibbon(ribbonReactRoot, {
         return;
       }
       if (kind === "time") {
-        applyToSelection("Number format", (sheetId, ranges) => {
+        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { numberFormat: "h:mm:ss" }, { label: "Number format" });
           }
@@ -6458,7 +6459,7 @@ mountRibbon(ribbonReactRoot, {
         return;
       }
       if (kind === "fraction") {
-        applyToSelection("Number format", (sheetId, ranges) => {
+        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { numberFormat: "# ?/?" }, { label: "Number format" });
           }
@@ -6466,7 +6467,7 @@ mountRibbon(ribbonReactRoot, {
         return;
       }
       if (kind === "scientific") {
-        applyToSelection("Number format", (sheetId, ranges) => {
+        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { numberFormat: "0.00E+00" }, { label: "Number format" });
           }
@@ -6474,7 +6475,7 @@ mountRibbon(ribbonReactRoot, {
         return;
       }
       if (kind === "text") {
-        applyToSelection("Number format", (sheetId, ranges) => {
+        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { numberFormat: "@" }, { label: "Number format" });
           }
@@ -6486,10 +6487,26 @@ mountRibbon(ribbonReactRoot, {
 
     const accountingPrefix = "home.number.accounting.";
     if (commandId.startsWith(accountingPrefix)) {
-      // For now, treat all accounting currency picks as the default currency preset.
-      applyFormattingToSelection("Number format", (_doc, sheetId, ranges) =>
-        applyNumberFormatPreset(doc, sheetId, ranges, "currency"),
-      );
+      const currency = commandId.slice(accountingPrefix.length);
+      const symbol = (() => {
+        switch (currency) {
+          case "eur":
+            return "€";
+          case "gbp":
+            return "£";
+          case "jpy":
+            return "¥";
+          case "usd":
+          default:
+            return "$";
+        }
+      })();
+
+      applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
+        for (const range of ranges) {
+          doc.setRangeFormat(sheetId, range, { numberFormat: `${symbol}#,##0.00` }, { label: "Number format" });
+        }
+      });
       return;
     }
 
