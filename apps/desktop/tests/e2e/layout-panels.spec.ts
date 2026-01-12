@@ -105,6 +105,7 @@ test.describe("dockable panels layout persistence", () => {
     await page.reload();
     await waitForDesktopReady(page);
 
+    await page.getByRole("tab", { name: "View", exact: true }).click();
     await page.getByTestId("open-version-history-panel").click();
     await expect(page.getByTestId("panel-versionHistory")).toBeVisible();
   });
@@ -115,6 +116,7 @@ test.describe("dockable panels layout persistence", () => {
     await page.reload();
     await waitForDesktopReady(page);
 
+    await page.getByRole("tab", { name: "View", exact: true }).click();
     await page.getByTestId("open-branch-manager-panel").click();
     await expect(page.getByTestId("panel-branchManager")).toBeVisible();
   });
