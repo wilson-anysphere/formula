@@ -8496,6 +8496,10 @@ fn parse_xmatch_match_mode(
             if let Value::Error(e) = v {
                 return Err(e);
             }
+            // Arrays are not valid mode arguments (they cannot be implicitly intersected).
+            if matches!(v, Value::Array(_) | Value::Range(_) | Value::MultiRange(_)) {
+                return Err(ErrorKind::Value);
+            }
             let n = coerce_to_i64(&v)?;
             lookup::MatchMode::try_from(n).map_err(ErrorKind::from)
         }
@@ -8519,6 +8523,10 @@ fn parse_xmatch_search_mode(
             };
             if let Value::Error(e) = v {
                 return Err(e);
+            }
+            // Arrays are not valid mode arguments (they cannot be implicitly intersected).
+            if matches!(v, Value::Array(_) | Value::Range(_) | Value::MultiRange(_)) {
+                return Err(ErrorKind::Value);
             }
             let n = coerce_to_i64(&v)?;
             lookup::SearchMode::try_from(n).map_err(ErrorKind::from)

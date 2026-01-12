@@ -5531,6 +5531,62 @@ fn bytecode_backend_applies_implicit_intersection_for_xlookup_xmatch_mode_ranges
 }
 
 #[test]
+fn bytecode_backend_xlookup_xmatch_mode_args_error_on_array_expressions_like_ast() {
+    let mut engine = Engine::new();
+
+    // Produce array results via range arithmetic.
+    engine.set_cell_value("Sheet1", "D1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "D2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "D3", 3.0).unwrap();
+
+    // match_mode as array expression.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=XMATCH(2,{1;2;3},D1:D3*0)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=XLOOKUP(2,{1;2;3},{10;20;30},,D1:D3*0)")
+        .unwrap();
+
+    // search_mode as array expression.
+    engine
+        .set_cell_formula("Sheet1", "A3", "=XMATCH(2,{1;2;3},0,D1:D3*0)")
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A4",
+            "=XLOOKUP(2,{1;2;3},{10;20;30},,0,D1:D3*0)",
+        )
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 4);
+    assert_eq!(
+        stats.compiled, 4,
+        "expected XLOOKUP/XMATCH to compile with array-expr mode args"
+    );
+    assert_eq!(stats.fallback, 0);
+
+    engine.recalculate_single_threaded();
+
+    for cell in ["A1", "A2", "A3", "A4"] {
+        assert_eq!(
+            engine.get_cell_value("Sheet1", cell),
+            Value::Error(ErrorKind::Value)
+        );
+    }
+
+    for (formula, cell) in [
+        ("=XMATCH(2,{1;2;3},D1:D3*0)", "A1"),
+        ("=XLOOKUP(2,{1;2;3},{10;20;30},,D1:D3*0)", "A2"),
+        ("=XMATCH(2,{1;2;3},0,D1:D3*0)", "A3"),
+        ("=XLOOKUP(2,{1;2;3},{10;20;30},,0,D1:D3*0)", "A4"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_xlookup_xmatch_accept_let_single_cell_reference_locals() {
     let mut engine = Engine::new();
 
