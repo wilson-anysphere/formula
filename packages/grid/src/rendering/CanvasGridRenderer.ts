@@ -3611,10 +3611,18 @@ export class CanvasGridRenderer {
       };
 
       const alignPos = (pos: number, lineWidth: number): number => {
-        // Align strokes to device pixels for crisp output. Mirrors the logic asserted in
-        // `CanvasGridRenderer.cellFormatting.test.ts` (odd widths use half-pixel alignment).
-        const roundedPos = Math.round(pos);
+        // Align strokes to device pixels for crisp output when the width is effectively an integer.
+        //
+        // For non-integer widths (common at fractional zoom levels), snapping would shift borders
+        // away from their true geometric position and can collapse distinct widths (e.g. double
+        // border widths of 2 vs 3). In those cases we draw at the exact coordinate and let the
+        // browser antialias as needed.
+        //
+        // Mirrors the logic asserted in `CanvasGridRenderer.cellFormatting.test.ts` for integer widths
+        // (odd widths use half-pixel alignment).
         const roundedWidth = Math.round(lineWidth);
+        if (Math.abs(lineWidth - roundedWidth) > 1e-3) return pos;
+        const roundedPos = Math.round(pos);
         return roundedWidth % 2 === 1 ? roundedPos + 0.5 : roundedPos;
       };
 
