@@ -950,12 +950,13 @@ fn unsupported(ptg: u8, warnings: Vec<String>) -> DecodeRgceResult {
         warnings.push(msg);
     }
     DecodeRgceResult {
-        // Use a *real* Excel error literal so callers can round-trip the decoded formula through
-        // `formula-engine` and other Excel-compatible parsers.
+        // Use a parseable, stable Excel error literal so callers can round-trip the decoded
+        // formula through `formula-engine`.
         //
-        // `#NAME?` is a reasonable generic fallback for “something in the formula is unknown /
-        // unsupported”.
-        text: "#NAME?".to_string(),
+        // We intentionally use `#UNKNOWN!` here rather than encoding custom placeholders like
+        // `#UNSUPPORTED_PTG_0xNN!`. `formula-engine` maps unrecognized error literals to `#VALUE!`,
+        // losing the intent that the decoded token was unknown/unsupported.
+        text: "#UNKNOWN!".to_string(),
         warnings,
     }
 }
@@ -1823,7 +1824,7 @@ mod tests {
         // PtgExp (0x01) is not supported by this best-effort NAME rgce printer.
         let rgce = [0x01];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
-        assert_eq!(decoded.text, "#NAME?");
+        assert_eq!(decoded.text, "#UNKNOWN!");
         assert!(!decoded.warnings.is_empty(), "expected warnings");
         assert_parseable(&decoded.text);
     }
@@ -2885,7 +2886,7 @@ mod tests {
 
         let rgce = [0x00];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
-        assert_eq!(decoded.text, "#NAME?");
+        assert_eq!(decoded.text, "#UNKNOWN!");
         assert!(
             decoded.warnings.iter().any(|w| w.contains("0x00")),
             "expected warning to include original ptg id, warnings={:?}",
@@ -2905,7 +2906,7 @@ mod tests {
         // decoder falls back to a parseable Excel error literal.
         let rgce = [0x03];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
-        assert_eq!(decoded.text, "#NAME?");
+        assert_eq!(decoded.text, "#UNKNOWN!");
         assert!(
             decoded
                 .warnings
@@ -2933,7 +2934,7 @@ mod tests {
         // decoder falls back to a parseable Excel error literal.
         let rgce = [0x1E, 0x01];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
-        assert_eq!(decoded.text, "#NAME?");
+        assert_eq!(decoded.text, "#UNKNOWN!");
         assert!(
             decoded
                 .warnings
