@@ -1,9 +1,9 @@
 use std::io::Read;
 
-use formula_vba::{
-    extract_vba_signature_signed_digest, parse_vba_digital_signature, verify_vba_digital_signature,
-    VbaSignatureVerification,
-};
+#[cfg(not(target_arch = "wasm32"))]
+use formula_vba::{verify_vba_digital_signature, VbaSignatureBinding, VbaSignatureVerification};
+
+use formula_vba::{extract_vba_signature_signed_digest, parse_vba_digital_signature};
 
 fn load_fixture_vba_bin() -> Vec<u8> {
     let fixture_path = concat!(
@@ -119,4 +119,18 @@ fn verifies_signature_even_when_digsig_header_is_corrupt() {
         .expect("verification should succeed")
         .expect("signature should be present");
     assert_eq!(verified.verification, VbaSignatureVerification::SignedVerified);
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn verifies_signed_vba_fixture_signature_and_reports_binding_mismatch() {
+    let vba_bin = load_fixture_vba_bin();
+    let sig = verify_vba_digital_signature(&vba_bin)
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    // The fixture embeds a synthetic digest value; it is not intended to match the computed digest
+    // of the fixture's project streams.
+    assert_eq!(sig.binding, VbaSignatureBinding::NotBound);
 }
