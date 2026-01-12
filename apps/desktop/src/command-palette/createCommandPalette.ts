@@ -642,18 +642,18 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
         label.appendChild(renderHighlightedText(fn.name, fn.matchRanges));
         main.appendChild(label);
 
-        if (fn.signature) {
-          const signature = document.createElement("div");
-          signature.className = "command-palette__item-description";
-          signature.textContent = fn.signature;
-          main.appendChild(signature);
-        }
-
         if (fn.summary) {
           const summary = document.createElement("div");
           summary.className = "command-palette__item-description";
           summary.textContent = fn.summary;
           main.appendChild(summary);
+        }
+
+        if (fn.signature) {
+          const signature = document.createElement("div");
+          signature.className = "command-palette__item-description command-palette__item-description--mono";
+          signature.textContent = fn.signature;
+          main.appendChild(signature);
         }
 
         li.appendChild(main);

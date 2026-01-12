@@ -559,6 +559,19 @@
   white-space: nowrap;
 }
 
+.command-palette__item-description--mono {
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+  font-size: 11px;
+}
+
 .command-palette__item-shortcut {
   font-size: 12px;
   color: var(--text-secondary);
