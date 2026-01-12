@@ -46,6 +46,21 @@ test("cursor AI policy guard fails when forbidden provider strings are present",
   }
 });
 
+test("cursor AI policy guard fails when forbidden provider strings are present in root config files", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-root-config-fail-"));
+  try {
+    // Root-level config files (package.json, Cargo.toml, etc) are scanned because
+    // adding forbidden dependencies there should fail fast.
+    await writeFixtureFile(tmpRoot, "package.json", '{ "name": "example", "dependencies": { "openai": "0.0.0" } }\n');
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("cursor AI policy guard fails when forbidden strings appear in unrelated unit tests", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-test-fail-"));
   try {

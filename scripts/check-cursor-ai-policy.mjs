@@ -91,6 +91,10 @@ const SCANNED_FILE_EXTENSIONS = new Set([
 
 const MAX_BYTES_TO_SCAN = 2 * 1024 * 1024; // 2 MiB guard against generated/binary blobs.
 
+// Config formats where any mention of provider identifiers is almost certainly a
+// direct dependency/config regression (not an incidental string in code/comments).
+const CONFIG_FILE_EXTENSIONS = new Set([".json", ".toml", ".yaml", ".yml"]);
+
 /**
  * @typedef {{ file: string, ruleId: string, message: string, line?: number, column?: number }} Violation
  */
@@ -216,6 +220,12 @@ const OPENAI_IN_TEST_RULE = {
   needleLower: "openai",
   message:
     "Forbidden: OpenAI references are not allowed in unit tests (Cursor-only AI). Use generic placeholders or test fixtures that avoid provider names.",
+};
+
+const OPENAI_IN_CONFIG_RULE = {
+  id: "openai-in-config",
+  needleLower: "openai",
+  message: "Forbidden: OpenAI references are not allowed in config/dependency files (Cursor-only AI).",
 };
 
 const OPENAI_IMPORT_REGEXES = [
@@ -352,6 +362,23 @@ export async function checkCursorAiPolicy(options = {}) {
     if (allowForbiddenInThisTest) return;
 
     const contentLower = content.toLowerCase();
+    const ext = path.extname(relLower);
+
+    // For config/dependency files, any mention of provider identifiers is a hard fail.
+    if (CONFIG_FILE_EXTENSIONS.has(ext)) {
+      const idx = contentLower.indexOf(OPENAI_IN_CONFIG_RULE.needleLower);
+      if (idx !== -1) {
+        const { line, column } = computeLineColumn(content, idx);
+        record({
+          file: rel,
+          ruleId: OPENAI_IN_CONFIG_RULE.id,
+          message: OPENAI_IN_CONFIG_RULE.message,
+          line,
+          column,
+        });
+        return;
+      }
+    }
 
     // Unit tests should not mention provider names at all (unless they are tests for
     // this guard). This is stricter than the import-specifier check and helps
@@ -398,6 +425,21 @@ export async function checkCursorAiPolicy(options = {}) {
   for (const dir of dirsToScan) {
     await walkDir(dir, rootDir, scanFile);
     if (violations.length >= maxViolations) break;
+  }
+
+  // Also scan root-level config files (package.json, Cargo.toml, etc). Those can
+  // reintroduce forbidden dependencies without touching the main code trees.
+  if (violations.length < maxViolations) {
+    try {
+      const rootEntries = await readdir(rootDir, { withFileTypes: true });
+      for (const entry of rootEntries) {
+        if (violations.length >= maxViolations) break;
+        if (!entry.isFile()) continue;
+        await scanFile(path.join(rootDir, entry.name));
+      }
+    } catch {
+      // ignore
+    }
   }
 
   return { ok: violations.length === 0, violations };
