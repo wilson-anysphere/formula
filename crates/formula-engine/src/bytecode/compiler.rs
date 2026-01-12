@@ -336,6 +336,7 @@ impl<'a> CompileCtx<'a> {
     fn alloc_temp_local(&mut self, label: &'static str) -> u32 {
         self.alloc_local(Arc::from(label))
     }
+
     fn compile_ifs(&mut self, args: &[Expr]) {
         // IFS requires at least one condition/value pair, and the argument count must be even.
         if args.len() < 2 {

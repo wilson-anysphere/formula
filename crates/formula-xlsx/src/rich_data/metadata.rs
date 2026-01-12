@@ -43,7 +43,9 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
     let xml = std::str::from_utf8(metadata_xml)?;
     let doc = Document::parse(xml)?;
 
-    let Some(xlrichvalue_type_idx) = find_metadata_type_index(&doc, "XLRICHVALUE") else {
+    let Some((xlrichvalue_type_idx, metadata_types_count)) =
+        find_metadata_type_index_and_count(&doc, "XLRICHVALUE")
+    else {
         return Ok(HashMap::new());
     };
 
@@ -58,36 +60,127 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
     let Ok(xlrichvalue_t_zero_based) = u32::try_from(xlrichvalue_type_idx) else {
         return Ok(HashMap::new());
     };
-    let xlrichvalue_t_one_based = xlrichvalue_t_zero_based.saturating_add(1);
+    let Some(xlrichvalue_t_one_based) = xlrichvalue_t_zero_based.checked_add(1) else {
+        return Ok(HashMap::new());
+    };
 
-    Ok(parse_value_metadata_mappings(
-        &doc,
-        xlrichvalue_t_zero_based,
-        xlrichvalue_t_one_based,
-        &future_bk_indices,
-    ))
+    let rc_t_indexing = infer_value_metadata_rc_t_indexing(&doc, metadata_types_count);
+    let out = match rc_t_indexing {
+        RcTIndexing::ZeroBased => {
+            parse_value_metadata_mappings(&doc, &[xlrichvalue_t_zero_based], &future_bk_indices)
+        }
+        RcTIndexing::OneBased => {
+            parse_value_metadata_mappings(&doc, &[xlrichvalue_t_one_based], &future_bk_indices)
+        }
+        RcTIndexing::Ambiguous => {
+            // When we can't infer whether rc/@t is 0-based or 1-based, fall back to the original
+            // tolerant behavior: accept both and keep whichever mapping we see first for a given
+            // vm entry.
+            let mut merged = parse_value_metadata_mappings(
+                &doc,
+                &[xlrichvalue_t_zero_based, xlrichvalue_t_one_based],
+                &future_bk_indices,
+            );
+
+            // If the tolerant parse produces no results, attempt the single-scheme parses anyway.
+            if merged.is_empty() {
+                let a = parse_value_metadata_mappings(
+                    &doc,
+                    &[xlrichvalue_t_zero_based],
+                    &future_bk_indices,
+                );
+                let b = parse_value_metadata_mappings(
+                    &doc,
+                    &[xlrichvalue_t_one_based],
+                    &future_bk_indices,
+                );
+                merged = if a.len() >= b.len() { a } else { b };
+            }
+
+            merged
+        }
+    };
+
+    Ok(out)
 }
 
-fn find_metadata_type_index(doc: &Document<'_>, name: &str) -> Option<usize> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RcTIndexing {
+    ZeroBased,
+    OneBased,
+    Ambiguous,
+}
+
+fn find_metadata_type_index_and_count(doc: &Document<'_>, name: &str) -> Option<(usize, usize)> {
     let metadata_types = doc
         .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "metadataTypes")?;
 
+    let mut out_idx: Option<usize> = None;
+    let mut count = 0usize;
     for (idx, node) in metadata_types
         .children()
         .filter(|n| n.is_element() && n.tag_name().name() == "metadataType")
         .enumerate()
     {
+        count += 1;
         let Some(mt_name) = node.attribute("name") else {
             continue;
         };
 
         if mt_name.eq_ignore_ascii_case(name) {
-            return Some(idx);
+            out_idx = Some(idx);
         }
     }
 
-    None
+    out_idx.map(|idx| (idx, count))
+}
+
+fn infer_value_metadata_rc_t_indexing(doc: &Document<'_>, metadata_types_count: usize) -> RcTIndexing {
+    if metadata_types_count == 0 {
+        return RcTIndexing::Ambiguous;
+    }
+
+    let Some(value_metadata) = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "valueMetadata")
+    else {
+        return RcTIndexing::Ambiguous;
+    };
+
+    // Collect min/max across all `<rc t="...">` to infer whether indices are 0-based (0..count-1)
+    // or 1-based (1..count). In some workbooks the ranges overlap (e.g. only 1..count-1), in which
+    // case we treat it as ambiguous and let the caller decide.
+    let mut min_t: Option<u32> = None;
+    let mut max_t: Option<u32> = None;
+    for rc in value_metadata
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "rc")
+    {
+        let Some(t) = rc.attribute("t").and_then(|t| t.parse::<u32>().ok()) else {
+            continue;
+        };
+        min_t = Some(min_t.map(|m| m.min(t)).unwrap_or(t));
+        max_t = Some(max_t.map(|m| m.max(t)).unwrap_or(t));
+    }
+
+    let Some((min_t, max_t)) = min_t.zip(max_t) else {
+        return RcTIndexing::Ambiguous;
+    };
+
+    let Ok(count_u32) = u32::try_from(metadata_types_count) else {
+        return RcTIndexing::Ambiguous;
+    };
+
+    let zero_based_possible = max_t < count_u32;
+    let one_based_possible = min_t >= 1 && max_t <= count_u32;
+
+    match (zero_based_possible, one_based_possible) {
+        (true, false) => RcTIndexing::ZeroBased,
+        (false, true) => RcTIndexing::OneBased,
+        // Either both are possible (range overlap), or neither is possible (corrupt input).
+        _ => RcTIndexing::Ambiguous,
+    }
 }
 
 fn parse_future_rich_value_indices(doc: &Document<'_>, name: &str) -> Vec<BkRun<Option<u32>>> {
@@ -128,8 +221,7 @@ fn parse_future_rich_value_indices(doc: &Document<'_>, name: &str) -> Vec<BkRun<
 
 fn parse_value_metadata_mappings(
     doc: &Document<'_>,
-    xlrichvalue_t_zero_based: u32,
-    xlrichvalue_t_one_based: u32,
+    xlrichvalue_t_values: &[u32],
     future_bk_indices: &[BkRun<Option<u32>>],
 ) -> HashMap<u32, u32> {
     let Some(value_metadata) = doc
@@ -158,7 +250,7 @@ fn parse_value_metadata_mappings(
                 && n.tag_name().name() == "rc"
                 && n.attribute("t")
                     .and_then(|t| t.parse::<u32>().ok())
-                    .is_some_and(|t| t == xlrichvalue_t_zero_based || t == xlrichvalue_t_one_based)
+                    .is_some_and(|t| xlrichvalue_t_values.contains(&t))
         });
 
         let Some(rc) = rc else {

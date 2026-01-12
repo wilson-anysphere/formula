@@ -25,7 +25,8 @@ const RICH_VALUE_REL_XML: &str = "xl/richData/richValueRel.xml";
 /// Resolve workbook rich value indices to image target part paths (`xl/media/*`) when possible.
 ///
 /// The returned vector uses:
-/// - index: rich value index (0-based, corresponds to `xl/richData/richValue.xml` record order)
+/// - index: rich value index (0-based, corresponds to the record order of the rich value table that
+///   is present in the package: either `xl/richData/richValue.xml` or `xl/richData/rdrichvalue.xml`)
 /// - value: resolved target part path (e.g. `xl/media/image1.png`) for image-rich-values, or `None`
 ///   if the record does not appear to reference an image.
 ///
@@ -38,7 +39,19 @@ pub fn resolve_rich_value_image_targets(
     parts: &BTreeMap<String, Vec<u8>>,
 ) -> Result<Vec<Option<String>>, XlsxError> {
     let rel_indices = if let Some(rich_value_xml) = parts.get(RICH_VALUE_XML) {
-        parse_rich_value_relationship_indices(rich_value_xml)?
+        let parsed = parse_rich_value_relationship_indices(rich_value_xml)?;
+        // Some workbooks include `richValue.xml` but store embedded images in `rdrichvalue.xml`.
+        // If the legacy table is empty, fall back to the rdRichValue table when available.
+        if parsed.is_empty() {
+            if let Some(rd_rich_value_xml) = parts.get(RD_RICH_VALUE_XML) {
+                let structure_xml = parts.get(RD_RICH_VALUE_STRUCTURE_XML).map(|b| b.as_slice());
+                parse_rdrichvalue_relationship_indices(rd_rich_value_xml, structure_xml)?
+            } else {
+                parsed
+            }
+        } else {
+            parsed
+        }
     } else if let Some(rd_rich_value_xml) = parts.get(RD_RICH_VALUE_XML) {
         let structure_xml = parts.get(RD_RICH_VALUE_STRUCTURE_XML).map(|b| b.as_slice());
         parse_rdrichvalue_relationship_indices(rd_rich_value_xml, structure_xml)?
@@ -387,6 +400,75 @@ mod tests {
 </Relationships>"#;
 
         let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        parts.insert(
+            "xl/richData/rdrichvaluestructure.xml".to_string(),
+            rd_rich_value_structure.to_vec(),
+        );
+        parts.insert(
+            "xl/richData/rdrichvalue.xml".to_string(),
+            rd_rich_value_xml.to_vec(),
+        );
+        parts.insert(
+            "xl/richData/richValueRel.xml".to_string(),
+            rich_value_rel_xml.to_vec(),
+        );
+        parts.insert(
+            "xl/richData/_rels/richValueRel.xml.rels".to_string(),
+            rels_xml.to_vec(),
+        );
+
+        let resolved = resolve_rich_value_image_targets(&parts).expect("resolve");
+        assert_eq!(
+            resolved,
+            vec![
+                Some("xl/media/image1.png".to_string()),
+                Some("xl/media/image2.png".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn falls_back_to_rdrichvalue_when_richvalue_table_is_empty() {
+        // Some workbooks include `richValue.xml` (possibly empty) but store embedded images via
+        // `rdrichvalue.xml`. If the legacy table contains no `<rv>` records, we should fall back to
+        // rdRichValue.
+        let rich_value_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values/>
+</rvData>"#;
+
+        let rd_rich_value_structure = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvStructures xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata" count="1">
+  <s t="_localImage">
+    <k n="_rvRel:LocalImageIdentifier" t="i"/>
+    <k n="CalcOrigin" t="i"/>
+  </s>
+</rvStructures>"#;
+
+        let rd_rich_value_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata" count="2">
+  <rv s="0"><v>0</v><v>5</v></rv>
+  <rv s="0"><v>1</v><v>5</v></rv>
+</rvData>"#;
+
+        let rich_value_rel_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<richValueRels xmlns="http://schemas.microsoft.com/office/spreadsheetml/2022/richvaluerel"
+       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rel r:id="rId1"/>
+  <rel r:id="rId2"/>
+</richValueRels>"#;
+
+        let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image2.png"/>
+</Relationships>"#;
+
+        let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        parts.insert(
+            "xl/richData/richValue.xml".to_string(),
+            rich_value_xml.to_vec(),
+        );
         parts.insert(
             "xl/richData/rdrichvaluestructure.xml".to_string(),
             rd_rich_value_structure.to_vec(),
