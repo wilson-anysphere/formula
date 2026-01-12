@@ -4794,7 +4794,7 @@ mod tests {
     }
 
     #[test]
-    fn set_sheet_tab_color_allows_non_rgb_updates() {
+    fn set_sheet_tab_color_rejects_non_rgb_updates() {
         let mut workbook = Workbook::new_empty(None);
         workbook.add_sheet("Sheet1".to_string());
 
@@ -4803,7 +4803,7 @@ mod tests {
             .load_workbook_persistent(workbook, WorkbookPersistenceLocation::InMemory)
             .expect("load persistent workbook");
 
-        state
+        let err = state
             .set_sheet_tab_color(
                 "Sheet1",
                 Some(TabColor {
@@ -4811,25 +4811,33 @@ mod tests {
                     ..Default::default()
                 }),
             )
-            .expect("set theme tab color");
+            .expect_err("expected non-RGB tab color update to fail");
 
-        // Ensure update is reflected in in-memory workbook info.
+        match err {
+            AppStateError::WhatIf(msg) => assert!(
+                msg.contains("ARGB"),
+                "expected error message to mention ARGB, got: {msg}"
+            ),
+            other => panic!("expected AppStateError::WhatIf, got {other:?}"),
+        }
+
+        // Ensure failed update doesn't mutate in-memory state.
         let info = state.workbook_info().expect("workbook info");
         let sheet1 = info
             .sheets
             .iter()
             .find(|s| s.id == "Sheet1")
             .expect("Sheet1 exists");
-        assert_eq!(sheet1.tab_color.as_ref().and_then(|c| c.theme), Some(1));
+        assert_eq!(sheet1.tab_color, None);
 
-        // Ensure the update is persisted as a full CT_Color payload (not only RGB fast path).
+        // Ensure failed update doesn't write to persistent storage either.
         let storage = state.persistent_storage().expect("storage");
         let workbook_id = state.persistent_workbook_id().expect("workbook id");
         let model = storage
             .export_model_workbook(workbook_id)
             .expect("export model");
         let sheet1 = model.sheet_by_name("Sheet1").expect("Sheet1 exists");
-        assert_eq!(sheet1.tab_color.as_ref().and_then(|c| c.theme), Some(1));
+        assert_eq!(sheet1.tab_color, None);
     }
 
     #[test]
