@@ -770,27 +770,11 @@ export const defaultRibbonSchema: RibbonSchema = {
           label: "Panels",
           buttons: [
             {
-              id: "open-ai-panel",
-              label: "AI panel",
-              ariaLabel: "Toggle AI panel",
-              icon: "🤖",
-              testId: "open-ai-panel",
-              size: "icon",
-            },
-            {
               id: "open-panel-ai-chat",
               label: "AI chat",
               ariaLabel: "Toggle AI chat panel",
               icon: "🤖",
               testId: "open-panel-ai-chat",
-              size: "icon",
-            },
-            {
-              id: "open-ai-audit-panel",
-              label: "Audit log",
-              ariaLabel: "Toggle AI audit log panel",
-              icon: "🧾",
-              testId: "open-ai-audit-panel",
               size: "icon",
             },
             {
