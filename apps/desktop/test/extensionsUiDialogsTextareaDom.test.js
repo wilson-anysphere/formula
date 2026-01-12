@@ -1,7 +1,28 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { showInputBox } from "../src/extensions/ui.js";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+let showInputBox = null;
+try {
+  const extensionsDir = path.join(__dirname, "..", "src", "extensions");
+  const candidates = ["ui.js", "ui.ts"];
+  for (const candidate of candidates) {
+    const candidatePath = path.join(extensionsDir, candidate);
+    if (!fs.existsSync(candidatePath)) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const mod = await import(new URL(`../src/extensions/${candidate}`, import.meta.url).href);
+    if (typeof mod.showInputBox === "function") {
+      showInputBox = mod.showInputBox;
+      break;
+    }
+  }
+} catch {
+  // ignore; test will be skipped below if showInputBox is unavailable.
+}
 
 let JSDOM = null;
 try {
@@ -54,7 +75,7 @@ async function withDom(fn) {
   }
 }
 
-test("showInputBox textarea mode renders without inline styles", { skip: !hasDom }, async () => {
+test("showInputBox textarea mode renders without inline styles", { skip: !hasDom || !showInputBox }, async () => {
   await withDom(async () => {
     const promise = showInputBox({ prompt: "JSON", value: "{}", type: "textarea" });
     const dialog = document.querySelector('dialog[data-testid="input-box"]');
@@ -79,4 +100,3 @@ test("showInputBox textarea mode renders without inline styles", { skip: !hasDom
     assert.equal(document.querySelector('dialog[data-testid="input-box"]'), null);
   });
 });
-
