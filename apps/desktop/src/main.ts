@@ -7003,54 +7003,65 @@ async function handleRibbonExportPdf(): Promise<void> {
     const limits = getGridLimitsForFormatting();
     const active = app.getActiveCell();
 
+    const clipBandSelectionToUsedRange = (range0: CellRange): CellRange => {
+      const normalized: CellRange = {
+        start: { row: Math.min(range0.start.row, range0.end.row), col: Math.min(range0.start.col, range0.end.col) },
+        end: { row: Math.max(range0.start.row, range0.end.row), col: Math.max(range0.start.col, range0.end.col) },
+      };
+
+      const activeCellFallback0: CellRange = {
+        start: { row: active.row, col: active.col },
+        end: { row: active.row, col: active.col },
+      };
+
+      const isFullHeight = normalized.start.row === 0 && normalized.end.row === limits.maxRows - 1;
+      const isFullWidth = normalized.start.col === 0 && normalized.end.col === limits.maxCols - 1;
+      if (!isFullHeight && !isFullWidth) return normalized;
+
+      const used = doc.getUsedRange(sheetId);
+      if (!used) return activeCellFallback0;
+
+      const startRow = Math.max(normalized.start.row, used.startRow);
+      const endRow = Math.min(normalized.end.row, used.endRow);
+      const startCol = Math.max(normalized.start.col, used.startCol);
+      const endCol = Math.min(normalized.end.col, used.endCol);
+      const clipped =
+        startRow <= endRow && startCol <= endCol
+          ? { start: { row: startRow, col: startCol }, end: { row: endRow, col: endCol } }
+          : null;
+      return clipped ?? activeCellFallback0;
+    };
+
     // Use the selection by default, but clip full-row/full-column/full-sheet selections to the
     // used range to avoid generating PDFs that span millions of empty cells.
-    let selectionRange0 = selectionBoundingBox0Based();
-    const activeCellFallback0: CellRange = {
-      start: { row: active.row, col: active.col },
-      end: { row: active.row, col: active.col },
-    };
-    const isFullHeight = selectionRange0.start.row === 0 && selectionRange0.end.row === limits.maxRows - 1;
-    const isFullWidth = selectionRange0.start.col === 0 && selectionRange0.end.col === limits.maxCols - 1;
-    if (isFullHeight || isFullWidth) {
-      const used = doc.getUsedRange(sheetId);
-      if (used) {
-        const startRow = Math.max(selectionRange0.start.row, used.startRow);
-        const endRow = Math.min(selectionRange0.end.row, used.endRow);
-        const startCol = Math.max(selectionRange0.start.col, used.startCol);
-        const endCol = Math.min(selectionRange0.end.col, used.endCol);
-        const clipped =
-          startRow <= endRow && startCol <= endCol
-            ? { start: { row: startRow, col: startCol }, end: { row: endRow, col: endCol } }
-            : null;
-        selectionRange0 = clipped ?? activeCellFallback0;
-      } else {
-        selectionRange0 = activeCellFallback0;
-      }
-    }
-
-    let range: PrintCellRange = {
-      startRow: selectionRange0.start.row + 1,
-      endRow: selectionRange0.end.row + 1,
-      startCol: selectionRange0.start.col + 1,
-      endCol: selectionRange0.end.col + 1,
-    };
+    let exportRange0 = clipBandSelectionToUsedRange(selectionBoundingBox0Based());
 
     try {
       const settings = await invoke("get_sheet_print_settings", { sheet_id: sheetId });
       const printArea = (settings as any)?.print_area;
       const first = Array.isArray(printArea) ? printArea[0] : null;
       if (first) {
-        range = {
-          startRow: Number(first.start_row),
-          endRow: Number(first.end_row),
-          startCol: Number(first.start_col),
-          endCol: Number(first.end_col),
-        };
+        const startRow = Number(first.start_row);
+        const endRow = Number(first.end_row);
+        const startCol = Number(first.start_col);
+        const endCol = Number(first.end_col);
+        if ([startRow, endRow, startCol, endCol].every((v) => Number.isFinite(v) && v > 0)) {
+          exportRange0 = clipBandSelectionToUsedRange({
+            start: { row: Math.min(startRow, endRow) - 1, col: Math.min(startCol, endCol) - 1 },
+            end: { row: Math.max(startRow, endRow) - 1, col: Math.max(startCol, endCol) - 1 },
+          });
+        }
       }
     } catch (err) {
       console.warn("Failed to fetch print area settings; exporting selection instead:", err);
     }
+
+    const range: PrintCellRange = {
+      startRow: exportRange0.start.row + 1,
+      endRow: exportRange0.end.row + 1,
+      startCol: exportRange0.start.col + 1,
+      endCol: exportRange0.end.col + 1,
+    };
 
     const b64 = await invoke("export_sheet_range_pdf", {
       sheet_id: sheetId,
