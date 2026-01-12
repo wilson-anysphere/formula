@@ -405,6 +405,117 @@ impl<'a> CompileCtx<'a> {
         self.alloc_local(Arc::from(label))
     }
 
+    fn compile_choose(&mut self, args: &[Expr], allow_range: bool) {
+        // CHOOSE(index, value1, value2, ...)
+        if args.len() < 2 {
+            self.push_error_const(ErrorKind::Value);
+            return;
+        }
+
+        // Evaluate the index once, coerce it to a number, and truncate toward zero.
+        //
+        // Excel truncates non-integer indices (e.g. CHOOSE(1.9, ...) uses index 1). The runtime's
+        // `coerce_to_i64` implements this with `trunc()`.
+        self.compile_expr_inner(&args[0], false);
+        // Coerce to number using unary-plus semantics (matches `coerce_to_number`).
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::UnaryPlus, 0, 0));
+
+        // Apply truncation via ROUNDDOWN(number, 0).
+        let zero_idx = self.program.consts.len() as u32;
+        self.program
+            .consts
+            .push(ConstValue::Value(Value::Number(0.0)));
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::PushConst, zero_idx, 0));
+        let rounddown_idx = intern_func(self.program, Function::RoundDown);
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::CallFunc, rounddown_idx, 2));
+
+        let index_local = self.alloc_temp_local("\u{0}CHOOSE_INDEX");
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::StoreLocal, index_local, 0));
+
+        // If the index expression is an error, return it without evaluating any choices.
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::LoadLocal, index_local, 0));
+        let jump_not_error_idx = self.program.instrs.len();
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::JumpIfNotError, 0, 0));
+        // Error path: reload the error and jump to end.
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::LoadLocal, index_local, 0));
+        let jump_error_end_idx = self.program.instrs.len();
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::Jump, 0, 0));
+
+        let cases_start = self.program.instrs.len() as u32;
+        self.program.instrs[jump_not_error_idx] =
+            Instruction::new(OpCode::JumpIfNotError, cases_start, 0);
+
+        let choices = &args[1..];
+        let mut jump_if_idxs: Vec<usize> = Vec::new();
+        let mut jump_end_idxs: Vec<usize> = vec![jump_error_end_idx];
+
+        // For the first case, the index is already on the stack (from LoadLocal + JumpIfNotError).
+        for (idx, choice) in choices.iter().enumerate() {
+            if idx != 0 {
+                self.program
+                    .instrs
+                    .push(Instruction::new(OpCode::LoadLocal, index_local, 0));
+            }
+
+            let case_number = (idx + 1) as f64;
+            let const_idx = self.program.consts.len() as u32;
+            self.program
+                .consts
+                .push(ConstValue::Value(Value::Number(case_number)));
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::PushConst, const_idx, 0));
+
+            self.program.instrs.push(Instruction::new(OpCode::Eq, 0, 0));
+            let jump_idx = self.program.instrs.len();
+            // Patched below: a=next_case_target, b=end_target (for error propagation).
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::JumpIfFalseOrError, 0, 0));
+
+            // Match branch.
+            self.compile_expr_inner(choice, allow_range);
+            let jump_end_idx = self.program.instrs.len();
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::Jump, 0, 0));
+
+            let next_case_target = self.program.instrs.len() as u32;
+            self.program.instrs[jump_idx] =
+                Instruction::new(OpCode::JumpIfFalseOrError, next_case_target, 0);
+            jump_if_idxs.push(jump_idx);
+            jump_end_idxs.push(jump_end_idx);
+        }
+
+        // No match: Excel returns #VALUE! for out-of-range indices.
+        self.push_error_const(ErrorKind::Value);
+        let end_target = self.program.instrs.len() as u32;
+
+        for idx in jump_if_idxs {
+            let a = self.program.instrs[idx].a();
+            self.program.instrs[idx] = Instruction::new(OpCode::JumpIfFalseOrError, a, end_target);
+        }
+        for idx in jump_end_idxs {
+            self.program.instrs[idx] = Instruction::new(OpCode::Jump, end_target, 0);
+        }
+    }
+
     fn compile_ifs(&mut self, args: &[Expr]) {
         // IFS requires at least one condition/value pair, and the argument count must be even.
         if args.len() < 2 {
