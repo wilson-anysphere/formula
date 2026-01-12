@@ -1,13 +1,7 @@
+import { normalizeExcelColorToCss } from "../shared/colors.js";
+
 function argbToCss(argb) {
-  if (typeof argb !== "string" || !/^#[0-9A-Fa-f]{8}$/.test(argb)) return null;
-  const a = Number.parseInt(argb.slice(1, 3), 16) / 255;
-  const r = Number.parseInt(argb.slice(3, 5), 16);
-  const g = Number.parseInt(argb.slice(5, 7), 16);
-  const b = Number.parseInt(argb.slice(7, 9), 16);
-  const rgb = "rgb";
-  if (a >= 1) return `${rgb}(${r} ${g} ${b})`;
-  const rgba = "rgba";
-  return `${rgba}(${r}, ${g}, ${b}, ${a.toFixed(3)})`;
+  return normalizeExcelColorToCss(argb) ?? null;
 }
 
 /**
@@ -17,7 +11,6 @@ function argbToCss(argb) {
  */
 export function renderCellStyle(style) {
   const rules = [];
-  const rgb = "rgb";
 
   const font = style.font ?? {};
   if (font.bold) rules.push("font-weight:bold");
@@ -43,7 +36,7 @@ export function renderCellStyle(style) {
   if (alignment.wrapText) rules.push("white-space:normal");
 
   const border = style.border ?? {};
-  const defaultBorderColor = `${rgb}(0 0 0)`;
+  const defaultBorderColor = "#000000";
   if (border.left?.style) rules.push(`border-left:${border.left.style} ${argbToCss(border.left.color) ?? defaultBorderColor}`);
   if (border.right?.style) rules.push(`border-right:${border.right.style} ${argbToCss(border.right.color) ?? defaultBorderColor}`);
   if (border.top?.style) rules.push(`border-top:${border.top.style} ${argbToCss(border.top.color) ?? defaultBorderColor}`);

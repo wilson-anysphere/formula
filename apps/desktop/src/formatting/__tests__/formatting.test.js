@@ -67,7 +67,7 @@ test("toolbar commands produce expected style rendering (snapshot)", () => {
   const style = doc.styleTable.get(cell.styleId);
   assert.equal(
     renderCellStyle(style),
-    "font-weight:bold;background-color:rgb(255 255 0);text-align:center;white-space:normal;border-left:thin rgb(0 0 0);border-right:thin rgb(0 0 0);border-top:thin rgb(0 0 0);border-bottom:thin rgb(0 0 0);number-format:$#,##0.00",
+    "font-weight:bold;background-color:#ffff00;text-align:center;white-space:normal;border-left:thin #000000;border-right:thin #000000;border-top:thin #000000;border-bottom:thin #000000;number-format:$#,##0.00",
   );
 });
 
