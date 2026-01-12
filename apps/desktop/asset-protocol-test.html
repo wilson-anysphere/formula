@@ -51,6 +51,12 @@
       <code>Cross-Origin-Embedder-Policy: require-corp</code> (crossOriginIsolated).
     </p>
     <p>
+      <strong>Important:</strong> this test must be run inside the Formula desktop app from a
+      trusted app-local origin (e.g. <code>tauri://localhost</code>, <code>http://localhost</code>,
+      <code>*.localhost</code>). If the WebView is navigated to remote/untrusted content, the Rust
+      <code>asset:</code> protocol handler will deny all <code>asset://...</code> requests.
+    </p>
+    <p>
       <strong>crossOriginIsolated:</strong>
       <span id="coi"></span>
     </p>
@@ -106,4 +112,3 @@
     </script>
   </body>
 </html>
-

@@ -186,6 +186,11 @@ How this is (currently) handled in the repo:
     - For security, it does **not** set `Access-Control-Allow-Origin: *`; it sets `Access-Control-Allow-Origin` to the
       **stable initial webview origin** (mirroring Tauri’s upstream `window_origin` behavior) so an external navigation
       cannot gain CORS access to arbitrary `asset://…` files. See `apps/desktop/src-tauri/src/tauri_origin.rs`.
+    - Security boundary: `asset://...` responses are only served to **trusted app-local origins**
+      (`localhost`, `127.0.0.1`, `::1`, `*.localhost`, best-effort `file://`). If the WebView navigates to remote/untrusted
+      content, all `asset:` requests are denied with `403` to avoid turning `asset:` into a local-file read primitive.
+    - DoS hardening: non-range `asset:` responses are **size-limited** (currently 10 MiB) to avoid unbounded in-memory file
+      reads; large files must be accessed via `Range` requests (which are already clamped per-request).
   - If isolation is missing in a production desktop build, the UI logs an error and shows a long-lived toast (see
     `warnIfMissingCrossOriginIsolationInTauriProd()` in `apps/desktop/src/main.ts`).
 

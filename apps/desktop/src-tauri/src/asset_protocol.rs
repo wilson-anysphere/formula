@@ -2,13 +2,23 @@ use std::io::{Read, Seek, SeekFrom, Write};
 
 use rand_core::RngCore;
 use tauri::http::{
-    header::{ACCEPT_RANGES, ACCESS_CONTROL_EXPOSE_HEADERS, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE},
+    header::{
+        ACCEPT_RANGES, ACCESS_CONTROL_EXPOSE_HEADERS, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE,
+    },
     Request, Response, StatusCode,
 };
 use tauri::path::SafePathBuf;
 use tauri::scope::fs::Scope;
 use tauri::utils::mime_type::MimeType;
-use tauri::{Runtime, UriSchemeContext};
+use tauri::{Manager, Runtime, UriSchemeContext};
+use url::Url;
+
+/// Max bytes allowed for non-range `asset://...` responses.
+///
+/// Range requests are already clamped to ~1 MiB, but non-range requests historically read the
+/// entire file into memory, which can OOM the backend if a compromised webview requests a very
+/// large file.
+const MAX_NON_RANGE_ASSET_BYTES: u64 = 10 * 1024 * 1024; // 10 MiB
 
 /// Custom `asset:` protocol handler with COEP-friendly headers.
 ///
@@ -27,7 +37,10 @@ use tauri::{Runtime, UriSchemeContext};
 /// The origin is computed from configuration/platform rules instead of the current
 /// webview URL so that an external navigation cannot gain CORS access to `asset://`
 /// resources.
-pub fn handler<R: Runtime>(ctx: UriSchemeContext<'_, R>, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
+pub fn handler<R: Runtime>(
+    ctx: UriSchemeContext<'_, R>,
+    request: Request<Vec<u8>>,
+) -> Response<Vec<u8>> {
     let window_origin = stable_window_origin(&ctx);
 
     if !ctx.app_handle().config().app.security.asset_protocol.enable {
@@ -41,7 +54,32 @@ pub fn handler<R: Runtime>(ctx: UriSchemeContext<'_, R>, request: Request<Vec<u8
             .unwrap();
     }
 
-    let scope = match Scope::new(ctx.app_handle(), &ctx.app_handle().config().app.security.asset_protocol.scope) {
+    // Security boundary: `asset://` is effectively "read a local file inside the configured scope".
+    // If the webview ever navigates to remote/untrusted content, we must not allow that origin to
+    // access `asset://` at all (even as a no-cors subresource).
+    let window_url = current_window_url(&ctx);
+    if !window_url
+        .as_ref()
+        .is_some_and(is_trusted_asset_protocol_origin)
+    {
+        let url_for_log = window_url
+            .as_ref()
+            .map(|u| u.to_string())
+            .unwrap_or_else(|| "<unknown>".to_string());
+        eprintln!("[asset protocol] blocked request from untrusted origin: {url_for_log}");
+        return Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .header(CONTENT_TYPE, "text/plain")
+            .header("Access-Control-Allow-Origin", &window_origin)
+            .header("Cross-Origin-Resource-Policy", "cross-origin")
+            .body(b"asset protocol is only available from trusted app-local origins".to_vec())
+            .unwrap();
+    }
+
+    let scope = match Scope::new(
+        ctx.app_handle(),
+        &ctx.app_handle().config().app.security.asset_protocol.scope,
+    ) {
         Ok(scope) => scope,
         Err(err) => {
             return Response::builder()
@@ -64,6 +102,32 @@ pub fn handler<R: Runtime>(ctx: UriSchemeContext<'_, R>, request: Request<Vec<u8
             .body(err.to_string().into_bytes())
             .unwrap(),
     }
+}
+
+fn current_window_url<R: Runtime>(ctx: &UriSchemeContext<'_, R>) -> Option<Url> {
+    let window = ctx.app_handle().get_webview_window(ctx.webview_label())?;
+    window.as_ref().url().ok()
+}
+
+fn is_trusted_asset_protocol_origin(url: &Url) -> bool {
+    // Keep this logic consistent with other "privileged API" origin gates in the desktop shell.
+    //
+    // We treat app-local content as trusted:
+    // - packaged builds typically run on an internal `*.localhost` origin
+    // - dev builds run on `http://localhost:<port>`
+    //
+    // Note: `file://` is included as a best-effort compatibility fallback.
+    match url.scheme() {
+        "data" => return false,
+        "file" => return true,
+        _ => {}
+    }
+
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+
+    host == "localhost" || host == "127.0.0.1" || host == "::1" || host.ends_with(".localhost")
 }
 
 fn stable_window_origin<R: Runtime>(ctx: &UriSchemeContext<'_, R>) -> String {
@@ -111,22 +175,32 @@ fn get_response(
 
     if let Err(e) = SafePathBuf::new(path.clone().into()) {
         eprintln!("[asset protocol] invalid path \"{path}\": {e}");
-        return resp.status(StatusCode::FORBIDDEN).body(Vec::new()).map_err(Into::into);
+        return resp
+            .status(StatusCode::FORBIDDEN)
+            .body(Vec::new())
+            .map_err(Into::into);
     }
 
     if !scope.is_allowed(&path) {
         eprintln!("[asset protocol] path not allowed by scope: {path}");
-        return resp.status(StatusCode::FORBIDDEN).body(Vec::new()).map_err(Into::into);
+        return resp
+            .status(StatusCode::FORBIDDEN)
+            .body(Vec::new())
+            .map_err(Into::into);
     }
 
     let mut file = match std::fs::File::open(&path) {
         Ok(file) => file,
         Err(err) => {
             return match err.kind() {
-                std::io::ErrorKind::NotFound => resp.status(StatusCode::NOT_FOUND).body(Vec::new()).map_err(Into::into),
-                std::io::ErrorKind::PermissionDenied => {
-                    resp.status(StatusCode::FORBIDDEN).body(Vec::new()).map_err(Into::into)
-                }
+                std::io::ErrorKind::NotFound => resp
+                    .status(StatusCode::NOT_FOUND)
+                    .body(Vec::new())
+                    .map_err(Into::into),
+                std::io::ErrorKind::PermissionDenied => resp
+                    .status(StatusCode::FORBIDDEN)
+                    .body(Vec::new())
+                    .map_err(Into::into),
                 _ => Err(err.into()),
             };
         }
@@ -134,11 +208,36 @@ fn get_response(
 
     let metadata = file.metadata()?;
     if !metadata.is_file() {
-        return resp.status(StatusCode::NOT_FOUND).body(Vec::new()).map_err(Into::into);
+        return resp
+            .status(StatusCode::NOT_FOUND)
+            .body(Vec::new())
+            .map_err(Into::into);
     }
 
     // File length.
     let len = metadata.len();
+
+    // We only enforce this on non-range (full-body) requests. Range requests are clamped to
+    // `MAX_LEN` below so they remain bounded per request.
+    let range_header = request
+        .headers()
+        .get("range")
+        .and_then(|r| r.to_str().ok())
+        .map(|r| r.to_string());
+
+    if range_header.is_none()
+        && request.method() != tauri::http::Method::HEAD
+        && len > MAX_NON_RANGE_ASSET_BYTES
+    {
+        eprintln!(
+            "[asset protocol] refusing to serve large file without Range: {path} (size={len}, limit={MAX_NON_RANGE_ASSET_BYTES})"
+        );
+        return resp
+            .status(StatusCode::PAYLOAD_TOO_LARGE)
+            .header(CONTENT_TYPE, "text/plain")
+            .body(b"asset file is too large; use Range requests".to_vec())
+            .map_err(Into::into);
+    }
 
     // MIME type detection.
     let (mime_type, read_bytes) = {
@@ -157,12 +256,7 @@ fn get_response(
     resp = resp.header(CONTENT_TYPE, mime_type.to_string());
 
     // Handle 206 (partial range) requests.
-    if let Some(range_header) = request
-        .headers()
-        .get("range")
-        .and_then(|r| r.to_str().ok())
-        .map(|r| r.to_string())
-    {
+    if let Some(range_header) = range_header {
         resp = resp.header(ACCEPT_RANGES, "bytes");
         resp = resp.header(ACCESS_CONTROL_EXPOSE_HEADERS, "content-range");
 
@@ -232,7 +326,10 @@ fn get_response(
         let boundary_sep = format!("\r\n--{boundary}\r\n");
         let boundary_closer = format!("\r\n--{boundary}--\r\n");
 
-        resp = resp.header(CONTENT_TYPE, format!("multipart/byteranges; boundary={boundary}"));
+        resp = resp.header(
+            CONTENT_TYPE,
+            format!("multipart/byteranges; boundary={boundary}"),
+        );
         resp = resp.status(StatusCode::PARTIAL_CONTENT);
 
         let mut buf = Vec::new();
