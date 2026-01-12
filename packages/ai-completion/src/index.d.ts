@@ -27,15 +27,27 @@ export interface CompletionContext {
   surroundingCells: SurroundingCellsContext;
 }
 
+export interface CompletionClient {
+  complete: (prompt: string, options?: CompletionOptions) => Promise<string>;
+}
+
 export class TabCompletionEngine {
   constructor(options?: {
     functionRegistry?: FunctionRegistry;
     parsePartialFormula?: typeof parsePartialFormula;
-    localModel?: { complete: (prompt: string, options?: CompletionOptions) => Promise<string> } | null;
+    /**
+     * Optional Cursor-managed completion client for formula-body suggestions.
+     */
+    completionClient?: CompletionClient | null;
+    /**
+     * @deprecated Use completionClient instead.
+     */
+    localModel?: CompletionClient | null;
     schemaProvider?: SchemaProvider | null;
     cache?: LRUCache<Suggestion[]>;
     cacheSize?: number;
     maxSuggestions?: number;
+    completionTimeoutMs?: number;
     localModelTimeoutMs?: number;
   });
 
@@ -102,6 +114,11 @@ export interface CompletionOptions {
   temperature?: number;
   stop?: string[];
   timeoutMs?: number;
+}
+
+export class CursorCompletionClient implements CompletionClient {
+  constructor(options: { baseUrl: string; fetchImpl?: typeof fetch; timeoutMs?: number; headers?: Record<string, string> });
+  complete(prompt: string, options?: CompletionOptions): Promise<string>;
 }
 
 export class LocalModelManager {

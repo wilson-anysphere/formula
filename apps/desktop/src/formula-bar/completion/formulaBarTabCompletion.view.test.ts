@@ -9,6 +9,45 @@ import { FormulaBarView } from "../FormulaBarView.js";
 import { FormulaBarTabCompletionController } from "../../ai/completion/formulaBarTabCompletion.js";
 
 describe("FormulaBarView tab completion (integration)", () => {
+  it("uses Cursor backend completion for formula-body suggestions", async () => {
+    const doc = new DocumentController();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    let calls = 0;
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+      completionClient: {
+        complete: async () => {
+          calls += 1;
+          return "2";
+        },
+      },
+    });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=1+";
+    view.textarea.setSelectionRange(3, 3);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await completion.flushTabCompletion();
+
+    expect(calls).toBe(1);
+    expect(view.model.aiSuggestion()).toBe("=1+2");
+    expect(view.model.aiGhostText()).toBe("2");
+    expect(view.model.aiSuggestionPreview()).toBe(3);
+
+    completion.destroy();
+    host.remove();
+  });
+
   it("suggests contiguous ranges for SUM when typing a column reference", async () => {
     const doc = new DocumentController();
     for (let row = 0; row < 10; row += 1) {

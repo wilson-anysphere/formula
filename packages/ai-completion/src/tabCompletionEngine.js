@@ -53,22 +53,27 @@ export class TabCompletionEngine {
    * @param {{
    *   functionRegistry?: FunctionRegistry,
    *   parsePartialFormula?: typeof parsePartialFormula,
+   *   // Optional Cursor-managed completion client. When provided, the engine will
+   *   // request a completion for formula bodies and treat the returned string as
+   *   // insertion text at the cursor (or a full formula if it begins with "=").
+   *   completionClient?: { complete: (prompt: string, options?: any) => Promise<string> } | null,
    *   localModel?: { complete: (prompt: string, options?: any) => Promise<string> } | null,
    *   schemaProvider?: SchemaProvider | null,
    *   cache?: LRUCache,
    *   cacheSize?: number,
    *   maxSuggestions?: number,
+   *   completionTimeoutMs?: number,
    *   localModelTimeoutMs?: number
    * }} [options]
    */
   constructor(options = {}) {
     this.functionRegistry = options.functionRegistry ?? new FunctionRegistry();
     this.parsePartialFormula = options.parsePartialFormula ?? parsePartialFormula;
-    this.localModel = options.localModel ?? null;
+    this.localModel = options.completionClient ?? options.localModel ?? null;
     this.schemaProvider = options.schemaProvider ?? null;
     this.cache = options.cache ?? new LRUCache(options.cacheSize ?? 200);
     this.maxSuggestions = options.maxSuggestions ?? 5;
-    this.localModelTimeoutMs = options.localModelTimeoutMs ?? 60;
+    this.localModelTimeoutMs = options.completionTimeoutMs ?? options.localModelTimeoutMs ?? 60;
   }
 
   /**

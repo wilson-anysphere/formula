@@ -2,6 +2,7 @@ export * from "./a1.js";
 export * from "./functionRegistry.js";
 export * from "./formulaPartialParser.js";
 export * from "./lruCache.js";
+export * from "./cursorCompletionClient.js";
 export * from "./localModelManager.js";
 export * from "./ollamaClient.js";
 export * from "./patternSuggester.js";
