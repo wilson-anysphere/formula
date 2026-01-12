@@ -499,7 +499,7 @@ For update-driven restarts prefer `restart_app` (graceful).
 - **Notifications**
   - `show_system_notification` (best-effort native notification via `tauri-plugin-notification`; used as a fallback by `apps/desktop/src/tauri/notifications.ts`, and restricted to the main window)
 - **External URLs**
-  - `open_external_url` (opens URLs in the OS via `tauri_plugin_shell`; blocks `javascript:`/`data:` and requires explicit user confirmation for non-`http:`/`https:`/`mailto:` schemes)
+  - `open_external_url` (opens URLs in the OS via `tauri_plugin_shell`; allowlists `http:`/`https:`/`mailto:` and rejects everything else, including `javascript:`, `data:`, and `file:`)
 
 ### Backend → frontend events
 
@@ -732,9 +732,8 @@ custom Rust IPC commands (`clipboard_read` / `clipboard_write`) and must be adde
 External URL opening is also routed through a custom Rust IPC command:
 
 - `open_external_url`
-  - Blocks `javascript:` and `data:` links.
-  - Treats `http:`, `https:`, and `mailto:` as trusted by default.
-  - For any other scheme (including `file:`), it requires an explicit user confirmation prompt before handing off to the OS.
+  - Allows only `http:`, `https:`, and `mailto:` links.
+  - Rejects everything else (including `javascript:`, `data:`, and `file:`) at the Rust boundary.
 
 Note: this capability intentionally does **not** grant `shell:allow-open` (the JS shell plugin API). Prefer using the `open_external_url`
 command (via `apps/desktop/src/tauri/shellOpen.ts`) so link handling remains consistent and scheme allowlisting lives at a
