@@ -510,6 +510,14 @@ fn excel_eq(left: &Value, right: &Value) -> Result<bool, ErrorKind> {
             cmp_case_insensitive(text_like_str(a).unwrap(), text_like_str(b).unwrap())
         }
         (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
+        (Value::Entity(a), Value::Entity(b)) => cmp_case_insensitive(&a.display, &b.display),
+        (Value::Record(a), Value::Record(b)) => cmp_case_insensitive(&a.display, &b.display),
+        (Value::Entity(a), Value::Text(b)) => cmp_case_insensitive(&a.display, b),
+        (Value::Text(a), Value::Entity(b)) => cmp_case_insensitive(a, &b.display),
+        (Value::Record(a), Value::Text(b)) => cmp_case_insensitive(&a.display, b),
+        (Value::Text(a), Value::Record(b)) => cmp_case_insensitive(a, &b.display),
+        (Value::Entity(a), Value::Record(b)) => cmp_case_insensitive(&a.display, &b.display),
+        (Value::Record(a), Value::Entity(b)) => cmp_case_insensitive(&a.display, &b.display),
         // Type precedence (approximate Excel): numbers < text < booleans.
         (Value::Number(_), Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Bool(_)) => {
             Ordering::Less

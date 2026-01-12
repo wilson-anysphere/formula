@@ -290,7 +290,6 @@ impl RecordValue {
         }
     }
 }
-
 #[derive(Clone, PartialEq)]
 pub struct Lambda {
     pub params: Arc<[String]>,
@@ -321,6 +320,12 @@ impl fmt::Debug for Lambda {
             .finish()
     }
 }
+
+/// Convenience alias for [`EntityValue`].
+pub type Entity = EntityValue;
+
+/// Convenience alias for [`RecordValue`].
+pub type Record = RecordValue;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -530,21 +535,11 @@ impl Value {
             Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
             Value::Blank => Ok(String::new()),
             Value::Error(e) => Err(*e),
-            other => {
-                // Preserve existing behavior for non-scalar values. Future "rich"
-                // scalar types (e.g. Entity/Record) should behave like text.
-                if matches!(
-                    other,
-                    Value::Reference(_)
-                        | Value::ReferenceUnion(_)
-                        | Value::Array(_)
-                        | Value::Lambda(_)
-                        | Value::Spill { .. }
-                ) {
-                    return Err(ErrorKind::Value);
-                }
-                Ok(other.to_string())
-            }
+            Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => Err(ErrorKind::Value),
         }
     }
 
@@ -568,21 +563,11 @@ impl Value {
             Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
             Value::Blank => Ok(String::new()),
             Value::Error(e) => Err(*e),
-            other => {
-                // Preserve existing behavior for non-scalar values. Future "rich"
-                // scalar types (e.g. Entity/Record) should behave like text.
-                if matches!(
-                    other,
-                    Value::Reference(_)
-                        | Value::ReferenceUnion(_)
-                        | Value::Array(_)
-                        | Value::Lambda(_)
-                        | Value::Spill { .. }
-                ) {
-                    return Err(ErrorKind::Value);
-                }
-                Ok(other.to_string())
-            }
+            Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => Err(ErrorKind::Value),
         }
     }
 }

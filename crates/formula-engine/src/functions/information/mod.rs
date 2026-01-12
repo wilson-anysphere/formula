@@ -19,7 +19,7 @@ pub fn isnumber(value: &Value) -> bool {
 
 /// Returns TRUE if the value is text.
 pub fn istext(value: &Value) -> bool {
-    matches!(value, Value::Text(_))
+    matches!(value, Value::Text(_) | Value::Entity(_) | Value::Record(_))
 }
 
 /// Returns TRUE if the value is a boolean.

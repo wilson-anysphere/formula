@@ -63,7 +63,7 @@ pub use parser::{
     lex, parse_formula_partial, FunctionContext, ParseContext, PartialParse, Token, TokenKind,
 };
 pub use perf::{run_benchmarks, BenchmarkResult};
-pub use value::{ErrorKind, Value};
+pub use value::{Entity, ErrorKind, Record, Value};
 
 /// Parse a formula into an [`Ast`].
 ///

@@ -1787,6 +1787,26 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
             std::cmp::Ordering::Equal => 0,
             std::cmp::Ordering::Greater => 1,
         }),
+        (Value::Blank, Value::Entity(y)) => Some(match cmp_case_insensitive("", &y.display) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        }),
+        (Value::Entity(x), Value::Blank) => Some(match cmp_case_insensitive(&x.display, "") {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        }),
+        (Value::Blank, Value::Record(y)) => Some(match cmp_case_insensitive("", &y.display) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        }),
+        (Value::Record(x), Value::Blank) => Some(match cmp_case_insensitive(&x.display, "") {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        }),
         (Value::Blank, Value::Bool(y)) => Some(match false.cmp(y) {
             std::cmp::Ordering::Less => -1,
             std::cmp::Ordering::Equal => 0,

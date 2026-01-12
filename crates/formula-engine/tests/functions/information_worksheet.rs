@@ -1,5 +1,5 @@
 use formula_engine::eval::parse_a1;
-use formula_engine::{Engine, ErrorKind, Value};
+use formula_engine::{Engine, Entity, ErrorKind, Record, Value};
 
 use super::harness::{assert_number, TestSheet};
 
@@ -20,12 +20,17 @@ fn isnumber_istext_islogical_work_on_scalars_and_references() {
     sheet.set("A1", 1.0);
     sheet.set("A2", "x");
     sheet.set("A3", true);
+    sheet.set("A4", Value::Entity(Entity::new("Entity display")));
+    sheet.set("A5", Value::Record(Record::new("Record display")));
 
     assert_eq!(sheet.eval("=ISNUMBER(A1)"), Value::Bool(true));
     assert_eq!(sheet.eval("=ISNUMBER(A2)"), Value::Bool(false));
+    assert_eq!(sheet.eval("=ISNUMBER(A4)"), Value::Bool(false));
 
     assert_eq!(sheet.eval("=ISTEXT(A2)"), Value::Bool(true));
     assert_eq!(sheet.eval("=ISTEXT(A1)"), Value::Bool(false));
+    assert_eq!(sheet.eval("=ISTEXT(A4)"), Value::Bool(true));
+    assert_eq!(sheet.eval("=ISTEXT(A5)"), Value::Bool(true));
 
     assert_eq!(sheet.eval("=ISLOGICAL(A3)"), Value::Bool(true));
     assert_eq!(sheet.eval("=ISLOGICAL(A2)"), Value::Bool(false));
@@ -53,8 +58,12 @@ fn isna_iserr_iserror_distinguish_error_kinds() {
 fn type_returns_excel_type_codes() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", Value::Blank);
+    sheet.set("A2", Value::Entity(Entity::new("Entity display")));
+    sheet.set("A3", Value::Record(Record::new("Record display")));
 
     assert_number(&sheet.eval("=TYPE(A1)"), 1.0);
+    assert_number(&sheet.eval("=TYPE(A2)"), 2.0);
+    assert_number(&sheet.eval("=TYPE(A3)"), 2.0);
     assert_number(&sheet.eval("=TYPE(1)"), 1.0);
     assert_number(&sheet.eval("=TYPE(\"x\")"), 2.0);
     assert_number(&sheet.eval("=TYPE(TRUE)"), 4.0);
@@ -103,15 +112,18 @@ fn isnumber_spills_elementwise_over_array_literals() {
 #[test]
 fn n_and_t_match_excel_coercions() {
     let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Entity(Entity::new("Hello")));
 
     assert_number(&sheet.eval("=N(5)"), 5.0);
     assert_number(&sheet.eval("=N(TRUE)"), 1.0);
     assert_number(&sheet.eval("=N(FALSE)"), 0.0);
     assert_number(&sheet.eval("=N(\"hello\")"), 0.0);
+    assert_number(&sheet.eval("=N(A1)"), 0.0);
     assert_eq!(sheet.eval("=N(#DIV/0!)"), Value::Error(ErrorKind::Div0));
 
     assert_eq!(sheet.eval("=T(\"hello\")"), Value::Text("hello".to_string()));
     assert_eq!(sheet.eval("=T(5)"), Value::Text(String::new()));
     assert_eq!(sheet.eval("=T(TRUE)"), Value::Text(String::new()));
+    assert_eq!(sheet.eval("=T(A1)"), Value::Text("Hello".to_string()));
     assert_eq!(sheet.eval("=T(#DIV/0!)"), Value::Error(ErrorKind::Div0));
 }

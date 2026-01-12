@@ -1650,6 +1650,7 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         return Err(*e);
     }
 
+    // Treat rich values as text for comparison semantics.
     let left = match left.clone() {
         Value::Entity(v) => Value::Text(v.display),
         Value::Record(v) => Value::Text(v.display),

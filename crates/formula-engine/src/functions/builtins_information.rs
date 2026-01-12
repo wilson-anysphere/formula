@@ -259,9 +259,9 @@ fn t_value(v: &Value) -> Value {
     match v {
         Value::Error(e) => Value::Error(*e),
         Value::Text(s) => Value::Text(s.clone()),
+        Value::Entity(entity) => Value::Text(entity.display.clone()),
+        Value::Record(record) => Value::Text(record.display.clone()),
         Value::Number(_)
-        | Value::Entity(_)
-        | Value::Record(_)
         | Value::Bool(_)
         | Value::Blank
         | Value::Record(_)

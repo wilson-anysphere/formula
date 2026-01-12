@@ -3299,6 +3299,7 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         return Err(*e);
     }
 
+    // Treat rich values as text for comparison semantics.
     let left = match left.clone() {
         Value::Entity(v) => Value::Text(v.display),
         Value::Record(v) => Value::Text(v.display),
@@ -3309,7 +3310,6 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         Value::Record(v) => Value::Text(v.display),
         other => other,
     };
-
     if matches!(
         &left,
         Value::Array(_)
@@ -3355,6 +3355,46 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         (Value::Number(a), Value::Number(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
         (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
             crate::value::cmp_case_insensitive(text_like_str(a).unwrap(), text_like_str(b).unwrap())
+        }
+        (Value::Text(a), Value::Entity(b)) => {
+            let au = a.to_ascii_uppercase();
+            let bu = b.display.to_ascii_uppercase();
+            au.cmp(&bu)
+        }
+        (Value::Text(a), Value::Record(b)) => {
+            let au = a.to_ascii_uppercase();
+            let bu = b.display.to_ascii_uppercase();
+            au.cmp(&bu)
+        }
+        (Value::Entity(a), Value::Text(b)) => {
+            let au = a.display.to_ascii_uppercase();
+            let bu = b.to_ascii_uppercase();
+            au.cmp(&bu)
+        }
+        (Value::Record(a), Value::Text(b)) => {
+            let au = a.display.to_ascii_uppercase();
+            let bu = b.to_ascii_uppercase();
+            au.cmp(&bu)
+        }
+        (Value::Entity(a), Value::Entity(b)) => {
+            let au = a.display.to_ascii_uppercase();
+            let bu = b.display.to_ascii_uppercase();
+            au.cmp(&bu)
+        }
+        (Value::Record(a), Value::Record(b)) => {
+            let au = a.display.to_ascii_uppercase();
+            let bu = b.display.to_ascii_uppercase();
+            au.cmp(&bu)
+        }
+        (Value::Entity(a), Value::Record(b)) => {
+            let au = a.display.to_ascii_uppercase();
+            let bu = b.display.to_ascii_uppercase();
+            au.cmp(&bu)
+        }
+        (Value::Record(a), Value::Entity(b)) => {
+            let au = a.display.to_ascii_uppercase();
+            let bu = b.display.to_ascii_uppercase();
+            au.cmp(&bu)
         }
         (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
         (Value::Number(_), Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Bool(_)) => {

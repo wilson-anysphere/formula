@@ -46,8 +46,8 @@ fn format_options_for_value_locale(value_locale: ValueLocaleConfig, system: Exce
 fn coerce_to_string_with_format_options(value: &Value, options: &FormatOptions) -> Result<String, ErrorKind> {
     match value {
         Value::Text(s) => Ok(s.clone()),
-        Value::Entity(v) => Ok(v.display.clone()),
-        Value::Record(v) => Ok(v.display.clone()),
+        Value::Entity(entity) => Ok(entity.display.clone()),
+        Value::Record(record) => Ok(record.display.clone()),
         Value::Number(n) => Ok(formula_format::format_value(FmtValue::Number(*n), None, options).text),
         Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
         Value::Blank => Ok(String::new()),
@@ -76,6 +76,14 @@ fn values_equal_for_lookup(ctx: &LookupContext, lookup_value: &Value, candidate:
     match (lookup_value, candidate) {
         (Value::Number(a), Value::Number(b)) => a == b,
         (Value::Text(a), Value::Text(b)) => text_eq_case_insensitive(a, b),
+        (Value::Entity(a), Value::Entity(b)) => text_eq_case_insensitive(&a.display, &b.display),
+        (Value::Record(a), Value::Record(b)) => text_eq_case_insensitive(&a.display, &b.display),
+        (Value::Text(a), Value::Entity(b)) => text_eq_case_insensitive(a, &b.display),
+        (Value::Text(a), Value::Record(b)) => text_eq_case_insensitive(a, &b.display),
+        (Value::Entity(a), Value::Text(b)) => text_eq_case_insensitive(&a.display, b),
+        (Value::Record(a), Value::Text(b)) => text_eq_case_insensitive(&a.display, b),
+        (Value::Entity(a), Value::Record(b)) => text_eq_case_insensitive(&a.display, &b.display),
+        (Value::Record(a), Value::Entity(b)) => text_eq_case_insensitive(&a.display, &b.display),
         (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::Error(a), Value::Error(b)) => a == b,
         (Value::Number(a), Value::Text(b)) | (Value::Text(b), Value::Number(a)) => {
@@ -88,6 +96,34 @@ fn values_equal_for_lookup(ctx: &LookupContext, lookup_value: &Value, candidate:
                     ctx.value_locale,
                     ctx.now_utc,
                     ctx.date_system,
+                )
+                .is_ok_and(|parsed| parsed == *a)
+            }
+        }
+        (Value::Number(a), Value::Entity(b)) | (Value::Entity(b), Value::Number(a)) => {
+            let trimmed = b.display.trim();
+            if trimmed.is_empty() {
+                false
+            } else {
+                parse_value_text(
+                    trimmed,
+                    ValueLocaleConfig::en_us(),
+                    Utc::now(),
+                    ExcelDateSystem::EXCEL_1900,
+                )
+                .is_ok_and(|parsed| parsed == *a)
+            }
+        }
+        (Value::Number(a), Value::Record(b)) | (Value::Record(b), Value::Number(a)) => {
+            let trimmed = b.display.trim();
+            if trimmed.is_empty() {
+                false
+            } else {
+                parse_value_text(
+                    trimmed,
+                    ValueLocaleConfig::en_us(),
+                    Utc::now(),
+                    ExcelDateSystem::EXCEL_1900,
                 )
                 .is_ok_and(|parsed| parsed == *a)
             }
@@ -211,6 +247,10 @@ fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
         (Value::Bool(x), Value::Blank) => return x.cmp(&false),
         (Value::Blank, Value::Text(y)) => return cmp_case_insensitive("", y),
         (Value::Text(x), Value::Blank) => return cmp_case_insensitive(x, ""),
+        (Value::Blank, Value::Entity(entity)) => return cmp_case_insensitive("", &entity.display),
+        (Value::Entity(entity), Value::Blank) => return cmp_case_insensitive(&entity.display, ""),
+        (Value::Blank, Value::Record(record)) => return cmp_case_insensitive("", &record.display),
+        (Value::Record(record), Value::Blank) => return cmp_case_insensitive(&record.display, ""),
         _ => {}
     }
 
@@ -240,6 +280,14 @@ fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
     match (a, b) {
         (Value::Number(x), Value::Number(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
         (Value::Text(x), Value::Text(y)) => cmp_case_insensitive(x, y),
+        (Value::Text(x), Value::Entity(y)) => cmp_case_insensitive(x, &y.display),
+        (Value::Text(x), Value::Record(y)) => cmp_case_insensitive(x, &y.display),
+        (Value::Entity(x), Value::Text(y)) => cmp_case_insensitive(&x.display, y),
+        (Value::Record(x), Value::Text(y)) => cmp_case_insensitive(&x.display, y),
+        (Value::Entity(x), Value::Entity(y)) => cmp_case_insensitive(&x.display, &y.display),
+        (Value::Record(x), Value::Record(y)) => cmp_case_insensitive(&x.display, &y.display),
+        (Value::Entity(x), Value::Record(y)) => cmp_case_insensitive(&x.display, &y.display),
+        (Value::Record(x), Value::Entity(y)) => cmp_case_insensitive(&x.display, &y.display),
         (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
         (Value::Blank, Value::Blank) => Ordering::Equal,
         (Value::Error(x), Value::Error(y)) => x.code().cmp(&y.code()),
