@@ -2696,6 +2696,61 @@ fn bytecode_backend_coupon_basis_4_uses_fixed_period_length_and_preserves_additi
 }
 
 #[test]
+fn bytecode_backend_coupon_basis_0_preserves_additivity_even_when_days360_is_not_additive() {
+    let mut engine = Engine::new();
+
+    // Same schedule as the basis=4 test above, but exercising the US/NASD 30/360 method (basis=0).
+    // US DAYS360 is not additive for some end-of-month schedules (the end-date adjustment depends
+    // on the start-date day). Excel preserves the invariant COUPDAYBS + COUPDAYSNC == COUPDAYS by
+    // computing COUPDAYSNC as E - A (where E is fixed at 360/frequency).
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=COUPDAYS("2020-11-15","2021-02-28",2,0)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", r#"=COUPDAYBS("2020-11-15","2021-02-28",2,0)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", r#"=COUPDAYSNC("2020-11-15","2021-02-28",2,0)"#)
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 3);
+    assert_eq!(stats.compiled, 3);
+    assert_eq!(stats.fallback, 0);
+    assert_eq!(engine.bytecode_program_count(), 3);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(180.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(75.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(105.0));
+
+    let Value::Number(days) = engine.get_cell_value("Sheet1", "A1") else {
+        panic!("expected COUPDAYS to return a number");
+    };
+    let Value::Number(daybs) = engine.get_cell_value("Sheet1", "A2") else {
+        panic!("expected COUPDAYBS to return a number");
+    };
+    let Value::Number(daysnc) = engine.get_cell_value("Sheet1", "A3") else {
+        panic!("expected COUPDAYSNC to return a number");
+    };
+    assert_eq!(days, daybs + daysnc);
+
+    // Guard: the direct US/NASD DAYS360(settlement, NCD) differs from E-A here.
+    let system = engine.date_system();
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 11, 15), system).unwrap();
+    let ncd = ymd_to_serial(ExcelDate::new(2021, 2, 28), system).unwrap();
+    let dsc_us =
+        formula_engine::functions::date_time::days360(settlement, ncd, false, system).unwrap();
+    assert_eq!(dsc_us, 106);
+    assert_ne!(dsc_us as f64, daysnc);
+
+    assert_engine_matches_ast(&engine, r#"=COUPDAYS("2020-11-15","2021-02-28",2,0)"#, "A1");
+    assert_engine_matches_ast(&engine, r#"=COUPDAYBS("2020-11-15","2021-02-28",2,0)"#, "A2");
+    assert_engine_matches_ast(&engine, r#"=COUPDAYSNC("2020-11-15","2021-02-28",2,0)"#, "A3");
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_standard_bond_functions() {
     let mut engine = Engine::new();
 
