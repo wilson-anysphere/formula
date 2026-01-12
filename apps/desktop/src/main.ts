@@ -4554,7 +4554,7 @@ mountRibbon(ribbonRoot, {
   fileActions: {
     newWorkbook: () => {
       if (!tauriBackend) {
-        showToast("Desktop-only");
+        showToast("Creating new workbooks is available in the desktop app.");
         return;
       }
       void handleNewWorkbook().catch((err) => {
@@ -4564,7 +4564,7 @@ mountRibbon(ribbonRoot, {
     },
     openWorkbook: () => {
       if (!tauriBackend) {
-        showToast("Desktop-only");
+        showToast("Opening workbooks is available in the desktop app.");
         return;
       }
       void promptOpenWorkbook().catch((err) => {
@@ -4574,7 +4574,7 @@ mountRibbon(ribbonRoot, {
     },
     saveWorkbook: () => {
       if (!tauriBackend) {
-        showToast("Desktop-only");
+        showToast("Saving workbooks is available in the desktop app.");
         return;
       }
       void handleSave().catch((err) => {
@@ -4584,7 +4584,7 @@ mountRibbon(ribbonRoot, {
     },
     saveWorkbookAs: () => {
       if (!tauriBackend) {
-        showToast("Desktop-only");
+        showToast("Save As is available in the desktop app.");
         return;
       }
       void handleSaveAs().catch((err) => {
@@ -4592,22 +4592,42 @@ mountRibbon(ribbonRoot, {
         showToast(`Failed to save workbook: ${String(err)}`, "error");
       });
     },
+    pageSetup: () => {
+      void handleRibbonPageSetup().catch((err) => {
+        console.error("Failed to open page setup:", err);
+        showToast(`Failed to open page setup: ${String(err)}`, "error");
+      });
+    },
+    print: () => {
+      const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+      if (!invokeAvailable) {
+        showToast("Print is available in the desktop app.");
+        return;
+      }
+      showToast("Print is not implemented yet. Opening Page Setup…");
+      void handleRibbonPageSetup().catch((err) => {
+        console.error("Failed to open page setup:", err);
+        showToast(`Failed to open page setup: ${String(err)}`, "error");
+      });
+    },
     closeWindow: () => {
       if (!handleCloseRequestForRibbon) {
-        showToast("Desktop-only");
+        showToast("Closing windows is available in the desktop app.");
         return;
       }
       void handleCloseRequestForRibbon({ quit: false }).catch((err) => {
         console.error("Failed to close window:", err);
+        showToast(`Failed to close window: ${String(err)}`, "error");
       });
     },
     quit: () => {
       if (!handleCloseRequestForRibbon) {
-        showToast("Desktop-only");
+        showToast("Quitting is available in the desktop app.");
         return;
       }
       void handleCloseRequestForRibbon({ quit: true }).catch((err) => {
         console.error("Failed to quit app:", err);
+        showToast(`Failed to quit app: ${String(err)}`, "error");
       });
     },
   },
@@ -5036,11 +5056,27 @@ mountRibbon(ribbonRoot, {
           showToast("Print is available in the desktop app.");
           return;
         }
-        showToast("Print is not implemented yet. Try Export PDF instead.");
+        showToast("Print is not implemented yet. Opening Page Setup…");
+        void handleRibbonPageSetup().catch((err) => {
+          console.error("Failed to open page setup:", err);
+          showToast(`Failed to open page setup: ${String(err)}`, "error");
+        });
         return;
       }
 
       case "file.options.close": {
+        if (handleCloseRequestForRibbon) {
+          void handleCloseRequestForRibbon({ quit: false }).catch((err) => {
+            console.error("Failed to close window:", err);
+            showToast(`Failed to close window: ${String(err)}`, "error");
+          });
+          return;
+        }
+
+        const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+        if (!invokeAvailable) {
+          showToast("Closing windows is available in the desktop app.");
+        }
         void hideTauriWindow().catch((err) => {
           console.error("Failed to close window:", err);
           showToast(`Failed to close window: ${String(err)}`, "error");

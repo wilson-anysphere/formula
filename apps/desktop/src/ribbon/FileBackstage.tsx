@@ -82,6 +82,22 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.saveWorkbookAs,
       },
       {
+        label: "Print…",
+        hint: shortcut("P"),
+        ariaKeyShortcuts: ariaShortcut("P"),
+        testId: "file-print",
+        ariaLabel: "Print",
+        onInvoke: actions?.print,
+      },
+      {
+        label: "Page Setup…",
+        hint: "",
+        ariaKeyShortcuts: "",
+        testId: "file-page-setup",
+        ariaLabel: "Page setup",
+        onInvoke: actions?.pageSetup,
+      },
+      {
         label: "Close Window",
         hint: shortcut("W"),
         ariaKeyShortcuts: ariaShortcut("W"),
