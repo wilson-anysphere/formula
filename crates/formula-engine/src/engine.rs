@@ -8349,6 +8349,46 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_compile_report_classifies_cross_sheet_references() {
+        let mut engine = Engine::new();
+        engine.set_cell_value("Sheet2", "A1", 1.0).unwrap();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=Sheet2!A1")
+            .unwrap();
+
+        let report = engine.bytecode_compile_report(10);
+        assert_eq!(report.len(), 1);
+        assert_eq!(
+            report[0].reason,
+            BytecodeCompileReason::LowerError(bytecode::LowerError::CrossSheetReference)
+        );
+    }
+
+    #[test]
+    fn bytecode_compile_report_classifies_ineligible_range_expressions() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=A2:A3")
+            .unwrap();
+
+        let report = engine.bytecode_compile_report(10);
+        assert_eq!(report.len(), 1);
+        assert_eq!(report[0].reason, BytecodeCompileReason::IneligibleExpr);
+    }
+
+    #[test]
+    fn bytecode_compile_report_classifies_range_size_limit_exceeded() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "AA1", "=SUM(A1:Z200000)")
+            .unwrap();
+
+        let report = engine.bytecode_compile_report(10);
+        assert_eq!(report.len(), 1);
+        assert_eq!(report[0].reason, BytecodeCompileReason::ExceedsRangeCellLimit);
+    }
+
+    #[test]
     fn bytecode_column_cache_uses_range_min_row() {
         let mut engine = Engine::new();
         engine
