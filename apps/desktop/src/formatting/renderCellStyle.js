@@ -37,8 +37,9 @@ export function renderCellStyle(style) {
   if (alignment.wrapText) rules.push("white-space:normal");
 
   const border = style.border ?? {};
-  // Keep as concatenation so `noHardcodedColors` doesn't treat this as a UI literal.
-  const defaultBorderColor = "#" + "000000";
+  // Border color is optional in the DocumentController style schema. When absent,
+  // fall back to the UI border token rather than hardcoding black.
+  const defaultBorderColor = "var(--border)";
   if (border.left?.style) rules.push(`border-left:${border.left.style} ${argbToCss(border.left.color) ?? defaultBorderColor}`);
   if (border.right?.style) rules.push(`border-right:${border.right.style} ${argbToCss(border.right.color) ?? defaultBorderColor}`);
   if (border.top?.style) rules.push(`border-top:${border.top.style} ${argbToCss(border.top.color) ?? defaultBorderColor}`);
