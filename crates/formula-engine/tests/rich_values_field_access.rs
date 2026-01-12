@@ -44,7 +44,7 @@ fn entity_field_access_variants() {
     );
     assert_eq!(
         engine.get_cell_value("Sheet1", "B2"),
-        Value::Error(ErrorKind::Field)
+        Value::Error(ErrorKind::Value)
     );
 }
 

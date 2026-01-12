@@ -40,11 +40,11 @@ fn entity_field_access_missing_field_returns_field_error() {
 }
 
 #[test]
-fn field_access_non_rich_base_returns_field_error() {
+fn field_access_non_rich_base_returns_value_error() {
     let mut sheet = TestSheet::new();
 
     sheet.set("A1", 1.0);
-    assert_eq!(sheet.eval("=A1.Price"), Value::Error(ErrorKind::Field));
+    assert_eq!(sheet.eval("=A1.Price"), Value::Error(ErrorKind::Value));
 }
 
 #[test]
