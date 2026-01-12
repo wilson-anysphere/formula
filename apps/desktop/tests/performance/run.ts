@@ -109,7 +109,6 @@ async function main(): Promise<void> {
   const benchmarks = [
     ...createStartupBenchmarks(),
     ...createRenderBenchmarks(),
-    ...createSharedGridRendererBenchmarks(),
     ...createCollaborationBenchmarks(),
   ];
 
@@ -119,6 +118,10 @@ async function main(): Promise<void> {
     );
     benchmarks.push(...createDocumentCellProviderCacheKeyBenchmarks());
   }
+
+  // CanvasGridRenderer benchmarks install a global JSDOM + canvas mocks. Run them
+  // last so other (pure Node) benchmarks aren't affected by the DOM globals.
+  benchmarks.push(...createSharedGridRendererBenchmarks());
 
   const results: BenchmarkResult[] = [];
   for (const bench of benchmarks) {
