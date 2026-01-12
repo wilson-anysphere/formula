@@ -11,6 +11,7 @@ import {
   setSeedPanelsForExtension,
 } from "../../extensions/contributedPanelsSeedStore.js";
 import { showToast } from "../../extensions/ui.js";
+import * as nativeDialogs from "../../tauri/nativeDialogs.js";
 
 function tryShowToast(message, type = "info") {
   try {
@@ -231,15 +232,15 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
               try {
                 const record = await extensionManager.install(item.id, null, {
                   confirm: async (warning) => {
-                    // Best-effort: use a browser confirm prompt (some environments may not allow it).
+                    // Best-effort: use a native dialog in desktop builds (with a safe web fallback).
+                    const hasTauriConfirm = typeof globalThis?.__TAURI__?.dialog?.confirm === "function";
+                    const hasWindowConfirm = typeof window?.confirm === "function";
+                    if (!hasTauriConfirm && !hasWindowConfirm) return true;
                     try {
-                      if (typeof window?.confirm === "function") {
-                        return window.confirm(`${warning.message}\n\nProceed with install?`);
-                      }
+                      return await nativeDialogs.confirm(`${warning.message}\n\nProceed with install?`);
                     } catch {
-                      // ignore
+                      return true;
                     }
-                    return true;
                   },
                 });
                 if (Array.isArray(record?.warnings)) {

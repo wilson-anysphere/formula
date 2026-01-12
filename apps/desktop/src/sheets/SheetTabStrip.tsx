@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ContextMenu, type ContextMenuItem } from "../menus/contextMenu";
+import * as nativeDialogs from "../tauri/nativeDialogs";
 import type { SheetMeta, TabColor, WorkbookSheetStore } from "./workbookSheetStore";
 import { computeWorkbookSheetMoveIndex } from "./sheetReorder";
 
@@ -201,14 +202,16 @@ export function SheetTabStrip({
         type: "item",
         label: "Delete",
         enabled: canDelete,
-        onSelect: () => deleteSheet(sheet),
+        onSelect: () => {
+          void deleteSheet(sheet);
+        },
       },
     ];
 
     tabContextMenu.open({ x: anchor.x, y: anchor.y, items });
   };
 
-  const deleteSheet = (sheet: SheetMeta): void => {
+  const deleteSheet = async (sheet: SheetMeta): Promise<void> => {
     if (editingSheetId && editingSheetId !== sheet.id) {
       const ok = commitRename(editingSheetId);
       if (!ok) return;
@@ -216,7 +219,12 @@ export function SheetTabStrip({
 
     if (editingSheetId === sheet.id) return;
 
-    const ok = window.confirm(`Delete sheet "${sheet.name}"?`);
+    let ok = false;
+    try {
+      ok = await nativeDialogs.confirm(`Delete sheet "${sheet.name}"?`);
+    } catch {
+      ok = false;
+    }
     if (!ok) return;
 
     const deletedName = sheet.name;
