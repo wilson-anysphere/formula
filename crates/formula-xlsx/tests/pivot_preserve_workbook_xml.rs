@@ -1,4 +1,5 @@
 use formula_xlsx::pivots::preserve::apply_preserved_pivot_caches_to_workbook_xml;
+use roxmltree::Document;
 
 fn count(haystack: &str, needle: &str) -> usize {
     haystack.match_indices(needle).count()
@@ -68,3 +69,43 @@ fn merges_when_workbook_already_has_pivot_caches() {
     assert!(pivot_pos < ext_pos, "<pivotCaches> must remain before <extLst>");
 }
 
+#[test]
+fn inserts_into_self_closing_prefixed_workbook_root() {
+    let workbook =
+        r#"<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+    let fragment = r#"<x:pivotCaches><x:pivotCache cacheId="1" r:id="rId1"/></x:pivotCaches>"#;
+
+    let updated = apply_preserved_pivot_caches_to_workbook_xml(workbook, fragment).expect("patch");
+
+    Document::parse(&updated).expect("output should be parseable XML");
+    assert!(updated.contains("<x:pivotCaches"), "missing inserted block: {updated}");
+    assert!(
+        updated.contains("</x:workbook>"),
+        "missing expanded root close tag: {updated}"
+    );
+    assert!(
+        !updated.contains("</workbook>"),
+        "introduced unprefixed close tag: {updated}"
+    );
+    assert!(
+        updated.contains(r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#),
+        "missing xmlns:r declaration: {updated}"
+    );
+}
+
+#[test]
+fn inserts_into_self_closing_default_ns_workbook_root() {
+    let workbook =
+        r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+
+    let updated = apply_preserved_pivot_caches_to_workbook_xml(workbook, PIVOT_CACHES).expect("patch");
+
+    Document::parse(&updated).expect("output should be parseable XML");
+    assert_eq!(count(&updated, "<pivotCaches"), 1);
+    let pivot_pos = updated.find("<pivotCaches").unwrap();
+    let close_pos = updated.find("</workbook>").unwrap();
+    assert!(
+        pivot_pos < close_pos,
+        "<pivotCaches> should be inside <workbook>: {updated}"
+    );
+}

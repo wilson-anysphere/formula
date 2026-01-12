@@ -736,6 +736,51 @@ fn insert_pivot_caches(
     workbook_node: &roxmltree::Node<'_, '_>,
     preserved_pivot_caches_xml: &str,
 ) -> Result<String, ChartExtractionError> {
+    let workbook_range = workbook_node.range();
+    let root_start = workbook_range.start;
+    let workbook_prefix = element_prefix_at(workbook_xml, root_start);
+    let preserved_pivot_caches_xml = rewrite_spreadsheetml_prefix_in_fragment(
+        preserved_pivot_caches_xml,
+        workbook_prefix,
+        &["pivotCaches", "pivotCache"],
+        "pivotCaches",
+    )?;
+
+    // Some producers emit `xl/workbook.xml` with a self-closing root element:
+    // `<workbook .../>` or `<x:workbook .../>`.
+    //
+    // When that happens we must expand the root in-place before we can insert
+    // children like `<pivotCaches>`. Otherwise, inserting at "before </workbook>"
+    // will compute an index inside the `<workbook .../>` start tag, producing
+    // invalid XML.
+    let workbook_root = &workbook_xml[workbook_range.clone()];
+    if is_self_closing_element(workbook_root) {
+        let workbook_tag = crate::xml::prefixed_tag(workbook_prefix, "workbook");
+        let close_tag = format!("</{workbook_tag}>");
+
+        let (start, trailing_ws) = split_trailing_whitespace(workbook_root);
+        let start = start.trim_end();
+        let start = start.strip_suffix("/>").unwrap_or(start);
+        let start = start.trim_end();
+
+        let mut expanded_root = String::with_capacity(
+            start.len() + 1 + preserved_pivot_caches_xml.len() + close_tag.len() + trailing_ws.len(),
+        );
+        expanded_root.push_str(start);
+        expanded_root.push('>');
+        expanded_root.push_str(&preserved_pivot_caches_xml);
+        expanded_root.push_str(&close_tag);
+        expanded_root.push_str(trailing_ws);
+
+        let mut out = String::with_capacity(
+            workbook_xml.len() + preserved_pivot_caches_xml.len() + close_tag.len() + 1,
+        );
+        out.push_str(&workbook_xml[..workbook_range.start]);
+        out.push_str(&expanded_root);
+        out.push_str(&workbook_xml[workbook_range.end..]);
+        return Ok(out);
+    }
+
     let mut insert_idx = None;
 
     // 1) Prefer inserting after `<customWorkbookViews>` when present.
@@ -768,8 +813,6 @@ fn insert_pivot_caches(
     let insert_idx = match insert_idx {
         Some(idx) => idx,
         None => {
-            let root_start = workbook_node.range().start;
-            let workbook_prefix = element_prefix_at(workbook_xml, root_start);
             let close_tag_len = crate::xml::prefixed_tag(workbook_prefix, "workbook").len() + 3;
             workbook_node
                 .range()
@@ -782,15 +825,6 @@ fn insert_pivot_caches(
                 })?
         }
     };
-
-    let root_start = workbook_node.range().start;
-    let workbook_prefix = element_prefix_at(workbook_xml, root_start);
-    let preserved_pivot_caches_xml = rewrite_spreadsheetml_prefix_in_fragment(
-        preserved_pivot_caches_xml,
-        workbook_prefix,
-        &["pivotCaches", "pivotCache"],
-        "pivotCaches",
-    )?;
 
     let mut out = String::with_capacity(workbook_xml.len() + preserved_pivot_caches_xml.len());
     out.push_str(&workbook_xml[..insert_idx]);
