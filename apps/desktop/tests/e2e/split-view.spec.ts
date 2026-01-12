@@ -1102,4 +1102,67 @@ test.describe("split view / shared grid zoom", () => {
     const a3 = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A3"));
     expect(a3).toBe("3");
   });
+
+  test("Escape cancels an in-progress fill handle drag in the secondary pane", async ({ page }) => {
+    await page.goto("/?grid=shared");
+    await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 60_000 });
+
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
+    await page.waitForFunction(() => Boolean((window as any).__formulaSecondaryGrid), undefined, { timeout: 10_000 });
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument();
+
+      doc.setCellValue(sheetId, "A1", 1);
+      doc.setCellValue(sheetId, "A2", 2);
+
+      const grid = (window as any).__formulaSecondaryGrid;
+      grid.setSelectionRanges(
+        [
+          {
+            startRow: 1,
+            endRow: 3,
+            startCol: 1,
+            endCol: 2,
+          },
+        ],
+        { activeCell: { row: 2, col: 1 } },
+      );
+    });
+    await waitForIdle(page);
+
+    const secondaryBox = await page.locator("#grid-secondary").boundingBox();
+    expect(secondaryBox).not.toBeNull();
+
+    await page.waitForFunction(() => Boolean((window as any).__formulaSecondaryGrid?.renderer?.getFillHandleRect?.()));
+
+    const handle = await page.evaluate(() => (window as any).__formulaSecondaryGrid.renderer.getFillHandleRect());
+    expect(handle).not.toBeNull();
+
+    // Drag towards A4, then press Escape before releasing.
+    const a4Rect = await page.evaluate(() => (window as any).__formulaSecondaryGrid.getCellRect(4, 1));
+    expect(a4Rect).not.toBeNull();
+
+    await page.mouse.move(secondaryBox!.x + handle!.x + handle!.width / 2, secondaryBox!.y + handle!.y + handle!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(secondaryBox!.x + a4Rect!.x + a4Rect!.width / 2, secondaryBox!.y + a4Rect!.y + a4Rect!.height / 2);
+
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe("grid-secondary");
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaSecondaryGrid?.dragMode ?? null)).toBe("fillHandle");
+
+    await page.keyboard.press("Escape");
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaSecondaryGrid?.dragMode ?? null)).toBe(null);
+
+    await page.mouse.up();
+    await waitForIdle(page);
+
+    const [a3, a4] = await Promise.all([
+      page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A3")),
+      page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A4")),
+    ]);
+    expect(a3).toBe("");
+    expect(a4).toBe("");
+  });
 });

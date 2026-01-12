@@ -2603,6 +2603,8 @@ if (
   const gridSecondaryEl = gridSecondary;
   const gridSplitterEl = gridSplitter;
 
+  let secondaryGridView: SecondaryGridView | null = null;
+
   // --- Split view secondary pane keyboard shortcuts ---------------------------------
   //
   // The primary grid wires clipboard + delete via SpreadsheetApp.onKeyDown, which only
@@ -2620,6 +2622,14 @@ if (
       e.preventDefault();
       app.openCommentsPanel();
       return;
+    }
+
+    // Cancel an in-progress fill handle drag (matches primary-grid Escape semantics).
+    if (e.key === "Escape") {
+      if (secondaryGridView?.grid.cancelFillHandleDrag()) {
+        e.preventDefault();
+        return;
+      }
     }
 
     const primary = e.ctrlKey || e.metaKey;
@@ -2747,7 +2757,6 @@ if (
     dockBottomEl.dataset.hidden = zoneVisible(layout.docks.bottom) ? "false" : "true";
   }
 
-  let secondaryGridView: SecondaryGridView | null = null;
   let splitPanePersistTimer: number | null = null;
   let splitPanePersistDirty = false;
 
