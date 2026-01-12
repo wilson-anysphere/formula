@@ -329,6 +329,133 @@ test.describe("desktop OAuth redirect capture", () => {
     expect(promptCalls).toBe(0);
   });
 
+  test("can cancel a pending PKCE redirect without showing an error", async ({ page }) => {
+    await page.addInitScript(() => {
+      const listeners: Record<string, any> = {};
+      (window as any).__tauriListeners = listeners;
+
+      const credentialEntries = new Map<string, { id: string; secret: any }>();
+      let credentialIdCounter = 0;
+
+      (window as any).__oauthOpenedUrls = [] as string[];
+      (window as any).__promptCalls = [] as Array<{ message?: string; defaultValue?: string | null }>;
+
+      // Track prompt usage so tests can assert we didn't fall back to manual copy/paste.
+      window.prompt = ((message?: string, defaultValue?: string) => {
+        (window as any).__promptCalls.push({ message, defaultValue: defaultValue ?? null });
+        return null;
+      }) as any;
+
+      // Seed a query + OAuth provider config so the Data Queries panel has an OAuth2 row.
+      window.localStorage.setItem(
+        "formula.desktop.powerQuery.oauthProviders:local-workbook",
+        JSON.stringify([
+          {
+            id: "example",
+            clientId: "client-id",
+            tokenEndpoint: "https://example.com/oauth/token",
+            authorizationEndpoint: "https://example.com/oauth/authorize",
+            redirectUri: "formula://oauth/callback",
+            defaultScopes: ["scope-a"],
+          },
+        ]),
+      );
+
+      window.localStorage.setItem(
+        "formula.desktop.powerQuery.queries:local-workbook",
+        JSON.stringify([
+          {
+            id: "q_oauth",
+            name: "OAuth query",
+            source: {
+              type: "api",
+              url: "https://example.com/api",
+              method: "GET",
+              auth: { type: "oauth2", providerId: "example", scopes: ["scope-a"] },
+            },
+            steps: [],
+            refreshPolicy: { type: "manual" },
+          },
+        ]),
+      );
+
+      (window as any).__TAURI__ = {
+        core: {
+          invoke: async (cmd: string, args: any) => {
+            if (cmd === "power_query_state_get") return null;
+            if (cmd === "power_query_state_set") return null;
+
+            if (cmd === "power_query_credential_get") {
+              const scopeKey = String(args?.scope_key ?? "");
+              return scopeKey ? credentialEntries.get(scopeKey) ?? null : null;
+            }
+            if (cmd === "power_query_credential_set") {
+              const scopeKey = String(args?.scope_key ?? "");
+              if (!scopeKey) throw new Error("missing scope_key");
+              const entry = { id: `id-${++credentialIdCounter}`, secret: args?.secret };
+              credentialEntries.set(scopeKey, entry);
+              return entry;
+            }
+            if (cmd === "power_query_credential_delete") {
+              const scopeKey = String(args?.scope_key ?? "");
+              if (scopeKey) credentialEntries.delete(scopeKey);
+              return null;
+            }
+            if (cmd === "power_query_credential_list") {
+              return Array.from(credentialEntries.entries()).map(([scopeKey, entry]) => ({ scopeKey, id: entry.id }));
+            }
+            return null;
+          },
+        },
+        event: {
+          listen: async (name: string, handler: any) => {
+            listeners[name] = handler;
+            return () => {
+              delete listeners[name];
+            };
+          },
+          emit: async () => {},
+        },
+        shell: {
+          open: async (url: string) => {
+            (window as any).__oauthOpenedUrls.push(url);
+          },
+        },
+        window: {
+          getCurrentWebviewWindow: () => ({
+            hide: async () => {},
+            close: async () => {},
+          }),
+        },
+      };
+    });
+
+    await gotoDesktop(page);
+
+    // Open the Data Queries panel.
+    await page.evaluate(() => {
+      window.dispatchEvent(new CustomEvent("formula:open-panel", { detail: { panelId: "dataQueries" } }));
+    });
+
+    const signIn = page.getByRole("button", { name: "Sign in" }).first();
+    await expect(signIn).toBeVisible();
+    await signIn.click();
+
+    await expect(page.getByText("Awaiting OAuth redirect…")).toBeVisible();
+
+    const cancelButton = page.getByRole("button", { name: "Cancel sign-in" }).first();
+    await expect(cancelButton).toBeVisible();
+    await cancelButton.click();
+
+    await expect(page.getByText("Awaiting OAuth redirect…")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Sign in" }).first()).toBeVisible();
+
+    // No prompt should be shown and cancellation should not surface a global error.
+    const promptCalls = await page.evaluate(() => (window as any).__promptCalls?.length ?? 0);
+    expect(promptCalls).toBe(0);
+    await expect(page.getByText(/cancelled/i)).toHaveCount(0);
+  });
+
   test("redirect emitted during openAuthUrl (before waitForRedirect) still completes PKCE", async ({ page }) => {
     await page.addInitScript(() => {
       const listeners: Record<string, any> = {};
