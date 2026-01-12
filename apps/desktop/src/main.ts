@@ -53,6 +53,7 @@ import { t, tWithVars } from "./i18n/index.js";
 import { getOpenFileFilters } from "./file_dialog_filters.js";
 import { formatRangeAddress, parseRangeAddress } from "@formula/scripting";
 import { normalizeFormulaTextOpt } from "@formula/engine";
+import type { CollabSession } from "@formula/collab-session";
 import { startWorkbookSync } from "./tauri/workbookSync";
 import { TauriWorkbookBackend } from "./tauri/workbookBackend";
 import * as nativeDialogs from "./tauri/nativeDialogs";
@@ -191,6 +192,22 @@ function warnIfMissingCrossOriginIsolationInTauriProd(): void {
 warnIfMissingCrossOriginIsolationInTauriProd();
 
 let workbookSheetStore = new WorkbookSheetStore([{ id: "Sheet1", name: "Sheet1", visibility: "visible" }]);
+const workbookSheetNames = new Map<string, string>();
+
+function syncWorkbookSheetNamesFromSheetStore(): void {
+  workbookSheetNames.clear();
+  for (const sheet of workbookSheetStore.listAll()) {
+    workbookSheetNames.set(sheet.id, sheet.name);
+  }
+}
+
+syncWorkbookSheetNamesFromSheetStore();
+
+// Task 13 adds this helper in collab mode. Declare it here so main.ts can
+// consume it without taking a hard dependency on collab wiring being present.
+interface SpreadsheetApp {
+  getCollabSession?: () => CollabSession | null;
+}
 
 function installExternalLinkInterceptor(): void {
   if (typeof document === "undefined") return;
@@ -1035,6 +1052,38 @@ function listDocumentSheetIds(): string[] {
   return sheetIds.length > 0 ? sheetIds : ["Sheet1"];
 }
 
+function coerceCollabSheetField(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  const maybe = value as any;
+  if (maybe?.constructor?.name === "YText" && typeof maybe.toString === "function") {
+    try {
+      return maybe.toString();
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function listSheetsFromCollabSession(session: CollabSession): SheetUiInfo[] {
+  const out: SheetUiInfo[] = [];
+  const seen = new Set<string>();
+  const entries = session?.sheets?.toArray?.() ?? [];
+  for (const entry of entries) {
+    const map: any = entry;
+    const id = coerceCollabSheetField(map?.get?.("id") ?? map?.id);
+    if (!id) continue;
+    const trimmed = id.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    const name = coerceCollabSheetField(map?.get?.("name") ?? map?.name) ?? trimmed;
+    out.push({ id: trimmed, name });
+  }
+  return out.length > 0 ? out : [{ id: "Sheet1", name: "Sheet1" }];
+}
+
 function reconcileSheetStoreWithDocument(ids: string[]): void {
   if (ids.length === 0) return;
 
@@ -1061,6 +1110,39 @@ function reconcileSheetStoreWithDocument(ids: string[]): void {
       // allow the removal (e.g. last-sheet guard).
     }
   }
+}
+
+let lastCollabSheetsKey = "";
+
+function syncSheetStoreFromCollabSession(session: CollabSession): void {
+  const sheets = listSheetsFromCollabSession(session);
+  const key = sheets.map((s) => `${s.id}\u0000${s.name}`).join("|");
+  if (key === lastCollabSheetsKey) return;
+  lastCollabSheetsKey = key;
+
+  try {
+    workbookSheetStore = new WorkbookSheetStore(
+      sheets.map((sheet) => ({
+        id: sheet.id,
+        name: sheet.name,
+        visibility: "visible",
+      })),
+    );
+  } catch (err) {
+    // If collab sheet names are invalid/duplicated (shouldn't happen, but can if a remote
+    // client writes bad metadata), fall back to using the stable sheet id as the display name
+    // so the UI remains functional.
+    console.error("[formula][desktop] Failed to apply collab sheet metadata:", err);
+    workbookSheetStore = new WorkbookSheetStore(
+      sheets.map((sheet) => ({
+        id: sheet.id,
+        name: sheet.id,
+        visibility: "visible",
+      })),
+    );
+  }
+
+  syncWorkbookSheetNamesFromSheetStore();
 }
 
 function listSheetsForUi(): SheetUiInfo[] {
@@ -1196,18 +1278,86 @@ function renderSheetPosition(sheets: SheetUiInfo[], activeId: string): void {
   sheetPositionEl.textContent = `Sheet ${position} of ${total}`;
 }
 
+let syncingSheetUi = false;
+let observedCollabSession: CollabSession | null = null;
+let collabSheetsObserver: ((events: any, transaction: any) => void) | null = null;
+let collabSheetsUnloadHookInstalled = false;
+
+function ensureCollabSheetObserver(): void {
+  const session = app.getCollabSession?.() ?? null;
+  if (!session) return;
+  if (observedCollabSession === session) return;
+
+  if (observedCollabSession && collabSheetsObserver) {
+    observedCollabSession.sheets.unobserveDeep(collabSheetsObserver as any);
+  }
+
+  observedCollabSession = session;
+  collabSheetsObserver = () => {
+    syncSheetStoreFromCollabSession(session);
+    syncSheetUi();
+  };
+  session.sheets.observeDeep(collabSheetsObserver as any);
+
+  // Initial sync (collab sheet list may include sheets with no cells, which the
+  // DocumentController won't create and therefore wouldn't show up otherwise).
+  syncSheetStoreFromCollabSession(session);
+
+  if (!collabSheetsUnloadHookInstalled) {
+    collabSheetsUnloadHookInstalled = true;
+    window.addEventListener("unload", () => {
+      if (observedCollabSession && collabSheetsObserver) {
+        observedCollabSession.sheets.unobserveDeep(collabSheetsObserver as any);
+      }
+      observedCollabSession = null;
+      collabSheetsObserver = null;
+    });
+  }
+}
+
 function syncSheetUi(): void {
-  const sheets = listSheetsForUi();
-  const activeId = app.getCurrentSheetId();
-  renderSheetTabs(sheets);
-  renderSheetSwitcher(sheets, activeId);
-  renderSheetPosition(sheets, activeId);
+  if (syncingSheetUi) return;
+  syncingSheetUi = true;
+  try {
+    ensureCollabSheetObserver();
+
+    const session = app.getCollabSession?.() ?? null;
+    if (session) {
+      // Keep the UI store aligned with the authoritative sheet list in Yjs.
+      syncSheetStoreFromCollabSession(session);
+    }
+
+    // Keep `workbookSheetNames` in sync so sheet-name consumers (extension API,
+    // context keys, etc) reflect collab metadata.
+    syncWorkbookSheetNamesFromSheetStore();
+
+    const sheets = listSheetsForUi();
+    const activeId = app.getCurrentSheetId();
+    if (!sheets.some((sheet) => sheet.id === activeId)) {
+      const fallback = sheets[0]?.id ?? null;
+      if (fallback) {
+        // If the active sheet is removed (eg: via version restore or branch checkout),
+        // automatically switch to the first remaining sheet.
+        app.activateSheet(fallback);
+      }
+    }
+
+    const nextActiveId = app.getCurrentSheetId();
+    renderSheetTabs(sheets);
+    renderSheetSwitcher(sheets, nextActiveId);
+    renderSheetPosition(sheets, nextActiveId);
+  } finally {
+    syncingSheetUi = false;
+  }
 }
 
 {
-  const ids = listDocumentSheetIds();
-  reconcileSheetStoreWithDocument(ids);
-  lastDocSheetIdsKey = stableSheetIdKey(ids);
+  const session = app.getCollabSession?.() ?? null;
+  if (!session) {
+    const ids = listDocumentSheetIds();
+    reconcileSheetStoreWithDocument(ids);
+    lastDocSheetIdsKey = stableSheetIdKey(ids);
+  }
   syncSheetUi();
 }
 
@@ -1248,6 +1398,15 @@ app.selectRange = (...args: Parameters<SpreadsheetApp["selectRange"]>): void => 
 // and re-render when edits create new sheets (DocumentController creates sheets lazily).
 app.getDocument().on("change", () => {
   app.refresh();
+  // In collab mode, the sheet list is driven by the Yjs workbook schema (`session.sheets`).
+  // Avoid reconciling the UI sheet store against DocumentController's lazily-created sheets.
+  const session = app.getCollabSession?.() ?? null;
+  if (session) {
+    // If collab comes online after initial render, sync once to attach the observer
+    // and switch the sheet UI over to the Yjs-backed sheet list.
+    if (observedCollabSession !== session) syncSheetUi();
+    return;
+  }
   const ids = listDocumentSheetIds();
   const key = stableSheetIdKey(ids);
   if (key === lastDocSheetIdsKey) return;
@@ -5139,6 +5298,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
       visibility: "visible",
     })),
   );
+  syncWorkbookSheetNamesFromSheetStore();
 
   const MAX_COLS = 200;
   const CHUNK_ROWS = 200;
