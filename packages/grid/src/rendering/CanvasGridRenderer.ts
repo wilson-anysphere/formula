@@ -2918,9 +2918,7 @@ export class CanvasGridRenderer {
             }
           } else if (layoutEngine && availableWidth > 0) {
             const layout = layoutEngine.layout({
-              runs: layoutRuns.map(
-                (r) => ({ text: r.text, font: r.font, color: r.color, underline: r.underline, strike: r.strike }) as any
-              ),
+              runs: layoutRuns.map((r) => ({ text: r.text, font: r.font, color: r.color, underline: r.underline, strike: r.strike })),
               text: undefined,
               font: defaults,
               maxWidth: availableWidth,

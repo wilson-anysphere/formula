@@ -26,6 +26,7 @@ export type TextRun = {
   font?: FontSpec;
   color?: string;
   underline?: boolean;
+  strike?: boolean;
 };
 
 export type LayoutOptions = {
