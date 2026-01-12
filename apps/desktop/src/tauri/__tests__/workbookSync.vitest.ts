@@ -330,4 +330,33 @@ describe("workbookSync", () => {
 
     sync.stop();
   });
+
+  it("filters applyState deleted-sheet cell deltas (sheetStructureChanged without sheetMetaDeltas)", async () => {
+    const document = createMaterializedDocument();
+    const sync = startWorkbookSync({ document: document as any });
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
+
+    // Populate a second sheet with a value so `applyState` must delete it.
+    document.setCellValue("Sheet2", { row: 0, col: 0 }, "hello");
+    await flushMicrotasks();
+
+    invoke.mockClear();
+
+    // Build a snapshot that only contains Sheet1. `applyState` does not emit sheetMetaDeltas
+    // for structural changes; workbookSync must instead filter cell deltas against the
+    // post-applyState sheet snapshot.
+    const snapshotDoc = new DocumentController();
+    snapshotDoc.getCell("Sheet1", { row: 0, col: 0 });
+    const snapshot = snapshotDoc.encodeState();
+
+    document.applyState(snapshot);
+
+    await flushMicrotasks(8);
+    await flushNextTick();
+
+    expect(document.getSheetIds()).toEqual(["Sheet1"]);
+    expect(invoke).not.toHaveBeenCalled();
+
+    sync.stop();
+  });
 });
