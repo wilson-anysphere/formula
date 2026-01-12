@@ -77,8 +77,11 @@ fn locate_pkcs7_signed_data<'a>(
     if signature_stream.first() == Some(&0x30)
         && looks_like_pkcs7_signed_data_content_info(signature_stream)
     {
+        let end = signature_stream
+            .len()
+            .saturating_sub(skip_element(signature_stream)?.len());
         return Ok(Some(Pkcs7Location {
-            der: signature_stream,
+            der: &signature_stream[..end],
             offset: 0,
         }));
     }
@@ -103,8 +106,11 @@ fn locate_pkcs7_signed_data<'a>(
             continue;
         }
         if looks_like_pkcs7_signed_data_content_info(&signature_stream[offset..]) {
+            let slice = &signature_stream[offset..];
+            let consumed = slice.len().saturating_sub(skip_element(slice)?.len());
+            let end = offset.saturating_add(consumed).min(signature_stream.len());
             return Ok(Some(Pkcs7Location {
-                der: &signature_stream[offset..],
+                der: &signature_stream[offset..end],
                 offset,
             }));
         }
@@ -186,7 +192,7 @@ fn parse_pkcs7_signed_data_encap_content(
     encap_cur = after_encap_oid;
 
     // eContent [0] EXPLICIT OCTET STRING OPTIONAL
-    let econtent = if encap_cur.is_empty() {
+    let econtent = if encap_cur.is_empty() || is_eoc(encap_cur) {
         None
     } else {
         let (tag, len, rest) = parse_tag_and_length(encap_cur)?;
@@ -247,6 +253,10 @@ fn parse_spc_indirect_data_content(
         digest_algorithm_oid,
         digest,
     })
+}
+
+fn is_eoc(bytes: &[u8]) -> bool {
+    bytes.len() >= 2 && bytes[0] == 0x00 && bytes[1] == 0x00
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
