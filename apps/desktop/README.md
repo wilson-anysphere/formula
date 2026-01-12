@@ -174,7 +174,8 @@ At a high level:
 
 Extension panels (`contributes.panels` / `formula.ui.createPanel`) are rendered in a sandboxed `<iframe>` with a
 restrictive CSP (see `apps/desktop/src/extensions/ExtensionPanelBody.tsx`), so panel HTML cannot load remote scripts or
-make network requests directly. Panels should communicate with extension code via `postMessage`.
+make network requests directly. The desktop also scrubs Tauri IPC globals (`__TAURI__`, etc) from the iframe as a
+defense-in-depth measure. Panels should communicate with extension code via `postMessage`.
 
 ### Where extensions live / what persists
 
