@@ -504,6 +504,31 @@ mod tests {
     }
 
     #[test]
+    fn workbook_rels_remove_calc_chain_removes_by_target_even_if_type_is_unexpected() {
+        // Some producers may emit a nonstandard relationship type for calcChain, but still target
+        // `calcChain.xml`. The recalc policy should be tolerant and remove it based on the target.
+        let rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId2" Type="http://example.com/not-calc-chain" Target="calcChain.xml"/>
+  <Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"/>
+</Relationships>
+"#;
+
+        let updated = workbook_rels_remove_calc_chain(rels_xml.as_bytes())
+            .expect("remove calc chain relationship from workbook.xml.rels");
+        let updated = std::str::from_utf8(&updated).expect("utf8 workbook rels");
+
+        assert!(
+            !updated.contains("calcChain.xml"),
+            "expected calc chain relationship to be removed, got: {updated}"
+        );
+        assert!(
+            updated.contains("metadata.xml"),
+            "expected metadata relationship to be preserved, got: {updated}"
+        );
+    }
+
+    #[test]
     fn workbook_xml_force_full_calc_on_load_expands_prefixed_self_closing_workbook_root() {
         let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>
