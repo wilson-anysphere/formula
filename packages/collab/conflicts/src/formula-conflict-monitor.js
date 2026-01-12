@@ -419,12 +419,31 @@ export class FormulaConflictMonitor {
         kind = "value";
       } else {
         // Both formula and value cleared. Disambiguate based on what the cell
-        // previously contained:
-        // - If the old formula was non-empty, treat this as a formula clear.
-        // - Otherwise treat it as a value clear (including binder-style writes
-        //   that set `formula=null` before `value=null`).
+        // previously contained and, when possible, the write ordering.
+        //
+        // In the common case:
+        // - `setLocalFormula("")` writes formula first, then value.
+        // - `setLocalValue(null)` writes value first, then formula.
+        //
+        // Binder-style writers may set `formula=null` before `value=null`, so
+        // ordering alone is not sufficient when the prior formula was empty.
         const priorFormula = (formulaChange?.oldValue ?? "").toString().trim();
-        kind = priorFormula ? "formula" : "value";
+        if (!priorFormula) {
+          // Treat clears on value-cells as value edits (also matches binder-style ordering).
+          kind = "value";
+        } else if (formulaChange?.action === "delete") {
+          // In formula-only mode, value writes clear formulas via key deletion.
+          // Treat those clears as part of the value edit so we don't accidentally
+          // record them as local formula edits.
+          kind = "value";
+        } else if (formulaItemId && valueItemId && formulaItemId.client === valueItemId.client) {
+          // Infer whether this was a formula edit or value edit based on which key
+          // was written first in the transaction.
+          kind = valueItemId.clock < formulaItemId.clock ? "value" : "formula";
+        } else {
+          // Fall back to treating it as a formula clear when we can't infer order.
+          kind = "formula";
+        }
       }
     }
 

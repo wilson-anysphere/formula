@@ -159,3 +159,71 @@ test("FormulaConflictMonitor tracks local-origin value clears for value conflict
   docA.destroy();
   docB.destroy();
 });
+
+test("FormulaConflictMonitor local-origin tracking does not misclassify setLocalValue(null) clears on formula cells (formula+value mode)", () => {
+  // Ensure deterministic map-entry overwrite tie-breaking: higher clientID wins.
+  const docA = new Y.Doc();
+  docA.clientID = 1;
+  const docB = new Y.Doc();
+  docB.clientID = 2;
+
+  let disconnect = connectDocs(docA, docB);
+
+  const localOrigin = { type: "local-a" };
+  const cellKey = "Sheet1:0:0";
+
+  /** @type {Array<any>} */
+  const conflicts = [];
+
+  const monitor = new FormulaConflictMonitor({
+    doc: docA,
+    localUserId: "user-a",
+    origin: localOrigin,
+    localOrigins: new Set([localOrigin]),
+    mode: "formula+value",
+    onConflict: (c) => conflicts.push(c)
+  });
+
+  // Establish base as a formula cell.
+  docA.transact(() => {
+    const cell = new Y.Map();
+    cell.set("formula", "=0");
+    cell.set("value", null);
+    docA.getMap("cells").set(cellKey, cell);
+  }, localOrigin);
+
+  const cellB = /** @type {any} */ (docB.getMap("cells").get(cellKey));
+  assert.ok(cellB, "expected base cell map to sync to docB");
+  assert.equal(cellB.get("formula"), "=0");
+
+  // Offline concurrent edits:
+  // - A clears via the monitor API `setLocalValue(null)` (this writes value first, then formula).
+  // - B overwrites with a literal value (and omits modifiedBy).
+  disconnect();
+  monitor.setLocalValue(cellKey, null);
+
+  docB.transact(() => {
+    const cell = /** @type {Y.Map<any>} */ (docB.getMap("cells").get(cellKey));
+    cell.set("value", "theirs");
+    cell.set("formula", null);
+    // Intentionally omit `modifiedBy`.
+  });
+
+  // Reconnect and sync state.
+  disconnect = connectDocs(docA, docB);
+
+  const valueConflict = conflicts.find((c) => c.kind === "value") ?? null;
+  assert.ok(valueConflict, "expected a value conflict to be detected");
+  assert.equal(valueConflict.localValue, null);
+  assert.equal(valueConflict.remoteValue, "theirs");
+  assert.equal(
+    conflicts.some((c) => c.kind === "content"),
+    false,
+    "expected clear-vs-value overwrite to be treated as a value conflict, not a content conflict"
+  );
+
+  monitor.dispose();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
