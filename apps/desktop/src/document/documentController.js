@@ -34,7 +34,17 @@ function sortKey(sheetId, row, col) {
 }
 
 function parseRowColKey(key) {
-  const [rowStr, colStr] = key.split(",");
+  const comma = key.indexOf(",");
+  // This format is internal-only, but keep validation to avoid corrupting state silently.
+  if (comma === -1) {
+    throw new Error(`Invalid cell key: ${key}`);
+  }
+
+  // Preserve the historical `split(",")` semantics: ignore any additional commas.
+  const secondComma = key.indexOf(",", comma + 1);
+  const rowStr = key.slice(0, comma);
+  const colStr = secondComma === -1 ? key.slice(comma + 1) : key.slice(comma + 1, secondComma);
+
   const row = Number(rowStr);
   const col = Number(colStr);
   if (!Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0) {
