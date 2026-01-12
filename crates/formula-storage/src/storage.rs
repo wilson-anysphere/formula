@@ -76,6 +76,15 @@ fn parse_optional_json_value(raw: Option<String>) -> Option<serde_json::Value> {
     })
 }
 
+fn invalid_sheet_name_placeholder(sheet_id: Uuid) -> String {
+    // Use a deterministic, Excel-safe placeholder name (<= 31 chars, ASCII, no forbidden chars).
+    // This allows corrupted databases (e.g. non-TEXT `sheets.name`) to remain operable and
+    // round-trip through export/import without failing.
+    let id_str = sheet_id.to_string();
+    let prefix = id_str.get(0..8).unwrap_or(&id_str);
+    format!("_invalid_{prefix}")
+}
+
 #[derive(Clone)]
 pub struct Storage {
     conn: Arc<Mutex<Connection>>,
@@ -858,9 +867,14 @@ impl Storage {
             let Ok(storage_sheet_id) = row.get::<_, String>(0) else {
                 continue;
             };
-            let Ok(name) = row.get::<_, String>(1) else {
+            let Ok(storage_sheet_uuid) = Uuid::parse_str(&storage_sheet_id) else {
                 continue;
             };
+            let name = row
+                .get::<_, Option<String>>(1)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| invalid_sheet_name_placeholder(storage_sheet_uuid));
             let visibility_raw: String = row.get(3).unwrap_or_else(|_| "visible".to_string());
             let tab_color_fast: Option<String> = row.get(4).ok().flatten();
             let tab_color_json: Option<String> = row.get(5).ok().flatten();
@@ -1110,9 +1124,11 @@ impl Storage {
                 return Ok(None);
             };
 
-            let Some(name) = r.get::<_, Option<String>>(2).ok().flatten() else {
-                return Ok(None);
-            };
+            let name = r
+                .get::<_, Option<String>>(2)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| invalid_sheet_name_placeholder(id));
             let visibility: String = r.get(4).unwrap_or_else(|_| "visible".to_string());
             let metadata_raw: Option<String> = r.get::<_, Option<String>>(11).ok().flatten();
             Ok(Some(SheetMeta {
@@ -1166,13 +1182,19 @@ impl Storage {
                 |r| {
                     let id: String = r.get(0)?;
                     let workbook_id: String = r.get(1)?;
-                    let visibility: String = r.get(4)?;
+                    let visibility: String = r.get(4).unwrap_or_else(|_| "visible".to_string());
                     let metadata_raw: Option<String> = r.get::<_, Option<String>>(11).ok().flatten();
+                    let id_parsed =
+                        Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?;
                     Ok(SheetMeta {
-                        id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                        id: id_parsed,
                         workbook_id: Uuid::parse_str(&workbook_id)
                             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                        name: r.get(2)?,
+                        name: r
+                            .get::<_, Option<String>>(2)
+                            .ok()
+                            .flatten()
+                            .unwrap_or_else(|| invalid_sheet_name_placeholder(id_parsed)),
                         position: r.get(3).unwrap_or(0),
                         visibility: SheetVisibility::parse(&visibility),
                         tab_color: r.get::<_, Option<String>>(5).ok().flatten(),
@@ -1724,9 +1746,11 @@ impl Storage {
                 return Ok(None);
             };
 
-            let Some(name) = r.get::<_, Option<String>>(2).ok().flatten() else {
-                return Ok(None);
-            };
+            let name = r
+                .get::<_, Option<String>>(2)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| invalid_sheet_name_placeholder(id));
             let visibility: String = r.get(4).unwrap_or_else(|_| "visible".to_string());
             let metadata_raw: Option<String> = r.get::<_, Option<String>>(11).ok().flatten();
             Ok(Some(SheetMeta {
@@ -1779,13 +1803,19 @@ impl Storage {
                 |r| {
                     let id: String = r.get(0)?;
                     let workbook_id: String = r.get(1)?;
-                    let visibility: String = r.get(4)?;
+                    let visibility: String = r.get(4).unwrap_or_else(|_| "visible".to_string());
                     let metadata_raw: Option<String> = r.get::<_, Option<String>>(11).ok().flatten();
+                    let id_parsed =
+                        Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?;
                     Ok(SheetMeta {
-                        id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                        id: id_parsed,
                         workbook_id: Uuid::parse_str(&workbook_id)
                             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                        name: r.get(2)?,
+                        name: r
+                            .get::<_, Option<String>>(2)
+                            .ok()
+                            .flatten()
+                            .unwrap_or_else(|| invalid_sheet_name_placeholder(id_parsed)),
                         position: r.get(3).unwrap_or(0),
                         visibility: SheetVisibility::parse(&visibility),
                         tab_color: r.get::<_, Option<String>>(5).ok().flatten(),
