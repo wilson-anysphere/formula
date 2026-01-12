@@ -1461,6 +1461,8 @@ impl Range2D {
         match arg {
             ArgValue::Reference(r) => Ok(Self::Reference(r.normalized())),
             ArgValue::Scalar(Value::Array(arr)) => Ok(Self::Array(arr)),
+            ArgValue::Scalar(Value::Reference(r)) => Ok(Self::Reference(r.normalized())),
+            ArgValue::Scalar(Value::Error(e)) => Err(e),
             ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => Err(ErrorKind::Value),
         }
     }

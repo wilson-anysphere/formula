@@ -280,3 +280,34 @@ fn minmaxifs_validates_arg_shape_and_pairs() {
     );
 }
 
+#[test]
+fn minmaxifs_accepts_reference_returning_functions() {
+    let mut engine = Engine::new();
+
+    for (addr, v) in [("A1", 5.0), ("A2", 3.0), ("A3", 7.0)] {
+        engine
+            .set_cell_value("Sheet1", addr, v)
+            .expect("set value");
+    }
+
+    for (addr, v) in [("B1", "A"), ("B2", "B"), ("B3", "A")] {
+        engine
+            .set_cell_value("Sheet1", addr, v)
+            .expect("set value");
+    }
+
+    // OFFSET returns a reference value; MINIFS/MAXIFS should accept those wherever a range is expected.
+    assert_eq!(
+        eval(
+            &mut engine,
+            "=MINIFS(OFFSET(A1,0,0,3,1),OFFSET(B1,0,0,3,1),\"A\")"
+        ),
+        Value::Number(5.0)
+    );
+
+    // Errors returned from reference-returning functions should propagate as-is.
+    assert_eq!(
+        eval(&mut engine, "=MAXIFS(OFFSET(A1,1048576,0,1,1),B1:B3,\"A\")"),
+        Value::Error(ErrorKind::Ref)
+    );
+}
