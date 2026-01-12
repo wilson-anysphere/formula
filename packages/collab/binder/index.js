@@ -200,6 +200,7 @@ function getYMapCell(cellData) {
   if (typeof cellData.get !== "function") return null;
   if (typeof cellData.set !== "function") return null;
   if (typeof cellData.delete !== "function") return null;
+  if (typeof cellData.forEach !== "function") return null;
   return cellData;
 }
 
@@ -364,7 +365,10 @@ export function bindYjsToDocumentController(options) {
   // Stable origin token for local DocumentController -> Yjs transactions when
   // we don't have a dedicated undo service wrapper.
   const binderOrigin = undoService?.origin ?? { type: "document-controller:binder" };
-
+  // Origin used for internal normalization transactions (e.g. cloning foreign nested
+  // Y.Maps into local constructors). This origin is intentionally distinct from the
+  // undoService origin so collaborative undo only captures the user's actual edit.
+  const normalizeOrigin = { type: "document-controller:binder:normalize" };
   /** @type {Map<string, NormalizedCell>} */
   let cache = new Map();
 
@@ -431,6 +435,55 @@ export function bindYjsToDocumentController(options) {
   let writeChain = Promise.resolve();
   // Serialize DocumentController -> Yjs sheet metadata writes (view state, etc).
   let sheetWriteChain = Promise.resolve();
+
+  /**
+   * Normalize foreign nested Y.Maps (e.g. created by a different `yjs` module instance
+   * in mixed ESM/CJS environments) into local types before mutating them.
+   *
+   * This conversion is intentionally performed in an *untracked* transaction (origin
+   * not in UndoManager.trackedOrigins) so collaborative undo only captures the user's
+   * actual edit.
+   *
+   * @param {Iterable<string>} rawKeys
+   */
+  function ensureLocalCellMapsForWrite(rawKeys) {
+    /** @type {string[]} */
+    const foreign = [];
+    for (const rawKey of rawKeys) {
+      if (typeof rawKey !== "string") continue;
+      const existingCell = getYMapCell(cells.get(rawKey));
+      if (!existingCell) continue;
+      if (existingCell instanceof Y.Map) continue;
+      foreign.push(rawKey);
+    }
+
+    if (foreign.length === 0) return;
+
+    const prevApplyingLocal = applyingLocal;
+    applyingLocal = true;
+    try {
+      ydoc.transact(
+        () => {
+          for (const rawKey of foreign) {
+            const cellData = cells.get(rawKey);
+            const cell = getYMapCell(cellData);
+            if (!cell || cell instanceof Y.Map) continue;
+
+            const local = new Y.Map();
+            cell.forEach((v, k) => {
+              local.set(k, v);
+            });
+            cells.set(rawKey, local);
+          }
+        },
+        // Use a dedicated origin token so this conversion does not enter the collab
+        // UndoManager history (trackedOrigins only includes the local edit origin).
+        normalizeOrigin,
+      );
+    } finally {
+      applyingLocal = prevApplyingLocal;
+    }
+  }
 
   /**
    * @param {Set<string>} changedCanonicalKeys
@@ -1296,6 +1349,21 @@ export function bindYjsToDocumentController(options) {
       });
     }
 
+    // Normalize any foreign nested cell maps before we mutate them. This keeps
+    // Yjs UndoManager (collab undo) reliable in mixed-module environments.
+    /** @type {Set<string>} */
+    const rawKeysToNormalize = new Set();
+    for (const item of prepared) {
+      // Skip deletes: we don't mutate the nested map when removing the cell key.
+      if (item.value == null && item.formula == null && item.styleId === 0 && !item.encryptedPayload) continue;
+      for (const rawKey of item.targets) {
+        if (typeof rawKey === "string") rawKeysToNormalize.add(rawKey);
+      }
+    }
+    if (rawKeysToNormalize.size > 0) {
+      ensureLocalCellMapsForWrite(rawKeysToNormalize);
+    }
+
     const apply = () => {
       for (const item of prepared) {
         const { canonicalKey, targets, value, formula, styleId, format, encryptedPayload, formatKey } = item;
@@ -1469,18 +1537,20 @@ export function bindYjsToDocumentController(options) {
     };
 
     if (typeof undoService?.transact === "function") {
+      const prevApplyingLocal = applyingLocal;
       applyingLocal = true;
       try {
         undoService.transact(apply);
       } finally {
-        applyingLocal = false;
+        applyingLocal = prevApplyingLocal;
       }
     } else {
+      const prevApplyingLocal = applyingLocal;
       applyingLocal = true;
       try {
         ydoc.transact(apply, binderOrigin);
       } finally {
-        applyingLocal = false;
+        applyingLocal = prevApplyingLocal;
       }
     }
   }
@@ -1644,18 +1714,20 @@ export function bindYjsToDocumentController(options) {
     };
 
     if (typeof undoService?.transact === "function") {
+      const prevApplyingLocal = applyingLocal;
       applyingLocal = true;
       try {
         undoService.transact(apply);
       } finally {
-        applyingLocal = false;
+        applyingLocal = prevApplyingLocal;
       }
     } else {
+      const prevApplyingLocal = applyingLocal;
       applyingLocal = true;
       try {
         ydoc.transact(apply, binderOrigin);
       } finally {
-        applyingLocal = false;
+        applyingLocal = prevApplyingLocal;
       }
     }
   }
