@@ -27,6 +27,10 @@ const TYPE_STRING: &str = "public.utf8-plain-text"; // NSPasteboardTypeString
 const TYPE_HTML: &str = "public.html"; // NSPasteboardTypeHTML
 const TYPE_RTF: &str = "public.rtf"; // NSPasteboardTypeRTF
 const TYPE_PNG: &str = "public.png"; // NSPasteboardTypePNG
+const TYPE_TIFF: &str = "public.tiff"; // NSPasteboardTypeTIFF
+
+// NSBitmapImageFileType values (from AppKit).
+const NSBITMAP_IMAGE_FILE_TYPE_PNG: usize = 4; // NSBitmapImageFileTypePNG
 
 fn ensure_main_thread() -> Result<(), ClipboardError> {
     // +[NSThread isMainThread]
@@ -144,6 +148,56 @@ unsafe fn pasteboard_data_for_type(
     }
 }
 
+unsafe fn tiff_to_png_bytes(tiff: &[u8]) -> Result<Vec<u8>, ClipboardError> {
+    // [NSBitmapImageRep imageRepWithData:data]
+    let data = nsdata_from_bytes(tiff)?;
+    let rep: *mut AnyObject =
+        objc2::msg_send![objc2::class!(NSBitmapImageRep), imageRepWithData: &*data];
+    if rep.is_null() {
+        return Err(ClipboardError::OperationFailed(
+            "failed to decode TIFF via NSBitmapImageRep".to_string(),
+        ));
+    }
+
+    // Pass an empty properties dictionary.
+    let props: *mut AnyObject = objc2::msg_send![objc2::class!(NSDictionary), dictionary];
+    let png_data: *mut AnyObject = objc2::msg_send![
+        rep,
+        representationUsingType: NSBITMAP_IMAGE_FILE_TYPE_PNG
+        properties: props
+    ];
+    if png_data.is_null() {
+        return Err(ClipboardError::OperationFailed(
+            "failed to encode PNG via NSBitmapImageRep".to_string(),
+        ));
+    }
+
+    Ok(nsdata_to_vec(png_data, usize::MAX))
+}
+
+unsafe fn png_to_tiff_bytes(png: &[u8]) -> Result<Vec<u8>, ClipboardError> {
+    // [[NSImage alloc] initWithData:data]
+    let data = nsdata_from_bytes(png)?;
+    let cls = objc2::class!(NSImage);
+    let alloc: *mut AnyObject = objc2::msg_send![cls, alloc];
+    let img: *mut AnyObject = objc2::msg_send![alloc, initWithData: &*data];
+    if img.is_null() {
+        return Err(ClipboardError::OperationFailed(
+            "failed to decode PNG via NSImage".to_string(),
+        ));
+    }
+
+    // -[NSImage TIFFRepresentation]
+    let tiff_data: *mut AnyObject = objc2::msg_send![img, TIFFRepresentation];
+    if tiff_data.is_null() {
+        return Err(ClipboardError::OperationFailed(
+            "failed to encode TIFF via NSImage::TIFFRepresentation".to_string(),
+        ));
+    }
+
+    Ok(nsdata_to_vec(tiff_data, usize::MAX))
+}
+
 pub fn read() -> Result<ClipboardContent, ClipboardError> {
     ensure_main_thread()?;
 
@@ -161,6 +215,7 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
         let ty_html = nsstring_from_str(TYPE_HTML)?;
         let ty_rtf = nsstring_from_str(TYPE_RTF)?;
         let ty_png = nsstring_from_str(TYPE_PNG)?;
+        let ty_tiff = nsstring_from_str(TYPE_TIFF)?;
 
         let text = pasteboard_string_for_type(pasteboard, &*ty_string).or_else(|| {
             pasteboard_data_for_type(pasteboard, &*ty_string, usize::MAX)
@@ -176,9 +231,18 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
         let rtf = pasteboard_data_for_type(pasteboard, &*ty_rtf, MAX_RICH_TEXT_BYTES)
             .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
 
+        // Prefer PNG when present, but fall back to TIFF (converted to PNG) for interoperability
+        // with macOS apps that primarily put `public.tiff` on the pasteboard.
         let png_base64 = pasteboard_data_for_type(pasteboard, &*ty_png, MAX_IMAGE_BYTES)
-            .filter(|bytes| !bytes.is_empty())
-            .map(|bytes| STANDARD.encode(bytes));
+            .map(|bytes| STANDARD.encode(&bytes))
+            .or_else(|| {
+                let tiff = pasteboard_data_for_type(pasteboard, &*ty_tiff, MAX_IMAGE_BYTES)?;
+                let png = tiff_to_png_bytes(&tiff).ok()?;
+                if png.len() > MAX_IMAGE_BYTES {
+                    return None;
+                }
+                Some(STANDARD.encode(&png))
+            });
 
         Ok(ClipboardContent {
             text,
@@ -270,6 +334,24 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
                     "failed to set NSPasteboardTypePNG".to_string(),
                 ));
             }
+
+            // Also provide `public.tiff` (NSPasteboardTypeTIFF) for better macOS interoperability.
+            // Many AppKit apps prefer TIFF even when PNG is present.
+            if bytes.len() <= MAX_IMAGE_BYTES {
+                if let Ok(tiff) = png_to_tiff_bytes(bytes) {
+                    if !tiff.is_empty() && tiff.len() <= MAX_IMAGE_BYTES {
+                        let ty_tiff = nsstring_from_str(TYPE_TIFF)?;
+                        let tiff_data = nsdata_from_bytes(&tiff)?;
+                        let ok: bool =
+                            objc2::msg_send![&*item, setData: &*tiff_data forType: &*ty_tiff];
+                        if !ok {
+                            return Err(ClipboardError::OperationFailed(
+                                "failed to set NSPasteboardTypeTIFF".to_string(),
+                            ));
+                        }
+                    }
+                }
+            }
         }
 
         let objects: *mut AnyObject =
@@ -289,4 +371,88 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
             ))
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::Engine as _;
+
+    fn png_dimensions(png: &[u8]) -> Option<(u32, u32)> {
+        const SIG: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
+        if png.len() < 24 {
+            return None;
+        }
+        if &png[0..8] != SIG {
+            return None;
+        }
+        if &png[12..16] != b"IHDR" {
+            return None;
+        }
+        let w = u32::from_be_bytes(png[16..20].try_into().ok()?);
+        let h = u32::from_be_bytes(png[20..24].try_into().ok()?);
+        Some((w, h))
+    }
+
+    fn run_on_main_thread<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static) -> R {
+        let is_main: bool = unsafe { objc2::msg_send![objc2::class!(NSThread), isMainThread] };
+        if is_main {
+            return f();
+        }
+
+        unsafe {
+            use std::ffi::c_void;
+            use std::sync::mpsc;
+
+            type DispatchQueue = *mut c_void;
+            type DispatchFn = extern "C" fn(*mut c_void);
+
+            extern "C" {
+                fn dispatch_get_main_queue() -> DispatchQueue;
+                fn dispatch_sync_f(queue: DispatchQueue, context: *mut c_void, work: DispatchFn);
+            }
+
+            struct Ctx<R: Send + 'static> {
+                f: Option<Box<dyn FnOnce() -> R + Send + 'static>>,
+                tx: mpsc::Sender<R>,
+            }
+
+            extern "C" fn trampoline<R: Send + 'static>(ctx: *mut c_void) {
+                unsafe {
+                    let mut ctx: Box<Ctx<R>> = Box::from_raw(ctx as *mut Ctx<R>);
+                    let f = ctx.f.take().expect("closure already taken");
+                    let result = f();
+                    let _ = ctx.tx.send(result);
+                }
+            }
+
+            let (tx, rx) = mpsc::channel();
+            let ctx = Box::new(Ctx { f: Some(Box::new(f)), tx });
+            dispatch_sync_f(
+                dispatch_get_main_queue(),
+                Box::into_raw(ctx) as *mut c_void,
+                trampoline::<R>,
+            );
+            rx.recv().expect("main-thread dispatch failed")
+        }
+    }
+
+    #[test]
+    fn png_tiff_png_roundtrip_preserves_dimensions() {
+        run_on_main_thread(|| {
+            // 1x1 transparent PNG.
+            let png = base64::engine::general_purpose::STANDARD
+                .decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO9C9VwAAAAASUVORK5CYII=",
+                )
+                .unwrap();
+            let dims_before = png_dimensions(&png).expect("valid png");
+
+            let tiff = autoreleasepool(|_| unsafe { png_to_tiff_bytes(&png) }).expect("png -> tiff");
+            let png2 = autoreleasepool(|_| unsafe { tiff_to_png_bytes(&tiff) }).expect("tiff -> png");
+            let dims_after = png_dimensions(&png2).expect("valid png output");
+
+            assert_eq!(dims_before, dims_after);
+        });
+    }
 }
