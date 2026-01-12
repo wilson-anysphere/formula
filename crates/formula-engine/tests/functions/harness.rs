@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use formula_engine::date::ExcelDateSystem;
 use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::{Engine, Value};
