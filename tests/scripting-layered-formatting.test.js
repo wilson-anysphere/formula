@@ -84,6 +84,43 @@ test("Range.getFormat returns inherited column format when using the real Docume
   workbook.dispose();
 });
 
+test("Range.getFormat returns inherited row format when using the real DocumentController layered formatting", () => {
+  const controller = new DocumentController();
+  controller.setRowFormat("Sheet1", 5, { font: { italic: true } });
+  assert.equal(controller.getCell("Sheet1", "A6").styleId, 0);
+
+  const workbook = new DocumentControllerWorkbookAdapter(controller, { activeSheetName: "Sheet1" });
+  const sheet = workbook.getActiveSheet();
+  assert.deepEqual(sheet.getRange("A6").getFormat(), { italic: true });
+
+  workbook.dispose();
+});
+
+test("Range.getFormat returns inherited sheet default format when using the real DocumentController layered formatting", () => {
+  const controller = new DocumentController();
+  controller.setSheetFormat("Sheet1", { fill: { fgColor: "#FF00FF00" } });
+  assert.equal(controller.getCell("Sheet1", "A1").styleId, 0);
+
+  const workbook = new DocumentControllerWorkbookAdapter(controller, { activeSheetName: "Sheet1" });
+  const sheet = workbook.getActiveSheet();
+  assert.deepEqual(sheet.getRange("A1").getFormat(), { backgroundColor: "#FF00FF00" });
+
+  workbook.dispose();
+});
+
+test("Range.getFormat composes row + col formats when using the real DocumentController layered formatting", () => {
+  const controller = new DocumentController();
+  controller.setColFormat("Sheet1", 0, { font: { bold: true } });
+  controller.setRowFormat("Sheet1", 0, { font: { italic: true } });
+  assert.equal(controller.getCell("Sheet1", "A1").styleId, 0);
+
+  const workbook = new DocumentControllerWorkbookAdapter(controller, { activeSheetName: "Sheet1" });
+  const sheet = workbook.getActiveSheet();
+  assert.deepEqual(sheet.getRange("A1").getFormat(), { bold: true, italic: true });
+
+  workbook.dispose();
+});
+
 test("Macro recorder receives formatChanged for column style deltas (layered formatting)", () => {
   const doc = new FakeDocumentController();
   const boldId = doc.styleTable.intern({ font: { bold: true } });
