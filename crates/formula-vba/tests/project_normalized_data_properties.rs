@@ -82,77 +82,24 @@ fn project_normalized_data_project_properties_parse_name_and_value_tokens_withou
     let normalized =
         project_normalized_data(&vba_project_bin).expect("compute ProjectNormalizedData");
 
-    // Property tokens must appear as `property_name || property_value` with:
-    // - no '=' separators
-    // - no surrounding quotes for quoted values
-    // - no newline bytes
-    let expected_name = b"NameVBAProject";
-    let expected_base_class = b"BaseClassUserForm1";
-    let expected_help_file = b"HelpFilec:\\example path\\example.hlp";
-    let expected_help_context_id = b"HelpContextID1";
+    // Expected transcript:
+    // - selected `VBA/dir` record payload bytes (here: PROJECTCODEPAGE / 1252)
+    // - ProjectProperties as name token bytes + value token bytes (no separators, no quotes, no NWLN)
+    // - FormsNormalizedData (designer storage bytes padded to 1023-byte blocks)
+    let mut expected = Vec::new();
+    expected.extend_from_slice(&1252u16.to_le_bytes());
+    expected.extend_from_slice(b"NameVBAProject");
+    expected.extend_from_slice(b"BaseClassUserForm1");
+    expected.extend_from_slice(b"HelpFilec:\\example path\\example.hlp");
+    expected.extend_from_slice(b"HelpContextID1");
 
-    let pos_name =
-        find_subslice(&normalized, expected_name).expect("Name property tokens should be present");
-    let pos_base_class = find_subslice(&normalized, expected_base_class)
-        .expect("BaseClass property tokens should be present");
-    let pos_help_file = find_subslice(&normalized, expected_help_file)
-        .expect("HelpFile property tokens should be present");
-    let pos_help_context_id = find_subslice(&normalized, expected_help_context_id)
-        .expect("HelpContextID property tokens should be present");
-
-    assert!(
-        pos_name < pos_base_class
-            && pos_base_class < pos_help_file
-            && pos_help_file < pos_help_context_id,
-        "expected ProjectProperties tokens to appear in the same order as in the PROJECT stream"
-    );
-
-    // Ensure the raw `=` separators from the input lines are not present.
-    assert!(
-        !normalized.windows(b"Name=".len()).any(|w| w == b"Name="),
-        "expected ProjectNormalizedData to omit the '=' separator from the Name line"
-    );
-    assert!(
-        !normalized
-            .windows(b"BaseClass=".len())
-            .any(|w| w == b"BaseClass="),
-        "expected ProjectNormalizedData to omit the '=' separator from the BaseClass line"
-    );
-    assert!(
-        !normalized
-            .windows(b"HelpFile=".len())
-            .any(|w| w == b"HelpFile="),
-        "expected ProjectNormalizedData to omit the '=' separator from the HelpFile line"
-    );
-    assert!(
-        !normalized
-            .windows(b"HelpContextID=".len())
-            .any(|w| w == b"HelpContextID="),
-        "expected ProjectNormalizedData to omit the '=' separator from the HelpContextID line"
-    );
-
-    // Ensure quoted values are appended without quote bytes, and newline bytes are not carried over
-    // from the `PROJECT` stream line endings.
-    assert!(
-        !normalized.contains(&b'"'),
-        "expected ProjectNormalizedData to omit quotes from quoted property values"
-    );
-    assert!(
-        !normalized.contains(&b'\r') && !normalized.contains(&b'\n'),
-        "expected ProjectNormalizedData to omit NWLN bytes from PROJECT stream property lines"
-    );
-
-    // `BaseClass` must also contribute the normalized designer storage bytes.
+    // `BaseClass` must also contribute the normalized designer storage bytes (1023-byte padded).
     let mut expected_designer_storage = Vec::new();
     expected_designer_storage.extend_from_slice(b"DESIGNER");
     expected_designer_storage.extend(std::iter::repeat(0u8).take(1023 - b"DESIGNER".len()));
+    expected.extend_from_slice(&expected_designer_storage);
 
-    let pos_designer = find_subslice(&normalized, &expected_designer_storage)
-        .expect("expected NormalizeDesignerStorage(UserForm1) bytes to be present");
-    assert!(
-        pos_base_class < pos_designer,
-        "expected BaseClass property tokens to appear before the normalized designer storage bytes"
-    );
+    assert_eq!(normalized, expected);
 }
 
 #[test]
