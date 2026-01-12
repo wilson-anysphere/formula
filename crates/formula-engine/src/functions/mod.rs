@@ -38,6 +38,7 @@ mod builtins_dynamic_arrays;
 mod builtins_dynamic_array_textsplit;
 mod builtins_information;
 mod builtins_lambda;
+mod builtins_logical_constants;
 mod builtins_logical;
 mod builtins_logical_extended;
 mod builtins_lookup;

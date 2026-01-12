@@ -917,6 +917,10 @@ def generate_cases() -> dict[str, Any]:
                 inputs=[CellInput("A1", a), CellInput("B1", b)],
             )
 
+    # Excel supports `TRUE`/`FALSE` as both logical constants and zero-arg functions.
+    _add_case(cases, prefix="true", tags=["logical", "TRUE"], formula="=TRUE()")
+    _add_case(cases, prefix="false", tags=["logical", "FALSE"], formula="=FALSE()")
+
     for a in [0, 1, -1, "", "0", "1"]:
         _add_case(
             cases,

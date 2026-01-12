@@ -19798,6 +19798,26 @@
       "id": "or_1b85b3f37c1a"
     },
     {
+      "formula": "=TRUE()",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "logical",
+        "TRUE"
+      ],
+      "id": "true_9206060fbb67"
+    },
+    {
+      "formula": "=FALSE()",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "logical",
+        "FALSE"
+      ],
+      "id": "false_513d4092ee80"
+    },
+    {
       "formula": "=NOT(A1)",
       "outputCell": "C1",
       "inputs": [

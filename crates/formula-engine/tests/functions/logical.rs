@@ -3,6 +3,21 @@ use formula_engine::{eval, ErrorKind, Value};
 use super::harness::{assert_number, TestSheet};
 
 #[test]
+fn true_false_support_literal_and_zero_arg_function_forms() {
+    let mut sheet = TestSheet::new();
+
+    assert_eq!(sheet.eval("=TRUE()"), Value::Bool(true));
+    assert_eq!(sheet.eval("=FALSE()"), Value::Bool(false));
+
+    // Literal forms still work.
+    assert_eq!(sheet.eval("=TRUE"), Value::Bool(true));
+    assert_eq!(sheet.eval("=FALSE"), Value::Bool(false));
+
+    // Ensure `TRUE()` parses/executes as a function call (Excel-compatible).
+    assert_number(&sheet.eval("=IF(TRUE(),1,2)"), 1.0);
+}
+
+#[test]
 fn if_selects_branch_and_defaults_false() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=IF(TRUE, 1, 2)"), 1.0);

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T04:47:49.886192897Z",
+  "generatedAt": "2026-01-12T05:50:21.979029644Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "27e1524c5f0165c20050c2a5aec5024a63d53a34e055163ff838dd6c5e67ff54",
-    "count": 1413
+    "sha256": "7a874d2591609126f26188847d6067716041cae15760d55da7ef73b4c042e675",
+    "count": 1415
   },
   "results": [
     {
@@ -9256,6 +9256,26 @@
     },
     {
       "caseId": "or_1b85b3f37c1a",
+      "outputCell": "C1",
+      "result": {
+        "t": "b",
+        "v": false
+      },
+      "address": "C1",
+      "displayText": "FALSE"
+    },
+    {
+      "caseId": "true_9206060fbb67",
+      "outputCell": "C1",
+      "result": {
+        "t": "b",
+        "v": true
+      },
+      "address": "C1",
+      "displayText": "TRUE"
+    },
+    {
+      "caseId": "false_513d4092ee80",
       "outputCell": "C1",
       "result": {
         "t": "b",

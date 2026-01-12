@@ -571,6 +571,14 @@ export default {
       ]
     },
     {
+      "name": "FALSE",
+      "min_args": 0,
+      "max_args": 0,
+      "volatility": "non_volatile",
+      "return_type": "bool",
+      "arg_types": []
+    },
+    {
       "name": "FILTER",
       "min_args": 2,
       "max_args": 3,
@@ -2189,6 +2197,14 @@ export default {
         "any",
         "number"
       ]
+    },
+    {
+      "name": "TRUE",
+      "min_args": 0,
+      "max_args": 0,
+      "volatility": "non_volatile",
+      "return_type": "bool",
+      "arg_types": []
     },
     {
       "name": "TRUNC",

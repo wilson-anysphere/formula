@@ -831,10 +831,22 @@ impl<'a> Lexer<'a> {
                     } else {
                         let ident = self.lex_ident();
                         let upper = ident.to_ascii_uppercase();
-                        if upper == "TRUE" {
-                            self.push(TokenKind::Boolean(true), start, self.idx);
-                        } else if upper == "FALSE" {
-                            self.push(TokenKind::Boolean(false), start, self.idx);
+                        if upper == "TRUE" || upper == "FALSE" {
+                            // Excel supports `TRUE` / `FALSE` as both boolean literals *and* zero-arg
+                            // functions (`TRUE()` / `FALSE()`). Lex `TRUE`/`FALSE` as booleans only
+                            // when they are standalone literals; if the next non-whitespace
+                            // character is `(`, treat them as identifiers so the parser produces a
+                            // `FunctionCall`.
+                            let next_non_ws = self.src[self.idx..]
+                                .chars()
+                                .find(|c| !matches!(c, ' ' | '\t' | '\r' | '\n'));
+                            if next_non_ws == Some('(') {
+                                self.push(TokenKind::Ident(ident), start, self.idx);
+                            } else if upper == "TRUE" {
+                                self.push(TokenKind::Boolean(true), start, self.idx);
+                            } else {
+                                self.push(TokenKind::Boolean(false), start, self.idx);
+                            }
                         } else {
                             self.push(TokenKind::Ident(ident), start, self.idx);
                         }
@@ -3038,4 +3050,74 @@ fn estimate_number_token_bytes(raw: &str) -> usize {
         }
     }
     9
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Expr, FunctionCall, ParseOptions};
+
+    #[test]
+    fn true_false_lex_as_boolean_literals_when_not_followed_by_paren() {
+        let opts = ParseOptions::default();
+        let tokens = lex("TRUE", &opts).unwrap();
+        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        assert_eq!(kinds, vec![TokenKind::Boolean(true), TokenKind::Eof]);
+
+        let tokens = lex("FALSE", &opts).unwrap();
+        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        assert_eq!(kinds, vec![TokenKind::Boolean(false), TokenKind::Eof]);
+    }
+
+    #[test]
+    fn true_false_lex_as_idents_when_called_with_parentheses() {
+        let opts = ParseOptions::default();
+
+        let tokens = lex("TRUE()", &opts).unwrap();
+        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Ident("TRUE".to_string()),
+                TokenKind::LParen,
+                TokenKind::RParen,
+                TokenKind::Eof
+            ]
+        );
+
+        // Whitespace between the name and `(` still counts as a call.
+        let tokens = lex("FALSE \t()", &opts).unwrap();
+        let kinds: Vec<TokenKind> = tokens.into_iter().map(|t| t.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Ident("FALSE".to_string()),
+                TokenKind::Whitespace(" \t".to_string()),
+                TokenKind::LParen,
+                TokenKind::RParen,
+                TokenKind::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn true_false_paren_forms_parse_as_function_calls_not_postfix_calls() {
+        let ast = parse_formula("=TRUE()", ParseOptions::default()).unwrap();
+        match ast.expr {
+            Expr::FunctionCall(FunctionCall { name, args }) => {
+                assert_eq!(name.name_upper, "TRUE");
+                assert!(args.is_empty());
+            }
+            other => panic!("expected FunctionCall, got {other:?}"),
+        }
+
+        let ast = parse_formula("=FALSE()", ParseOptions::default()).unwrap();
+        match ast.expr {
+            Expr::FunctionCall(FunctionCall { name, args }) => {
+                assert_eq!(name.name_upper, "FALSE");
+                assert!(args.is_empty());
+            }
+            other => panic!("expected FunctionCall, got {other:?}"),
+        }
+    }
 }
