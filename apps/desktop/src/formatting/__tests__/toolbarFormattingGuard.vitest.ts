@@ -15,13 +15,12 @@ describe("toolbar formatting safety cap", () => {
     document.body.appendChild(toastRoot);
   });
 
-  it("refuses to apply formatting when per-cell enumeration across a multi-range selection exceeds the cap", () => {
+  it("refuses to apply formatting when the (non-band) selection exceeds the cap", () => {
     const doc = new DocumentController();
     const spy = vi.spyOn(doc, "setRangeFormat");
 
     const start = performance.now();
-    // Keep each rectangle below the range-run threshold so the guard counts every cell
-    // (and blocks once we exceed the total enumerated cell cap).
+    // Two medium rectangles + a small tail range pushes us just over the total cell cap (100k).
     setFillColor(doc, "Sheet1", ["A1:Z1923", "A3000:Z4922", "A6000:A6004"], "#FFFF0000");
     const elapsed = performance.now() - start;
 
@@ -34,7 +33,22 @@ describe("toolbar formatting safety cap", () => {
     expect(toast?.textContent).toMatch(/Selection too large to apply formatting/i);
   });
 
-  it("allows formatting for enormous rectangles using the range-run fast path", () => {
+  it("allows formatting for large rectangles that use the range-run fast path", () => {
+    const doc = new DocumentController();
+    const spy = vi.spyOn(doc, "setRangeFormat");
+
+    const start = performance.now();
+    // 26 cols * 3846 rows = 99,996 cells (below the 100k cap, above the 50k range-run threshold).
+    const applied = setFillColor(doc, "Sheet1", "A1:Z3846", "#FFFF0000");
+    const elapsed = performance.now() - start;
+
+    expect(elapsed).toBeLessThan(250);
+    expect(applied).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[data-testid="toast"]')).toBeNull();
+  });
+
+  it("refuses to apply formatting to an enormous rectangular selection", () => {
     const doc = new DocumentController();
     const spy = vi.spyOn(doc, "setRangeFormat");
 
@@ -43,9 +57,13 @@ describe("toolbar formatting safety cap", () => {
     const elapsed = performance.now() - start;
 
     expect(elapsed).toBeLessThan(250);
-    expect(applied).toBe(true);
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[data-testid="toast"]')).toBeNull();
+    expect(applied).toBe(false);
+    expect(spy).not.toHaveBeenCalled();
+
+    const toast = document.querySelector('[data-testid="toast"]') as HTMLElement | null;
+    expect(toast).not.toBeNull();
+    expect(toast?.dataset.type).toBe("warning");
+    expect(toast?.textContent).toMatch(/Selection too large to apply formatting/i);
   });
 
   it("refuses to apply formatting to extremely large full-row selections (row band cap)", () => {
