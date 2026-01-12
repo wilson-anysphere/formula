@@ -2321,6 +2321,85 @@ mod tests {
     }
 
     #[test]
+    fn repairs_xlsm_with_prefix_only_defaults_and_missing_overrides() {
+        // A pathological but observed-in-the-wild shape: no default namespace on the root, but a
+        // declared prefix used for child elements. If the document is missing `<Override>` entries
+        // we must preserve the prefix when inserting them (otherwise the injected nodes land in no
+        // namespace and Excel ignores them).
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
+  <ct:Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <ct:Default Extension="xml" ContentType="application/xml"/>
+</Types>"#;
+
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"></worksheet>"#;
+
+        let bytes = build_package(&[
+            ("[Content_Types].xml", content_types.as_bytes()),
+            ("xl/workbook.xml", workbook_xml.as_bytes()),
+            ("xl/_rels/workbook.xml.rels", workbook_rels.as_bytes()),
+            ("xl/worksheets/sheet1.xml", worksheet_xml.as_bytes()),
+            ("xl/vbaProject.bin", b"fake-vba-project"),
+        ]);
+
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        let written = pkg.write_to_bytes().expect("write pkg");
+        let pkg2 = XlsxPackage::from_bytes(&written).expect("read pkg2");
+
+        let ct = std::str::from_utf8(pkg2.part("[Content_Types].xml").unwrap()).unwrap();
+        let doc = Document::parse(ct).expect("parse content types");
+
+        let ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types";
+
+        let workbook_override = doc
+            .descendants()
+            .find(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "Override"
+                    && n.attribute("PartName") == Some("/xl/workbook.xml")
+            })
+            .expect("workbook override");
+        assert_eq!(workbook_override.tag_name().namespace(), Some(ct_ns));
+        assert_eq!(
+            workbook_override.attribute("ContentType"),
+            Some("application/vnd.ms-excel.sheet.macroEnabled.main+xml")
+        );
+
+        let vba_override = doc
+            .descendants()
+            .find(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "Override"
+                    && n.attribute("PartName") == Some("/xl/vbaProject.bin")
+            })
+            .expect("vbaProject override");
+        assert_eq!(vba_override.tag_name().namespace(), Some(ct_ns));
+        assert_eq!(
+            vba_override.attribute("ContentType"),
+            Some("application/vnd.ms-office.vbaProject")
+        );
+
+        assert!(
+            ct.contains("<ct:Override"),
+            "expected inserted Override nodes to use the ct: prefix, got:\n{ct}"
+        );
+    }
+
+    #[test]
     fn repairs_workbook_rels_with_prefixed_self_closing_root() {
         let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">

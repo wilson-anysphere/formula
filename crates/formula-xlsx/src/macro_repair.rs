@@ -109,6 +109,7 @@ pub(crate) fn ensure_xlsm_content_types(
     let mut buf = Vec::new();
 
     let mut override_tag_name: Option<String> = None;
+    let mut default_tag_name: Option<String> = None;
 
     let mut has_workbook_override = false;
     let mut has_vba_override = false;
@@ -233,6 +234,18 @@ pub(crate) fn ensure_xlsm_content_types(
     loop {
         let event = reader.read_event_into(&mut buf)?;
         match event {
+            Event::Start(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Default") => {
+                if default_tag_name.is_none() {
+                    default_tag_name = Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                }
+                writer.write_event(Event::Start(e))?;
+            }
+            Event::Empty(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Default") => {
+                if default_tag_name.is_none() {
+                    default_tag_name = Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                }
+                writer.write_event(Event::Empty(e))?;
+            }
             Event::Start(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Override") => {
                 if override_tag_name.is_none() {
                     override_tag_name = Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
@@ -268,8 +281,18 @@ pub(crate) fn ensure_xlsm_content_types(
                 )?;
             }
             Event::End(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Types") => {
-                let override_tag_name =
-                    override_tag_name.clone().unwrap_or_else(|| prefixed_tag(e.name().as_ref(), "Override"));
+                // Prefer using an existing `<Override>` prefix when available. If the file has no
+                // overrides (or is missing them due to producer bugs), fall back to the prefix
+                // used by `<Default>` entries so we don't inject un-namespaced overrides into a
+                // prefix-only content types document.
+                let override_tag_name = override_tag_name
+                    .clone()
+                    .or_else(|| {
+                        default_tag_name
+                            .as_ref()
+                            .map(|tag| prefixed_tag(tag.as_bytes(), "Override"))
+                    })
+                    .unwrap_or_else(|| prefixed_tag(e.name().as_ref(), "Override"));
 
                 if !has_workbook_override {
                     changed = true;
@@ -312,6 +335,11 @@ pub(crate) fn ensure_xlsm_content_types(
                 let types_tag_name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                 let override_tag_name = override_tag_name
                     .clone()
+                    .or_else(|| {
+                        default_tag_name
+                            .as_ref()
+                            .map(|tag| prefixed_tag(tag.as_bytes(), "Override"))
+                    })
                     .unwrap_or_else(|| prefixed_tag(types_tag_name.as_bytes(), "Override"));
 
                 writer.write_event(Event::Start(e))?;
