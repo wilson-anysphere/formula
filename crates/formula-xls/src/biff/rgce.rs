@@ -19,7 +19,11 @@
 //! base is known, the decoder defaults to `(0,0)` (A1) but still preserves `$` absolute/relative
 //! markers in the rendered A1 text.
 
-use super::{externsheet::ExternSheetEntry, strings, supbook::SupBookInfo};
+use super::{
+    externsheet::ExternSheetEntry,
+    strings,
+    supbook::{SupBookInfo, SupBookKind},
+};
 
 // BIFF8 supports 65,536 rows (0-based 0..=65,535).
 const BIFF8_MAX_ROW0: i64 = u16::MAX as i64;
@@ -611,10 +615,6 @@ pub(crate) fn decode_biff8_rgce_with_base(
             //
             // [MS-XLS] 2.5.198.41
             // Payload: [ixti: u16][iname: u16][reserved: u16]
-            //
-            // We do not currently parse the supporting `SUPBOOK`/`EXTERNNAME` tables needed to
-            // resolve the external name, so decode best-effort as `#REF!` (but still consume the
-            // payload so we can keep decoding the remainder of the rgce stream).
             0x39 | 0x59 | 0x79 => {
                 if input.len() < 6 {
                     warnings.push("unexpected end of rgce stream".to_string());
@@ -623,10 +623,25 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let ixti = u16::from_le_bytes([input[0], input[1]]);
                 let iname = u16::from_le_bytes([input[2], input[3]]);
                 input = &input[6..];
-                warnings.push(format!(
-                    "PtgNameX external name reference is not supported (ixti={ixti}, iname={iname})"
-                ));
-                stack.push(ExprFragment::new("#REF!".to_string()));
+
+                // Excel uses `PtgNameX` for external workbook defined names and for add-in/UDF
+                // function calls. For UDF calls, the token sequence is typically:
+                //
+                //   args..., PtgNameX(func), PtgFuncVar(argc+1, 0x00FF)
+                //
+                // In this case we must decode `PtgNameX` into a *function identifier* (no workbook
+                // prefix or quoting), otherwise the rendered formula won't be parseable.
+                let is_udf_call = matches!(input.get(0), Some(0x22 | 0x42 | 0x62))
+                    && input.len() >= 4
+                    && u16::from_le_bytes([input[2], input[3]]) == 0x00FF;
+
+                match format_namex_ref(ixti, iname, is_udf_call, ctx) {
+                    Ok(txt) => stack.push(ExprFragment::new(txt)),
+                    Err(err) => {
+                        warnings.push(err);
+                        stack.push(ExprFragment::new("#REF!".to_string()));
+                    }
+                }
             }
             // PtgRef (2D)
             0x24 | 0x44 | 0x64 => {
@@ -731,7 +746,8 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 input = &input[8..];
                 if base_is_default
                     && !warned_default_base_for_relative
-                    && ((col_first_field & RELATIVE_MASK) != 0 || (col_last_field & RELATIVE_MASK) != 0)
+                    && ((col_first_field & RELATIVE_MASK) != 0
+                        || (col_last_field & RELATIVE_MASK) != 0)
                 {
                     warnings.push(
                         "relative reference tokens are interpreted relative to A1 (no base cell provided)"
@@ -839,13 +855,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     warned_default_base_for_relative = true;
                 }
 
-                let cell = decode_ref_n(
-                    row_raw,
-                    col_field,
-                    base,
-                    &mut warnings,
-                    "PtgRefN3d",
-                );
+                let cell = decode_ref_n(row_raw, col_field, base, &mut warnings, "PtgRefN3d");
                 if cell == "#REF!" {
                     stack.push(ExprFragment::new(cell));
                     continue;
@@ -877,7 +887,8 @@ pub(crate) fn decode_biff8_rgce_with_base(
 
                 if base_is_default
                     && !warned_default_base_for_relative
-                    && ((col_first_field & RELATIVE_MASK) != 0 || (col_last_field & RELATIVE_MASK) != 0)
+                    && ((col_first_field & RELATIVE_MASK) != 0
+                        || (col_last_field & RELATIVE_MASK) != 0)
                 {
                     warnings.push(
                         "relative reference tokens are interpreted relative to A1 (no base cell provided)"
@@ -1272,16 +1283,13 @@ fn format_sheet_ref(ixti: u16, ctx: &RgceDecodeContext<'_>) -> Result<String, St
 
     // External workbook reference. Best-effort: if SUPBOOK metadata is missing or incomplete,
     // surface an error so the caller can fall back to a parseable placeholder (e.g. `#REF!`).
-    let sb = ctx
-        .supbooks
-        .get(entry.supbook as usize)
-        .ok_or_else(|| {
-            format!(
-                "EXTERNSHEET entry ixti={ixti} references missing SUPBOOK index {} (supbook count={})",
-                entry.supbook,
-                ctx.supbooks.len()
-            )
-        })?;
+    let sb = ctx.supbooks.get(entry.supbook as usize).ok_or_else(|| {
+        format!(
+            "EXTERNSHEET entry ixti={ixti} references missing SUPBOOK index {} (supbook count={})",
+            entry.supbook,
+            ctx.supbooks.len()
+        )
+    })?;
 
     let workbook_raw = sb
         .workbook_name
@@ -1332,6 +1340,86 @@ fn format_sheet_ref(ixti: u16, ctx: &RgceDecodeContext<'_>) -> Result<String, St
     }
 }
 
+fn format_namex_ref(
+    ixti: u16,
+    iname: u16,
+    is_function: bool,
+    ctx: &RgceDecodeContext<'_>,
+) -> Result<String, String> {
+    if iname == 0 {
+        return Err(format!(
+            "PtgNameX has invalid iname=0 (expected 1-based external name index, ixti={ixti})"
+        ));
+    }
+
+    // In BIFF8, PtgNameX stores `ixti` (index into EXTERNSHEET), which in turn points at a SUPBOOK.
+    // Some writers may instead store the SUPBOOK index directly (when EXTERNSHEET is missing). Be
+    // permissive and treat missing EXTERNSHEET as a signal to interpret `ixti` as `iSupBook`.
+    let (supbook_index, sheet_ref_available) = match ctx.externsheet.get(ixti as usize) {
+        Some(entry) => (entry.supbook, true),
+        None => (ixti, false),
+    };
+
+    let Some(sb) = ctx.supbooks.get(supbook_index as usize) else {
+        return Err(format!(
+            "PtgNameX references missing SUPBOOK index {supbook_index} (ixti={ixti}, supbook count={})",
+            ctx.supbooks.len()
+        ));
+    };
+
+    let name_idx = (iname as usize)
+        .checked_sub(1)
+        .ok_or_else(|| "iname underflow".to_string())?;
+    let Some(extern_name) = sb.extern_names.get(name_idx) else {
+        return Err(format!(
+            "PtgNameX references missing EXTERNNAME iname={iname} for SUPBOOK index {supbook_index} (extern name count={})",
+            sb.extern_names.len()
+        ));
+    };
+
+    if is_function {
+        if extern_name.is_empty() {
+            return Err(format!(
+                "PtgNameX function reference has empty EXTERNNAME (ixti={ixti}, iname={iname})"
+            ));
+        }
+        return Ok(extern_name.clone());
+    }
+
+    match sb.kind {
+        // Workbook- or sheet-scoped external name in another workbook.
+        SupBookKind::ExternalWorkbook => {
+            // If the EXTERNSHEET entry has a meaningful sheet ref (itab values), format
+            // `'[Book.xlsx]Sheet1'!MyName`. Otherwise fall back to workbook-scoped `'[Book.xlsx]MyName'`.
+            if sheet_ref_available {
+                if let Ok(prefix) = format_sheet_ref(ixti, ctx) {
+                    return Ok(format!("{prefix}{extern_name}"));
+                }
+            }
+
+            let workbook_raw = sb
+                .workbook_name
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| sb.virt_path.as_str());
+            if workbook_raw.is_empty() {
+                return Err(format!(
+                    "SUPBOOK index {supbook_index} referenced by PtgNameX has empty workbook name"
+                ));
+            }
+
+            let workbook = format_external_workbook_name(workbook_raw);
+            // Workbook-scoped external names use the Excel form `[Book]Name`, but our formula
+            // parser can mis-tokenize unquoted `[Book]Name` as a structured reference. Quote the
+            // full token so it becomes a `QuotedIdent`.
+            let token = format!("{workbook}{extern_name}");
+            Ok(quote_sheet_name_if_needed(&token))
+        }
+        // Add-in/UDF/library. Best-effort: use the extern name itself.
+        _ => Ok(extern_name.clone()),
+    }
+}
+
 fn format_internal_sheet_ref(
     ixti: u16,
     itab_first: i16,
@@ -1363,7 +1451,10 @@ fn format_internal_sheet_ref(
     if itab_first == itab_last {
         Ok(format!("{}!", quote_sheet_name_if_needed(first)))
     } else {
-        Ok(format!("{}!", quote_sheet_range_name_if_needed(first, last)))
+        Ok(format!(
+            "{}!",
+            quote_sheet_range_name_if_needed(first, last)
+        ))
     }
 }
 
@@ -1714,7 +1805,11 @@ mod tests {
         ];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "A1#");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1767,10 +1862,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "_UNKNOWN_FUNC_0xFFFF()");
         assert!(
-            decoded
-                .warnings
-                .iter()
-                .any(|w| w.contains("0xFFFF")),
+            decoded.warnings.iter().any(|w| w.contains("0xFFFF")),
             "warnings={:?}",
             decoded.warnings
         );
@@ -1846,10 +1938,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
         assert!(
-            decoded
-                .warnings
-                .iter()
-                .any(|w| w.contains("ixti=0")),
+            decoded.warnings.iter().any(|w| w.contains("ixti=0")),
             "warnings={:?}",
             decoded.warnings
         );
@@ -2256,7 +2345,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "$1:$1");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -2389,7 +2482,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Sheet1!$1:$1");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_print_titles_parseable("Sheet1", &decoded.text);
     }
 
@@ -2557,7 +2654,8 @@ mod tests {
         let col_field = encode_col_field(3, true, true);
         let rgce = [
             0x3E, // PtgRefN3d
-            0x00, 0x00, // ixti
+            0x00,
+            0x00, // ixti
             row_raw.to_le_bytes()[0],
             row_raw.to_le_bytes()[1],
             col_field.to_le_bytes()[0],
@@ -2566,7 +2664,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce_with_base(&rgce, &ctx, Some(base));
         assert_eq!(decoded.text, "Sheet1!N9");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_print_area_parseable("Sheet1", &decoded.text);
     }
 
@@ -2589,7 +2691,8 @@ mod tests {
         let col_last_field = encode_col_field(4, true, true);
         let rgce = [
             0x3F, // PtgAreaN3d
-            0x00, 0x00, // ixti
+            0x00,
+            0x00, // ixti
             row_first_raw.to_le_bytes()[0],
             row_first_raw.to_le_bytes()[1],
             row_last_raw.to_le_bytes()[0],
@@ -2602,7 +2705,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce_with_base(&rgce, &ctx, Some(base));
         assert_eq!(decoded.text, "Sheet1!N9:O10");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_print_area_parseable("Sheet1", &decoded.text);
     }
 
@@ -2623,7 +2730,8 @@ mod tests {
         let col_field = encode_col_field(2, false, true);
         let rgce = [
             0x3E, // PtgRefN3d
-            0x00, 0x00, // ixti
+            0x00,
+            0x00, // ixti
             row_raw.to_le_bytes()[0],
             row_raw.to_le_bytes()[1],
             col_field.to_le_bytes()[0],
@@ -2632,7 +2740,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce_with_base(&rgce, &ctx, Some(base));
         assert_eq!(decoded.text, "Sheet1!$C7");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_print_area_parseable("Sheet1", &decoded.text);
     }
 
@@ -2653,7 +2765,8 @@ mod tests {
         let col_field = encode_col_field(1, true, true);
         let rgce = [
             0x3E, // PtgRefN3d
-            0x00, 0x00, // ixti
+            0x00,
+            0x00, // ixti
             row_raw.to_le_bytes()[0],
             row_raw.to_le_bytes()[1],
             col_field.to_le_bytes()[0],
@@ -2694,7 +2807,8 @@ mod tests {
         let col_last_field = encode_col_field(1, true, true);
         let rgce = [
             0x3F, // PtgAreaN3d
-            0x00, 0x00, // ixti
+            0x00,
+            0x00, // ixti
             row_first_raw.to_le_bytes()[0],
             row_first_raw.to_le_bytes()[1],
             row_last_raw.to_le_bytes()[0],
@@ -2792,7 +2906,10 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#NAME?");
         assert!(
-            decoded.warnings.iter().any(|w| w.contains("stack underflow")),
+            decoded
+                .warnings
+                .iter()
+                .any(|w| w.contains("stack underflow")),
             "expected stack underflow warning, warnings={:?}",
             decoded.warnings
         );
@@ -2851,7 +2968,7 @@ mod tests {
     }
 
     #[test]
-    fn decodes_ptg_namex_to_ref_placeholder() {
+    fn decodes_ptg_namex_with_missing_context_to_ref() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
@@ -2862,13 +2979,161 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
         assert!(
-            decoded
-                .warnings
-                .iter()
-                .any(|w| w.contains("PtgNameX external name reference is not supported")),
+            decoded.warnings.iter().any(|w| w.contains("PtgNameX")),
             "warnings={:?}",
             decoded.warnings
         );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_namex_external_workbook_workbook_scoped_name() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 1,
+            itab_first: -1,
+            itab_last: -1,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+
+        let supbooks = vec![
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "\u{0001}".to_string(),
+                kind: SupBookKind::Internal,
+                workbook_name: None,
+                sheet_names: Vec::new(),
+                extern_names: Vec::new(),
+            },
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "Book2.xlsx".to_string(),
+                kind: SupBookKind::ExternalWorkbook,
+                workbook_name: Some("Book2.xlsx".to_string()),
+                sheet_names: vec!["Sheet1".to_string()],
+                extern_names: vec!["MyName".to_string()],
+            },
+        ];
+
+        let ctx = RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &sheet_names,
+            externsheet: &externsheet,
+            supbooks: &supbooks,
+            defined_names: &defined_names,
+        };
+
+        let rgce = [0x39, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "'[Book2.xlsx]MyName'");
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_namex_external_workbook_sheet_scoped_name() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 1,
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+
+        let supbooks = vec![
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "\u{0001}".to_string(),
+                kind: SupBookKind::Internal,
+                workbook_name: None,
+                sheet_names: Vec::new(),
+                extern_names: Vec::new(),
+            },
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "Book2.xlsx".to_string(),
+                kind: SupBookKind::ExternalWorkbook,
+                workbook_name: Some("Book2.xlsx".to_string()),
+                sheet_names: vec!["Sheet1".to_string()],
+                extern_names: vec!["MyName".to_string()],
+            },
+        ];
+
+        let ctx = RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &sheet_names,
+            externsheet: &externsheet,
+            supbooks: &supbooks,
+            defined_names: &defined_names,
+        };
+
+        let rgce = [0x39, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "'[Book2.xlsx]Sheet1'!MyName");
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_namex_udf_function_name_for_ptg_funcvar_00ff() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 1,
+            itab_first: -1,
+            itab_last: -1,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+
+        let supbooks = vec![
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "\u{0001}".to_string(),
+                kind: SupBookKind::Internal,
+                workbook_name: None,
+                sheet_names: Vec::new(),
+                extern_names: Vec::new(),
+            },
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "\u{0002}".to_string(),
+                kind: SupBookKind::Other,
+                workbook_name: None,
+                sheet_names: Vec::new(),
+                extern_names: vec!["MyFunc".to_string()],
+            },
+        ];
+
+        let ctx = RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &sheet_names,
+            externsheet: &externsheet,
+            supbooks: &supbooks,
+            defined_names: &defined_names,
+        };
+
+        // MyFunc(1) encoded as: [PtgInt 1][PtgNameX][PtgFuncVar argc=2 iftab=0x00FF]
+        let rgce = vec![
+            0x1E, 0x01, 0x00, // PtgInt 1
+            0x39, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, // PtgNameX (ixti=0, iname=1)
+            0x22, 0x02, 0xFF, 0x00, // PtgFuncVar(argc=2, iftab=0x00FF)
+        ];
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "MyFunc(1)");
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
     }
 
     #[test]
