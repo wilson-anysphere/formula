@@ -1303,8 +1303,11 @@ def content_types_cellimages_xml() -> str:
 
 
 def cellimages_xml() -> str:
-    # Excel-style "in-cell image store". This part isn't currently interpreted by
-    # the engine; it exists as an on-disk fixture for manual debugging and future
+    # Synthetic "in-cell image store" (`xl/cellimages.xml`) fixture.
+    #
+    # Real Excel workbooks can include a `cellimages` store part, but Excel's
+    # observed schema shape is richer (e.g. it can embed an `xdr:pic` subtree).
+    # This minimal variant exists as an on-disk fixture for manual debugging and
     # unknown-part preservation tests.
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cellImages xmlns="http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages"
