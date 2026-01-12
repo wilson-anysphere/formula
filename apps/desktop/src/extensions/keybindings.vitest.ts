@@ -89,6 +89,27 @@ describe("keybindings", () => {
     expect(matchesKeybinding(binding!, eventForKey("+", { ctrlKey: true, shiftKey: true, code: "Equal" }))).toBe(true);
   });
 
+  it("matches shifted digits via KeyboardEvent.code fallback (ctrl+shift+1)", () => {
+    const binding = parseKeybinding("cmd", "ctrl+shift+1");
+    expect(binding).not.toBeNull();
+    expect(matchesKeybinding(binding!, eventForKey("!", { ctrlKey: true, shiftKey: true, code: "Digit1" }))).toBe(true);
+  });
+
+  it("matches shifted brackets via KeyboardEvent.code fallback (ctrl+shift+[)", () => {
+    const binding = parseKeybinding("cmd", "ctrl+shift+[");
+    expect(binding).not.toBeNull();
+    expect(matchesKeybinding(binding!, eventForKey("{", { ctrlKey: true, shiftKey: true, code: "BracketLeft" }))).toBe(true);
+  });
+
+  it("does not fall back to KeyboardEvent.code for letters (layout-aware matching)", () => {
+    const binding = parseKeybinding("cmd", "ctrl+y");
+    expect(binding).not.toBeNull();
+
+    // Example: On QWERTZ layouts, the physical `KeyY` produces `event.key === "z"`.
+    // We intentionally keep letter matching semantics based on `event.key`.
+    expect(matchesKeybinding(binding!, eventForKey("z", { ctrlKey: true, code: "KeyY" }))).toBe(false);
+  });
+
   it("formatKeybindingForDisplay renders mac vs other", () => {
     const binding = parseKeybinding("cmd.test", "ctrl+option+shift+cmd+arrowup")!;
     expect(formatKeybindingForDisplay(binding, "mac")).toMatchInlineSnapshot('"⌃⌥⇧⌘↑"');
@@ -113,4 +134,3 @@ describe("keybindings", () => {
     expect(getPrimaryCommandKeybindingDisplay("cmd.one", index)).toBe("Ctrl+B");
   });
 });
-
