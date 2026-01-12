@@ -468,8 +468,9 @@ Events emitted by the Rust host (see `main.rs`, `menu.rs`, `tray.rs`, `updater.r
 - Deep links:
   - `oauth-redirect` (payload: `string` URL, e.g. `formula://oauth/callback?...`)
 - Menu bar:
-  - `menu-open`, `menu-new`, `menu-save`, `menu-save-as`, `menu-close-window`, `menu-quit`
+  - `menu-open`, `menu-new`, `menu-save`, `menu-save-as`, `menu-export-pdf`, `menu-close-window`, `menu-quit`
   - `menu-undo`, `menu-redo`, `menu-cut`, `menu-copy`, `menu-paste`, `menu-select-all`
+  - `menu-zoom-in`, `menu-zoom-out`, `menu-zoom-reset`
   - `menu-about`, `menu-check-updates`
 - Tray:
   - `tray-new`, `tray-open`, `tray-quit`

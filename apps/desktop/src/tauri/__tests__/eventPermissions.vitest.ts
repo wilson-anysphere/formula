@@ -118,6 +118,7 @@ describe("tauri capability event permissions", () => {
       "menu-new",
       "menu-save",
       "menu-save-as",
+      "menu-export-pdf",
       "menu-close-window",
       "menu-quit",
       "menu-undo",
@@ -126,6 +127,9 @@ describe("tauri capability event permissions", () => {
       "menu-copy",
       "menu-paste",
       "menu-select-all",
+      "menu-zoom-in",
+      "menu-zoom-out",
+      "menu-zoom-reset",
       "menu-about",
       "menu-check-updates",
 
