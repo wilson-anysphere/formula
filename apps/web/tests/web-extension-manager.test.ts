@@ -28,8 +28,38 @@ const originalGlobals = {
   indexedDB: (globalThis as any).indexedDB,
   IDBKeyRange: (globalThis as any).IDBKeyRange,
   crypto: (globalThis as any).crypto,
-  Worker: (globalThis as any).Worker
+  Worker: (globalThis as any).Worker,
+  localStorage: (globalThis as any).localStorage
 };
+
+class MemoryStorage implements Storage {
+  private readonly _map = new Map<string, string>();
+
+  get length(): number {
+    return this._map.size;
+  }
+
+  clear(): void {
+    this._map.clear();
+  }
+
+  getItem(key: string): string | null {
+    const value = this._map.get(String(key));
+    return value === undefined ? null : value;
+  }
+
+  key(index: number): string | null {
+    return [...this._map.keys()][index] ?? null;
+  }
+
+  removeItem(key: string): void {
+    this._map.delete(String(key));
+  }
+
+  setItem(key: string, value: string): void {
+    this._map.set(String(key), String(value));
+  }
+}
 
 class NodeWebWorkerShim {
   private readonly _worker: NodeWorker;
@@ -168,6 +198,8 @@ beforeEach(async () => {
   (globalThis as any).indexedDB = indexedDB;
   // eslint-disable-next-line no-global-assign
   (globalThis as any).IDBKeyRange = IDBKeyRange;
+  // eslint-disable-next-line no-global-assign
+  (globalThis as any).localStorage = new MemoryStorage();
   if (!globalThis.crypto?.subtle) {
     // eslint-disable-next-line no-global-assign
     (globalThis as any).crypto = crypto.webcrypto;
@@ -206,6 +238,12 @@ afterAll(() => {
   try {
     // eslint-disable-next-line no-global-assign
     (globalThis as any).Worker = originalGlobals.Worker;
+  } catch {
+    // ignore
+  }
+  try {
+    // eslint-disable-next-line no-global-assign
+    (globalThis as any).localStorage = originalGlobals.localStorage;
   } catch {
     // ignore
   }
@@ -561,4 +599,53 @@ test("rejects browser entrypoints that contain dynamic import()", async () => {
   await manager.dispose();
   await host.dispose();
   await fs.rm(tmpRoot, { recursive: true, force: true });
+});
+
+test("uninstall clears persisted permission + extension storage state (localStorage)", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+
+  const manager = new WebExtensionManager({ marketplaceClient, host });
+
+  await manager.install("formula.sample-hello");
+
+  // Simulate previously-granted permissions + persisted extension storage.
+  globalThis.localStorage.setItem(
+    "formula.extensionHost.permissions",
+    JSON.stringify({
+      "formula.sample-hello": { storage: true, network: { mode: "full" } },
+      "other.extension": { "ui.commands": true }
+    })
+  );
+  globalThis.localStorage.setItem(
+    "formula.extensionHost.storage.formula.sample-hello",
+    JSON.stringify({ foo: "bar" })
+  );
+
+  await manager.uninstall("formula.sample-hello");
+
+  expect(globalThis.localStorage.getItem("formula.extensionHost.storage.formula.sample-hello")).toBe(null);
+
+  const permissionsRaw = globalThis.localStorage.getItem("formula.extensionHost.permissions");
+  expect(permissionsRaw).not.toBe(null);
+  const permissions = JSON.parse(String(permissionsRaw));
+  expect(permissions["formula.sample-hello"]).toBeUndefined();
+  expect(permissions["other.extension"]).toEqual({ "ui.commands": true });
+
+  await manager.dispose();
+  await host.dispose();
 });

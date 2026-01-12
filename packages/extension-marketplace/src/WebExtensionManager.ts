@@ -33,6 +33,7 @@ export interface BrowserExtensionHostLike {
     mainUrl: string;
   }): Promise<string>;
   unloadExtension?(extensionId: string): Promise<void | boolean> | void | boolean;
+  revokePermissions?(extensionId: string, permissions?: string[]): Promise<void> | void;
   listExtensions(): Array<{ id: string }>;
 }
 
@@ -461,6 +462,25 @@ export class WebExtensionManager {
       await txDone(tx);
     } finally {
       db.close();
+    }
+
+    // Best-effort cleanup of persisted browser-host state.
+    //
+    // - permissions: PermissionManager persists grants in localStorage under
+    //   `formula.extensionHost.permissions`. Clear the uninstalled extension's entry so a
+    //   reinstall prompts again.
+    // - storage/config: LocalStorageExtensionStorage persists per-extension blobs under
+    //   `formula.extensionHost.storage.<extensionId>`. Remove it so reinstall starts fresh.
+    try {
+      await this.host?.revokePermissions?.(String(id));
+    } catch {
+      // ignore (host might not support permissions, or storage might be unavailable)
+    }
+
+    try {
+      globalThis.localStorage?.removeItem(`formula.extensionHost.storage.${String(id)}`);
+    } catch {
+      // ignore (localStorage may be disabled/unavailable)
     }
   }
 
