@@ -142,3 +142,50 @@ test("ContextMenu closes submenu and restores focus when the main menu scrolls",
     }
   });
 });
+
+test("ContextMenu renders items as native buttons (no role=menuitem override)", { skip: !hasDom }, () => {
+  withDom((dom) => {
+    const menu = new ContextMenu();
+
+    const items = [
+      {
+        type: "item",
+        label: "Copy",
+        onSelect: () => {
+          // ignore
+        },
+      },
+      { type: "separator" },
+      {
+        type: "submenu",
+        label: "Format",
+        items: [
+          {
+            type: "item",
+            label: "Bold",
+            onSelect: () => {
+              // ignore
+            },
+          },
+        ],
+      },
+    ];
+
+    try {
+      menu.open({ x: 10, y: 10, items });
+
+      const container = dom.window.document.querySelector(".context-menu");
+      assert.ok(container);
+      assert.equal(container.getAttribute("role"), "menu");
+
+      const buttons = Array.from(dom.window.document.querySelectorAll(".context-menu__item"));
+      assert.ok(buttons.length > 0);
+      for (const button of buttons) {
+        assert.ok(button instanceof dom.window.HTMLButtonElement);
+        assert.equal(button.getAttribute("role"), null);
+      }
+    } finally {
+      menu.close();
+    }
+  });
+});
