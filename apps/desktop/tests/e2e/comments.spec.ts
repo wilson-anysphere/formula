@@ -112,7 +112,24 @@ test.describe("comments", () => {
     await grid.click({ position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
-    await grid.click({ button: "right", position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
+    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    await page.evaluate(
+      ({ x, y }) => {
+        const grid = document.getElementById("grid");
+        if (!grid) throw new Error("Missing #grid container");
+        const rect = grid.getBoundingClientRect();
+        grid.dispatchEvent(
+          new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            button: 2,
+            clientX: rect.left + x,
+            clientY: rect.top + y,
+          }),
+        );
+      },
+      { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 },
+    );
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
 

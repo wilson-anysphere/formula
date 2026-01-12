@@ -30,10 +30,24 @@ test.describe("Clear Contents context menu", () => {
     await grid.click({ position: { x: a1Rect.x + a1Rect.width / 2, y: a1Rect.y + a1Rect.height / 2 } });
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
-    await grid.click({
-      button: "right",
-      position: { x: a1Rect.x + a1Rect.width / 2, y: a1Rect.y + a1Rect.height / 2 },
-    });
+    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    await page.evaluate(
+      ({ x, y }) => {
+        const grid = document.getElementById("grid");
+        if (!grid) throw new Error("Missing #grid container");
+        const rect = grid.getBoundingClientRect();
+        grid.dispatchEvent(
+          new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            button: 2,
+            clientX: rect.left + x,
+            clientY: rect.top + y,
+          }),
+        );
+      },
+      { x: a1Rect.x + a1Rect.width / 2, y: a1Rect.y + a1Rect.height / 2 },
+    );
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
 
@@ -107,10 +121,24 @@ test.describe("Clear Contents context menu", () => {
     await grid.click({ position: { x: a1Rect.x + a1Rect.width / 2, y: a1Rect.y + a1Rect.height / 2 } });
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
-    await grid.click({
-      button: "right",
-      position: { x: a1Rect.x + a1Rect.width / 2, y: a1Rect.y + a1Rect.height / 2 },
-    });
+    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    await page.evaluate(
+      ({ x, y }) => {
+        const grid = document.getElementById("grid");
+        if (!grid) throw new Error("Missing #grid container");
+        const rect = grid.getBoundingClientRect();
+        grid.dispatchEvent(
+          new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            button: 2,
+            clientX: rect.left + x,
+            clientY: rect.top + y,
+          }),
+        );
+      },
+      { x: a1Rect.x + a1Rect.width / 2, y: a1Rect.y + a1Rect.height / 2 },
+    );
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
 

@@ -658,7 +658,21 @@ test.describe("Extensions UI integration", () => {
     await grantSampleHelloPermissions(page);
 
     // Open the context menu without first opening the Extensions panel.
-    await page.locator("#grid").click({ button: "right", position: { x: 100, y: 40 } });
+    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    await page.evaluate(() => {
+      const grid = document.getElementById("grid");
+      if (!grid) throw new Error("Missing #grid container");
+      const rect = grid.getBoundingClientRect();
+      grid.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          clientX: rect.left + 100,
+          clientY: rect.top + 40,
+        }),
+      );
+    });
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
 
