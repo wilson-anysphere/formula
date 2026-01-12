@@ -166,3 +166,41 @@ fn project_normalized_data_host_extender_info_header_and_key_matching_is_case_in
         "expected [Workspace] section lines to be ignored"
     );
 }
+
+#[test]
+fn project_normalized_data_host_extender_info_strips_utf8_bom() {
+    // Some producers may include a UTF-8 BOM at the start of the PROJECT stream. Ensure this does
+    // not prevent `[Host Extender Info]` section detection.
+
+    let project_stream = b"\xEF\xBB\xBF[Host Extender Info]\r\nHostExtenderRef=MyHostExtender\r\n";
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(project_stream).expect("write PROJECT stream");
+    }
+
+    // `project_normalized_data()` requires a `VBA/dir` stream to exist.
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let dir_container = compress_container(&[]);
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir stream");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized =
+        project_normalized_data(&vba_project_bin).expect("compute ProjectNormalizedData");
+
+    assert_eq!(
+        normalized,
+        b"Host Extender InfoHostExtenderRef=MyHostExtender",
+        "expected Host Extender Info contribution even when PROJECT stream starts with a UTF-8 BOM"
+    );
+    assert!(
+        !normalized.contains(&0xEF) && !normalized.contains(&0xBB) && !normalized.contains(&0xBF),
+        "expected BOM bytes to be stripped from the transcript"
+    );
+}
