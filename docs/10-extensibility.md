@@ -51,7 +51,7 @@ These are **not** stable public APIs, but can be handy when debugging extension 
 Extension panels are rendered as a sandboxed `<iframe>` (currently via a `blob:` URL generated from the HTML):
 
 - `sandbox="allow-scripts"` (no `allow-same-origin`)
-- `allow="clipboard-read 'none'; clipboard-write 'none'"` (panels must use the permission-gated `formula.clipboard` API instead of `navigator.clipboard`)
+- `allow="clipboard-read 'none'; clipboard-write 'none'; camera 'none'; microphone 'none'; geolocation 'none'"` (panels must use the permission-gated `formula.clipboard` API instead of `navigator.clipboard`, and are blocked from other sensitive browser capabilities)
 - No top navigation / popups enabled
 - A restrictive **Content Security Policy** is injected into the webview HTML to prevent bypassing the
   extension host permission model (no network / remote scripts).
