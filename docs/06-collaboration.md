@@ -359,6 +359,20 @@ Practical guidance:
   - conflict monitors can reliably classify it as local
 - When applying remote updates manually in tests/tools, ensure they do *not* use the local origin. `@formula/collab-undo` exports a `REMOTE_ORIGIN` token for this purpose.
 
+#### Bulk “time travel” origins (version restore / branch apply)
+
+Some features intentionally perform **bulk rewrites** of workbook state (effectively “time travel”):
+
+- **Version restore** (`@formula/collab-versioning` / `createYjsSpreadsheetDocAdapter.applyState`) uses the origin string `"versioning-restore"`.
+- **Branch checkout/merge apply** (`CollabBranchingWorkflow` → `applyDocumentStateToYjsDoc`) uses the origin string `"branching-apply"` by default
+  (can be configured to use `session.origin` for undoable behavior).
+
+These origins are **not** “local user edits” and should be treated specially:
+
+- Formula/value conflict monitors (`FormulaConflictMonitor`, `CellConflictMonitor`) accept an `ignoredOrigins` set to completely ignore these transactions
+  (no conflicts emitted and no local-edit tracking updates). `createCollabSession` configures this by default.
+- Structural conflict monitoring (`CellStructuralConflictMonitor`) only logs operations for origins in its `localOrigins` set; bulk apply origins should not be included.
+
 Example:
 
 ```ts
@@ -723,6 +737,8 @@ Notes:
 - For deterministic delete-vs-overwrite detection, formula clears must be represented as `formula = null`
   (not `cell.delete("formula")`) because Yjs map deletes do not create Items.
 - `remoteUserId` attribution is best-effort and may be empty if the overwriting writer did not update `modifiedBy`.
+- Conflict monitors support an `ignoredOrigins` option to ignore bulk “time travel” transactions such as version restores
+  (`"versioning-restore"`) and branch apply operations (`"branching-apply"`). `createCollabSession` wires this by default.
 
 ---
 
