@@ -28,6 +28,7 @@ from case_generators import (
     engineering,
     errors,
     financial,
+    financial_eom,
     info,
     lambda_cases,
     logical,
@@ -246,6 +247,7 @@ def generate_cases() -> dict[str, Any]:
     info.generate(cases, add_case=_add_case, CellInput=CellInput)
     lambda_cases.generate(cases, add_case=_add_case, CellInput=CellInput)
     errors.generate(cases, add_case=_add_case, CellInput=CellInput)
+    financial_eom.generate(cases, add_case=_add_case, CellInput=CellInput)
 
     return {
         "schemaVersion": 1,

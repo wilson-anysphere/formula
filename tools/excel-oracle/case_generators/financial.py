@@ -91,41 +91,50 @@ def generate(
     )
     add_case(cases, prefix="rri", tags=["financial", "RRI"], formula="=RRI(10,-100,200)")
     add_case(cases, prefix="pduration", tags=["financial", "PDURATION"], formula="=PDURATION(0.025,2000,2200)")
+    coup_settlement = excel_serial_1900(2024, 6, 15)
+    coup_maturity = excel_serial_1900(2025, 1, 1)
+    coup_inputs = [CellInput("A1", coup_settlement), CellInput("A2", coup_maturity)]
     add_case(
         cases,
         prefix="coupdaybs",
         tags=["financial", "COUPDAYBS"],
-        formula="=COUPDAYBS(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+        formula="=COUPDAYBS(A1,A2,2,0)",
+        inputs=coup_inputs,
     )
     add_case(
         cases,
         prefix="coupdays",
         tags=["financial", "COUPDAYS"],
-        formula="=COUPDAYS(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+        formula="=COUPDAYS(A1,A2,2,0)",
+        inputs=coup_inputs,
     )
     add_case(
         cases,
         prefix="coupdaysnc",
         tags=["financial", "COUPDAYSNC"],
-        formula="=COUPDAYSNC(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+        formula="=COUPDAYSNC(A1,A2,2,0)",
+        inputs=coup_inputs,
     )
     add_case(
         cases,
         prefix="coupncd",
         tags=["financial", "COUPNCD"],
-        formula="=COUPNCD(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+        formula="=COUPNCD(A1,A2,2,0)",
+        inputs=coup_inputs,
     )
     add_case(
         cases,
         prefix="coupnum",
         tags=["financial", "COUPNUM"],
-        formula="=COUPNUM(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+        formula="=COUPNUM(A1,A2,2,0)",
+        inputs=coup_inputs,
     )
     add_case(
         cases,
         prefix="couppcd",
         tags=["financial", "COUPPCD"],
-        formula="=COUPPCD(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+        formula="=COUPPCD(A1,A2,2,0)",
+        inputs=coup_inputs,
     )
     add_case(
         cases,

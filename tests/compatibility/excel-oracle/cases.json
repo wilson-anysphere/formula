@@ -31443,64 +31443,118 @@
       "id": "pduration_714b36cd13f7"
     },
     {
-      "formula": "=COUPDAYBS(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "formula": "=COUPDAYBS(A1,A2,2,0)",
       "outputCell": "C1",
-      "inputs": [],
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 45458
+        },
+        {
+          "cell": "A2",
+          "value": 45658
+        }
+      ],
       "tags": [
         "financial",
         "COUPDAYBS"
       ],
-      "id": "coupdaybs_4b2eba1dee34"
+      "id": "coupdaybs_7dd82a6ce30a"
     },
     {
-      "formula": "=COUPDAYS(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "formula": "=COUPDAYS(A1,A2,2,0)",
       "outputCell": "C1",
-      "inputs": [],
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 45458
+        },
+        {
+          "cell": "A2",
+          "value": 45658
+        }
+      ],
       "tags": [
         "financial",
         "COUPDAYS"
       ],
-      "id": "coupdays_f155f62d6a93"
+      "id": "coupdays_15fc1f745c8c"
     },
     {
-      "formula": "=COUPDAYSNC(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "formula": "=COUPDAYSNC(A1,A2,2,0)",
       "outputCell": "C1",
-      "inputs": [],
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 45458
+        },
+        {
+          "cell": "A2",
+          "value": 45658
+        }
+      ],
       "tags": [
         "financial",
         "COUPDAYSNC"
       ],
-      "id": "coupdaysnc_934b16a50735"
+      "id": "coupdaysnc_1d753bc1c4dd"
     },
     {
-      "formula": "=COUPNCD(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "formula": "=COUPNCD(A1,A2,2,0)",
       "outputCell": "C1",
-      "inputs": [],
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 45458
+        },
+        {
+          "cell": "A2",
+          "value": 45658
+        }
+      ],
       "tags": [
         "financial",
         "COUPNCD"
       ],
-      "id": "coupncd_f5e830ea3bf5"
+      "id": "coupncd_d16b3b0f31ac"
     },
     {
-      "formula": "=COUPNUM(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "formula": "=COUPNUM(A1,A2,2,0)",
       "outputCell": "C1",
-      "inputs": [],
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 45458
+        },
+        {
+          "cell": "A2",
+          "value": 45658
+        }
+      ],
       "tags": [
         "financial",
         "COUPNUM"
       ],
-      "id": "coupnum_7e75448b6428"
+      "id": "coupnum_d9d412c85981"
     },
     {
-      "formula": "=COUPPCD(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "formula": "=COUPPCD(A1,A2,2,0)",
       "outputCell": "C1",
-      "inputs": [],
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 45458
+        },
+        {
+          "cell": "A2",
+          "value": 45658
+        }
+      ],
       "tags": [
         "financial",
         "COUPPCD"
       ],
-      "id": "couppcd_788e658c75dd"
+      "id": "couppcd_fb1f66d541f3"
     },
     {
       "formula": "=FVSCHEDULE(100,{0.1,0.2})",
@@ -34700,6 +34754,90 @@
         "error"
       ],
       "id": "err_name_98478a4250b7"
+    },
+    {
+      "formula": "=DAY(COUPNCD(DATE(2021,3,1),DATE(2021,8,31),2,0))",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPNCD",
+        "eom"
+      ],
+      "description": "COUPNCD end-of-month schedule restores month-end after February",
+      "id": "financial_coupncd_eom_384cda9180e8"
+    },
+    {
+      "formula": "=DAY(COUPPCD(DATE(2020,12,1),DATE(2021,8,31),2,0))",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPPCD",
+        "eom"
+      ],
+      "description": "COUPPCD end-of-month schedule restores month-end across February",
+      "id": "financial_couppcd_eom_167771114aa8"
+    },
+    {
+      "formula": "=COUPNUM(DATE(2020,12,1),DATE(2021,8,31),2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPNUM",
+        "eom"
+      ],
+      "description": "COUPNUM counts remaining coupons on an end-of-month schedule",
+      "id": "financial_coupnum_eom_31dcba4d85bf"
+    },
+    {
+      "formula": "=COUPDAYBS(DATE(2021,3,1),DATE(2021,8,31),2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYBS",
+        "eom"
+      ],
+      "description": "COUPDAYBS day-count in the current coupon period (EOM schedule)",
+      "id": "financial_coupdaybs_eom_c121799fc85f"
+    },
+    {
+      "formula": "=COUPDAYSNC(DATE(2021,3,1),DATE(2021,8,31),2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYSNC",
+        "eom"
+      ],
+      "description": "COUPDAYSNC days from settlement to next coupon date (EOM schedule)",
+      "id": "financial_coupdaysnc_eom_7fd6df3aa358"
+    },
+    {
+      "formula": "=COUPDAYS(DATE(2021,3,1),DATE(2021,8,31),2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYS",
+        "eom"
+      ],
+      "description": "COUPDAYS days in coupon period (EOM schedule)",
+      "id": "financial_coupdays_eom_63c11809cb88"
+    },
+    {
+      "formula": "=DAY(COUPPCD(DATE(2030,9,1),DATE(2031,2,28),2,0))",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPPCD",
+        "eom"
+      ],
+      "description": "COUPPCD EOM schedule restores month-end when maturity is Feb month-end (28th -> 31st)",
+      "id": "financial_couppcd_eom_maturity_feb_37fb733d211c"
     }
   ]
 }
