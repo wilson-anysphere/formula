@@ -111,6 +111,7 @@ export async function introspectSyncToken(
   const userId = claims.sub;
   const orgId = claims.orgId;
   const role = claims.role as DocumentRole;
+  let sessionMfaSatisfied: boolean | null = null;
 
   if (claims.docId !== params.docId) {
     return { active: false, reason: "doc_mismatch", userId, orgId, role };
@@ -119,7 +120,7 @@ export async function introspectSyncToken(
   if (claims.sessionId) {
     const sessionRes = await db.query(
       `
-        SELECT user_id, expires_at, revoked_at
+        SELECT user_id, expires_at, revoked_at, mfa_satisfied
         FROM sessions
         WHERE id = $1
         LIMIT 1
@@ -131,7 +132,12 @@ export async function introspectSyncToken(
       return { active: false, reason: "session_not_found", userId, orgId, role };
     }
 
-    const session = sessionRes.rows[0] as { user_id: string; expires_at: Date; revoked_at: Date | null };
+    const session = sessionRes.rows[0] as {
+      user_id: string;
+      expires_at: Date;
+      revoked_at: Date | null;
+      mfa_satisfied?: boolean | null;
+    };
 
     if (session.user_id !== userId) {
       return { active: false, reason: "session_user_mismatch", userId, orgId, role };
@@ -144,6 +150,8 @@ export async function introspectSyncToken(
     if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
       return { active: false, reason: "session_expired", userId, orgId, role };
     }
+
+    sessionMfaSatisfied = Boolean(session.mfa_satisfied);
   }
 
   if (claims.apiKeyId) {
@@ -185,7 +193,7 @@ export async function introspectSyncToken(
 
   const docRes = await db.query(
     `
-      SELECT d.org_id, d.deleted_at, dm.role AS member_role, os.ip_allowlist
+      SELECT d.org_id, d.deleted_at, dm.role AS member_role, os.ip_allowlist, os.require_mfa
       FROM documents d
       JOIN org_settings os ON os.org_id = d.org_id
       LEFT JOIN document_members dm
@@ -205,6 +213,7 @@ export async function introspectSyncToken(
     deleted_at: Date | null;
     member_role: unknown;
     ip_allowlist: unknown;
+    require_mfa: unknown;
   };
 
   if (row.org_id !== orgId) {
@@ -219,6 +228,10 @@ export async function introspectSyncToken(
   const memberRole = memberRoleParsed.success ? (memberRoleParsed.data as DocumentRole) : null;
   if (!memberRole) {
     return { active: false, reason: "not_member", userId, orgId, role };
+  }
+
+  if (claims.sessionId && Boolean(row.require_mfa) && sessionMfaSatisfied === false) {
+    return { active: false, reason: "mfa_required", userId, orgId, role };
   }
 
   // Permissions may change after a sync token is minted (e.g. owner demotes an

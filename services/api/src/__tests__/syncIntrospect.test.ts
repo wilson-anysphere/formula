@@ -480,4 +480,93 @@ describe("internal sync token introspection", () => {
     },
     15_000
   );
+
+  it(
+    "rejects introspection for session-issued tokens when org MFA is required but session has not satisfied MFA",
+    async () => {
+      const aliceRegister = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "alice-introspect-mfa@example.com",
+          password: "password1234",
+          name: "Alice MFA",
+          orgName: "Acme MFA"
+        }
+      });
+      expect(aliceRegister.statusCode).toBe(200);
+      const aliceCookie = extractCookie(aliceRegister.headers["set-cookie"]);
+      const orgId = (aliceRegister.json() as any).organization.id as string;
+
+      const bobRegister = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "bob-introspect-mfa@example.com",
+          password: "password1234",
+          name: "Bob MFA"
+        }
+      });
+      expect(bobRegister.statusCode).toBe(200);
+      const bobId = (bobRegister.json() as any).user.id as string;
+      const bobCookie = extractCookie(bobRegister.headers["set-cookie"]);
+
+      const createDoc = await app.inject({
+        method: "POST",
+        url: "/docs",
+        headers: { cookie: aliceCookie },
+        payload: { orgId, title: "MFA Doc" }
+      });
+      expect(createDoc.statusCode).toBe(200);
+      const docId = (createDoc.json() as any).document.id as string;
+
+      const inviteBob = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/invite`,
+        headers: { cookie: aliceCookie },
+        payload: { email: "bob-introspect-mfa@example.com", role: "editor" }
+      });
+      expect(inviteBob.statusCode).toBe(200);
+
+      const syncTokenRes = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/sync-token`,
+        headers: { cookie: bobCookie }
+      });
+      expect(syncTokenRes.statusCode).toBe(200);
+      const syncToken = (syncTokenRes.json() as any).token as string;
+
+      const decoded = jwt.verify(syncToken, config.syncTokenSecret, {
+        audience: "formula-sync"
+      }) as any;
+      expect(decoded).toMatchObject({ sub: bobId, docId, orgId, role: "editor" });
+      expect(decoded.sessionId).toBeTypeOf("string");
+
+      const enforceMfa = await app.inject({
+        method: "PATCH",
+        url: `/orgs/${orgId}/settings`,
+        headers: { cookie: aliceCookie },
+        payload: { requireMfa: true }
+      });
+      expect(enforceMfa.statusCode).toBe(200);
+
+      const introspectRes = await app.inject({
+        method: "POST",
+        url: "/internal/sync/introspect",
+        headers: { "x-internal-admin-token": config.internalAdminToken! },
+        payload: { token: syncToken, docId }
+      });
+      expect(introspectRes.statusCode).toBe(200);
+      expect(introspectRes.json()).toMatchObject({
+        ok: false,
+        active: false,
+        error: "forbidden",
+        reason: "mfa_required",
+        userId: bobId,
+        orgId,
+        role: "editor"
+      });
+    },
+    15_000
+  );
 });
