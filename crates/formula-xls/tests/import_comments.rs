@@ -30,6 +30,7 @@ fn imports_note_comment_records() {
     assert_eq!(comment.kind, CommentKind::Note);
     assert_eq!(comment.content, "Hello from note");
     assert_eq!(comment.author.name, "Alice");
+    assert_eq!(comment.id, "xls-note:A1:1");
 }
 
 #[test]
@@ -54,6 +55,7 @@ fn anchors_note_comments_to_merged_region_top_left_cell() {
     let comments = sheet.comments_for_cell(a1);
     assert_eq!(comments.len(), 1, "expected 1 comment on A1");
     assert_eq!(comments[0].content, "Hello from note");
+    assert_eq!(comments[0].id, "xls-note:A1:1");
 }
 
 #[test]
@@ -70,6 +72,7 @@ fn imports_note_comment_text_using_workbook_codepage() {
     let comments = sheet.comments_for_cell(a1);
     assert_eq!(comments.len(), 1, "expected 1 comment on A1");
     assert_eq!(comments[0].content, "\u{0410}");
+    assert_eq!(comments[0].id, "xls-note:A1:1");
 }
 
 #[test]
@@ -86,4 +89,5 @@ fn imports_note_comment_text_split_across_multiple_continue_records() {
     let comments = sheet.comments_for_cell(a1);
     assert_eq!(comments.len(), 1, "expected 1 comment on A1");
     assert_eq!(comments[0].content, "ABCDE");
+    assert_eq!(comments[0].id, "xls-note:A1:1");
 }

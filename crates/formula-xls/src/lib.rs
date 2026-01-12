@@ -708,8 +708,22 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                                     "failed to fully import `.xls` note comments for sheet `{sheet_name}` (index {sheet_idx}): {w}"
                                 ))
                             }));
+                            let mut used_note_ids: HashSet<String> = HashSet::new();
                             for note in notes {
+                                let anchor = sheet.merged_regions.resolve_cell(note.cell);
+                                let candidate_id =
+                                    format!("xls-note:{}:{}", anchor.to_a1(), note.obj_id);
+                                let id = if used_note_ids.insert(candidate_id.clone()) {
+                                    candidate_id
+                                } else {
+                                    warnings.push(ImportWarning::new(format!(
+                                        "duplicate `.xls` note comment id `{candidate_id}` in sheet `{sheet_name}` (index {sheet_idx}); generating UUID instead"
+                                    )));
+                                    String::new()
+                                };
+
                                 let comment = Comment {
+                                    id,
                                     kind: CommentKind::Note,
                                     content: note.text,
                                     author: CommentAuthor {

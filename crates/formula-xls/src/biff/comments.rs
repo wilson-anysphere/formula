@@ -40,6 +40,7 @@ const TXO_TEXT_LEN_OFFSET: usize = 6;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BiffNote {
     pub(crate) cell: CellRef,
+    pub(crate) obj_id: u16,
     pub(crate) author: String,
     pub(crate) text: String,
 }
@@ -119,7 +120,7 @@ pub(crate) fn parse_biff_sheet_notes(
 
     let mut out: Vec<BiffNote> = Vec::with_capacity(notes.len());
     for note in notes {
-        let Some((_obj_id, text)) = texts_by_obj_id
+        let Some((obj_id, text)) = texts_by_obj_id
             .get(&note.primary_obj_id)
             .map(|text| (note.primary_obj_id, text))
             .or_else(|| texts_by_obj_id.get(&note.secondary_obj_id).map(|text| (note.secondary_obj_id, text)))
@@ -137,6 +138,7 @@ pub(crate) fn parse_biff_sheet_notes(
 
         out.push(BiffNote {
             cell: note.cell,
+            obj_id,
             author: note.author,
             text: text.clone(),
         });
@@ -173,14 +175,41 @@ fn parse_note_record(
     let primary_obj_id = u16::from_le_bytes([data[6], data[7]]);
     let secondary_obj_id = u16::from_le_bytes([data[4], data[5]]);
 
-    let mut author = match strings::parse_biff_short_string(&data[8..], biff, codepage) {
-        Ok((s, _)) => s,
-        Err(err) => {
-            warnings.push(format!(
-                "failed to parse NOTE author string at offset {offset}: {err}"
-            ));
-            String::new()
+    // `stAuthor` is specified as a `ShortXLUnicodeString` (BIFF8) or an ANSI short string (BIFF5),
+    // but files in the wild sometimes store it as an `XLUnicodeString` (16-bit length prefix), and
+    // may include embedded NULs. Keep this best-effort: return an empty author string if decoding
+    // fails.
+    let author_bytes = &data[8..];
+    let mut author = match strings::parse_biff_short_string(author_bytes, biff, codepage) {
+        Ok((s, consumed)) => {
+            // If BIFF8 short-string parsing succeeds but doesn't consume the full payload, attempt
+            // `XLUnicodeString` decoding before falling back to the short-string result.
+            if matches!(biff, BiffVersion::Biff8) && consumed != author_bytes.len() {
+                match strings::parse_biff8_unicode_string(author_bytes, codepage) {
+                    Ok((alt, alt_consumed)) if alt_consumed == author_bytes.len() => alt,
+                    _ => s,
+                }
+            } else {
+                s
+            }
         }
+        Err(err) => match biff {
+            BiffVersion::Biff8 => match strings::parse_biff8_unicode_string(author_bytes, codepage) {
+                Ok((alt, _)) => alt,
+                Err(_) => {
+                    warnings.push(format!(
+                        "failed to parse NOTE author string at offset {offset}: {err}"
+                    ));
+                    String::new()
+                }
+            },
+            BiffVersion::Biff5 => {
+                warnings.push(format!(
+                    "failed to parse NOTE author string at offset {offset}: {err}"
+                ));
+                String::new()
+            }
+        },
     };
     strip_embedded_nuls(&mut author);
 
@@ -584,6 +613,48 @@ mod tests {
             payload.extend_from_slice(&u.to_le_bytes());
         }
         record(records::RECORD_CONTINUE, &payload)
+    }
+
+    #[test]
+    fn note_record_strips_embedded_nuls_from_author() {
+        let author = "Al\0ice";
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_le_bytes()); // row
+        payload.extend_from_slice(&0u16.to_le_bytes()); // col
+        payload.extend_from_slice(&1u16.to_le_bytes()); // grbit/idObj
+        payload.extend_from_slice(&1u16.to_le_bytes()); // idObj/grbit
+
+        // BIFF8 ShortXLUnicodeString author (compressed) containing an embedded NUL.
+        payload.push(author.len() as u8);
+        payload.push(0); // flags (compressed)
+        payload.extend_from_slice(author.as_bytes());
+
+        let mut warnings = Vec::new();
+        let parsed = parse_note_record(&payload, 0, BiffVersion::Biff8, 1252, &mut warnings)
+            .expect("parse note");
+        assert_eq!(parsed.author, "Alice");
+    }
+
+    #[test]
+    fn note_record_parses_author_encoded_as_xlunicode_string() {
+        let author = "Alice";
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_le_bytes()); // row
+        payload.extend_from_slice(&0u16.to_le_bytes()); // col
+        payload.extend_from_slice(&1u16.to_le_bytes()); // grbit/idObj
+        payload.extend_from_slice(&1u16.to_le_bytes()); // idObj/grbit
+
+        // BIFF8 XLUnicodeString author (16-bit length).
+        payload.extend_from_slice(&(author.len() as u16).to_le_bytes());
+        payload.push(0); // flags (compressed)
+        payload.extend_from_slice(author.as_bytes());
+
+        let mut warnings = Vec::new();
+        let parsed = parse_note_record(&payload, 0, BiffVersion::Biff8, 1252, &mut warnings)
+            .expect("parse note");
+        assert_eq!(parsed.author, author);
     }
 
     #[test]
