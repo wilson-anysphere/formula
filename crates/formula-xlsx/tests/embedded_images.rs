@@ -161,6 +161,13 @@ const RICH_VALUE_REL_XML_WITH_ID_WHITESPACE: &str = r#"<?xml version="1.0" encod
 </richValueRel>
 "#;
 
+const RICH_VALUE_REL_XML_WITH_CUSTOM_REL_ID: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<richValueRel xmlns="http://schemas.microsoft.com/office/2022/10/spreadsheetml/richvaluerelationships"
+              xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rel r:id="rIdImg"/>
+</richValueRel>
+"#;
+
 const METADATA_RELS_XML_CUSTOM_RICHVALUE_PARTS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1"
@@ -175,6 +182,14 @@ const METADATA_RELS_XML_CUSTOM_RICHVALUE_PARTS: &str = r#"<?xml version="1.0" en
 const RICH_VALUE_REL_RELS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1"
+                 Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                 Target="../media/image1.png"/>
+</Relationships>
+"#;
+
+const RICH_VALUE_REL_RELS_XML_CUSTOM_REL_ID: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdImg"
                  Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
                  Target="../media/image1.png"/>
 </Relationships>
@@ -348,6 +363,19 @@ fn extracts_when_rich_value_rel_rid_has_whitespace() {
         1,
         RICH_VALUE_REL_XML_WITH_ID_WHITESPACE,
         RICH_VALUE_REL_RELS_XML,
+    );
+}
+
+#[test]
+fn extracts_when_rich_value_rel_rid_is_non_numeric() {
+    // While most workbooks use numeric relationship IDs (`rId1`, `rId2`, ...), OPC relationship IDs
+    // are not required to be numeric. Ensure we still resolve targets when the ID has a non-numeric
+    // suffix.
+    assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema_with_rels(
+        METADATA_XML,
+        1,
+        RICH_VALUE_REL_XML_WITH_CUSTOM_REL_ID,
+        RICH_VALUE_REL_RELS_XML_CUSTOM_REL_ID,
     );
 }
 

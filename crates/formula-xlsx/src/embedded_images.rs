@@ -925,12 +925,7 @@ fn parse_rich_value_rel_ids(xml: &[u8]) -> Result<Vec<String>, XlsxError> {
                     if openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"id") {
                         let value = attr.unescape_value()?.into_owned();
                         let trimmed = value.trim();
-                        // Relationship IDs are typically `rIdN` (digits). Be defensive and ignore
-                        // other `id=` attributes.
-                        if trimmed.starts_with("rId")
-                            && trimmed.len() > 3
-                            && trimmed[3..].chars().all(|c| c.is_ascii_digit())
-                        {
+                        if !trimmed.is_empty() {
                             rid = Some(trimmed.to_string());
                         }
                         break;
