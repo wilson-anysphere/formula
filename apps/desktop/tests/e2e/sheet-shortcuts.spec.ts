@@ -6,6 +6,7 @@ test.describe("sheet navigation shortcuts", () => {
   test("Ctrl+PageDown / Ctrl+PageUp switches the active sheet (wraps)", async ({ page }) => {
     await gotoDesktop(page);
     await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 1");
 
     // Ensure the grid has focus by clicking the center of A1 once the layout is ready.
     await page.waitForFunction(() => {
@@ -30,6 +31,7 @@ test.describe("sheet navigation shortcuts", () => {
       app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
     });
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
 
     const ctrlKey = process.platform !== "darwin";
     const metaKey = process.platform === "darwin";
@@ -52,25 +54,30 @@ test.describe("sheet navigation shortcuts", () => {
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
     await expect(page.getByTestId("active-value")).toHaveText("Hello from Sheet2");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
 
     // Previous sheet.
     await dispatch("PageUp");
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
     await expect(page.getByTestId("active-value")).toHaveText("Seed");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
 
     // Wrap-around at the start.
     await dispatch("PageUp");
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
 
     // Wrap-around at the end.
     await dispatch("PageDown");
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
   });
 
   test("Ctrl/Cmd+PageUp/PageDown is global (works from ribbon focus) and restores grid focus", async ({ page }) => {
     await gotoDesktop(page);
     await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 1");
 
     // Lazily create Sheet2 so sheet navigation is observable.
     await page.evaluate(() => {
@@ -78,6 +85,7 @@ test.describe("sheet navigation shortcuts", () => {
       app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
     });
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
 
     // Ensure we start on Sheet1.
     await page.getByTestId("sheet-tab-Sheet1").click();
@@ -112,6 +120,7 @@ test.describe("sheet navigation shortcuts", () => {
     }, process.platform === "darwin");
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
 
     // After switching sheets, focus should return to the grid so keyboard workflows keep working.
     await expect
@@ -136,6 +145,7 @@ test.describe("sheet navigation shortcuts", () => {
     }, process.platform === "darwin");
 
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
     await expect
       .poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.id))
       .toBe("grid");
