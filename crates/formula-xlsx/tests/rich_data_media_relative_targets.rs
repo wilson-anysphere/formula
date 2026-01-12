@@ -3,7 +3,10 @@ use std::io::{Cursor, Write};
 use formula_model::CellRef;
 use formula_xlsx::XlsxPackage;
 
-fn build_rich_image_xlsx_with_media_relative_target(include_rich_value_part: bool) -> Vec<u8> {
+fn build_rich_image_xlsx_with_rich_value_rel_target(
+    include_rich_value_part: bool,
+    rel_target: &str,
+) -> Vec<u8> {
     let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -57,12 +60,17 @@ fn build_rich_image_xlsx_with_media_relative_target(include_rich_value_part: boo
   <rel r:id="rId1"/>
 </richValueRel>"#;
 
-    // NOTE: Some producers emit `Target="media/image1.png"` (relative to `xl/`) rather than the
-    // more common `Target="../media/image1.png"` (relative to `xl/richData/`).
-    let rich_value_rel_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    // NOTE: Some producers emit:
+    // - `Target="media/image1.png"` (relative to `xl/`) rather than the more common
+    //   `Target="../media/image1.png"` (relative to `xl/richData/`), OR
+    // - `Target="xl/media/image1.png"` without a leading `/` (which would otherwise resolve to
+    //   `xl/richData/xl/media/...`).
+    let rich_value_rel_rels = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png#fragment"/>
-</Relationships>"#;
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="{rel_target}"/>
+</Relationships>"#
+    );
 
     let cursor = Cursor::new(Vec::new());
     let mut zip = zip::ZipWriter::new(cursor);
@@ -93,7 +101,7 @@ fn build_rich_image_xlsx_with_media_relative_target(include_rich_value_part: boo
 
     zip.start_file("xl/richData/_rels/richValueRel.xml.rels", options)
         .unwrap();
-    zip.write_all(rich_value_rel_rels).unwrap();
+    zip.write_all(rich_value_rel_rels.as_bytes()).unwrap();
 
     zip.start_file("xl/media/image1.png", options).unwrap();
     zip.write_all(b"fakepng").unwrap();
@@ -103,7 +111,7 @@ fn build_rich_image_xlsx_with_media_relative_target(include_rich_value_part: boo
 
 #[test]
 fn rich_data_cell_images_resolves_media_relative_targets_with_rich_value_parts() {
-    let bytes = build_rich_image_xlsx_with_media_relative_target(true);
+    let bytes = build_rich_image_xlsx_with_rich_value_rel_target(true, "media/image1.png#fragment");
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
     let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
 
@@ -122,7 +130,7 @@ fn rich_data_cell_images_resolves_media_relative_targets_with_rich_value_parts()
 
 #[test]
 fn rich_data_cell_images_resolves_media_relative_targets_without_rich_value_parts() {
-    let bytes = build_rich_image_xlsx_with_media_relative_target(false);
+    let bytes = build_rich_image_xlsx_with_rich_value_rel_target(false, "media/image1.png#fragment");
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
     let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
 
@@ -139,3 +147,41 @@ fn rich_data_cell_images_resolves_media_relative_targets_without_rich_value_part
     );
 }
 
+#[test]
+fn rich_data_cell_images_resolves_xl_prefixed_targets_without_root_slash_with_rich_value_parts() {
+    let bytes = build_rich_image_xlsx_with_rich_value_rel_target(true, "xl/media/image1.png#fragment");
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+    let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
+
+    let key = ("Sheet1".to_string(), CellRef::from_a1("A1").unwrap());
+    assert_eq!(
+        images.get(&key).map(|v| v.as_slice()),
+        Some(b"fakepng".as_slice())
+    );
+    assert_eq!(
+        images.len(),
+        1,
+        "unexpected extra images extracted: keys={:?}",
+        images.keys().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn rich_data_cell_images_resolves_xl_prefixed_targets_without_root_slash_without_rich_value_parts() {
+    let bytes =
+        build_rich_image_xlsx_with_rich_value_rel_target(false, "xl/media/image1.png#fragment");
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+    let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
+
+    let key = ("Sheet1".to_string(), CellRef::from_a1("A1").unwrap());
+    assert_eq!(
+        images.get(&key).map(|v| v.as_slice()),
+        Some(b"fakepng".as_slice())
+    );
+    assert_eq!(
+        images.len(),
+        1,
+        "unexpected extra images extracted: keys={:?}",
+        images.keys().collect::<Vec<_>>()
+    );
+}

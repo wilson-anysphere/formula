@@ -707,10 +707,15 @@ fn build_rich_value_rel_index_to_target_part(
 fn resolve_rich_value_rel_target_part(source_part: &str, target: &str) -> String {
     // Relationship targets in `xl/richData/_rels/richValueRel.xml.rels` are typically relative to
     // `xl/richData/` (e.g. `../media/image1.png`). Some producers instead emit targets relative to
-    // `xl/` (e.g. `media/image1.png`), so handle that as a special-case for robust extraction.
+    // `xl/` (e.g. `media/image1.png`), or emit `Target="xl/..."` without a leading `/` (which would
+    // otherwise resolve to `xl/richData/xl/...`). Handle these as special-cases for robust
+    // extraction.
     let target = strip_fragment(target);
+    let target = target.strip_prefix("./").unwrap_or(target);
     if target.starts_with("media/") {
         format!("xl/{target}")
+    } else if target.starts_with("xl/") {
+        target.to_string()
     } else {
         path::resolve_target(source_part, target)
     }

@@ -403,6 +403,48 @@ mod tests {
     }
 
     #[test]
+    fn resolves_image_targets_when_relationship_target_is_xl_prefixed_without_root_slash() {
+        let rich_value_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <rv type="0">
+      <v kind="rel">0</v>
+    </rv>
+  </values>
+</rvData>"#;
+
+        let rich_value_rel_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvRel xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"
+       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rels>
+    <rel r:id="rId7"/>
+  </rels>
+</rvRel>"#;
+
+        // Target is missing a leading `/`, so naive resolution would yield `xl/richData/xl/media/...`.
+        let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId7"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+    Target="xl/media/image1.png#fragment"/>
+</Relationships>"#;
+
+        let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        parts.insert("xl/richData/richValue.xml".to_string(), rich_value_xml.to_vec());
+        parts.insert(
+            "xl/richData/richValueRel.xml".to_string(),
+            rich_value_rel_xml.to_vec(),
+        );
+        parts.insert(
+            "xl/richData/_rels/richValueRel.xml.rels".to_string(),
+            rels_xml.to_vec(),
+        );
+
+        let resolved = resolve_rich_value_image_targets(&parts).expect("resolve");
+        assert_eq!(resolved, vec![Some("xl/media/image1.png".to_string())]);
+    }
+
+    #[test]
     fn missing_supporting_parts_returns_nones() {
         let rich_value_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
