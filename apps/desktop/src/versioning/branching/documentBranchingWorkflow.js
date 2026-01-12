@@ -72,9 +72,9 @@ export class DocumentBranchingWorkflow {
   async commitCurrentState(actor, message) {
     const nextState = normalizeDocumentState(documentControllerToBranchState(this.doc));
 
-    // DocumentController doesn't model workbook-level metadata like empty sheets,
-    // named ranges, or comments. Preserve whatever is currently stored in the
-    // branch head and only overlay the cell edits we can observe locally.
+    // DocumentController does not model some workbook-level metadata like named ranges
+    // or comments. Preserve whatever is currently stored in the branch head and only
+    // overlay the cell + sheet metadata we can observe locally.
     const baseState = normalizeDocumentState(await this.branchService.getCurrentState());
 
     /** @type {import("../../../../../packages/versioning/branches/src/types.js").DocumentState} */

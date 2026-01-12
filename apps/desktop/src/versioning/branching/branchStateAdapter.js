@@ -19,9 +19,9 @@ const MASKED_CELL_VALUE = "###";
 /**
  * Best-effort access to DocumentController sheet metadata.
  *
- * Task 201 adds authoritative sheet metadata (order + display names) to
- * DocumentController. This adapter needs to work both before and after that
- * change lands, so we feature-detect common access patterns.
+ * Task 201 added authoritative sheet metadata (order + display names) to
+ * DocumentController. This adapter still feature-detects common access patterns
+ * so it can tolerate older controller instances during gradual rollouts.
  *
  * @param {any} doc
  * @param {string} sheetId
