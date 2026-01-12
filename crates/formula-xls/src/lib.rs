@@ -645,7 +645,8 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
         }
 
         // Extract legacy cell comments ("notes") encoded via NOTE/OBJ/TXO records in the sheet
-        // BIFF substream.
+        // BIFF substream. This runs after merged regions have been populated so
+        // `Worksheet::add_comment` can normalize anchors inside merged regions.
         if let (Some(workbook_stream), Some(codepage), Some(biff_version), Some(biff_idx)) = (
             workbook_stream.as_deref(),
             biff_codepage,

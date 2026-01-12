@@ -809,10 +809,12 @@ mod tests {
         ]
         .concat();
 
-        let names =
-            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252).expect("parse names");
-        assert_eq!(names.len(), 1);
-        assert_eq!(names[0].name, name);
-        assert_eq!(names[0].rgce, rgce);
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+        assert_eq!(parsed.names.len(), 1);
+        assert_eq!(parsed.names[0].name, name);
+        assert_eq!(parsed.names[0].refers_to, "1");
+        assert_eq!(parsed.names[0].comment.as_deref(), Some(description));
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
     }
 }
