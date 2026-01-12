@@ -267,7 +267,7 @@ Notes:
 
 Notes:
 
-* `rc/@t="1"` is the 1-based index into `<metadataTypes>`.
+* In this fixture, `rc/@t="1"` is a 1-based index into `<metadataTypes>` (0-based is also observed in the wild/tests).
 * `rc/@v="0"` is a 0-based index into the `<futureMetadata name="XLRICHVALUE">` `<bk>` list.
 * `xlrd:rvb/@i="0"` is the **0-based rich value index** into `xl/richData/richValue.xml`.
 
