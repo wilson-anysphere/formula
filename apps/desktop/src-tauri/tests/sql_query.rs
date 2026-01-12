@@ -168,14 +168,14 @@ fn desktop_allowed_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
 
     if let Some(base) = directories::BaseDirs::new() {
-        if let Ok(canon) = std::fs::canonicalize(base.home_dir()) {
+        if let Ok(canon) = dunce::canonicalize(base.home_dir()) {
             roots.push(canon);
         }
     }
 
     if let Some(user) = directories::UserDirs::new() {
         if let Some(doc) = user.document_dir() {
-            if let Ok(canon) = std::fs::canonicalize(doc) {
+            if let Ok(canon) = dunce::canonicalize(doc) {
                 if !roots.iter().any(|p| p == &canon) {
                     roots.push(canon);
                 }
@@ -219,7 +219,7 @@ async fn sqlite_file_path_outside_scope_is_denied() {
     assert!(!roots.is_empty(), "expected at least one allowed root");
 
     let outside_dir = tempfile::tempdir().expect("tempdir");
-    let outside_dir_canon = std::fs::canonicalize(outside_dir.path()).expect("canonicalize");
+    let outside_dir_canon = dunce::canonicalize(outside_dir.path()).expect("canonicalize");
 
     if is_in_roots(&outside_dir_canon, &roots) {
         // Extremely unusual environment (e.g. HOME=/tmp). Skip rather than producing a false
@@ -259,7 +259,7 @@ async fn sqlite_symlink_escape_is_denied() {
 
     // Create a real database file outside the allowed roots.
     let outside_dir = tempfile::tempdir().expect("tempdir");
-    let outside_dir_canon = std::fs::canonicalize(outside_dir.path()).expect("canonicalize");
+    let outside_dir_canon = dunce::canonicalize(outside_dir.path()).expect("canonicalize");
     if is_in_roots(&outside_dir_canon, &roots) {
         eprintln!(
             "skipping symlink escape sqlite test: tempdir {} is within allowed roots {roots:?}",
@@ -300,7 +300,7 @@ async fn sqlite_dotdot_traversal_escape_is_denied() {
 
     // Create a real database file outside the allowed roots.
     let outside_dir = tempfile::tempdir().expect("tempdir");
-    let outside_dir_canon = std::fs::canonicalize(outside_dir.path()).expect("canonicalize");
+    let outside_dir_canon = dunce::canonicalize(outside_dir.path()).expect("canonicalize");
     if is_in_roots(&outside_dir_canon, &roots) {
         eprintln!(
             "skipping .. traversal sqlite test: tempdir {} is within allowed roots {roots:?}",
@@ -351,7 +351,7 @@ async fn odbc_sqlite_file_path_outside_scope_is_denied() {
     assert!(!roots.is_empty(), "expected at least one allowed root");
 
     let outside_dir = tempfile::tempdir().expect("tempdir");
-    let outside_dir_canon = std::fs::canonicalize(outside_dir.path()).expect("canonicalize");
+    let outside_dir_canon = dunce::canonicalize(outside_dir.path()).expect("canonicalize");
 
     if is_in_roots(&outside_dir_canon, &roots) {
         eprintln!(
@@ -413,7 +413,7 @@ async fn odbc_sqlite_symlink_escape_is_denied() {
 
     // Create a real database file outside the allowed roots.
     let outside_dir = tempfile::tempdir().expect("tempdir");
-    let outside_dir_canon = std::fs::canonicalize(outside_dir.path()).expect("canonicalize");
+    let outside_dir_canon = dunce::canonicalize(outside_dir.path()).expect("canonicalize");
     if is_in_roots(&outside_dir_canon, &roots) {
         eprintln!(
             "skipping symlink escape odbc sqlite test: tempdir {} is within allowed roots {roots:?}",
@@ -455,7 +455,7 @@ async fn odbc_sqlite_dotdot_traversal_escape_is_denied() {
 
     // Create a real database file outside the allowed roots.
     let outside_dir = tempfile::tempdir().expect("tempdir");
-    let outside_dir_canon = std::fs::canonicalize(outside_dir.path()).expect("canonicalize");
+    let outside_dir_canon = dunce::canonicalize(outside_dir.path()).expect("canonicalize");
     if is_in_roots(&outside_dir_canon, &roots) {
         eprintln!(
             "skipping .. traversal odbc sqlite test: tempdir {} is within allowed roots {roots:?}",
@@ -508,7 +508,7 @@ async fn sqlite_attach_cannot_read_out_of_scope_db_via_multi_statement() {
 
     // Create a real database file outside the allowed roots.
     let outside_dir = tempfile::tempdir().expect("tempdir");
-    let outside_dir_canon = std::fs::canonicalize(outside_dir.path()).expect("canonicalize");
+    let outside_dir_canon = dunce::canonicalize(outside_dir.path()).expect("canonicalize");
 
     if is_in_roots(&outside_dir_canon, &roots) {
         eprintln!(
@@ -595,7 +595,7 @@ async fn sqlite_get_schema_file_path_outside_scope_is_denied() {
     assert!(!roots.is_empty(), "expected at least one allowed root");
 
     let outside_dir = tempfile::tempdir().expect("tempdir");
-    let outside_dir_canon = std::fs::canonicalize(outside_dir.path()).expect("canonicalize");
+    let outside_dir_canon = dunce::canonicalize(outside_dir.path()).expect("canonicalize");
 
     if is_in_roots(&outside_dir_canon, &roots) {
         eprintln!(
@@ -628,7 +628,7 @@ async fn odbc_sqlite_get_schema_file_path_outside_scope_is_denied() {
     assert!(!roots.is_empty(), "expected at least one allowed root");
 
     let outside_dir = tempfile::tempdir().expect("tempdir");
-    let outside_dir_canon = std::fs::canonicalize(outside_dir.path()).expect("canonicalize");
+    let outside_dir_canon = dunce::canonicalize(outside_dir.path()).expect("canonicalize");
 
     if is_in_roots(&outside_dir_canon, &roots) {
         eprintln!(
