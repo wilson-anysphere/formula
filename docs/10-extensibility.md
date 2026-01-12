@@ -1179,6 +1179,11 @@ extensions.
 
 Marketplace implementation details (HTTP endpoints, publish/download headers, caching) are documented in
 [`docs/marketplace.md`](./marketplace.md).
+
+For running a **local** marketplace server (for Desktop/Tauri testing) and bootstrapping a publisher token/keypair, see:
+
+- [`services/marketplace/README.md`](../services/marketplace/README.md)
+
 ### Web + desktop (Tauri/WebView) install + update flow
 
 The web runtime and the Tauri/WebView desktop runtime use the same **no-Node** installation model (implemented by
