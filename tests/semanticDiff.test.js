@@ -94,3 +94,52 @@ test("semanticDiff: semantic-equivalent formulas are not modified", () => {
   assert.equal(diff.formatOnly.length, 0);
 });
 
+test("semanticDiff: encrypted cell modified is detected and includes key metadata", () => {
+  const before = sheetFromObject({
+    [cellKey(0, 0)]: { enc: { keyId: "k1", ciphertextBase64: "ct1" } },
+  });
+  const after = sheetFromObject({
+    [cellKey(0, 0)]: { enc: { keyId: "k1", ciphertextBase64: "ct2" } },
+  });
+  const diff = semanticDiff(before, after);
+  assert.equal(diff.modified.length, 1);
+  assert.deepEqual(diff.modified[0].cell, { row: 0, col: 0 });
+  assert.equal(diff.modified[0].oldEncrypted, true);
+  assert.equal(diff.modified[0].newEncrypted, true);
+  assert.equal(diff.modified[0].oldKeyId, "k1");
+  assert.equal(diff.modified[0].newKeyId, "k1");
+});
+
+test("semanticDiff: encrypted cell moved is detected via enc signature", () => {
+  const before = sheetFromObject({
+    [cellKey(0, 0)]: { enc: { keyId: "k1", ciphertextBase64: "ct" } },
+  });
+  const after = sheetFromObject({
+    [cellKey(0, 1)]: { enc: { keyId: "k1", ciphertextBase64: "ct" } },
+  });
+  const diff = semanticDiff(before, after);
+  assert.equal(diff.moved.length, 1);
+  assert.deepEqual(diff.moved[0].oldLocation, { row: 0, col: 0 });
+  assert.deepEqual(diff.moved[0].newLocation, { row: 0, col: 1 });
+  assert.equal(diff.moved[0].encrypted, true);
+  assert.equal(diff.moved[0].keyId, "k1");
+  assert.equal(diff.added.length, 0);
+  assert.equal(diff.removed.length, 0);
+});
+
+test("semanticDiff: encrypted cell format-only changes are detected", () => {
+  const before = sheetFromObject({
+    [cellKey(0, 0)]: { enc: { keyId: "k1", ciphertextBase64: "ct" }, format: { bold: true } },
+  });
+  const after = sheetFromObject({
+    [cellKey(0, 0)]: { enc: { keyId: "k1", ciphertextBase64: "ct" }, format: { bold: false } },
+  });
+  const diff = semanticDiff(before, after);
+  assert.equal(diff.formatOnly.length, 1);
+  assert.deepEqual(diff.formatOnly[0].cell, { row: 0, col: 0 });
+  assert.equal(diff.formatOnly[0].oldEncrypted, true);
+  assert.equal(diff.formatOnly[0].newEncrypted, true);
+  assert.equal(diff.formatOnly[0].oldKeyId, "k1");
+  assert.equal(diff.formatOnly[0].newKeyId, "k1");
+  assert.equal(diff.modified.length, 0);
+});
