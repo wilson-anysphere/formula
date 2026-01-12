@@ -456,6 +456,25 @@ pub fn build_note_comment_split_across_continues_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a NOTE/OBJ pair but **missing** the associated TXO text
+/// payload.
+///
+/// This is used to validate best-effort import behavior: the importer should emit a warning and
+/// skip creating a comment when the NOTE record cannot be joined to a TXO text payload.
+pub fn build_note_comment_missing_txo_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_missing_txo_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a single external hyperlink on `A1`.
 ///
 /// This is used to ensure we preserve BIFF `HLINK` records when importing `.xls` workbooks.
@@ -816,6 +835,14 @@ fn build_note_comment_split_across_continues_workbook_stream() -> Vec<u8> {
     )
 }
 
+fn build_note_comment_missing_txo_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream(
+        "NotesMissingTxo",
+        &build_note_comment_missing_txo_sheet_stream(),
+        1252,
+    )
+}
+
 fn build_single_sheet_workbook_stream(sheet_name: &str, sheet_stream: &[u8], codepage: u16) -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -875,6 +902,43 @@ fn build_note_comment_split_across_continues_sheet_stream() -> Vec<u8> {
     // "ABCDE" split as "AB" + "CDE" across two `CONTINUE` records.
     let segments: [&[u8]; 2] = [b"AB", b"CDE"];
     build_note_comment_sheet_stream_with_compressed_txo(false, OBJECT_ID, AUTHOR, &segments)
+}
+
+fn build_note_comment_missing_txo_sheet_stream() -> Vec<u8> {
+    const OBJECT_ID: u16 = 1;
+    const AUTHOR: &str = "Alice";
+
+    // The workbook globals above create 16 style XFs + 1 cell XF, so the first usable
+    // cell XF index is 16.
+    const XF_GENERAL_CELL: u16 = 16;
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes());
+    dims.extend_from_slice(&1u32.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&1u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Ensure the anchor cell exists in the calamine value grid.
+    push_record(&mut sheet, RECORD_BLANK, &blank_cell(0, 0, XF_GENERAL_CELL));
+
+    // NOTE + OBJ but no TXO: importer should warn and skip.
+    push_record(
+        &mut sheet,
+        RECORD_NOTE,
+        &note_record(0u16, 0u16, OBJECT_ID, AUTHOR),
+    );
+    push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
 }
 
 fn build_note_comment_sheet_stream_with_compressed_txo(

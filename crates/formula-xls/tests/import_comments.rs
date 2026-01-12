@@ -100,3 +100,33 @@ fn imports_note_comment_text_split_across_multiple_continue_records() {
     assert_eq!(comments[0].content, "ABCDE");
     assert_eq!(comments[0].id, "xls-note:A1:1");
 }
+
+#[test]
+fn skips_note_comment_when_txo_payload_is_missing() {
+    let bytes = xls_fixture_builder::build_note_comment_missing_txo_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("NotesMissingTxo")
+        .expect("NotesMissingTxo missing");
+
+    let a1 = CellRef::from_a1("A1").unwrap();
+    assert!(
+        sheet.comments_for_cell(a1).is_empty(),
+        "expected no comments when TXO payload is missing"
+    );
+
+    assert!(
+        result
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("missing TXO payload")),
+        "expected missing TXO warning; warnings={:?}",
+        result
+            .warnings
+            .iter()
+            .map(|w| w.message.as_str())
+            .collect::<Vec<_>>()
+    );
+}
