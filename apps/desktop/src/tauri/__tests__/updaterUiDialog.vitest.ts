@@ -168,6 +168,52 @@ describe("updaterUi (dialog + download)", () => {
     expect(restartBtn?.style.display).not.toBe("none");
   });
 
+  it("promotes 'Download manually' when the update download fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const handlers = new Map<string, (event: any) => void>();
+    const listen = vi.fn(async (eventName: string, handler: (event: any) => void) => {
+      handlers.set(eventName, handler);
+      return () => handlers.delete(eventName);
+    });
+
+    const download = vi.fn(async () => {
+      throw new Error("network down");
+    });
+
+    const install = vi.fn(async () => {});
+    const check = vi.fn(async () => ({
+      version: "1.2.3",
+      body: "notes",
+      download,
+      install,
+    }));
+
+    vi.stubGlobal("__TAURI__", {
+      event: { listen },
+      updater: { check },
+    });
+
+    const { installUpdaterUi } = await import("../updaterUi");
+    await installUpdaterUi();
+
+    handlers.get("update-available")?.({ payload: { source: "manual", version: "1.2.3", body: "notes" } });
+    await flushMicrotasks();
+
+    const downloadBtn = document.querySelector<HTMLButtonElement>('[data-testid="updater-download"]');
+    expect(downloadBtn).not.toBeNull();
+
+    downloadBtn?.click();
+    await flushMicrotasks(12);
+
+    const dialog = document.querySelector('[data-testid="updater-dialog"]') as HTMLElement | null;
+    expect(dialog).not.toBeNull();
+
+    const viewBtn = dialog?.querySelector<HTMLButtonElement>('[data-testid="updater-view-versions"]');
+    expect(viewBtn).not.toBeNull();
+    expect(viewBtn?.textContent).toBe("Download manually");
+  });
+
   it("opens the GitHub Releases page from the update dialog (manual rollback path)", async () => {
     const { handleUpdaterEvent, FORMULA_RELEASES_URL } = await import("../updaterUi");
 
