@@ -150,7 +150,10 @@ run_cargo_audit() {
     local eval_txt="${REPORT_DIR}/cargo-audit_${slug}.policy.txt"
 
     set +e
-    (cd "$dir" && cargo audit --json) >"$out_json" 2>"$out_err"
+    # Run via the agent wrapper so we inherit the same stability defaults as other Rust workflows
+    # (RLIMIT_AS, conservative parallelism, and retry-on-EAGAIN). The wrapper preserves stdout, so
+    # machine-readable JSON output is still safe to capture.
+    (cd "$dir" && bash "${ROOT_DIR}/scripts/cargo_agent.sh" audit --json) >"$out_json" 2>"$out_err"
     local rc=$?
     set -e
 
