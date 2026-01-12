@@ -1154,7 +1154,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].cell, CellRef::new(1, 1));
@@ -1399,7 +1399,7 @@ mod tests {
         ]
         .concat();
 
-        let (notes, warnings) =
+        let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 1);

@@ -289,6 +289,28 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     is_missing: false,
                 });
             }
+            // Spill range postfix (`#`).
+            0x2F => {
+                let prec = 60;
+                let expr = match stack.pop() {
+                    Some(v) => v,
+                    None => {
+                        warnings.push("rgce stack underflow".to_string());
+                        return unsupported(ptg, warnings);
+                    }
+                };
+                let inner = if expr.precedence < prec && !expr.is_missing {
+                    format!("({})", expr.text)
+                } else {
+                    expr.text
+                };
+                stack.push(ExprFragment {
+                    text: format!("{inner}#"),
+                    precedence: prec,
+                    contains_union: expr.contains_union,
+                    is_missing: false,
+                });
+            }
             // Explicit parentheses.
             0x15 => {
                 let expr = match stack.pop() {
@@ -1142,85 +1164,13 @@ fn push_column(col: u32, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use formula_engine::{parse_formula, ParseOptions};
     use formula_xlsx::print::{parse_print_area_defined_name, parse_print_titles_defined_name};
 
     fn assert_parseable(expr: &str) {
         let expr = expr.trim();
         assert!(!expr.is_empty(), "decoded expression must be non-empty");
-
-        // Excel error literals like `#REF!` and `#NAME?` can appear as defined-name formulas.
-        if expr.starts_with('#') {
-            assert!(
-                matches!(
-                    expr,
-                    "#NULL!"
-                        | "#DIV/0!"
-                        | "#VALUE!"
-                        | "#REF!"
-                        | "#NAME?"
-                        | "#NUM!"
-                        | "#N/A"
-                        | "#GETTING_DATA"
-                        | "#UNKNOWN!"
-                ),
-                "unexpected Excel error literal: {expr:?}"
-            );
-            return;
-        }
-
-        // Print titles (and other defined names) can use union (`,`) of ranges.
-        for part in expr.split(',') {
-            let part = part.trim();
-            assert!(!part.is_empty(), "empty union part in {expr:?}");
-
-            if formula_model::Range::from_a1(part).is_ok() {
-                continue;
-            }
-
-            if is_row_range(part) || is_col_range(part) {
-                continue;
-            }
-
-            panic!("expected A1 range / row range / col range, got {part:?}");
-        }
-    }
-
-    fn is_row_range(s: &str) -> bool {
-        let Some((a, b)) = s.split_once(':') else {
-            return false;
-        };
-
-        let a = a.trim().replace('$', "");
-        let b = b.trim().replace('$', "");
-        if a.is_empty() || b.is_empty() {
-            return false;
-        }
-        if !a.chars().all(|c| c.is_ascii_digit()) || !b.chars().all(|c| c.is_ascii_digit()) {
-            return false;
-        }
-        match (a.parse::<u32>(), b.parse::<u32>()) {
-            (Ok(a), Ok(b)) => a > 0 && b > 0,
-            _ => false,
-        }
-    }
-
-    fn is_col_range(s: &str) -> bool {
-        let Some((a, b)) = s.split_once(':') else {
-            return false;
-        };
-
-        let a = a.trim().replace('$', "");
-        let b = b.trim().replace('$', "");
-        if a.is_empty() || b.is_empty() {
-            return false;
-        }
-        if !a.chars().all(|c| c.is_ascii_alphabetic())
-            || !b.chars().all(|c| c.is_ascii_alphabetic())
-        {
-            return false;
-        }
-
-        col_from_a1(&a).is_some() && col_from_a1(&b).is_some()
+        parse_formula(&format!("={expr}"), ParseOptions::default()).expect("parse formula");
     }
 
     fn assert_print_area_parseable(sheet_name: &str, expr: &str) {
@@ -1278,6 +1228,30 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "A1");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_spill_range_postfix() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // A1# (spill operator applied to a relative ref).
+        let row_raw = 0u16;
+        let col_field = encode_col_field(0, true, true);
+        let rgce = [
+            0x24,
+            row_raw.to_le_bytes()[0],
+            row_raw.to_le_bytes()[1],
+            col_field.to_le_bytes()[0],
+            col_field.to_le_bytes()[1],
+            0x2F,
+        ];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "A1#");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
         assert_parseable(&decoded.text);
     }
