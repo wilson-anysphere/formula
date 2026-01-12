@@ -60,7 +60,7 @@ export class SecondaryGridView {
     getComputedValue: (cell: { row: number; col: number }) => string | number | boolean | null;
     onSelectionChange?: (selection: { row: number; col: number } | null) => void;
     onSelectionRangeChange?: (range: CellRange | null) => void;
-    getCommentMeta?: (cellRef: string) => { resolved: boolean } | null;
+    getCommentMeta?: (row: number, col: number) => { resolved: boolean } | null;
     initialScroll?: ScrollState;
     initialZoom?: number;
     persistScroll?: (scroll: ScrollState) => void;
