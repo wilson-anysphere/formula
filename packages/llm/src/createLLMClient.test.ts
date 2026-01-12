@@ -13,3 +13,4 @@ describe("createLLMClient", () => {
     expect(() => (createLLMClient as any)({})).toThrow(/no longer accepts/);
   });
 });
+

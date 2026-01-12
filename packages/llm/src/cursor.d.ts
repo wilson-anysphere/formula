@@ -28,3 +28,4 @@ export class CursorLLMClient {
 
   streamChat(request: ChatRequest): AsyncIterable<ChatStreamEvent>;
 }
+

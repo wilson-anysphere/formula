@@ -289,7 +289,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
     props,
     ragService,
     schemaProvider,
-    workbookId
+    workbookId,
   ]);
 
   return (
@@ -358,10 +358,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
               />
               Continue running if I deny an approval (agent will re-plan)
             </label>
-            <div
-              ref={agentStepsRootRef}
-              style={{ borderTop: "1px solid var(--border)", paddingTop: 10, minHeight: 0, flex: 1, overflow: "auto" }}
-            >
+            <div ref={agentStepsRootRef} style={{ borderTop: "1px solid var(--border)", paddingTop: 10, minHeight: 0, flex: 1, overflow: "auto" }}>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Steps</div>
               {agentEvents.length === 0 ? (
                 <div style={{ fontSize: 12, opacity: 0.8 }}>No steps yet.</div>
@@ -392,11 +389,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
         )}
       </div>
       {approvalRequest ? (
-        <ApprovalModal
-          request={approvalRequest}
-          onApprove={() => resolveApproval(true)}
-          onReject={() => resolveApproval(false)}
-        />
+        <ApprovalModal request={approvalRequest} onApprove={() => resolveApproval(true)} onReject={() => resolveApproval(false)} />
       ) : null}
     </div>
   );
@@ -419,7 +412,7 @@ function TabButton(props: { active: boolean; onClick: () => void; children: Reac
         border: "1px solid var(--border)",
         background: props.active ? "var(--bg-tertiary)" : "transparent",
         color: "var(--text-primary)",
-        fontWeight: props.active ? 600 : 500
+        fontWeight: props.active ? 600 : 500,
       }}
     >
       {props.children}
@@ -441,8 +434,7 @@ function AgentEventRow({ event }: { event: AgentProgressEvent }) {
     case "tool_result":
       return (
         <span>
-          Result: <code>{event.call.name}</code> •{" "}
-          {event.ok === undefined ? "done" : event.ok ? "ok" : "error"}
+          Result: <code>{event.call.name}</code> • {event.ok === undefined ? "done" : event.ok ? "ok" : "error"}
           {event.error ? ` (${event.error})` : null}
         </span>
       );

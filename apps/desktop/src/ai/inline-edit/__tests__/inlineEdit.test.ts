@@ -13,8 +13,6 @@ import { CLASSIFICATION_LEVEL } from "../../../../../../packages/security/dlp/sr
 import { LocalClassificationStore } from "../../../../../../packages/security/dlp/src/classificationStore.js";
 import { LocalPolicyStore } from "../../../../../../packages/security/dlp/src/policyStore.js";
 
-const LEGACY_OPENAI_API_KEY_STORAGE_KEY = ["formula", "openaiApiKey"].join(":");
-
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -369,15 +367,15 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
     expect(doc.getCell("Sheet1", "C1").value).toBe("TOP SECRET");
   });
 
-  it("uses the desktop LLM client fallback when no inlineEdit llmClient is injected", async () => {
-    // Legacy user API keys should be proactively purged (and never used for auth).
-    localStorage.setItem(LEGACY_OPENAI_API_KEY_STORAGE_KEY, "sk-test-inline-edit");
-
+  it("uses the default Cursor client when no inlineEdit llmClient is injected", async () => {
     let callCount = 0;
     const fetchMock = vi.fn(async (url: string, init: any) => {
       callCount++;
       expect(url).toBe("/v1/chat");
+      expect(init?.method).toBe("POST");
       expect(init?.credentials).toBe("include");
+      // Cursor-only: no user API keys should be sent from the client.
+      expect(init?.headers?.Authorization).toBeUndefined();
 
       if (callCount === 1) {
         return {
@@ -385,7 +383,13 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
           json: async () => ({
             message: {
               content: "",
-              toolCalls: [{ id: "call-1", name: "set_range", arguments: { range: "C1:C3", values: [[1], [2], [3]] } }],
+              toolCalls: [
+                {
+                  id: "call-1",
+                  name: "set_range",
+                  arguments: { range: "C1:C3", values: [[1], [2], [3]] },
+                },
+              ],
             },
             usage: { promptTokens: 10, completionTokens: 5 },
           }),
@@ -425,7 +429,7 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
       activeValue: document.createElement("div"),
     };
 
-    // No inlineEdit config passed; controller should use the Cursor-backed client.
+    // No inlineEdit config passed; controller should fall back to the default desktop LLM client.
     const app = new SpreadsheetApp(root, status);
 
     app.selectRange({ range: { startRow: 0, endRow: 2, startCol: 2, endCol: 2 } }); // C1:C3
@@ -441,8 +445,6 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
       const el = overlay.querySelector<HTMLElement>('[data-testid="inline-edit-preview-summary"]');
       return el && el.textContent?.includes("Changes:") ? el : null;
     });
-
-    expect(localStorage.getItem(LEGACY_OPENAI_API_KEY_STORAGE_KEY)).toBeNull();
 
     overlay.querySelector<HTMLButtonElement>('[data-testid="inline-edit-approve"]')!.click();
 

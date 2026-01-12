@@ -121,15 +121,6 @@ export function purgeLegacyDesktopLLMSettings(): void {
  * All inference is routed through the Cursor backend (no provider selection or API keys).
  */
 export function getDesktopLLMClient(): LLMClient {
-  // One-time best-effort cleanup: older desktop builds persisted provider/API keys
-  // in localStorage. Those settings are no longer used; purge them on first AI use
-  // so stale secrets aren't left behind.
-  try {
-    purgeLegacyDesktopLLMSettings();
-  } catch {
-    // ignore
-  }
-
   if (!cachedClient) cachedClient = createLLMClient();
   return cachedClient;
 }

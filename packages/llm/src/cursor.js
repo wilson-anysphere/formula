@@ -5,9 +5,8 @@
  * `POST /chat/completions` (typically under a `/v1` base path).
  *
  * This client is intentionally *not* provider-selectable and does *not* read
- * user API keys (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc). Callers must
- * inject auth via `getAuthHeaders` / `authToken` (and/or rely on cookies when
- * same-origin).
+ * user API keys from environment variables. Callers must inject auth via
+ * `getAuthHeaders` / `authToken` (and/or rely on cookies when same-origin).
  */
 
 /**
@@ -524,4 +523,3 @@ export class CursorLLMClient {
     }
   }
 }
-
