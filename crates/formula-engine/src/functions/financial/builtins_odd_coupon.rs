@@ -1,83 +1,28 @@
 use chrono::{DateTime, Utc};
 
 use crate::date::{serial_to_ymd, ExcelDateSystem};
-use crate::error::{ExcelError, ExcelResult};
 use crate::eval::CompiledExpr;
-use crate::functions::date_time;
 use crate::functions::{eval_scalar_arg, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{ErrorKind, Value};
 
-fn excel_error_kind(e: ExcelError) -> ErrorKind {
-    match e {
-        ExcelError::Div0 => ErrorKind::Div0,
-        ExcelError::Value => ErrorKind::Value,
-        ExcelError::Num => ErrorKind::Num,
-    }
-}
+use super::builtins_helpers::{
+    basis_from_optional_arg, coerce_to_finite_number, datevalue_from_value, excel_error_kind,
+    excel_result_number,
+};
 
-fn excel_result_number(res: ExcelResult<f64>) -> Value {
-    match res {
-        Ok(n) => Value::Number(n),
-        Err(e) => Value::Error(excel_error_kind(e)),
-    }
-}
-
-fn datevalue_from_value(
+fn datevalue_checked_from_value(
     ctx: &dyn FunctionContext,
     value: &Value,
     system: ExcelDateSystem,
     now_utc: DateTime<Utc>,
 ) -> Result<i32, ErrorKind> {
-    let serial = match value {
-        Value::Text(s) => {
-            date_time::datevalue(s, ctx.value_locale(), now_utc, system).map_err(excel_error_kind)?
-        }
-        _ => {
-            let n = value.coerce_to_number_with_ctx(ctx)?;
-            if !n.is_finite() {
-                return Err(ErrorKind::Num);
-            }
-            let serial = n.floor();
-            if serial < (i32::MIN as f64) || serial > (i32::MAX as f64) {
-                return Err(ErrorKind::Num);
-            }
-            serial as i32
-        }
-    };
+    let serial = datevalue_from_value(ctx, value, system, now_utc)?;
 
     // Ensure the resulting serial is representable in the workbook date system.
     serial_to_ymd(serial, system).map_err(excel_error_kind)?;
 
     Ok(serial)
-}
-
-fn coerce_to_finite_number(ctx: &dyn FunctionContext, v: &Value) -> Result<f64, ErrorKind> {
-    let n = v.coerce_to_number_with_ctx(ctx)?;
-    if !n.is_finite() {
-        return Err(ErrorKind::Num);
-    }
-    Ok(n)
-}
-
-fn basis_from_optional_arg(
-    ctx: &dyn FunctionContext,
-    arg: Option<&CompiledExpr>,
-) -> Result<i32, ErrorKind> {
-    let Some(arg) = arg else {
-        return Ok(0);
-    };
-    let v = eval_scalar_arg(ctx, arg);
-    if matches!(v, Value::Blank) {
-        return Ok(0);
-    }
-    let n = coerce_to_finite_number(ctx, &v)?;
-    let t = n.trunc();
-    if t < (i32::MIN as f64) || t > (i32::MAX as f64) {
-        return Err(ErrorKind::Num);
-    }
-    let basis = t as i32;
-    super::coupon_schedule::validate_basis(basis).map_err(excel_error_kind)
 }
 
 fn frequency_from_value(ctx: &dyn FunctionContext, v: &Value) -> Result<i32, ErrorKind> {
@@ -130,19 +75,19 @@ fn oddfprice_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let system = ctx.date_system();
     let now_utc = ctx.now_utc();
 
-    let settlement = match datevalue_from_value(ctx, &settlement, system, now_utc) {
+    let settlement = match datevalue_checked_from_value(ctx, &settlement, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let maturity = match datevalue_from_value(ctx, &maturity, system, now_utc) {
+    let maturity = match datevalue_checked_from_value(ctx, &maturity, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let issue = match datevalue_from_value(ctx, &issue, system, now_utc) {
+    let issue = match datevalue_checked_from_value(ctx, &issue, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let first_coupon = match datevalue_from_value(ctx, &first_coupon, system, now_utc) {
+    let first_coupon = match datevalue_checked_from_value(ctx, &first_coupon, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -217,19 +162,19 @@ fn oddfyield_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let system = ctx.date_system();
     let now_utc = ctx.now_utc();
 
-    let settlement = match datevalue_from_value(ctx, &settlement, system, now_utc) {
+    let settlement = match datevalue_checked_from_value(ctx, &settlement, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let maturity = match datevalue_from_value(ctx, &maturity, system, now_utc) {
+    let maturity = match datevalue_checked_from_value(ctx, &maturity, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let issue = match datevalue_from_value(ctx, &issue, system, now_utc) {
+    let issue = match datevalue_checked_from_value(ctx, &issue, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let first_coupon = match datevalue_from_value(ctx, &first_coupon, system, now_utc) {
+    let first_coupon = match datevalue_checked_from_value(ctx, &first_coupon, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -302,15 +247,15 @@ fn oddlprice_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let system = ctx.date_system();
     let now_utc = ctx.now_utc();
 
-    let settlement = match datevalue_from_value(ctx, &settlement, system, now_utc) {
+    let settlement = match datevalue_checked_from_value(ctx, &settlement, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let maturity = match datevalue_from_value(ctx, &maturity, system, now_utc) {
+    let maturity = match datevalue_checked_from_value(ctx, &maturity, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let last_interest = match datevalue_from_value(ctx, &last_interest, system, now_utc) {
+    let last_interest = match datevalue_checked_from_value(ctx, &last_interest, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -382,15 +327,15 @@ fn oddlyield_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let system = ctx.date_system();
     let now_utc = ctx.now_utc();
 
-    let settlement = match datevalue_from_value(ctx, &settlement, system, now_utc) {
+    let settlement = match datevalue_checked_from_value(ctx, &settlement, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let maturity = match datevalue_from_value(ctx, &maturity, system, now_utc) {
+    let maturity = match datevalue_checked_from_value(ctx, &maturity, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let last_interest = match datevalue_from_value(ctx, &last_interest, system, now_utc) {
+    let last_interest = match datevalue_checked_from_value(ctx, &last_interest, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };

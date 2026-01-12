@@ -5,6 +5,7 @@ mod builtins_accrint;
 mod builtins_amortization;
 mod builtins_bonds;
 mod builtins_depreciation_ext;
+mod builtins_helpers;
 mod builtins_french_depreciation;
 mod builtins_misc;
 mod builtins_odd_coupon;
@@ -42,4 +43,3 @@ pub use securities::{
     yieldmat,
 };
 pub use time_value::{effect, fv, ipmt, nominal, nper, pmt, ppmt, pv, rate, rri};
-
