@@ -29,7 +29,7 @@ If you are editing collaboration code, start here and keep this doc in sync with
 - Desktop presence renderer: [`apps/desktop/src/grid/presence-renderer/`](../apps/desktop/src/grid/presence-renderer/) (`PresenceRenderer`)
 - Permissions + masking: [`packages/collab/permissions/index.js`](../packages/collab/permissions/index.js) (`getCellPermissions`, `maskCellValue`)
 - Local persistence implementations: [`packages/collab/persistence/src/`](../packages/collab/persistence/src/) (`IndexedDbCollabPersistence`, `FileCollabPersistence`)
-- Comments (Yjs `comments` root helpers): [`packages/collab/comments/src/manager.ts`](../packages/collab/comments/src/manager.ts) (`CommentManager`, `createCommentManagerForSession`, `migrateCommentsArrayToMap`)
+- Comments (Yjs `comments` root helpers): [`packages/collab/comments/src/manager.ts`](../packages/collab/comments/src/manager.ts) (`CommentManager`, `createCommentManagerForSession`, `createCommentManagerForDoc`, `migrateCommentsArrayToMap`)
 - Conflict monitors: [`packages/collab/conflicts/index.js`](../packages/collab/conflicts/index.js) (`FormulaConflictMonitor`, `CellConflictMonitor`, `CellStructuralConflictMonitor`)
 - Collab version history glue: [`packages/collab/versioning/src/index.ts`](../packages/collab/versioning/src/index.ts) (`createCollabVersioning`)
 - Version store kept *inside the Y.Doc*: [`packages/versioning/src/store/yjsVersionStore.js`](../packages/versioning/src/store/yjsVersionStore.js) (`YjsVersionStore`)
