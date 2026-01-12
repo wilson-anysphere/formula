@@ -262,7 +262,7 @@ V3 spec references:
 - §2.4.2.7 ContentsHashV3:
   https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/601a4412-00cc-46a0-b8e0-3001c011308e
 
-### ProjectNormalizedData (v3) / ContentsHashV3 (MS-OVBA §2.4.2.5–§2.4.2.7)
+### ProjectNormalizedData (MS-OVBA §2.4.2, ContentsHashV3)
 
 For **v3 / `\x05DigitalSignatureExt`**, MS-OVBA defines the binding digest (`ContentsHashV3`) as
 SHA-256 over v3 `ProjectNormalizedData`:
