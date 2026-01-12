@@ -226,15 +226,8 @@ fn build_zip(files: &[(&str, &[u8])]) -> Vec<u8> {
     zip.finish().unwrap().into_inner()
 }
 
-#[test]
-fn saving_xlsx_strips_xlm_macrosheets_and_dialogsheets_without_vba_project() {
-    // Build a tiny "XLSX-in-disguise" package:
-    // - Has XLM macrosheets + dialog sheets
-    // - Does *not* have `xl/vbaProject.bin`
-    // - Advertises a macro-enabled workbook content type
-    //
-    // When saving to `.xlsx`, formula-io must strip *all* macro-capable content, not just VBA.
-    let input_bytes = build_zip(&[
+fn macro_capable_xlm_package_bytes() -> Vec<u8> {
+    build_zip(&[
         (
             "[Content_Types].xml",
             br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -253,7 +246,18 @@ fn saving_xlsx_strips_xlm_macrosheets_and_dialogsheets_without_vba_project() {
         ),
         ("xl/macrosheets/sheet1.xml", br#"<macrosheet/>"#),
         ("xl/dialogsheets/sheet1.xml", br#"<dialogsheet/>"#),
-    ]);
+    ])
+}
+
+#[test]
+fn saving_xlsx_strips_xlm_macrosheets_and_dialogsheets_without_vba_project() {
+    // Build a tiny "XLSX-in-disguise" package:
+    // - Has XLM macrosheets + dialog sheets
+    // - Does *not* have `xl/vbaProject.bin`
+    // - Advertises a macro-enabled workbook content type
+    //
+    // When saving to `.xlsx`, formula-io must strip *all* macro-capable content, not just VBA.
+    let input_bytes = macro_capable_xlm_package_bytes();
 
     let pkg = XlsxPackage::from_bytes(&input_bytes).expect("parse test package");
     assert!(
@@ -299,7 +303,7 @@ fn saving_xlsx_strips_xlm_macrosheets_and_dialogsheets_without_vba_project() {
 }
 
 #[test]
-fn saving_xltx_strips_xlm_macrosheets_and_dialogsheets_without_vba_project() {
+fn saving_xltx_strips_macro_capable_content() {
     // Regression test: `.xltx` (macro-free template) must never contain macro-capable parts, even
     // for packages that only contain XLM macro sheets / dialog sheets (and no vbaProject.bin).
     let input_bytes = build_zip(&[
@@ -369,5 +373,59 @@ fn saving_xltx_strips_xlm_macrosheets_and_dialogsheets_without_vba_project() {
     assert!(
         !content_types.contains("macroEnabled"),
         "expected `[Content_Types].xml` to not advertise a macro-enabled workbook"
+    );
+}
+
+#[test]
+fn saving_xltm_preserves_macro_capable_content() {
+    let input_bytes = macro_capable_xlm_package_bytes();
+    let pkg = XlsxPackage::from_bytes(&input_bytes).expect("parse test package");
+    assert!(
+        pkg.macro_presence().any(),
+        "test package should be detected as macro-capable"
+    );
+
+    let wb = Workbook::Xlsx(pkg);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let out_path = dir.path().join("out.xltm");
+    save_workbook(&wb, &out_path).expect("save workbook");
+
+    let bytes = std::fs::read(&out_path).expect("read saved workbook");
+    let out_pkg = XlsxPackage::from_bytes(&bytes).expect("re-open saved package");
+
+    assert!(
+        out_pkg.part("xl/macrosheets/sheet1.xml").is_some(),
+        "expected XLM macrosheet parts to be preserved when saving `.xltm`"
+    );
+    assert!(
+        out_pkg.part("xl/dialogsheets/sheet1.xml").is_some(),
+        "expected legacy dialog sheet parts to be preserved when saving `.xltm`"
+    );
+}
+
+#[test]
+fn saving_xlam_preserves_macro_capable_content() {
+    let input_bytes = macro_capable_xlm_package_bytes();
+    let pkg = XlsxPackage::from_bytes(&input_bytes).expect("parse test package");
+    assert!(
+        pkg.macro_presence().any(),
+        "test package should be detected as macro-capable"
+    );
+
+    let wb = Workbook::Xlsx(pkg);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let out_path = dir.path().join("out.xlam");
+    save_workbook(&wb, &out_path).expect("save workbook");
+
+    let bytes = std::fs::read(&out_path).expect("read saved workbook");
+    let out_pkg = XlsxPackage::from_bytes(&bytes).expect("re-open saved package");
+
+    assert!(
+        out_pkg.part("xl/macrosheets/sheet1.xml").is_some(),
+        "expected XLM macrosheet parts to be preserved when saving `.xlam`"
+    );
+    assert!(
+        out_pkg.part("xl/dialogsheets/sheet1.xml").is_some(),
+        "expected legacy dialog sheet parts to be preserved when saving `.xlam`"
     );
 }

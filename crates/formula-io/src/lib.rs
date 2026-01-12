@@ -357,8 +357,10 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
         .to_ascii_lowercase();
 
     let ext_format = match ext.as_str() {
-        "xlsx" | "xltx" => Some(WorkbookFormat::Xlsx),
-        "xlsm" | "xltm" | "xlam" => Some(WorkbookFormat::Xlsm),
+        // `.xltx`/`.xltm`/`.xlam` are all OOXML ZIP containers and should be treated as XLSX
+        // packages for extension-based fallback dispatch.
+        "xlsx" | "xltx" | "xltm" | "xlam" => Some(WorkbookFormat::Xlsx),
+        "xlsm" => Some(WorkbookFormat::Xlsm),
         "xls" => Some(WorkbookFormat::Xls),
         "xlsb" => Some(WorkbookFormat::Xlsb),
         "csv" => Some(WorkbookFormat::Csv),
