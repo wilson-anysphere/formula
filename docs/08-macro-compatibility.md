@@ -1037,6 +1037,9 @@ of the control-character-prefixed streams:
 - `\x05DigitalSignatureEx`
 - `\x05DigitalSignatureExt`
 
+If more than one signature stream exists, Excel/MS-OVBA prefers the newest stream:
+`DigitalSignatureExt` → `DigitalSignatureEx` → `DigitalSignature`.
+
 Edge case: some producers store a **storage** named `\x05DigitalSignature*` containing a nested
 stream (e.g. `\x05DigitalSignature/sig`). When searching for signatures, match on any path
 component, not just root-level streams.

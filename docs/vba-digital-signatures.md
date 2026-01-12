@@ -25,6 +25,8 @@ Notes:
 - Some producers store the signature as a **storage** named `\x05DigitalSignature*` containing one
   or more streams, e.g. `\x05DigitalSignature/sig`. Signature discovery should therefore match on
   any *path component*, not only a root stream.
+- If more than one signature stream exists, Excel/MS-OVBA prefers the newest stream:
+  `DigitalSignatureExt` → `DigitalSignatureEx` → `DigitalSignature`.
 
 ## Signature stream payload variants (what the bytes look like)
 
@@ -77,6 +79,8 @@ specific VBA project.
 |---|---|
 | CMS `signedData` | `1.2.840.113549.1.7.2` |
 | Authenticode `SpcIndirectDataContent` | `1.3.6.1.4.1.311.2.1.4` |
+| Digest algorithm: SHA-1 | `1.3.14.3.2.26` |
+| Digest algorithm: SHA-256 | `2.16.840.1.101.3.4.2.1` |
 
 ## Binding (MS-OVBA project digest verification)
 
@@ -100,6 +104,9 @@ Result interpretation (current behavior):
 
 ### Implementation notes / caveats
 
+- The binding implementation currently supports SHA-1 and SHA-256 digests (based on the `DigestInfo`
+  algorithm OID). If an unknown digest OID is encountered, binding is reported as
+  `VbaSignatureBinding::Unknown`.
 - The project digest computation is currently **best-effort** and deterministic (to support stable
   tests and predictable behavior), but may not match Excel's exact MS-OVBA transcript for all
   real-world files (e.g. if Excel hashes decompressed module source, only parts of module streams,
