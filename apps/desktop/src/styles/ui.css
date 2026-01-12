@@ -589,6 +589,13 @@
   gap: 2px;
 }
 
+.command-palette__item-right {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .command-palette__shortcut {
   display: inline-flex;
   align-items: center;
