@@ -138,6 +138,30 @@ This design allows relationship IDs to change without rewriting every rich value
 
 ---
 
+## End-to-end reference chain (example)
+
+The exact XML vocab inside `richValue.xml` varies across Excel builds, but the *indexing chain* for images-in-cell
+is generally:
+
+1. **Worksheet cell** (`xl/worksheets/sheetN.xml`)
+   - Cell has `c/@vm="1"` (value metadata index, **1-based**).
+2. **Value metadata** (`xl/metadata.xml`)
+   - `vm=1` selects `<valueMetadata><bk>` #1 (**1-based**).
+   - That `<bk>` contains `<rc t="…" v="0"/>` where `v` is **0-based** into `futureMetadata name="XLRICHVALUE"`.
+3. **Future metadata** (`xl/metadata.xml`)
+   - `futureMetadata name="XLRICHVALUE"` `<bk>` #0 contains `<xlrd:rvb i="5"/>`.
+   - `i=5` is the **0-based rich value index** into `xl/richData/richValue.xml`.
+4. **Rich value** (`xl/richData/richValue.xml`)
+   - Rich value record #5 is an “image” typed rich value.
+   - Its payload contains a **relationship index** (e.g. `relIndex = 0`, **0-based**) into `richValueRel.xml`.
+5. **Relationship table** (`xl/richData/richValueRel.xml`)
+   - Relationship table entry #0 contains `r:id="rId7"`.
+6. **OPC resolution** (`xl/richData/_rels/richValueRel.xml.rels`)
+   - Relationship `Id="rId7"` resolves to `Target="../media/image1.png"`.
+
+So: **cell → vm (1-based) → metadata.xml → rvb@i (0-based) → richValue.xml → relIndex (0-based) →
+richValueRel.xml → rId → .rels target → image bytes**.
+
 ## Minimal XML skeletons (best-effort)
 
 These skeletons aim to show **roots, key child tags, and key attributes** as Excel tends to emit them. Namespaces and some attribute names may differ across builds—treat them as *shape guidance*, not a strict schema.
