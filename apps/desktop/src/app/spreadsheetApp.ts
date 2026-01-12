@@ -3304,7 +3304,7 @@ export class SpreadsheetApp {
     if (!this.sharedGrid) return;
     const target = e.target as HTMLElement | null;
     if (target) {
-      if (this.vScrollbarTrack.contains(target) || this.hScrollbarTrack.contains(target) || target.closest(".outline-toggle")) {
+      if (this.vScrollbarTrack.contains(target) || this.hScrollbarTrack.contains(target) || this.outlineLayer.contains(target)) {
         this.clearSharedHoverCellCache();
         this.hideCommentTooltip();
         return;
@@ -6484,7 +6484,7 @@ export class SpreadsheetApp {
         if (
           this.vScrollbarTrack.contains(target) ||
           this.hScrollbarTrack.contains(target) ||
-          target.closest(".outline-toggle")
+          this.outlineLayer.contains(target)
         ) {
           this.hideCommentTooltip();
           this.root.style.cursor = "";
