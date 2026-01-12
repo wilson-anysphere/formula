@@ -275,3 +275,21 @@ test(
     );
   },
 );
+
+test(
+  'cargo_agent rejects invalid FORMULA_CARGO_JOBS',
+  { skip: !hasBash || !hasCargo },
+  () => {
+    const proc = spawnSync(
+      'bash',
+      ['-lc', 'export FORMULA_CARGO_JOBS=not-a-number && bash scripts/cargo_agent.sh check -h'],
+      { encoding: 'utf8', cwd: repoRoot },
+    );
+    if (proc.error) throw proc.error;
+    assert.notEqual(proc.status, 0, 'expected non-zero exit for invalid FORMULA_CARGO_JOBS');
+    assert.ok(
+      proc.stderr.includes('invalid FORMULA_CARGO_JOBS'),
+      `expected stderr to mention invalid FORMULA_CARGO_JOBS, got:\n${proc.stderr}`,
+    );
+  },
+);

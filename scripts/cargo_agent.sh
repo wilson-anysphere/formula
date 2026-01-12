@@ -108,6 +108,14 @@ fi
 # `source scripts/agent-init.sh` (which sets `CARGO_BUILD_JOBS`) influences the wrapper too.
 caller_jobs_env="${FORMULA_CARGO_JOBS:-${FORMULA_CARGO_TEST_JOBS:-}}"
 jobs="${FORMULA_CARGO_JOBS:-${CARGO_BUILD_JOBS:-4}}"
+# Fail fast when callers explicitly configure an invalid job count. (We keep a more forgiving
+# fallback for generic env vars like `CARGO_BUILD_JOBS`, since those are sometimes set globally.)
+if [[ -n "${FORMULA_CARGO_JOBS:-}" ]]; then
+  if ! [[ "${FORMULA_CARGO_JOBS}" =~ ^[0-9]+$ ]] || [[ "${FORMULA_CARGO_JOBS}" -lt 1 ]]; then
+    echo "cargo_agent: invalid FORMULA_CARGO_JOBS=${FORMULA_CARGO_JOBS} (expected integer >= 1)" >&2
+    exit 2
+  fi
+fi
 # Guardrails: reject/avoid dangerous values from generic env vars.
 #
 # - Cargo rejects 0 jobs (e.g. `-j0` or `CARGO_BUILD_JOBS=0`) with "jobs may not be 0".
