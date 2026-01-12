@@ -229,6 +229,13 @@ fn model_value_to_scalar(value: &ModelCellValue) -> CellScalar {
         ModelCellValue::RichText(rt) => CellScalar::Text(rt.text.clone()),
         ModelCellValue::Entity(entity) => CellScalar::Text(entity.display_value.clone()),
         ModelCellValue::Record(record) => CellScalar::Text(record.to_string()),
+        ModelCellValue::Image(image) => CellScalar::Text(
+            image
+                .alt_text
+                .clone()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "[Image]".to_string()),
+        ),
         ModelCellValue::Array(arr) => CellScalar::Text(format!("{:?}", arr.data)),
         ModelCellValue::Spill(_) => CellScalar::Error("#SPILL!".to_string()),
         _ => rich_model_cell_value_to_scalar(value).unwrap_or_else(|| CellScalar::Text(format!("{value:?}"))),
@@ -286,6 +293,19 @@ fn rich_model_cell_value_to_scalar(value: &ModelCellValue) -> Option<CellScalar>
             let display_value =
                 json_get_str(record, &["displayValue", "display_value", "display"])?.to_string();
             Some(CellScalar::Text(display_value))
+        }
+        "image" => {
+            let image = serialized.get("value")?;
+            let alt_text = image
+                .get("altText")
+                .or_else(|| image.get("alt_text"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if alt_text.is_empty() {
+                Some(CellScalar::Text("[Image]".to_string()))
+            } else {
+                Some(CellScalar::Text(alt_text.to_string()))
+            }
         }
         _ => None,
     }

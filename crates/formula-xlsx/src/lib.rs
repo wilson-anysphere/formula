@@ -963,6 +963,13 @@ fn cell_meta_from_value(value: &CellValue) -> (Option<CellValueKind>, Option<Str
             Some(CellValueKind::SharedString { index: 0 }),
             Some(record.to_string()),
         ),
+        CellValue::Image(image) => match image.alt_text.as_deref().filter(|s| !s.is_empty()) {
+            Some(alt) => (
+                Some(CellValueKind::SharedString { index: 0 }),
+                Some(alt.to_string()),
+            ),
+            None => (None, None),
+        },
         _ => (Some(CellValueKind::Number), None),
     }
 }

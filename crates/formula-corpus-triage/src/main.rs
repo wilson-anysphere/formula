@@ -629,6 +629,13 @@ fn normalize_model_value(value: &CellValue) -> NormalizedValue {
         CellValue::RichText(r) => NormalizedValue::Text(r.text.clone()),
         CellValue::Entity(e) => NormalizedValue::Text(e.display_value.clone()),
         CellValue::Record(r) => NormalizedValue::Text(r.to_string()),
+        CellValue::Image(image) => NormalizedValue::Text(
+            image
+                .alt_text
+                .clone()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "[Image]".to_string()),
+        ),
         CellValue::Array(_) | CellValue::Spill(_) => NormalizedValue::Blank,
     }
 }
@@ -647,6 +654,13 @@ fn set_engine_value(engine: &mut Engine, sheet: &str, addr: &str, value: &CellVa
         CellValue::RichText(r) => EngineValue::Text(r.text.clone()),
         CellValue::Entity(e) => EngineValue::Text(e.display_value.clone()),
         CellValue::Record(r) => EngineValue::Text(r.to_string()),
+        CellValue::Image(image) => EngineValue::Text(
+            image
+                .alt_text
+                .clone()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "[Image]".to_string()),
+        ),
         CellValue::Array(_) | CellValue::Spill(_) => EngineValue::Blank,
     };
     engine

@@ -2011,6 +2011,14 @@ fn value_semantics_eq(existing: &ExistingCellValue, patch_value: Option<&CellVal
                 _ => false,
             }
         },
+        CellValue::Image(image) => match image.alt_text.as_deref().filter(|s| !s.is_empty()) {
+            Some(alt) => match existing {
+                ExistingCellValue::String(v) => v == alt,
+                ExistingCellValue::SharedString(rich) => rich.text == alt,
+                _ => false,
+            },
+            None => matches!(existing, ExistingCellValue::None),
+        },
         CellValue::RichText(rich) => match existing {
             ExistingCellValue::SharedString(existing_rich) => existing_rich == rich,
             ExistingCellValue::String(v) => rich.runs.is_empty() && &rich.text == v,
@@ -2094,6 +2102,19 @@ fn cell_representation_for_patch(
         CellValue::Record(record) => {
             let degraded = CellValue::String(record.to_string());
             cell_representation_for_patch(Some(&degraded), formula, existing_t, shared_strings)
+        }
+        CellValue::Image(image) => {
+            if let Some(alt) = image.alt_text.as_deref().filter(|s| !s.is_empty()) {
+                let degraded = CellValue::String(alt.to_string());
+                cell_representation_for_patch(
+                    Some(&degraded),
+                    formula,
+                    existing_t,
+                    shared_strings,
+                )
+            } else {
+                Ok((None, CellBodyKind::None))
+            }
         }
         CellValue::RichText(rich) => {
             if let Some(existing_t) = existing_t {

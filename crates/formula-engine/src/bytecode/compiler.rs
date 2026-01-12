@@ -455,7 +455,6 @@ impl<'a> CompileCtx<'a> {
             self.program.instrs[idx] = Instruction::new(OpCode::Jump, end_target, 0);
         }
     }
-
     fn compile_choose(&mut self, args: &[Expr], allow_range: bool) {
         // CHOOSE(index, value1, value2, ...)
         // Excel semantics:

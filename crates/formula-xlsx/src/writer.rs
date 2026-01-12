@@ -718,6 +718,15 @@ fn cell_xml(
             let idx = shared_strings.index.get(&display).copied().unwrap_or_default();
             value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
         }
+        CellValue::Image(image) => {
+            // In-cell images are not yet exported as first-class XLSX rich values. Degrade to
+            // plain text when alt text is available; otherwise omit the cached value.
+            if let Some(alt) = image.alt_text.as_deref().filter(|s| !s.is_empty()) {
+                attrs.push_str(r#" t="s""#);
+                let idx = shared_strings.index.get(alt).copied().unwrap_or_default();
+                value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
+            }
+        }
         CellValue::Array(_) | CellValue::Spill(_) => {}
     }
 
@@ -818,6 +827,15 @@ fn build_shared_strings(workbook: &Workbook) -> SharedStrings {
                         let idx = values.len();
                         values.push(s.clone());
                         index.insert(s, idx);
+                    }
+                }
+                CellValue::Image(image) => {
+                    if let Some(alt) = image.alt_text.as_deref().filter(|s| !s.is_empty()) {
+                        if !index.contains_key(alt) {
+                            let idx = values.len();
+                            values.push(alt.to_string());
+                            index.insert(alt.to_string(), idx);
+                        }
                     }
                 }
                 CellValue::RichText(r) => {

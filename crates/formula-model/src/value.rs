@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 pub use crate::rich_text::RichText;
+use crate::drawings::ImageId;
 use crate::{CellRef, ErrorValue};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -34,6 +35,12 @@ pub enum CellValue {
     /// Record values are treated similarly to entities for scalar export: they
     /// degrade to their display string in legacy IO paths.
     Record(RecordValue),
+    /// In-cell image value (Excel "image in cell" / `IMAGE()`).
+    ///
+    /// This is a first-class value variant so that workbook JSON/IPC payloads can reference
+    /// media stored in [`Workbook::images`](crate::Workbook::images) without requiring a full
+    /// XLSX round-trip implementation.
+    Image(ImageValue),
     /// Array result (stub).
     Array(ArrayValue),
     /// Marker for a cell that is part of a spilled array (stub).
@@ -225,6 +232,51 @@ impl fmt::Display for RecordValue {
 impl From<RecordValue> for CellValue {
     fn from(value: RecordValue) -> Self {
         CellValue::Record(value)
+    }
+}
+
+/// JSON-friendly representation of an in-cell image value.
+///
+/// This references an entry in [`Workbook::images`](crate::Workbook::images) by id, with optional
+/// metadata that can be used for display/round-tripping.
+///
+/// ## JSON schema
+///
+/// Stored inside the [`CellValue`] `{type, value}` envelope:
+///
+/// ```json
+/// {
+///   "type": "image",
+///   "value": {
+///     "imageId": "image1.png",
+///     "altText": "Logo",
+///     "width": 128,
+///     "height": 64
+///   }
+/// }
+/// ```
+///
+/// `width` / `height` are expressed in CSS pixels (px).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageValue {
+    /// Image identifier in [`Workbook::images`](crate::Workbook::images).
+    #[serde(alias = "image_id")]
+    pub image_id: ImageId,
+    /// Optional alt text for accessibility / scalar degradation.
+    #[serde(default, alias = "alt_text", skip_serializing_if = "Option::is_none")]
+    pub alt_text: Option<String>,
+    /// Optional display width in pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    /// Optional display height in pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+}
+
+impl From<ImageValue> for CellValue {
+    fn from(value: ImageValue) -> Self {
+        CellValue::Image(value)
     }
 }
 

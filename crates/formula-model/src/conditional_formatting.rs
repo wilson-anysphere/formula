@@ -1094,6 +1094,7 @@ fn cell_value_truthy(value: &CellValue) -> bool {
             }
             !r.display_value.is_empty()
         }
+        CellValue::Image(image) => !image.image_id.as_str().is_empty(),
         CellValue::Array(a) => !a.data.is_empty(),
         CellValue::Spill(_) => true,
     }
@@ -1411,10 +1412,12 @@ impl ValueKey {
             CellValue::Error(e) => Some(ValueKey::Error(e)),
             CellValue::Empty => None,
             CellValue::RichText(t) => Some(ValueKey::String(t.text)),
-        CellValue::Entity(e) => Some(ValueKey::String(e.display_value)),
-        CellValue::Record(r) => Some(ValueKey::String(r.to_string())),
-        CellValue::Array(_) => None,
-        CellValue::Spill(_) => None,
+            CellValue::Entity(e) => Some(ValueKey::String(e.display_value)),
+            CellValue::Record(r) => Some(ValueKey::String(r.to_string())),
+            CellValue::Image(image) => Some(ValueKey::String(image.image_id.0)),
+            CellValue::Array(_) => None,
+            CellValue::Spill(_) => None,
+        }
     }
 }
 }

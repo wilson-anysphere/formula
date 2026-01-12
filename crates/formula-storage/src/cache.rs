@@ -901,6 +901,13 @@ fn estimate_cell_value_bytes(value: &CellValue) -> usize {
         CellValue::RichText(rt) => rt.text.len().saturating_add(rt.runs.len().saturating_mul(32)),
         CellValue::Entity(entity) => entity.display_value.len(),
         CellValue::Record(record) => record_display_len(record),
+        CellValue::Image(image) => image.image_id.as_str().len().saturating_add(
+            image
+                .alt_text
+                .as_ref()
+                .map(|s| s.len())
+                .unwrap_or_default(),
+        ),
         CellValue::Error(err) => err.as_str().len(),
         CellValue::Array(arr) => {
             let mut bytes = 64usize;
@@ -912,6 +919,13 @@ fn estimate_cell_value_bytes(value: &CellValue) -> usize {
                         CellValue::RichText(rt) => rt.text.len() + rt.runs.len() * 32,
                         CellValue::Entity(entity) => entity.display_value.len(),
                         CellValue::Record(record) => record_display_len(record),
+                        CellValue::Image(image) => image.image_id.as_str().len().saturating_add(
+                            image
+                                .alt_text
+                                .as_ref()
+                                .map(|s| s.len())
+                                .unwrap_or_default(),
+                        ),
                         CellValue::Error(err) => err.as_str().len(),
                         CellValue::Array(_) => 64,
                         CellValue::Spill(_) => 16,

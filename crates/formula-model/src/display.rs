@@ -58,6 +58,17 @@ pub fn format_cell_display(
                 .unwrap_or("");
             FmtValue::Text(display)
         }
+        CellValue::Image(image) => {
+            let display = image
+                .alt_text
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| {
+                    display_buf = Some("[Image]".to_string());
+                    display_buf.as_deref().unwrap_or("")
+                });
+            FmtValue::Text(display)
+        }
         // For now arrays/spills are UI-rendered elsewhere.
         CellValue::Array(_) | CellValue::Spill(_) => FmtValue::Blank,
     };

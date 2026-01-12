@@ -4085,6 +4085,14 @@ fn cell_representation(
             let degraded = CellValue::String(record.to_string());
             cell_representation(&degraded, formula, existing_t, shared_string_idx)
         }
+        CellValue::Image(image) => {
+            if let Some(alt) = image.alt_text.as_deref().filter(|s| !s.is_empty()) {
+                let degraded = CellValue::String(alt.to_string());
+                cell_representation(&degraded, formula, existing_t, shared_string_idx)
+            } else {
+                Ok((None, CellBodyKind::None))
+            }
+        }
         CellValue::RichText(rich) => {
             if let Some(existing_t) = existing_t {
                 if should_preserve_unknown_t(existing_t) {

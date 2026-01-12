@@ -2036,6 +2036,7 @@ fn apply_one_change(tx: &Transaction<'_>, change: &CellChange) -> Result<()> {
         CellValue::RichText(_)
         | CellValue::Entity(_)
         | CellValue::Record(_)
+        | CellValue::Image(_)
         | CellValue::Array(_)
         | CellValue::Spill(_) => (None, None, None),
     };
@@ -2293,6 +2294,7 @@ fn cell_value_fast_path(value: &CellValue) -> (Option<String>, Option<f64>, Opti
         CellValue::RichText(_)
         | CellValue::Entity(_)
         | CellValue::Record(_)
+        | CellValue::Image(_)
         | CellValue::Array(_)
         | CellValue::Spill(_) => (None, None, None),
     }

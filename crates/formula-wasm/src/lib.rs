@@ -705,6 +705,13 @@ fn cell_value_to_engine_rich(value: &CellValue) -> Result<EngineValue, JsValue> 
                 fields,
             }))
         }
+        CellValue::Image(image) => Ok(EngineValue::Text(
+            image
+                .alt_text
+                .clone()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "[Image]".to_string()),
+        )),
         CellValue::Array(arr) => {
             let rows = arr.data.len();
             let cols = arr.data.first().map(|r| r.len()).unwrap_or(0);
@@ -741,6 +748,13 @@ fn cell_value_to_engine(value: &CellValue) -> EngineValue {
         CellValue::RichText(rt) => EngineValue::Text(rt.plain_text().to_string()),
         CellValue::Entity(_) | CellValue::Record(_) => cell_value_to_engine_rich(value)
             .unwrap_or_else(|_| EngineValue::Error(ErrorKind::Value)),
+        CellValue::Image(image) => EngineValue::Text(
+            image
+                .alt_text
+                .clone()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "[Image]".to_string()),
+        ),
         // The workbook model can store cached array/spill results, but the WASM worker API only
         // supports scalar values today. Treat these as spill errors so downstream formulas see an
         // error rather than silently treating an array as a string.
@@ -766,6 +780,14 @@ fn cell_value_to_scalar_json_input(value: &CellValue) -> JsonValue {
         CellValue::Record(record) => {
             let display = record.to_string();
             JsonValue::String(encode_scalar_text_input(&display))
+        }
+        CellValue::Image(image) => {
+            let display = image
+                .alt_text
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or("[Image]");
+            JsonValue::String(encode_scalar_text_input(display))
         }
         // Degrade arrays to their top-left value so `getCell`/`toJson` remain scalar-compatible.
         CellValue::Array(arr) => arr
@@ -3105,20 +3127,17 @@ mod tests {
 
     #[test]
     fn get_cell_data_degrades_model_entity_and_record_values_to_display_string_and_chains() {
-        // When `formula-model` gains Entity/Record variants, ensure we degrade them to display
-        // strings at the scalar JSON protocol boundary.
-        let entity: CellValue = match serde_json::from_value(json!({
+        // Ensure we degrade model Entity/Record variants to display strings at the scalar JSON
+        // protocol boundary.
+        let entity: CellValue = serde_json::from_value(json!({
             "type": "entity",
             "value": {
-                "display": "Entity display"
+                "displayValue": "Entity display"
             }
-        })) {
-            Ok(value) => value,
-            // Older versions of `formula-model` won't have Entity/Record variants yet.
-            Err(_) => return,
-        };
+        }))
+        .expect("entity CellValue should deserialize");
 
-        let record: CellValue = match serde_json::from_value(json!({
+        let record: CellValue = serde_json::from_value(json!({
             "type": "record",
             "value": {
                 "displayField": "name",
@@ -3127,10 +3146,8 @@ mod tests {
                     "age": { "type": "number", "value": 42.0 }
                 }
             }
-        })) {
-            Ok(value) => value,
-            Err(_) => return,
-        };
+        }))
+        .expect("record CellValue should deserialize");
 
         let mut wb = WorkbookState::new_with_default_sheet();
 
@@ -3171,6 +3188,42 @@ mod tests {
         assert_eq!(
             engine_value_to_json(EngineValue::Error(ErrorKind::Field)),
             json!("#FIELD!")
+        );
+    }
+
+    #[test]
+    fn cell_value_to_json_degrades_image_values_deterministically() {
+        // The scalar JSON protocol does not support structured rich values yet. Image values
+        // should degrade to a stable string for callers (UI, IPC).
+        let image: CellValue = match serde_json::from_value(json!({
+            "type": "image",
+            "value": {
+                "imageId": "image1.png",
+                "altText": "Logo"
+            }
+        })) {
+            Ok(value) => value,
+            // Older versions of `formula-model` won't have the Image variant yet.
+            Err(_) => return,
+        };
+
+        assert_eq!(
+            engine_value_to_json(cell_value_to_engine(&image)),
+            json!("Logo")
+        );
+
+        let image_no_alt: CellValue = match serde_json::from_value(json!({
+            "type": "image",
+            "value": {
+                "imageId": "image1.png"
+            }
+        })) {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        assert_eq!(
+            engine_value_to_json(cell_value_to_engine(&image_no_alt)),
+            json!("[Image]")
         );
     }
 
