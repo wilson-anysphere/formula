@@ -439,6 +439,41 @@ test.describe("split view", () => {
     await expect(input).toBeFocused();
   });
 
+  test("primary in-cell edits commit on blur without stealing focus when clicking the secondary pane (shared grid)", async ({
+    page,
+  }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
+
+    const primary = page.locator("#grid");
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+    // Begin editing A1 in the primary pane, but do not press Enter.
+    await primary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    await page.keyboard.press("h");
+    const editor = primary.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await page.keyboard.type("ello");
+    await expect(editor).toHaveValue("hello");
+
+    // Clicking the secondary pane should commit the edit without stealing focus back to the primary grid.
+    await secondary.click({ position: { x: 48 + 100 + 12, y: 24 + 12 } }); // B1
+    await waitForIdle(page);
+
+    await expect(page.getByTestId("active-cell")).toHaveText("B1");
+    expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("hello");
+    await expect(editor).toBeHidden();
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe("grid-secondary");
+  });
+
   test("secondary in-cell edits commit on blur when clicking the primary pane", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
