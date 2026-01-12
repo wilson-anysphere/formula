@@ -8,6 +8,20 @@ use crate::functions::{
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{casefold, Array, ErrorKind, Lambda, Value};
 
+fn checked_array_cells(rows: usize, cols: usize) -> Result<usize, ErrorKind> {
+    let total = rows.checked_mul(cols).ok_or(ErrorKind::Spill)?;
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Err(ErrorKind::Spill);
+    }
+    Ok(total)
+}
+
+fn try_vec_with_capacity<T>(len: usize) -> Result<Vec<T>, ErrorKind> {
+    let mut out = Vec::new();
+    out.try_reserve_exact(len).map_err(|_| ErrorKind::Num)?;
+    Ok(out)
+}
+
 inventory::submit! {
     FunctionSpec {
         name: "FILTER",
@@ -40,7 +54,10 @@ fn filter_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     if filters_rows {
-        let mut keep = Vec::with_capacity(array.rows);
+        let mut keep = match try_vec_with_capacity::<bool>(array.rows) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
         for row in 0..array.rows {
             let v = include.get(row, 0).cloned().unwrap_or(Value::Blank);
             match v.coerce_to_bool_with_ctx(ctx) {
@@ -54,7 +71,14 @@ fn filter_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             return filter_if_empty(ctx, args.get(2));
         }
 
-        let mut values = Vec::with_capacity(out_rows.saturating_mul(array.cols));
+        let total = match checked_array_cells(out_rows, array.cols) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let mut values = match try_vec_with_capacity::<Value>(total) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
         for (row, keep_row) in keep.into_iter().enumerate() {
             if !keep_row {
                 continue;
@@ -68,7 +92,10 @@ fn filter_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     // Filter columns.
-    let mut keep = Vec::with_capacity(array.cols);
+    let mut keep = match try_vec_with_capacity::<bool>(array.cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for col in 0..array.cols {
         let v = include.get(0, col).cloned().unwrap_or(Value::Blank);
         match v.coerce_to_bool_with_ctx(ctx) {
@@ -82,7 +109,14 @@ fn filter_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return filter_if_empty(ctx, args.get(2));
     }
 
-    let mut values = Vec::with_capacity(array.rows.saturating_mul(out_cols));
+    let total = match checked_array_cells(array.rows, out_cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut values = match try_vec_with_capacity::<Value>(total) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for row in 0..array.rows {
         for (col, keep_col) in keep.iter().copied().enumerate() {
             if keep_col {
@@ -146,9 +180,15 @@ fn sort_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     if by_col {
-        let mut keys: Vec<Vec<SortKeyValue>> = Vec::with_capacity(sort_indices.len());
+        let mut keys: Vec<Vec<SortKeyValue>> = match try_vec_with_capacity(sort_indices.len()) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
         for &row_idx in &sort_indices {
-            let mut out = Vec::with_capacity(array.cols);
+            let mut out: Vec<SortKeyValue> = match try_vec_with_capacity(array.cols) {
+                Ok(v) => v,
+                Err(e) => return Value::Error(e),
+            };
             for col in 0..array.cols {
                 out.push(sort_key(array.get(row_idx, col).unwrap_or(&Value::Blank)));
             }
@@ -166,7 +206,14 @@ fn sort_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             a.cmp(&b)
         });
 
-        let mut values = Vec::with_capacity(array.rows.saturating_mul(array.cols));
+        let total = match checked_array_cells(array.rows, array.cols) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let mut values = match try_vec_with_capacity::<Value>(total) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
         for row in 0..array.rows {
             for &col in &order {
                 values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
@@ -176,9 +223,15 @@ fn sort_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Array(Array::new(array.rows, array.cols, values));
     }
 
-    let mut keys: Vec<Vec<SortKeyValue>> = Vec::with_capacity(sort_indices.len());
+    let mut keys: Vec<Vec<SortKeyValue>> = match try_vec_with_capacity(sort_indices.len()) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for &col_idx in &sort_indices {
-        let mut out = Vec::with_capacity(array.rows);
+        let mut out: Vec<SortKeyValue> = match try_vec_with_capacity(array.rows) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
         for row in 0..array.rows {
             out.push(sort_key(array.get(row, col_idx).unwrap_or(&Value::Blank)));
         }
@@ -196,7 +249,14 @@ fn sort_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         a.cmp(&b)
     });
 
-    let mut values = Vec::with_capacity(array.rows.saturating_mul(array.cols));
+    let total = match checked_array_cells(array.rows, array.cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut values = match try_vec_with_capacity::<Value>(total) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for &row in &order {
         for col in 0..array.cols {
             values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
@@ -310,12 +370,18 @@ fn sortby_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
     let axis_len = if sort_rows { array.rows } else { array.cols };
 
-    let mut keys: Vec<Vec<SortKeyValue>> = Vec::with_capacity(key_arrays.len());
+    let mut keys: Vec<Vec<SortKeyValue>> = match try_vec_with_capacity(key_arrays.len()) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for key in key_arrays {
         let Some(orientation) = vector_orientation(&key, axis_len) else {
             return Value::Error(ErrorKind::Value);
         };
-        let mut out = Vec::with_capacity(axis_len);
+        let mut out: Vec<SortKeyValue> = match try_vec_with_capacity(axis_len) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
         for idx in 0..axis_len {
             let v = match orientation {
                 VectorOrientation::Row => key.get(0, idx).unwrap_or(&Value::Blank),
@@ -337,7 +403,14 @@ fn sortby_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         a.cmp(&b)
     });
 
-    let mut values = Vec::with_capacity(array.rows.saturating_mul(array.cols));
+    let total = match checked_array_cells(array.rows, array.cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut values = match try_vec_with_capacity::<Value>(total) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     if sort_rows {
         for &row in &order {
             for col in 0..array.cols {
@@ -507,10 +580,16 @@ fn canonical_number_bits(n: f64) -> u64 {
 
 fn unique_rows(array: Array, exactly_once: bool) -> Value {
     let mut counts: HashMap<Vec<UniqueKeyCell>, usize> = HashMap::new();
-    let mut keys_by_row: Vec<Vec<UniqueKeyCell>> = Vec::with_capacity(array.rows);
+    let mut keys_by_row: Vec<Vec<UniqueKeyCell>> = match try_vec_with_capacity(array.rows) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
 
     for row in 0..array.rows {
-        let mut key = Vec::with_capacity(array.cols);
+        let mut key: Vec<UniqueKeyCell> = match try_vec_with_capacity(array.cols) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
         for col in 0..array.cols {
             let v = array.get(row, col).unwrap_or(&Value::Blank);
             key.push(unique_key_cell(v));
@@ -540,7 +619,14 @@ fn unique_rows(array: Array, exactly_once: bool) -> Value {
     }
 
     let out_rows = selected.len();
-    let mut values = Vec::with_capacity(out_rows.saturating_mul(array.cols));
+    let total = match checked_array_cells(out_rows, array.cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut values = match try_vec_with_capacity::<Value>(total) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for row in selected {
         for col in 0..array.cols {
             values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
@@ -552,10 +638,16 @@ fn unique_rows(array: Array, exactly_once: bool) -> Value {
 
 fn unique_columns(array: Array, exactly_once: bool) -> Value {
     let mut counts: HashMap<Vec<UniqueKeyCell>, usize> = HashMap::new();
-    let mut keys_by_col: Vec<Vec<UniqueKeyCell>> = Vec::with_capacity(array.cols);
+    let mut keys_by_col: Vec<Vec<UniqueKeyCell>> = match try_vec_with_capacity(array.cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
 
     for col in 0..array.cols {
-        let mut key = Vec::with_capacity(array.rows);
+        let mut key: Vec<UniqueKeyCell> = match try_vec_with_capacity(array.rows) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
         for row in 0..array.rows {
             let v = array.get(row, col).unwrap_or(&Value::Blank);
             key.push(unique_key_cell(v));
@@ -584,7 +676,14 @@ fn unique_columns(array: Array, exactly_once: bool) -> Value {
         return Value::Error(ErrorKind::Calc);
     }
 
-    let mut values = Vec::with_capacity(array.rows.saturating_mul(selected.len()));
+    let total = match checked_array_cells(array.rows, selected.len()) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut values = match try_vec_with_capacity::<Value>(total) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for row in 0..array.rows {
         for &col in &selected {
             values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
@@ -635,7 +734,14 @@ fn take_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Calc);
     }
 
-    let mut values = Vec::with_capacity(out_rows.saturating_mul(out_cols));
+    let total = match checked_array_cells(out_rows, out_cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut values = match try_vec_with_capacity::<Value>(total) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for r in 0..out_rows {
         for c in 0..out_cols {
             values.push(
@@ -692,7 +798,14 @@ fn drop_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Calc);
     }
 
-    let mut values = Vec::with_capacity(out_rows.saturating_mul(out_cols));
+    let total = match checked_array_cells(out_rows, out_cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut values = match try_vec_with_capacity::<Value>(total) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for r in 0..out_rows {
         for c in 0..out_cols {
             values.push(
@@ -739,7 +852,14 @@ fn choosecols_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         cols.push(col);
     }
 
-    let mut values = Vec::with_capacity(array.rows.saturating_mul(cols.len()));
+    let total = match checked_array_cells(array.rows, cols.len()) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut values = match try_vec_with_capacity::<Value>(total) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for row in 0..array.rows {
         for &col in &cols {
             values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
@@ -781,7 +901,14 @@ fn chooserows_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         rows.push(row);
     }
 
-    let mut values = Vec::with_capacity(rows.len().saturating_mul(array.cols));
+    let total = match checked_array_cells(rows.len(), array.cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut values = match try_vec_with_capacity::<Value>(total) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for &row in &rows {
         for col in 0..array.cols {
             values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
@@ -818,7 +945,15 @@ fn hstack_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let out_rows = arrays.iter().map(|a| a.rows).max().unwrap_or(0);
     let out_cols: usize = arrays.iter().map(|a| a.cols).sum();
 
-    let mut values = vec![Value::Error(ErrorKind::NA); out_rows.saturating_mul(out_cols)];
+    let total = match checked_array_cells(out_rows, out_cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut values = match try_vec_with_capacity::<Value>(total) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    values.resize(total, Value::Error(ErrorKind::NA));
     let mut col_offset = 0usize;
     for array in arrays {
         for row in 0..array.rows {
@@ -864,7 +999,15 @@ fn vstack_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let out_rows: usize = arrays.iter().map(|a| a.rows).sum();
     let out_cols = arrays.iter().map(|a| a.cols).max().unwrap_or(0);
 
-    let mut values = vec![Value::Error(ErrorKind::NA); out_rows.saturating_mul(out_cols)];
+    let total = match checked_array_cells(out_rows, out_cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut values = match try_vec_with_capacity::<Value>(total) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    values.resize(total, Value::Error(ErrorKind::NA));
     let mut row_offset = 0usize;
     for array in arrays {
         for row in 0..array.rows {
@@ -1020,6 +1163,9 @@ fn randarray_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Some(v) => v,
         None => return Value::Error(ErrorKind::Num),
     };
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
 
     // Use a fallible reservation to avoid aborting the process if a user asks for an
     // unreasonably large array (or if memory is exhausted).
@@ -1137,8 +1283,14 @@ fn expand_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Some(v) => v,
         None => return Value::Error(ErrorKind::Num),
     };
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
 
-    let mut values = Vec::with_capacity(total);
+    let mut values = Vec::new();
+    if values.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
     for row in 0..out_rows {
         for col in 0..out_cols {
             if row < array.rows && col < array.cols {
@@ -1197,7 +1349,14 @@ fn map_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let call = prepare_lambda_call(&call_name, arrays.len());
 
-    let mut out = Vec::with_capacity(out_rows.saturating_mul(out_cols));
+    let total = match checked_array_cells(out_rows, out_cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut out = match try_vec_with_capacity::<Value>(total) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for row in 0..out_rows {
         for col in 0..out_cols {
             let mut arg_values = Vec::with_capacity(arrays.len());
@@ -1249,9 +1408,15 @@ fn byrow_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     let call = prepare_lambda_call(&call_name, 1);
-    let mut values = Vec::with_capacity(array.rows);
+    let mut values = match try_vec_with_capacity::<Value>(array.rows) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for row in 0..array.rows {
-        let mut row_values = Vec::with_capacity(array.cols);
+        let mut row_values = match try_vec_with_capacity::<Value>(array.cols) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
         for col in 0..array.cols {
             row_values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
         }
@@ -1293,9 +1458,15 @@ fn bycol_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     let call = prepare_lambda_call(&call_name, 1);
-    let mut values = Vec::with_capacity(array.cols);
+    let mut values = match try_vec_with_capacity::<Value>(array.cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for col in 0..array.cols {
-        let mut col_values = Vec::with_capacity(array.rows);
+        let mut col_values = match try_vec_with_capacity::<Value>(array.rows) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
         for row in 0..array.rows {
             col_values.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
         }
@@ -1355,9 +1526,15 @@ fn makearray_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Some(v) => v,
         None => return Value::Error(ErrorKind::Num),
     };
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
 
     let call = prepare_lambda_call(&call_name, 2);
-    let mut values = Vec::with_capacity(total);
+    let mut values = Vec::new();
+    if values.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
     for row in 0..rows_usize {
         for col in 0..cols_usize {
             let arg_values = [
@@ -1460,7 +1637,10 @@ fn scan_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     let call = prepare_lambda_call(&call_name, 2);
-    let mut values = Vec::with_capacity(array.values.len());
+    let mut values = match try_vec_with_capacity::<Value>(array.values.len()) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     match initial {
         Some(initial_expr) => {
             let initial = eval_scalar_arg(ctx, initial_expr);
@@ -1515,7 +1695,8 @@ pub(super) fn arg_value_to_array(
             ctx.record_reference(&r);
             let rows = (r.end.row - r.start.row + 1) as usize;
             let cols = (r.end.col - r.start.col + 1) as usize;
-            let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+            let total = checked_array_cells(rows, cols)?;
+            let mut values = try_vec_with_capacity::<Value>(total)?;
             for row in r.start.row..=r.end.row {
                 for col in r.start.col..=r.end.col {
                     values.push(ctx.get_cell_value(&r.sheet_id, CellAddr { row, col }));
@@ -1689,7 +1870,7 @@ fn sort_vector_indices(
     }
 
     let max_index = i64::try_from(key_count).unwrap_or(i64::MAX);
-    let mut indices = Vec::with_capacity(arr.values.len());
+    let mut indices = try_vec_with_capacity::<usize>(arr.values.len())?;
     for v in &arr.values {
         let idx = v.coerce_to_i64_with_ctx(ctx)?;
         if idx < 1 || idx > max_index {
@@ -1720,7 +1901,7 @@ fn sort_vector_orders(
         return Err(ErrorKind::Value);
     }
 
-    let mut orders = Vec::with_capacity(arr.values.len());
+    let mut orders = try_vec_with_capacity::<bool>(arr.values.len())?;
     for v in &arr.values {
         orders.push(sort_descending_from_value(ctx, v)?);
     }
@@ -1883,7 +2064,14 @@ fn to_vector_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr], to_col: bool) 
         Err(e) => return Value::Error(e),
     };
 
-    let mut values = Vec::with_capacity(array.rows.saturating_mul(array.cols));
+    let total = match checked_array_cells(array.rows, array.cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut values = match try_vec_with_capacity::<Value>(total) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     let push_cell = |v: Value, out: &mut Vec<Value>| {
         if ignore_blanks && matches!(v, Value::Blank) {
             return;
@@ -1949,7 +2137,14 @@ fn wrap_vector_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr], wrap_rows: b
         Err(e) => return Value::Error(e),
     };
 
-    let mut flat = Vec::with_capacity(array.rows.saturating_mul(array.cols));
+    let total = match checked_array_cells(array.rows, array.cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut flat = match try_vec_with_capacity::<Value>(total) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for row in 0..array.rows {
         for col in 0..array.cols {
             flat.push(array.get(row, col).cloned().unwrap_or(Value::Blank));
@@ -1964,8 +2159,15 @@ fn wrap_vector_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr], wrap_rows: b
         let out_cols = wrap_count;
         let out_rows = flat.len().div_ceil(out_cols);
 
-        let mut values = Vec::with_capacity(out_rows.saturating_mul(out_cols));
-        for idx in 0..out_rows.saturating_mul(out_cols) {
+        let total = match checked_array_cells(out_rows, out_cols) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let mut values = match try_vec_with_capacity::<Value>(total) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        for idx in 0..total {
             if let Some(v) = flat.get(idx).cloned() {
                 values.push(v);
             } else {
@@ -1979,7 +2181,14 @@ fn wrap_vector_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr], wrap_rows: b
     let out_rows = wrap_count;
     let out_cols = flat.len().div_ceil(out_rows);
 
-    let mut values = Vec::with_capacity(out_rows.saturating_mul(out_cols));
+    let total = match checked_array_cells(out_rows, out_cols) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let mut values = match try_vec_with_capacity::<Value>(total) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     for row in 0..out_rows {
         for col in 0..out_cols {
             let idx = col.saturating_mul(out_rows).saturating_add(row);
