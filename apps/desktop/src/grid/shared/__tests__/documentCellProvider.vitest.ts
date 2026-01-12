@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DocumentController } from "../../../document/documentController.js";
 import { DocumentCellProvider } from "../documentCellProvider.js";
@@ -181,5 +181,47 @@ describe("DocumentCellProvider formatting integration", () => {
         endCol: headerCols + 1
       }
     });
+  });
+
+  it("does not clear other sheet caches when a large invalidation occurs", () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", "one");
+    doc.setCellValue("Sheet2", "A1", "two");
+
+    let activeSheet = "Sheet1";
+
+    const headerRows = 1;
+    const headerCols = 1;
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => activeSheet,
+      headerRows,
+      headerCols,
+      rowCount: 10 + headerRows,
+      colCount: 10 + headerCols,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const spy = vi.spyOn(doc, "getCell");
+
+    expect(provider.getCell(headerRows, headerCols)?.value).toBe("one");
+    activeSheet = "Sheet2";
+    expect(provider.getCell(headerRows, headerCols)?.value).toBe("two");
+    expect(spy).toHaveBeenCalledTimes(2);
+
+    // This is large enough to trigger the provider's "large invalidation" path.
+    activeSheet = "Sheet1";
+    provider.invalidateDocCells({ startRow: 0, endRow: 50, startCol: 0, endCol: 50 });
+
+    // Sheet1 cache is cleared.
+    expect(provider.getCell(headerRows, headerCols)?.value).toBe("one");
+    expect(spy).toHaveBeenCalledTimes(3);
+
+    // Sheet2 cache remains intact.
+    activeSheet = "Sheet2";
+    expect(provider.getCell(headerRows, headerCols)?.value).toBe("two");
+    expect(spy).toHaveBeenCalledTimes(3);
   });
 });
