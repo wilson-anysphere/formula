@@ -15,6 +15,9 @@
   targeted edge cases (like odd-coupon bonds) without regenerating the entire dataset.
 
   Note: the subset corpus should reuse canonical `caseId`s from `tests/compatibility/excel-oracle/cases.json`.
+  When patching real Excel results, `tools/excel-oracle/update_pinned_dataset.py` records a compact
+  provenance entry under `source.patches` in the pinned dataset (Excel version/build/OS + subset
+  corpus hash) so it’s clear which case IDs have been overwritten with real Excel output.
 
 .PARAMETER SubsetCasesPath
   Path to a subset corpus (default: tools/excel-oracle/odd_coupon_long_stub_cases.json).
