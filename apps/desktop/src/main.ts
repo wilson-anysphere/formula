@@ -477,6 +477,36 @@ function openColorPicker(
   );
   input.click();
 }
+
+const FONT_SIZE_STEPS = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72];
+
+function activeCellFontSizePt(): number {
+  const sheetId = app.getCurrentSheetId();
+  const cell = app.getActiveCell();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const docAny = app.getDocument() as any;
+  const state = docAny.getCell?.(sheetId, cell);
+  const style = docAny.styleTable?.get?.(state?.styleId ?? 0) ?? {};
+  const size = style.font?.size;
+  return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 11;
+}
+
+function stepFontSize(current: number, direction: "increase" | "decrease"): number {
+  const value = Number(current);
+  const resolved = Number.isFinite(value) && value > 0 ? value : 11;
+  if (direction === "increase") {
+    for (const step of FONT_SIZE_STEPS) {
+      if (step > resolved + 1e-6) return step;
+    }
+    return resolved;
+  }
+
+  for (let i = FONT_SIZE_STEPS.length - 1; i >= 0; i -= 1) {
+    const step = FONT_SIZE_STEPS[i]!;
+    if (step < resolved - 1e-6) return step;
+  }
+  return resolved;
+}
 // Panels persist state keyed by a workbook/document identifier. For file-backed workbooks we use
 // their on-disk path; for unsaved sessions we generate a random session id so distinct new
 // workbooks don't collide.
@@ -4409,6 +4439,24 @@ mountRibbon(ribbonRoot, {
           applyToSelection("Font size", (sheetId, ranges) => setFontSize(doc, sheetId, ranges, picked));
         })();
         return;
+
+      case "home.font.increaseFont": {
+        const current = activeCellFontSizePt();
+        const next = stepFontSize(current, "increase");
+        if (next !== current) {
+          applyToSelection("Font size", (sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
+        }
+        return;
+      }
+
+      case "home.font.decreaseFont": {
+        const current = activeCellFontSizePt();
+        const next = stepFontSize(current, "decrease");
+        if (next !== current) {
+          applyToSelection("Font size", (sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
+        }
+        return;
+      }
 
       case "home.alignment.alignLeft":
         applyToSelection("Align left", (sheetId, ranges) => setHorizontalAlign(app.getDocument(), sheetId, ranges, "left"));
