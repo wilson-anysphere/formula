@@ -115,16 +115,22 @@ Definition:
 - `PCD` is the coupon date `<= settlement` in the maturity-anchored schedule.
 - `NCD` is the coupon date `> settlement` in the maturity-anchored schedule.
 
-Reference pseudocode (month-stepping backward from maturity):
+Implementation note (maturity-anchored, non-drifting):
+
+- Because `EDATE` clamps to the end of month when the target month is shorter, *iteratively*
+  stepping `EDATE(EDATE(...), ...)` can drift the day-of-month (e.g. 31st → 30th). Excel’s `COUP*`
+  functions behave as if each coupon date is computed as an offset from `maturity`, i.e.
+  `EDATE(maturity, -k*m)`.
+
+Reference pseudocode (scan coupon periods back from `maturity`):
 
 ```text
 m = 12 / frequency
-ncd = maturity
-loop:
-  pcd = EDATE(ncd, -m)
+for n in 1..:
+  pcd = EDATE(maturity, -(n*m))
+  ncd = if n == 1 then maturity else EDATE(maturity, -((n-1)*m))
   if pcd <= settlement < ncd:
-     return (pcd, ncd)
-  ncd = pcd
+     return (pcd, ncd, n)  # n is COUPNUM
 ```
 
 This naturally supports:
@@ -134,18 +140,8 @@ This naturally supports:
 
 ### Computing `COUPNUM` (number of remaining coupons)
 
-Once `(PCD, NCD)` is known, `COUPNUM` is the count of coupon dates `>= NCD` and `<= maturity`, stepping forward by `m` months.
-
-Reference pseudocode:
-
-```text
-count = 0
-d = NCD
-while d <= maturity:
-  count += 1
-  d = EDATE(d, +m)
-return count
-```
+In a maturity-anchored implementation, `COUPNUM` is the same `n` returned by the `(PCD, NCD)` scan
+above: the number of remaining coupon payment dates from `NCD` through `maturity`, inclusive.
 
 This definition matches the needs of `PRICE`/`YIELD`/`DURATION` where “remaining coupon payments” includes the maturity payment.
 
