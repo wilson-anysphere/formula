@@ -1610,6 +1610,8 @@ window.addEventListener("keydown", (e) => {
       return;
     }
     if (keyLower === "i") {
+      // Cmd+I is reserved for toggling the AI sidebar. Only bind italic to Ctrl+I.
+      if (!e.ctrlKey || e.metaKey) return;
       e.preventDefault();
       applyFormattingToSelection("Italic", (doc, sheetId, ranges) => toggleItalic(doc, sheetId, ranges));
       return;

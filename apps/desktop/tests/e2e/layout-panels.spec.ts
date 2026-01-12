@@ -137,7 +137,7 @@ test.describe("dockable panels layout persistence", () => {
     await expect(page.getByTestId("panel-branchManager")).toHaveCount(0);
   });
 
-  test("Ctrl/Cmd+Shift+A toggles AI chat panel open/closed", async ({ page }) => {
+  test("Cmd+I toggles AI chat panel open/closed", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
     await page.reload();
@@ -147,14 +147,14 @@ test.describe("dockable panels layout persistence", () => {
     // Avoid clicking the shared-grid corner header (select-all), which can be slow/flaky under Playwright.
     await page.locator("#grid").focus();
 
-    await page.keyboard.press("ControlOrMeta+Shift+A");
+    await page.keyboard.press("Meta+I");
     await expect(page.getByTestId("dock-right").getByTestId("panel-aiChat")).toBeVisible();
 
-    await page.keyboard.press("ControlOrMeta+Shift+A");
+    await page.keyboard.press("Meta+I");
     await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
   });
 
-  test("Ctrl/Cmd+Shift+A does not toggle AI chat while typing in the formula bar", async ({ page }) => {
+  test("Cmd+I does not toggle AI chat while typing in the formula bar", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
     await page.reload();
@@ -165,7 +165,7 @@ test.describe("dockable panels layout persistence", () => {
     await expect(page.getByTestId("formula-input")).toBeVisible();
     await expect(page.getByTestId("formula-input")).toBeFocused();
 
-    await page.keyboard.press("ControlOrMeta+Shift+A");
+    await page.keyboard.press("Meta+I");
     await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
   });
 });
