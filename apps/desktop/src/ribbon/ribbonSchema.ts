@@ -1682,13 +1682,13 @@ export const defaultRibbonSchema: RibbonSchema = {
           id: "data.sortFilter",
           label: "Sort & Filter",
           buttons: [
-            { id: "data.sortFilter.sortAtoZ", label: "Sort A to Z", ariaLabel: "Sort A to Z", icon: "A→Z" },
-            { id: "data.sortFilter.sortZtoA", label: "Sort Z to A", ariaLabel: "Sort Z to A", icon: "Z→A" },
+            { id: "data.sortFilter.sortAtoZ", label: "Sort A to Z", ariaLabel: "Sort A to Z", iconId: "sort" },
+            { id: "data.sortFilter.sortZtoA", label: "Sort Z to A", ariaLabel: "Sort Z to A", iconId: "sort" },
             {
               id: "data.sortFilter.sort",
               label: "Sort",
               ariaLabel: "Sort",
-              icon: "⇅",
+              iconId: "sort",
               kind: "dropdown",
               menuItems: [
                 { id: "data.sortFilter.sort.customSort", label: "Custom Sort…", ariaLabel: "Custom Sort", iconId: "settings" },
@@ -1696,7 +1696,7 @@ export const defaultRibbonSchema: RibbonSchema = {
                 { id: "data.sortFilter.sort.sortZtoA", label: "Sort Z to A", ariaLabel: "Sort Z to A", iconId: "sort" },
               ],
             },
-            { id: "data.sortFilter.filter", label: "Filter", ariaLabel: "Filter", icon: "⏷", kind: "toggle" },
+            { id: "data.sortFilter.filter", label: "Filter", ariaLabel: "Filter", iconId: "filter", kind: "toggle" },
             { id: "data.sortFilter.clear", label: "Clear", ariaLabel: "Clear", iconId: "close" },
             { id: "data.sortFilter.reapply", label: "Reapply", ariaLabel: "Reapply", iconId: "refresh" },
             {
@@ -1720,10 +1720,10 @@ export const defaultRibbonSchema: RibbonSchema = {
               id: "data.dataTools.textToColumns",
               label: "Text to Columns",
               ariaLabel: "Text to Columns",
-              icon: "⇥",
+              iconId: "insertColumns",
               kind: "dropdown",
               menuItems: [
-                { id: "data.dataTools.textToColumns", label: "Text to Columns…", ariaLabel: "Text to Columns", icon: "⇥" },
+                { id: "data.dataTools.textToColumns", label: "Text to Columns…", ariaLabel: "Text to Columns", iconId: "insertColumns" },
                 { id: "data.dataTools.textToColumns.reapply", label: "Reapply", ariaLabel: "Reapply", iconId: "refresh" },
               ],
             },
@@ -2240,8 +2240,8 @@ export const defaultRibbonSchema: RibbonSchema = {
             { id: "view.window.split", label: "Split", ariaLabel: "Split", iconId: "divide", kind: "toggle" },
             { id: "view.window.hide", label: "Hide", ariaLabel: "Hide", iconId: "eyeOff" },
             { id: "view.window.unhide", label: "Unhide", ariaLabel: "Unhide", iconId: "eye" },
-            { id: "view.window.viewSideBySide", label: "View Side by Side", ariaLabel: "View Side by Side", icon: "⧉", kind: "toggle" },
-            { id: "view.window.synchronousScrolling", label: "Synchronous Scrolling", ariaLabel: "Synchronous Scrolling", icon: "⇵", kind: "toggle" },
+            { id: "view.window.viewSideBySide", label: "View Side by Side", ariaLabel: "View Side by Side", iconId: "sideBySide", kind: "toggle" },
+            { id: "view.window.synchronousScrolling", label: "Synchronous Scrolling", ariaLabel: "Synchronous Scrolling", iconId: "syncScroll", kind: "toggle" },
             { id: "view.window.resetWindowPosition", label: "Reset Window Position", ariaLabel: "Reset Window Position", iconId: "undo" },
             {
               id: "view.window.switchWindows",
