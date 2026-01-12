@@ -1,6 +1,6 @@
 use std::io::{Cursor, Read, Write};
 
-use formula_model::CellRef;
+use formula_model::{CellRef, CellValue};
 use formula_xlsx::{
     patch_xlsx_streaming_workbook_cell_patches, CellPatch, WorkbookCellPatches, XlsxPackage,
 };
@@ -209,6 +209,70 @@ fn in_memory_noop_clear_does_not_insert_cell_or_expand_dimension(
         pkg.part("xl/worksheets/sheet1.xml").unwrap(),
         original_sheet.as_slice(),
         "expected in-memory patcher to preserve sheet XML bytes for a no-op clear patch"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn streaming_empty_formula_is_treated_as_noop_clear_for_missing_cell(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_minimal_a1_fixture();
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("Z100")?,
+        CellPatch::Set {
+            value: CellValue::Empty,
+            formula: Some("=".to_string()),
+            style: None,
+        },
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming_workbook_cell_patches(Cursor::new(bytes.clone()), &mut out, &patches)?;
+
+    let sheet_xml = read_sheet1_xml_from_xlsx(out.get_ref());
+    assert!(!has_cell(&sheet_xml, "Z100"));
+    assert!(!has_row(&sheet_xml, "100"));
+    assert_eq!(dimension_ref(&sheet_xml), "A1");
+    assert_eq!(
+        out.get_ref().as_slice(),
+        bytes.as_slice(),
+        "expected streaming patcher to leave the zip unchanged for a no-op empty-formula patch"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn in_memory_empty_formula_is_treated_as_noop_clear_for_missing_cell(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_minimal_a1_fixture();
+    let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+    let original_sheet = pkg.part("xl/worksheets/sheet1.xml").unwrap().to_vec();
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("Z100")?,
+        CellPatch::Set {
+            value: CellValue::Empty,
+            formula: Some("=".to_string()),
+            style: None,
+        },
+    );
+    pkg.apply_cell_patches(&patches)?;
+
+    let sheet_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
+    assert!(!has_cell(sheet_xml, "Z100"));
+    assert!(!has_row(sheet_xml, "100"));
+    assert_eq!(dimension_ref(sheet_xml), "A1");
+    assert_eq!(
+        pkg.part("xl/worksheets/sheet1.xml").unwrap(),
+        original_sheet.as_slice(),
+        "expected in-memory patcher to preserve sheet XML bytes for a no-op empty-formula patch"
     );
 
     Ok(())

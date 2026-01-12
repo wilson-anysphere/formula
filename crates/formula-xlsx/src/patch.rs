@@ -1532,6 +1532,10 @@ fn write_cell_patch(
         CellPatch::Clear { .. } => (None, None),
         CellPatch::Set { value, formula, .. } => (Some(value), formula.as_deref()),
     };
+    let formula = match formula {
+        Some(formula) if formula_is_material(Some(formula)) => Some(formula),
+        _ => None,
+    };
 
     let (new_t, body_kind) =
         cell_representation_for_patch(value, formula, existing_t, shared_strings)?;
@@ -1579,13 +1583,10 @@ fn write_cell_patch(
 }
 
 fn patch_has_formula(patch: &CellPatch) -> bool {
-    matches!(
-        patch,
-        CellPatch::Set {
-            formula: Some(_),
-            ..
-        }
-    )
+    match patch {
+        CellPatch::Set { formula, .. } => formula_is_material(formula.as_deref()),
+        _ => false,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1628,6 +1629,10 @@ fn patch_cell_element(
     let (patch_value, patch_formula) = match patch {
         CellPatch::Clear { .. } => (None, None),
         CellPatch::Set { value, formula, .. } => (Some(value), formula.as_deref()),
+    };
+    let patch_formula = match patch_formula {
+        Some(formula) if formula_is_material(Some(formula)) => Some(formula),
+        _ => None,
     };
 
     let cell_prefix = element_prefix(original_start.name().as_ref()).map(|p| p.to_vec());
@@ -1916,6 +1921,13 @@ fn extract_inline_string_text(
     Ok((out, events.len()))
 }
 
+fn formula_is_material(formula: Option<&str>) -> bool {
+    let Some(formula) = formula else {
+        return false;
+    };
+    !crate::formula_text::normalize_display_formula(formula).is_empty()
+}
+
 fn formula_to_file_text(formula: &str) -> String {
     let display = crate::formula_text::normalize_display_formula(formula);
     crate::formula_text::add_xlfn_prefixes(&display)
@@ -1953,6 +1965,10 @@ fn cell_representation_for_patch(
     existing_t: Option<&str>,
     shared_strings: &mut Option<&mut SharedStringsState>,
 ) -> Result<(Option<String>, CellBodyKind), XlsxError> {
+    let formula = match formula {
+        Some(formula) if formula_is_material(Some(formula)) => Some(formula),
+        _ => None,
+    };
     let Some(value) = value else {
         return Ok((None, CellBodyKind::None));
     };

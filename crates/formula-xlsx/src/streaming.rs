@@ -125,7 +125,9 @@ pub fn patch_xlsx_streaming<R: Read + Seek, W: Write + Seek>(
     }
 
     let mut archive = ZipArchive::new(input)?;
-    let mut formula_changed = cell_patches.iter().any(|p| p.formula.is_some());
+    let mut formula_changed = cell_patches
+        .iter()
+        .any(|p| formula_is_material(p.formula.as_deref()));
     if !formula_changed {
         formula_changed =
             streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
@@ -212,7 +214,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
                 CellPatch::Clear { .. } => (CellValue::Empty, None),
                 CellPatch::Set { value, formula, .. } => (value.clone(), formula.clone()),
             };
-            saw_formula_patch |= formula.is_some();
+            saw_formula_patch |= formula_is_material(formula.as_deref());
             let xf_index = patch.style_index();
             patches_by_part
                 .entry(worksheet_part.clone())
@@ -337,7 +339,7 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles<R: Read + Seek, W:
                 CellPatch::Clear { .. } => (CellValue::Empty, None),
                 CellPatch::Set { value, formula, .. } => (value.clone(), formula.clone()),
             };
-            saw_formula_patch |= formula.is_some();
+            saw_formula_patch |= formula_is_material(formula.as_deref());
 
             let xf_index = if let Some(style_id) = patch.style_id() {
                 if style_id == 0 {
@@ -970,7 +972,7 @@ fn patch_wants_shared_string(
 
             // Preserve streaming patcher's historical behavior for formula string results: use
             // `t="str"` unless the original cell already used shared strings.
-            if patch.formula.is_some() {
+            if formula_is_material(patch.formula.as_deref()) {
                 return false;
             }
 
@@ -1165,7 +1167,7 @@ fn streaming_patches_remove_existing_formulas<R: Read + Seek>(
     for (worksheet_part, patches) in patches_by_part {
         let mut target_cells: HashSet<String> = HashSet::new();
         for patch in patches {
-            if patch.formula.is_none() {
+            if !formula_is_material(patch.formula.as_deref()) {
                 target_cells.insert(patch.cell.to_a1());
             }
         }
@@ -2107,7 +2109,10 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     cell_ref: &CellRef,
     patch: &CellPatchInternal,
 ) -> Result<(), StreamingPatchError> {
-    let patch_formula = patch.formula.as_deref();
+    let patch_formula = match patch.formula.as_deref() {
+        Some(formula) if formula_is_material(Some(formula)) => Some(formula),
+        _ => None,
+    };
     let mut existing_t: Option<String> = None;
     let style_override = patch.xf_index;
 
@@ -2445,7 +2450,10 @@ fn write_patched_cell<W: Write>(
     patch: &CellPatchInternal,
     prefix: Option<&str>,
 ) -> Result<(), StreamingPatchError> {
-    let patch_formula = patch.formula.as_deref();
+    let patch_formula = match patch.formula.as_deref() {
+        Some(formula) if formula_is_material(Some(formula)) => Some(formula),
+        _ => None,
+    };
     let mut existing_t: Option<String> = None;
     let shared_string_idx = patch.shared_string_idx;
 
@@ -2566,7 +2574,7 @@ fn cell_representation(
                 return Ok((Some("s".to_string()), CellBodyKind::V(idx.to_string())));
             }
 
-            if formula.is_some() {
+            if formula_is_material(formula) {
                 Ok((Some("str".to_string()), CellBodyKind::V(s.clone())))
             } else {
                 Ok((
