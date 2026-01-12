@@ -381,6 +381,64 @@ let secondaryGridView: SecondaryGridView | null = null;
 type SheetActivatedEvent = { sheet: { id: string; name: string } };
 const sheetActivatedListeners = new Set<(event: SheetActivatedEvent) => void>();
 
+type ExtensionWorkbookLifecycleEvent = {
+  workbook: {
+    name: string;
+    path: string | null;
+    sheets: Array<{ id: string; name: string }>;
+    activeSheet: { id: string; name: string };
+  };
+};
+
+const workbookOpenedEventListeners = new Set<(event: ExtensionWorkbookLifecycleEvent) => void>();
+const beforeSaveEventListeners = new Set<(event: ExtensionWorkbookLifecycleEvent) => void>();
+
+function emitWorkbookOpenedForExtensions(workbook: ExtensionWorkbookLifecycleEvent["workbook"]): void {
+  const event: ExtensionWorkbookLifecycleEvent = { workbook };
+  for (const listener of [...workbookOpenedEventListeners]) {
+    try {
+      listener(event);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function emitBeforeSaveForExtensions(workbook: ExtensionWorkbookLifecycleEvent["workbook"]): void {
+  const event: ExtensionWorkbookLifecycleEvent = { workbook };
+  for (const listener of [...beforeSaveEventListeners]) {
+    try {
+      listener(event);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function getWorkbookSnapshotForExtensions(options: { pathOverride?: string | null } = {}): ExtensionWorkbookLifecycleEvent["workbook"] {
+  const sheetId = app.getCurrentSheetId();
+  const activeSheet = { id: sheetId, name: workbookSheetStore.getName(sheetId) ?? sheetId };
+
+  const storedSheets = workbookSheetStore.listAll();
+  const sheets =
+    storedSheets.length > 0 ? storedSheets.map((sheet) => ({ id: sheet.id, name: sheet.name })) : [{ id: "Sheet1", name: "Sheet1" }];
+
+  const rawPath =
+    Object.prototype.hasOwnProperty.call(options, "pathOverride")
+      ? options.pathOverride
+      : activeWorkbook?.path ?? activeWorkbook?.origin_path ?? null;
+  const trimmedPath = typeof rawPath === "string" ? rawPath.trim() : "";
+  const path = trimmedPath ? trimmedPath : null;
+
+  const name = (() => {
+    const pick = typeof path === "string" && path.trim() !== "" ? path : null;
+    if (!pick) return "Workbook";
+    return pick.split(/[/\\]/).pop() ?? "Workbook";
+  })();
+
+  return { name, path, sheets, activeSheet };
+}
+
 function emitSheetActivated(sheetId: string): void {
   const id = String(sheetId ?? "").trim();
   if (!id) return;
@@ -3768,6 +3826,16 @@ if (
       sheetActivatedListeners.add(handler);
       return () => sheetActivatedListeners.delete(handler);
     },
+    onWorkbookOpened(handler: (event: ExtensionWorkbookLifecycleEvent) => void) {
+      if (typeof handler !== "function") return () => {};
+      workbookOpenedEventListeners.add(handler);
+      return () => workbookOpenedEventListeners.delete(handler);
+    },
+    onBeforeSave(handler: (event: ExtensionWorkbookLifecycleEvent) => void) {
+      if (typeof handler !== "function") return () => {};
+      beforeSaveEventListeners.add(handler);
+      return () => beforeSaveEventListeners.delete(handler);
+    },
     async getSheet(name: string) {
       const sheetId = findSheetIdByName(name);
       if (!sheetId) return undefined;
@@ -4089,7 +4157,7 @@ if (
       //
       // When the workbook has no path, `handleSave()` will prompt for a Save As target.
       // In that scenario we let the desktop save flow notify extensions once a path is
-      // chosen (via `handleSaveAsPath()` calling `host.saveWorkbookAs(...)`) so:
+      // chosen (via `handleSaveAsPath()` emitting the `beforeSave` event) so:
       //   - cancelling the dialog does not emit `beforeSave`
       //   - the `beforeSave` event includes the final path selected by the user
       const notifyExtensions = !activeWorkbook?.path;
@@ -8816,10 +8884,7 @@ async function openWorkbookFromPath(
     await loadWorkbookIntoDocument(activeWorkbook);
     if (options.notifyExtensions !== false) {
       try {
-        // User-initiated workbook opens (file dropped, open-file IPC, etc) bypass the extension API
-        // layer, so manually notify the BrowserExtensionHost so `formula.events.onWorkbookOpened`
-        // fires for any active extensions.
-        extensionHostManagerForE2e?.host.openWorkbook(activeWorkbook.path ?? activeWorkbook.origin_path ?? path);
+        emitWorkbookOpenedForExtensions(getWorkbookSnapshotForExtensions());
       } catch {
         // Ignore extension host errors; workbook open should still succeed.
       }
@@ -8912,7 +8977,7 @@ async function handleSave(options: { notifyExtensions?: boolean; throwOnCancel?:
 
   if (options.notifyExtensions !== false) {
     try {
-      extensionHostManagerForE2e?.host.saveWorkbook();
+      emitBeforeSaveForExtensions(getWorkbookSnapshotForExtensions());
     } catch {
       // Ignore extension host errors; save should still succeed.
     }
@@ -8963,7 +9028,7 @@ async function handleSaveAsPath(
   await drainBackendSync();
   if (options.notifyExtensions !== false) {
     try {
-      extensionHostManagerForE2e?.host.saveWorkbookAs(path);
+      emitBeforeSaveForExtensions(getWorkbookSnapshotForExtensions({ pathOverride: path }));
     } catch {
       // Ignore extension host errors; save should still succeed.
     }
@@ -9044,9 +9109,7 @@ async function handleNewWorkbook(
     await loadWorkbookIntoDocument(activeWorkbook);
     if (options.notifyExtensions !== false) {
       try {
-        // See `openWorkbookFromPath`: new workbook is user-driven (not via extension API), so
-        // notify the extension host directly.
-        extensionHostManagerForE2e?.host.openWorkbook(activeWorkbook.path ?? activeWorkbook.origin_path ?? null);
+        emitWorkbookOpenedForExtensions(getWorkbookSnapshotForExtensions());
       } catch {
         // Ignore extension host errors; new workbook should still succeed.
       }
