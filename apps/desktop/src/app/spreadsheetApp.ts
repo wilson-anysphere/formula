@@ -3428,7 +3428,10 @@ export class SpreadsheetApp {
 
             coordScratch.row = row;
             coordScratch.col = col;
-            const cell = this.document.getCell(this.sheetId, coordScratch);
+            // Avoid `DocumentController.getCell` clones/allocations while scanning coordinates:
+            // we only need read-only access to the stored cell state.
+            const cell = sheetModel.cells.get(`${row},${col}`);
+            if (!cell) continue;
             // Ignore format-only cells (styleId-only).
             const hasContent = cell.value != null || cell.formula != null;
             if (!hasContent) continue;
