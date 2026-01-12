@@ -36,6 +36,9 @@ static CLOSE_REQUEST_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 const OPEN_FILE_EVENT: &str = "open-file";
 const OPEN_FILE_READY_EVENT: &str = "open-file-ready";
 
+const OAUTH_REDIRECT_EVENT: &str = "oauth-redirect";
+const OAUTH_REDIRECT_READY_EVENT: &str = "oauth-redirect-ready";
+
 #[derive(Debug, Default)]
 struct OpenFileState {
     ready: bool,
@@ -43,6 +46,14 @@ struct OpenFileState {
 }
 
 type SharedOpenFileState = Arc<Mutex<OpenFileState>>;
+
+#[derive(Debug, Default)]
+struct OauthRedirectState {
+    ready: bool,
+    pending_urls: Vec<String>,
+}
+
+type SharedOauthRedirectState = Arc<Mutex<OauthRedirectState>>;
 
 type SharedStartupMetrics = Arc<Mutex<StartupMetrics>>;
 
@@ -218,6 +229,21 @@ fn emit_open_file_event(app: &tauri::AppHandle, paths: Vec<String>) {
     }
 }
 
+fn emit_oauth_redirect_event(app: &tauri::AppHandle, url: String) {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+
+    show_main_window(app);
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit(OAUTH_REDIRECT_EVENT, trimmed.to_string());
+    } else {
+        let _ = app.emit(OAUTH_REDIRECT_EVENT, trimmed.to_string());
+    }
+}
+
 fn normalize_open_file_request_paths(paths: Vec<String>) -> Vec<String> {
     // Best-effort de-dupe (avoids double-opens if both argv and macOS open-document events fire).
     let mut seen = HashSet::<String>::new();
@@ -228,6 +254,25 @@ fn normalize_open_file_request_paths(paths: Vec<String>) -> Vec<String> {
         }
         if seen.insert(path.clone()) {
             out.push(path);
+        }
+    }
+    out
+}
+
+fn normalize_oauth_redirect_request_urls(urls: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::<String>::new();
+    let mut out = Vec::new();
+    for url in urls {
+        let trimmed = url.trim().trim_matches('"');
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !trimmed.starts_with("formula://") {
+            continue;
+        }
+        let normalized = trimmed.to_string();
+        if seen.insert(normalized.clone()) {
+            out.push(normalized);
         }
     }
     out
@@ -254,10 +299,44 @@ fn handle_open_file_request(app: &tauri::AppHandle, paths: Vec<String>) {
     }
 }
 
+fn handle_oauth_redirect_request(app: &tauri::AppHandle, urls: Vec<String>) {
+    let urls = normalize_oauth_redirect_request_urls(urls);
+    if urls.is_empty() {
+        return;
+    }
+
+    show_main_window(app);
+
+    let redirect_state = app.state::<SharedOauthRedirectState>().inner().clone();
+    let mut state = redirect_state.lock().unwrap();
+
+    if state.ready {
+        drop(state);
+        for url in urls {
+            emit_oauth_redirect_event(app, url);
+        }
+    } else {
+        state.pending_urls.extend(urls);
+    }
+}
+
 fn extract_open_file_paths(argv: &[String], cwd: Option<&Path>) -> Vec<String> {
     open_file::extract_open_file_paths_from_argv(argv, cwd)
         .into_iter()
         .map(|path| path.to_string_lossy().to_string())
+        .collect()
+}
+
+fn extract_oauth_redirect_urls(argv: &[String]) -> Vec<String> {
+    argv.iter()
+        .filter_map(|arg| {
+            let trimmed = arg.trim().trim_matches('"');
+            if trimmed.starts_with("formula://") {
+                Some(trimmed.to_string())
+            } else {
+                None
+            }
+        })
         .collect()
 }
 
@@ -402,6 +481,7 @@ fn main() {
     ));
 
     let open_file_state: SharedOpenFileState = Arc::new(Mutex::new(OpenFileState::default()));
+    let oauth_redirect_state: SharedOauthRedirectState = Arc::new(Mutex::new(OauthRedirectState::default()));
     let initial_argv: Vec<String> = std::env::args().collect();
     let initial_cwd = std::env::current_dir().ok();
     let initial_paths = normalize_open_file_request_paths(extract_open_file_paths(
@@ -413,6 +493,12 @@ fn main() {
         guard.pending_paths.extend(initial_paths);
     }
 
+    let initial_oauth_urls = normalize_oauth_redirect_request_urls(extract_oauth_redirect_urls(&initial_argv));
+    if !initial_oauth_urls.is_empty() {
+        let mut guard = oauth_redirect_state.lock().unwrap();
+        guard.pending_urls.extend(initial_oauth_urls);
+    }
+
     let app = tauri::Builder::default()
         // Override Tauri's default `asset:` protocol handler to attach COEP-friendly headers.
         // See `asset_protocol.rs` for details.
@@ -422,14 +508,10 @@ fn main() {
             //
             // When an OAuth provider redirects to our custom URI scheme, the OS may attempt to
             // launch a second instance of the application. The single-instance plugin forwards
-            // the argv to the running instance; emit the URL to the frontend so it can resolve
-            // any pending `DesktopOAuthBroker.waitForRedirect(...)` promises.
-            for arg in &argv {
-                let url = arg.trim().trim_matches('"');
-                if url.starts_with("formula://") {
-                    let _ = app.emit("oauth-redirect", url.to_string());
-                }
-            }
+            // the argv to the running instance; queue/emit the URL to the frontend so it can
+            // resolve any pending `DesktopOAuthBroker.waitForRedirect(...)` promises.
+            let oauth_urls = extract_oauth_redirect_urls(&argv);
+            handle_oauth_redirect_request(app, oauth_urls);
 
             // File association / open-with handling.
             let cwd = cwd_from_single_instance_callback(cwd);
@@ -457,6 +539,7 @@ fn main() {
         .manage(state)
         .manage(macro_trust)
         .manage(open_file_state)
+        .manage(oauth_redirect_state)
         .manage(TrayStatusState::default())
         .manage(startup_metrics)
         // NOTE: IPC hardening / command allowlist (Tauri v2 capabilities)
@@ -840,18 +923,6 @@ fn main() {
                 }
             }
 
-            // Best-effort: if the app was launched via a deep-link URL (e.g. the first
-            // instance after an OAuth redirect), forward it to the frontend.
-            //
-            // When the app is already running, `tauri_plugin_single_instance` forwards URLs
-            // to this process via its callback above.
-            for arg in std::env::args() {
-                let url = arg.trim().trim_matches('"');
-                if url.starts_with("formula://") {
-                    let _ = app.emit("oauth-redirect", url.to_string());
-                }
-            }
-
             // Queue `open-file` requests until the frontend has installed its event listeners.
             if let Some(window) = app.get_webview_window("main") {
                 let handle = app.handle().clone();
@@ -873,6 +944,27 @@ fn main() {
                 });
             }
 
+            // Queue `oauth-redirect` requests until the frontend has installed its event listeners.
+            if let Some(window) = app.get_webview_window("main") {
+                let handle = app.handle().clone();
+                window.listen(OAUTH_REDIRECT_READY_EVENT, move |_event| {
+                    let state = handle.state::<SharedOauthRedirectState>().inner().clone();
+                    let pending = {
+                        let mut guard = state.lock().unwrap();
+                        if guard.ready {
+                            return;
+                        }
+                        guard.ready = true;
+                        std::mem::take(&mut guard.pending_urls)
+                    };
+
+                    let pending = normalize_oauth_redirect_request_urls(pending);
+                    for url in pending {
+                        emit_oauth_redirect_event(&handle, url);
+                    }
+                });
+            }
+
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -883,14 +975,9 @@ fn main() {
         // the running instance receives an "open documents" event. Route it through the
         // same open-file pipeline.
         tauri::RunEvent::Opened { urls, .. } => {
-            for url in &urls {
-                let url = url.as_str().trim().trim_matches('"');
-                if url.starts_with("formula://") {
-                    let _ = app_handle.emit("oauth-redirect", url.to_string());
-                }
-            }
-
             let argv: Vec<String> = urls.iter().map(|url| url.to_string()).collect();
+            let oauth_urls = extract_oauth_redirect_urls(&argv);
+            handle_oauth_redirect_request(app_handle, oauth_urls);
             let paths = extract_open_file_paths(&argv, None);
             handle_open_file_request(app_handle, paths);
         }

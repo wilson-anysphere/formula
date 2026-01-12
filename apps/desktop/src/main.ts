@@ -4529,13 +4529,23 @@ try {
   // The Rust host emits `oauth-redirect` when a deep-link/protocol handler is invoked
   // (e.g. `formula://oauth/callback?...`). Resolve the pending broker redirect without
   // requiring a manual copy/paste step.
-  void listen("oauth-redirect", (event) => {
+  const oauthRedirectListener = listen("oauth-redirect", (event) => {
     const redirectUrl = (event as any)?.payload;
     if (typeof redirectUrl !== "string" || redirectUrl.trim() === "") return;
     const expectedRedirectUri = oauthBroker.findPendingRedirectUri(redirectUrl);
     if (!expectedRedirectUri) return;
     oauthBroker.resolveRedirect(expectedRedirectUri, redirectUrl);
   });
+
+  // Signal that we're ready to receive (and flush any queued) oauth-redirect events.
+  void oauthRedirectListener
+    .then(() => {
+      if (!emit) return;
+      return Promise.resolve(emit("oauth-redirect-ready"));
+    })
+    .catch((err) => {
+      console.error("Failed to signal oauth redirect readiness:", err);
+    });
 
   // When the Rust host receives a close request, it asks the frontend to flush any pending
   // workbook-sync operations and to sync macro UI context before it runs `Workbook_BeforeClose`.
