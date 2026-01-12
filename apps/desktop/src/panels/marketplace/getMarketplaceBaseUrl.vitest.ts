@@ -48,6 +48,16 @@ describe("getMarketplaceBaseUrl", () => {
     expect(getMarketplaceBaseUrl({ storage: relativeStorage, env: { DEV: true } })).toBe("/api");
   });
 
+  it("collapses multiple leading slashes for relative overrides", () => {
+    const storage = {
+      getItem(key: string) {
+        if (key === "formula:marketplace:baseUrl") return "//api";
+        return null;
+      },
+    };
+    expect(getMarketplaceBaseUrl({ storage, env: { DEV: true } })).toBe("/api");
+  });
+
   it("ignores invalid absolute URL overrides and falls back to defaults", () => {
     const storage = {
       getItem(key: string) {

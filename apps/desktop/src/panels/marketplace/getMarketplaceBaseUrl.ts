@@ -41,6 +41,9 @@ function normalizeBaseUrl(value: string): string | null {
   while (out.startsWith("./")) out = out.slice(2);
   if (!out) return null;
   if (!out.startsWith("/")) out = `/${out}`;
+  // Avoid protocol-relative URLs (e.g. "//example.com/api") and keep it consistent with
+  // MarketplaceClient normalization.
+  out = out.replace(/^\/+/, "/");
   return out;
 }
 
