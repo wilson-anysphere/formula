@@ -8,7 +8,6 @@ use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
 
 const SYSTEM: ExcelDateSystem = ExcelDateSystem::EXCEL_1900;
 const BASIS: i32 = 0;
-const REDEMPTION: f64 = 100.0;
 const TOLERANCE: f64 = 1e-7;
 const CASES: u32 = 64;
 
@@ -23,6 +22,7 @@ struct OddFirstCase {
     first_coupon: i32,
     rate: f64,
     yld: f64,
+    redemption: f64,
     frequency: i32,
 }
 
@@ -33,6 +33,7 @@ struct OddLastCase {
     last_interest: i32,
     rate: f64,
     yld: f64,
+    redemption: f64,
     frequency: i32,
 }
 
@@ -45,6 +46,10 @@ fn arb_rate_0_to_0_2() -> impl Strategy<Value = f64> {
     (0u32..=200_000u32).prop_map(|micros| micros as f64 / 1_000_000.0)
 }
 
+fn arb_redemption() -> impl Strategy<Value = f64> {
+    (50u32..=150u32).prop_map(|v| v as f64)
+}
+
 fn arb_oddf_case() -> impl Strategy<Value = OddFirstCase> {
     arb_frequency().prop_flat_map(|frequency| {
         let months_per_period = 12 / frequency;
@@ -55,9 +60,10 @@ fn arb_oddf_case() -> impl Strategy<Value = OddFirstCase> {
             2i32..=120, // issue_offset_days (>=2 so settlement can be strictly between)
             arb_rate_0_to_0_2(),
             arb_rate_0_to_0_2(),
+            arb_redemption(),
         )
             .prop_flat_map(
-                move |(year, month, n_coupons, issue_offset_days, rate, yld)| {
+                move |(year, month, n_coupons, issue_offset_days, rate, yld, redemption)| {
                     let first_coupon =
                         ymd_to_serial(ExcelDate::new(year, month, 15), SYSTEM).unwrap();
                     let maturity = edate(
@@ -77,6 +83,7 @@ fn arb_oddf_case() -> impl Strategy<Value = OddFirstCase> {
                         first_coupon,
                         rate,
                         yld,
+                        redemption,
                         frequency,
                     })
                 },
@@ -92,8 +99,9 @@ fn arb_oddl_case() -> impl Strategy<Value = OddLastCase> {
             1u8..=12,
             arb_rate_0_to_0_2(),
             arb_rate_0_to_0_2(),
+            arb_redemption(),
         )
-            .prop_flat_map(move |(year, month, rate, yld)| {
+            .prop_flat_map(move |(year, month, rate, yld, redemption)| {
                 let last_interest = ymd_to_serial(ExcelDate::new(year, month, 15), SYSTEM).unwrap();
 
                 // Ensure maturity falls inside the next regular coupon period (short stub)
@@ -113,6 +121,7 @@ fn arb_oddl_case() -> impl Strategy<Value = OddLastCase> {
                         last_interest,
                         rate,
                         yld,
+                        redemption,
                         frequency,
                     })
                 })
@@ -140,7 +149,7 @@ fn prop_oddf_yield_price_roundtrip_basis0() {
                 case.first_coupon,
                 case.rate,
                 case.yld,
-                REDEMPTION,
+                case.redemption,
                 case.frequency,
                 BASIS,
                 SYSTEM,
@@ -157,7 +166,7 @@ fn prop_oddf_yield_price_roundtrip_basis0() {
                 case.first_coupon,
                 case.rate,
                 price,
-                REDEMPTION,
+                case.redemption,
                 case.frequency,
                 BASIS,
                 SYSTEM,
@@ -184,7 +193,7 @@ fn prop_oddf_yield_price_roundtrip_basis0() {
                 case.first_coupon,
                 case.rate,
                 yld_out,
-                REDEMPTION,
+                case.redemption,
                 case.frequency,
                 BASIS,
                 SYSTEM,
@@ -211,7 +220,7 @@ fn prop_oddf_yield_price_roundtrip_basis0() {
                     case.first_coupon,
                     case.rate,
                     y_lo,
-                    REDEMPTION,
+                    case.redemption,
                     case.frequency,
                     BASIS,
                     SYSTEM,
@@ -228,7 +237,7 @@ fn prop_oddf_yield_price_roundtrip_basis0() {
                     case.first_coupon,
                     case.rate,
                     y_hi,
-                    REDEMPTION,
+                    case.redemption,
                     case.frequency,
                     BASIS,
                     SYSTEM,
@@ -268,7 +277,7 @@ fn prop_oddl_yield_price_roundtrip_basis0() {
                 case.last_interest,
                 case.rate,
                 case.yld,
-                REDEMPTION,
+                case.redemption,
                 case.frequency,
                 BASIS,
                 SYSTEM,
@@ -284,7 +293,7 @@ fn prop_oddl_yield_price_roundtrip_basis0() {
                 case.last_interest,
                 case.rate,
                 price,
-                REDEMPTION,
+                case.redemption,
                 case.frequency,
                 BASIS,
                 SYSTEM,
@@ -309,7 +318,7 @@ fn prop_oddl_yield_price_roundtrip_basis0() {
                 case.last_interest,
                 case.rate,
                 yld_out,
-                REDEMPTION,
+                case.redemption,
                 case.frequency,
                 BASIS,
                 SYSTEM,
@@ -334,7 +343,7 @@ fn prop_oddl_yield_price_roundtrip_basis0() {
                     case.last_interest,
                     case.rate,
                     y_lo,
-                    REDEMPTION,
+                    case.redemption,
                     case.frequency,
                     BASIS,
                     SYSTEM,
@@ -350,7 +359,7 @@ fn prop_oddl_yield_price_roundtrip_basis0() {
                     case.last_interest,
                     case.rate,
                     y_hi,
-                    REDEMPTION,
+                    case.redemption,
                     case.frequency,
                     BASIS,
                     SYSTEM,
