@@ -2668,6 +2668,11 @@ async function renameSheetById(
     // Best-effort; context keys should never block a rename.
   }
 
+  // Renaming sheets affects workbook metadata and does not necessarily produce cell deltas (e.g.
+  // when no formulas referenced the old name). Mark the document dirty explicitly so unsaved-changes
+  // prompts behave as expected (Excel-like).
+  app.getDocument().markDirty();
+
   return { id, name: workbookSheetStore.getName(id) ?? normalizedNewName };
 }
 
@@ -2740,16 +2745,6 @@ function renderSheetTabs(): void {
         await invoke("set_sheet_tab_color", { sheet_id: sheetId, tab_color: tabColor ?? null });
       },
       onSheetsReordered: () => restoreFocusAfterSheetNavigation(),
-      onSheetRenamed: ({ oldName, newName }) => {
-        try {
-          rewriteDocumentFormulasForSheetRename(app.getDocument(), oldName, newName);
-        } catch (err) {
-          showToast(`Failed to update formulas after rename: ${String((err as any)?.message ?? err)}`, "error");
-        }
-        // Renaming sheets affects workbook metadata but does not produce cell deltas, so
-        // mark the document dirty explicitly for unsaved-changes prompts.
-        app.getDocument().markDirty();
-      },
       onSheetDeleted: ({ sheetId, name, sheetOrder }) => {
         const doc = app.getDocument() as any;
         try {
