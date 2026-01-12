@@ -165,15 +165,17 @@ This definition matches the needs of `PRICE`/`YIELD`/`DURATION` where “remaini
 
 ### Computing `A` and `DSC`
 
-For all bases, `A` and `DSC` are computed as a “day count” between two dates:
+`A` (days accrued since the previous coupon) is always computed as a basis-specific day count:
 
-- `A = days_between(PCD, settlement, basis)`
-- `DSC = days_between(settlement, NCD, basis)`
+- basis `0`: `DAYS360(PCD, settlement, FALSE)`
+- basis `4`: `DAYS360(PCD, settlement, TRUE)`
+- basis `1`/`2`/`3`: `settlement - PCD` (actual days)
 
-Where:
+`DSC` (days from settlement to the next coupon) follows an Excel quirk:
 
-- For basis `0` and `4` use `days360`.
-- For basis `1`, `2`, `3` use actual days: `end_serial - start_serial`.
+- basis `0`/`4` (30/360): Excel treats `E` as a fixed `360/f` model-period and defines `DSC = E - A`
+  (so `A + DSC = E` for any settlement date within the coupon period).
+- basis `1`/`2`/`3`: `DSC = NCD - settlement` (actual days).
 
 ### Computing `E` (days in coupon period)
 
@@ -184,7 +186,7 @@ Where:
 - basis `3`: `E = 365 / f` (constant)
 - basis `1`: `E = actual_days(NCD - PCD)` (variable, depends on the coupon period)
 
-This convention is important because for basis `2`/`3` you can have `A + DSC != E` (since `A`/`DSC` are actual days but `E` is a fixed “model year” fraction).
+This convention is important because for basis `2`/`3` you can have `A + DSC != E` (since `A`/`DSC` are actual days but `E` is a fixed “model year” fraction), while for basis `0`/`4` (30/360) Excel keeps additivity by defining `DSC = E - A`.
 
 ---
 
