@@ -83,7 +83,8 @@ When adding odd-coupon coverage to the oracle corpus, prefer:
 - cases that cover both Excel 1900 and 1904 date systems (the engine should match in both)
 
 The generator includes a small set of boundary-date equality cases (e.g. `issue == settlement`,
-`settlement == first_coupon`, `settlement == last_interest`).
+`settlement == first_coupon`, `first_coupon == maturity`, `issue == first_coupon`,
+`settlement == last_interest`).
 
 It also includes a small set of **negative yield / negative coupon rate** validation cases
 (tagged `odd_coupon_validation`) to confirm Excel’s input-domain behavior for:
