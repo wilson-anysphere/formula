@@ -163,7 +163,10 @@ fn choose_array(ctx: &dyn FunctionContext, indices: &Array, choices: &[CompiledE
                         if arr.rows == 1 && arr.cols == 1 {
                             arr.values[0].clone()
                         } else if arr.rows == shape.rows && arr.cols == shape.cols {
-                            arr.values.get(pos).cloned().unwrap_or(Value::Error(ErrorKind::Value))
+                            arr.values
+                                .get(pos)
+                                .cloned()
+                                .unwrap_or(Value::Error(ErrorKind::Value))
                         } else {
                             Value::Error(ErrorKind::Value)
                         }
@@ -522,14 +525,18 @@ fn excel_eq(left: &Value, right: &Value) -> Result<bool, ErrorKind> {
         (Value::Entity(a), Value::Record(b)) => cmp_case_insensitive(&a.display, &b.display),
         (Value::Record(a), Value::Entity(b)) => cmp_case_insensitive(&a.display, &b.display),
         // Type precedence (approximate Excel): numbers < text < booleans.
-        (Value::Number(_), Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Bool(_)) => {
-            Ordering::Less
-        }
+        (
+            Value::Number(_),
+            Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Bool(_),
+        ) => Ordering::Less,
         (Value::Text(_) | Value::Entity(_) | Value::Record(_), Value::Bool(_)) => Ordering::Less,
-        (Value::Text(_) | Value::Entity(_) | Value::Record(_), Value::Number(_)) => Ordering::Greater,
-        (Value::Bool(_), Value::Number(_) | Value::Text(_) | Value::Entity(_) | Value::Record(_)) => {
+        (Value::Text(_) | Value::Entity(_) | Value::Record(_), Value::Number(_)) => {
             Ordering::Greater
         }
+        (
+            Value::Bool(_),
+            Value::Number(_) | Value::Text(_) | Value::Entity(_) | Value::Record(_),
+        ) => Ordering::Greater,
         // Blank should have been coerced above.
         (Value::Blank, Value::Blank) => Ordering::Equal,
         (Value::Blank, _) => Ordering::Less,

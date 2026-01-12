@@ -1018,12 +1018,9 @@ impl ParserImpl {
                 kind: SpannedExprKind::Bool(false),
             }),
             _ => match parse_a1(id) {
-                Ok(addr) => self.parse_cell_or_range(
-                    SheetReference::Current,
-                    span.start,
-                    addr,
-                    span.end,
-                ),
+                Ok(addr) => {
+                    self.parse_cell_or_range(SheetReference::Current, span.start, addr, span.end)
+                }
                 Err(_) => Ok(SpannedExpr {
                     span,
                     kind: SpannedExprKind::NameRef(crate::eval::NameRef {
@@ -2651,7 +2648,8 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             Err(e) => return (Value::Error(e), traces),
         };
 
-        let out = provider.cube_member_property(&connection, &member_expression_or_handle, &property);
+        let out =
+            provider.cube_member_property(&connection, &member_expression_or_handle, &property);
         (out, traces)
     }
 
@@ -2888,12 +2886,8 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             None
         };
 
-        let out = provider.cube_kpi_member(
-            &connection,
-            &kpi_name,
-            &kpi_property,
-            caption.as_deref(),
-        );
+        let out =
+            provider.cube_kpi_member(&connection, &kpi_name, &kpi_property, caption.as_deref());
         (out, traces)
     }
 
@@ -2967,7 +2961,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         };
                         acc += n;
                     }
-                    Value::Record(_) | Value::Entity(_) => return (Value::Error(ErrorKind::Value), traces),
+                    Value::Record(_) | Value::Entity(_) => {
+                        return (Value::Error(ErrorKind::Value), traces)
+                    }
                     Value::Reference(_) | Value::ReferenceUnion(_) => {
                         return (Value::Error(ErrorKind::Value), traces);
                     }
@@ -3214,12 +3210,10 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         }
                     },
                 };
-                Ok(formula_format::format_value(
-                    formula_format::Value::Number(*n),
-                    None,
-                    &options,
+                Ok(
+                    formula_format::format_value(formula_format::Value::Number(*n), None, &options)
+                        .text,
                 )
-                .text)
             }
             Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
             Value::Blank => Ok(String::new()),
@@ -3491,14 +3485,18 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
             au.cmp(&bu)
         }
         (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
-        (Value::Number(_), Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Bool(_)) => {
-            Ordering::Less
-        }
+        (
+            Value::Number(_),
+            Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Bool(_),
+        ) => Ordering::Less,
         (Value::Text(_) | Value::Entity(_) | Value::Record(_), Value::Bool(_)) => Ordering::Less,
-        (Value::Text(_) | Value::Entity(_) | Value::Record(_), Value::Number(_)) => Ordering::Greater,
-        (Value::Bool(_), Value::Number(_) | Value::Text(_) | Value::Entity(_) | Value::Record(_)) => {
+        (Value::Text(_) | Value::Entity(_) | Value::Record(_), Value::Number(_)) => {
             Ordering::Greater
         }
+        (
+            Value::Bool(_),
+            Value::Number(_) | Value::Text(_) | Value::Entity(_) | Value::Record(_),
+        ) => Ordering::Greater,
         (Value::Blank, Value::Blank) => Ordering::Equal,
         (Value::Blank, _) => Ordering::Less,
         (_, Value::Blank) => Ordering::Greater,

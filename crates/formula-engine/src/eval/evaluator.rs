@@ -1,8 +1,12 @@
 use crate::date::ExcelDateSystem;
 use crate::error::ExcelError;
 use crate::eval::address::CellAddr;
-use crate::eval::ast::{BinaryOp, CompareOp, CompiledExpr, Expr, PostfixOp, SheetReference, UnaryOp};
-use crate::functions::{ArgValue as FnArgValue, FunctionContext, Reference as FnReference, SheetId as FnSheetId};
+use crate::eval::ast::{
+    BinaryOp, CompareOp, CompiledExpr, Expr, PostfixOp, SheetReference, UnaryOp,
+};
+use crate::functions::{
+    ArgValue as FnArgValue, FunctionContext, Reference as FnReference, SheetId as FnSheetId,
+};
 use crate::locale::ValueLocaleConfig;
 use crate::value::{casefold, cmp_case_insensitive, Array, ErrorKind, Lambda, NumberLocale, Value};
 use crate::LocaleConfig;
@@ -414,18 +418,36 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             // External workbooks do not expose dimensions via the ValueResolver interface, so
             // treat the bounds as unknown and only resolve whole-row/whole-column sentinels using
             // Excel's default grid size.
-            FnSheetId::External(_) => (formula_model::EXCEL_MAX_ROWS, formula_model::EXCEL_MAX_COLS),
+            FnSheetId::External(_) => {
+                (formula_model::EXCEL_MAX_ROWS, formula_model::EXCEL_MAX_COLS)
+            }
         };
         let max_row = rows.saturating_sub(1);
         let max_col = cols.saturating_sub(1);
 
         let start = CellAddr {
-            row: if start.row == CellAddr::SHEET_END { max_row } else { start.row },
-            col: if start.col == CellAddr::SHEET_END { max_col } else { start.col },
+            row: if start.row == CellAddr::SHEET_END {
+                max_row
+            } else {
+                start.row
+            },
+            col: if start.col == CellAddr::SHEET_END {
+                max_col
+            } else {
+                start.col
+            },
         };
         let end = CellAddr {
-            row: if end.row == CellAddr::SHEET_END { max_row } else { end.row },
-            col: if end.col == CellAddr::SHEET_END { max_col } else { end.col },
+            row: if end.row == CellAddr::SHEET_END {
+                max_row
+            } else {
+                end.row
+            },
+            col: if end.col == CellAddr::SHEET_END {
+                max_col
+            } else {
+                end.col
+            },
         };
 
         if matches!(sheet_id, FnSheetId::Local(_))
@@ -439,7 +461,8 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
     fn function_result_to_eval_value(&self, value: Value) -> EvalValue {
         match value {
             Value::Reference(r) => {
-                let Some((start, end)) = self.resolve_range_bounds(&r.sheet_id, r.start, r.end) else {
+                let Some((start, end)) = self.resolve_range_bounds(&r.sheet_id, r.start, r.end)
+                else {
                     return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                 };
                 EvalValue::Reference(vec![ResolvedRange {
@@ -451,7 +474,8 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             Value::ReferenceUnion(ranges) => {
                 let mut out = Vec::with_capacity(ranges.len());
                 for r in ranges {
-                    let Some((start, end)) = self.resolve_range_bounds(&r.sheet_id, r.start, r.end) else {
+                    let Some((start, end)) = self.resolve_range_bounds(&r.sheet_id, r.start, r.end)
+                    else {
                         return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                     };
                     out.push(ResolvedRange {
@@ -501,14 +525,20 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 Some(sheet_ids) => {
                     let mut ranges = Vec::with_capacity(sheet_ids.len());
                     for sheet_id in sheet_ids {
-                        if matches!(&sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id)) {
+                        if matches!(&sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id))
+                        {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         }
-                        let Some((start, end)) = self.resolve_range_bounds(&sheet_id, r.addr, r.addr)
+                        let Some((start, end)) =
+                            self.resolve_range_bounds(&sheet_id, r.addr, r.addr)
                         else {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         };
-                        ranges.push(ResolvedRange { sheet_id, start, end });
+                        ranges.push(ResolvedRange {
+                            sheet_id,
+                            start,
+                            end,
+                        });
                     }
                     EvalValue::Reference(ranges)
                 }
@@ -518,20 +548,27 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 Some(sheet_ids) => {
                     let mut ranges = Vec::with_capacity(sheet_ids.len());
                     for sheet_id in sheet_ids {
-                        if matches!(&sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id)) {
+                        if matches!(&sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id))
+                        {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         }
-                        let Some((start, end)) = self.resolve_range_bounds(&sheet_id, r.start, r.end)
+                        let Some((start, end)) =
+                            self.resolve_range_bounds(&sheet_id, r.start, r.end)
                         else {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         };
-                        ranges.push(ResolvedRange { sheet_id, start, end });
+                        ranges.push(ResolvedRange {
+                            sheet_id,
+                            start,
+                            end,
+                        });
                     }
                     EvalValue::Reference(ranges)
                 }
                 None => EvalValue::Scalar(Value::Error(ErrorKind::Ref)),
             },
-            Expr::StructuredRef(sref) => match self.resolver.resolve_structured_ref(self.ctx, sref) {
+            Expr::StructuredRef(sref) => match self.resolver.resolve_structured_ref(self.ctx, sref)
+            {
                 Some(ranges) if !ranges.is_empty() => {
                     if !ranges
                         .iter()
@@ -593,8 +630,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                         let Some(origin) = self.resolver.spill_origin(sheet_id, range.start) else {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         };
-                        let Some((start, end)) = self.resolver.spill_range(sheet_id, origin)
-                        else {
+                        let Some((start, end)) = self.resolver.spill_range(sheet_id, origin) else {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         };
 
@@ -830,10 +866,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
 
         let mut call_scope =
             HashMap::with_capacity(lambda.params.len().saturating_mul(2).saturating_add(1));
-        call_scope.insert(
-            casefold(call_name.trim()),
-            Value::Lambda(lambda.clone()),
-        );
+        call_scope.insert(casefold(call_name.trim()), Value::Lambda(lambda.clone()));
         for (idx, param) in lambda.params.iter().enumerate() {
             let value = evaluated_args.get(idx).cloned().unwrap_or(Value::Blank);
             let param_key = casefold(param.trim());
@@ -996,8 +1029,9 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                     None
                 }
             }
-            SheetReference::External(key) => is_valid_external_sheet_key(key)
-                .then(|| FnSheetId::External(key.clone())),
+            SheetReference::External(key) => {
+                is_valid_external_sheet_key(key).then(|| FnSheetId::External(key.clone()))
+            }
         }
     }
 
@@ -1009,8 +1043,9 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 let (start, end) = if a <= b { (*a, *b) } else { (*b, *a) };
                 Some((start..=end).map(FnSheetId::Local).collect())
             }
-            SheetReference::External(key) => is_valid_external_sheet_key(key)
-                .then(|| vec![FnSheetId::External(key.clone())]),
+            SheetReference::External(key) => {
+                is_valid_external_sheet_key(key).then(|| vec![FnSheetId::External(key.clone())])
+            }
         }
     }
 
@@ -1095,10 +1130,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         let mut values = Vec::with_capacity(rows.saturating_mul(cols));
         for row in range.start.row..=range.end.row {
             for col in range.start.col..=range.end.col {
-                values.push(self.get_sheet_cell_value(
-                    &range.sheet_id,
-                    CellAddr { row, col },
-                ));
+                values.push(self.get_sheet_cell_value(&range.sheet_id, CellAddr { row, col }));
             }
         }
         Value::Array(Array::new(rows, cols, values))
@@ -1405,7 +1437,9 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     fn sheet_dimensions(&self, sheet_id: &FnSheetId) -> (u32, u32) {
         match sheet_id {
             FnSheetId::Local(id) => self.resolver.sheet_dimensions(*id),
-            FnSheetId::External(_) => (formula_model::EXCEL_MAX_ROWS, formula_model::EXCEL_MAX_COLS),
+            FnSheetId::External(_) => {
+                (formula_model::EXCEL_MAX_ROWS, formula_model::EXCEL_MAX_COLS)
+            }
         }
     }
 
@@ -1463,10 +1497,7 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     }
 
     fn make_lambda(&self, params: Vec<String>, body: CompiledExpr) -> Value {
-        let params: Vec<String> = params
-            .into_iter()
-            .map(|p| casefold(p.trim()))
-            .collect();
+        let params: Vec<String> = params.into_iter().map(|p| casefold(p.trim())).collect();
 
         let mut env = self.capture_lexical_env_map();
         env.retain(|k, _| !k.starts_with(crate::eval::LAMBDA_OMITTED_PREFIX));
@@ -1516,7 +1547,10 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
         );
 
         for (idx, param) in lambda.params.iter().enumerate() {
-            let value = args.get(idx).cloned().unwrap_or(FnArgValue::Scalar(Value::Blank));
+            let value = args
+                .get(idx)
+                .cloned()
+                .unwrap_or(FnArgValue::Scalar(Value::Blank));
             let value = match value {
                 FnArgValue::Scalar(v) => v,
                 FnArgValue::Reference(r) => Value::Reference(r),
@@ -1715,14 +1749,18 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         }
         (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
         // Type precedence (approximate Excel): numbers < text < booleans.
-        (Value::Number(_), Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Bool(_)) => {
-            Ordering::Less
-        }
+        (
+            Value::Number(_),
+            Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Bool(_),
+        ) => Ordering::Less,
         (Value::Text(_) | Value::Entity(_) | Value::Record(_), Value::Bool(_)) => Ordering::Less,
-        (Value::Text(_) | Value::Entity(_) | Value::Record(_), Value::Number(_)) => Ordering::Greater,
-        (Value::Bool(_), Value::Number(_) | Value::Text(_) | Value::Entity(_) | Value::Record(_)) => {
+        (Value::Text(_) | Value::Entity(_) | Value::Record(_), Value::Number(_)) => {
             Ordering::Greater
         }
+        (
+            Value::Bool(_),
+            Value::Number(_) | Value::Text(_) | Value::Entity(_) | Value::Record(_),
+        ) => Ordering::Greater,
         // Blank should have been coerced above.
         (Value::Blank, Value::Blank) => Ordering::Equal,
         (Value::Blank, _) => Ordering::Less,
@@ -1893,7 +1931,10 @@ fn parse_field_access_key(raw: &str) -> Option<String> {
 }
 
 fn eval_field_access(value: &Value, field_key: &str) -> Value {
-    fn map_lookup<'a>(map: &'a std::collections::HashMap<String, Value>, key: &str) -> Option<&'a Value> {
+    fn map_lookup<'a>(
+        map: &'a std::collections::HashMap<String, Value>,
+        key: &str,
+    ) -> Option<&'a Value> {
         if let Some(v) = map.get(key) {
             return Some(v);
         }

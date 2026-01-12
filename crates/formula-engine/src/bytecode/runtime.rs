@@ -3149,7 +3149,11 @@ fn and_array(a: &ArrayValue, all_true: &mut bool, any: &mut bool) -> Option<Erro
                 }
             }
             // Text and blanks in arrays are ignored (same as references).
-            Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Empty | Value::Missing => {}
+            Value::Text(_)
+            | Value::Entity(_)
+            | Value::Record(_)
+            | Value::Empty
+            | Value::Missing => {}
             // Arrays should be scalar values; ignore any nested arrays/references rather than
             // treating them as implicit spills.
             Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => {}
@@ -3175,7 +3179,11 @@ fn or_array(a: &ArrayValue, any_true: &mut bool, any: &mut bool) -> Option<Error
                 }
             }
             // Text and blanks in arrays are ignored (same as references).
-            Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Empty | Value::Missing => {}
+            Value::Text(_)
+            | Value::Entity(_)
+            | Value::Record(_)
+            | Value::Empty
+            | Value::Missing => {}
             // Arrays should be scalar values; ignore any nested arrays/references rather than
             // treating them as implicit spills.
             Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => {}
@@ -3196,7 +3204,11 @@ fn xor_array(a: &ArrayValue, acc: &mut bool) -> Option<ErrorKind> {
             }
             Value::Bool(b) => *acc ^= *b,
             // Text and blanks in arrays are ignored (same as references).
-            Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Empty | Value::Missing => {}
+            Value::Text(_)
+            | Value::Entity(_)
+            | Value::Record(_)
+            | Value::Empty
+            | Value::Missing => {}
             // Arrays should be scalar values; ignore any nested arrays/references rather than
             // treating them as implicit spills.
             Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => {}
@@ -3706,7 +3718,10 @@ fn fn_istext(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Value);
     }
     map_arg(&args[0], grid, base, |v| {
-        Value::Bool(matches!(v, Value::Text(_) | Value::Entity(_) | Value::Record(_)))
+        Value::Bool(matches!(
+            v,
+            Value::Text(_) | Value::Entity(_) | Value::Record(_)
+        ))
     })
 }
 
@@ -3805,10 +3820,7 @@ fn fn_t(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         Value::Text(s) => Value::Text(s.clone()),
         Value::Entity(ent) => Value::Text(Arc::from(ent.display.as_str())),
         Value::Record(rec) => Value::Text(Arc::from(rec.display.as_str())),
-        Value::Number(_)
-        | Value::Bool(_)
-        | Value::Empty
-        | Value::Missing => {
+        Value::Number(_) | Value::Bool(_) | Value::Empty | Value::Missing => {
             Value::Text(Arc::from(""))
         }
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Value::Error(ErrorKind::Value),
