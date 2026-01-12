@@ -185,7 +185,8 @@ fn build_spc_indirect_data_content_md5(project_digest: &[u8]) -> Vec<u8> {
 fn build_spc_indirect_data_content_v2_sha256(project_digest_md5: &[u8]) -> Vec<u8> {
     // MS-OSHARED §2.3.2.4.3.2: SpcIndirectDataContentV2
     //
-    // The VBA project hash bytes are stored in SigDataV1Serialized.sourceHash (MD5 per MS-OVBA).
+    // The VBA project hash bytes are stored in SigDataV1Serialized.sourceHash (MD5 per MS-OSHARED
+    // §4.3).
     let spc_indirect_data_v2_oid = [0x2B, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x1F];
     let sha256_oid = [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01];
 
