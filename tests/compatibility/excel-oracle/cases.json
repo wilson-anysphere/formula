@@ -13450,6 +13450,196 @@
       "id": "convert_a89703f2a31c"
     },
     {
+      "formula": "=BIN2DEC(\"1010\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "BIN2DEC"
+      ],
+      "id": "bin2dec_9a42db1e8ec7"
+    },
+    {
+      "formula": "=BIN2OCT(\"1010\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "BIN2OCT"
+      ],
+      "id": "bin2oct_1481ab5de99b"
+    },
+    {
+      "formula": "=BIN2HEX(\"1010\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "BIN2HEX"
+      ],
+      "id": "bin2hex_62da9a3b39d0"
+    },
+    {
+      "formula": "=OCT2DEC(\"17\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "OCT2DEC"
+      ],
+      "id": "oct2dec_9ad6d69252a6"
+    },
+    {
+      "formula": "=OCT2BIN(\"17\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "OCT2BIN"
+      ],
+      "id": "oct2bin_6e7a13d9fa7b"
+    },
+    {
+      "formula": "=OCT2HEX(\"17\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "OCT2HEX"
+      ],
+      "id": "oct2hex_5eed772e6680"
+    },
+    {
+      "formula": "=HEX2DEC(\"FF\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "HEX2DEC"
+      ],
+      "id": "hex2dec_eeeb40eb7bba"
+    },
+    {
+      "formula": "=HEX2BIN(\"FF\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "HEX2BIN"
+      ],
+      "id": "hex2bin_206d52a9863e"
+    },
+    {
+      "formula": "=HEX2OCT(\"FF\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "HEX2OCT"
+      ],
+      "id": "hex2oct_0343c8edf83c"
+    },
+    {
+      "formula": "=DEC2BIN(10)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "DEC2BIN"
+      ],
+      "id": "dec2bin_b6ba5e4ba63a"
+    },
+    {
+      "formula": "=DEC2OCT(10)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "DEC2OCT"
+      ],
+      "id": "dec2oct_eef390e583fe"
+    },
+    {
+      "formula": "=DEC2HEX(10)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "DEC2HEX"
+      ],
+      "id": "dec2hex_3f16e219dbf4"
+    },
+    {
+      "formula": "=BASE(15,16,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "BASE"
+      ],
+      "id": "base_87c534355e68"
+    },
+    {
+      "formula": "=DECIMAL(\"FF\",16)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "DECIMAL"
+      ],
+      "id": "decimal_bb3695e47d79"
+    },
+    {
+      "formula": "=BITAND(5,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "BITAND"
+      ],
+      "id": "bitand_914c322f2d7f"
+    },
+    {
+      "formula": "=BITOR(5,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "BITOR"
+      ],
+      "id": "bitor_b89ad2a01887"
+    },
+    {
+      "formula": "=BITXOR(5,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "BITXOR"
+      ],
+      "id": "bitxor_b73a8ae14da8"
+    },
+    {
+      "formula": "=BITLSHIFT(1,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "BITLSHIFT"
+      ],
+      "id": "bitlshift_800b44b64f78"
+    },
+    {
+      "formula": "=BITRSHIFT(8,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "BITRSHIFT"
+      ],
+      "id": "bitrshift_d6fddbdb8a52"
+    },
+    {
       "formula": "=SUM(A1:A3)",
       "outputCell": "C1",
       "inputs": [

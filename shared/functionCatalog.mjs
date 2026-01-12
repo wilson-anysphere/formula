@@ -294,6 +294,18 @@ export default {
       ]
     },
     {
+      "name": "BASE",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "BESSELI",
       "min_args": 2,
       "max_args": 2,
@@ -395,6 +407,38 @@ export default {
       ]
     },
     {
+      "name": "BIN2DEC",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "BIN2HEX",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "number"
+      ]
+    },
+    {
+      "name": "BIN2OCT",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "number"
+      ]
+    },
+    {
       "name": "BINOM.DIST",
       "min_args": 4,
       "max_args": 4,
@@ -443,6 +487,61 @@ export default {
         "number",
         "number",
         "bool"
+      ]
+    },
+    {
+      "name": "BITAND",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "BITLSHIFT",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "BITOR",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "BITRSHIFT",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "BITXOR",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
       ]
     },
     {
@@ -1246,6 +1345,50 @@ export default {
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "DEC2BIN",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "DEC2HEX",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "DEC2OCT",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "DECIMAL",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "text",
         "number"
       ]
     },
@@ -2081,6 +2224,38 @@ export default {
       "return_type": "number",
       "arg_types": [
         "any"
+      ]
+    },
+    {
+      "name": "HEX2BIN",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "number"
+      ]
+    },
+    {
+      "name": "HEX2DEC",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "HEX2OCT",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "number"
       ]
     },
     {
@@ -3373,6 +3548,38 @@ export default {
         "text",
         "text",
         "text"
+      ]
+    },
+    {
+      "name": "OCT2BIN",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "number"
+      ]
+    },
+    {
+      "name": "OCT2DEC",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "OCT2HEX",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "number"
       ]
     },
     {

@@ -10,6 +10,7 @@ mod dynamic_arrays_shape;
 mod dynamic_arrays_sortby;
 mod dynamic_arrays_stack;
 mod dynamic_arrays_textsplit;
+mod engineering_base;
 mod engineering_complex;
 mod engineering_convert;
 mod financial_bonds;

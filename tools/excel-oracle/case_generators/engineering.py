@@ -64,3 +64,35 @@ def generate(
         tags=["engineering", "CONVERT"],
         formula='=CONVERT(1,"m","ft")',
     )
+
+    # ------------------------------------------------------------------
+    # Engineering functions (base conversions + bitwise)
+    # ------------------------------------------------------------------
+    add_case(cases, prefix="bin2dec", tags=["engineering", "BIN2DEC"], formula='=BIN2DEC("1010")')
+    add_case(cases, prefix="bin2oct", tags=["engineering", "BIN2OCT"], formula='=BIN2OCT("1010")')
+    add_case(cases, prefix="bin2hex", tags=["engineering", "BIN2HEX"], formula='=BIN2HEX("1010")')
+
+    add_case(cases, prefix="oct2dec", tags=["engineering", "OCT2DEC"], formula='=OCT2DEC("17")')
+    add_case(cases, prefix="oct2bin", tags=["engineering", "OCT2BIN"], formula='=OCT2BIN("17")')
+    add_case(cases, prefix="oct2hex", tags=["engineering", "OCT2HEX"], formula='=OCT2HEX("17")')
+
+    add_case(cases, prefix="hex2dec", tags=["engineering", "HEX2DEC"], formula='=HEX2DEC("FF")')
+    add_case(cases, prefix="hex2bin", tags=["engineering", "HEX2BIN"], formula='=HEX2BIN("FF")')
+    add_case(cases, prefix="hex2oct", tags=["engineering", "HEX2OCT"], formula='=HEX2OCT("FF")')
+
+    add_case(cases, prefix="dec2bin", tags=["engineering", "DEC2BIN"], formula="=DEC2BIN(10)")
+    add_case(cases, prefix="dec2oct", tags=["engineering", "DEC2OCT"], formula="=DEC2OCT(10)")
+    add_case(cases, prefix="dec2hex", tags=["engineering", "DEC2HEX"], formula="=DEC2HEX(10)")
+
+    add_case(cases, prefix="base", tags=["engineering", "BASE"], formula="=BASE(15,16,4)")
+    add_case(cases, prefix="decimal", tags=["engineering", "DECIMAL"], formula='=DECIMAL("FF",16)')
+
+    add_case(cases, prefix="bitand", tags=["engineering", "BITAND"], formula="=BITAND(5,3)")
+    add_case(cases, prefix="bitor", tags=["engineering", "BITOR"], formula="=BITOR(5,3)")
+    add_case(cases, prefix="bitxor", tags=["engineering", "BITXOR"], formula="=BITXOR(5,3)")
+    add_case(
+        cases, prefix="bitlshift", tags=["engineering", "BITLSHIFT"], formula="=BITLSHIFT(1,3)"
+    )
+    add_case(
+        cases, prefix="bitrshift", tags=["engineering", "BITRSHIFT"], formula="=BITRSHIFT(8,3)"
+    )

@@ -42,6 +42,7 @@ mod builtins_database;
 mod builtins_dynamic_arrays;
 mod builtins_dynamic_array_textsplit;
 mod builtins_engineering_convert;
+mod builtins_engineering;
 mod builtins_information;
 mod builtins_information_worksheet;
 mod builtins_information_workbook;

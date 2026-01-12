@@ -371,6 +371,7 @@ fn oddf_equation(
         && issue < first_coupon
         && settlement < maturity)
     {
+        // Boundary behaviors are locked in `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`.
         return Err(ExcelError::Num);
     }
 
