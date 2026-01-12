@@ -32,7 +32,7 @@ export class DocumentController {
 
   setCellValue(sheetId: string, coord: unknown, value: unknown, options?: unknown): void;
   setCellFormula(sheetId: string, coord: unknown, formula: string | null, options?: unknown): void;
-  setRangeFormat(sheetId: string, range: unknown, stylePatch: Record<string, any> | null, options?: unknown): void;
+  setRangeFormat(sheetId: string, range: unknown, stylePatch: Record<string, any> | null, options?: unknown): boolean;
   setSheetFormat(sheetId: string, stylePatch: Record<string, any> | null, options?: unknown): void;
   setRowFormat(sheetId: string, row: number, stylePatch: Record<string, any> | null, options?: unknown): void;
   setColFormat(sheetId: string, col: number, stylePatch: Record<string, any> | null, options?: unknown): void;

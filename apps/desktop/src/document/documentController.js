@@ -2605,7 +2605,7 @@ export class DocumentController {
    * @param {CellRange | string} range
    * @param {Record<string, any> | null} stylePatch
    * @param {{ label?: string, maxEnumeratedCells?: number, maxEnumeratedRows?: number }} [options]
-   * @returns {boolean} True when formatting was applied; false when skipped (e.g. safety caps).
+   * @returns {boolean} True when the request was processed; false when skipped (e.g. safety caps).
    */
   setRangeFormat(sheetId, range, stylePatch, options = {}) {
     const maxEnumeratedCells = Number.isFinite(options?.maxEnumeratedCells) ? options.maxEnumeratedCells : 200_000;
@@ -2827,7 +2827,9 @@ export class DocumentController {
         cellDeltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
       }
 
-      if (rangeRunDeltas.length === 0 && cellDeltas.length === 0) return false;
+      // No-op: patch did not change any existing runs or explicit cell styles.
+      // This is not a "skipped due to safety caps" case, so return true.
+      if (rangeRunDeltas.length === 0 && cellDeltas.length === 0) return true;
       this.#applyUserRangeRunDeltas(cellDeltas, rangeRunDeltas, { label: options.label });
       return true;
     }
