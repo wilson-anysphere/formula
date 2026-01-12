@@ -1,9 +1,6 @@
 import { rewriteSheetNamesInFormula } from "../workbook/formulaRewrite";
 
 type DocumentControllerLike = {
-  beginBatch(options?: { label?: string }): void;
-  endBatch(): void;
-  cancelBatch(): void;
   setCellInputs?: (
     inputs: ReadonlyArray<{ sheetId: string; row: number; col: number; value: unknown; formula: string | null }>,
     options?: { source?: string; label?: string },
@@ -65,14 +62,7 @@ export function rewriteDocumentFormulasForSheetRename(
   if (edits.length === 0) return;
   if (typeof doc.setCellInputs !== "function") return;
 
-  doc.beginBatch({ label: "Rename Sheet" });
-  try {
-    doc.setCellInputs(edits, { source: "sheetRename" });
-    doc.endBatch();
-  } catch (err) {
-    doc.cancelBatch();
-    throw err;
-  }
+  doc.setCellInputs(edits, { label: "Rename Sheet", source: "sheetRename" });
 }
 
 export function rewriteDocumentFormulasForSheetDelete(doc: DocumentControllerLike, deletedName: string): void {
@@ -83,14 +73,7 @@ export function rewriteDocumentFormulasForSheetDelete(doc: DocumentControllerLik
   if (edits.length === 0) return;
   if (typeof doc.setCellInputs !== "function") return;
 
-  doc.beginBatch({ label: "Delete Sheet" });
-  try {
-    doc.setCellInputs(edits, { source: "sheetDelete" });
-    doc.endBatch();
-  } catch (err) {
-    doc.cancelBatch();
-    throw err;
-  }
+  doc.setCellInputs(edits, { label: "Delete Sheet", source: "sheetDelete" });
 }
 
 function splitWorkbookPrefix(sheetSpec: string): { workbookPrefix: string | null; remainder: string } {

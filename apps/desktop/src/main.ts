@@ -1814,6 +1814,13 @@ let suppressDocReorderFromStore = false;
 let sheetStoreDocSync: ReturnType<typeof startSheetStoreDocumentSync> | null = null;
 let sheetStoreDocSyncStore: WorkbookSheetStore | null = null;
 
+type SheetStoreSnapshot = {
+  order: string[];
+  byId: Map<string, { name: string; visibility: SheetVisibility; tabColor?: TabColor }>;
+};
+
+let lastSheetStoreSnapshot: SheetStoreSnapshot | null = null;
+
 type SheetUiInfo = { id: string; name: string; visibility?: SheetVisibility; tabColor?: TabColor };
 
 function emitSheetMetadataChanged(): void {
@@ -1877,6 +1884,17 @@ function installSheetStoreDocSync(): void {
     (sheetId) => {
       app.activateSheet(sheetId);
       restoreFocusAfterSheetNavigation();
+    },
+    {
+      withStoreMutations: (fn) => {
+        const prev = syncingSheetUi;
+        syncingSheetUi = true;
+        try {
+          return fn();
+        } finally {
+          syncingSheetUi = prev;
+        }
+      },
     },
   );
   sheetStoreDocSyncStore = workbookSheetStore;
@@ -2182,29 +2200,166 @@ function syncSheetUi(): void {
 
 function installSheetStoreSubscription(): void {
   stopSheetStoreListener?.();
-  stopSheetStoreListener = workbookSheetStore.subscribe(() => {
-    // Sheet tab operations (rename/reorder/hide/tab color/etc) are workbook metadata changes
-    // that may not touch any cells. Mark the DocumentController dirty so the unsaved-changes
-    // prompt stays accurate.
-    //
-    // Guard against marking dirty during internal UI sync transactions.
-    if (!syncingSheetUi) {
-      app.getDocument().markDirty();
+  // Reset the store snapshot whenever we (re)install the subscription (workbook open, collab teardown, etc).
+  const captureSnapshot = (): SheetStoreSnapshot => {
+    const sheets = workbookSheetStore.listAll();
+    const byId = new Map<string, { name: string; visibility: SheetVisibility; tabColor?: TabColor }>();
+    for (const sheet of sheets) {
+      byId.set(sheet.id, { name: sheet.name, visibility: sheet.visibility, tabColor: sheet.tabColor });
+    }
+    return { order: sheets.map((s) => s.id), byId };
+  };
 
-      // Keep DocumentController sheet order aligned with the UI sheet store ordering so
-      // snapshot/restore flows (encodeState/applyState, VersionManager) preserve the user's
-      // tab ordering.
-      //
-      // In collab mode the Yjs workbook schema (`session.sheets`) is authoritative for
-      // ordering; avoid mutating the DocumentController sheet map there.
+  lastSheetStoreSnapshot = captureSnapshot();
+  stopSheetStoreListener = workbookSheetStore.subscribe(() => {
+    const prevSnapshot = lastSheetStoreSnapshot;
+    const nextSnapshot = captureSnapshot();
+    lastSheetStoreSnapshot = nextSnapshot;
+
+    // Keep DocumentController in sync with sheet UI store mutations so sheet-tab operations are
+    // undoable via the existing Ctrl+Z/Ctrl+Y stack.
+    //
+    // Guard against applying these updates during internal sheet UI sync transactions
+    // (doc -> store, collab observer updates, etc) so we don't create feedback loops.
+    if (!syncingSheetUi && prevSnapshot) {
       const session = app.getCollabSession?.() ?? null;
-      if (!session && !suppressDocReorderFromStore) {
-        const desired = workbookSheetStore.listAll().map((s) => s.id);
-        const current = app.getDocument().getSheetIds();
-        const desiredKey = desired.join("|");
-        const currentKey = current.join("|");
-        if (desiredKey && desiredKey !== currentKey) {
-          app.getDocument().reorderSheets(desired);
+      if (!session) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const doc: any = app.getDocument();
+
+        const tabColorEqual = (a: TabColor | undefined, b: TabColor | undefined): boolean => {
+          if (a === b) return true;
+          if (!a || !b) return !a && !b;
+          return (
+            (a.rgb ?? null) === (b.rgb ?? null) &&
+            (a.theme ?? null) === (b.theme ?? null) &&
+            (a.indexed ?? null) === (b.indexed ?? null) &&
+            (a.tint ?? null) === (b.tint ?? null) &&
+            (a.auto ?? null) === (b.auto ?? null)
+          );
+        };
+
+        const prevOrder = prevSnapshot.order;
+        const nextOrder = nextSnapshot.order;
+        const prevById = prevSnapshot.byId;
+        const nextById = nextSnapshot.byId;
+
+        const added = nextOrder.filter((id) => !prevById.has(id));
+        const removed = prevOrder.filter((id) => !nextById.has(id));
+
+        // Renames/deletes can be paired with formula rewrites (sheet-qualified refs).
+        // Keep the doc batch open through the end of the current task so any synchronous
+        // follow-up edits (e.g. `rewriteDocumentFormulasForSheetRename`) become a single undo step.
+        //
+        // Note: We intentionally don't do this for reorder/hide/tabColor since those don't
+        // require paired document mutations.
+        const hasRename = nextOrder.some((sheetId) => {
+          if (added.includes(sheetId)) return false;
+          if (removed.includes(sheetId)) return false;
+          const before = prevById.get(sheetId);
+          const after = nextById.get(sheetId);
+          return Boolean(before && after && before.name !== after.name);
+        });
+        const shouldBatchSheetMeta = removed.length > 0 || hasRename;
+        if (shouldBatchSheetMeta && typeof doc.beginBatch === "function" && typeof doc.endBatch === "function") {
+          const label = removed.length > 0 ? "Delete Sheet" : "Rename Sheet";
+          let batchStarted = false;
+          try {
+            doc.beginBatch({ label });
+            batchStarted = true;
+          } catch {
+            // ignore
+          }
+          if (batchStarted) {
+            queueMicrotask(() => {
+              try {
+                doc.endBatch();
+              } catch {
+                // ignore
+              }
+            });
+          }
+        }
+
+        // Add sheets (undoable).
+        for (const sheetId of added) {
+          const meta = nextById.get(sheetId);
+          if (!meta) continue;
+          const idx = nextOrder.indexOf(sheetId);
+          let insertAfterId: string | null = null;
+          for (let j = idx - 1; j >= 0; j -= 1) {
+            const candidate = nextOrder[j];
+            if (candidate && prevById.has(candidate)) {
+              insertAfterId = candidate;
+              break;
+            }
+          }
+          try {
+            doc.addSheet({ sheetId, name: meta.name, insertAfterId });
+          } catch {
+            // ignore
+          }
+        }
+
+        // Delete sheets (undoable).
+        for (const sheetId of removed) {
+          try {
+            doc.deleteSheet(sheetId);
+          } catch {
+            // ignore
+          }
+        }
+
+        // Reorder sheets (undoable).
+        if (!suppressDocReorderFromStore && added.length === 0 && removed.length === 0) {
+          const prevKey = prevOrder.join("|");
+          const nextKey = nextOrder.join("|");
+          if (prevKey && nextKey && prevKey !== nextKey) {
+            try {
+              doc.reorderSheets(nextOrder, { mergeKey: "sheet-tabs-reorder" });
+            } catch {
+              // ignore
+            }
+          }
+        }
+
+        // Metadata changes (undoable).
+        for (const sheetId of nextOrder) {
+          if (added.includes(sheetId)) continue;
+          if (removed.includes(sheetId)) continue;
+          const before = prevById.get(sheetId);
+          const after = nextById.get(sheetId);
+          if (!before || !after) continue;
+
+          if (before.name !== after.name) {
+            try {
+              doc.renameSheet(sheetId, after.name);
+            } catch {
+              // ignore
+            }
+          }
+
+          if (before.visibility !== after.visibility) {
+            try {
+              if (before.visibility === "visible" && after.visibility !== "visible") {
+                doc.hideSheet(sheetId);
+              } else if (before.visibility !== "visible" && after.visibility === "visible") {
+                doc.unhideSheet(sheetId);
+              } else {
+                doc.setSheetVisibility(sheetId, after.visibility);
+              }
+            } catch {
+              // ignore
+            }
+          }
+
+          if (!tabColorEqual(before.tabColor, after.tabColor)) {
+            try {
+              doc.setSheetTabColor(sheetId, after.tabColor);
+            } catch {
+              // ignore
+            }
+          }
         }
       }
     }
@@ -3440,15 +3595,7 @@ if (
       }
 
       if (rewrittenInputs.length > 0) {
-        doc.beginBatch({ label: "Rename sheet" });
-        let committed = false;
-        try {
-          doc.setCellInputs(rewrittenInputs, { label: "Rename sheet", source: "extension" });
-          committed = true;
-        } finally {
-          if (committed) doc.endBatch();
-          else doc.cancelBatch();
-        }
+        doc.setCellInputs(rewrittenInputs, { label: "Rename sheet", source: "extension" });
       }
 
       return { id: sheetId, name: workbookSheetStore.getName(sheetId) ?? normalizedNewName };
@@ -3461,30 +3608,10 @@ if (
 
       const doc = app.getDocument();
       const wasActive = app.getCurrentSheetId() === sheetId;
+      const deletedName = workbookSheetStore.getName(sheetId) ?? sheetId;
 
       // Update sheet metadata first to enforce workbook invariants (e.g. last-sheet guard).
       workbookSheetStore.remove(sheetId);
-
-      // Ensure the sheet exists before deletion (DocumentController can be lazily sheet-creating).
-      // Deleting via the public API keeps history + change events consistent.
-      try {
-        doc.getCell(sheetId, { row: 0, col: 0 });
-      } catch {
-        // ignore (best-effort materialization)
-      }
-
-      try {
-        doc.deleteSheet(sheetId, { label: "Extension deleteSheet", source: "Extension deleteSheet" });
-      } catch {
-        // If DocumentController deletion isn't available for some reason, fall back to
-        // best-effort removal of the internal sheet map (legacy behavior).
-        try {
-          doc.model?.sheets?.delete?.(sheetId);
-        } catch {
-          // ignore
-        }
-      }
-
       if (wasActive) {
         const next =
           workbookSheetStore.listVisible().at(0)?.id ??
@@ -3493,6 +3620,12 @@ if (
         if (next && next !== sheetId) {
           app.activateSheet(next);
         }
+      }
+
+      try {
+        rewriteDocumentFormulasForSheetDelete(doc as any, deletedName);
+      } catch {
+        // ignore
       }
 
       syncSheetUi();
@@ -7689,7 +7822,13 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   const CHUNK_ROWS = 200;
   const { maxRows: MAX_ROWS, maxCols: MAX_COLS } = getWorkbookLoadLimits();
 
-  const snapshotSheets: Array<{ id: string; cells: any[] }> = [];
+  const snapshotSheets: Array<{
+    id: string;
+    name: string;
+    visibility: SheetVisibility;
+    tabColor?: TabColor;
+    cells: any[];
+  }> = [];
   const truncations: WorkbookLoadTruncation[] = [];
 
   for (const sheet of sheets) {
@@ -7697,7 +7836,13 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
 
     const usedRange = await tauriBackend.getSheetUsedRange(sheet.id);
     if (!usedRange) {
-      snapshotSheets.push({ id: sheet.id, cells });
+      snapshotSheets.push({
+        id: sheet.id,
+        name: sheet.name,
+        visibility: sheet.visibility,
+        tabColor: sheet.tabColor,
+        cells,
+      });
       continue;
     }
 
@@ -7717,7 +7862,13 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     }
 
     if (startRow > endRow || startCol > endCol) {
-      snapshotSheets.push({ id: sheet.id, cells });
+      snapshotSheets.push({
+        id: sheet.id,
+        name: sheet.name,
+        visibility: sheet.visibility,
+        tabColor: sheet.tabColor,
+        cells,
+      });
       continue;
     }
 
@@ -7752,7 +7903,13 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
       }
     }
 
-    snapshotSheets.push({ id: sheet.id, cells });
+    snapshotSheets.push({
+      id: sheet.id,
+      name: sheet.name,
+      visibility: sheet.visibility,
+      tabColor: sheet.tabColor,
+      cells,
+    });
   }
 
   const snapshot = encodeDocumentSnapshot({ schemaVersion: 1, sheets: snapshotSheets });
