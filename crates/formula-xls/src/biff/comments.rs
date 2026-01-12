@@ -9,6 +9,7 @@
 //! - Only plain text + author are decoded; rich text formatting and comment box
 //!   geometry/visibility are ignored.
 //! - Malformed/incomplete record sequences may yield partial output and warnings.
+//! - Modern threaded comments are an OOXML feature and are not supported in `.xls`.
 
 #![allow(dead_code)]
 

@@ -4,6 +4,9 @@
 //! needs a handful of workbook-global and worksheet records. The implementation is
 //! split into submodules so future BIFF parsing work can share common primitives
 //! (record iteration, CONTINUE handling, and string decoding).
+//!
+//! In particular, this includes best-effort parsing for legacy cell notes/comments
+//! (`NOTE/OBJ/TXO`) used by the `.xls` importer.
 
 use std::io::{Read, Seek};
 use std::path::Path;
