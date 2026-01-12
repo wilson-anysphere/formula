@@ -3,10 +3,20 @@
 use std::io::{Cursor, Write};
 use std::process::Command;
 
+use formula_model::{Alignment, Range};
+use formula_xlsx::write_minimal_xlsx;
 use tempfile::tempdir;
 
-fn build_synthetic_rich_data_xlsx() -> Vec<u8> {
-    let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+fn build_synthetic_rich_data_xlsx_impl(include_rich_value_part: bool) -> Vec<u8> {
+    let rich_value_override = if include_rich_value_part {
+        r#"  <Override PartName="/xl/richData/richValue.xml" ContentType="application/vnd.ms-excel.richvalue+xml"/>
+"#
+    } else {
+        ""
+    };
+
+    let content_types = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
@@ -14,9 +24,10 @@ fn build_synthetic_rich_data_xlsx() -> Vec<u8> {
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
   <Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
-  <Override PartName="/xl/richData/richValue.xml" ContentType="application/vnd.ms-excel.richvalue+xml"/>
-  <Override PartName="/xl/richData/richValueRel.xml" ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
-</Types>"#;
+{rich_value_override}  <Override PartName="/xl/richData/richValueRel.xml" ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
+</Types>"#,
+        rich_value_override = rich_value_override
+    );
 
     let root_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -122,9 +133,11 @@ fn build_synthetic_rich_data_xlsx() -> Vec<u8> {
     zip.start_file("xl/metadata.xml", options).unwrap();
     zip.write_all(metadata_xml.as_bytes()).unwrap();
 
-    zip.start_file("xl/richData/richValue.xml", options)
-        .unwrap();
-    zip.write_all(rich_value_xml.as_bytes()).unwrap();
+    if include_rich_value_part {
+        zip.start_file("xl/richData/richValue.xml", options)
+            .unwrap();
+        zip.write_all(rich_value_xml.as_bytes()).unwrap();
+    }
 
     zip.start_file("xl/richData/richValueRel.xml", options)
         .unwrap();
@@ -140,9 +153,65 @@ fn build_synthetic_rich_data_xlsx() -> Vec<u8> {
     zip.finish().unwrap().into_inner()
 }
 
+fn build_synthetic_rich_data_xlsx() -> Vec<u8> {
+    build_synthetic_rich_data_xlsx_impl(true)
+}
+
+fn build_synthetic_rich_data_xlsx_without_rich_value_part() -> Vec<u8> {
+    build_synthetic_rich_data_xlsx_impl(false)
+}
+
 #[test]
 fn dump_rich_data_cli_prints_resolved_mapping() -> Result<(), Box<dyn std::error::Error>> {
     let bytes = build_synthetic_rich_data_xlsx();
+    let dir = tempdir()?;
+    let path = dir.path().join("fixture.xlsx");
+    std::fs::write(&path, bytes)?;
+
+    let bin = env!("CARGO_BIN_EXE_dump_rich_data");
+    let output = Command::new(bin).arg(&path).output()?;
+    assert!(
+        output.status.success(),
+        "dump_rich_data failed: status={:?} stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout)?;
+    assert!(
+        stdout.contains("Sheet1!A1 vm=1 -> rv=0 -> xl/media/image1.png"),
+        "unexpected stdout:\n{stdout}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn dump_rich_data_cli_prints_no_richdata_message() -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = write_minimal_xlsx(&[] as &[Range], &[] as &[Alignment])?;
+    let dir = tempdir()?;
+    let path = dir.path().join("fixture.xlsx");
+    std::fs::write(&path, bytes)?;
+
+    let bin = env!("CARGO_BIN_EXE_dump_rich_data");
+    let output = Command::new(bin).arg(&path).output()?;
+    assert!(
+        output.status.success(),
+        "dump_rich_data failed: status={:?} stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout)?;
+    assert_eq!(stdout.trim_end(), "no richData found", "unexpected stdout:\n{stdout}");
+
+    Ok(())
+}
+
+#[test]
+fn dump_rich_data_cli_resolves_without_rich_value_parts() -> Result<(), Box<dyn std::error::Error>>
+{
+    let bytes = build_synthetic_rich_data_xlsx_without_rich_value_part();
     let dir = tempdir()?;
     let path = dir.path().join("fixture.xlsx");
     std::fs::write(&path, bytes)?;

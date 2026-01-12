@@ -122,8 +122,20 @@ impl RichDataVmIndex {
     /// Resolve a worksheet `c/@vm` value into rich value + relationship indices and a target part.
     pub fn resolve_vm(&self, vm: u32) -> RichDataVmResolution {
         let rich_value_index = self.vm_to_rich_value_index.get(&vm).copied();
-        let rel_index =
-            rich_value_index.and_then(|idx| self.rich_value_index_to_rel_index.get(&idx).copied());
+        let rel_index = rich_value_index.and_then(|idx| {
+            self.rich_value_index_to_rel_index
+                .get(&idx)
+                .copied()
+                // Some legacy/degenerate packages omit `richValue*.xml` parts. In those workbooks
+                // the rich value index often maps directly to an entry in `richValueRel.xml`.
+                .or_else(|| {
+                    if self.rich_value_index_to_rel_index.is_empty() {
+                        Some(idx)
+                    } else {
+                        None
+                    }
+                })
+        });
         let target_part = rel_index.and_then(|idx| {
             self.rel_index_to_target_part
                 .get(idx as usize)
