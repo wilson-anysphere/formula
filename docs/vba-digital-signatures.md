@@ -400,6 +400,8 @@ Repo status:
 - Binding logic in `crates/formula-vba/src/signature.rs` treats `\x05DigitalSignatureExt` as a v3
   signature stream and compares its signed digest bytes against the computed v3 project digest
   (hashing v3 `ProjectNormalizedData` with the `DigestInfo` algorithm OID; typically SHA-256, 32 bytes).
+- For v1/v2 binding, Office-produced signatures use **MD5** (16-byte digests per MS-OSHARED §4.3),
+  even when `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256.
 
 Tests in this repo:
 [`crates/formula-vba/tests/contents_hash_v3.rs`](../crates/formula-vba/tests/contents_hash_v3.rs)
@@ -426,13 +428,13 @@ To bind the signature to the VBA project contents, `formula-vba` currently:
    - `digest_bytes` (the signed digest bytes).
 2. Chooses the MS-OVBA §2.4.2 transcript version based on the signature stream variant (`stream_kind`):
    - `DigitalSignature` / `DigitalSignatureEx` (v1/v2):
-     - compute **Content Hash** (v1) and **Agile Content Hash** (v2) as MD5 digests over
-       `ContentNormalizedData` and `ContentNormalizedData || FormsNormalizedData`.
-     - Per MS-OSHARED §4.3, the digest bytes are expected to be **MD5 (16 bytes)** even when
-       `hash_oid` indicates SHA-256 (the OID is informational for v1/v2 binding).
-   - `DigitalSignatureExt` (v3):
-     - compute the v3 digest by hashing v3 `ProjectNormalizedData` (`V3ContentNormalizedData || FormsNormalizedData`)
-       with the digest algorithm indicated by `hash_oid` (expected SHA-256, 32 bytes).
+      - compute **Content Hash** (v1) and **Agile Content Hash** (v2) by hashing
+        `ContentNormalizedData` and `ContentNormalizedData || FormsNormalizedData`.
+      - Per MS-OSHARED §4.3, the digest bytes are expected to be **MD5 (16 bytes)** even when
+        `hash_oid` indicates SHA-256 (the OID is informational for v1/v2 binding).
+    - `DigitalSignatureExt` (v3):
+      - compute the v3 digest by hashing v3 `ProjectNormalizedData` (`V3ContentNormalizedData || FormsNormalizedData`)
+        with the digest algorithm indicated by `hash_oid` (expected SHA-256, 32 bytes).
 3. Compares the computed digest bytes to `digest_bytes` to determine the binding result
    (`VbaSignatureBinding::{Bound, NotBound, Unknown}`).
 
@@ -463,9 +465,6 @@ Result interpretation (current behavior):
     by it (including module ordering and module source normalization).
   - `FormsNormalizedData` is derived from streams inside root-level “designer” storages (for
     example UserForms), with per-stream padding to 1023-byte blocks.
-- `compute_vba_project_digest` is a deterministic **fallback** digest over OLE stream names/bytes.
-  It exists to keep binding checks useful for synthetic/partial fixtures when MS-OVBA normalization
-  cannot be computed, but it is not expected to match Excel for all real-world files.
 - The project digest computation is **best-effort** and deterministic (to support stable tests and
   predictable behavior), but may not match Excel's exact transcript for all real-world files. This
   can produce false negatives (a valid signature treated as not bound).
@@ -495,8 +494,8 @@ If you need to update or extend signature handling, start with:
 - `crates/formula-vba/src/normalized_data.rs`
   - MS-OVBA §2.4.2.2 `FormsNormalizedData` (`forms_normalized_data`)
 - `crates/formula-vba/src/project_digest.rs`
+  - `compute_vba_project_digest` (v1/v2 digest over MS-OVBA transcripts)
   - `compute_vba_project_digest_v3` (MS-OVBA §2.4.2 v3 digest for `DigitalSignatureExt`)
-  - deterministic fallback digest over OLE streams (used when MS-OVBA normalization fails)
 
 ## Tests / examples in this repo
 

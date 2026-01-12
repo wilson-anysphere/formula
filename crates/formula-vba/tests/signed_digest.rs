@@ -195,6 +195,24 @@ fn make_spc_indirect_data_content_sha256(digest: &[u8]) -> Vec<u8> {
 }
 
 #[test]
+fn extracts_source_hash_from_spc_indirect_data_content_v2() {
+    // Simulate the MS-OSHARED SpcIndirectDataContentV2 variant, where DigestInfo.digest contains
+    // a DER-encoded `SigDataV1Serialized` structure instead of raw hash bytes.
+    let source_hash = (10u8..26u8).collect::<Vec<_>>();
+    assert_eq!(source_hash.len(), 16);
+
+    let sigdata = der_sequence(&[der_octet_string(&source_hash)]);
+    let spc = make_spc_indirect_data_content_sha256(&sigdata);
+    let pkcs7 = make_pkcs7_signed_message(&spc);
+
+    let got = extract_vba_signature_signed_digest(&pkcs7)
+        .expect("extract digest")
+        .expect("digest present");
+    assert_eq!(got.digest_algorithm_oid, "2.16.840.1.101.3.4.2.1");
+    assert_eq!(got.digest, source_hash);
+}
+
+#[test]
 fn extracts_signed_digest_from_embedded_pkcs7() {
     let digest = (0u8..32).collect::<Vec<_>>();
     let spc = make_spc_indirect_data_content_sha256(&digest);

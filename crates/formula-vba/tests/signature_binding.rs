@@ -106,18 +106,20 @@ fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
     out.extend_from_slice(data);
 }
 
-fn build_minimal_vba_project_bin(module1: &[u8], signature_blob: Option<&[u8]>) -> Vec<u8> {
-    // `content_normalized_data` expects a decompressed-and-parsable `VBA/dir` stream and module
-    // streams containing MS-OVBA compressed containers.
-    let module_container = compress_container(module1);
+fn build_minimal_vba_project_bin(module1_code: &[u8], signature_blob: Option<&[u8]>) -> Vec<u8> {
+    // Store the module as a plain compressed container (text_offset = 0).
+    let module_container = compress_container(module1_code);
 
+    // Minimal `VBA/dir` listing one module.
     let dir_decompressed = {
         let mut out = Vec::new();
-        // PROJECTNAME (included in ContentNormalizedData).
-        push_record(&mut out, 0x0004, b"VBAProject");
 
-        // Single module record group.
-        push_record(&mut out, 0x0019, b"Module1"); // MODULENAME
+        // PROJECTNAME + PROJECTCONSTANTS are incorporated into ContentNormalizedData when present.
+        push_record(&mut out, 0x0004, b"VBAProject");
+        push_record(&mut out, 0x000C, b"");
+
+        // MODULENAME
+        push_record(&mut out, 0x0019, b"Module1");
 
         // MODULESTREAMNAME + reserved u16.
         let mut stream_name = Vec::new();
@@ -127,8 +129,10 @@ fn build_minimal_vba_project_bin(module1: &[u8], signature_blob: Option<&[u8]>) 
 
         // MODULETYPE (standard)
         push_record(&mut out, 0x0021, &0u16.to_le_bytes());
-        // MODULETEXTOFFSET: our module stream is just the compressed container.
+
+        // MODULETEXTOFFSET
         push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+
         out
     };
     let dir_container = compress_container(&dir_decompressed);
@@ -205,12 +209,12 @@ fn der_octet_string(bytes: &[u8]) -> Vec<u8> {
     der_tlv(0x04, bytes)
 }
 
-fn build_spc_indirect_data_content_sha1(project_digest: &[u8]) -> Vec<u8> {
-    // SHA-1 OID: 1.3.14.3.2.26
-    let sha1_oid = [0x2B, 0x0E, 0x03, 0x02, 0x1A];
+fn build_spc_indirect_data_content_sha256(project_digest: &[u8]) -> Vec<u8> {
+    // SHA-256 OID: 2.16.840.1.101.3.4.2.1
+    let sha256_oid = [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01];
 
     let mut alg_id = Vec::new();
-    alg_id.extend_from_slice(&der_oid_raw(&sha1_oid));
+    alg_id.extend_from_slice(&der_oid_raw(&sha256_oid));
     alg_id.extend_from_slice(&der_null());
     let alg_id = der_sequence(&alg_id);
 
@@ -249,12 +253,15 @@ fn build_spc_indirect_data_content_md5(project_digest: &[u8]) -> Vec<u8> {
 
 #[test]
 fn bound_signature_sets_binding_bound() {
-    let module1 = b"Sub Hello()\r\nEnd Sub\r\n";
+    // Include an Attribute line and LF-only newlines to exercise normalization.
+    let module1 = b"Attribute VB_Name = \"Module1\"\nSub A()\nEnd Sub\n";
     let unsigned = build_minimal_vba_project_bin(module1, None);
     let normalized = content_normalized_data(&unsigned).expect("content normalized data");
     let digest: [u8; 16] = Md5::digest(&normalized).into();
 
-    let signed_content = build_spc_indirect_data_content_sha1(&digest);
+    // MS-OSHARED: the DigestInfo.algorithm may be SHA-256 even when the VBA project digest bytes
+    // are a 16-byte MD5.
+    let signed_content = build_spc_indirect_data_content_sha256(&digest);
     let pkcs7 = make_pkcs7_detached_signature(&signed_content);
 
     let mut signature_stream = signed_content.clone();
@@ -283,12 +290,12 @@ fn bound_signature_sets_binding_bound() {
 
 #[test]
 fn tampering_project_changes_binding_but_not_pkcs7_verification() {
-    let module1 = b"Sub Hello()\r\nEnd Sub\r\n";
+    let module1 = b"Sub A()\r\nEnd Sub\r\n";
     let unsigned = build_minimal_vba_project_bin(module1, None);
     let normalized = content_normalized_data(&unsigned).expect("content normalized data");
     let digest: [u8; 16] = Md5::digest(&normalized).into();
 
-    let signed_content = build_spc_indirect_data_content_sha1(&digest);
+    let signed_content = build_spc_indirect_data_content_sha256(&digest);
     let pkcs7 = make_pkcs7_detached_signature(&signed_content);
     let mut signature_stream = signed_content.clone();
     signature_stream.extend_from_slice(&pkcs7);
@@ -320,12 +327,12 @@ fn tampering_project_changes_binding_but_not_pkcs7_verification() {
 
 #[test]
 fn embedded_pkcs7_content_is_used_for_binding() {
-    let module1 = b"Sub Hello()\r\nEnd Sub\r\n";
+    let module1 = b"Sub A()\r\nEnd Sub\r\n";
     let unsigned = build_minimal_vba_project_bin(module1, None);
     let normalized = content_normalized_data(&unsigned).expect("content normalized data");
     let digest: [u8; 16] = Md5::digest(&normalized).into();
 
-    let signed_content = build_spc_indirect_data_content_sha1(&digest);
+    let signed_content = build_spc_indirect_data_content_sha256(&digest);
     let pkcs7 = make_pkcs7_signed_message(&signed_content);
 
     let signed = build_minimal_vba_project_bin(module1, Some(&pkcs7));
@@ -343,6 +350,7 @@ fn md5_binding_is_supported() {
     let unsigned = build_minimal_vba_project_bin(module1, None);
     let normalized = content_normalized_data(&unsigned).expect("content normalized data");
     let digest: [u8; 16] = Md5::digest(&normalized).into();
+    assert_eq!(digest.len(), 16, "MD5 digest should be 16 bytes");
 
     let signed_content = build_spc_indirect_data_content_md5(&digest);
     let pkcs7 = make_pkcs7_detached_signature(&signed_content);

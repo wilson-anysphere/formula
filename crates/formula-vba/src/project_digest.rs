@@ -19,8 +19,10 @@ use crate::{
 /// not used to select the VBA project digest algorithm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DigestAlg {
-    /// MD5 (16 bytes). Per MS-OSHARED §4.3 this is the VBA project "source hash" algorithm even
-    /// when the PKCS#7/CMS signature uses SHA-1/SHA-256.
+    /// MD5 (16 bytes).
+    ///
+    /// Per MS-OSHARED §4.3 this is the VBA project "source hash" algorithm even when the PKCS#7/CMS
+    /// signature uses SHA-1/SHA-256 (and even when `DigestInfo.digestAlgorithm` indicates SHA-256).
     Md5,
     Sha1,
     Sha256,

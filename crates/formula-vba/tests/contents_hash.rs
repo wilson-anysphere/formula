@@ -656,6 +656,49 @@ fn content_normalized_data_uses_module_stream_name_record_for_stream_lookup() {
     assert_eq!(normalized, module_code.as_bytes());
 }
 #[test]
+fn content_normalized_data_includes_project_name_and_constants() {
+    // Attribute line should be stripped, and the remaining module lines normalized to CRLF.
+    let module_code = b"Attribute VB_Name = \"Module1\"\nSub A()\nEnd Sub\n";
+    let module_container = compress_container(module_code);
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0004, b"P"); // PROJECTNAME
+        push_record(&mut out, 0x000C, b"C"); // PROJECTCONSTANTS
+
+        push_record(&mut out, 0x0019, b"Module1"); // MODULENAME
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name); // MODULESTREAMNAME
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE (standard)
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // MODULETEXTOFFSET
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let normalized = content_normalized_data(&vba_bin).expect("content normalized data");
+    assert_eq!(&normalized[..2], b"PC", "expected project name + constants prefix");
+    assert!(
+        normalized.ends_with(b"Sub A()\r\nEnd Sub\r\n"),
+        "expected module newlines to be normalized to CRLF: {normalized:?}"
+    );
+}
+
+#[test]
 fn content_normalized_data_decodes_module_stream_name_using_dir_codepage() {
     let module_name = "Módülé1";
     let module_code = "Option Explicit\r\n";

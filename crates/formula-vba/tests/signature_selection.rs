@@ -11,16 +11,18 @@ use md5::{Digest as _, Md5};
 mod signature_test_utils;
 
 fn build_minimal_vba_project_bin_with_signature_streams(
-    module1: &[u8],
+    module1_code: &[u8],
     signature_streams: &[(&str, &[u8])],
 ) -> Vec<u8> {
-    let module_container = compress_container(module1);
+    let module_container = compress_container(module1_code);
 
     let dir_decompressed = {
         let mut out = Vec::new();
-        // PROJECTNAME (included in ContentNormalizedData).
+        // PROJECTNAME + PROJECTCONSTANTS.
         push_record(&mut out, 0x0004, b"VBAProject");
+        push_record(&mut out, 0x000C, b"");
 
+        // Minimal module record group.
         push_record(&mut out, 0x0019, b"Module1"); // MODULENAME
         let mut stream_name = Vec::new();
         stream_name.extend_from_slice(b"Module1");
@@ -108,12 +110,12 @@ fn der_octet_string(bytes: &[u8]) -> Vec<u8> {
     der_tlv(0x04, bytes)
 }
 
-fn build_spc_indirect_data_content_sha1(project_digest: &[u8]) -> Vec<u8> {
-    // SHA-1 OID: 1.3.14.3.2.26
-    let sha1_oid = [0x2B, 0x0E, 0x03, 0x02, 0x1A];
+fn build_spc_indirect_data_content_sha256(project_digest: &[u8]) -> Vec<u8> {
+    // SHA-256 OID: 2.16.840.1.101.3.4.2.1
+    let sha256_oid = [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01];
 
     let mut alg_id = Vec::new();
-    alg_id.extend_from_slice(&der_oid_raw(&sha1_oid));
+    alg_id.extend_from_slice(&der_oid_raw(&sha256_oid));
     alg_id.extend_from_slice(&der_null());
     let alg_id = der_sequence(&alg_id);
 
@@ -131,7 +133,7 @@ fn build_spc_indirect_data_content_sha1(project_digest: &[u8]) -> Vec<u8> {
 
 #[test]
 fn prefers_bound_verified_signature_stream_over_unbound_verified_candidate() {
-    let module1 = b"Sub Hello()\r\nEnd Sub\r\n";
+    let module1 = b"Sub A()\r\nEnd Sub\r\n";
 
     // Build an unsigned project first to compute the digest that Office would sign.
     let unsigned = build_minimal_vba_project_bin_with_signature_streams(module1, &[]);
@@ -139,7 +141,7 @@ fn prefers_bound_verified_signature_stream_over_unbound_verified_candidate() {
     let digest: [u8; 16] = Md5::digest(&normalized).into();
 
     // Create a bound signature stream (digest matches the project).
-    let bound_content = build_spc_indirect_data_content_sha1(&digest);
+    let bound_content = build_spc_indirect_data_content_sha256(&digest);
     let bound_pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&bound_content);
     let mut bound_stream = bound_content.clone();
     bound_stream.extend_from_slice(&bound_pkcs7);
@@ -148,7 +150,7 @@ fn prefers_bound_verified_signature_stream_over_unbound_verified_candidate() {
     // digest does not match the current project.
     let mut wrong_digest = digest.clone();
     wrong_digest[0] ^= 0xFF;
-    let unbound_content = build_spc_indirect_data_content_sha1(&wrong_digest);
+    let unbound_content = build_spc_indirect_data_content_sha256(&wrong_digest);
     let unbound_pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&unbound_content);
     let mut unbound_stream = unbound_content.clone();
     unbound_stream.extend_from_slice(&unbound_pkcs7);

@@ -437,7 +437,37 @@ fn parse_spc_indirect_data_content(
     // Skip over AlgorithmIdentifier to reach digest OCTET STRING.
     di_cur = skip_element(di_cur)?;
 
-    let (digest, _after_digest) = parse_octet_string(di_cur)?;
+    let (digest_raw, _after_digest) = parse_octet_string(di_cur)?;
+
+    // Some producers store a serialized `SigDataV1Serialized` blob inside `DigestInfo.digest`
+    // instead of raw hash bytes. Detect the common cases and extract the 16-byte "source hash"
+    // (MD5 per MS-OSHARED §4.3):
+    // - If the digest bytes look like a self-contained DER SEQUENCE, treat it as a serialized
+    //   SigData structure.
+    // - Otherwise, only attempt SigData parsing when the digest length isn't a standard hash length.
+    let maybe_sigdata = if digest_raw.first() == Some(&0x30) {
+        matches!(skip_element(&digest_raw), Ok(rest) if rest.is_empty())
+    } else {
+        !matches!(digest_raw.len(), 16 | 20 | 32)
+    };
+    let digest = if maybe_sigdata {
+        match extract_source_hash_from_sig_data_v1_serialized(&digest_raw)? {
+            Some(hash) => hash,
+            None => {
+                // Some producers (and some legacy tests) wrap the 16-byte source hash in an ASN.1
+                // SEQUENCE without the expected SigData version INTEGER. As a best-effort fallback,
+                // allow extracting any 16-byte OCTET STRING contained in the DER element, but only
+                // when the digest bytes look like a self-contained DER element.
+                if digest_raw.first() == Some(&0x30) {
+                    scan_asn1_for_octet_string_len(&digest_raw, 16)?.unwrap_or(digest_raw)
+                } else {
+                    digest_raw
+                }
+            }
+        }
+    } else {
+        digest_raw
+    };
 
     Ok(VbaSignedDigest {
         digest_algorithm_oid,
