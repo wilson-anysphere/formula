@@ -275,9 +275,6 @@
   min-height: 0;
   padding: 12px;
   overflow: auto;
-  font-family:
-    system-ui,
-    sans-serif;
 }
 
 .collab-version-history__title {
@@ -338,9 +335,6 @@
   min-height: 0;
   overflow: auto;
   padding: 12px;
-  font-family:
-    system-ui,
-    sans-serif;
 }
 
 .branch-manager__permission-warning {
@@ -398,9 +392,6 @@
   min-height: 0;
   overflow: auto;
   padding: 12px;
-  font-family:
-    system-ui,
-    sans-serif;
 }
 
 .branch-merge__permission-warning {
