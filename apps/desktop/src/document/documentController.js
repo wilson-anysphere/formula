@@ -1138,31 +1138,6 @@ export class DocumentController {
   }
 
   /**
-   * Return the contributing style ids for a cell's effective formatting (layered formats).
-   *
-   * Tuple order matches the clipboard helper expectations:
-   * `[sheetDefaultStyleId, rowStyleId, colStyleId, cellStyleId]`.
-   *
-   * @param {string} sheetId
-   * @param {CellCoord | string} coord
-   * @returns {[number, number, number, number]}
-   */
-  getCellFormatStyleIds(sheetId, coord) {
-    const c = typeof coord === "string" ? parseA1(coord) : coord;
-
-    // Ensure the sheet is materialized (DocumentController is lazily sheet-creating).
-    const cell = this.model.getCell(sheetId, c.row, c.col);
-    const sheet = this.model.sheets.get(sheetId);
-
-    const sheetDefaultStyleId = sheet?.defaultStyleId ?? 0;
-    const rowStyleId = sheet?.rowStyleIds.get(c.row) ?? 0;
-    const colStyleId = sheet?.colStyleIds.get(c.col) ?? 0;
-    const cellStyleId = cell.styleId ?? 0;
-
-    return [sheetDefaultStyleId, rowStyleId, colStyleId, cellStyleId];
-  }
-
-  /**
    * @param {string} sheetId
    * @returns {number}
    */
