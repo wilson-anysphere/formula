@@ -554,6 +554,72 @@ fn from_xlsx_bytes_imports_bool_and_error_cells() {
 }
 
 #[wasm_bindgen_test]
+fn from_xlsx_bytes_imports_extended_error_cells_with_semantics() {
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/extended-errors.xlsx"
+    ));
+    let mut wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
+
+    let cases = [
+        ("A1", "#GETTING_DATA", 8.0),
+        ("B1", "#FIELD!", 11.0),
+        ("C1", "#CONNECT!", 12.0),
+        ("D1", "#BLOCKED!", 13.0),
+        ("E1", "#UNKNOWN!", 14.0),
+    ];
+
+    for (address, expected_error, _) in cases.iter().copied() {
+        let cell_js = wb.get_cell(address.to_string(), None).unwrap();
+        let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
+        assert_eq!(cell.value, json!(expected_error));
+        assert_eq!(cell.input, json!(expected_error));
+    }
+
+    // Populate formulas that distinguish between real error values vs. error-looking strings.
+    for (address, _, _) in cases.iter().copied() {
+        let col = &address[0..1];
+
+        wb.set_cell(
+            format!("{col}2"),
+            JsValue::from_str(&format!("=ISERROR({address})")),
+            None,
+        )
+        .unwrap();
+        wb.set_cell(
+            format!("{col}3"),
+            JsValue::from_str(&format!("=ERROR.TYPE({address})")),
+            None,
+        )
+        .unwrap();
+        wb.set_cell(
+            format!("{col}4"),
+            JsValue::from_str(&format!("={address}+1")),
+            None,
+        )
+        .unwrap();
+    }
+
+    wb.recalculate(None).unwrap();
+
+    for (address, expected_error, expected_code) in cases.iter().copied() {
+        let col = &address[0..1];
+
+        let iserror_js = wb.get_cell(format!("{col}2"), None).unwrap();
+        let iserror: CellData = serde_wasm_bindgen::from_value(iserror_js).unwrap();
+        assert_eq!(iserror.value, json!(true));
+
+        let type_js = wb.get_cell(format!("{col}3"), None).unwrap();
+        let type_cell: CellData = serde_wasm_bindgen::from_value(type_js).unwrap();
+        assert_json_number(&type_cell.value, expected_code);
+
+        let arith_js = wb.get_cell(format!("{col}4"), None).unwrap();
+        let arith: CellData = serde_wasm_bindgen::from_value(arith_js).unwrap();
+        assert_eq!(arith.value, json!(expected_error));
+    }
+}
+
+#[wasm_bindgen_test]
 fn getting_data_error_literal_is_parsed_as_error() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell("A1".to_string(), JsValue::from_str("#GETTING_DATA"), None)

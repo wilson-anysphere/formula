@@ -593,6 +593,23 @@ def sheet_bool_error_xml() -> str:
 """
 
 
+def sheet_extended_errors_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="e"><v>#GETTING_DATA</v></c>
+      <c r="B1" t="e"><v>#FIELD!</v></c>
+      <c r="C1" t="e"><v>#CONNECT!</v></c>
+      <c r="D1" t="e"><v>#BLOCKED!</v></c>
+      <c r="E1" t="e"><v>#UNKNOWN!</v></c>
+      <c r="F1" t="e"><v>#DIV/0!</v></c>
+    </row>
+  </sheetData>
+</worksheet>
+"""
+
+
 def sheet_varied_styles_xml() -> str:
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -1808,6 +1825,11 @@ def main() -> None:
     write_xlsx(
         ROOT / "basic" / "bool-error.xlsx",
         [sheet_bool_error_xml()],
+        styles_minimal_xml(),
+    )
+    write_xlsx(
+        ROOT / "basic" / "extended-errors.xlsx",
+        [sheet_extended_errors_xml()],
         styles_minimal_xml(),
     )
     write_xlsx(
