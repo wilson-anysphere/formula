@@ -741,6 +741,34 @@
   font-size: 12px;
 }
 
+#sheet-tabs.sheet-bar .sheet-tabs[data-dragging="true"] .sheet-tab {
+  cursor: grabbing;
+}
+
+#sheet-tabs.sheet-bar .sheet-tab[data-dragging="true"] {
+  opacity: 0.65;
+}
+
+#sheet-tabs.sheet-bar .sheet-tab[data-drop-position="before"]::before {
+  content: "";
+  position: absolute;
+  inset-block: 2px;
+  left: -2px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+#sheet-tabs.sheet-bar .sheet-tab[data-drop-position="after"]::after {
+  content: "";
+  position: absolute;
+  inset-block: 2px;
+  right: -2px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
 #sheet-tabs.sheet-bar .sheet-tab:hover {
   background: var(--bg-tertiary);
 }

@@ -81,6 +81,8 @@ export function SheetTabStrip({
   }, [store]);
 
   const visibleSheets = useMemo(() => sheets.filter((s) => s.visibility === "visible"), [sheets]);
+  const [draggingSheetId, setDraggingSheetId] = useState<string | null>(null);
+  const [dropIndicator, setDropIndicator] = useState<{ targetSheetId: string; position: "before" | "after" } | null>(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const autoScrollRef = useRef<{ raf: number | null; direction: -1 | 0 | 1 }>({ raf: null, direction: 0 });
@@ -162,6 +164,11 @@ export function SheetTabStrip({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const clearDragIndicators = () => {
+    setDropIndicator(null);
+    setDraggingSheetId(null);
+  };
 
   const commitRename = (sheetId: string): Promise<boolean> => {
     if (renameCommitRef.current) return renameCommitRef.current;
@@ -530,6 +537,7 @@ export function SheetTabStrip({
         role="tablist"
         aria-label="Sheets"
         aria-orientation="horizontal"
+        data-dragging={draggingSheetId ? "true" : undefined}
         onKeyDown={(e) => {
           if (e.defaultPrevented) return;
 
@@ -615,18 +623,31 @@ export function SheetTabStrip({
           e.preventDefault();
           e.dataTransfer.dropEffect = "move";
           maybeAutoScroll(e.clientX);
+
+          // Only apply an "end" indicator when dragging over the container itself (not over a tab),
+          // otherwise the per-tab handler will compute before/after.
+          if (e.target === e.currentTarget) {
+            const last = visibleSheets.at(-1)?.id ?? null;
+            if (last) setDropIndicator({ targetSheetId: last, position: "after" });
+          }
         }}
         onDrop={(e) => {
           if (!isSheetDrag(e.dataTransfer)) return;
           e.preventDefault();
           stopAutoScroll();
           const fromId = e.dataTransfer.getData("text/sheet-id") || e.dataTransfer.getData("text/plain");
-          if (!fromId) return;
+          if (!fromId) {
+            clearDragIndicators();
+            return;
+          }
           // Dropping on the container inserts at the end of the visible list.
           moveSheet(fromId, { kind: "end" });
+          clearDragIndicators();
         }}
-        onDragLeave={() => {
+        onDragLeave={(e) => {
           stopAutoScroll();
+          // Avoid flickering the drop indicator when moving between child tabs.
+          if (e.target === e.currentTarget) setDropIndicator(null);
         }}
       >
         {visibleSheets.map((sheet) => (
@@ -635,6 +656,8 @@ export function SheetTabStrip({
             sheet={sheet}
             active={sheet.id === activeSheetId}
             editing={editingSheetId === sheet.id}
+            dragging={draggingSheetId === sheet.id}
+            dropPosition={dropIndicator?.targetSheetId === sheet.id ? dropIndicator.position : null}
             draftName={draftName}
             renameError={editingSheetId === sheet.id ? renameError : null}
             renameInputRef={renameInputRef}
@@ -666,12 +689,27 @@ export function SheetTabStrip({
             onDraftNameChange={setDraftName}
             onDragStart={() => {
               stopAutoScroll();
+              setDraggingSheetId(sheet.id);
+              setDropIndicator(null);
             }}
             onDragEnd={() => {
               stopAutoScroll();
+              clearDragIndicators();
+            }}
+            onDragOverTab={(e) => {
+              if (!isSheetDrag(e.dataTransfer)) return;
+              if (draggingSheetId && draggingSheetId === sheet.id) {
+                setDropIndicator(null);
+                return;
+              }
+
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              const shouldInsertAfter = e.clientX > rect.left + rect.width / 2;
+              setDropIndicator({ targetSheetId: sheet.id, position: shouldInsertAfter ? "after" : "before" });
             }}
             onDropOnTab={(e) => {
               stopAutoScroll();
+              clearDragIndicators();
               const fromId = e.dataTransfer.getData("text/sheet-id") || e.dataTransfer.getData("text/plain");
               if (!fromId || fromId === sheet.id) return;
 
@@ -721,6 +759,8 @@ function SheetTab(props: {
   sheet: SheetMeta;
   active: boolean;
   editing: boolean;
+  dragging: boolean;
+  dropPosition: "before" | "after" | null;
   draftName: string;
   renameError: string | null;
   renameInputRef: React.RefObject<HTMLInputElement>;
@@ -733,6 +773,7 @@ function SheetTab(props: {
   onDraftNameChange: (name: string) => void;
   onDragStart: () => void;
   onDragEnd: () => void;
+  onDragOverTab: (e: React.DragEvent<HTMLButtonElement>) => void;
   onDropOnTab: (e: React.DragEvent<HTMLButtonElement>) => void;
 }) {
   const { sheet, active, editing, draftName, renameError } = props;
@@ -752,6 +793,8 @@ function SheetTab(props: {
       data-sheet-id={sheet.id}
       data-active={active ? "true" : "false"}
       data-tab-color={tabColorCss ?? undefined}
+      data-dragging={props.dragging ? "true" : undefined}
+      data-drop-position={props.dropPosition ?? undefined}
       draggable={!editing}
       ref={props.tabRef}
       onClick={() => {
@@ -774,6 +817,7 @@ function SheetTab(props: {
         if (!e.dataTransfer.types.includes("text/sheet-id") && !e.dataTransfer.types.includes("text/plain")) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
+        props.onDragOverTab(e);
       }}
       onDrop={(e) => {
         if (!e.dataTransfer.types.includes("text/sheet-id") && !e.dataTransfer.types.includes("text/plain")) return;

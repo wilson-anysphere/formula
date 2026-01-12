@@ -449,6 +449,94 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
   });
 
+  test("dragging Sheet2 before Sheet1 reorders the tab strip, updates the sheet switcher, and marks the document dirty", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Keep Sheet1 active so we can assert it stays active after reordering.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.activateCell({ row: 0, col: 0 });
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
+
+    // Lazily create Sheet2 (DocumentController creates sheets on demand).
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
+    });
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    // Reset the dirty bit so we can attribute it to the tab reorder, not sheet creation.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getDocument().markSaved();
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
+
+    // Move Sheet2 before Sheet1 (new order: Sheet2, Sheet1).
+    try {
+      await page
+        .getByTestId("sheet-tab-Sheet2")
+        .dragTo(page.getByTestId("sheet-tab-Sheet1"), { targetPosition: { x: 1, y: 1 } });
+    } catch {
+      // Ignore; we'll fall back to a synthetic drop below.
+    }
+
+    // As with other tab drag tests, use a synthetic drop if Playwright's dragTo doesn't take.
+    const desiredOrder = ["Sheet2", "Sheet1"];
+    const orderKey = (order: Array<string | null>) => order.filter(Boolean).slice(0, 2).join(",");
+    const didReorder = orderKey(
+      await page.evaluate(() =>
+        Array.from(document.querySelectorAll("#sheet-tabs .sheet-tabs [data-sheet-id]")).map((el) =>
+          (el as HTMLElement).getAttribute("data-sheet-id"),
+        ),
+      ),
+    );
+
+    if (didReorder !== desiredOrder.join(",")) {
+      await page.evaluate(() => {
+        const fromId = "Sheet2";
+        const target = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
+        if (!target) throw new Error("Missing Sheet1 tab");
+        const rect = target.getBoundingClientRect();
+
+        const dt = new DataTransfer();
+        dt.setData("text/sheet-id", fromId);
+        dt.setData("text/plain", fromId);
+
+        const drop = new DragEvent("drop", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 1,
+          clientY: rect.top + rect.height / 2,
+        });
+        Object.defineProperty(drop, "dataTransfer", { value: dt });
+        target.dispatchEvent(drop);
+      });
+    }
+
+    await expect.poll(() =>
+      page.evaluate(() =>
+        Array.from(document.querySelectorAll("#sheet-tabs .sheet-tabs [data-sheet-id]")).map((el) =>
+          (el as HTMLElement).getAttribute("data-sheet-id"),
+        ),
+      ),
+    ).toEqual(desiredOrder);
+
+    // Active sheet remains Sheet1.
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
+
+    // The sheet switcher should reflect the tab ordering.
+    const options = page.getByTestId("sheet-switcher").locator("option");
+    await expect(options.nth(0)).toHaveAttribute("value", "Sheet2");
+    await expect(options.nth(1)).toHaveAttribute("value", "Sheet1");
+    await expect(page.getByTestId("sheet-switcher")).toHaveValue("Sheet1");
+
+    // Reordering marks the workbook dirty.
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
+  });
+
   test("drag reorder maps visible tab positions onto full sheet order with hidden sheets", async ({ page }) => {
     await gotoDesktop(page);
 
