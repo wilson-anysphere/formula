@@ -1781,15 +1781,14 @@ export class SpreadsheetApp {
         sheetNameResolver: this.sheetNameResolver ?? undefined,
         limits: this.limits,
         schemaProvider: {
-          getNamedRanges: () => {
-            const formatSheetPrefix = (id: string): string => {
-              const needsQuotes = !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(id);
-              if (!needsQuotes) return `${id}!`;
-              return `'${id.replaceAll("'", "''")}'!`;
-            };
-
-            const out: Array<{ name: string; range?: string }> = [];
-            for (const entry of this.searchWorkbook.names.values()) {
+           getNamedRanges: () => {
+             const formatSheetPrefix = (id: string): string => {
+              const token = formatSheetNameForA1(id);
+              return token ? `${token}!` : "";
+             };
+ 
+             const out: Array<{ name: string; range?: string }> = [];
+             for (const entry of this.searchWorkbook.names.values()) {
               const e: any = entry as any;
               const name = typeof e?.name === "string" ? (e.name as string) : "";
               if (!name) continue;

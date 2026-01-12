@@ -1217,6 +1217,92 @@ test("Sheet-qualified range suggestions require quotes for sheet names that star
   );
 });
 
+test("Sheet-qualified range suggestions require quotes for sheet names that look like A1 refs (A1)", async () => {
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`A1!A${r}`] = r;
+
+  const cellContext = {
+    getCellValue(row, col, sheetName) {
+      const sheet = sheetName ?? "Sheet1";
+      const a1 = `${sheet}!${columnIndexToLetter(col)}${row + 1}`;
+      return values[a1] ?? null;
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "A1"],
+      getTables: () => [],
+    },
+  });
+
+  const unquoted = "=SUM(A1!A";
+  const unquotedSuggestions = await engine.getSuggestions({
+    currentInput: unquoted,
+    cursorPosition: unquoted.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+  assert.equal(unquotedSuggestions.length, 0);
+
+  const quoted = "=SUM('A1'!A";
+  const quotedSuggestions = await engine.getSuggestions({
+    currentInput: quoted,
+    cursorPosition: quoted.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+
+  assert.ok(
+    quotedSuggestions.some((s) => s.text === "=SUM('A1'!A1:A10)"),
+    `Expected a quoted A1 sheet range suggestion, got: ${quotedSuggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Sheet-qualified range suggestions require quotes for reserved sheet names (TRUE)", async () => {
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`TRUE!A${r}`] = r;
+
+  const cellContext = {
+    getCellValue(row, col, sheetName) {
+      const sheet = sheetName ?? "Sheet1";
+      const a1 = `${sheet}!${columnIndexToLetter(col)}${row + 1}`;
+      return values[a1] ?? null;
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "TRUE"],
+      getTables: () => [],
+    },
+  });
+
+  const unquoted = "=SUM(TRUE!A";
+  const unquotedSuggestions = await engine.getSuggestions({
+    currentInput: unquoted,
+    cursorPosition: unquoted.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+  assert.equal(unquotedSuggestions.length, 0);
+
+  const quoted = "=SUM('TRUE'!A";
+  const quotedSuggestions = await engine.getSuggestions({
+    currentInput: quoted,
+    cursorPosition: quoted.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+
+  assert.ok(
+    quotedSuggestions.some((s) => s.text === "=SUM('TRUE'!A1:A10)"),
+    `Expected a quoted TRUE sheet range suggestion, got: ${quotedSuggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Sheet-qualified ranges are not suggested when the sheet name prefix is incomplete (can't be a pure insertion)", async () => {
   const values = {};
   for (let r = 1; r <= 10; r++) values[`Sheet2!A${r}`] = r;

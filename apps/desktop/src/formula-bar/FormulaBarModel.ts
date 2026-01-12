@@ -4,6 +4,7 @@ import { highlightFormula, type HighlightSpan } from "./highlight/highlightFormu
 import { tokenizeFormula } from "./highlight/tokenizeFormula.js";
 import { rangeToA1, type RangeAddress } from "../spreadsheet/a1.js";
 import { parseSheetQualifiedA1Range } from "./parseSheetQualifiedA1Range.js";
+import { formatSheetNameForA1 } from "../sheet/formatSheetNameForA1.js";
 import {
   assignFormulaReferenceColors,
   extractFormulaReferences,
@@ -339,7 +340,6 @@ function formatRangeReference(range: RangeAddress, sheetId?: string): string {
 }
 
 function formatSheetPrefix(id: string): string {
-  const needsQuotes = !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(id);
-  if (!needsQuotes) return `${id}!`;
-  return `'${id.replaceAll("'", "''")}'!`;
+  const name = formatSheetNameForA1(id);
+  return name ? `${name}!` : "";
 }

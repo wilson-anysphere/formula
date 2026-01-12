@@ -48,6 +48,12 @@ describe("FormulaBarModel", () => {
     model.updateRangeSelection(parseA1Range("B2:C3")!, "O'Hare");
     expect(model.draft).toBe("='O''Hare'!B2:C3");
     expect(model.hoveredReference()).toEqual(parseA1Range("B2:C3"));
+
+    model.updateRangeSelection(parseA1Range("B2:C3")!, "TRUE");
+    expect(model.draft).toBe("='TRUE'!B2:C3");
+
+    model.updateRangeSelection(parseA1Range("B2:C3")!, "A1");
+    expect(model.draft).toBe("='A1'!B2:C3");
   });
 
   it("accepts AI suggestions as an insertion at the caret", () => {

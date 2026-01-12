@@ -670,9 +670,18 @@ function splitSheetQualifiedArg(text) {
 
 function needsSheetQuotes(sheetName) {
   // Match Excel's "unquoted sheet name" rules (roughly identifier-like).
-  // Anything that doesn't look like an identifier (spaces, punctuation, or
-  // leading digits) requires quotes.
-  return !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(sheetName);
+  //
+  // Note: avoid emitting ambiguous unquoted prefixes like:
+  // - TRUE!A1 / FALSE!A1 (boolean literals)
+  // - A1!B2 / XFD1048576!A1 (looks like an A1 cell reference)
+  // - R1C1!A1 / RC!A1 (looks like an R1C1 cell reference)
+  //
+  // See similar logic in the Rust backend (`formula_model::needs_quoting_for_sheet_reference`).
+  if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(sheetName)) return true;
+  const lower = sheetName.toLowerCase();
+  if (lower === "true" || lower === "false") return true;
+  if (looksLikeA1CellReference(sheetName) || looksLikeR1C1CellReference(sheetName)) return true;
+  return false;
 }
 
 function formatSheetPrefix(sheetName) {
@@ -680,6 +689,49 @@ function formatSheetPrefix(sheetName) {
   if (!needsQuotes) return `${sheetName}!`;
   const escaped = sheetName.replaceAll("'", "''");
   return `'${escaped}'!`;
+}
+
+function looksLikeA1CellReference(name) {
+  let i = 0;
+  let letters = "";
+  while (i < name.length) {
+    const ch = name[i];
+    if (!ch || !/[A-Za-z]/.test(ch)) break;
+    if (letters.length >= 3) return false;
+    letters += ch;
+    i += 1;
+  }
+  if (letters.length === 0) return false;
+
+  let digits = "";
+  while (i < name.length) {
+    const ch = name[i];
+    if (!ch || !/[0-9]/.test(ch)) break;
+    digits += ch;
+    i += 1;
+  }
+  if (digits.length === 0) return false;
+  if (i !== name.length) return false;
+
+  // Convert col letters to 1-based index and compare against Excel max col (XFD = 16384).
+  const col = letters
+    .toUpperCase()
+    .split("")
+    .reduce((acc, c) => acc * 26 + (c.charCodeAt(0) - 64), 0);
+  return col <= 16384;
+}
+
+function looksLikeR1C1CellReference(name) {
+  const upper = String(name ?? "").toUpperCase();
+  if (upper === "R" || upper === "C") return true;
+  if (!upper.startsWith("R")) return false;
+  let i = 1;
+  while (i < upper.length && upper[i] >= "0" && upper[i] <= "9") i += 1;
+  if (i >= upper.length) return false;
+  if (upper[i] !== "C") return false;
+  i += 1;
+  while (i < upper.length && upper[i] >= "0" && upper[i] <= "9") i += 1;
+  return i === upper.length;
 }
 
 function suggestStructuredRefs(prefix, tables) {

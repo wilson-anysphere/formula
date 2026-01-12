@@ -10,6 +10,7 @@ import {
 import type { DocumentController } from "../../document/documentController.js";
 import type { FormulaBarView } from "../../formula-bar/FormulaBarView.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
+import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
 import { evaluateFormula, type SpreadsheetValue } from "../../spreadsheet/evaluateFormula.js";
 
 function normalizeSheetNameToken(sheetName: string): string {
@@ -496,9 +497,8 @@ function parseIntLike(value: unknown): number | null {
 function formatSheetPrefix(sheetName: string): string {
   const trimmed = sheetName.trim();
   if (!trimmed) return "";
-  const needsQuotes = !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(trimmed);
-  if (!needsQuotes) return `${trimmed}!`;
-  return `'${trimmed.replaceAll("'", "''")}'!`;
+  const token = formatSheetNameForA1(trimmed);
+  return token ? `${token}!` : "";
 }
 
 function toA1(row: number, col: number): string {
