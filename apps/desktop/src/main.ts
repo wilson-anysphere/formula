@@ -3,6 +3,8 @@ import "./styles/tokens.css";
 import "./styles/ui.css";
 import "./styles/workspace.css";
 
+import { ThemeController } from "./theme/themeController.js";
+
 import { LayoutController } from "./layout/layoutController.js";
 import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
@@ -49,6 +51,18 @@ import { evaluateWhenClause } from "./extensions/whenClause.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
 
 import sampleHelloManifest from "../../../extensions/sample-hello/package.json";
+
+// Apply theme + reduced motion settings as early as possible to avoid rendering with
+// default tokens before the user's preference is known.
+const themeController = new ThemeController();
+themeController.start();
+window.addEventListener("unload", () => {
+  try {
+    themeController.stop();
+  } catch {
+    // Best-effort cleanup; ignore failures during teardown.
+  }
+});
 
 const workbookSheetNames = new Map<string, string>();
 
