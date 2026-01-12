@@ -16,9 +16,10 @@ function formatInt(value: number): string {
   return raw.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
-function rangeEndToExtent(end: number): number {
-  if (!Number.isFinite(end)) return 0;
-  return Math.max(0, Math.floor(end)) + 1;
+function formatOneBasedInclusiveRange(start: number, end: number): string {
+  const startInclusive = Math.max(0, Math.floor(start)) + 1;
+  const endInclusive = Math.max(0, Math.floor(end)) + 1;
+  return `${formatInt(startInclusive)}-${formatInt(endInclusive)}`;
 }
 
 export function createWorkbookLoadTruncationWarning(
@@ -34,17 +35,16 @@ export function createWorkbookLoadTruncationWarning(
   const sheetSummaries = truncations.slice(0, maxSheetsToShow).map((t) => {
     const sheetLabel = String(t.sheetName ?? "").trim() || String(t.sheetId ?? "").trim() || "Sheet";
 
-    const usedRows = rangeEndToExtent(t.originalRange.end_row);
-    const usedCols = rangeEndToExtent(t.originalRange.end_col);
+    const usedText =
+      `rows ${formatOneBasedInclusiveRange(t.originalRange.start_row, t.originalRange.end_row)}, ` +
+      `cols ${formatOneBasedInclusiveRange(t.originalRange.start_col, t.originalRange.end_col)}`;
 
     const hasIntersection = t.loadedRange.startRow <= t.loadedRange.endRow && t.loadedRange.startCol <= t.loadedRange.endCol;
-    const loadedRows = hasIntersection ? rangeEndToExtent(t.loadedRange.endRow) : 0;
-    const loadedCols = hasIntersection ? rangeEndToExtent(t.loadedRange.endCol) : 0;
+    const loadedText = hasIntersection
+      ? `rows ${formatOneBasedInclusiveRange(t.loadedRange.startRow, t.loadedRange.endRow)}, cols ${formatOneBasedInclusiveRange(t.loadedRange.startCol, t.loadedRange.endCol)}`
+      : `no cells within rows 1-${formatInt(limits.maxRows)}, cols 1-${formatInt(limits.maxCols)}`;
 
-    const loadedText = hasIntersection ? `${formatInt(loadedRows)}×${formatInt(loadedCols)}` : "no cells";
-    const usedText = `${formatInt(usedRows)}×${formatInt(usedCols)}`;
-
-    return `${sheetLabel} (loaded ${loadedText}, used ${usedText})`;
+    return `${sheetLabel} (loaded ${loadedText}; used ${usedText})`;
   });
 
   const remaining = truncations.length - sheetSummaries.length;
@@ -72,4 +72,3 @@ export function warnIfWorkbookLoadTruncated(
 
   showToast(message, "warning", { timeoutMs: 15_000 });
 }
-

@@ -24,6 +24,10 @@ describe("createWorkbookLoadTruncationWarning", () => {
 
     expect(message).toContain("Workbook partially loaded");
     expect(message).toContain("Foo");
+    expect(message).toContain("rows 1-10,000");
+    expect(message).toContain("cols 1-200");
+    expect(message).toContain("rows 1-15,001");
+    expect(message).toContain("cols 1-251");
     expect(message).toContain("loadMaxRows");
     expect(message).toContain("DESKTOP_LOAD_MAX_ROWS");
   });
