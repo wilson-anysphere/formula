@@ -9,6 +9,10 @@
 //! possible (active tab, frozen panes, zoom, selection, and grid/headings/zero
 //! visibility flags).
 //!
+//! When present, workbook- and sheet-scoped defined names (named ranges) are also
+//! imported. Defined-name formula (`rgce`) decoding is best-effort and may emit
+//! warnings for unsupported tokens.
+//!
 //! Note import is best-effort and intentionally lossy:
 //! - Comment box geometry/visibility/formatting is not preserved
 //! - Only plain text + author (when available) are imported
@@ -154,9 +158,9 @@ pub struct MergedRange {
 /// Result of importing a legacy `.xls` workbook.
 ///
 /// The returned [`Workbook`] contains the successfully imported data (values,
-/// formulas, merged regions, row/column metadata, hyperlinks, and legacy
-/// comments/notes where available). Any non-fatal issues encountered during
-/// import are returned in [`XlsImportResult::warnings`].
+/// formulas, merged regions, row/column/outline metadata, hyperlinks, defined
+/// names, and legacy comments/notes where available). Any non-fatal issues
+/// encountered during import are returned in [`XlsImportResult::warnings`].
 pub struct XlsImportResult {
     pub workbook: Workbook,
     pub source: ImportSource,
