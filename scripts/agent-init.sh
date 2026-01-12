@@ -17,8 +17,17 @@ export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 # Make: Limit parallel jobs
 export MAKEFLAGS="${MAKEFLAGS:--j4}"
 
-# Rust codegen: Fewer units = less memory, slightly slower
-export RUSTFLAGS="${RUSTFLAGS:--C codegen-units=4}"
+# Rust codegen units:
+#
+# Avoid setting `RUSTFLAGS=-C codegen-units=N` here. While it can reduce memory usage,
+# it also overrides Cargo profile configuration and can defeat the safeguards in
+# `scripts/cargo_agent.sh` that scale codegen parallelism to the chosen Cargo job count.
+# Under high load, that mismatch can surface as flaky rustc ICEs like:
+# "failed to spawn work thread: Resource temporarily unavailable".
+#
+# `scripts/cargo_agent.sh` already sets `CARGO_PROFILE_{DEV,TEST}_CODEGEN_UNITS` to a
+# safe default automatically, and agents should always use that wrapper instead of
+# invoking `cargo` directly.
 
 # ============================================================================
 # Cargo Home Isolation (CRITICAL - prevents cross-agent ~/.cargo lock contention)
