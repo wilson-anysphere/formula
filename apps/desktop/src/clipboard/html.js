@@ -79,49 +79,36 @@ function normalizeClipboardHtml(html) {
   const endFragment = getOffset("EndFragment");
 
   // CF_HTML offsets are byte offsets from the start of the payload. Prefer byte slicing
-  // when possible, but fall back to string slicing when offsets are missing/incorrect.
-  /** @type {Uint8Array | null} */
-  let cachedUtf8Bytes = null;
-  /** @type {TextDecoder | null} */
-  let cachedUtf8Decoder = null;
-
-  const getUtf8Bytes = () => {
-    if (cachedUtf8Bytes) return cachedUtf8Bytes;
-    if (typeof TextEncoder === "undefined") return null;
-    try {
-      cachedUtf8Bytes = new TextEncoder().encode(input);
-      return cachedUtf8Bytes;
-    } catch {
-      return null;
+  // when possible, but fall back to code-unit slicing when needed.
+  const encodeUtf8 = (text) => {
+    if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(text);
+    if (typeof Buffer !== "undefined") {
+      // eslint-disable-next-line no-undef
+      return Buffer.from(text, "utf8");
     }
+    return null;
   };
 
-  const getUtf8Decoder = () => {
-    if (cachedUtf8Decoder) return cachedUtf8Decoder;
-    if (typeof TextDecoder === "undefined") return null;
-    try {
-      cachedUtf8Decoder = new TextDecoder("utf-8", { fatal: false });
-      return cachedUtf8Decoder;
-    } catch {
-      return null;
+  const decodeUtf8 = (bytes) => {
+    if (typeof TextDecoder !== "undefined") return new TextDecoder().decode(bytes);
+    if (typeof Buffer !== "undefined") {
+      // eslint-disable-next-line no-undef
+      return Buffer.from(bytes).toString("utf8");
     }
+    return null;
   };
 
-  const safeByteSlice = (start, end) => {
+  const inputBytes = encodeUtf8(input);
+
+  const safeSliceUtf8 = (start, end) => {
+    if (!inputBytes) return null;
     if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
-    if (start < 0 || end <= start) return null;
-    const bytes = getUtf8Bytes();
-    const decoder = getUtf8Decoder();
-    if (!bytes || !decoder) return null;
-    if (end > bytes.length) return null;
-    try {
-      return decoder.decode(bytes.slice(start, end));
-    } catch {
-      return null;
-    }
+    if (start < 0 || end <= start || end > inputBytes.length) return null;
+    const decoded = decodeUtf8(inputBytes.subarray(start, end));
+    return typeof decoded === "string" ? decoded : null;
   };
 
-  const safeSlice = (start, end) => {
+  const safeSliceCodeUnits = (start, end) => {
     if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
     if (start < 0 || end <= start || end > input.length) return null;
     return input.slice(start, end);
@@ -130,18 +117,17 @@ function normalizeClipboardHtml(html) {
   const containsCompleteTable = (s) => /<table\b[\s\S]*?<\/table>/i.test(s);
 
   // Prefer fragment offsets when they look sane, but fall back to StartHTML/EndHTML.
-  // Try byte slicing first (CF_HTML spec), then string slicing as a fallback.
-  for (const candidate of [
-    safeByteSlice(startFragment, endFragment),
-    safeByteSlice(startHtml, endHtml),
-    safeSlice(startFragment, endFragment),
-    safeSlice(startHtml, endHtml),
+  for (const [start, end] of [
+    [startFragment, endFragment],
+    [startHtml, endHtml],
   ]) {
-    if (!candidate) continue;
-    const stripped = stripToMarkup(candidate);
-    // Offsets can be "valid" but still wrong (e.g. truncated). Only accept them when they
-    // contain a full table element so downstream parsing doesn't regress.
-    if (containsCompleteTable(stripped)) return stripped;
+    for (const candidate of [safeSliceUtf8(start, end), safeSliceCodeUnits(start, end)]) {
+      if (!candidate) continue;
+      const stripped = stripToMarkup(candidate);
+      // Offsets can be "valid" but still wrong (e.g. truncated). Only accept them when they
+      // contain a full table element so downstream parsing doesn't regress.
+      if (containsCompleteTable(stripped)) return stripped;
+    }
   }
 
   // If offsets are missing/incorrect, CF_HTML payloads often include fragment comment markers.

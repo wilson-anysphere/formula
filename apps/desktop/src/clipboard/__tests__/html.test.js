@@ -3,12 +3,23 @@ import assert from "node:assert/strict";
 
 import { parseHtmlToCellGrid, serializeCellGridToHtml } from "../html.js";
 
-function buildCfHtmlPayload(innerHtml, { beforeFragmentHtml = "" } = {}) {
+function buildCfHtmlPayload(
+  innerHtml,
+  {
+    beforeFragmentHtml = "",
+    includeFragmentMarkers = true,
+    offsets = "codeUnits", // "codeUnits" | "bytes"
+  } = {}
+) {
   const markerStart = "<!--StartFragment-->";
   const markerEnd = "<!--EndFragment-->";
-  const html = `<!DOCTYPE html><html><body>${beforeFragmentHtml}${markerStart}${innerHtml}${markerEnd}</body></html>`;
+  const prefix = `<!DOCTYPE html><html><body>${beforeFragmentHtml}${includeFragmentMarkers ? markerStart : ""}`;
+  const suffix = `${includeFragmentMarkers ? markerEnd : ""}</body></html>`;
+  const html = `${prefix}${innerHtml}${suffix}`;
 
   const pad8 = (n) => String(n).padStart(8, "0");
+
+  const byteLength = (s) => new TextEncoder().encode(s).length;
 
   // Use fixed-width offset placeholders so the header length stays constant after substitution.
   const headerTemplate = [
@@ -21,10 +32,15 @@ function buildCfHtmlPayload(innerHtml, { beforeFragmentHtml = "" } = {}) {
     "",
   ].join("\r\n");
 
-  const startHTML = headerTemplate.length;
-  const endHTML = startHTML + html.length;
-  const startFragment = startHTML + html.indexOf(markerStart) + markerStart.length;
-  const endFragment = startHTML + html.indexOf(markerEnd);
+  const headerLen = offsets === "bytes" ? byteLength(headerTemplate) : headerTemplate.length;
+
+  const startHTML = headerLen;
+  const endHTML = startHTML + (offsets === "bytes" ? byteLength(html) : html.length);
+
+  const startFragment =
+    startHTML + (offsets === "bytes" ? byteLength(prefix) : prefix.length);
+  const endFragment =
+    startFragment + (offsets === "bytes" ? byteLength(innerHtml) : innerHtml.length);
 
   const header = headerTemplate
     .replace("StartHTML:00000000", `StartHTML:${pad8(startHTML)}`)
@@ -146,4 +162,19 @@ test("clipboard HTML tolerates CF_HTML payloads with truncated offsets (still co
 
   assert.equal(grid[0][0].value, 5);
   assert.equal(grid[0][1].value, 6);
+});
+
+test("clipboard HTML handles CF_HTML byte offsets when non-ASCII content appears before the fragment", () => {
+  // Include a bunch of multi-byte UTF-8 characters before the intended table, and omit fragment markers
+  // so parsing must rely on StartFragment/EndFragment offsets.
+  const cfHtml = buildCfHtmlPayload("<table><tr><td>RIGHT</td></tr></table>", {
+    beforeFragmentHtml: `<table><tr><td>WRONG</td></tr></table>${"€".repeat(1000)}`,
+    includeFragmentMarkers: false,
+    offsets: "bytes",
+  });
+
+  const grid = parseHtmlToCellGrid(cfHtml);
+  assert.ok(grid);
+
+  assert.equal(grid[0][0].value, "RIGHT");
 });
