@@ -61,6 +61,7 @@ mod statistical_moments;
 mod statistical_more;
 mod statistical_ets;
 mod cube_rtd;
+mod statistical_regression;
 mod text;
 mod text_dbcs;
 mod thai;

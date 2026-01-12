@@ -386,36 +386,6 @@ fn eval_ast_inner(
                     if args.len() < 2 {
                         return Value::Error(ErrorKind::Value);
                     }
-                    let idx_val =
-                        eval_ast_inner(&args[0], grid, sheet_id, base, locale, lexical_scopes);
-                    let idx = match coerce_to_i64(&idx_val) {
-                        Ok(i) => i,
-                        Err(e) => return Value::Error(e),
-                    };
-                    // CHOOSE is 1-indexed.
-                    if idx < 1 {
-                        return Value::Error(ErrorKind::Value);
-                    }
-                    let idx_usize = match usize::try_from(idx) {
-                        Ok(i) => i,
-                        Err(_) => return Value::Error(ErrorKind::Value),
-                    };
-                    if idx_usize >= args.len() {
-                        return Value::Error(ErrorKind::Value);
-                    }
-                    return eval_ast_inner(
-                        &args[idx_usize],
-                        grid,
-                        sheet_id,
-                        base,
-                        locale,
-                        lexical_scopes,
-                    );
-                }
-                Function::Choose => {
-                    if args.len() < 2 {
-                        return Value::Error(ErrorKind::Value);
-                    }
 
                     let index_value =
                         eval_ast_inner(&args[0], grid, sheet_id, base, locale, lexical_scopes);

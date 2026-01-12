@@ -20654,6 +20654,46 @@
       "id": "minifs_b317e8eaff04"
     },
     {
+      "formula": "=LINEST({1;2;3},{1;2;3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "LINEST"
+      ],
+      "id": "stat_linest_d9c2a8e060fe"
+    },
+    {
+      "formula": "=LOGEST({2;6;18},{0;1;2})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "LOGEST"
+      ],
+      "id": "stat_logest_8fab3593593b"
+    },
+    {
+      "formula": "=TREND({1;2;3},{1;2;3},{4;5})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "TREND"
+      ],
+      "id": "stat_trend_af71dd9a2007"
+    },
+    {
+      "formula": "=GROWTH({2;6;18},{0;1;2},{3;4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "statistical",
+        "GROWTH"
+      ],
+      "id": "stat_growth_750ef3f5abd7"
+    },
+    {
       "formula": "=AND(A1,B1)",
       "outputCell": "C1",
       "inputs": [

@@ -7406,14 +7406,6 @@ fn bytecode_expr_is_eligible_inner(
                     bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
                 })
             }
-            bytecode::ast::Function::Choose => {
-                if args.len() < 2 {
-                    return false;
-                }
-                args.iter().all(|arg| {
-                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
-                })
-            }
             bytecode::ast::Function::And
             | bytecode::ast::Function::Or
             | bytecode::ast::Function::Xor => {

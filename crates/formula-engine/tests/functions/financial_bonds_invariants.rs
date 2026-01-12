@@ -375,7 +375,7 @@ fn price_matches_pv_when_settlement_is_coupon_date() {
                                 let pv = eval_number(
                                     &mut sheet,
                                     &format!(
-                                        "=LET(n,{k},c,({rate})*({redemption})/{frequency},r,({yld})/{frequency},PV(r,n,-c,-{redemption}))"
+                                        "=LET(n,{k},c,100*({rate})/{frequency},r,({yld})/{frequency},PV(r,n,-c,-{redemption}))"
                                     ),
                                 );
 

@@ -1585,6 +1585,19 @@ export default {
       ]
     },
     {
+      "name": "GROWTH",
+      "min_args": 1,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "any",
+        "any",
+        "bool"
+      ]
+    },
+    {
       "name": "HARMEAN",
       "min_args": 1,
       "max_args": 255,
@@ -2220,6 +2233,19 @@ export default {
       ]
     },
     {
+      "name": "LINEST",
+      "min_args": 1,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "any",
+        "bool",
+        "bool"
+      ]
+    },
+    {
       "name": "LN",
       "min_args": 1,
       "max_args": 1,
@@ -2248,6 +2274,19 @@ export default {
       "return_type": "number",
       "arg_types": [
         "number"
+      ]
+    },
+    {
+      "name": "LOGEST",
+      "min_args": 1,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "any",
+        "bool",
+        "bool"
       ]
     },
     {
@@ -4074,6 +4113,19 @@ export default {
       "return_type": "any",
       "arg_types": [
         "any"
+      ]
+    },
+    {
+      "name": "TREND",
+      "min_args": 1,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "any",
+        "any",
+        "bool"
       ]
     },
     {

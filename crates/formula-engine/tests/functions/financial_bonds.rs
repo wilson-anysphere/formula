@@ -186,10 +186,10 @@ fn negative_yield_below_minus_one_is_allowed_when_frequency_gt_one() {
 }
 
 #[test]
-fn price_scales_coupon_payment_by_redemption() {
+fn price_coupon_payment_is_based_on_face_value() {
     // With settlement on a coupon date and yld=0, PRICE reduces to redemption + coupon_payment
     // (clean == dirty, since accrued interest A=0). Excel defines coupon_payment as
-    // redemption*rate/frequency.
+    // 100*rate/frequency (i.e. `rate` is per $100 face value, independent of `redemption`).
     let system = ExcelDateSystem::EXCEL_1900;
     let settlement = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
     let maturity = ymd_to_serial(ExcelDate::new(2021, 1, 1), system).unwrap(); // next semiannual coupon date
@@ -199,7 +199,7 @@ fn price_scales_coupon_payment_by_redemption() {
     let redemption = 105.0;
     let frequency = 2;
 
-    let expected = redemption + redemption * rate / (frequency as f64);
+    let expected = redemption + 100.0 * rate / (frequency as f64);
     let actual = price(settlement, maturity, rate, yld, redemption, frequency, 0, system).unwrap();
     assert_close(actual, expected, 1e-12);
 }

@@ -151,7 +151,9 @@ pub fn price(
         return Err(ExcelError::Num);
     }
 
-    let coupon_payment = redemption * rate / freq;
+    // Excel's `rate` is the annual coupon rate *per $100 face value* (not scaled by `redemption`,
+    // which is the amount repaid per $100 face value at maturity).
+    let coupon_payment = 100.0 * rate / freq;
     if !coupon_payment.is_finite() {
         return Err(ExcelError::Num);
     }
@@ -202,7 +204,9 @@ pub fn yield_rate(
     }
 
     let freq = frequency as f64;
-    let coupon_payment = redemption * rate / freq;
+    // Excel's `rate` is the annual coupon rate *per $100 face value* (not scaled by `redemption`,
+    // which is the amount repaid per $100 face value at maturity).
+    let coupon_payment = 100.0 * rate / freq;
     if !coupon_payment.is_finite() {
         return Err(ExcelError::Num);
     }

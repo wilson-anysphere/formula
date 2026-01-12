@@ -38,6 +38,7 @@ from case_generators import (
     text,
 )
 
+
 @dataclasses.dataclass(frozen=True)
 class CellInput:
     cell: str
@@ -203,6 +204,37 @@ def generate_cases() -> dict[str, Any]:
     math_cases.generate(cases, add_case=_add_case, CellInput=CellInput)
     engineering.generate(cases, add_case=_add_case, CellInput=CellInput)
     statistical.generate(cases, add_case=_add_case, CellInput=CellInput, excel_serial_1900=_excel_serial_1900)
+
+    # Regression / forecasting (Excel BIFF FTAB: LINEST, LOGEST, TREND, GROWTH).
+    #
+    # These functions are deterministic but easy to accidentally omit because they return arrays
+    # and are less commonly used in "simple" spreadsheets. Include a few small, stable cases so
+    # they show up in corpus function coverage.
+    _add_case(
+        cases,
+        prefix="stat_linest",
+        tags=["statistical", "LINEST"],
+        formula="=LINEST({1;2;3},{1;2;3})",
+    )
+    _add_case(
+        cases,
+        prefix="stat_logest",
+        tags=["statistical", "LOGEST"],
+        formula="=LOGEST({2;6;18},{0;1;2})",
+    )
+    _add_case(
+        cases,
+        prefix="stat_trend",
+        tags=["statistical", "TREND"],
+        formula="=TREND({1;2;3},{1;2;3},{4;5})",
+    )
+    _add_case(
+        cases,
+        prefix="stat_growth",
+        tags=["statistical", "GROWTH"],
+        formula="=GROWTH({2;6;18},{0;1;2},{3;4})",
+    )
+
     logical.generate(cases, add_case=_add_case, CellInput=CellInput)
     coercion.generate(cases, add_case=_add_case, CellInput=CellInput)
     text.generate(cases, add_case=_add_case, CellInput=CellInput, excel_serial_1900=_excel_serial_1900)
