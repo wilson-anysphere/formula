@@ -49,6 +49,10 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "FILTER",
     "FLOOR.MATH",
     "FLOOR.PRECISE",
+    "FORECAST.ETS",
+    "FORECAST.ETS.CONFINT",
+    "FORECAST.ETS.SEASONALITY",
+    "FORECAST.ETS.STAT",
     "FORECAST.LINEAR",
     "GAMMA",
     "GAMMA.DIST",
@@ -476,6 +480,14 @@ mod tests {
         let input = "STDEV.S(A1:A3)+VAR.P(A1:A3)";
         let expected = "_xlfn.STDEV.S(A1:A3)+_xlfn.VAR.P(A1:A3)";
         assert_eq!(add_xlfn_prefixes(input), expected);
+    }
+
+    #[test]
+    fn xlfn_roundtrip_preserves_forecast_ets_functions() {
+        let display = "FORECAST.ETS(1,2,3)+FORECAST.ETS.CONFINT(1,2,3)+FORECAST.ETS.SEASONALITY(1,2,3)+FORECAST.ETS.STAT(1,2,3)";
+        let file = "_xlfn.FORECAST.ETS(1,2,3)+_xlfn.FORECAST.ETS.CONFINT(1,2,3)+_xlfn.FORECAST.ETS.SEASONALITY(1,2,3)+_xlfn.FORECAST.ETS.STAT(1,2,3)";
+        assert_eq!(add_xlfn_prefixes(display), file);
+        assert_eq!(strip_xlfn_prefixes(file), display);
     }
 
     #[test]
