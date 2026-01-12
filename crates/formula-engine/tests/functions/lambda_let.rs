@@ -110,3 +110,18 @@ fn lambda_supports_omitted_parameters_with_isomitted() {
         Value::Bool(false)
     );
 }
+
+#[test]
+fn lambda_calls_can_be_used_as_reference_arguments() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 10.0);
+    sheet.set("A2", 20.0);
+    sheet.set("A3", 30.0);
+
+    // Ensure lambdas can return references so reference-only functions like OFFSET accept the
+    // result without treating it as an inlined array value.
+    assert_number(
+        &sheet.eval("=LET(f,LAMBDA(r,r),OFFSET(f(A1:A3),0,0,1,1))"),
+        10.0,
+    );
+}

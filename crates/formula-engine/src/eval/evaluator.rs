@@ -674,7 +674,39 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         scopes.push(call_scope);
 
         let evaluator = self.with_lexical_scopes(scopes);
-        evaluator.deref_eval_value_dynamic(evaluator.eval_value(lambda.body.as_ref()))
+        match evaluator.eval_value(lambda.body.as_ref()) {
+            EvalValue::Scalar(v) => v,
+            EvalValue::Reference(mut ranges) => {
+                // Ensure a stable order for deterministic function behavior (e.g. COUNT over a
+                // multi-area union).
+                ranges.sort_by(|a, b| {
+                    a.sheet_id
+                        .cmp(&b.sheet_id)
+                        .then_with(|| a.start.row.cmp(&b.start.row))
+                        .then_with(|| a.start.col.cmp(&b.start.col))
+                        .then_with(|| a.end.row.cmp(&b.end.row))
+                        .then_with(|| a.end.col.cmp(&b.end.col))
+                });
+
+                match ranges.as_slice() {
+                    [only] => Value::Reference(FnReference {
+                        sheet_id: only.sheet_id.clone(),
+                        start: only.start,
+                        end: only.end,
+                    }),
+                    _ => Value::ReferenceUnion(
+                        ranges
+                            .into_iter()
+                            .map(|r| FnReference {
+                                sheet_id: r.sheet_id,
+                                start: r.start,
+                                end: r.end,
+                            })
+                            .collect(),
+                    ),
+                }
+            }
+        }
     }
 
     fn deref_eval_value_dynamic(&self, value: EvalValue) -> Value {
@@ -1278,7 +1310,39 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
         scopes.push(call_scope);
 
         let evaluator = self.with_lexical_scopes(scopes);
-        evaluator.deref_eval_value_dynamic(evaluator.eval_value(lambda.body.as_ref()))
+        match evaluator.eval_value(lambda.body.as_ref()) {
+            EvalValue::Scalar(v) => v,
+            EvalValue::Reference(mut ranges) => {
+                // Ensure a stable order for deterministic function behavior (e.g. COUNT over a
+                // multi-area union).
+                ranges.sort_by(|a, b| {
+                    a.sheet_id
+                        .cmp(&b.sheet_id)
+                        .then_with(|| a.start.row.cmp(&b.start.row))
+                        .then_with(|| a.start.col.cmp(&b.start.col))
+                        .then_with(|| a.end.row.cmp(&b.end.row))
+                        .then_with(|| a.end.col.cmp(&b.end.col))
+                });
+
+                match ranges.as_slice() {
+                    [only] => Value::Reference(FnReference {
+                        sheet_id: only.sheet_id.clone(),
+                        start: only.start,
+                        end: only.end,
+                    }),
+                    _ => Value::ReferenceUnion(
+                        ranges
+                            .into_iter()
+                            .map(|r| FnReference {
+                                sheet_id: r.sheet_id,
+                                start: r.start,
+                                end: r.end,
+                            })
+                            .collect(),
+                    ),
+                }
+            }
+        }
     }
 
     fn volatile_rand_u64(&self) -> u64 {

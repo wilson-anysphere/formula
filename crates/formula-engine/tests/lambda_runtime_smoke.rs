@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use formula_engine::eval::{BinaryOp, Expr, NameRef};
+use formula_engine::eval::{BinaryOp, Expr, NameRef, RangeRef};
 use formula_engine::eval::{
     CellAddr, EvalContext, Evaluator, RecalcContext, ResolvedName, SheetReference, ValueResolver,
 };
@@ -182,6 +182,45 @@ fn lambda_recursion_is_depth_limited() {
     };
 
     assert_eq!(evaluator.eval_formula(&expr), Value::Error(ErrorKind::Calc));
+}
+
+#[test]
+fn lambda_calls_can_return_reference_values() {
+    let resolver = TestResolver::default();
+    let ctx = EvalContext {
+        current_sheet: 0,
+        current_cell: CellAddr { row: 0, col: 0 },
+    };
+    let recalc_ctx = RecalcContext::new(0);
+    let evaluator = Evaluator::new(&resolver, ctx, &recalc_ctx);
+
+    // LAMBDA(r, r) - identity function for references.
+    let body = Expr::NameRef(NameRef {
+        sheet: SheetReference::Current,
+        name: "r".to_string(),
+    });
+    let lambda_value = evaluator.make_lambda(vec!["r".to_string()], body);
+    evaluator.set_local("F", ArgValue::Scalar(lambda_value));
+
+    let range_expr = Expr::RangeRef(RangeRef {
+        sheet: SheetReference::Current,
+        start: CellAddr { row: 0, col: 0 },
+        end: CellAddr { row: 2, col: 0 },
+    });
+
+    let call_expr = Expr::FunctionCall {
+        name: "F".to_string(),
+        original_name: "F".to_string(),
+        args: vec![range_expr],
+    };
+
+    let expected = Reference {
+        sheet_id: SheetId::Local(0),
+        start: CellAddr { row: 0, col: 0 },
+        end: CellAddr { row: 2, col: 0 },
+    };
+
+    assert_eq!(evaluator.eval_arg(&call_expr), ArgValue::Reference(expected));
 }
 
 #[test]
