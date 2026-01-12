@@ -33,7 +33,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
   const [activeTabId, setActiveTabId] = React.useState<string>(initialTabId ?? firstTabId);
   const [pressedById, setPressedById] = React.useState<Record<string, boolean>>(() => computeInitialPressed(schema));
 
-  const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
+  const tabButtonRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
 
   const activateButton = React.useCallback(
     (button: RibbonButtonDefinition) => {
@@ -55,10 +55,21 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
     [actions],
   );
 
+  const selectTabByIndex = React.useCallback(
+    (nextIndex: number) => {
+      const tab = tabs[nextIndex];
+      if (!tab) return;
+      setActiveTabId(tab.id);
+      actions.onTabChange?.(tab.id);
+      tabButtonRefs.current[tab.id]?.focus();
+    },
+    [actions, tabs],
+  );
+
   return (
     <div className="ribbon" data-testid="ribbon-root">
       <div className="ribbon__tabs" role="tablist" aria-label="Ribbon tabs">
-        {tabs.map((tab) => {
+        {tabs.map((tab, index) => {
           const isActive = tab.id === activeTabId;
           const isFile = Boolean(tab.isFile);
           return (
@@ -73,10 +84,38 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                 .filter(Boolean)
                 .join(" ")}
               role="tab"
+              id={`ribbon-tab-${tab.id}`}
               aria-selected={isActive}
+              aria-controls={`ribbon-panel-${tab.id}`}
+              tabIndex={isActive ? 0 : -1}
+              ref={(el) => {
+                tabButtonRefs.current[tab.id] = el;
+              }}
               onClick={() => {
                 setActiveTabId(tab.id);
                 actions.onTabChange?.(tab.id);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowRight") {
+                  event.preventDefault();
+                  selectTabByIndex((index + 1) % tabs.length);
+                  return;
+                }
+                if (event.key === "ArrowLeft") {
+                  event.preventDefault();
+                  selectTabByIndex((index - 1 + tabs.length) % tabs.length);
+                  return;
+                }
+                if (event.key === "Home") {
+                  event.preventDefault();
+                  selectTabByIndex(0);
+                  return;
+                }
+                if (event.key === "End") {
+                  event.preventDefault();
+                  selectTabByIndex(tabs.length - 1);
+                  return;
+                }
               }}
             >
               {tab.label}
@@ -85,12 +124,26 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
         })}
       </div>
 
-      <div className="ribbon__content" role="tabpanel" aria-label={activeTab?.label ?? "Ribbon"}>
-        {activeTab?.groups.map((group) => (
-          <RibbonGroup key={group.id} group={group} pressedById={pressedById} onActivateButton={activateButton} />
-        ))}
+      <div className="ribbon__content">
+        {tabs.map((tab) => {
+          const isActive = tab.id === activeTabId;
+          return (
+            <div
+              key={tab.id}
+              id={`ribbon-panel-${tab.id}`}
+              role="tabpanel"
+              aria-labelledby={`ribbon-tab-${tab.id}`}
+              aria-label={tab.label}
+              hidden={!isActive}
+              className="ribbon__tabpanel"
+            >
+              {tab.groups.map((group) => (
+                <RibbonGroup key={group.id} group={group} pressedById={pressedById} onActivateButton={activateButton} />
+              ))}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
-

@@ -68,14 +68,18 @@
 }
 
 .ribbon__content {
-  display: flex;
-  align-items: stretch;
-  gap: 12px;
   padding: 6px 8px;
   min-height: 76px;
   background: var(--bg-secondary);
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+.ribbon__tabpanel {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 12px;
+  min-height: 64px;
 }
 
 .ribbon-group {
@@ -125,6 +129,7 @@
   font-family: inherit;
   line-height: 1.1;
   white-space: nowrap;
+  position: relative;
   transition:
     background-color var(--motion-duration-fast) var(--motion-ease),
     border-color var(--motion-duration-fast) var(--motion-ease),
@@ -203,7 +208,7 @@
 }
 
 .ribbon-button--icon {
-  width: 28px;
+  width: 32px;
   padding: 0;
 }
 
@@ -211,3 +216,10 @@
   display: none;
 }
 
+.ribbon-button--icon .ribbon-button__caret {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  margin: 0;
+  font-size: 9px;
+}

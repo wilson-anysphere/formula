@@ -36,6 +36,7 @@ export function RibbonButton({ button, pressed, onActivate }: RibbonButtonProps)
   const kind = button.kind ?? "button";
   const size = button.size ?? "small";
   const ariaPressed = kind === "toggle" ? Boolean(pressed) : undefined;
+  const ariaHaspopup = kind === "dropdown" ? ("menu" as const) : undefined;
 
   return (
     <button
@@ -50,6 +51,7 @@ export function RibbonButton({ button, pressed, onActivate }: RibbonButtonProps)
         .join(" ")}
       aria-label={button.ariaLabel}
       aria-pressed={ariaPressed}
+      aria-haspopup={ariaHaspopup}
       disabled={button.disabled}
       data-testid={button.testId}
       onClick={() => onActivate?.(button)}
@@ -69,4 +71,3 @@ export function RibbonButton({ button, pressed, onActivate }: RibbonButtonProps)
     </button>
   );
 }
-
