@@ -172,8 +172,8 @@ Implementation notes:
 
 - Tray menu and click behavior are implemented in `apps/desktop/src-tauri/src/tray.rs`.
   - Emits: `tray-new`, `tray-open`, `tray-quit`
-  - “Check for Updates” runs an update check (`updater::spawn_update_check`)
-- In release builds, `main.rs` also runs a lightweight update check on startup (`updater::spawn_update_check`, behind `#[cfg(not(debug_assertions))]`).
+  - “Check for Updates” runs an update check (`updater::spawn_update_check(..., UpdateCheckSource::Manual)`)
+- In release builds, `main.rs` also runs a lightweight update check on startup (`updater::spawn_update_check(..., UpdateCheckSource::Startup)`, behind `#[cfg(not(debug_assertions))]`).
 - Global shortcuts are registered in `apps/desktop/src-tauri/src/shortcuts.rs`.
   - Accelerators: `CmdOrCtrl+Shift+O`, `CmdOrCtrl+Shift+P`
   - The plugin handler in `main.rs` emits: `shortcut-quick-open`, `shortcut-command-palette`
@@ -251,9 +251,12 @@ Events emitted by the Rust host (see `main.rs`, `tray.rs`, `updater.rs`):
 - Shortcuts:
   - `shortcut-quick-open`, `shortcut-command-palette`
 - Updates:
-  - `update-available` (payload: `{ version, body }`)
+  - `update-check-started` (payload: `{ source }`)
+  - `update-not-available` (payload: `{ source }`)
+  - `update-check-error` (payload: `{ source, message }`)
+  - `update-available` (payload: `{ source, version, body }`)
 
-Note: at the time of writing, `apps/desktop/src/main.ts` does not yet listen for `update-available` (it is emitted by the Rust host, but there is no UI flow wired up yet).
+Note: at the time of writing, `apps/desktop/src/main.ts` does not yet listen for these updater events (they are emitted by the Rust host, but there is no UI flow wired up yet).
 
 Related frontend → backend events used as acknowledgements during close:
 
