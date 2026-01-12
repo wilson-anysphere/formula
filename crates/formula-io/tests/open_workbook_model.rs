@@ -39,6 +39,26 @@ fn open_workbook_model_xlsx() {
 }
 
 #[test]
+fn open_workbook_model_xlsx_multi_sheet() {
+    let path = fixture_path("xlsx/basic/multi-sheet.xlsx");
+    let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
+
+    assert_eq!(workbook.sheets.len(), 2);
+    assert_eq!(workbook.sheets[0].name, "Sheet1");
+    assert_eq!(workbook.sheets[1].name, "Sheet2");
+
+    let sheet1 = workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(sheet1.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(
+        sheet1.value_a1("B1").unwrap(),
+        CellValue::String("Hello".to_string())
+    );
+
+    let sheet2 = workbook.sheet_by_name("Sheet2").expect("Sheet2 missing");
+    assert_eq!(sheet2.value_a1("A1").unwrap(), CellValue::Number(2.0));
+}
+
+#[test]
 fn open_workbook_model_xlsx_reads_formulas() {
     let path = fixture_path("xlsx/formulas/formulas.xlsx");
     let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
