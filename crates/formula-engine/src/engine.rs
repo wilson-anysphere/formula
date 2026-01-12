@@ -3407,6 +3407,14 @@ impl Engine {
                     lexical_scopes,
                 )),
             }),
+            crate::Expr::FieldAccess(access) => crate::Expr::FieldAccess(crate::FieldAccessExpr {
+                base: Box::new(self.inline_static_defined_names_for_bytecode_inner(
+                    access.base.as_ref(),
+                    current_sheet,
+                    visiting,
+                )),
+                field: access.field.clone(),
+            }),
             crate::Expr::Binary(b) => crate::Expr::Binary(crate::BinaryExpr {
                 op: b.op,
                 left: Box::new(self.inline_static_defined_names_for_bytecode_inner(
@@ -5783,6 +5791,15 @@ fn rewrite_structured_refs_for_bytecode(
                 field: access.field.clone(),
             }))
         }
+        crate::Expr::FieldAccess(access) => Some(crate::Expr::FieldAccess(crate::FieldAccessExpr {
+            base: Box::new(rewrite_structured_refs_for_bytecode(
+                access.base.as_ref(),
+                origin_sheet,
+                origin_cell,
+                tables_by_sheet,
+            )?),
+            field: access.field.clone(),
+        })),
         crate::Expr::FunctionCall(call) => Some(crate::Expr::FunctionCall(crate::FunctionCall {
             name: call.name.clone(),
             args: call

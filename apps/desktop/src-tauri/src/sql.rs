@@ -49,6 +49,14 @@ fn sql_query_timeout_duration() -> Duration {
     Duration::from_millis(sql_query_timeout_ms())
 }
 
+fn sql_timeout_error(kind: &'static str) -> anyhow::Error {
+    let timeout_ms = sql_query_timeout_ms();
+    anyhow!(
+        "{kind} query exceeded the maximum execution time ({timeout_ms}ms). \
+         Try adding a LIMIT clause or optimizing the query."
+    )
+}
+
 fn sql_value_estimated_bytes(value: &JsonValue) -> usize {
     match value {
         JsonValue::Null => 4,
@@ -68,15 +76,9 @@ async fn with_sql_query_timeout<T>(
     kind: &'static str,
     fut: impl std::future::Future<Output = Result<T>>,
 ) -> Result<T> {
-    let timeout_ms = sql_query_timeout_ms();
     tokio::time::timeout(sql_query_timeout_duration(), fut)
         .await
-        .map_err(|_| {
-            anyhow!(
-                "{kind} query exceeded the maximum execution time ({timeout_ms}ms). \
-                 Try adding a LIMIT clause or optimizing the query."
-            )
-        })?
+        .map_err(|_| sql_timeout_error(kind))?
 }
 
 const SQLITE_SCOPE_DENIED_ERROR: &str =
@@ -692,7 +694,10 @@ async fn query_sqlite(
     with_sql_query_timeout("SQLite", async {
         // Fetch schema first (best-effort). We do this on a separate connection so schema discovery
         // failures don't prevent query execution.
-        let schema = sqlite_schema(opts, sql).await.ok();
+        let schema =
+            with_sql_query_timeout("SQLite schema discovery", sqlite_schema(opts, sql))
+                .await
+                .ok();
 
         let mut conn = sqlx::SqliteConnection::connect_with(opts)
             .await
