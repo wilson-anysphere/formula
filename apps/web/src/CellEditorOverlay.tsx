@@ -68,7 +68,7 @@ export function CellEditorOverlay(props: {
       value={props.value}
       onChange={(event) => props.onChange(event.currentTarget.value)}
       onKeyDown={(event) => {
-        if (event.key === "F4" && props.value.trim().startsWith("=")) {
+        if (event.key === "F4" && !event.altKey && !event.ctrlKey && !event.metaKey && props.value.trim().startsWith("=")) {
           event.preventDefault();
           const input = event.currentTarget;
           const value = input.value;

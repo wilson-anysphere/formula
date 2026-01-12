@@ -129,7 +129,7 @@ export class CellEditorOverlay {
   private onKeyDown(e: KeyboardEvent): void {
     if (!this.editingCell) return;
 
-    if (e.key === "F4" && this.element.value.trim().startsWith("=")) {
+    if (e.key === "F4" && !e.altKey && !e.ctrlKey && !e.metaKey && this.element.value.trim().startsWith("=")) {
       e.preventDefault();
       e.stopPropagation();
 

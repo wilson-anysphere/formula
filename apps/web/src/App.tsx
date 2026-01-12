@@ -1355,7 +1355,13 @@ function EngineDemoApp() {
             onKeyDown={(event) => {
               // Excel UX: F4 cycles the absolute/relative state of the reference token at the caret,
               // but only while editing a formula (draft starts with "=").
-              if (event.key === "F4" && event.currentTarget.value.trim().startsWith("=")) {
+              if (
+                event.key === "F4" &&
+                !event.altKey &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                event.currentTarget.value.trim().startsWith("=")
+              ) {
                 event.preventDefault();
                 const input = event.currentTarget;
                 const value = input.value;

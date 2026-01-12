@@ -332,7 +332,7 @@ export class FormulaBarView {
   #onKeyDown(e: KeyboardEvent): void {
     if (!this.model.isEditing) return;
 
-    if (e.key === "F4" && this.model.draft.trim().startsWith("=")) {
+    if (e.key === "F4" && !e.altKey && !e.ctrlKey && !e.metaKey && this.model.draft.trim().startsWith("=")) {
       e.preventDefault();
 
       const prevText = this.textarea.value;
