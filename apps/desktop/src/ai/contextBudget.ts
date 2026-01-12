@@ -9,15 +9,19 @@ export type ContextBudgetMode = "chat" | "agent" | "inline_edit";
 export function getModelContextWindowTokens(model: string): number {
   const m = String(model ?? "").toLowerCase();
 
-  // OpenAI
-  if (m.startsWith("gpt-4o") || m.startsWith("gpt-4.1") || m.includes("gpt-4-turbo")) return 128_000;
-  if (m.startsWith("gpt-4")) return 32_000;
-  if (m.startsWith("gpt-3.5")) return 16_000;
+  // If the model name includes an explicit context-window hint (e.g. "32k", "128k"),
+  // trust it. This keeps the logic deterministic without relying on any specific
+  // model/provider naming scheme.
+  const hintMatch = m.match(/(\d+)\s*k\b/i);
+  if (hintMatch) {
+    const thousands = Number(hintMatch[1]);
+    if (Number.isFinite(thousands) && thousands > 0) return Math.floor(thousands * 1000);
+  }
 
-  // Anthropic
-  if (m.startsWith("claude-3") || m.startsWith("claude-2")) return 200_000;
+  // Cursor-managed backends generally support large context windows.
+  if (m.includes("cursor")) return 128_000;
 
-  // Default fallback (kept modest to avoid blowing up smaller provider limits).
+  // Conservative default for unknown models.
   return 16_000;
 }
 
@@ -48,4 +52,3 @@ export function getDefaultReserveForOutputTokens(mode: ContextBudgetMode, contex
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
-
