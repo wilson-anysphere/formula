@@ -107,7 +107,7 @@ A 1M-row spreadsheet could exceed 100M tokens. Required strategies:
 
 1. **Schema-First:** Send structure (headers, types, samples), not raw data
 2. **Selective Sampling:** Random/stratified sample for statistical questions
-3. **RAG Over Cells:** Embed cells, retrieve relevant context via semantic search
+3. **RAG Over Cells:** Retrieve relevant context via deterministic, offline hash embeddings (no user API keys, no local model setup)
 4. **Hierarchical Summarization:** Pre-computed aggregates at sheet/region level
 5. **Query-Aware Loading:** Dynamically load only ranges relevant to current query
 
