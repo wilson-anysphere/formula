@@ -284,9 +284,9 @@ export class DesktopExtensionHostManager {
   }
 
   async resetPermissionsForExtension(extensionId: string): Promise<void> {
-    // The desktop UI labels this action as "Revoke all permissions" for a single extension.
-    // Use `revokePermissions(extensionId)` (no specific list) to match that semantics.
-    await this.host.revokePermissions(extensionId);
+    // Clears all stored grants for a single extension, forcing the next privileged API
+    // call to re-prompt for permissions.
+    await this.host.resetPermissions(extensionId);
     this.emit();
   }
 
