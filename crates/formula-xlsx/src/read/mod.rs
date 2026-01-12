@@ -1,7 +1,7 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
+use std::io::{Cursor, Read, Seek, SeekFrom};
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
-use std::io::{Cursor, Read};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
@@ -78,11 +78,23 @@ pub fn load_from_path(path: impl AsRef<Path>) -> Result<XlsxDocument, ReadError>
 /// the parts required to build a [`formula_model::Workbook`] (workbook metadata,
 /// styles, shared strings, and referenced worksheets).
 pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadError> {
-    let cursor = Cursor::new(bytes);
-    let mut archive = ZipArchive::new(cursor)?;
+    read_workbook_model_from_reader(Cursor::new(bytes))
+}
 
-    let workbook_xml = read_zip_part_required(&mut archive, WORKBOOK_PART)?;
-    let workbook_rels = read_zip_part_required(&mut archive, WORKBOOK_RELS_PART)?;
+/// Read an XLSX workbook model directly from a seekable reader without inflating
+/// the entire XLSX package (or every ZIP part) into memory.
+pub fn read_workbook_model_from_reader<R: Read + Seek>(mut reader: R) -> Result<Workbook, ReadError> {
+    // Ensure we start from the beginning; callers may pass a reused reader.
+    reader.seek(SeekFrom::Start(0))?;
+    let mut archive = ZipArchive::new(reader)?;
+    read_workbook_model_from_zip(&mut archive)
+}
+
+fn read_workbook_model_from_zip<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+) -> Result<Workbook, ReadError> {
+    let workbook_xml = read_zip_part_required(archive, WORKBOOK_PART)?;
+    let workbook_rels = read_zip_part_required(archive, WORKBOOK_RELS_PART)?;
 
     let rels_info = parse_relationships(&workbook_rels)?;
     let (date_system, _calc_pr, sheets, defined_names) =
@@ -101,7 +113,7 @@ pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadErro
         .as_deref()
         .map(|target| resolve_target(WORKBOOK_PART, target))
         .unwrap_or_else(|| "xl/styles.xml".to_string());
-    let styles_bytes = read_zip_part_optional(&mut archive, &styles_part_name)?;
+    let styles_bytes = read_zip_part_optional(archive, &styles_part_name)?;
     let styles_part = StylesPart::parse_or_default(styles_bytes.as_deref(), &mut workbook.styles)?;
 
     let shared_strings_part_name = rels_info
@@ -109,7 +121,7 @@ pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadErro
         .as_deref()
         .map(|target| resolve_target(WORKBOOK_PART, target))
         .unwrap_or_else(|| "xl/sharedStrings.xml".to_string());
-    let shared_strings = match read_zip_part_optional(&mut archive, &shared_strings_part_name)? {
+    let shared_strings = match read_zip_part_optional(archive, &shared_strings_part_name)? {
         Some(bytes) => parse_shared_strings(&bytes)?,
         None => Vec::new(),
     };
@@ -128,94 +140,45 @@ pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadErro
             _ => SheetVisibility::Visible,
         };
 
-        let sheet_xml = read_zip_part_optional(&mut archive, &sheet.path)?.ok_or(
-            ReadError::MissingPart("worksheet part referenced from workbook.xml.rels"),
-        )?;
+        let sheet_xml = read_zip_part_optional(archive, &sheet.path)?
+            .ok_or(ReadError::MissingPart(
+                "worksheet part referenced from workbook.xml.rels",
+            ))?;
 
         // Worksheet-level metadata lives inside the worksheet part (and sometimes its .rels).
         let sheet_xml_str = std::str::from_utf8(&sheet_xml)?;
 
-        ws.tab_color = parse_sheet_tab_color(sheet_xml_str)?;
+        // Optional metadata: best-effort.
+        ws.tab_color = parse_sheet_tab_color(sheet_xml_str).unwrap_or(None);
 
         // Merged cells (must be parsed before cell content so we don't treat interior
         // cells as value-bearing).
-        let merges = crate::merge_cells::read_merge_cells_from_worksheet_xml(sheet_xml_str)
-            .map_err(|err| match err {
-                crate::merge_cells::MergeCellsError::Xml(e) => ReadError::Xml(e),
-                crate::merge_cells::MergeCellsError::Attr(e) => ReadError::XmlAttr(e),
-                crate::merge_cells::MergeCellsError::Utf8(e) => ReadError::Utf8(e),
-                crate::merge_cells::MergeCellsError::InvalidRef(r) => ReadError::InvalidRangeRef(r),
-                crate::merge_cells::MergeCellsError::Zip(e) => ReadError::Zip(e),
-                crate::merge_cells::MergeCellsError::Io(e) => ReadError::Io(e),
-            })?;
-        for range in merges {
-            ws.merged_regions
-                .add(range)
-                .map_err(|e| ReadError::InvalidRangeRef(e.to_string()))?;
-        }
-
-        // Hyperlinks.
-        let rels_part = rels_for_part(&sheet.path);
-        let rels_xml_bytes = read_zip_part_optional(&mut archive, &rels_part)?;
-        let rels_xml = rels_xml_bytes
-            .as_deref()
-            .map(|bytes| std::str::from_utf8(bytes))
-            .transpose()?;
-        ws.hyperlinks = parse_worksheet_hyperlinks(sheet_xml_str, rels_xml)?;
-
-        parse_worksheet_into_model(ws, ws_id, &sheet_xml, &shared_strings, &styles_part, None)?;
-
-        // Attach any Excel table definitions referenced by this worksheet so structured references
-        // (e.g. `Table1[Column]`, `[@Column]`) can be resolved by the engine. The fast reader is
-        // best-effort here: if a table part is missing or malformed, skip it instead of failing
-        // the entire workbook load.
-        let table_part_ids = parse_table_part_ids(&sheet_xml)?;
-        if let Some(rels_bytes) = rels_xml_bytes.as_deref() {
-            if !table_part_ids.is_empty() {
-                let relationships = crate::openxml::parse_relationships(rels_bytes)?;
-                let mut rels_by_id: HashMap<String, crate::openxml::Relationship> =
-                    HashMap::with_capacity(relationships.len());
-                for rel in relationships {
-                    rels_by_id.insert(rel.id.clone(), rel);
-                }
-
-                let mut seen_rel_ids: HashSet<String> = ws
-                    .tables
-                    .iter()
-                    .filter_map(|t| t.relationship_id.clone())
-                    .collect();
-
-                for r_id in table_part_ids {
-                    if !seen_rel_ids.insert(r_id.clone()) {
-                        continue;
-                    }
-
-                    let Some(rel) = rels_by_id.get(&r_id) else {
-                        continue;
-                    };
-                    if rel.type_uri != TABLE_REL_TYPE {
-                        continue;
-                    }
-
-                    let target = resolve_target(&sheet.path, &rel.target);
-                    let Some(table_bytes) = read_zip_part_optional(&mut archive, &target)? else {
-                        continue;
-                    };
-
-                    let Ok(table_xml) = std::str::from_utf8(&table_bytes) else {
-                        continue;
-                    };
-
-                    let Ok(mut table) = parse_table(table_xml) else {
-                        continue;
-                    };
-
-                    table.relationship_id = Some(r_id);
-                    table.part_path = Some(target);
-                    ws.tables.push(table);
-                }
+        if let Ok(merges) = crate::merge_cells::read_merge_cells_from_worksheet_xml(sheet_xml_str) {
+            for range in merges {
+                let _ = ws.merged_regions.add(range);
             }
         }
+
+        // Worksheet relationships are needed to resolve external hyperlink targets and table parts.
+        let rels_part = rels_for_part(&sheet.path);
+        let rels_xml_bytes = read_zip_part_optional(archive, &rels_part)?;
+        let rels_xml = rels_xml_bytes
+            .as_deref()
+            .and_then(|bytes| std::str::from_utf8(bytes).ok());
+
+        ws.hyperlinks = parse_worksheet_hyperlinks(sheet_xml_str, rels_xml).unwrap_or_default();
+
+        ws.auto_filter = parse_worksheet_autofilter(sheet_xml_str).ok().flatten();
+
+        attach_tables_from_parts(
+            ws,
+            &sheet.path,
+            &sheet_xml,
+            rels_xml_bytes.as_deref(),
+            archive,
+        );
+
+        parse_worksheet_into_model(ws, ws_id, &sheet_xml, &shared_strings, &styles_part, None)?;
     }
 
     for defined in defined_names {
@@ -238,6 +201,75 @@ pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadErro
     }
 
     Ok(workbook)
+}
+
+fn attach_tables_from_parts<R: Read + Seek>(
+    worksheet: &mut formula_model::Worksheet,
+    worksheet_part: &str,
+    worksheet_xml: &[u8],
+    worksheet_rels_xml: Option<&[u8]>,
+    archive: &mut ZipArchive<R>,
+) {
+    let table_rel_ids = match parse_table_part_ids(worksheet_xml) {
+        Ok(ids) => ids,
+        Err(_) => Vec::new(),
+    };
+    if table_rel_ids.is_empty() {
+        return;
+    }
+
+    let Some(rels_xml) = worksheet_rels_xml else {
+        return;
+    };
+
+    let relationships = match crate::openxml::parse_relationships(rels_xml) {
+        Ok(rels) => rels,
+        Err(_) => return,
+    };
+
+    let mut rels_by_id: HashMap<String, crate::openxml::Relationship> =
+        HashMap::with_capacity(relationships.len());
+    for rel in relationships {
+        rels_by_id.insert(rel.id.clone(), rel);
+    }
+
+    let mut seen_rel_ids: std::collections::HashSet<String> = worksheet
+        .tables
+        .iter()
+        .filter_map(|t| t.relationship_id.clone())
+        .collect();
+
+    for r_id in table_rel_ids {
+        if !seen_rel_ids.insert(r_id.clone()) {
+            continue;
+        }
+
+        let Some(rel) = rels_by_id.get(&r_id) else {
+            continue;
+        };
+        if rel.type_uri != TABLE_REL_TYPE {
+            continue;
+        }
+
+        let target = resolve_target(worksheet_part, &rel.target);
+        let table_bytes = match read_zip_part_optional(archive, &target) {
+            Ok(Some(bytes)) => bytes,
+            _ => continue,
+        };
+
+        let table_xml = match std::str::from_utf8(&table_bytes) {
+            Ok(xml) => xml,
+            Err(_) => continue,
+        };
+
+        let mut table = match parse_table(table_xml) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        table.relationship_id = Some(r_id);
+        table.part_path = Some(target);
+        worksheet.tables.push(table);
+    }
 }
 
 fn read_zip_part_required<R: Read + std::io::Seek>(

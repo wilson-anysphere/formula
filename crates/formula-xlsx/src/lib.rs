@@ -86,7 +86,7 @@ pub use pivots::{
     PivotTableStyleInfo, PreservedPivotParts, RelationshipStub, XlsxPivots,
 };
 pub use recalc_policy::RecalcPolicy;
-pub use read::{load_from_bytes, read_workbook_model_from_bytes};
+pub use read::{load_from_bytes, read_workbook_model_from_bytes, read_workbook_model_from_reader};
 #[cfg(not(target_arch = "wasm32"))]
 pub use read::load_from_path;
 #[cfg(not(target_arch = "wasm32"))]

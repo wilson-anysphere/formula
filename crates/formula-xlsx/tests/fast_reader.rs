@@ -271,3 +271,21 @@ fn fast_reader_sets_workbook_date_system_from_workbook_pr() {
     assert_eq!(full.date_system, DateSystem::Excel1904);
     assert_eq!(fast.date_system, DateSystem::Excel1904);
 }
+
+#[test]
+fn fast_reader_discovers_table_parts() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/table.xlsx");
+    let bytes = std::fs::read(&path).expect("read table fixture");
+    let workbook =
+        formula_xlsx::read_workbook_model_from_bytes(&bytes).expect("fast reader should succeed");
+
+    assert_eq!(workbook.sheets.len(), 1);
+    let sheet = &workbook.sheets[0];
+    assert_eq!(sheet.tables.len(), 1);
+
+    let table = &sheet.tables[0];
+    assert_eq!(table.name, "Table1");
+    assert_eq!(table.range.to_string(), "A1:D4");
+    assert_eq!(table.relationship_id.as_deref(), Some("rId1"));
+    assert_eq!(table.part_path.as_deref(), Some("xl/tables/table1.xml"));
+}
