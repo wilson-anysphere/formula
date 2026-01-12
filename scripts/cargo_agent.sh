@@ -109,8 +109,13 @@ fi
 #
 # Prefer the wrapper-specific override, but fall back to the standard Cargo env var so
 # `source scripts/agent-init.sh` (which sets `CARGO_BUILD_JOBS`) influences the wrapper too.
+caller_jobs_env="${FORMULA_CARGO_JOBS:-${CARGO_BUILD_JOBS:-}}"
 jobs="${FORMULA_CARGO_JOBS:-${CARGO_BUILD_JOBS:-4}}"
 limit_as="${FORMULA_CARGO_LIMIT_AS:-14G}"
+
+# Record whether the caller explicitly configured Rayon thread counts before we set any defaults.
+orig_rayon_num_threads="${RAYON_NUM_THREADS:-}"
+orig_formula_rayon_num_threads="${FORMULA_RAYON_NUM_THREADS:-}"
 
 # Cargo also supports configuring the default parallelism via `CARGO_BUILD_JOBS`.
 # Export it so commands that *don't* accept `-j` (e.g. `cargo fmt`, `cargo clean`)
@@ -230,6 +235,17 @@ if [[ "${subcommand}" == "test" && -z "${RUST_TEST_THREADS:-}" ]]; then
   export RUST_TEST_THREADS="${rust_test_threads}"
 fi
 
+# Further reduce concurrency for test runs when callers haven't explicitly opted into
+# higher parallelism. This avoids sporadic rustc panics like:
+# "failed to spawn helper thread: Resource temporarily unavailable" (EAGAIN)
+if [[ "${subcommand}" == "test" && -z "${caller_jobs_env}" ]]; then
+  jobs="1"
+  export CARGO_BUILD_JOBS="${jobs}"
+  if [[ -z "${orig_rayon_num_threads}" && -z "${orig_formula_rayon_num_threads}" ]]; then
+    export RAYON_NUM_THREADS="${jobs}"
+  fi
+fi
+
 # Limit rustc's internal codegen parallelism on multi-agent hosts.
 #
 # Even with `cargo -j` and Rayon's thread pool capped, rustc/LLVM may still spawn helper threads
@@ -262,11 +278,53 @@ esac
 
 echo "cargo_agent: jobs=${jobs} as=${limit_as} test_threads=${RUST_TEST_THREADS:-auto}" >&2
 
-# Run through run_limited.sh if it exists and limit_as is set
+run_cargo_cmd=("${cargo_cmd[@]}")
 if [[ -n "${limit_as}" && "${limit_as}" != "0" && "${limit_as}" != "off" && "${limit_as}" != "unlimited" ]]; then
   if [[ -x "${repo_root}/scripts/run_limited.sh" ]]; then
-    exec bash "${repo_root}/scripts/run_limited.sh" --as "${limit_as}" -- "${cargo_cmd[@]}"
+    run_cargo_cmd=(bash "${repo_root}/scripts/run_limited.sh" --as "${limit_as}" -- "${cargo_cmd[@]}")
   fi
 fi
 
-exec "${cargo_cmd[@]}"
+# Retry on transient rustc thread spawn failures (EAGAIN) that are common on multi-agent hosts.
+#
+# These failures show up as rustc panics like:
+# - "failed to create helper thread: Resource temporarily unavailable"
+# - "failed to spawn helper thread: Resource temporarily unavailable"
+# - "failed to spawn work thread: Resource temporarily unavailable"
+#
+# Retrying after a short backoff usually succeeds once other agents finish their compile bursts.
+max_attempts="${FORMULA_CARGO_RETRY_ATTEMPTS:-5}"
+attempt=1
+while true; do
+  # Capture output for error pattern detection while still streaming it to the console.
+  tmp_log="$(mktemp -t cargo_agent.XXXXXX)"
+  set +e
+  "${run_cargo_cmd[@]}" 2>&1 | tee "${tmp_log}"
+  status="${PIPESTATUS[0]}"
+  set -e
+
+  if [[ "${status}" -eq 0 ]]; then
+    rm -f "${tmp_log}"
+    exit 0
+  fi
+
+  if grep -q "Resource temporarily unavailable" "${tmp_log}" \
+    && grep -q "compiler unexpectedly panicked" "${tmp_log}"; then
+    if [[ "${attempt}" -ge "${max_attempts}" ]]; then
+      rm -f "${tmp_log}"
+      exit "${status}"
+    fi
+
+    # Exponential-ish backoff with jitter.
+    base=$(( 1 << (attempt - 1) ))
+    sleep_s=$(( base + RANDOM % (base + 1) ))
+    echo "cargo_agent: rustc thread exhaustion (EAGAIN); retrying in ${sleep_s}s (attempt ${attempt}/${max_attempts})" >&2
+    rm -f "${tmp_log}"
+    sleep "${sleep_s}"
+    attempt=$(( attempt + 1 ))
+    continue
+  fi
+
+  rm -f "${tmp_log}"
+  exit "${status}"
+done
