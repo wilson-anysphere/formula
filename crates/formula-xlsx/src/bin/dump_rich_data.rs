@@ -705,8 +705,10 @@ fn find_part_bytes_case_insensitive<'a>(
     pkg: &'a XlsxPackage,
     desired: &str,
 ) -> Option<(&'a str, &'a [u8])> {
+    let desired = desired.strip_prefix('/').unwrap_or(desired);
     for name in pkg.part_names() {
-        if name.eq_ignore_ascii_case(desired) {
+        let canonical = name.strip_prefix('/').unwrap_or(name);
+        if canonical.eq_ignore_ascii_case(desired) {
             let bytes = pkg.part(name)?;
             return Some((name, bytes));
         }
