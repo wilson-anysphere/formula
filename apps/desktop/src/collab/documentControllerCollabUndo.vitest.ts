@@ -51,26 +51,34 @@ describe("collaboration-safe undo/redo (desktop)", () => {
       defaultSheetId: "Sheet1",
     });
 
-    // Local (DocumentController-origin) edit.
-    document.setCellValue("Sheet1", { row: 0, col: 0 }, "local");
+    // Two local edits so we can verify undo does *not* skip past an un-undoable change.
+    document.setCellValue("Sheet1", { row: 0, col: 0 }, "local-a1");
     await flushBinderWork();
-    expect(document.getCell("Sheet1", { row: 0, col: 0 }).value).toBe("local");
+    undoService.stopCapturing();
 
-    // Remote overwrite (untracked origin).
+    document.setCellValue("Sheet1", { row: 0, col: 1 }, "local-b1");
+    await flushBinderWork();
+    undoService.stopCapturing();
+
+    // Remote overwrite of the *most recent* local edit (B1).
     session.doc.transact(() => {
       const ycell = new Y.Map();
-      ycell.set("value", "remote");
-      session.cells.set("Sheet1:0:0", ycell);
+      ycell.set("value", "remote-b1");
+      session.cells.set("Sheet1:0:1", ycell);
     }, REMOTE_ORIGIN);
     await flushBinderWork();
-    expect(document.getCell("Sheet1", { row: 0, col: 0 }).value).toBe("remote");
 
-    // Undo should not resurrect the overwritten local value.
+    expect(document.getCell("Sheet1", { row: 0, col: 0 }).value).toBe("local-a1");
+    expect(document.getCell("Sheet1", { row: 0, col: 1 }).value).toBe("remote-b1");
+
+    // Undo should NOT:
+    // - overwrite the remote value for B1
+    // - skip past the un-undoable B1 edit and undo A1 instead
     undoService.undo();
     await flushBinderWork();
-    expect(document.getCell("Sheet1", { row: 0, col: 0 }).value).toBe("remote");
+    expect(document.getCell("Sheet1", { row: 0, col: 0 }).value).toBe("local-a1");
+    expect(document.getCell("Sheet1", { row: 0, col: 1 }).value).toBe("remote-b1");
 
     binder.destroy();
   });
 });
-
