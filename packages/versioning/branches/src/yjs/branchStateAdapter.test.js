@@ -168,6 +168,28 @@ test("branchStateFromYjsDoc/applyBranchStateToYjsDoc: preserves encrypted cell p
   assert.equal(cell2.get("formula"), undefined);
 });
 
+test("branchStateFromYjsDoc/applyBranchStateToYjsDoc: round-trips sheet view (frozen panes)", () => {
+  const doc = new Y.Doc();
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheet.set("view", { frozenRows: 2, frozenCols: 1 });
+    sheets.push([sheet]);
+  });
+
+  const state = branchStateFromYjsDoc(doc);
+  assert.deepEqual(state.sheets.metaById.Sheet1?.view, { frozenRows: 2, frozenCols: 1 });
+
+  const doc2 = new Y.Doc();
+  applyBranchStateToYjsDoc(doc2, state);
+
+  const sheet2 = doc2.getArray("sheets").get(0);
+  assert.ok(sheet2 instanceof Y.Map);
+  assert.deepEqual(sheet2.get("view"), { frozenRows: 2, frozenCols: 1 });
+});
+
 test("branchStateFromYjsDoc: prefers encrypted payloads over plaintext duplicates across legacy cell keys", () => {
   const enc = {
     v: 1,
