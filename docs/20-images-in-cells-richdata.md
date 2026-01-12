@@ -613,7 +613,7 @@ Minimal representative shape for the `futureMetadata`/`rvb` variant (index bases
 <metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
           xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
   <metadataTypes>
-    <!-- `t` in <rc> is a 1-based index into this list -->
+    <!-- `t` in <rc> selects an entry in this list (often 1-based in Excel; 0-based is also observed). -->
     <metadataType name="XLRICHVALUE"/>
   </metadataTypes>
 
