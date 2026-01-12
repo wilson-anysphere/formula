@@ -592,9 +592,12 @@ if (!titlebarRoot) {
 }
 const titlebarRootEl = titlebarRoot;
 
-const ribbonRoot = document.getElementById("ribbon");
-if (!ribbonRoot) {
+if (!document.getElementById("ribbon")) {
   throw new Error("Missing #ribbon container");
+}
+const ribbonReactRoot = document.getElementById("ribbon-react-root");
+if (!ribbonReactRoot) {
+  throw new Error("Missing #ribbon-react-root container");
 }
 
 const formulaBarRoot = document.getElementById("formula-bar");
@@ -5275,7 +5278,7 @@ async function handleRibbonExportPdf(): Promise<void> {
   }
 }
 
-mountRibbon(ribbonRoot, {
+mountRibbon(ribbonReactRoot, {
   fileActions: {
     newWorkbook: () => {
       if (!tauriBackend) {
