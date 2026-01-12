@@ -441,8 +441,8 @@ fn duration_n1_equals_time_to_maturity() {
                     // schedule (`coupon_schedule` in `bonds.rs`):
                     // - basis 0: `E` is modeled as 360/frequency and `DSC = E - A` (with `A`
                     //   computed via US/NASD DAYS360)
-                    // - basis 4: `E = DAYS360(PCD, NCD, TRUE)` and `DSC = E - A` (European 30/360;
-                    //   `E` can differ from 360/frequency for some EOM schedules)
+                    // - basis 4: `E` is modeled as 360/frequency and `DSC = E - A` (European 30/360
+                    //   day counts for `A`, but a fixed coupon-period length for `E`)
                     // - basis 2: `E = 360/frequency`, `DSC` is an actual day count
                     // - basis 3: `E = 365/frequency`, `DSC` is an actual day count
                     // - basis 1: `E` is the actual length of the coupon period, and `DSC` is an
@@ -450,7 +450,7 @@ fn duration_n1_equals_time_to_maturity() {
                     let expected = eval_number(
                         &mut sheet,
                         &format!(
-                            "=LET(pcd,{pcd},a,IF({basis}=0,DAYS360(pcd,{settlement},FALSE),IF({basis}=4,DAYS360(pcd,{settlement},TRUE),{settlement}-pcd)),e,IF(OR({basis}=0,{basis}=2),360/{frequency},IF({basis}=4,DAYS360(pcd,{maturity},TRUE),IF({basis}=3,365/{frequency},{maturity}-pcd))),dsc,IF(OR({basis}=0,{basis}=4),e-a,{maturity}-{settlement}),(dsc/e)/{frequency})"
+                            "=LET(pcd,{pcd},a,IF({basis}=0,DAYS360(pcd,{settlement},FALSE),IF({basis}=4,DAYS360(pcd,{settlement},TRUE),{settlement}-pcd)),e,IF(OR({basis}=0,{basis}=2,{basis}=4),360/{frequency},IF({basis}=3,365/{frequency},{maturity}-pcd)),dsc,IF(OR({basis}=0,{basis}=4),e-a,{maturity}-{settlement}),(dsc/e)/{frequency})"
                         ),
                     );
 
