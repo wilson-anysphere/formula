@@ -5,6 +5,7 @@ use crate::{
     compute_vba_project_digest,
     contents_hash::content_normalized_data,
     normalized_data::forms_normalized_data,
+    DigestAlg,
     OleError, OleFile,
 };
 use md5::{Digest as _, Md5};
