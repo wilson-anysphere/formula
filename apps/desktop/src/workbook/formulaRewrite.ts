@@ -393,7 +393,9 @@ function looksLikeR1C1CellReference(name: string): boolean {
 
 const UNICODE_LETTER_RE: RegExp | null = (() => {
   try {
-    return new RegExp("^\\p{L}$", "u");
+    // Rust backend uses `char::is_alphabetic` for unquoted sheet parsing. That corresponds to
+    // Unicode's derived `Alphabetic` property (not just General_Category=Letter).
+    return new RegExp("^\\p{Alphabetic}$", "u");
   } catch {
     return null;
   }
@@ -401,7 +403,8 @@ const UNICODE_LETTER_RE: RegExp | null = (() => {
 
 const UNICODE_ALNUM_RE: RegExp | null = (() => {
   try {
-    return new RegExp("^[\\p{L}\\p{N}]$", "u");
+    // Rust backend uses `char::is_alphanumeric` which is effectively Alphabetic || Number.
+    return new RegExp("^[\\p{Alphabetic}\\p{Number}]$", "u");
   } catch {
     return null;
   }
