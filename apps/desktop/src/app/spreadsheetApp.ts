@@ -1168,7 +1168,7 @@ export class SpreadsheetApp {
         }
         this.ensureActiveCellVisible();
         this.scrollCellIntoView(this.selection.active);
-        if (this.sharedGrid) this.syncSharedGridSelectionFromState();
+        if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView: false });
         this.refresh();
         if (!suppressFocusRestore) this.focus();
       },
@@ -3104,7 +3104,9 @@ export class SpreadsheetApp {
       this.ensureActiveCellVisible();
       didScroll = this.scrollCellIntoView(this.selection.active);
     }
-    if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView });
+    // In shared-grid mode, we explicitly scroll the active cell into view above. Avoid triggering
+    // a redundant `scrollToCell` (and extra scroll event) when syncing selection ranges.
+    if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView: false });
     else if (didScroll) this.ensureViewportMappingCurrent();
     if (sheetChanged) {
       const presence = this.collabSession?.presence;
@@ -3171,7 +3173,9 @@ export class SpreadsheetApp {
       const didScrollCell = this.scrollCellIntoView(this.selection.active);
       didScroll = didScrollRange || didScrollCell;
     }
-    if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView });
+    // In shared-grid mode, we explicitly scroll the active cell/range into view above. Avoid
+    // triggering a redundant `scrollToCell` (and extra scroll event) when syncing selection ranges.
+    if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView: false });
     else if (didScroll) this.ensureViewportMappingCurrent();
     if (sheetChanged) {
       const presence = this.collabSession?.presence;
@@ -6665,7 +6669,7 @@ export class SpreadsheetApp {
     }
     this.ensureActiveCellVisible();
     this.scrollCellIntoView(this.selection.active);
-    if (this.sharedGrid) this.syncSharedGridSelectionFromState();
+    if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView: false });
     this.refresh();
     this.focus();
   }
@@ -7894,7 +7898,7 @@ export class SpreadsheetApp {
 
       this.ensureActiveCellVisible();
       const didScroll = this.scrollCellIntoView(this.selection.active);
-      if (this.sharedGrid) this.syncSharedGridSelectionFromState();
+      if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView: false });
       else if (didScroll) this.ensureViewportMappingCurrent();
       this.renderSelection();
       this.updateStatus();
@@ -7922,7 +7926,7 @@ export class SpreadsheetApp {
         : setActiveCell(this.selection, { row, col }, this.limits);
       this.ensureActiveCellVisible();
       const didScroll = this.scrollCellIntoView(this.selection.active);
-      if (this.sharedGrid) this.syncSharedGridSelectionFromState();
+      if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView: false });
       else if (didScroll) this.ensureViewportMappingCurrent();
       this.renderSelection();
       this.updateStatus();
@@ -7961,7 +7965,7 @@ export class SpreadsheetApp {
     e.preventDefault();
     this.selection = next;
     const didScroll = this.scrollCellIntoView(this.selection.active);
-    if (this.sharedGrid) this.syncSharedGridSelectionFromState();
+    if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView: false });
     else if (didScroll) this.ensureViewportMappingCurrent();
     this.renderSelection();
     this.updateStatus();
@@ -9372,7 +9376,7 @@ export class SpreadsheetApp {
 
     this.ensureActiveCellVisible();
     const didScroll = this.scrollCellIntoView(this.selection.active);
-    if (this.sharedGrid) this.syncSharedGridSelectionFromState();
+    if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView: false });
     else if (didScroll) this.ensureViewportMappingCurrent();
     this.renderReferencePreview();
     this.renderSelection();
