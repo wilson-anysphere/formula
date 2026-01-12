@@ -142,6 +142,51 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("web: read ignores oversized text/html blobs (keeps plain text)", async () => {
+    const largeHtml = new Blob([new ArrayBuffer(3 * 1024 * 1024)], { type: "text/html" });
+
+    // Ensure we don't attempt to materialize a huge string via `Blob#text()`.
+    // @ts-ignore
+    largeHtml.text = async () => {
+      throw new Error("should not call text() for oversized html blobs");
+    };
+
+    await withGlobals(
+      {
+        __TAURI__: undefined,
+        navigator: {
+          clipboard: {
+            async read() {
+              return [
+                {
+                  types: ["text/html", "text/plain"],
+                  /**
+                   * @param {string} type
+                   */
+                  async getType(type) {
+                    switch (type) {
+                      case "text/html":
+                        return largeHtml;
+                      case "text/plain":
+                        return new Blob(["hello"], { type });
+                      default:
+                        throw new Error(`Unexpected clipboard type: ${type}`);
+                    }
+                  },
+                },
+              ];
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.deepEqual(content, { text: "hello" });
+      }
+    );
+  });
+
   await t.test("web: read returns small image/png blobs", async () => {
     const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 
