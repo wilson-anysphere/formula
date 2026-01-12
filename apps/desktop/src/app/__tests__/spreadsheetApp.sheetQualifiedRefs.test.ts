@@ -192,4 +192,26 @@ describe("SpreadsheetApp fallback evaluator", () => {
     app.destroy();
     root.remove();
   });
+
+  it("can compute a cell value for a non-active sheet via getCellComputedValueForSheet", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc = app.getDocument();
+
+    // Active sheet remains Sheet1 (default).
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, 10);
+    doc.setCellFormula("Sheet2", { row: 0, col: 1 }, "=Sheet1!A1+1");
+
+    expect(app.getCurrentSheetId()).toBe("Sheet1");
+    expect(app.getCellComputedValueForSheet("Sheet2", { row: 0, col: 1 })).toBe(11);
+
+    app.destroy();
+    root.remove();
+  });
 });
