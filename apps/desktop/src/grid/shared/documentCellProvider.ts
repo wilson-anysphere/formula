@@ -4,6 +4,31 @@ import type { DocumentController } from "../../document/documentController.js";
 
 type RichTextValue = { text: string; runs?: Array<{ start: number; end: number; style?: Record<string, unknown> }> };
 
+type DocStyle = Record<string, any>;
+
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Convert `#AARRGGBB` strings into `rgba(r,g,b,a)` strings usable by canvas.
+ * Returns `undefined` when the input is invalid.
+ */
+function argbToCanvasCss(argb: unknown): string | undefined {
+  if (typeof argb !== "string") return undefined;
+  const match = /^#([0-9a-fA-F]{8})$/.exec(argb.trim());
+  if (!match) return undefined;
+
+  const a = Number.parseInt(match[1].slice(0, 2), 16);
+  const r = Number.parseInt(match[1].slice(2, 4), 16);
+  const g = Number.parseInt(match[1].slice(4, 6), 16);
+  const b = Number.parseInt(match[1].slice(6, 8), 16);
+  if (![a, r, g, b].every((n) => Number.isFinite(n))) return undefined;
+
+  const alpha = Math.min(1, Math.max(0, Math.round((a / 255) * 1000) / 1000));
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 function isRichTextValue(value: unknown): value is RichTextValue {
   if (typeof value !== "object" || value == null) return false;
   const v = value as { text?: unknown; runs?: unknown };
@@ -28,6 +53,7 @@ export class DocumentCellProvider implements CellProvider {
   private readonly rowHeaderStyle: CellStyle = { fontWeight: "600", textAlign: "end" };
 
   private readonly cache: LruCache<string, CellData | null>;
+  private readonly styleCache = new Map<number, CellStyle | undefined>();
   private readonly listeners = new Set<(update: CellProviderUpdate) => void>();
   private unsubscribeDoc: (() => void) | null = null;
 
@@ -53,6 +79,95 @@ export class DocumentCellProvider implements CellProvider {
     // Cache covers cell metadata + value formatting work. Keep it bounded to avoid
     // memory blow-ups on huge scrolls.
     this.cache = new LruCache<string, CellData | null>(50_000);
+  }
+
+  private resolveStyle(styleId: unknown): CellStyle | undefined {
+    const id = typeof styleId === "number" && Number.isInteger(styleId) && styleId >= 0 ? styleId : 0;
+    if (this.styleCache.has(id)) return this.styleCache.get(id);
+
+    const docStyle: DocStyle = this.options.document?.styleTable?.get?.(id) ?? {};
+    const style = this.convertDocStyleToGridStyle(docStyle);
+    this.styleCache.set(id, style);
+    return style;
+  }
+
+  private convertDocStyleToGridStyle(docStyle: unknown): CellStyle | undefined {
+    if (!isPlainObject(docStyle)) return undefined;
+
+    // Note: `@formula/grid` CellStyle is evolving; the shared-grid rendering pipeline reads
+    // additional formatting primitives (borders, underline, etc.) off this object at runtime.
+    // We intentionally build this as a plain object and cast at the end to avoid tight coupling
+    // to the exact type shape.
+    const out: any = {};
+
+    const fill = isPlainObject(docStyle.fill) ? docStyle.fill : null;
+    const fillColor = argbToCanvasCss(fill?.fgColor ?? fill?.background);
+    if (fillColor) out.fill = fillColor;
+
+    const font = isPlainObject(docStyle.font) ? docStyle.font : null;
+    if (font?.bold === true) out.fontWeight = "700";
+    if (font?.italic === true) out.fontStyle = "italic";
+    if (font?.underline === true) out.underline = true;
+    if (font?.strike === true) out.strike = true;
+    if (typeof font?.name === "string" && font.name.trim() !== "") out.fontFamily = font.name;
+    if (typeof font?.size === "number" && Number.isFinite(font.size)) {
+      out.fontSize = (font.size * 96) / 72;
+    }
+    const fontColor = argbToCanvasCss(font?.color);
+    if (fontColor) out.color = fontColor;
+
+    const alignment = isPlainObject(docStyle.alignment) ? docStyle.alignment : null;
+    const horizontal = alignment?.horizontal;
+    if (horizontal === "center") out.textAlign = "center";
+    else if (horizontal === "left") out.textAlign = "left";
+    else if (horizontal === "right") out.textAlign = "right";
+    // "general"/undefined: leave undefined so renderer can pick based on value type.
+    if (alignment?.wrapText === true) out.wrapMode = "word";
+
+    const border = isPlainObject(docStyle.border) ? docStyle.border : null;
+    if (border) {
+      const black = "rgba(0,0,0,1)";
+      const mapExcelBorderStyle = (style: unknown): { width: number; style: string } | null => {
+        if (typeof style !== "string") return null;
+        switch (style) {
+          case "thin":
+            return { width: 1, style: "solid" };
+          case "medium":
+            return { width: 2, style: "solid" };
+          case "thick":
+            return { width: 3, style: "solid" };
+          case "dashed":
+            return { width: 1, style: "dashed" };
+          case "dotted":
+            return { width: 1, style: "dotted" };
+          case "double":
+            return { width: 3, style: "double" };
+          default:
+            return null;
+        }
+      };
+
+      const mapEdge = (edge: any) => {
+        if (!isPlainObject(edge)) return undefined;
+        const mapped = mapExcelBorderStyle(edge.style);
+        if (!mapped) return undefined;
+        const color = argbToCanvasCss(edge.color) ?? black;
+        return { width: mapped.width, style: mapped.style, color };
+      };
+
+      const borders: any = {};
+      const left = mapEdge(border.left);
+      const right = mapEdge(border.right);
+      const top = mapEdge(border.top);
+      const bottom = mapEdge(border.bottom);
+      if (left) borders.left = left;
+      if (right) borders.right = right;
+      if (top) borders.top = top;
+      if (bottom) borders.bottom = bottom;
+      if (Object.keys(borders).length > 0) out.borders = borders;
+    }
+
+    return Object.keys(out).length > 0 ? (out as CellStyle) : undefined;
   }
 
   invalidateAll(): void {
@@ -145,7 +260,11 @@ export class DocumentCellProvider implements CellProvider {
     const docRow = row - headerRows;
     const docCol = col - headerCols;
 
-    const state = this.options.document.getCell(sheetId, { row: docRow, col: docCol }) as { value: unknown; formula: string | null };
+    const state = this.options.document.getCell(sheetId, { row: docRow, col: docCol }) as {
+      value: unknown;
+      formula: string | null;
+      styleId?: number;
+    };
     if (!state) {
       this.cache.set(key, null);
       return null;
@@ -174,7 +293,8 @@ export class DocumentCellProvider implements CellProvider {
       return { resolved: meta.resolved };
     })();
 
-    const cell: CellData = { row, col, value, comment };
+    const style = this.resolveStyle(state.styleId);
+    const cell: CellData = { row, col, value, style, comment };
     this.cache.set(key, cell);
     return cell;
   }
