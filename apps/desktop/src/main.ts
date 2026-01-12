@@ -3118,12 +3118,24 @@ if (
       // Update sheet metadata first to enforce workbook invariants (e.g. last-sheet guard).
       workbookSheetStore.remove(sheetId);
 
-      // DocumentController doesn't expose first-class sheet deletion yet, but the sheet map
-      // is authoritative for `getSheetIds()` which drives UI reconciliation.
+      // Ensure the sheet exists before deletion (DocumentController can be lazily sheet-creating).
+      // Deleting via the public API keeps history + change events consistent.
       try {
-        doc.model?.sheets?.delete?.(sheetId);
+        doc.getCell(sheetId, { row: 0, col: 0 });
       } catch {
-        // ignore
+        // ignore (best-effort materialization)
+      }
+
+      try {
+        doc.deleteSheet(sheetId, { label: "Extension deleteSheet", source: "Extension deleteSheet" });
+      } catch {
+        // If DocumentController deletion isn't available for some reason, fall back to
+        // best-effort removal of the internal sheet map (legacy behavior).
+        try {
+          doc.model?.sheets?.delete?.(sheetId);
+        } catch {
+          // ignore
+        }
       }
 
       if (wasActive) {
@@ -3134,27 +3146,6 @@ if (
         if (next && next !== sheetId) {
           app.activateSheet(next);
         }
-      }
-
-      // Nudge downstream observers: deleting a sheet via `doc.model.sheets.delete` doesn't
-      // emit a DocumentController change event, but our UI and caches are reconciled on change.
-      try {
-        const nudgeSheetId = app.getCurrentSheetId();
-        const before = doc.getCell(nudgeSheetId, { row: 0, col: 0 });
-        doc.applyExternalDeltas(
-          [
-            {
-              sheetId: nudgeSheetId,
-              row: 0,
-              col: 0,
-              before,
-              after: before,
-            },
-          ],
-          { recalc: false, source: "Extension deleteSheet" },
-        );
-      } catch {
-        // ignore
       }
 
       syncSheetUi();
