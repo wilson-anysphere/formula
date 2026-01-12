@@ -454,12 +454,12 @@ pub fn verify_vba_digital_signature_bound(
 
         match signature.stream_kind {
             VbaSignatureStreamKind::DigitalSignatureExt => {
-                // Spec note: for VBA signatures the binding digest bytes are always a 16-byte MD5
-                // per MS-OSHARED §4.3, regardless of the `DigestInfo.digestAlgorithm` OID.
+                // V3 (`DigitalSignatureExt`) binds against the MS-OVBA v3 transcript. MS-OVBA
+                // specifies SHA-256 for `ContentsHashV3`, but in the wild the DigestInfo algorithm
+                // OID can vary and may even be inconsistent with the digest length.
                 //
-                // This code still accepts non-16-byte digests as a best-effort/legacy compatibility
-                // path (some fixtures and non-Office producers use them); when present we infer a
-                // hashing algorithm from the digest length. This is not spec-correct for VBA binding.
+                // Infer the digest algorithm primarily from the digest length (16/20/32 →
+                // MD5/SHA-1/SHA-256), falling back to the OID.
                 let Some(alg) = digest_alg_from_digest_len(signed.digest.len())
                     .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid))
                 else {
@@ -547,9 +547,11 @@ pub fn verify_vba_digital_signature_bound(
 /// MS-OVBA Contents Hash transcript (Content Hash / Agile Content Hash, or the V3 Content Hash for
 /// `DigitalSignatureExt`).
 ///
-/// Note: per MS-OSHARED §4.3, for legacy VBA signature streams (`DigitalSignature` /
-/// `DigitalSignatureEx`), the embedded digest bytes are always a 16-byte MD5 even when
-/// `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256.
+/// Note: for legacy VBA signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`),
+/// Office uses 16-byte MD5 digest bytes for binding even when `DigestInfo.digestAlgorithm.algorithm`
+/// indicates SHA-256 (MS-OSHARED §4.3). For the v3 `\x05DigitalSignatureExt` stream, the digest
+/// algorithm OID is meaningful (typically SHA-256) and the digest bytes are computed over the
+/// MS-OVBA v3 transcript.
 ///
 /// If multiple signature streams are present, we prefer:
 /// 1) The first signature stream (by Excel-like stream-name ordering; see `signature_path_rank`)
@@ -728,9 +730,10 @@ pub fn verify_vba_digital_signature_with_trust(
 /// Verify whether a VBA signature blob is bound to the given `vbaProject.bin` payload via the
 /// MS-OVBA "Contents Hash" mechanism.
 ///
-/// Note: for VBA signatures, the embedded binding digest bytes are always a 16-byte MD5 per
-/// MS-OSHARED §4.3 even when the
-/// `DigestInfo.digestAlgorithm.algorithm` OID indicates SHA-256.
+/// Note: for legacy VBA signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`),
+/// Office uses 16-byte MD5 digest bytes for binding even when `DigestInfo.digestAlgorithm.algorithm`
+/// indicates SHA-256 (MS-OSHARED §4.3). For v3 `\x05DigitalSignatureExt`, the digest algorithm OID is
+/// meaningful (typically SHA-256) and the digest bytes are computed over the MS-OVBA v3 transcript.
 ///
 /// This is a best-effort helper: it returns [`VbaSignatureBinding::Unknown`] when the signature does
 /// not contain a supported digest structure, uses an unsupported hash algorithm, or the binding
@@ -758,12 +761,17 @@ pub fn verify_vba_signature_binding_with_stream_path(
         let stream_kind = signature_path_stream_kind(signature_stream_path);
         // Prefer v3 when the stream kind indicates `DigitalSignatureExt`.
         //
-        // When the stream kind is unknown (or not provided), note that MS-OSHARED §4.3 specifies
-        // the embedded VBA signature binding digest bytes are always a 16-byte MD5 across all
-        // variants, so digest length is *not* a reliable way to distinguish v3 from v1/v2.
+        // For legacy v1/v2 (`DigitalSignature` / `DigitalSignatureEx`) streams, Office uses a
+        // 16-byte MD5 digest for binding per MS-OSHARED §4.3, even when the DigestInfo algorithm OID
+        // indicates SHA-256.
         //
-        // We therefore only treat non-16-byte digests as a non-spec/legacy signal of v3 and, for
-        // 16-byte digests, try legacy v1/v2 binding first with a best-effort v3 fallback below.
+        // For v3 (`DigitalSignatureExt`), the digest bytes are computed over the MS-OVBA v3
+        // transcript and the digest algorithm is meaningful (typically SHA-256; MS-OVBA §2.4.2.7).
+        //
+        // When the stream kind is unknown (or not provided), digest length is only a heuristic:
+        // 20/32-byte digests strongly suggest v3, but 16-byte digests are ambiguous (legacy v1/v2 vs
+        // v3 using MD5). We therefore default to legacy binding for 16-byte digests and use a
+        // best-effort v3 fallback below if the legacy comparison fails.
         let treat_as_v3 = match stream_kind {
             Some(VbaSignatureStreamKind::DigitalSignatureExt) => true,
             Some(VbaSignatureStreamKind::DigitalSignature)
@@ -772,11 +780,12 @@ pub fn verify_vba_signature_binding_with_stream_path(
         };
 
         if treat_as_v3 {
-            // Spec note: for VBA signatures the binding digest bytes are always a 16-byte MD5 per
-            // MS-OSHARED §4.3, regardless of the `DigestInfo.digestAlgorithm` OID.
+            // V3 (`DigitalSignatureExt`) binds against the MS-OVBA v3 transcript. MS-OVBA specifies
+            // SHA-256 for `ContentsHashV3`, but in the wild the DigestInfo algorithm OID can vary and
+            // may even be inconsistent with the digest length.
             //
-            // If callers feed us non-16-byte digests, treat them as non-spec/legacy and fall back to
-            // inferring a hashing algorithm from the digest length.
+            // Infer the digest algorithm primarily from the digest length (16/20/32 →
+            // MD5/SHA-1/SHA-256), falling back to the OID.
             let Some(alg) = digest_alg_from_digest_len(signed_digest.len())
                 .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid))
             else {
@@ -826,9 +835,9 @@ pub fn verify_vba_signature_binding_with_stream_path(
         }
 
         // If the stream kind is unknown (or not provided), the digest length heuristic above will
-        // classify a spec-correct v3 signature (MD5 digest bytes per MS-OSHARED §4.3) as a legacy
-        // signature. As a best-effort fallback, attempt v3 binding even for 16-byte digests when we
-        // couldn't match the legacy Content/Agile hash.
+        // classify v3 signatures that use a 16-byte digest (e.g. MD5) as legacy. As a best-effort
+        // fallback, attempt v3 binding even for 16-byte digests when we couldn't match the legacy
+        // Content/Agile hash.
         if matches!(stream_kind, Some(VbaSignatureStreamKind::Unknown) | None) {
             let alg = digest_alg_from_digest_len(signed_digest.len())
                 .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid));
@@ -1463,9 +1472,14 @@ pub fn verify_vba_project_signature_binding(
         // `vbaProject.bin` (e.g. `xl/vbaProjectSignature.bin`) we may not know the original stream
         // name; in that case we fall back to heuristics.
         //
-        // Note: per MS-OSHARED §4.3, the embedded VBA signature binding digest bytes are always a
-        // 16-byte MD5 across all variants, so digest length is *not* a reliable way to distinguish
-        // v3 from v1/v2. Any digest-length heuristics here are legacy/non-spec behavior.
+        // Note: for legacy v1/v2 (`DigitalSignature` / `DigitalSignatureEx`) signature streams,
+        // Office uses a 16-byte MD5 digest for binding per MS-OSHARED §4.3 even when the DigestInfo
+        // algorithm OID indicates SHA-256.
+        //
+        // When the stream kind is unknown (or not provided), digest length is only a heuristic:
+        // 20/32-byte digests strongly suggest v3, but 16-byte digests are ambiguous (legacy v1/v2 vs
+        // v3 using MD5). This helper therefore defaults to legacy binding for 16-byte digests and
+        // falls back to a best-effort v3 comparison below if the legacy comparison fails.
         //
         // If we *do* know the stream kind and it is a legacy `DigitalSignature`/`DigitalSignatureEx`
         // stream, keep legacy semantics even if the digest length is unexpected.
@@ -1477,11 +1491,12 @@ pub fn verify_vba_project_signature_binding(
         };
 
         if treat_as_v3 {
-            // Spec note: for VBA signatures the binding digest bytes are always a 16-byte MD5 per
-            // MS-OSHARED §4.3, regardless of the `DigestInfo.digestAlgorithm` OID.
+            // V3 (`DigitalSignatureExt`) binds against the MS-OVBA v3 transcript. MS-OVBA specifies
+            // SHA-256 for `ContentsHashV3`, but in the wild the DigestInfo algorithm OID can vary and
+            // may even be inconsistent with the digest length.
             //
-            // If callers feed us non-16-byte digests, treat them as non-spec/legacy and fall back to
-            // inferring a hashing algorithm from the digest length.
+            // Infer the digest algorithm primarily from the digest length (16/20/32 →
+            // MD5/SHA-1/SHA-256), falling back to the OID.
             let Some(alg) = digest_alg_from_digest_len(signed_digest.len())
                 .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid))
             else {
