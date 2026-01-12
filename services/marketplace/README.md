@@ -98,7 +98,7 @@ const fs = require("node:fs/promises");
 })();
 NODE
 
-# 3) Publish an extension directory (origin *without* /api)
+# 3) Publish an extension directory (origin without /api; `/api` is also accepted and normalized)
 node tools/extension-publisher/src/cli.js publish extensions/my-extension \\
   --marketplace http://127.0.0.1:8787 \\
   --token publisher-token \\

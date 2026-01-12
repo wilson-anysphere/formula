@@ -8,8 +8,9 @@ All marketplace routes in this document are under the `/api/*` prefix (for examp
 
 Depending on the caller, the configurable “base URL” differs:
 
-- **Browser/WebView clients** (`MarketplaceClient` / `WebExtensionManager`) use a base URL that *already includes* the API
+- **Browser/WebView clients** (`MarketplaceClient` / `WebExtensionManager`) conceptually use a base URL that includes the API
   prefix, e.g. `https://marketplace.formula.app/api`.
+  - For convenience, origin-only values (e.g. `https://marketplace.formula.app`) are accepted and normalized to `.../api`.
 - **Publisher tooling** (`tools/extension-publisher`) takes the marketplace **origin** and appends `/api/...` internally,
   e.g. `https://marketplace.formula.app`. (Passing a URL that ends with `/api` is also accepted and will be normalized.)
 
