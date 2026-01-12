@@ -265,8 +265,11 @@ function isPositiveIntegerString(value) {
 }
 
 function defaultWasmConcurrency() {
-  const rawJobs = process.env.CARGO_BUILD_JOBS;
-  const jobsFromEnv = isPositiveIntegerString(rawJobs) ? rawJobs.trim() : null;
+  const rawFormulaJobs = process.env.FORMULA_CARGO_JOBS;
+  const rawCargoJobs = process.env.CARGO_BUILD_JOBS;
+  const jobsFromEnv =
+    (isPositiveIntegerString(rawFormulaJobs) ? rawFormulaJobs.trim() : null) ??
+    (isPositiveIntegerString(rawCargoJobs) ? rawCargoJobs.trim() : null);
   const jobs = jobsFromEnv ?? "4";
   return {
     jobs,
@@ -278,7 +281,7 @@ function defaultWasmConcurrency() {
     rayonThreads:
       process.env.RAYON_NUM_THREADS ??
       process.env.FORMULA_RAYON_NUM_THREADS ??
-      // When CARGO_BUILD_JOBS is explicitly set, prefer that.
+      // When jobs are explicitly configured, prefer that.
       jobsFromEnv ??
       jobs,
     // wasm-pack's release mode runs wasm-opt (Binaryen) which can spawn one worker per CPU core.
@@ -287,7 +290,7 @@ function defaultWasmConcurrency() {
     binaryenCores:
       process.env.BINARYEN_CORES ??
       process.env.FORMULA_BINARYEN_CORES ??
-      // When CARGO_BUILD_JOBS is explicitly set, prefer that.
+      // When jobs are explicitly configured, prefer that.
       jobsFromEnv ??
       jobs,
   };
@@ -349,6 +352,7 @@ if ((result.status ?? 0) !== 0) {
   const rustflagsSetsCodegenUnits =
     typeof process.env.RUSTFLAGS === "string" && process.env.RUSTFLAGS.includes("codegen-units");
   const userProvidedConcurrency =
+    process.env.FORMULA_CARGO_JOBS ||
     process.env.CARGO_BUILD_JOBS ||
     process.env.MAKEFLAGS ||
     // Treat RUSTFLAGS as a concurrency override only when it sets `-C codegen-units=...`.

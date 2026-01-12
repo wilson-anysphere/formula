@@ -11,8 +11,9 @@ set -e
 # Node.js: 3GB heap limit (leaves room for other processes)
 export NODE_OPTIONS="--max-old-space-size=3072"
 
-# Rust: Limit parallel compilation jobs (each can use 1-2GB)
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
+# Rust: Limit parallel compilation jobs (each can use 1-2GB).
+# Prefer the wrapper-specific override (`FORMULA_CARGO_JOBS`) when provided.
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-${FORMULA_CARGO_JOBS:-4}}"
 
 # Make: Limit parallel jobs
 export MAKEFLAGS="${MAKEFLAGS:--j${CARGO_BUILD_JOBS}}"

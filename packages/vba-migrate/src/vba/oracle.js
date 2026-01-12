@@ -144,7 +144,7 @@ async function ensureBuilt({ repoRoot, binPath }) {
           ? path.join(repoRoot, "target", "cargo-home")
           : envCargoHome;
       await mkdir(cargoHome, { recursive: true });
-      const jobs = process.env.CARGO_BUILD_JOBS ?? "4";
+      const jobs = process.env.FORMULA_CARGO_JOBS ?? process.env.CARGO_BUILD_JOBS ?? "4";
       const rayonThreads = process.env.RAYON_NUM_THREADS ?? process.env.FORMULA_RAYON_NUM_THREADS ?? jobs;
       const baseEnv = {
         ...process.env,

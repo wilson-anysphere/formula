@@ -139,7 +139,7 @@ function assertCommand(cmd, args, message) {
 }
 
 function buildWithWasmPack() {
-  const jobs = process.env.CARGO_BUILD_JOBS ?? "4";
+  const jobs = process.env.FORMULA_CARGO_JOBS ?? process.env.CARGO_BUILD_JOBS ?? "4";
   const makeflags = process.env.MAKEFLAGS ?? `-j${jobs}`;
   const rayonThreads = process.env.RAYON_NUM_THREADS ?? process.env.FORMULA_RAYON_NUM_THREADS ?? jobs;
 

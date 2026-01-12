@@ -68,7 +68,7 @@ function isCatalogVolatility(value) {
   return value === "non_volatile" || value === "volatile";
 }
 
-const jobs = process.env.CARGO_BUILD_JOBS ?? "4";
+const jobs = process.env.FORMULA_CARGO_JOBS ?? process.env.CARGO_BUILD_JOBS ?? "4";
 const rayonThreads = process.env.RAYON_NUM_THREADS ?? process.env.FORMULA_RAYON_NUM_THREADS ?? jobs;
 
 const raw = await run("cargo", [
