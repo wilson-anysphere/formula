@@ -143,9 +143,8 @@ and includes **no** `<Override>` entries for `xl/metadata.xml` or `xl/richData/*
 ```text
 xl/worksheets/sheet1.xml  cell <c vm="0">
   -> xl/metadata.xml      valueMetadata[0] -> rc/@v = 0
-  -> xl/richData/richValue.xml      rich value #0 (t="image") -> <v>0</v> (REL_SLOT)
+  -> xl/richData/richValue.xml      rich value #0 (t="image") -> <v>0</v> (relationship-slot index)
   -> xl/richData/richValueRel.xml   rel slot #0 -> r:id="rId1"
   -> xl/richData/_rels/richValueRel.xml.rels  rId1 -> ../media/image1.png
   -> xl/media/image1.png
 ```
-
