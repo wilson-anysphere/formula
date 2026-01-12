@@ -3782,7 +3782,16 @@ pub fn restart_app(app: tauri::AppHandle) {
     // On desktop targets Tauri provides `AppHandle::restart()`. On unsupported targets we fall
     // back to a best-effort graceful exit.
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
-    app.restart();
+    {
+        // `AppHandle::restart()` should terminate the process (by spawning a new instance and
+        // exiting), but if it ever returns we fall back to `AppHandle::exit(0)` as a best-effort
+        // graceful exit.
+        #[allow(unreachable_code, unused_must_use)]
+        {
+            app.restart();
+            app.exit(0);
+        }
+    }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     app.exit(0);

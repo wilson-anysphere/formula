@@ -438,8 +438,8 @@ fn cell_value_to_engine(value: &CellValue) -> EngineValue {
             formula_model::ErrorValue::Unknown => EngineValue::Error(ErrorKind::Unknown),
         },
         CellValue::RichText(rt) => EngineValue::Text(rt.plain_text().to_string()),
-        CellValue::Entity(entity) => EngineValue::Text(entity.display.clone()),
-        CellValue::Record(record) => EngineValue::Text(record.display.clone()),
+        CellValue::Entity(entity) => EngineValue::Text(entity.display_value.clone()),
+        CellValue::Record(record) => EngineValue::Text(record.display_value.clone()),
         // The workbook model can store cached array/spill results, but the WASM worker API only
         // supports scalar values today. Treat these as spill errors so downstream formulas see an
         // error rather than silently treating an array as a string.
