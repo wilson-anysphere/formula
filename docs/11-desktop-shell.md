@@ -73,8 +73,8 @@ header for those responses (or ensuring assets are served from the same origin a
 Notable keys:
 
 - `bundle.fileAssociations` registers `.xlsx`, `.xls`, `.xlsm`, `.xlsb`, `.csv` with the OS.
-- `bundle.linux.deb.depends` documents runtime deps for Linux packaging (e.g. `libwebkit2gtk-4.1-0`, `libgtk-3-0`,
-  appindicator, `librsvg2-2`, `libssl3`).
+- `bundle.linux.deb.depends` documents runtime deps for Linux packaging (e.g. `libwebkit2gtk-4.1-0`, `libgtk-3-0t64 | libgtk-3-0`,
+  appindicator, `librsvg2-2`, `libssl3t64 | libssl3`).
 - `bundle.macOS.entitlements` / signing keys and `bundle.windows.timestampUrl`.
 
 ### `plugins.updater`

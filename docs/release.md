@@ -117,12 +117,14 @@ These dependencies are declared in `apps/desktop/src-tauri/tauri.conf.json` unde
 `bundle.linux.deb.depends`:
 
 - `libwebkit2gtk-4.1-0` – WebKitGTK system WebView used by Tauri on Linux.
-- `libgtk-3-0` – GTK3 (windowing/event loop; also required by WebKitGTK).
+- `libgtk-3-0t64 | libgtk-3-0` – GTK3 (windowing/event loop; also required by WebKitGTK).
+  Ubuntu 24.04 uses `*t64` package names for some libraries due to the `time_t` 64-bit transition.
 - `libayatana-appindicator3-1 | libappindicator3-1` – tray icon backend.
   The Rust bindings (`libappindicator-sys`) load this library dynamically at runtime; without it
   the app can launch but the tray icon will not appear.
 - `librsvg2-2` – SVG rendering used by parts of the GTK icon stack / common icon themes.
-- `libssl3` – OpenSSL runtime required by native dependencies in the Tauri stack.
+- `libssl3t64 | libssl3` – OpenSSL runtime required by native dependencies in the Tauri stack
+  (Ubuntu 24.04 uses the `libssl3t64` package name).
 
 ### Validating the `.deb`
 
