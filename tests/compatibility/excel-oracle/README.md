@@ -44,7 +44,7 @@ alive before we have a full Excel-generated oracle. Check the dataset's
 
 The case corpus generator (`tools/excel-oracle/generate_cases.py`) validates that:
 
-- every `non_volatile` function in `shared/functionCatalog.json` has at least one case
+- every `non_volatile` function in `shared/functionCatalog.json` has at least one **case formula** (`case.formula`)
 - `volatile` catalog functions are excluded (keeps pinned oracle comparisons deterministic)
 
 The Rust test suite also enforces these invariants (see
