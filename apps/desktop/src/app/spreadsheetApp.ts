@@ -378,6 +378,12 @@ export type SpreadsheetAppCollabOptions = {
   docId: string;
   token?: string;
   /**
+   * Legacy option used by older desktop collab wiring to toggle local durability.
+   *
+   * @deprecated Use `persistenceEnabled` (or the `collabPersistence` URL param) instead.
+   */
+  offlineEnabled?: boolean;
+  /**
    * Local durability (offline-first) for the collaborative Yjs document.
    *
    * Defaults to enabled; can be disabled via `?collabPersistence=0` for debugging.
@@ -450,6 +456,7 @@ function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
       docId,
       token,
       disableBc,
+      offlineEnabled: persistenceEnabled,
       persistenceEnabled,
       user: identity,
     };
@@ -471,11 +478,13 @@ function resolveCollabOptionsFromStoredConnection(workbookId: string | undefined
   const token = loadCollabToken({ wsUrl: stored.wsUrl, docId: stored.docId });
   if (!token) return null;
 
+  const persistenceEnabled = resolveCollabPersistenceEnabled(new URL(window.location.href).searchParams);
   return {
     wsUrl: stored.wsUrl,
     docId: stored.docId,
     token,
-    persistenceEnabled: resolveCollabPersistenceEnabled(new URL(window.location.href).searchParams),
+    offlineEnabled: persistenceEnabled,
+    persistenceEnabled,
     user: getCollabUserIdentity({ search: window.location.search }),
   };
 }
@@ -802,7 +811,8 @@ export class SpreadsheetApp {
       // operations) still propagate back into the DocumentController.
       const binderOrigin = { type: "desktop-document-controller:binder" };
 
-      const persistence = collab.persistenceEnabled === false ? undefined : new IndexedDbCollabPersistence();
+      const persistenceEnabled = collab.persistenceEnabled ?? collab.offlineEnabled ?? true;
+      const persistence = persistenceEnabled === false ? undefined : new IndexedDbCollabPersistence();
 
       this.collabSession = createCollabSession({
         docId: collab.docId,

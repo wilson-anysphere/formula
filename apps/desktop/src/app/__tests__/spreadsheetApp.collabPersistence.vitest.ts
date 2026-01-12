@@ -141,7 +141,7 @@ describe("SpreadsheetApp collab persistence", () => {
     mocks.bindCollabSessionToDocumentController.mockResolvedValue({ destroy: () => {} });
   });
 
-  it("constructs CollabSession with IndexedDbCollabPersistence when persistenceEnabled is true", () => {
+  it("constructs CollabSession with IndexedDbCollabPersistence when offlineEnabled is true", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -153,7 +153,7 @@ describe("SpreadsheetApp collab persistence", () => {
       collab: {
         wsUrl: "ws://example.invalid",
         docId: "doc-123",
-        persistenceEnabled: true,
+        offlineEnabled: true,
         user: { id: "u1", name: "User 1", color: "#ff0000" },
       },
     });
@@ -168,7 +168,7 @@ describe("SpreadsheetApp collab persistence", () => {
     root.remove();
   });
 
-  it("does not enable persistence when persistenceEnabled is false", () => {
+  it("does not enable persistence when offlineEnabled is false", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -180,7 +180,7 @@ describe("SpreadsheetApp collab persistence", () => {
       collab: {
         wsUrl: "ws://example.invalid",
         docId: "doc-456",
-        persistenceEnabled: false,
+        offlineEnabled: false,
         user: { id: "u2", name: "User 2", color: "#00ff00" },
       },
     });
