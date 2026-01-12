@@ -37,6 +37,34 @@ test.describe("command palette shortcut hints", () => {
     await expect(item.locator(".command-palette__shortcut")).toHaveText("F2");
   });
 
+  test("supports '/' shortcut search mode", async ({ page }) => {
+    await gotoDesktop(page);
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    const expectedCopyShortcut = process.platform === "darwin" ? "⌘C" : "Ctrl+C";
+
+    await page.keyboard.press(`${modifier}+Shift+P`);
+    await expect(page.getByTestId("command-palette")).toBeVisible();
+
+    const input = page.getByTestId("command-palette-input");
+
+    // Sanity check: a command without a keybinding (Insert Pivot Table) is visible in normal search.
+    await input.fill("pivot");
+    await expect(page.locator("li.command-palette__item", { hasText: "Insert Pivot Table" }).first()).toBeVisible();
+
+    // Enter shortcut mode with a leading '/' (after trimming). The pivot command should be filtered out
+    // because it doesn't have a keybinding display string.
+    await input.fill(" / pivot");
+    await expect(page.locator(".command-palette__hint")).toBeVisible();
+    await expect(page.locator("li.command-palette__item", { hasText: "Insert Pivot Table" })).toHaveCount(0);
+
+    // Shortcut mode should still return matching commands with shortcuts.
+    await input.fill("/ copy");
+    const copy = page.locator("li.command-palette__item", { hasText: "Copy" }).first();
+    await expect(copy).toBeVisible();
+    await expect(copy.locator(".command-palette__shortcut")).toHaveText(expectedCopyShortcut);
+  });
+
   test("renders the platform shortcut hint for Replace", async ({ page }) => {
     await gotoDesktop(page);
 
