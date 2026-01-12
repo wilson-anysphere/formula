@@ -74,6 +74,12 @@ const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   "cmd+k",
   // Some keyboards emit both ctrl+meta on the same chord.
   "ctrl+cmd+k",
+  // AI Chat toggle (core UX shortcut; extensions should not claim it).
+  // - Windows/Linux: Ctrl+Shift+A
+  // - macOS: Cmd+I (with Ctrl+Cmd+I fallback for some remote/VM keyboard setups)
+  "ctrl+shift+a",
+  "cmd+i",
+  "ctrl+cmd+i",
   // macOS system shortcut: Hide (Cmd+H). Extensions should never be able to claim it.
   "cmd+h",
   // Some keyboards emit both ctrl+meta on the same chord.
