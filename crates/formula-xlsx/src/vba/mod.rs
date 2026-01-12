@@ -9,6 +9,12 @@ pub use formula_vba::{
     VbaProjectDigestDebugInfo, VbaSignatureVerification, VBAModule, VBAProject, VBAReference,
 };
 
+const VBA_PROJECT_BIN: &str = "xl/vbaProject.bin";
+const VBA_PROJECT_BIN_RELS: &str = "xl/_rels/vbaProject.bin.rels";
+const VBA_PROJECT_SIGNATURE_BIN: &str = "xl/vbaProjectSignature.bin";
+const VBA_PROJECT_SIGNATURE_REL_TYPE: &str =
+    "http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature";
+
 impl XlsxPackage {
     /// Parse and return a structured VBA project model (for UI display).
     pub fn vba_project(&self) -> Result<Option<VBAProject>, formula_vba::ParseError> {
@@ -24,7 +30,12 @@ impl XlsxPackage {
     /// (`xl/vbaProjectSignature.bin`, or another part referenced from
     /// `xl/_rels/vbaProject.bin.rels`). We prefer that part when present, but fall back to
     /// inspecting `xl/vbaProject.bin`.
+    ///
+    /// Returns `Ok(None)` when `xl/vbaProject.bin` is missing.
     pub fn parse_vba_digital_signature(&self) -> Result<Option<VbaDigitalSignature>, SignatureError> {
+        if self.vba_project_bin().is_none() {
+            return Ok(None);
+        }
         parse_vba_digital_signature_from_parts(self.parts_map())
     }
 
@@ -35,7 +46,12 @@ impl XlsxPackage {
     ///
     /// Some producers store `xl/vbaProjectSignature.bin` as raw PKCS#7/CMS bytes (not an OLE
     /// compound file). In that case we fall back to verifying it as a raw signature blob.
+    ///
+    /// Returns `Ok(None)` when `xl/vbaProject.bin` is missing.
     pub fn verify_vba_digital_signature(&self) -> Result<Option<VbaDigitalSignature>, SignatureError> {
+        if self.vba_project_bin().is_none() {
+            return Ok(None);
+        }
         verify_vba_digital_signature_from_parts(self.parts_map())
     }
 }
@@ -43,19 +59,29 @@ impl XlsxPackage {
 impl XlsxDocument {
     /// Parse and return a structured VBA project model (for UI display).
     pub fn vba_project(&self) -> Result<Option<VBAProject>, formula_vba::ParseError> {
-        let Some(bin) = self.parts().get("xl/vbaProject.bin") else {
+        let Some(bin) = self.parts().get(VBA_PROJECT_BIN) else {
             return Ok(None);
         };
         Ok(Some(VBAProject::parse(bin)?))
     }
 
     /// Inspect the workbook's VBA project for a digital signature stream.
+    ///
+    /// Returns `Ok(None)` when `xl/vbaProject.bin` is missing.
     pub fn parse_vba_digital_signature(&self) -> Result<Option<VbaDigitalSignature>, SignatureError> {
+        if self.parts().get(VBA_PROJECT_BIN).is_none() {
+            return Ok(None);
+        }
         parse_vba_digital_signature_from_parts(self.parts())
     }
 
     /// Inspect and (best-effort) cryptographically verify the VBA project digital signature.
+    ///
+    /// Returns `Ok(None)` when `xl/vbaProject.bin` is missing.
     pub fn verify_vba_digital_signature(&self) -> Result<Option<VbaDigitalSignature>, SignatureError> {
+        if self.parts().get(VBA_PROJECT_BIN).is_none() {
+            return Ok(None);
+        }
         verify_vba_digital_signature_from_parts(self.parts())
     }
 }
@@ -77,8 +103,8 @@ fn parse_vba_digital_signature_from_parts(
                     // We can't reliably distinguish "valid raw signature" from "garbage" without
                     // additional parsing/verification. As a best-effort heuristic, only treat it as a
                     // signature when we can find an embedded signer certificate.
-                    let signer_subject = formula_vba::extract_signer_certificate_info(bytes)
-                        .map(|info| info.subject);
+                    let signer_subject =
+                        formula_vba::extract_signer_certificate_info(bytes).map(|info| info.subject);
                     if signer_subject.is_some() {
                         return Ok(Some(VbaDigitalSignature {
                             stream_path: signature_part_name,
@@ -93,7 +119,7 @@ fn parse_vba_digital_signature_from_parts(
         }
     }
 
-    let Some(vba_bin) = parts.get("xl/vbaProject.bin") else {
+    let Some(vba_bin) = parts.get(VBA_PROJECT_BIN) else {
         return Ok(None);
     };
     formula_vba::parse_vba_digital_signature(vba_bin)
@@ -142,7 +168,7 @@ fn verify_vba_digital_signature_from_parts(
     }
 
     // Fall back to inspecting `xl/vbaProject.bin` for embedded signature streams.
-    let Some(vba_project_bin) = parts.get("xl/vbaProject.bin") else {
+    let Some(vba_project_bin) = parts.get(VBA_PROJECT_BIN) else {
         return Ok(signature_part_result);
     };
 
@@ -169,7 +195,7 @@ fn verify_vba_digital_signature_from_parts(
 
 fn resolve_vba_signature_part_name(parts: &BTreeMap<String, Vec<u8>>) -> Option<String> {
     // Prefer explicit relationship resolution when available.
-    if let Some(rels_bytes) = parts.get("xl/_rels/vbaProject.bin.rels") {
+    if let Some(rels_bytes) = parts.get(VBA_PROJECT_BIN_RELS) {
         if let Ok(rels) = crate::openxml::parse_relationships(rels_bytes) {
             for rel in rels {
                 if rel
@@ -180,16 +206,12 @@ fn resolve_vba_signature_part_name(parts: &BTreeMap<String, Vec<u8>>) -> Option<
                     continue;
                 }
 
-                if !rel
-                    .type_uri
-                    .to_ascii_lowercase()
-                    .contains("vbaprojectsignature")
-                {
+                if rel.type_uri != VBA_PROJECT_SIGNATURE_REL_TYPE {
                     continue;
                 }
 
                 let target = strip_fragment(&rel.target);
-                let resolved = crate::path::resolve_target("xl/vbaProject.bin", target);
+                let resolved = crate::path::resolve_target(VBA_PROJECT_BIN, target);
                 if parts.contains_key(&resolved) {
                     return Some(resolved);
                 }
@@ -198,8 +220,8 @@ fn resolve_vba_signature_part_name(parts: &BTreeMap<String, Vec<u8>>) -> Option<
     }
 
     // Default part name used by Excel.
-    if parts.contains_key("xl/vbaProjectSignature.bin") {
-        return Some("xl/vbaProjectSignature.bin".to_string());
+    if parts.contains_key(VBA_PROJECT_SIGNATURE_BIN) {
+        return Some(VBA_PROJECT_SIGNATURE_BIN.to_string());
     }
 
     None

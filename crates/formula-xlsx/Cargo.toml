@@ -22,6 +22,7 @@ zip = { version = "2.1", default-features = false, features = ["deflate"] }
 [dev-dependencies]
 base64 = "0.22"
 cfb = "0.10"
+openssl = "0.10"
 pretty_assertions = "1"
 insta = "1.46"
 rust_xlsxwriter = "0.70"
