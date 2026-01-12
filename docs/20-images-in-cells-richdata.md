@@ -276,6 +276,7 @@ Current Formula behavior:
 * Excel emits both **0-based** and **1-based** `vm` values in different files/contexts.
   - Example: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` uses `vm="0"`.
   - Example: `fixtures/xlsx/metadata/rich-values-vm.xlsx` uses `vm="1"`.
+  - Example: `fixtures/xlsx/basic/image-in-cell.xlsx` (Excel-generated) uses `vm="1"` and `vm="2"`.
 * Formula treats `vm` as **ambiguous** (0-based or 1-based) and tries to resolve both bases where possible
   (see `crates/formula-xlsx/src/rich_data/mod.rs`).
 * Missing `vm` means “no value metadata”.
