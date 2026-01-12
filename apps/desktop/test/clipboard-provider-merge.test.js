@@ -135,3 +135,55 @@ test("tauri: merges legacy core.invoke('read_clipboard') without clobbering web 
     },
   );
 });
+
+test("tauri: merges web rich formats even when core.invoke('clipboard_read') returns only plain text", async () => {
+  const rtf = String.raw`{\rtf1\ansi hello}`;
+  const imageBytes = new Uint8Array([1, 2, 3, 4]);
+
+  /** @type {string[]} */
+  const invokeCalls = [];
+
+  await withGlobals(
+    {
+      __TAURI__: {
+        core: {
+          async invoke(cmd) {
+            invokeCalls.push(cmd);
+            if (cmd === "clipboard_read") return { text: "native text" };
+            throw new Error(`unexpected invoke cmd: ${cmd}`);
+          },
+        },
+        clipboard: {
+          async readText() {
+            throw new Error("should not call readText when clipboard_read provides text");
+          },
+        },
+      },
+      navigator: {
+        clipboard: {
+          async read() {
+            return [
+              {
+                types: ["text/rtf", "image/png"],
+                async getType(type) {
+                  if (type === "text/rtf") return new Blob([rtf], { type });
+                  if (type === "image/png") return new Blob([imageBytes], { type });
+                  throw new Error(`unexpected clipboard type: ${type}`);
+                },
+              },
+            ];
+          },
+        },
+      },
+    },
+    async () => {
+      const provider = await createClipboardProvider();
+      const content = await provider.read();
+
+      assert.deepStrictEqual(invokeCalls, ["clipboard_read"]);
+      assert.equal(content.text, "native text");
+      assert.equal(content.rtf, rtf);
+      assert.deepStrictEqual(content.imagePng, imageBytes);
+    },
+  );
+});

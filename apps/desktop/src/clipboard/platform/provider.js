@@ -223,7 +223,12 @@ function createTauriClipboardProvider() {
               native.pngBase64 = pngBase64;
             }
 
-            if (typeof native.html === "string" || typeof native.text === "string") {
+            // If we successfully read HTML from the native clipboard, we can return
+            // immediately (it already includes rich spreadsheet formats on supported
+            // platforms). If we *only* have plain text, still fall through to the
+            // WebView Clipboard API so we can pick up richer formats (rtf/image) when
+            // available.
+            if (typeof native.html === "string") {
               return native;
             }
 
