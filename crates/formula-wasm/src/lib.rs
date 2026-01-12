@@ -1000,7 +1000,8 @@ pub fn parse_formula_partial(
     };
 
     // Cursor is expressed in UTF-16 code units by JS callers.
-    let cursor_utf16 = cursor.unwrap_or_else(|| formula.encode_utf16().count() as u32);
+    let formula_utf16_len = formula.encode_utf16().count() as u32;
+    let cursor_utf16 = cursor.unwrap_or(formula_utf16_len).min(formula_utf16_len);
     let byte_cursor = utf16_cursor_to_byte_index(&formula, cursor_utf16);
     let prefix = &formula[..byte_cursor];
 
@@ -1456,6 +1457,22 @@ mod tests {
         let span_end = byte_index_to_utf16_cursor(prefix, err.span.end);
         assert_eq!(span_start, 1);
         assert_eq!(span_end, cursor_utf16 as usize);
+    }
+
+    #[test]
+    fn utf16_cursor_conversion_clamps_out_of_range_and_surrogate_midpoints() {
+        let formula = "=\"😀\"";
+        let formula_utf16_len = formula.encode_utf16().count() as u32;
+
+        // Cursor beyond the end clamps to the end.
+        let byte_cursor = utf16_cursor_to_byte_index(formula, formula_utf16_len.saturating_add(100));
+        assert_eq!(byte_cursor, formula.len());
+
+        // Cursor in the middle of a surrogate pair should clamp to a valid UTF-8 boundary.
+        // UTF-16 layout: '=' (1), '\"' (1), 😀 (2), '\"' (1)
+        // Cursor=3 lands between the two UTF-16 code units for 😀.
+        let byte_cursor_mid = utf16_cursor_to_byte_index(formula, 3);
+        assert_eq!(&formula[..byte_cursor_mid], "=\"");
     }
 
     #[test]
