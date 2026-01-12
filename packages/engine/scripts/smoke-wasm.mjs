@@ -50,6 +50,10 @@ async function collectRuntimeFiles(dir, relativeDir = "") {
   return out;
 }
 
+// Fail fast with a helpful message when the output directory doesn't exist yet.
+// This is the common case when contributors haven't run `pnpm build:wasm`.
+assertReadable(outDir);
+
 const runtimeFiles = await collectRuntimeFiles(outDir);
 if (runtimeFiles.length === 0) {
   console.error("[formula] No WASM runtime files found. Run `pnpm build:wasm` first.");
