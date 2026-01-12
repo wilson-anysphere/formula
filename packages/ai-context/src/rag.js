@@ -1,4 +1,4 @@
-import { isCellEmpty, normalizeRange, rangeToA1 } from "./a1.js";
+import { isCellEmpty, normalizeRange, parseA1Range, rangeToA1 } from "./a1.js";
 import { extractSheetSchema } from "./schema.js";
 
 /**
@@ -168,38 +168,10 @@ export function chunkSheetByRegions(sheet, options = {}) {
  * @param {string} schemaRange
  */
 function parseRangeFromSchemaRange(schemaRange) {
-  // schemaRange is always in `Sheet!A1:B2` form from extractSheetSchema.
-  const [sheetNameAndMaybe, a1] = schemaRange.includes("!") ? schemaRange.split("!") : ["", schemaRange];
-  const sheetName = sheetNameAndMaybe || undefined;
-  const match = /^(?<start>[A-Z]+\d+)(?::(?<end>[A-Z]+\d+))?$/.exec(a1);
-  if (!match || !match.groups) throw new Error(`Invalid schema range: ${schemaRange}`);
-
-  const start = match.groups.start;
-  const end = match.groups.end ?? start;
-
-  const startRef = cellFromA1(start);
-  const endRef = cellFromA1(end);
-  return normalizeRange({
-    sheetName,
-    startRow: startRef.row,
-    startCol: startRef.col,
-    endRow: endRef.row,
-    endCol: endRef.col,
-  });
-}
-
-/**
- * @param {string} a1Cell
- */
-function cellFromA1(a1Cell) {
-  const m = /^([A-Z]+)(\d+)$/.exec(a1Cell);
-  if (!m) throw new Error(`Invalid A1 cell: ${a1Cell}`);
-  const [, letters, digits] = m;
-  let col = 0;
-  for (const char of letters) col = col * 26 + (char.charCodeAt(0) - 64);
-  col -= 1;
-  const row = Number(digits) - 1;
-  return { row, col };
+  // Schema ranges are produced by `extractSheetSchema` and are always A1 ranges.
+  // Use the shared A1 parser so sheet quoting rules stay consistent (e.g.
+  // `'My Sheet'!A1:B2`, escaped quotes, etc).
+  return parseA1Range(schemaRange);
 }
 
 export class RagIndex {

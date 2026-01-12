@@ -35,5 +35,26 @@ describe("A1 utilities (sheet quoting)", () => {
     expect(parsed.sheetName).toBe("My Sheet");
     expect(rangeToA1(parsed)).toBe("'My Sheet'!A1");
   });
-});
 
+  it("rangeToA1 accepts already-quoted sheetName input (back-compat)", () => {
+    expect(
+      rangeToA1({
+        sheetName: "'My Sheet'",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+      }),
+    ).toBe("'My Sheet'!A1");
+
+    expect(
+      rangeToA1({
+        sheetName: "'Bob''s Sheet'",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+      }),
+    ).toBe("'Bob''s Sheet'!A1");
+  });
+});

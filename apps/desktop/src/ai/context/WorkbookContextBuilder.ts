@@ -712,9 +712,7 @@ export class WorkbookContextBuilder {
   }
 
   private schemaRangeRef(sheetId: string, range: Range): string {
-    // `packages/ai-context`'s A1 parser does not implement Excel-style quoted sheet names.
-    // Keep sheet names unquoted here so schema extraction can safely parse its own ranges.
-    return `${sheetId}!${rangeToA1Selection(range)}`;
+    return `${formatSheetNameForA1(sheetId)}!${rangeToA1Selection(range)}`;
   }
 
   private getContentVersionForCache(): number {

@@ -23,6 +23,10 @@ function unescapeSheetName(rawSheet) {
  * @param {string} sheetName
  */
 function formatSheetName(sheetName) {
+  // Accept either a raw sheet name ("My Sheet") or an already-quoted Excel sheet
+  // name ("'My Sheet'"). Canonicalize to an unquoted name before formatting so we
+  // don't double-quote.
+  sheetName = unescapeSheetName(sheetName);
   // Identifier-like sheet names can be used without quoting.
   if (/^[A-Za-z0-9_]+$/.test(sheetName)) return sheetName;
   // Excel style: wrap in single quotes and escape embedded quotes via doubling.
