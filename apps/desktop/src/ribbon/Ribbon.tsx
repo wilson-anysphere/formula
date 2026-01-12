@@ -425,11 +425,11 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                       setFlyoutOpen(false);
                       return;
                     }
-                    if (!contentVisible) return;
                     event.preventDefault();
                     if (!contentVisible) {
                       if (!isActive) {
                         setActiveTabId(tab.id);
+                        setBackstageOpen(false);
                         actions.onTabChange?.(tab.id);
                       }
                       setFlyoutOpen(true);

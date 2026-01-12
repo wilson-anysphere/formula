@@ -92,6 +92,15 @@ export const RibbonButton = React.memo(function RibbonButton({
       closeMenu();
     };
 
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      const root = dropdownRef.current;
+      if (!root) return;
+      if (root.contains(target)) return;
+      closeMenu();
+    };
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
@@ -100,9 +109,11 @@ export const RibbonButton = React.memo(function RibbonButton({
     };
 
     document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("focusin", onFocusIn);
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [closeMenu, menuOpen]);
@@ -185,11 +196,6 @@ export const RibbonButton = React.memo(function RibbonButton({
             const items = Array.from(root.querySelectorAll<HTMLButtonElement>(".ribbon-dropdown__menuitem:not(:disabled)"));
             if (items.length === 0) return;
             const currentIndex = items.findIndex((el) => el === document.activeElement);
-
-            if (event.key === "Tab") {
-              closeMenu();
-              return;
-            }
 
             if (event.key === "ArrowDown") {
               event.preventDefault();
