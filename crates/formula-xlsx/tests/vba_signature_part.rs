@@ -161,6 +161,14 @@ fn make_spc_indirect_data_content_sha256(digest: &[u8]) -> Vec<u8> {
 }
 
 fn build_minimal_vba_project_bin(module1: &[u8]) -> Vec<u8> {
+    build_minimal_vba_project_bin_impl(module1, None)
+}
+
+fn build_minimal_vba_project_bin_with_signature(module1: &[u8], signature_blob: &[u8]) -> Vec<u8> {
+    build_minimal_vba_project_bin_impl(module1, Some(signature_blob))
+}
+
+fn build_minimal_vba_project_bin_impl(module1: &[u8], signature_blob: Option<&[u8]>) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
 
@@ -214,6 +222,13 @@ fn build_minimal_vba_project_bin(module1: &[u8]) -> Vec<u8> {
     {
         let mut s = ole.create_stream("VBA/Module1").expect("module stream");
         s.write_all(&module_container).expect("write module");
+    }
+
+    if let Some(sig) = signature_blob {
+        let mut s = ole
+            .create_stream("\u{0005}DigitalSignature")
+            .expect("signature stream");
+        s.write_all(sig).expect("write signature");
     }
 
     ole.into_inner().into_inner()
@@ -472,4 +487,37 @@ fn verify_signature_part_binding_detects_tampered_vba_project_bin() {
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig.binding, VbaSignatureBinding::NotBound);
+}
+
+#[test]
+fn verify_falls_back_to_vba_project_bin_when_signature_part_is_garbage_and_embedded_signature_is_digsig_blob_wrapped(
+) {
+    // Build a minimal, digestable VBA project so binding evaluation can succeed.
+    let module_bytes = b"Sub Hello()\r\nEnd Sub\r\n";
+    let unsigned_project = build_minimal_vba_project_bin(module_bytes);
+    let digest = compute_vba_project_digest(&unsigned_project, DigestAlg::Md5)
+        .expect("compute project digest");
+    assert_eq!(digest.len(), 16, "VBA project digest must be 16-byte MD5");
+    let spc = make_spc_indirect_data_content_sha256(&digest);
+
+    // Build a valid PKCS#7 signature over the SpcIndirectDataContent and wrap it in a DigSigBlob
+    // offset table with decoy corrupted PKCS#7 blobs.
+    let pkcs7 = make_pkcs7_signed_message(&spc);
+    let wrapped = build_oshared_digsig_blob(&pkcs7);
+
+    // Embed the wrapped signature into `vbaProject.bin` itself.
+    let signed_project = build_minimal_vba_project_bin_with_signature(module_bytes, &wrapped);
+
+    // Provide a garbage signature part so `XlsxPackage::verify_vba_digital_signature` is forced to
+    // fall back to `vbaProject.bin` for signature inspection.
+    let xlsm_bytes = build_xlsm_zip(&signed_project, b"not-an-ole");
+    let pkg = XlsxPackage::from_bytes(&xlsm_bytes).expect("read xlsm");
+
+    let sig = pkg
+        .verify_vba_digital_signature()
+        .expect("verify signature")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::Bound);
 }
