@@ -26,7 +26,7 @@ and exits non-zero if mismatches exceed the configured threshold.
 
 ## Repository layout
 
-- `cases.json` — curated (~1.4k) formula + input-grid cases (deterministic).
+- `cases.json` — curated (~2k) formula + input-grid cases (deterministic).
 - `cases_odd_coupon_long.json` — supplemental **long odd-coupon** (`ODDF*` / `ODDL*`) cases.
   This file is not part of the default CI corpus because those functions may not be implemented
   in all builds yet, but it can be used with the Windows + Excel runner to capture oracle values.
