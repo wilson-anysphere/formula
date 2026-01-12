@@ -3163,6 +3163,42 @@ mod tests {
     }
 
     #[test]
+    fn wraps_union_operator_when_used_as_single_function_argument() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // SUM((A1,B1)):
+        // - A1 and B1 are combined with the union operator (`,`) into a single reference operand.
+        // - Excel requires parentheses around a union operand when used as a *single* function arg
+        //   so the comma is not interpreted as an argument separator.
+        //
+        // rgce:
+        //   PtgRef A1
+        //   PtgRef B1
+        //   PtgUnion
+        //   PtgFuncVar argc=1 iftab=4 (SUM)
+        let a1_col = encode_col_field(0, true, true);
+        let b1_col = encode_col_field(1, true, true);
+        let rgce = vec![
+            0x24, 0x00, 0x00, a1_col.to_le_bytes()[0], a1_col.to_le_bytes()[1], // A1
+            0x24, 0x00, 0x00, b1_col.to_le_bytes()[0], b1_col.to_le_bytes()[1], // B1
+            0x10, // union operator
+            0x22, 0x01, 0x04, 0x00, // SUM(argc=1)
+        ];
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "SUM((A1,B1))");
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn decodes_if_true_1_2_from_ptg_funcvar() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = Vec::new();
