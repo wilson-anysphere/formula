@@ -140,28 +140,6 @@ fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {
     buf
 }
 
-fn workbook_sheet_names(xml: &[u8]) -> Vec<String> {
-    let mut reader = Reader::from_reader(xml);
-    reader.config_mut().trim_text(true);
-    let mut buf = Vec::new();
-    let mut out = Vec::new();
-    loop {
-        match reader.read_event_into(&mut buf).expect("read xml") {
-            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"sheet" => {
-                for attr in e.attributes().flatten() {
-                    if attr.key.as_ref() == b"name" {
-                        out.push(attr.unescape_value().expect("attr").into_owned());
-                    }
-                }
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-        buf.clear();
-    }
-    out
-}
-
 fn workbook_sheets_with_rids(xml: &[u8]) -> Vec<(String, String)> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(true);
@@ -264,14 +242,13 @@ fn sheet_edits_preserve_richdata_parts_and_relationships() {
 
     // Sanity: ensure we actually exercised the sheet-structure rewrite path.
     let workbook_xml = zip_part(&saved, "xl/workbook.xml");
-    let workbook_sheets = workbook_sheet_names(&workbook_xml);
     let workbook_sheet_rids = workbook_sheets_with_rids(&workbook_xml);
     assert!(
-        !workbook_sheets.iter().any(|s| s == "Sheet2"),
+        !workbook_sheet_rids.iter().any(|(name, _)| name == "Sheet2"),
         "expected deleted sheet to be removed from xl/workbook.xml"
     );
     assert!(
-        workbook_sheets.iter().any(|s| s == "Added"),
+        workbook_sheet_rids.iter().any(|(name, _)| name == "Added"),
         "expected newly-added sheet to be present in xl/workbook.xml"
     );
     let cursor = Cursor::new(&saved);
