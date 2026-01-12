@@ -53,6 +53,7 @@ import { normalizeFormulaTextOpt } from "@formula/engine";
 import { startWorkbookSync } from "./tauri/workbookSync";
 import { TauriWorkbookBackend } from "./tauri/workbookBackend";
 import * as nativeDialogs from "./tauri/nativeDialogs";
+import { shellOpen } from "./tauri/shellOpen";
 import { setTrayStatus } from "./tauri/trayStatus";
 import { installUpdaterUi } from "./tauri/updaterUi";
 import { notify } from "./tauri/notifications";
@@ -125,6 +126,7 @@ import {
   markStartupTimeToInteractive,
   reportStartupWebviewLoaded,
 } from "./tauri/startupMetrics.js";
+import { openExternalHyperlink } from "./hyperlinks/openExternal.js";
 
 // Apply theme + reduced motion settings as early as possible to avoid rendering with
 // default tokens before the user's preference is known.
@@ -186,6 +188,64 @@ function warnIfMissingCrossOriginIsolationInTauriProd(): void {
 warnIfMissingCrossOriginIsolationInTauriProd();
 
 let workbookSheetStore = new WorkbookSheetStore([{ id: "Sheet1", name: "Sheet1", visibility: "visible" }]);
+
+function installExternalLinkInterceptor(): void {
+  if (typeof document === "undefined") return;
+
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (event.defaultPrevented) return;
+
+      const target = event.target as Element | null;
+      if (!target || typeof target.closest !== "function") return;
+      const anchor = target.closest("a[href]") as HTMLAnchorElement | null;
+      if (!anchor) return;
+
+      // Don't interfere with download links (e.g. blob exports like PDF).
+      if (anchor.hasAttribute("download")) return;
+
+      const href = anchor.getAttribute("href");
+      if (typeof href !== "string" || href.trim() === "") return;
+
+      // Only handle absolute URLs. Relative links are treated as internal navigation.
+      if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(href)) return;
+
+      // Always block javascript:/data: URL navigations.
+      try {
+        const parsed = new URL(href);
+        const protocol = parsed.protocol.replace(":", "").toLowerCase();
+        if (protocol === "javascript" || protocol === "data") {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+      } catch {
+        // Ignore invalid URLs.
+        return;
+      }
+
+      // Only intercept when running under Tauri. In web builds, let the browser handle
+      // normal navigation/new-tab behavior.
+      const isTauri = Boolean((globalThis as any).__TAURI__);
+      if (!isTauri) return;
+
+      // Prevent the webview from navigating away; open through the OS instead.
+      event.preventDefault();
+      event.stopPropagation();
+
+      void openExternalHyperlink(href, {
+        shellOpen,
+        confirmUntrustedProtocol: nativeDialogs.confirm,
+      }).catch((err) => {
+        console.error("Failed to open external link:", err);
+      });
+    },
+    { capture: true },
+  );
+}
+
+installExternalLinkInterceptor();
 
 // Cursor desktop no longer supports user-provided LLM settings, but legacy builds
 // persisted provider + API keys in localStorage. Best-effort purge on startup so

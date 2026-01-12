@@ -64,4 +64,53 @@ test.describe("external hyperlink opening", () => {
       expect(windowCalls).toEqual([]);
     });
   }
+
+  test("clicking an <a href> uses the Tauri shell plugin (no webview navigation)", async ({ page }) => {
+    await gotoDesktop(page);
+    await waitForIdle(page);
+
+    await page.evaluate(() => {
+      (window as any).__shellOpenCalls = [];
+      (window as any).__windowOpenCalls = [];
+
+      (window as any).__TAURI__ = {
+        plugin: {
+          shell: {
+            open: (url: string) => {
+              (window as any).__shellOpenCalls.push(url);
+              return Promise.resolve();
+            },
+          },
+        },
+      };
+
+      const original = window.open;
+      (window as any).__originalWindowOpen = original;
+      window.open = (...args: any[]) => {
+        (window as any).__windowOpenCalls.push(args);
+        return null;
+      };
+
+      const a = document.createElement("a");
+      a.id = "e2e-external-anchor";
+      a.href = "https://example.com";
+      a.textContent = "external link";
+      document.body.appendChild(a);
+    });
+
+    const urlBefore = page.url();
+
+    await page.click("#e2e-external-anchor");
+    await page.waitForFunction(() => (window as any).__shellOpenCalls?.length === 1);
+
+    const [shellCalls, windowCalls, urlAfter] = await Promise.all([
+      page.evaluate(() => (window as any).__shellOpenCalls),
+      page.evaluate(() => (window as any).__windowOpenCalls),
+      page.url(),
+    ]);
+
+    expect(shellCalls).toEqual(["https://example.com/"]);
+    expect(windowCalls).toEqual([]);
+    expect(urlAfter).toBe(urlBefore);
+  });
 });
