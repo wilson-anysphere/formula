@@ -107,6 +107,12 @@ function validateCommands(commands) {
     assertString(cmd.title, `contributes.commands[${idx}].title`);
     assertOptionalString(cmd.category, `contributes.commands[${idx}].category`);
     assertOptionalString(cmd.icon, `contributes.commands[${idx}].icon`);
+    assertOptionalString(cmd.description, `contributes.commands[${idx}].description`);
+
+    const keywords = assertArray(cmd.keywords, `contributes.commands[${idx}].keywords`);
+    for (const [kIdx, keyword] of keywords.entries()) {
+      assertString(keyword, `contributes.commands[${idx}].keywords[${kIdx}]`);
+    }
   }
   return list;
 }

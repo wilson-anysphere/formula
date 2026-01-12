@@ -112,6 +112,62 @@ test("manifest validation: activation event must reference contributed data conn
   );
 });
 
+test("manifest validation: contributes.commands supports optional description + keywords", () => {
+  assert.doesNotThrow(() =>
+    validateExtensionManifest(
+      {
+        name: "x",
+        version: "1.0.0",
+        publisher: "p",
+        main: "./dist/extension.js",
+        engines: { formula: "^1.0.0" },
+        activationEvents: ["onCommand:test.cmd"],
+        permissions: ["ui.commands"],
+        contributes: {
+          commands: [
+            {
+              command: "test.cmd",
+              title: "Test Command",
+              description: "A helpful subtitle shown in the command palette",
+              keywords: ["hello", "world"]
+            }
+          ]
+        }
+      },
+      { engineVersion: "1.0.0", enforceEngine: true }
+    )
+  );
+});
+
+test("manifest validation: contributes.commands keywords must be a string array", () => {
+  assert.throws(
+    () =>
+      validateExtensionManifest(
+        {
+          name: "x",
+          version: "1.0.0",
+          publisher: "p",
+          main: "./dist/extension.js",
+          engines: { formula: "^1.0.0" },
+          activationEvents: ["onCommand:test.cmd"],
+          permissions: ["ui.commands"],
+          contributes: {
+            commands: [
+              {
+                command: "test.cmd",
+                title: "Test Command",
+                // @ts-expect-error - intentional invalid manifest type
+                keywords: "not-an-array"
+              }
+            ]
+          }
+        },
+        { engineVersion: "1.0.0", enforceEngine: true }
+      ),
+    /contributes\.commands\[0\]\.keywords must be an array/
+  );
+});
+
 test("manifest validation: invalid permission rejected", () => {
   assert.throws(
     () =>

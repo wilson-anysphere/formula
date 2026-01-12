@@ -63,7 +63,9 @@ test("BrowserExtensionHost: exposes manifest contributions for UI integration", 
       command: "test.cmd",
       title: "Test Command",
       category: "Test",
-      icon: null
+      icon: null,
+      description: null,
+      keywords: null
     }
   ]);
 

@@ -265,18 +265,30 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
         const cmd = group.commands[i]!;
         const globalIndex = commandOffset + i;
 
-        const li = document.createElement("li");
-        li.className = "command-palette__item";
-        li.setAttribute("aria-selected", globalIndex === selectedIndex ? "true" : "false");
+         const li = document.createElement("li");
+         li.className = "command-palette__item";
+         li.setAttribute("aria-selected", globalIndex === selectedIndex ? "true" : "false");
 
-        const main = document.createElement("div");
-        main.className = "command-palette__item-main";
-        main.appendChild(renderHighlightedText(cmd.title, cmd.titleRanges));
+         const main = document.createElement("div");
+         main.className = "command-palette__item-main";
 
-        const shortcut = keybindingIndex.get(cmd.commandId)?.[0] ?? null;
-        if (shortcut) {
-          const right = document.createElement("div");
-          right.className = "command-palette__item-right";
+         const label = document.createElement("div");
+         label.className = "command-palette__item-label";
+         label.appendChild(renderHighlightedText(cmd.title, cmd.titleRanges));
+         main.appendChild(label);
+
+         const descriptionText = typeof cmd.description === "string" ? cmd.description.trim() : "";
+         if (descriptionText) {
+           const description = document.createElement("div");
+           description.className = "command-palette__item-description";
+           description.textContent = descriptionText;
+           main.appendChild(description);
+         }
+
+         const shortcut = keybindingIndex.get(cmd.commandId)?.[0] ?? null;
+         if (shortcut) {
+           const right = document.createElement("div");
+           right.className = "command-palette__item-right";
           const pill = document.createElement("span");
           pill.className = "command-palette__shortcut";
           pill.textContent = shortcut;

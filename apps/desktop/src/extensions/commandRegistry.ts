@@ -58,13 +58,17 @@ export class CommandRegistry {
     options?: { category?: string | null; icon?: string | null; description?: string | null; keywords?: string[] | null },
   ): void {
     const id = String(commandId);
+    const keywords =
+      Array.isArray(options?.keywords) && options?.keywords.length > 0
+        ? options.keywords.filter((kw) => typeof kw === "string" && kw.trim() !== "")
+        : options?.keywords ?? null;
     this.commands.set(id, {
       commandId: id,
       title,
       category: options?.category ?? null,
       icon: options?.icon ?? null,
       description: options?.description ?? null,
-      keywords: options?.keywords ?? null,
+      keywords,
       source: { kind: "builtin" },
       run: async (...args) => run(...args),
     });
@@ -103,7 +107,7 @@ export class CommandRegistry {
         category: cmd.category ?? null,
         icon: cmd.icon ?? null,
         description: cmd.description ?? null,
-        keywords: cmd.keywords ?? null,
+        keywords: Array.isArray(cmd.keywords) ? cmd.keywords.filter((kw) => typeof kw === "string" && kw.trim() !== "") : null,
         source: { kind: "extension", extensionId: String(cmd.extensionId) },
         run: async (...args) => executor(id, ...args),
       });

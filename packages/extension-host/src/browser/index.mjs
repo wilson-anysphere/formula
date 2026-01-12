@@ -801,12 +801,17 @@ class BrowserExtensionHost {
     const out = [];
     for (const extension of this._extensions.values()) {
       for (const cmd of extension.manifest.contributes?.commands ?? []) {
+        const keywords = Array.isArray(cmd.keywords)
+          ? cmd.keywords.filter((kw) => typeof kw === "string" && kw.trim().length > 0)
+          : null;
         out.push({
           extensionId: extension.id,
           command: cmd.command,
           title: cmd.title,
           category: cmd.category ?? null,
-          icon: cmd.icon ?? null
+          icon: cmd.icon ?? null,
+          description: typeof cmd.description === "string" ? cmd.description : null,
+          keywords
         });
       }
     }

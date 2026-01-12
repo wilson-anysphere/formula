@@ -1,5 +1,15 @@
 export const API_PERMISSIONS: Record<string, string[]>;
 
+export type ContributedCommand = {
+  extensionId: string;
+  command: string;
+  title: string;
+  category: string | null;
+  icon: string | null;
+  description: string | null;
+  keywords: string[] | null;
+};
+
 export class BrowserExtensionHost {
   constructor(options: {
     engineVersion: string;
@@ -13,7 +23,7 @@ export class BrowserExtensionHost {
   loadExtensionFromUrl(manifestUrl: string): Promise<void>;
   startup(): Promise<void>;
 
-  getContributedCommands(): any[];
+  getContributedCommands(): ContributedCommand[];
   getContributedPanels(): any[];
   getContributedKeybindings(): any[];
   getContributedMenu(menuId: string): any[];

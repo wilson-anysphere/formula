@@ -31,7 +31,12 @@
       {
         "command": "sampleHello.openPanel",
         "title": "Open Sample Panel",
-        "category": "Sample Hello"
+        "category": "Sample Hello",
+        "description": "Opens the Sample Hello panel.",
+        "keywords": [
+          "hello",
+          "panel"
+        ]
       },
       {
         "command": "sampleHello.fetchText",

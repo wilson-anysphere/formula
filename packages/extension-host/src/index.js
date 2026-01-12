@@ -526,7 +526,9 @@ class ExtensionHost {
           command: cmd.command,
           title: cmd.title,
           category: cmd.category ?? null,
-          icon: cmd.icon ?? null
+          icon: cmd.icon ?? null,
+          description: cmd.description ?? null,
+          keywords: Array.isArray(cmd.keywords) ? cmd.keywords : null
         });
       }
     }

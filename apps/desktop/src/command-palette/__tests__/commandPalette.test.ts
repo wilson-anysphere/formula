@@ -52,6 +52,18 @@ describe("command-palette/fuzzy", () => {
     });
     expect(match).not.toBeNull();
   });
+
+  test("matches on keywords when the title/category/id don't match", () => {
+    const match = fuzzyMatchCommand("gizmo", {
+      commandId: "ext.openPanel",
+      title: "Open Sample Panel",
+      category: "Extensions",
+      keywords: ["gizmo", "widget"],
+    });
+
+    expect(match).not.toBeNull();
+    expect(match!.score).toBeGreaterThan(0);
+  });
 });
 
 describe("command-palette/recents", () => {
@@ -82,4 +94,3 @@ describe("command-palette/recents", () => {
     expect(readCommandPaletteRecents(storage)).toEqual([]);
   });
 });
-
