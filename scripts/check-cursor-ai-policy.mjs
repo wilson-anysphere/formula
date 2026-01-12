@@ -101,6 +101,7 @@ const SCANNED_FILE_EXTENSIONS = new Set([
   ".toml",
   ".lock",
   ".sql",
+  ".txt",
   ".rs",
   ".py",
   ".go",
