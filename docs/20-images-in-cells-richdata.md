@@ -278,7 +278,7 @@ Current Formula behavior:
 |------:|----------|------|---------|
 | `t` | `<valueMetadata><bk><rc t="…">` | 1-based | index into `<metadataTypes>` (selects `metadataType name="XLRICHVALUE"`) |
 | `v` | `<valueMetadata><bk><rc v="…">` | 0-based | often an index into `<futureMetadata name="XLRICHVALUE"><bk>` (if present); other schemas may use `v` differently (including directly referencing the rich value index). |
-| `i` | `<xlrd:rvb i="…"/>` | 0-based | rich value index into `xl/richData/richValue.xml` |
+| `i` | `<xlrd:rvb i="…"/>` | 0-based | rich value index into the rich value instance table (e.g. `xl/richData/richValue*.xml` or `xl/richData/rdrichvalue.xml`, depending on naming scheme) |
 
 Notes:
 
@@ -286,7 +286,7 @@ Notes:
   in those, `rc/@v` may directly refer to the rich value index (or be interpreted via other extension
   tables). Preserve unknown metadata and implement mapping best-effort.
 
-### `richValue.xml` rich value table — **0-based**
+### Rich value instance table (`richValue*.xml` / `rdrichvalue.xml`) — **0-based**
 
 Rich values are stored in a list; the rich value index is **0-based** and is referenced from `xl/metadata.xml`
 either directly (e.g. `rc/@v = richValueIndex`) or indirectly (e.g. via `xlrd:rvb/@i`).
@@ -305,7 +305,7 @@ OPC relationship IDs (`rId1`, `rId2`, …) are:
 
 Excel avoids storing raw strings like `rId17` inside every rich value instance. Instead:
 
-1. `richValue.xml` stores a **relationship index** (e.g. `rel=0`).
+1. The rich value instance (`richValue.xml` or `rdrichvalue.xml`) stores a **relationship index** (e.g. `rel=0`).
 2. That index selects an entry in `richValueRel.xml` (e.g. entry `0` is `r:id="rId5"`).
 3. `rId5` is resolved using `xl/richData/_rels/richValueRel.xml.rels` to find the actual `Target` (e.g. `../media/image1.png`).
 
@@ -329,9 +329,11 @@ There are (at least) two observed variants for mapping `vm`/`metadata.xml` → r
    - That `<bk>` contains `<rc t="…" v="0"/>` where `v` is **0-based** into `futureMetadata name="XLRICHVALUE"`.
 3. **Future metadata** (`xl/metadata.xml`)
    - `futureMetadata name="XLRICHVALUE"` `<bk>` #0 contains `<xlrd:rvb i="5"/>`.
-   - `i=5` is the **0-based rich value index** into `xl/richData/richValue.xml`.
-4. **Rich value** (`xl/richData/richValue.xml`)
-   - Rich value record #5 is an “image” typed rich value.
+   - `i=5` is the **0-based rich value index** into the rich value instance table:
+     - `xl/richData/richValue*.xml` (Excel-like naming), or
+     - `xl/richData/rdrichvalue.xml` (rdRichValue naming)
+4. **Rich value** (rich value instance table)
+   - Rich value record #5 is an “image” typed rich value (exact representation varies by Excel build).
    - Its payload contains a **relationship index** (e.g. `relIndex = 0`, **0-based**) into `richValueRel.xml`.
 5. **Relationship table** (`xl/richData/richValueRel.xml`)
    - Relationship table entry #0 contains `r:id="rId7"`.
@@ -339,7 +341,7 @@ There are (at least) two observed variants for mapping `vm`/`metadata.xml` → r
    - Relationship `Id="rId7"` resolves to an OPC `Target` (often a media part like `../media/image1.png`,
      but treat this as opaque; other targets/types may appear depending on Excel build).
 
-So: **cell → vm (0/1-based) → metadata.xml → rvb@i (0-based) → richValue.xml → relIndex (0-based) →
+So: **cell → vm (0/1-based) → metadata.xml → rvb@i (0-based) → rich value instance table → relIndex (0-based) →
 richValueRel.xml → rId → .rels target → image bytes**.
 
 ### Variant B: `rc/@v` directly references the rich value index
