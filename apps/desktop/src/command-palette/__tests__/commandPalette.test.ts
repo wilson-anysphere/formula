@@ -171,6 +171,23 @@ describe("command-palette/recents", () => {
     expect(readCommandRecents(storage).map((e) => e.commandId)).toEqual(["cmd.normal"]);
   });
 
+  test("install enforces maxEntries even when existing storage is larger", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      COMMAND_RECENTS_STORAGE_KEY,
+      JSON.stringify([
+        { commandId: "cmd.a", lastUsedMs: 3, count: 1 },
+        { commandId: "cmd.b", lastUsedMs: 2, count: 1 },
+        { commandId: "cmd.c", lastUsedMs: 1, count: 1 },
+      ]),
+    );
+    const commandRegistry = new CommandRegistry();
+
+    installCommandRecentsTracker(commandRegistry, storage, { maxEntries: 2 });
+
+    expect(readCommandRecents(storage).map((e) => e.commandId)).toEqual(["cmd.a", "cmd.b"]);
+  });
+
   test("migrates legacy storage key into the new schema (one-time)", () => {
     const storage = new MemoryStorage();
     storage.setItem(LEGACY_COMMAND_RECENTS_STORAGE_KEY, JSON.stringify(["cmd.a", "cmd.b"]));

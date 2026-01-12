@@ -155,6 +155,9 @@ export function installCommandRecentsTracker(
   const now = options.now ?? (() => Date.now());
   const ignore = new Set((options.ignoreCommandIds ?? []).map((id) => String(id).trim()).filter(Boolean));
   const storageKey = options.storageKey ?? COMMAND_RECENTS_STORAGE_KEY;
+  const maxEntries = Number.isFinite(options.maxEntries)
+    ? Math.max(0, Math.floor(options.maxEntries ?? DEFAULT_COMMAND_RECENTS_MAX_ENTRIES))
+    : DEFAULT_COMMAND_RECENTS_MAX_ENTRIES;
 
   // Best-effort, one-time migration from the legacy recents key.
   // We only migrate when the new key has no entries yet, so it is idempotent.
@@ -171,20 +174,26 @@ export function installCommandRecentsTracker(
       }
     }
 
+    // Enforce the configured size cap even if storage already contains more entries.
+    if (existing.length > maxEntries) {
+      const trimmed = maxEntries > 0 ? existing.slice(0, maxEntries) : [];
+      writeCommandRecents(storage, trimmed, { storageKey });
+      existing = trimmed;
+    }
+
     if (existing.length === 0) {
       const legacyIds = safeParseLegacyRecents(storage.getItem(LEGACY_COMMAND_RECENTS_STORAGE_KEY)).filter(
         (id) => !ignore.has(id),
       );
       if (legacyIds.length > 0) {
-        const limit = Number.isFinite(options.maxEntries)
-          ? Math.max(0, options.maxEntries ?? DEFAULT_COMMAND_RECENTS_MAX_ENTRIES)
-          : DEFAULT_COMMAND_RECENTS_MAX_ENTRIES;
         const nowMs = now();
-        const migrated: CommandRecentEntry[] = (limit > 0 ? legacyIds.slice(0, limit) : []).map((commandId) => ({
-          commandId,
-          lastUsedMs: nowMs,
-          count: 1,
-        }));
+        const migrated: CommandRecentEntry[] = (maxEntries > 0 ? legacyIds.slice(0, maxEntries) : []).map(
+          (commandId) => ({
+            commandId,
+            lastUsedMs: nowMs,
+            count: 1,
+          }),
+        );
         if (migrated.length > 0) writeCommandRecents(storage, migrated, { storageKey });
       }
     }
