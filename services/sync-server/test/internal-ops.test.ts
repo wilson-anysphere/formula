@@ -202,6 +202,7 @@ test("internal endpoints require x-internal-admin-token", async (t) => {
     headers: { "x-internal-admin-token": "admin-token" },
   });
   assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get("cache-control"), "no-store");
   const body = (await ok.json()) as { tombstonesCount?: unknown };
   assert.equal(typeof body.tombstonesCount, "number");
 });

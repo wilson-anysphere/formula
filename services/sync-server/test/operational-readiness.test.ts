@@ -76,6 +76,14 @@ test("exposes Prometheus metrics in text format", async (t) => {
   assert.match(body, /sync_server_ws_messages_too_large_total/);
   assert.match(body, /sync_server_persistence_info/);
 
+  const health = await fetch(`${server.httpUrl}/healthz`);
+  assert.equal(health.status, 200);
+  assert.equal(health.headers.get("cache-control"), "no-store");
+
+  const ready = await fetch(`${server.httpUrl}/readyz`);
+  assert.equal(ready.status, 200);
+  assert.equal(ready.headers.get("cache-control"), "no-store");
+
   const internalMissing = await fetch(`${server.httpUrl}/internal/metrics`);
   assert.equal(internalMissing.status, 403);
 

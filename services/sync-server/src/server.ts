@@ -1026,6 +1026,7 @@ export function createSyncServer(
 
       if (req.method === "GET" && pathname === "/readyz") {
         if (!dataDirLock) {
+          res.setHeader("cache-control", "no-store");
           sendJson(res, 503, {
             status: "not_ready",
             reason: config.disableDataDirLock
@@ -1036,12 +1037,14 @@ export function createSyncServer(
         }
 
         const ready = persistenceInitialized && tombstones.isInitialized();
+        res.setHeader("cache-control", "no-store");
         sendJson(res, ready ? 200 : 503, { status: ready ? "ready" : "not_ready" });
         return;
       }
 
       if (req.method === "GET" && pathname === "/healthz") {
         const snapshot = connectionTracker.snapshot();
+        res.setHeader("cache-control", "no-store");
         sendJson(res, 200, {
           status: "ok",
           uptimeSec: Math.round(process.uptime()),
@@ -1095,6 +1098,7 @@ export function createSyncServer(
             .sort((a, b) => b.connections - a.connections)
             .slice(0, 10);
 
+          res.setHeader("cache-control", "no-store");
           sendJson(res, 200, {
             ok: true,
             persistence: {
