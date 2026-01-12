@@ -171,7 +171,9 @@ test.describe("Extensions UI integration", () => {
     const parentAccessBlocked = await webviewFrame!.evaluate(() => {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return Boolean((window.top as any).__formulaApp);
+        const app = (window.top as any).__formulaApp;
+        // Access should either throw or return `undefined` for cross-origin blocked properties.
+        return typeof app === "undefined";
       } catch {
         return true;
       }
