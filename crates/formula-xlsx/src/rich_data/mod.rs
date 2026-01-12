@@ -4,15 +4,21 @@
 //! - `xl/worksheets/sheet*.xml` `c/@vm` (value-metadata index)
 //! - `xl/metadata.xml` `<valueMetadata>` + rich-data extension payloads
 //! - `xl/richData/richValue*.xml` (rich-value records)
+//! - `xl/richData/richValueRel.xml` + `xl/richData/_rels/richValueRel.xml.rels` (relationship indirection)
 //!
 //! This module exposes best-effort parsing helpers without integrating into `formula-model` yet.
 
 pub mod metadata;
+pub mod rich_value;
+pub mod rich_value_rel;
 pub mod rich_value_structure;
 pub mod rich_value_types;
+
+mod images;
 mod media_parts;
 mod rich_value_images;
 
+pub use images::resolve_rich_value_image_targets;
 pub use rich_value_images::{ExtractedRichValueImages, RichValueEntry, RichValueIndex, RichValueWarning};
 
 use std::collections::HashMap;

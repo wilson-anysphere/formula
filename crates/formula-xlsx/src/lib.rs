@@ -103,6 +103,7 @@ pub use read::load_from_path;
 #[cfg(not(target_arch = "wasm32"))]
 pub use reader::{read_workbook, read_workbook_from_reader};
 pub use rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map;
+pub use rich_data::resolve_rich_value_image_targets;
 pub use rich_data::rich_value_structure::{
     parse_rich_value_structure_xml, RichValueStructure, RichValueStructureMember, RichValueStructures,
 };
