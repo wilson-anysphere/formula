@@ -3172,6 +3172,31 @@ fn bytecode_backend_matches_ast_for_choose_ifs_and_switch() {
 }
 
 #[test]
+fn bytecode_backend_choose_can_return_ranges() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 30.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SUM(CHOOSE(1, A1:A3, B1:B3))")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", "=SUM(CHOOSE(2, A1:A3, B1:B3))")
+        .unwrap();
+
+    // Ensure we're exercising the bytecode compiler path for CHOOSE returning a reference.
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, "=SUM(CHOOSE(1, A1:A3, B1:B3))", "C1");
+    assert_engine_matches_ast(&engine, "=SUM(CHOOSE(2, A1:A3, B1:B3))", "C2");
+}
+
+#[test]
 fn bytecode_backend_and_or_reference_semantics_match_ast() {
     let mut engine = Engine::new();
     engine

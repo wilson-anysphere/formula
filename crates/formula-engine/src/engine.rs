@@ -7614,8 +7614,21 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() < 2 {
                     return false;
                 }
-                args.iter()
-                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+                // CHOOSE lazily evaluates one of its value arguments, and can return either a
+                // scalar or a reference depending on context (e.g. `SUM(CHOOSE(1, A1:A3, B1:B3))`).
+                //
+                // Evaluate `index_num` in scalar mode, but gate the value arguments by the caller's
+                // `allow_range` / `allow_array_literals` flags so CHOOSE can return references or
+                // arrays when the surrounding expression allows them.
+                bytecode_expr_is_eligible_inner(&args[0], false, false, lexical_scopes)
+                    && args[1..].iter().all(|arg| {
+                        bytecode_expr_is_eligible_inner(
+                            arg,
+                            allow_range,
+                            allow_array_literals,
+                            lexical_scopes,
+                        )
+                    })
             }
             bytecode::ast::Function::Ifs => {
                 if args.len() < 2 || args.len() % 2 != 0 {
