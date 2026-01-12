@@ -35,6 +35,13 @@ pub fn resolve_relationship_target(
     let relationships = parse_relationships(rels_bytes)?;
     for rel in relationships {
         if rel.id == relationship_id {
+            if rel
+                .target_mode
+                .as_deref()
+                .is_some_and(|mode| mode.eq_ignore_ascii_case("External"))
+            {
+                return Ok(None);
+            }
             return Ok(Some(resolve_target(part_name, &rel.target)));
         }
     }
@@ -128,5 +135,70 @@ pub fn local_name(name: &[u8]) -> &[u8] {
     match name.iter().rposition(|b| *b == b':') {
         Some(idx) => &name[idx + 1..],
         None => name,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::io::{Cursor, Write};
+
+    use zip::write::FileOptions;
+    use zip::ZipWriter;
+
+    fn build_package(entries: &[(&str, &[u8])]) -> XlsxPackage {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+        for (name, bytes) in entries {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+
+        let bytes = zip.finish().unwrap().into_inner();
+        XlsxPackage::from_bytes(&bytes).expect("read test pkg")
+    }
+
+    #[test]
+    fn parse_relationships_captures_target_mode() {
+        let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com" TargetMode="External"/>
+</Relationships>"#;
+
+        let parsed = parse_relationships(rels).expect("parse relationships");
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].id, "rId1");
+        assert_eq!(parsed[0].target_mode.as_deref(), Some("External"));
+    }
+
+    #[test]
+    fn resolve_relationship_target_skips_external() {
+        let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com" TargetMode="External"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>"#;
+
+        let pkg = build_package(&[
+            ("xl/worksheets/sheet1.xml", br#"<worksheet/>"#),
+            ("xl/worksheets/_rels/sheet1.xml.rels", rels),
+            ("xl/media/image1.png", b"png-bytes"),
+        ]);
+
+        assert_eq!(
+            resolve_relationship_target(&pkg, "xl/worksheets/sheet1.xml", "rId1")
+                .expect("resolve external"),
+            None
+        );
+        assert_eq!(
+            resolve_relationship_target(&pkg, "xl/worksheets/sheet1.xml", "rId2")
+                .expect("resolve internal")
+                .as_deref(),
+            Some("xl/media/image1.png")
+        );
     }
 }
