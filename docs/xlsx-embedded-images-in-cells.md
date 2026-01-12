@@ -321,3 +321,71 @@ Instead, it uses:
 Open question:
 
 * Excel has multiple image-related features (floating drawings, background images, legacy objects, the `IMAGE()` function, “data types”, etc.). It is still possible that **other** Excel scenarios use a `cellImages` part (`xl/cellImages.xml` / `xl/cellimages.xml`) or additional parts. If/when we encounter such files in the corpus, we should extend this document with concrete samples.
+
+## 9) Real Excel example: multiple cells + multiple images (fixture)
+
+The fixture `fixtures/xlsx/basic/image-in-cell.xlsx` is a **real Excel-generated** workbook with **two**
+images stored as cell values (and the same RichData wiring described above).
+
+### Worksheet cells (`xl/worksheets/sheet1.xml`)
+
+In this file, multiple cells can share the same image binding:
+
+```xml
+<c r="B2" t="e" vm="1"><v>#VALUE!</v></c>
+<c r="B3" t="e" vm="1"><v>#VALUE!</v></c>
+<c r="B4" t="e" vm="2"><v>#VALUE!</v></c>
+```
+
+Interpretation:
+
+* `B2` and `B3` both use `vm="1"` → both reference the **same** rich value (and thus the same image).
+* `B4` uses `vm="2"` → references a **different** rich value (a different image).
+
+### Value metadata (`xl/metadata.xml`)
+
+The fixture has two rich value bindings:
+
+```xml
+<futureMetadata name="XLRICHVALUE" count="2">
+  <bk>...<xlrd:rvb i="0"/>...</bk>
+  <bk>...<xlrd:rvb i="1"/>...</bk>
+</futureMetadata>
+
+<valueMetadata count="2">
+  <bk><rc t="1" v="0"/></bk>
+  <bk><rc t="1" v="1"/></bk>
+</valueMetadata>
+```
+
+### Rich values (`xl/richData/rdrichvalue.xml`)
+
+The two rich values reference relationship slots `0` and `1` (and both have `CalcOrigin=5`):
+
+```xml
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata" count="2">
+  <rv s="0"><v>0</v><v>5</v></rv>
+  <rv s="0"><v>1</v><v>5</v></rv>
+</rvData>
+```
+
+### Relationship slots + media mapping
+
+`richValueRel.xml` defines the slot ordering:
+
+```xml
+<richValueRels xmlns="http://schemas.microsoft.com/office/spreadsheetml/2022/richvaluerel"
+               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rel r:id="rId1"/>
+  <rel r:id="rId2"/>
+</richValueRels>
+```
+
+And the `.rels` maps those `rId`s to actual media parts (note: `.rels` ordering can differ):
+
+```xml
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+              Target="../media/image2.png"/>
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+              Target="../media/image1.png"/>
+```
