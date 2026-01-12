@@ -16,7 +16,7 @@ fn eval_number(sheet: &mut TestSheet, formula: &str) -> f64 {
     }
 }
 
-fn eval_number_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<f64> {
+pub(super) fn eval_number_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<f64> {
     match sheet.eval(formula) {
         Value::Number(n) => Some(n),
         // These bond functions may not be registered in every build of the engine yet.

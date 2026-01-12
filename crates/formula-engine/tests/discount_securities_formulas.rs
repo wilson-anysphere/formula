@@ -23,6 +23,9 @@ fn evaluates_discount_security_and_tbill_financial_functions() {
         .set_cell_formula("Sheet1", "A1", "=DISC(DATE(2020,1,1),DATE(2021,1,1),97,100)")
         .unwrap();
     engine
+        .set_cell_formula("Sheet1", "B1", "=DISC(\"2020-01-01\",\"2021-01-01\",97,100)")
+        .unwrap();
+    engine
         .set_cell_formula(
             "Sheet1",
             "A2",
@@ -98,6 +101,7 @@ fn evaluates_discount_security_and_tbill_financial_functions() {
     engine.recalculate();
 
     assert_close(assert_number(engine.get_cell_value("Sheet1", "A1")), 0.03, 1e-12);
+    assert_close(assert_number(engine.get_cell_value("Sheet1", "B1")), 0.03, 1e-12);
     assert_close(assert_number(engine.get_cell_value("Sheet1", "A2")), 95.0, 1e-12);
     assert_close(
         assert_number(engine.get_cell_value("Sheet1", "A3")),
