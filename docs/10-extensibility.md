@@ -58,7 +58,10 @@ The desktop implements a small, VS Code-inspired subset of `when` syntax for men
 
 - Operators: `&&`, `||`, `!`, parentheses
 - Identifiers (context keys): `sheetName`, `cellHasValue`, `selectionType`, `activeCellA1`, `commentsPanelVisible`, `cellHasComment`, …
+  - Identifiers must start with a letter/underscore and may contain letters, digits, `_`, `.`, `:`, and `-`
+    (so keys like `view:foo` are valid).
 - Equality: `==` / `!=` against string/number/boolean literals
+  - String literals may be single- or double-quoted (e.g. `"Sheet1"` or `'Sheet1'`).
   - When an identifier is used directly (e.g. `cellHasValue`), it is evaluated using truthiness:
     `false`, `0`, `""`, `null`, and `undefined` are treated as false.
 
