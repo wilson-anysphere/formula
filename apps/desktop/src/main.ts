@@ -5363,6 +5363,24 @@ if (
     layoutController.setActiveSplitPane(pane);
   };
 
+  // When split view is active, many command handlers (menus, ribbon actions, keybinding commands)
+  // call `app.focus()` to restore keyboard focus to the spreadsheet. In split-view mode, restore
+  // focus to the *active* pane so shortcuts invoked from the secondary pane don't steal focus back
+  // to the primary grid.
+  const focusPrimaryGrid = app.focus.bind(app);
+  (app as any).focus = () => {
+    const split = layoutController.layout.splitView;
+    if (split.direction !== "none" && (split.activePane ?? "primary") === "secondary") {
+      try {
+        (gridSecondaryEl as any).focus?.({ preventScroll: true });
+      } catch {
+        gridSecondaryEl.focus?.();
+      }
+      return;
+    }
+    focusPrimaryGrid();
+  };
+
   // Minimal UX: clicking/focusing a pane marks it active so the split-view outline is stable.
   gridRoot.addEventListener("pointerdown", () => setActivePane("primary"), { capture: true });
   gridRoot.addEventListener("focusin", () => setActivePane("primary"));
