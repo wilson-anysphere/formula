@@ -91,6 +91,37 @@ test.describe("grid scrolling + virtualization", () => {
     expect(scrollAfter).toBeGreaterThan(scrollBefore);
   });
 
+  test("programmatic selection sync can opt out of scrolling (split-pane)", async ({ page }) => {
+    await gotoDesktop(page);
+    await waitForIdle(page);
+    const grid = page.locator("#grid");
+
+    // Scroll down so A1 is offscreen.
+    await grid.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(0, 300 * 24);
+    await expect.poll(async () => {
+      return await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    }).toBeGreaterThan(0);
+
+    // Select a visible cell at the current scroll offset so we can verify the active cell
+    // updates even when we suppress scroll+focus.
+    await grid.click({ position: { x: 60, y: 40 } });
+    await expect(page.getByTestId("active-cell")).not.toHaveText("A1");
+
+    const scrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll());
+
+    // Simulate a split-pane selection mirror: update selection without scrolling the pane.
+    await page.evaluate(() => {
+      (window as any).__formulaApp.activateCell({ row: 0, col: 0 }, { scrollIntoView: false, focus: false });
+    });
+
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll());
+    expect(scrollAfter.x).toBeCloseTo(scrollBefore.x, 5);
+    expect(scrollAfter.y).toBeCloseTo(scrollBefore.y, 5);
+  });
+
   test("name box Go To scrolls and updates selection", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);

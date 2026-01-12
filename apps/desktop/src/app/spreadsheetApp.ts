@@ -462,6 +462,7 @@ export class SpreadsheetApp {
     fillHandleSize: 0,
   });
   private readonly selectionListeners = new Set<(selection: SelectionState) => void>();
+  private readonly scrollListeners = new Set<(scroll: { x: number; y: number }) => void>();
 
   private editState = false;
   private readonly editStateListeners = new Set<(isEditing: boolean) => void>();
@@ -748,20 +749,25 @@ export class SpreadsheetApp {
           hTrack: this.hScrollbarTrack,
           hThumb: this.hScrollbarThumb
         },
-        callbacks: {
-          onScroll: (scroll, viewport) => {
-            this.scrollX = scroll.x;
-            this.scrollY = scroll.y;
-            this.syncSharedChartPanes(viewport);
-            this.hideCommentTooltip();
-            this.renderCharts(false);
-            this.renderAuditing();
-            this.renderSelection();
-          },
-          onSelectionChange: () => {
-            if (this.sharedGridSelectionSyncInProgress) return;
-            this.syncSelectionFromSharedGrid();
-            this.updateStatus();
+          callbacks: {
+            onScroll: (scroll, viewport) => {
+              const prevX = this.scrollX;
+              const prevY = this.scrollY;
+              this.scrollX = scroll.x;
+              this.scrollY = scroll.y;
+              this.syncSharedChartPanes(viewport);
+              this.hideCommentTooltip();
+              this.renderCharts(false);
+              this.renderAuditing();
+              this.renderSelection();
+              if (this.scrollX !== prevX || this.scrollY !== prevY) {
+                this.notifyScrollListeners();
+              }
+            },
+            onSelectionChange: () => {
+              if (this.sharedGridSelectionSyncInProgress) return;
+              this.syncSelectionFromSharedGrid();
+              this.updateStatus();
           },
           onSelectionRangeChange: () => {
             if (this.sharedGridSelectionSyncInProgress) return;
@@ -1274,6 +1280,27 @@ export class SpreadsheetApp {
     return { x: this.scrollX, y: this.scrollY };
   }
 
+  subscribeScroll(listener: (scroll: { x: number; y: number }) => void): () => void {
+    this.scrollListeners.add(listener);
+    listener(this.getScroll());
+    return () => this.scrollListeners.delete(listener);
+  }
+
+  setScroll(x: number, y: number): void {
+    const changed = this.setScrollInternal(x, y);
+    // Shared-grid mode repaints via CanvasGridRenderer and invokes the onScroll callback; the
+    // legacy renderer needs an explicit scroll-mode refresh.
+    if (changed && !this.sharedGrid) this.refresh("scroll");
+  }
+
+  private notifyScrollListeners(): void {
+    if (this.scrollListeners.size === 0) return;
+    const scroll = this.getScroll();
+    for (const listener of this.scrollListeners) {
+      listener(scroll);
+    }
+  }
+
   getGridMode(): DesktopGridMode {
     return this.gridMode;
   }
@@ -1718,7 +1745,9 @@ export class SpreadsheetApp {
   /**
    * Programmatically set the active cell (and optionally change sheets).
    */
-  activateCell(target: { sheetId?: string; row: number; col: number }): void {
+  activateCell(target: { sheetId?: string; row: number; col: number }, options?: { scrollIntoView?: boolean; focus?: boolean }): void {
+    const scrollIntoView = options?.scrollIntoView !== false;
+    const focus = options?.focus !== false;
     let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
@@ -1742,9 +1771,12 @@ export class SpreadsheetApp {
       sheetChanged = true;
     }
     this.selection = setActiveCell(this.selection, { row: target.row, col: target.col }, this.limits);
-    this.ensureActiveCellVisible();
-    const didScroll = this.scrollCellIntoView(this.selection.active);
-    if (this.sharedGrid) this.syncSharedGridSelectionFromState();
+    let didScroll = false;
+    if (scrollIntoView) {
+      this.ensureActiveCellVisible();
+      didScroll = this.scrollCellIntoView(this.selection.active);
+    }
+    if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView });
     else if (didScroll) this.ensureViewportMappingCurrent();
     this.renderSelection();
     this.updateStatus();
@@ -1754,13 +1786,15 @@ export class SpreadsheetApp {
     } else if (didScroll) {
       this.refresh("scroll");
     }
-    this.focus();
+    if (focus) this.focus();
   }
 
   /**
    * Programmatically set the selection range (and optionally change sheets).
    */
-  selectRange(target: { sheetId?: string; range: Range }): void {
+  selectRange(target: { sheetId?: string; range: Range }, options?: { scrollIntoView?: boolean; focus?: boolean }): void {
+    const scrollIntoView = options?.scrollIntoView !== false;
+    const focus = options?.focus !== false;
     let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
@@ -1787,14 +1821,17 @@ export class SpreadsheetApp {
       { ranges: [target.range], active, anchor: active, activeRangeIndex: 0 },
       this.limits
     );
-    this.ensureActiveCellVisible();
-    const activeRange = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0];
-    const didScrollRange = activeRange ? this.scrollRangeIntoView(activeRange) : false;
-    // Even if the range is too large to fit in the viewport, the active cell should never
-    // become "lost" offscreen.
-    const didScrollCell = this.scrollCellIntoView(this.selection.active);
-    const didScroll = didScrollRange || didScrollCell;
-    if (this.sharedGrid) this.syncSharedGridSelectionFromState();
+    let didScroll = false;
+    if (scrollIntoView) {
+      this.ensureActiveCellVisible();
+      const activeRange = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0];
+      const didScrollRange = activeRange ? this.scrollRangeIntoView(activeRange) : false;
+      // Even if the range is too large to fit in the viewport, the active cell should never
+      // become "lost" offscreen.
+      const didScrollCell = this.scrollCellIntoView(this.selection.active);
+      didScroll = didScrollRange || didScrollCell;
+    }
+    if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView });
     else if (didScroll) this.ensureViewportMappingCurrent();
     this.renderSelection();
     this.updateStatus();
@@ -1803,7 +1840,7 @@ export class SpreadsheetApp {
     } else if (didScroll) {
       this.refresh("scroll");
     }
-    this.focus();
+    if (focus) this.focus();
   }
 
   getSelectionRanges(): Range[] {
@@ -2008,13 +2045,17 @@ export class SpreadsheetApp {
     );
   }
 
-  private syncSharedGridSelectionFromState(): void {
+  private syncSharedGridSelectionFromState(options?: { scrollIntoView?: boolean }): void {
     if (!this.sharedGrid) return;
     const gridRanges = this.selection.ranges.map((r) => this.gridRangeFromDocRange(r));
     const gridActive = this.gridCellFromDocCell(this.selection.active);
     this.sharedGridSelectionSyncInProgress = true;
     try {
-      this.sharedGrid.setSelectionRanges(gridRanges, { activeIndex: this.selection.activeRangeIndex, activeCell: gridActive });
+      this.sharedGrid.setSelectionRanges(gridRanges, {
+        activeIndex: this.selection.activeRangeIndex,
+        activeCell: gridActive,
+        scrollIntoView: options?.scrollIntoView,
+      });
       this.scrollX = this.sharedGrid.getScroll().x;
       this.scrollY = this.sharedGrid.getScroll().y;
     } finally {
@@ -3781,7 +3822,10 @@ export class SpreadsheetApp {
     this.scrollY = Math.min(Math.max(0, this.scrollY), maxY);
   }
 
-  private setScroll(nextX: number, nextY: number): boolean {
+  private setScrollInternal(nextX: number, nextY: number): boolean {
+    if (!Number.isFinite(nextX)) nextX = 0;
+    if (!Number.isFinite(nextY)) nextY = 0;
+
     if (this.sharedGrid) {
       const before = this.sharedGrid.getScroll();
       this.sharedGrid.scrollTo(nextX, nextY);
@@ -3801,12 +3845,13 @@ export class SpreadsheetApp {
     if (changed) {
       this.hideCommentTooltip();
       this.syncScrollbars();
+      this.notifyScrollListeners();
     }
     return changed;
   }
 
   private scrollBy(deltaX: number, deltaY: number): void {
-    const changed = this.setScroll(this.scrollX + deltaX, this.scrollY + deltaY);
+    const changed = this.setScrollInternal(this.scrollX + deltaX, this.scrollY + deltaY);
     if (changed) this.refresh("scroll");
   }
 
@@ -4031,7 +4076,10 @@ export class SpreadsheetApp {
     const maxScroll = axis === "y" ? this.maxScrollY() : this.maxScrollX();
     const nextScroll = (clamped / thumbTravel) * maxScroll;
 
-    const changed = axis === "y" ? this.setScroll(this.scrollX, nextScroll) : this.setScroll(nextScroll, this.scrollY);
+    const changed =
+      axis === "y"
+        ? this.setScrollInternal(this.scrollX, nextScroll)
+        : this.setScrollInternal(nextScroll, this.scrollY);
     if (changed) this.refresh("scroll");
   }
 
@@ -4048,7 +4096,9 @@ export class SpreadsheetApp {
     const nextScroll = drag.thumbTravel === 0 ? 0 : (clamped / drag.thumbTravel) * drag.maxScroll;
 
     const changed =
-      drag.axis === "y" ? this.setScroll(this.scrollX, nextScroll) : this.setScroll(nextScroll, this.scrollY);
+      drag.axis === "y"
+        ? this.setScrollInternal(this.scrollX, nextScroll)
+        : this.setScrollInternal(nextScroll, this.scrollY);
 
     if (changed) this.refresh("scroll");
   }
@@ -4111,7 +4161,7 @@ export class SpreadsheetApp {
       }
     }
 
-    return this.setScroll(nextX, nextY);
+    return this.setScrollInternal(nextX, nextY);
   }
 
   private scrollRangeIntoView(range: Range, paddingPx = 8): boolean {
@@ -4186,7 +4236,7 @@ export class SpreadsheetApp {
       }
     }
 
-    return this.setScroll(nextX, nextY);
+    return this.setScrollInternal(nextX, nextY);
   }
 
   private renderOutlineControls(): void {
@@ -4595,7 +4645,7 @@ export class SpreadsheetApp {
 
       if (deltaX === 0 && deltaY === 0) return;
 
-      const didScroll = this.setScroll(this.scrollX + deltaX, this.scrollY + deltaY);
+      const didScroll = this.setScrollInternal(this.scrollX + deltaX, this.scrollY + deltaY);
       if (!didScroll) return;
 
       const cell = this.cellFromPoint(px, py);
@@ -5798,9 +5848,17 @@ export class SpreadsheetApp {
     return "";
   }
 
+  getCellComputedValueForSheet(sheetId: string, cell: { row: number; col: number }): string | number | boolean | null {
+    return this.getCellComputedValueForSheetInternal(sheetId, cell);
+  }
+
   private getCellComputedValue(cell: CellCoord): SpreadsheetValue {
+    return this.getCellComputedValueForSheetInternal(this.sheetId, cell);
+  }
+
+  private getCellComputedValueForSheetInternal(sheetId: string, cell: CellCoord): SpreadsheetValue {
     const address = cellToA1(cell);
-    const cacheKey = this.computedKey(this.sheetId, address);
+    const cacheKey = this.computedKey(sheetId, address);
 
     // The WASM engine currently cannot resolve sheet-qualified references (e.g. `Sheet2!A1`),
     // so when multiple sheets exist we fall back to the in-process evaluator for *all* formulas
@@ -5812,7 +5870,7 @@ export class SpreadsheetApp {
 
     const memo = new Map<string, SpreadsheetValue>();
     const stack = new Set<string>();
-    return this.computeCellValue(this.sheetId, cell, memo, stack, { useEngineCache });
+    return this.computeCellValue(sheetId, cell, memo, stack, { useEngineCache });
   }
 
   private computedKey(sheetId: string, address: string): string {
