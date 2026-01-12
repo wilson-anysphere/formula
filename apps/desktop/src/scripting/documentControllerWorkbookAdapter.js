@@ -96,6 +96,103 @@ function denseRectForDeltas(deltas) {
 }
 
 /**
+ * Diff two range-run formatting lists and return the row segments where the effective style id
+ * differs between the before/after states.
+ *
+ * Runs are:
+ * - sorted by `startRow`
+ * - non-overlapping
+ * - half-open `[startRow, endRowExclusive)`
+ * - sparse (styleId=0 is represented by absence of a run)
+ *
+ * The returned segments are within `[startRow, endRowExclusive)` and are also half-open.
+ *
+ * @param {any[]} beforeRuns
+ * @param {any[]} afterRuns
+ * @param {number} startRow
+ * @param {number} endRowExclusive
+ * @returns {Array<{ startRow: number, endRowExclusive: number, beforeStyleId: number, afterStyleId: number }>}
+ */
+function diffRangeRunSegments(beforeRuns, afterRuns, startRow, endRowExclusive) {
+  /** @type {Array<{ startRow: number, endRowExclusive: number, beforeStyleId: number, afterStyleId: number }>} */
+  const out = [];
+
+  if (!Number.isInteger(startRow) || !Number.isInteger(endRowExclusive)) return out;
+  if (endRowExclusive <= startRow) return out;
+
+  // Clamp to Excel bounds (DocumentController uses an exclusive max row of EXCEL_MAX_ROW + 1).
+  const maxRowExclusive = EXCEL_MAX_ROW + 1;
+  let pos = Math.max(0, Math.min(maxRowExclusive, startRow));
+  const end = Math.max(pos, Math.min(maxRowExclusive, endRowExclusive));
+  if (end <= pos) return out;
+
+  const before = Array.isArray(beforeRuns) ? beforeRuns : [];
+  const after = Array.isArray(afterRuns) ? afterRuns : [];
+
+  let i = 0;
+  let j = 0;
+  while (i < before.length && Number(before[i]?.endRowExclusive ?? 0) <= pos) i += 1;
+  while (j < after.length && Number(after[j]?.endRowExclusive ?? 0) <= pos) j += 1;
+
+  while (pos < end) {
+    let beforeStyleId = 0;
+    let beforeEnd = end;
+    if (i < before.length) {
+      const run = before[i];
+      const runStart = Number(run?.startRow);
+      const runEnd = Number(run?.endRowExclusive);
+      if (Number.isFinite(runStart) && Number.isFinite(runEnd)) {
+        if (runStart <= pos && pos < runEnd) {
+          beforeStyleId = Number(run?.styleId ?? 0);
+          beforeEnd = Math.min(runEnd, end);
+        } else if (runStart > pos) {
+          beforeEnd = Math.min(runStart, end);
+        }
+      }
+    }
+
+    let afterStyleId = 0;
+    let afterEnd = end;
+    if (j < after.length) {
+      const run = after[j];
+      const runStart = Number(run?.startRow);
+      const runEnd = Number(run?.endRowExclusive);
+      if (Number.isFinite(runStart) && Number.isFinite(runEnd)) {
+        if (runStart <= pos && pos < runEnd) {
+          afterStyleId = Number(run?.styleId ?? 0);
+          afterEnd = Math.min(runEnd, end);
+        } else if (runStart > pos) {
+          afterEnd = Math.min(runStart, end);
+        }
+      }
+    }
+
+    const nextPos = Math.min(beforeEnd, afterEnd, end);
+    if (nextPos <= pos) break;
+
+    if (beforeStyleId !== afterStyleId) {
+      const last = out[out.length - 1];
+      if (
+        last &&
+        last.endRowExclusive === pos &&
+        last.beforeStyleId === beforeStyleId &&
+        last.afterStyleId === afterStyleId
+      ) {
+        last.endRowExclusive = nextPos;
+      } else {
+        out.push({ startRow: pos, endRowExclusive: nextPos, beforeStyleId, afterStyleId });
+      }
+    }
+
+    pos = nextPos;
+    while (i < before.length && Number(before[i]?.endRowExclusive ?? 0) <= pos) i += 1;
+    while (j < after.length && Number(after[j]?.endRowExclusive ?? 0) <= pos) j += 1;
+  }
+
+  return out;
+}
+
+/**
  * Convert a DocumentController style object into the (currently minimal) scripting `CellFormat`
  * shape defined in `packages/scripting/formula.d.ts`.
  *
@@ -677,6 +774,90 @@ export class DocumentControllerWorkbookAdapter {
               address,
               format: entry.patch,
             });
+          }
+        }
+      }
+    }
+
+    // Range-run formatting changes (sheet.formatRunsByCol). Large rectangular format changes are
+    // stored here instead of emitting per-cell deltas, so synthesize formatChanged events for
+    // the macro recorder.
+    const rangeRunDeltas = Array.isArray(payload?.rangeRunDeltas) ? payload.rangeRunDeltas : [];
+    if (rangeRunDeltas.length > 0) {
+      /** @type {Map<string, Map<string, { patch: any, startRow: number, endRowExclusive: number, cols: Set<number> }>>} */
+      const rangeRunGroupsBySheet = new Map();
+      /** @type {Map<string, { patch: any, key: string, skip: boolean }>} */
+      const patchCache = new Map();
+
+      for (const delta of rangeRunDeltas) {
+        const sheetName = typeof delta?.sheetId === "string" ? delta.sheetId : typeof delta?.sheetName === "string" ? delta.sheetName : null;
+        if (!sheetName) continue;
+
+        const col = Number(delta.col ?? delta.column ?? delta.colIndex ?? delta.columnIndex);
+        if (!Number.isInteger(col) || col < 0 || col > EXCEL_MAX_COL) continue;
+
+        const startRow = Number(delta.startRow);
+        const endRowExclusive = Number(delta.endRowExclusive);
+        if (!Number.isInteger(startRow) || startRow < 0) continue;
+        if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow) continue;
+
+        const segments = diffRangeRunSegments(delta.beforeRuns, delta.afterRuns, startRow, endRowExclusive);
+        for (const segment of segments) {
+          const beforeStyleId = segment.beforeStyleId ?? 0;
+          const afterStyleId = segment.afterStyleId ?? 0;
+          const cacheKey = `${beforeStyleId},${afterStyleId}`;
+          let cached = patchCache.get(cacheKey);
+          if (!cached) {
+            const beforeStyle = styleTable?.get(beforeStyleId) ?? {};
+            const afterStyle = styleTable?.get(afterStyleId) ?? {};
+            const docPatch = diffStylePatch(beforeStyle, afterStyle);
+            const patch = scriptFormatPatchFromDocStylePatch(docPatch);
+            if (patch !== null && isPlainObject(patch) && Object.keys(patch).length === 0) {
+              cached = { patch: null, key: "", skip: true };
+            } else {
+              cached = { patch, key: patch === null ? "null" : stableStringify(patch), skip: false };
+            }
+            patchCache.set(cacheKey, cached);
+          }
+          if (cached.skip) continue;
+
+          const groupKey = `${segment.startRow}:${segment.endRowExclusive}:${cached.key}`;
+          let groups = rangeRunGroupsBySheet.get(sheetName);
+          if (!groups) {
+            groups = new Map();
+            rangeRunGroupsBySheet.set(sheetName, groups);
+          }
+          const entry = groups.get(groupKey) ?? {
+            patch: cached.patch,
+            startRow: segment.startRow,
+            endRowExclusive: segment.endRowExclusive,
+            cols: new Set(),
+          };
+          entry.cols.add(col);
+          groups.set(groupKey, entry);
+        }
+      }
+
+      for (const [sheetName, groups] of rangeRunGroupsBySheet.entries()) {
+        for (const entry of groups.values()) {
+          const cols = [...entry.cols].sort((a, b) => a - b);
+          let i = 0;
+          while (i < cols.length) {
+            let j = i + 1;
+            while (j < cols.length && cols[j] === cols[j - 1] + 1) j += 1;
+            const startCol = cols[i];
+            const endCol = cols[j - 1];
+            this.events.emit("formatChanged", {
+              sheetName,
+              address: formatRangeAddress({
+                startRow: entry.startRow,
+                startCol,
+                endRow: entry.endRowExclusive - 1,
+                endCol,
+              }),
+              format: entry.patch,
+            });
+            i = j;
           }
         }
       }

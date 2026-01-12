@@ -383,3 +383,20 @@ test("Macro recorder receives formatChanged for defaultFormat changes in sheetVi
 
   workbook.dispose();
 });
+
+test("Macro recorder records large rectangle formatting stored in range-run deltas (formatRunsByCol)", () => {
+  const controller = new DocumentController();
+  const workbook = new DocumentControllerWorkbookAdapter(controller, { activeSheetName: "Sheet1" });
+  const recorder = new MacroRecorder(workbook);
+  recorder.start();
+
+  // Large enough to cross the RANGE_RUN_FORMAT_THRESHOLD so formatting is stored in range runs
+  // instead of enumerating every cell.
+  controller.setRangeFormat("Sheet1", "A1:C20000", { font: { bold: true } });
+
+  assert.deepEqual(recorder.stop(), [
+    { type: "setFormat", sheetName: "Sheet1", address: "A1:C20000", format: { bold: true } },
+  ]);
+
+  workbook.dispose();
+});
