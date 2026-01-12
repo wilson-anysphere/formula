@@ -2372,12 +2372,6 @@ if (
     if (isEditableTarget(e.target)) return;
     if (app.isEditing()) return;
 
-    if (e.key === "F2") {
-      e.preventDefault();
-      app.openCellEditorAtActiveCell();
-      return;
-    }
-
     const primary = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
 

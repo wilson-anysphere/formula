@@ -149,6 +149,7 @@ export class SecondaryGridView {
       onCommit: (commit) => {
         this.applyEdit(commit.cell, commit.value);
         this.onRequestRefresh?.();
+        this.advanceSelectionAfterEdit(commit);
         focusWithoutScroll(this.container);
       },
       onCancel: () => {
@@ -319,6 +320,31 @@ export class SecondaryGridView {
     }
 
     this.document.setCellInput(sheetId, cell, rawValue, { label: "Edit cell" });
+  }
+
+  private advanceSelectionAfterEdit(commit: { cell: { row: number; col: number }; reason: "enter" | "tab"; shift: boolean }): void {
+    const counts = this.grid.renderer.scroll.getCounts();
+    const maxDocRows = Math.max(0, counts.rowCount - this.headerRows);
+    const maxDocCols = Math.max(0, counts.colCount - this.headerCols);
+    if (maxDocRows === 0 || maxDocCols === 0) return;
+
+    let nextRow = commit.cell.row;
+    let nextCol = commit.cell.col;
+
+    if (commit.reason === "enter") {
+      nextRow += commit.shift ? -1 : 1;
+    } else {
+      nextCol += commit.shift ? -1 : 1;
+    }
+
+    nextRow = clamp(nextRow, 0, maxDocRows - 1);
+    nextCol = clamp(nextCol, 0, maxDocCols - 1);
+
+    const gridRow = nextRow + this.headerRows;
+    const gridCol = nextCol + this.headerCols;
+
+    const range: CellRange = { startRow: gridRow, endRow: gridRow + 1, startCol: gridCol, endCol: gridCol + 1 };
+    this.grid.setSelectionRanges([range], { activeIndex: 0, activeCell: { row: gridRow, col: gridCol } });
   }
 
   private resizeToContainer(): void {
