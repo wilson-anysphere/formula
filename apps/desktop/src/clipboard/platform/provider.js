@@ -21,6 +21,79 @@ function hasTauri() {
 }
 
 /**
+ * @param {ClipboardContent} content
+ */
+function hasAnyContent(content) {
+  return Boolean(
+    content &&
+      (content.text !== undefined ||
+        content.html !== undefined ||
+        content.rtf !== undefined ||
+        content.imagePng !== undefined)
+  );
+}
+
+/**
+ * @param {Uint8Array} bytes
+ * @returns {string}
+ */
+function encodeBase64(bytes) {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(bytes).toString("base64");
+  }
+
+  if (typeof globalThis.btoa !== "function") {
+    throw new Error("Base64 encoding unavailable: missing Buffer and btoa");
+  }
+
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return globalThis.btoa(binary);
+}
+
+/**
+ * @param {string} base64
+ * @returns {Uint8Array}
+ */
+function decodeBase64(base64) {
+  if (typeof Buffer !== "undefined") {
+    return new Uint8Array(Buffer.from(base64, "base64"));
+  }
+
+  if (typeof globalThis.atob !== "function") {
+    throw new Error("Base64 decoding unavailable: missing Buffer and atob");
+  }
+
+  const binary = globalThis.atob(base64);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+/**
+ * Merge `incoming` into `base` without clobbering defined keys on `base`.
+ *
+ * @param {ClipboardContent} base
+ * @param {ClipboardContent} incoming
+ * @returns {ClipboardContent}
+ */
+function mergeClipboardContent(base, incoming) {
+  /** @type {ClipboardContent} */
+  const out = { ...base };
+
+  if (out.text === undefined && incoming.text !== undefined) out.text = incoming.text;
+  if (out.html === undefined && incoming.html !== undefined) out.html = incoming.html;
+  if (out.rtf === undefined && incoming.rtf !== undefined) out.rtf = incoming.rtf;
+  if (out.imagePng === undefined && incoming.imagePng !== undefined) out.imagePng = incoming.imagePng;
+
+  return out;
+}
+
+/**
  * @returns {Promise<ClipboardProvider>}
  */
 export async function createClipboardProvider() {
@@ -33,39 +106,79 @@ export async function createClipboardProvider() {
  */
 function createTauriClipboardProvider() {
   const tauriClipboard = globalThis.__TAURI__?.clipboard;
+  const tauriCore = globalThis.__TAURI__?.core;
 
   return {
     async read() {
       // Prefer rich reads via the WebView Clipboard API when available so we can
       // ingest HTML tables + formats from external spreadsheets.
       const web = await createWebClipboardProvider().read();
-      if (typeof web.html === "string" || typeof web.text === "string") return web;
+      let merged = web;
+      if (tauriCore?.invoke) {
+        try {
+          const data = await tauriCore.invoke("read_clipboard");
+          if (data && typeof data === "object") {
+            /** @type {any} */
+            const anyData = data;
+            /** @type {ClipboardContent} */
+            const invokeContent = {
+              text: typeof anyData.text === "string" ? anyData.text : undefined,
+              html: typeof anyData.html === "string" ? anyData.html : undefined,
+              rtf: typeof anyData.rtf === "string" ? anyData.rtf : undefined,
+              imagePng:
+                typeof anyData.image_png_base64 === "string"
+                  ? (() => {
+                      try {
+                        return decodeBase64(anyData.image_png_base64);
+                      } catch {
+                        return undefined;
+                      }
+                    })()
+                  : undefined,
+            };
+            merged = mergeClipboardContent(web, invokeContent);
+          }
+        } catch {
+          // Ignore; bridge command may not exist yet.
+        }
+      }
+
+      if (hasAnyContent(merged)) return merged;
 
       if (tauriClipboard?.readText) {
         const text = await tauriClipboard.readText();
         return { text: text ?? undefined };
       }
 
-      return web;
+      return merged;
     },
     async write(payload) {
-      if (tauriClipboard?.writeText) {
-        await tauriClipboard.writeText(payload.text);
-      } else {
-        await createWebClipboardProvider().write({ text: payload.text });
+      const hasNonText =
+        payload.html !== undefined || payload.rtf !== undefined || payload.imagePng !== undefined;
+
+      if (tauriCore?.invoke && (hasNonText || !tauriClipboard?.writeText)) {
+        try {
+          await tauriCore.invoke("write_clipboard", {
+            text: payload.text,
+            html: payload.html,
+            rtf: payload.rtf,
+            image_png_base64: payload.imagePng ? encodeBase64(payload.imagePng) : undefined,
+          });
+        } catch {
+          // Ignore; bridge command may not exist yet.
+        }
       }
 
-      // Best-effort HTML write via ClipboardItem when available (WebView-dependent).
-      if (payload.html && typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
-        try {
-          const item = new ClipboardItem({
-            "text/plain": new Blob([payload.text], { type: "text/plain" }),
-            "text/html": new Blob([payload.html], { type: "text/html" }),
-          });
-          await navigator.clipboard.write([item]);
-        } catch {
-          // Ignore; some platforms deny HTML clipboard writes.
+      if (tauriClipboard?.writeText) {
+        await tauriClipboard.writeText(payload.text);
+
+        // Best-effort rich write via ClipboardItem when available (WebView-dependent).
+        if (hasNonText) {
+          await createWebClipboardProvider().write(payload);
         }
+      } else {
+        // No native Tauri clipboard API; fall back to the Web Clipboard API (best effort).
+        await createWebClipboardProvider().write(payload);
       }
     },
   };
@@ -78,12 +191,18 @@ function createWebClipboardProvider() {
   return {
     async read() {
       // Prefer rich read if available.
-      if (navigator.clipboard?.read) {
+      const clipboard = globalThis.navigator?.clipboard;
+      if (clipboard?.read) {
         try {
-          const items = await navigator.clipboard.read();
+          const items = await clipboard.read();
           for (const item of items) {
-            const htmlType = item.types.find((t) => t === "text/html");
-            const textType = item.types.find((t) => t === "text/plain");
+            const types = Array.isArray(item.types) ? item.types : [];
+            const htmlType = types.find((t) => t === "text/html");
+            const textType = types.find((t) => t === "text/plain");
+            const rtfType = types.find((t) => t === "text/rtf");
+            const imageType = types.find((t) => t === "image/png");
+
+            if (!htmlType && !textType && !rtfType && !imageType) continue;
 
             const html =
               htmlType &&
@@ -91,8 +210,19 @@ function createWebClipboardProvider() {
             const text =
               textType &&
               (await item.getType(textType).then((b) => b.text()).catch(() => undefined));
+            const rtf =
+              rtfType && (await item.getType(rtfType).then((b) => b.text()).catch(() => undefined));
+            const imagePng =
+              imageType &&
+              (await item
+                .getType(imageType)
+                .then((b) => b.arrayBuffer())
+                .then((ab) => new Uint8Array(ab))
+                .catch(() => undefined));
 
-            if (html || text) return { html, text };
+            if (html !== undefined || text !== undefined || rtf !== undefined || imagePng !== undefined) {
+              return { html, text, rtf, imagePng };
+            }
           }
         } catch {
           // Permission denied or unsupported – fall back to plain text below.
@@ -101,30 +231,44 @@ function createWebClipboardProvider() {
 
       let text;
       try {
-        text = navigator.clipboard?.readText ? await navigator.clipboard.readText() : undefined;
+        text = clipboard?.readText ? await clipboard.readText() : undefined;
       } catch {
         text = undefined;
       }
       return { text };
     },
     async write(payload) {
-      // Prefer writing both formats when possible.
-      if (payload.html && typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+      const clipboard = globalThis.navigator?.clipboard;
+
+      // Prefer writing rich formats when possible.
+      if (typeof ClipboardItem !== "undefined" && clipboard?.write) {
         try {
-          const item = new ClipboardItem({
+          /** @type {Record<string, Blob>} */
+          const data = {
             "text/plain": new Blob([payload.text], { type: "text/plain" }),
-            "text/html": new Blob([payload.html], { type: "text/html" }),
-          });
-          await navigator.clipboard.write([item]);
+          };
+
+          if (payload.html !== undefined) {
+            data["text/html"] = new Blob([payload.html], { type: "text/html" });
+          }
+          if (payload.rtf !== undefined) {
+            data["text/rtf"] = new Blob([payload.rtf], { type: "text/rtf" });
+          }
+          if (payload.imagePng !== undefined) {
+            data["image/png"] = new Blob([payload.imagePng], { type: "image/png" });
+          }
+
+          const item = new ClipboardItem(data);
+          await clipboard.write([item]);
           return;
         } catch {
           // Fall back to plain text.
         }
       }
 
-      if (navigator.clipboard?.writeText) {
+      if (clipboard?.writeText) {
         try {
-          await navigator.clipboard.writeText(payload.text);
+          await clipboard.writeText(payload.text);
         } catch {
           // Ignore; clipboard write requires user gesture/permissions in browsers.
         }

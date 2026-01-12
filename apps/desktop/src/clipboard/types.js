@@ -10,12 +10,11 @@
  *
  * @typedef {CellState[][]} CellGrid
  *
- * @typedef {{ html?: string, text?: string }} ClipboardContent
- * @typedef {{ text: string, html?: string }} ClipboardWritePayload
+ * @typedef {{ html?: string, text?: string, rtf?: string, imagePng?: Uint8Array }} ClipboardContent
+ * @typedef {{ text: string, html?: string, rtf?: string, imagePng?: Uint8Array }} ClipboardWritePayload
  *
  * @typedef {"all" | "values" | "formulas" | "formats"} PasteSpecialMode
  * @typedef {{ mode?: PasteSpecialMode }} PasteOptions
  */
 
 export {};
-
