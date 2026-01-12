@@ -181,12 +181,12 @@ export function AIChatPanel(props: AIChatPanelProps) {
         ]);
       };
 
-      // When a streaming call triggers tool execution, providers may still emit
-      // additional text blocks after the tool call (e.g. Anthropic multi-block
-      // messages). We only want to stream the *final* assistant answer to the UI,
-      // so once a tool call begins we suppress further text deltas until the
-      // current model stream ends (`done`), then resume streaming for the next
-      // iteration.
+      // When a streaming call triggers tool execution, some models may still
+      // emit additional text blocks after the tool call (e.g. multi-block
+      // streaming payloads). We only want to stream the *final* assistant answer
+      // to the UI, so once a tool call begins we suppress further text deltas
+      // until the current model stream ends (`done`), then resume streaming for
+      // the next iteration.
       let suppressTextDeltasForCurrentStream = false;
 
       const onStreamEvent = (event: ChatStreamEvent) => {
