@@ -1047,7 +1047,6 @@ fn import_xls_path_with_biff_reader(
                 }
             }
         }
-        }
 
         if !sheet_rename_pairs.is_empty() {
             formula_rewrite::rewrite_workbook_formulas_for_sheet_renames(
