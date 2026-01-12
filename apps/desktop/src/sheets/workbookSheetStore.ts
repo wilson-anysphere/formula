@@ -127,10 +127,14 @@ export class WorkbookSheetStore {
     const normalizedSheets: SheetMeta[] = [];
     for (const sheet of initialSheets) {
       const normalizedName = validateSheetName(sheet.name, { sheets: normalizedSheets, ignoreId: null });
+      const visibility: SheetVisibility =
+        sheet.visibility === "visible" || sheet.visibility === "hidden" || sheet.visibility === "veryHidden"
+          ? sheet.visibility
+          : "visible";
       normalizedSheets.push({
         id: String(sheet.id).trim(),
         name: normalizedName,
-        visibility: sheet.visibility ?? "visible",
+        visibility,
         tabColor: sheet.tabColor ? { ...sheet.tabColor } : undefined,
       });
     }
@@ -274,16 +278,18 @@ export class WorkbookSheetStore {
     const idx = this.sheets.findIndex((s) => s.id === id);
     if (idx === -1) throw new Error("Sheet not found");
     const sheet = this.sheets[idx]!;
-    if (sheet.visibility === visibility) return;
+    const nextVisibility: SheetVisibility =
+      visibility === "visible" || visibility === "hidden" || visibility === "veryHidden" ? visibility : "visible";
+    if (sheet.visibility === nextVisibility) return;
 
     // Mirror Excel behavior: prevent hiding the last visible sheet.
-    if (sheet.visibility === "visible" && visibility !== "visible") {
+    if (sheet.visibility === "visible" && nextVisibility !== "visible") {
       const visibleCount = this.sheets.reduce((count, s) => count + (s.visibility === "visible" ? 1 : 0), 0);
       if (visibleCount <= 1) throw new Error("Cannot hide the last visible sheet");
     }
 
     const next = this.sheets.slice();
-    next[idx] = { ...sheet, visibility };
+    next[idx] = { ...sheet, visibility: nextVisibility };
     this.sheets = next;
     this.emit();
   }
@@ -317,10 +323,14 @@ export class WorkbookSheetStore {
     const normalizedSheets: SheetMeta[] = [];
     for (const sheet of nextSheets) {
       const normalizedName = validateSheetName(sheet.name, { sheets: normalizedSheets, ignoreId: null });
+      const visibility: SheetVisibility =
+        sheet.visibility === "visible" || sheet.visibility === "hidden" || sheet.visibility === "veryHidden"
+          ? sheet.visibility
+          : "visible";
       normalizedSheets.push({
         id: String(sheet.id).trim(),
         name: normalizedName,
-        visibility: sheet.visibility ?? "visible",
+        visibility,
         tabColor: sheet.tabColor ? { ...sheet.tabColor } : undefined,
       });
     }

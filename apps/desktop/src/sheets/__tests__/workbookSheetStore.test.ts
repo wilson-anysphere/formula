@@ -37,6 +37,7 @@ describe("WorkbookSheetStore", () => {
   it("prevents hiding the last visible sheet and supports unhide", () => {
     const store = new WorkbookSheetStore([{ id: "s1", name: "Sheet1", visibility: "visible" }]);
     expect(() => store.hide("s1")).toThrow(/last visible/i);
+    expect(() => store.setVisibility("s1", "veryHidden")).toThrow(/last visible/i);
 
     const store2 = new WorkbookSheetStore([
       { id: "s1", name: "Sheet1", visibility: "visible" },
@@ -49,6 +50,10 @@ describe("WorkbookSheetStore", () => {
 
     store2.unhide("s2");
     expect(store2.getById("s2")?.visibility).toBe("visible");
+
+    store2.setVisibility("s2", "veryHidden");
+    expect(store2.getById("s2")?.visibility).toBe("veryHidden");
+    expect(store2.listVisible().map((s) => s.id)).toEqual(["s1"]);
   });
 
   it("reorders sheets with move()", () => {
