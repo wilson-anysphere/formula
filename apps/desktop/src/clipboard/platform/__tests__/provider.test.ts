@@ -89,6 +89,18 @@ describe("clipboard/platform/provider (desktop Tauri multi-format path)", () => 
     expect(readText).toHaveBeenCalledTimes(1);
   });
 
+  it("read() falls back to legacy __TAURI__.clipboard.readText when invoke is unavailable and web clipboard is unavailable", async () => {
+    const legacyReadText = vi.fn().mockResolvedValue("legacy-clipboard");
+    (globalThis as any).__TAURI__ = { clipboard: { readText: legacyReadText } };
+
+    setMockNavigatorClipboard({});
+
+    const provider = await createClipboardProvider();
+    await expect(provider.read()).resolves.toEqual({ text: "legacy-clipboard" });
+
+    expect(legacyReadText).toHaveBeenCalledTimes(1);
+  });
+
   it("read() falls back to navigator.clipboard.readText when invoke rejects (e.g. unknown command)", async () => {
     const invoke = vi
       .fn()
@@ -155,6 +167,32 @@ describe("clipboard/platform/provider (desktop Tauri multi-format path)", () => 
     expect(legacyWriteText).toHaveBeenCalledTimes(1);
     expect(legacyWriteText).toHaveBeenCalledWith("fallback");
     expect(webWriteText).not.toHaveBeenCalled();
+  });
+
+  it("write() falls back to legacy __TAURI__.clipboard.writeText when invoke is unavailable and web clipboard is unavailable", async () => {
+    const legacyWriteText = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { clipboard: { writeText: legacyWriteText } };
+
+    setMockNavigatorClipboard({});
+
+    const provider = await createClipboardProvider();
+    await expect(provider.write({ text: "fallback", html: "<p>fallback</p>" })).resolves.toBeUndefined();
+
+    expect(legacyWriteText).toHaveBeenCalledTimes(1);
+    expect(legacyWriteText).toHaveBeenCalledWith("fallback");
+  });
+
+  it("write() falls back to navigator.clipboard.writeText when invoke is unavailable", async () => {
+    (globalThis as any).__TAURI__ = {};
+
+    const webWriteText = vi.fn().mockResolvedValue(undefined);
+    setMockNavigatorClipboard({ writeText: webWriteText });
+
+    const provider = await createClipboardProvider();
+    await expect(provider.write({ text: "fallback", html: "<p>fallback</p>" })).resolves.toBeUndefined();
+
+    expect(webWriteText).toHaveBeenCalledTimes(1);
+    expect(webWriteText).toHaveBeenCalledWith("fallback");
   });
 
   it("write() falls back to navigator.clipboard.writeText when invoke rejects and legacy clipboard API is unavailable", async () => {
