@@ -89,7 +89,7 @@ test.describe("dockable panels layout persistence", () => {
     await expect(rightDock.getByTestId("panel-macros")).toHaveCount(0);
   });
 
-  test("Cmd+Shift+I toggles AI chat panel open/closed", async ({ page }) => {
+  test("Ctrl/Cmd+Shift+A toggles AI chat panel open/closed", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
     await page.reload();
@@ -98,14 +98,14 @@ test.describe("dockable panels layout persistence", () => {
     // Ensure focus is on the grid (not an input) so the global shortcut should fire.
     await page.click("#grid", { position: { x: 5, y: 5 } });
 
-    await page.keyboard.press("Meta+Shift+I");
+    await page.keyboard.press("ControlOrMeta+Shift+A");
     await expect(page.getByTestId("dock-right").getByTestId("panel-aiChat")).toBeVisible();
 
-    await page.keyboard.press("Meta+Shift+I");
+    await page.keyboard.press("ControlOrMeta+Shift+A");
     await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
   });
 
-  test("Cmd+Shift+I does not toggle AI chat while typing in the formula bar", async ({ page }) => {
+  test("Ctrl/Cmd+Shift+A does not toggle AI chat while typing in the formula bar", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
     await page.reload();
@@ -116,7 +116,7 @@ test.describe("dockable panels layout persistence", () => {
     await expect(page.getByTestId("formula-input")).toBeVisible();
     await expect(page.getByTestId("formula-input")).toBeFocused();
 
-    await page.keyboard.press("Meta+Shift+I");
+    await page.keyboard.press("ControlOrMeta+Shift+A");
     await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
   });
 });

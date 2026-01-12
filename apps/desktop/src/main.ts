@@ -1105,9 +1105,6 @@ window.addEventListener("keydown", (e) => {
       return;
     }
     if (keyLower === "i") {
-      // Reserve Cmd+I for toggling the AI sidebar (see instructions/ui.md).
-      // Keep Ctrl+I working as the Excel-style italic shortcut.
-      if (e.metaKey && !e.ctrlKey) return;
       e.preventDefault();
       runWithOptionalBatch("Italic", () => toggleItalic(doc, sheetId, ranges));
       app.focus();
@@ -4197,13 +4194,14 @@ if (
     executeBuiltinCommand("clipboard.pasteSpecial");
   });
 
-  // Cmd+Shift+I toggles the AI sidebar (chat panel).
+  // Ctrl/Cmd+Shift+A toggles the AI sidebar (chat panel).
   // Keep this as a global shortcut so it works even when focus isn't on the grid.
   window.addEventListener("keydown", (e) => {
     if (e.defaultPrevented) return;
     if (e.repeat) return;
-    if (!e.metaKey || e.ctrlKey || e.altKey || !e.shiftKey) return;
-    if (e.key !== "I" && e.key !== "i") return;
+    const primary = e.ctrlKey || e.metaKey;
+    if (!primary || e.altKey || !e.shiftKey) return;
+    if (e.key !== "A" && e.key !== "a") return;
 
     const target = (e.target instanceof HTMLElement ? e.target : null) ?? (document.activeElement as HTMLElement | null);
     if (target) {
@@ -4212,7 +4210,7 @@ if (
     }
 
     e.preventDefault();
-    toggleDockPanel(PanelIds.AI_CHAT);
+    executeCommand("view.togglePanel.aiChat");
   });
 
   layoutController.on("change", () => {
