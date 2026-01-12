@@ -632,10 +632,14 @@ impl XlsbWorkbook {
             .iter()
             .map(|edit| {
                 let coord = (edit.row, edit.col);
-                let old_uses_sst =
-                    matches!(cell_records.get(&coord).map(|r| r.id), Some(biff12::STRING));
+                let old_id = cell_records.get(&coord).map(|r| r.id);
+                let old_uses_sst = matches!(old_id, Some(biff12::STRING));
+                let old_is_formula = old_id.is_some_and(is_formula_cell_record);
                 let new_uses_sst = matches!(edit.new_value, CellValue::Text(_))
-                    && edit.shared_string_index.is_some();
+                    && edit.shared_string_index.is_some()
+                    && edit.new_formula.is_none()
+                    && edit.new_rgcb.is_none()
+                    && !old_is_formula;
                 match (old_uses_sst, new_uses_sst) {
                     (false, true) => 1,
                     (true, false) => -1,
@@ -795,10 +799,14 @@ impl XlsbWorkbook {
             .iter()
             .map(|edit| {
                 let coord = (edit.row, edit.col);
-                let old_uses_sst =
-                    matches!(cell_records.get(&coord).map(|r| r.id), Some(biff12::STRING));
+                let old_id = cell_records.get(&coord).map(|r| r.id);
+                let old_uses_sst = matches!(old_id, Some(biff12::STRING));
+                let old_is_formula = old_id.is_some_and(is_formula_cell_record);
                 let new_uses_sst = matches!(edit.new_value, CellValue::Text(_))
-                    && edit.shared_string_index.is_some();
+                    && edit.shared_string_index.is_some()
+                    && edit.new_formula.is_none()
+                    && edit.new_rgcb.is_none()
+                    && !old_is_formula;
                 match (old_uses_sst, new_uses_sst) {
                     (false, true) => 1,
                     (true, false) => -1,

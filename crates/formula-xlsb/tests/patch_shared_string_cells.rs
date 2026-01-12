@@ -172,7 +172,9 @@ fn shared_strings_save_does_not_touch_sst_for_inserted_formula_string_cells() {
             new_value: CellValue::Text("New".to_string()),
             new_formula: Some(ptg_str("New")),
             new_rgcb: None,
-            shared_string_index: None,
+            // Even if the caller supplies an `isst`, formula cached strings are stored inline and
+            // should not affect the shared string table counts.
+            shared_string_index: Some(0),
         }],
     )
     .expect("save_with_cell_edits_shared_strings");
