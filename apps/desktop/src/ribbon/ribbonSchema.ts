@@ -410,6 +410,24 @@ export const defaultRibbonSchema: RibbonSchema = {
           ],
         },
         {
+          id: "home.find",
+          label: "Find",
+          buttons: [
+            {
+              id: "home.editing.findSelect",
+              label: "Find & Select",
+              ariaLabel: "Find and Select",
+              icon: "⌕",
+              kind: "dropdown",
+              menuItems: [
+                { id: "home.editing.findSelect.find", label: "Find", ariaLabel: "Find", icon: "⌕", testId: "ribbon-find" },
+                { id: "home.editing.findSelect.replace", label: "Replace", ariaLabel: "Replace", icon: "⎘", testId: "ribbon-replace" },
+                { id: "home.editing.findSelect.goTo", label: "Go To", ariaLabel: "Go To", icon: "↗", testId: "ribbon-goto" },
+              ],
+            },
+          ],
+        },
+        {
           id: "home.font",
           label: "Font",
           buttons: [
@@ -787,18 +805,6 @@ export const defaultRibbonSchema: RibbonSchema = {
                 { id: "home.editing.sortFilter.filter", label: "Filter", ariaLabel: "Filter", icon: "⏷" },
                 { id: "home.editing.sortFilter.clear", label: "Clear", ariaLabel: "Clear", icon: "✖" },
                 { id: "home.editing.sortFilter.reapply", label: "Reapply", ariaLabel: "Reapply", icon: "⟳" },
-              ],
-            },
-            {
-              id: "home.editing.findSelect",
-              label: "Find & Select",
-              ariaLabel: "Find and Select",
-              icon: "⌕",
-              kind: "dropdown",
-              menuItems: [
-                { id: "home.editing.findSelect.find", label: "Find", ariaLabel: "Find", icon: "⌕", testId: "ribbon-find" },
-                { id: "home.editing.findSelect.replace", label: "Replace", ariaLabel: "Replace", icon: "⎘", testId: "ribbon-replace" },
-                { id: "home.editing.findSelect.goTo", label: "Go To", ariaLabel: "Go To", icon: "↗", testId: "ribbon-goto" },
               ],
             },
           ],
