@@ -1148,10 +1148,93 @@ fn push_column(col: u32, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use formula_engine::{parse_formula, ParseOptions};
+    use formula_xlsx::print::{parse_print_area_defined_name, parse_print_titles_defined_name};
 
     fn assert_parseable(expr: &str) {
-        parse_formula(&format!("={expr}"), ParseOptions::default()).expect("parse formula");
+        let expr = expr.trim();
+        assert!(!expr.is_empty(), "decoded expression must be non-empty");
+
+        // Excel error literals like `#REF!` and `#NAME?` can appear as defined-name formulas.
+        if expr.starts_with('#') {
+            assert!(
+                matches!(
+                    expr,
+                    "#NULL!"
+                        | "#DIV/0!"
+                        | "#VALUE!"
+                        | "#REF!"
+                        | "#NAME?"
+                        | "#NUM!"
+                        | "#N/A"
+                        | "#GETTING_DATA"
+                        | "#UNKNOWN!"
+                ),
+                "unexpected Excel error literal: {expr:?}"
+            );
+            return;
+        }
+
+        // Print titles (and other defined names) can use union (`,`) of ranges.
+        for part in expr.split(',') {
+            let part = part.trim();
+            assert!(!part.is_empty(), "empty union part in {expr:?}");
+
+            if formula_model::Range::from_a1(part).is_ok() {
+                continue;
+            }
+
+            if is_row_range(part) || is_col_range(part) {
+                continue;
+            }
+
+            panic!("expected A1 range / row range / col range, got {part:?}");
+        }
+    }
+
+    fn is_row_range(s: &str) -> bool {
+        let Some((a, b)) = s.split_once(':') else {
+            return false;
+        };
+
+        let a = a.trim().replace('$', "");
+        let b = b.trim().replace('$', "");
+        if a.is_empty() || b.is_empty() {
+            return false;
+        }
+        if !a.chars().all(|c| c.is_ascii_digit()) || !b.chars().all(|c| c.is_ascii_digit()) {
+            return false;
+        }
+        match (a.parse::<u32>(), b.parse::<u32>()) {
+            (Ok(a), Ok(b)) => a > 0 && b > 0,
+            _ => false,
+        }
+    }
+
+    fn is_col_range(s: &str) -> bool {
+        let Some((a, b)) = s.split_once(':') else {
+            return false;
+        };
+
+        let a = a.trim().replace('$', "");
+        let b = b.trim().replace('$', "");
+        if a.is_empty() || b.is_empty() {
+            return false;
+        }
+        if !a.chars().all(|c| c.is_ascii_alphabetic())
+            || !b.chars().all(|c| c.is_ascii_alphabetic())
+        {
+            return false;
+        }
+
+        col_from_a1(&a).is_some() && col_from_a1(&b).is_some()
+    }
+
+    fn assert_print_area_parseable(sheet_name: &str, expr: &str) {
+        parse_print_area_defined_name(sheet_name, expr).expect("parse print area defined name");
+    }
+
+    fn assert_print_titles_parseable(sheet_name: &str, expr: &str) {
+        parse_print_titles_defined_name(sheet_name, expr).expect("parse print titles defined name");
     }
 
     const BIFF8_MAX_ROW: u16 = 0xFFFF;
@@ -1607,7 +1690,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Sheet1!$1:$1");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
-        assert_parseable(&decoded.text);
+        assert_print_titles_parseable("Sheet1", &decoded.text);
     }
 
     #[test]
@@ -1631,7 +1714,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Sheet1!$A:$A");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
-        assert_parseable(&decoded.text);
+        assert_print_titles_parseable("Sheet1", &decoded.text);
     }
 
     #[test]
@@ -1666,7 +1749,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Sheet1!$1:$1,Sheet1!$A:$A");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
-        assert_parseable(&decoded.text);
+        assert_print_titles_parseable("Sheet1", &decoded.text);
     }
 
     #[test]
@@ -1690,7 +1773,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Sheet1!A1:B2");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
-        assert_parseable(&decoded.text);
+        assert_print_area_parseable("Sheet1", &decoded.text);
     }
 
     #[test]
@@ -1708,7 +1791,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Sheet1!A1");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
-        assert_parseable(&decoded.text);
+        assert_print_area_parseable("Sheet1", &decoded.text);
     }
 
     #[test]
