@@ -19,6 +19,9 @@ import {
 } from "./layoutState.js";
 
 export class LayoutController {
+  /** @type {boolean} */
+  #needsPersist = false;
+
   /**
    * @param {{ workbookId: string, workspaceManager: import("./layoutPersistence.js").LayoutWorkspaceManager, primarySheetId?: string | null, workspaceId?: string }} params
    */
@@ -79,6 +82,9 @@ export class LayoutController {
 
     if (options.persist ?? true) {
       this.workspaceManager.saveWorkbookLayoutForWorkspace(this.workbookId, this.workspaceId, this.layout);
+      this.#needsPersist = false;
+    } else {
+      this.#needsPersist = true;
     }
 
     this.#emit("change", { layout: this.layout });
@@ -91,6 +97,7 @@ export class LayoutController {
    */
   persistNow() {
     this.workspaceManager.saveWorkbookLayoutForWorkspace(this.workbookId, this.workspaceId, this.layout);
+    this.#needsPersist = false;
   }
 
   /**
@@ -107,6 +114,7 @@ export class LayoutController {
     this.layout = this.workspaceManager.loadWorkbookLayoutForWorkspace(this.workbookId, this.workspaceId, {
       primarySheetId: this.primarySheetId,
     });
+    this.#needsPersist = false;
     this.#emit("change", { layout: this.layout });
   }
 
@@ -125,6 +133,7 @@ export class LayoutController {
    * @param {string} workspaceId
    */
   setActiveWorkspace(workspaceId) {
+    if (this.#needsPersist) this.persistNow();
     this.workspaceManager.setActiveWorkbookWorkspace(this.workbookId, workspaceId);
     this.workspaceId = this.workspaceManager.getActiveWorkbookWorkspaceId(this.workbookId);
     this.reload();
@@ -139,6 +148,7 @@ export class LayoutController {
    * @param {string} workspaceId
    */
   setWorkspace(workspaceId) {
+    if (this.#needsPersist) this.persistNow();
     this.workspaceId = typeof workspaceId === "string" && workspaceId.length > 0 ? workspaceId : "default";
     this.reload();
     this.#emit("workspace", { workspaceId: this.workspaceId, layout: this.layout });
