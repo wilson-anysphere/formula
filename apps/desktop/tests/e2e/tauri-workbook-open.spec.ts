@@ -417,10 +417,10 @@ test.describe("tauri workbook integration", () => {
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
 
     // Hide Sheet1.
-    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
     const menu = page.getByTestId("sheet-tab-context-menu");
     await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Hide" }).click();
+    await menu.getByRole("button", { name: "Hide", exact: true }).click();
 
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveCount(0);
     await expect(page.getByTestId("sheet-switcher")).toHaveValue("Sheet2");
@@ -437,9 +437,9 @@ test.describe("tauri workbook integration", () => {
       .toBe(1);
 
     // Unhide Sheet1.
-    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
+    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right", position: { x: 10, y: 10 } });
     await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Unhide…" }).click();
+    await menu.getByRole("button", { name: "Unhide…", exact: true }).click();
     await menu.getByRole("button", { name: "Sheet1" }).click();
 
     await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
@@ -456,9 +456,9 @@ test.describe("tauri workbook integration", () => {
       .toBe(1);
 
     // Set tab color for Sheet1.
-    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
     await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Tab Color" }).click();
+    await menu.getByRole("button", { name: "Tab Color", exact: true }).click();
     await menu.getByRole("button", { name: "Red" }).click();
 
     await expect
