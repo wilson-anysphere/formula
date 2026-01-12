@@ -2806,12 +2806,13 @@ export class SpreadsheetApp {
     }
 
     const docCell = this.docCellFromGridCell(picked);
-    const cellRef = cellToA1(docCell);
-    if (!this.commentCells.has(cellRef)) {
+    const metaKey = docCell.row * 16_384 + docCell.col;
+    if (!this.commentMetaByCoord.has(metaKey)) {
       this.hideCommentTooltip();
       return;
     }
 
+    const cellRef = cellToA1(docCell);
     const comments = this.commentManager.listForCell(cellRef);
     const preview = comments[0]?.content ?? "";
     if (!preview) {
@@ -3516,9 +3517,9 @@ export class SpreadsheetApp {
         const row = rows[visualRow]!;
         for (let visualCol = 0; visualCol < cols.length; visualCol++) {
           const col = cols[visualCol]!;
-          const cellRef = cellToA1({ row, col });
-          if (!this.commentCells.has(cellRef)) continue;
-          const resolved = this.commentMeta.get(cellRef)?.resolved ?? false;
+          const meta = this.commentMetaByCoord.get(row * 16_384 + col);
+          if (!meta) continue;
+          const resolved = meta.resolved ?? false;
           drawCommentIndicator(ctx, {
             x: startX + visualCol * this.cellWidth,
             y: startY + visualRow * this.cellHeight,
@@ -5802,12 +5803,13 @@ export class SpreadsheetApp {
     }
 
     const cell = this.cellFromPoint(x, y);
-    const cellRef = cellToA1(cell);
-    if (!this.commentCells.has(cellRef)) {
+    const metaKey = cell.row * 16_384 + cell.col;
+    if (!this.commentMetaByCoord.has(metaKey)) {
       this.hideCommentTooltip();
       return;
     }
 
+    const cellRef = cellToA1(cell);
     const comments = this.commentManager.listForCell(cellRef);
     const preview = comments[0]?.content ?? "";
     if (!preview) {
