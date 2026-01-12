@@ -1,4 +1,5 @@
-use formula_engine::{Engine, ErrorKind, NameDefinition, NameScope, Value};
+use formula_engine::eval::CellAddr;
+use formula_engine::{Engine, ErrorKind, NameDefinition, NameScope, PrecedentNode, Value};
 use formula_model::EXCEL_MAX_COLS;
 
 #[test]
@@ -168,4 +169,70 @@ fn shrinking_sheet_dimensions_invalidates_bytecode_compiled_references() {
         engine.get_cell_value("Sheet1", "A1"),
         Value::Error(ErrorKind::Ref)
     );
+}
+
+#[test]
+fn precedents_clamp_whole_row_and_column_to_sheet_dimensions() {
+    let mut engine = Engine::new();
+    engine.set_sheet_dimensions("Sheet1", 100, 10).unwrap();
+
+    engine.set_cell_formula("Sheet1", "B1", "=SUM(A:A)").unwrap();
+    // Avoid a circular reference: `1:1` includes row 1, so keep the formula outside row 1.
+    engine.set_cell_formula("Sheet1", "A2", "=SUM(1:1)").unwrap();
+    engine.recalculate();
+
+    assert_eq!(
+        engine.precedents("Sheet1", "B1").unwrap(),
+        vec![PrecedentNode::Range {
+            sheet: 0,
+            start: CellAddr { row: 0, col: 0 },
+            end: CellAddr { row: 99, col: 0 },
+        }]
+    );
+
+    assert_eq!(
+        engine.precedents("Sheet1", "A2").unwrap(),
+        vec![PrecedentNode::Range {
+            sheet: 0,
+            start: CellAddr { row: 0, col: 0 },
+            end: CellAddr { row: 0, col: 9 },
+        }]
+    );
+}
+
+#[test]
+fn precedents_clamp_whole_row_and_column_from_defined_names_and_indirect() {
+    let mut engine = Engine::new();
+    engine.set_sheet_dimensions("Sheet1", 100, 10).unwrap();
+
+    engine
+        .define_name(
+            "MyCol",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!A:A".to_string()),
+        )
+        .unwrap();
+
+    // A workbook-defined name that expands to a whole-column reference should clamp to sheet dims
+    // in the auditing API.
+    engine.set_cell_formula("Sheet1", "B1", "=SUM(MyCol)").unwrap();
+
+    // INDIRECT dynamic dependencies should also clamp whole-column refs to sheet dims.
+    engine
+        .set_cell_formula("Sheet1", "B2", "=SUM(INDIRECT(\"A:A\"))")
+        .unwrap();
+
+    engine.recalculate();
+
+    for addr in ["B1", "B2"] {
+        assert_eq!(
+            engine.precedents("Sheet1", addr).unwrap(),
+            vec![PrecedentNode::Range {
+                sheet: 0,
+                start: CellAddr { row: 0, col: 0 },
+                end: CellAddr { row: 99, col: 0 },
+            }],
+            "unexpected precedents for {addr}"
+        );
+    }
 }
