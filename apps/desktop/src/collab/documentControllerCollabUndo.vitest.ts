@@ -106,26 +106,62 @@ describe("collaboration-safe undo/redo (desktop)", () => {
     undoService.stopCapturing();
 
     comments.setCommentContent({ commentId, content: "hello (edited)", now: 2 });
+    undoService.stopCapturing();
 
-    const getContent = () => comments.listAll().find((c) => c.id === commentId)?.content ?? null;
+    comments.addReply({
+      commentId,
+      id: "r1",
+      content: "First reply",
+      author: { id: "u1", name: "Alice" },
+      now: 3,
+    });
+    undoService.stopCapturing();
 
-    expect(getContent()).toBe("hello (edited)");
+    comments.setResolved({ commentId, resolved: true, now: 4 });
+
+    const get = () => comments.listAll().find((c) => c.id === commentId) ?? null;
+
+    expect(get()?.content ?? null).toBe("hello (edited)");
+    expect(get()?.replies.length ?? 0).toBe(1);
+    expect(get()?.replies[0]?.content ?? null).toBe("First reply");
+    expect(get()?.resolved ?? null).toBe(true);
     expect(undoService.canUndo()).toBe(true);
 
+    // Undo resolve.
     undoService.undo();
-    expect(getContent()).toBe("hello");
+    expect(get()?.resolved ?? null).toBe(false);
 
+    // Undo reply.
     expect(undoService.canUndo()).toBe(true);
     undoService.undo();
-    expect(getContent()).toBe(null);
+    expect(get()?.replies.length ?? 0).toBe(0);
+
+    // Undo edit.
+    expect(undoService.canUndo()).toBe(true);
+    undoService.undo();
+    expect(get()?.content ?? null).toBe("hello");
+
+    // Undo add.
+    expect(undoService.canUndo()).toBe(true);
+    undoService.undo();
+    expect(get()).toBe(null);
 
     expect(undoService.canRedo()).toBe(true);
     undoService.redo();
-    expect(getContent()).toBe("hello");
+    expect(get()?.content ?? null).toBe("hello");
 
     expect(undoService.canRedo()).toBe(true);
     undoService.redo();
-    expect(getContent()).toBe("hello (edited)");
+    expect(get()?.content ?? null).toBe("hello (edited)");
+
+    expect(undoService.canRedo()).toBe(true);
+    undoService.redo();
+    expect(get()?.replies.length ?? 0).toBe(1);
+    expect(get()?.replies[0]?.content ?? null).toBe("First reply");
+
+    expect(undoService.canRedo()).toBe(true);
+    undoService.redo();
+    expect(get()?.resolved ?? null).toBe(true);
 
     binder.destroy();
   });

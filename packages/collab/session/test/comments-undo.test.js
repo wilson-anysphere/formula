@@ -322,26 +322,63 @@ test("Binder-origin collaborative undo captures comment add/edit when using a tr
   undo.stopCapturing();
 
   comments.setCommentContent({ commentId, content: "Hello (edited)", now: 2 });
-  assert.equal(comments.listAll().find((c) => c.id === commentId)?.content ?? null, "Hello (edited)");
+  undo.stopCapturing();
+
+  comments.addReply({
+    commentId,
+    id: "r1",
+    content: "First reply",
+    author: { id: "u1", name: "Alice" },
+    now: 3,
+  });
+  undo.stopCapturing();
+
+  comments.setResolved({ commentId, resolved: true, now: 4 });
+
+  const get = () => comments.listAll().find((c) => c.id === commentId) ?? null;
+
+  assert.equal(get()?.content ?? null, "Hello (edited)");
+  assert.equal(get()?.replies.length ?? 0, 1);
+  assert.equal(get()?.replies[0]?.content ?? null, "First reply");
+  assert.equal(get()?.resolved ?? null, true);
   assert.equal(undo.canUndo(), true);
 
-  // Undo the edit.
+  // Undo resolve.
   undo.undo();
-  assert.equal(comments.listAll().find((c) => c.id === commentId)?.content ?? null, "Hello");
+  assert.equal(get()?.resolved ?? null, false);
 
-  // Undo the add.
+  // Undo reply.
   assert.equal(undo.canUndo(), true);
   undo.undo();
-  assert.equal(comments.listAll().find((c) => c.id === commentId)?.content ?? null, null);
+  assert.equal(get()?.replies.length ?? 0, 0);
 
-  // Redo add + edit.
+  // Undo edit.
+  assert.equal(undo.canUndo(), true);
+  undo.undo();
+  assert.equal(get()?.content ?? null, "Hello");
+
+  // Undo add.
+  assert.equal(undo.canUndo(), true);
+  undo.undo();
+  assert.equal(get(), null);
+
+  // Redo add + edit + reply + resolve.
   assert.equal(undo.canRedo(), true);
   undo.redo();
-  assert.equal(comments.listAll().find((c) => c.id === commentId)?.content ?? null, "Hello");
+  assert.equal(get()?.content ?? null, "Hello");
 
   assert.equal(undo.canRedo(), true);
   undo.redo();
-  assert.equal(comments.listAll().find((c) => c.id === commentId)?.content ?? null, "Hello (edited)");
+  assert.equal(get()?.content ?? null, "Hello (edited)");
+
+  assert.equal(undo.canRedo(), true);
+  undo.redo();
+  assert.equal(get()?.replies.length ?? 0, 1);
+  assert.equal(get()?.replies[0]?.content ?? null, "First reply");
+
+  assert.equal(undo.canRedo(), true);
+  undo.redo();
+  assert.equal(get()?.resolved ?? null, true);
 
   doc.destroy();
 });
