@@ -211,7 +211,7 @@ fn parse_rich_value_part(part_name: &str, bytes: &[u8]) -> Result<Vec<ParsedRv>,
 
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) if e.local_name().as_ref() == b"rv" => {
+            Event::Start(e) if e.local_name().as_ref().eq_ignore_ascii_case(b"rv") => {
                 let explicit_index = parse_rv_explicit_index(&e)?;
                 let embed_rel_id = parse_rv_embed_rel_id(&mut reader)?;
                 out.push(ParsedRv {
@@ -222,7 +222,7 @@ fn parse_rich_value_part(part_name: &str, bytes: &[u8]) -> Result<Vec<ParsedRv>,
                     },
                 });
             }
-            Event::Empty(e) if e.local_name().as_ref() == b"rv" => {
+            Event::Empty(e) if e.local_name().as_ref().eq_ignore_ascii_case(b"rv") => {
                 let explicit_index = parse_rv_explicit_index(&e)?;
                 out.push(ParsedRv {
                     explicit_index,
@@ -268,14 +268,14 @@ fn parse_rv_embed_rel_id(reader: &mut Reader<Cursor<&[u8]>>) -> Result<Option<St
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) => {
                 depth += 1;
-                if e.local_name().as_ref() == b"blip" {
+                if e.local_name().as_ref().eq_ignore_ascii_case(b"blip") {
                     if let Some(rid) = parse_blip_embed(&e)? {
                         return Ok(Some(rid));
                     }
                 }
             }
             Event::Empty(e) => {
-                if e.local_name().as_ref() == b"blip" {
+                if e.local_name().as_ref().eq_ignore_ascii_case(b"blip") {
                     if let Some(rid) = parse_blip_embed(&e)? {
                         return Ok(Some(rid));
                     }
@@ -317,7 +317,7 @@ fn parse_metadata_rich_value_indices(bytes: &[u8]) -> Result<Vec<u32>, XlsxError
 
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"rvb" => {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref().eq_ignore_ascii_case(b"rvb") => {
                 for attr in e.attributes() {
                     let attr = attr?;
                     let key = openxml::local_name(attr.key.as_ref());
