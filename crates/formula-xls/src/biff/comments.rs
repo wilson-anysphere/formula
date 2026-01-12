@@ -12,6 +12,9 @@
 //! - Modern threaded comments are an OOXML feature and are not supported in `.xls`.
 //! - Missing TXO payloads (text) are treated as a warning and the note may be
 //!   skipped by the importer.
+//!
+//! Note: anchoring to merged regions (top-left cell) is handled by the importer
+//! when inserting notes into the [`formula_model`] worksheet model.
 
 use std::collections::HashMap;
 

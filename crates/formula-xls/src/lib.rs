@@ -17,7 +17,8 @@
 //! - Comment box geometry/visibility/formatting is not preserved
 //! - Only plain text + author (when available) are imported
 //! - Threaded comments are not supported in `.xls`
-//!
+//! - Notes inside merged regions are anchored to the merged region's top-left cell
+//! 
 //! We also extract workbook-global styles (including number format codes) and the
 //! workbook date system (1900 vs 1904) when possible. Anything else is preserved
 //! as metadata/warnings. In particular, comment parsing may emit warnings when
