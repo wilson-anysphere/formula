@@ -387,8 +387,14 @@ The exact way that a worksheet cell points at a `cellImages.xml` entry (if that 
 still not fully verified against a real Excel-generated “Place in Cell” workbook; treat that linkage
 as **opaque** and preserve all related parts for safe round-trip.
 
-At minimum, `xl/richData/richValue.xml` is expected to exist when `xl/metadata.xml` contains
-`<futureMetadata name="XLRICHVALUE">` entries with `xlrd:rvb i="…"` references (see mapping details above).
+At minimum, a rich value store is expected to exist when `xl/metadata.xml` indicates the `XLRICHVALUE`
+metadata type (the exact mapping schema varies by producer/Excel build).
+
+Depending on the producer, the rich value store may be named:
+
+- `xl/richData/richValue*.xml` (Excel-like naming), or
+- `xl/richData/rdrichvalue*.xml` / `xl/richData/rdRichValueTypes.xml` (rdRichValue naming; observed in this
+  repo from `rust_xlsxwriter` output).
 
 See also:
 
@@ -409,7 +415,14 @@ Common file names (Excel version-dependent; treat as “expected shape”, not a
 
 ## `[Content_Types].xml` requirements
 
-Workbooks that include these parts must also declare content types in `[Content_Types].xml`:
+Workbooks that include these parts may declare content types in `[Content_Types].xml`.
+
+In this repo, some fixtures rely on `<Default Extension="xml" ContentType="application/xml"/>` for
+`xl/metadata.xml` and `xl/richData/*` (no explicit overrides), while others include explicit overrides.
+Implementations should preserve whatever is in the source workbook.
+
+Independently of overrides for `.xml` parts, image payloads under `xl/media/*` still require appropriate
+image MIME defaults (e.g. `png` → `image/png`) for interoperability.
 
 - **Override** entries for XML parts like `/xl/cellImages.xml` (or `/xl/cellimages.xml`), `/xl/metadata.xml`,
   and `xl/richData/*.xml`
@@ -440,10 +453,21 @@ Observed in `fixtures/xlsx/metadata/rich-values-vm.xlsx`:
 
 - `application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml`
 
+Also observed in tests:
+
+- `application/vnd.openxmlformats-officedocument.spreadsheetml.metadata+xml`
+  - used by `crates/formula-xlsx/tests/metadata_rich_value_roundtrip.rs`
+
+And observed that **no override** may be present (default `application/xml`), in:
+
+- `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
+
 ### `xl/richData/*` content types (TODO: fixture-driven)
 
-Content types for `xl/richData/*` still need confirmation from a real Excel-exported
-workbook (and corresponding fixture + tests).
+Content types for `xl/richData/*` still need confirmation from a real Excel-exported workbook *that emits
+explicit overrides* for these parts.
+
+Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`: no richData overrides (default `application/xml`).
 
 Likely patterns seen in the ecosystem (unverified; do not hardcode without a real Excel fixture in
 `fixtures/xlsx/**`):
@@ -489,6 +513,8 @@ Partially known (fixture-driven details still recommended):
   - Lives in `xl/_rels/workbook.xml.rels`.
   - Observed in `fixtures/xlsx/metadata/rich-values-vm.xlsx`:
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
+  - Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`:
+    - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata"`
   - Preservation is covered by `crates/formula-xlsx/tests/metadata_rich_values_vm_roundtrip.rs`.
 - Workbook → `xl/cellImages.xml` relationship:
   - Lives in `xl/_rels/workbook.xml.rels`.
@@ -500,7 +526,12 @@ Partially known (fixture-driven details still recommended):
 - RichData relationship indirection (images referenced via `richValueRel.xml`):
   - `xl/richData/_rels/richValueRel.xml.rels` is expected to contain standard image relationships:
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
-  - (Exact `richValueRel` schemas and relationship discovery still need a real Excel fixture.)
+  - Workbook → richData relationships (Type URIs are Microsoft-specific and versioned). Observed in this repo:
+    - `http://schemas.microsoft.com/office/2017/06/relationships/richValue` (fixture: `image-in-cell-richdata.xlsx`)
+    - `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel` (fixture: `image-in-cell-richdata.xlsx`)
+    - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue` (test: `embedded_images_place_in_cell_roundtrip.rs`)
+    - `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel` (test: `embedded_images_place_in_cell_roundtrip.rs`)
+  - (Exact `richValue` schemas and relationship discovery still vary; preserve unknown relationships.)
 
 TODO (confirm via real Excel fixture, then harden parsers/writers):
 
