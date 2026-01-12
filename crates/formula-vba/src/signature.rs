@@ -759,7 +759,7 @@ pub fn verify_vba_signature_binding_with_stream_path(
                 // to our deterministic "project digest" over OLE streams. This keeps binding checks
                 // useful for synthetically-constructed fixtures while preserving the spec-ish path
                 // for real-world projects.
-                let digest = match compute_vba_project_digest(vba_project_bin, DigestAlg::Md5) {
+                let digest = match crate::compute_vba_project_digest(vba_project_bin, DigestAlg::Md5) {
                     Ok(v) => v,
                     Err(_) => return VbaSignatureBinding::Unknown,
                 };

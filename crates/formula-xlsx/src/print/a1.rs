@@ -354,7 +354,13 @@ fn letters_to_col(letters: &str) -> Result<u32, PrintError> {
                 "invalid column letters {letters:?}"
             )));
         }
-        col = col * 26 + (ch.to_ascii_uppercase() as u8 - b'A' + 1) as u32;
+        let digit = (ch.to_ascii_uppercase() as u8 - b'A' + 1) as u32;
+        col = col
+            .checked_mul(26)
+            .and_then(|c| c.checked_add(digit))
+            .ok_or_else(|| {
+                PrintError::InvalidA1(format!("invalid column letters {letters:?}"))
+            })?;
     }
 
     if col == 0 {

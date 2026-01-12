@@ -16,3 +16,12 @@ fn print_defined_name_parsing_accepts_sheet_names_case_insensitively() {
         }
     );
 }
+
+#[test]
+fn print_defined_name_parsing_rejects_overflowing_column_letters() {
+    // Extremely large column references should be rejected without panicking on integer overflow.
+    assert!(
+        parse_print_area_defined_name("Sheet1", "Sheet1!$ZZZZZZZ$1:$A$1").is_err(),
+        "expected parse to fail for column letters that overflow u32"
+    );
+}
