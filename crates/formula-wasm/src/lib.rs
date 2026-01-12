@@ -3137,6 +3137,25 @@ mod tests {
     }
 
     #[test]
+    fn set_cell_rich_empty_clears_previous_rich_value() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        let entity = CellValue::Entity(formula_model::EntityValue::new("Acme"));
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity).unwrap();
+
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", CellValue::Empty)
+            .unwrap();
+
+        let scalar = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(scalar.input, JsonValue::Null);
+        assert_eq!(scalar.value, JsonValue::Null);
+
+        let rich = wb.get_cell_rich_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(rich.input, CellValue::Empty);
+        assert_eq!(rich.value, CellValue::Empty);
+    }
+
+    #[test]
     fn cell_value_json_roundtrips_entity_and_record() {
         let mut record_fields = BTreeMap::new();
         record_fields.insert("Name".to_string(), CellValue::String("Alice".to_string()));
