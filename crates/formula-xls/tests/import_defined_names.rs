@@ -204,7 +204,12 @@ fn rewrites_calamine_defined_name_formulas_to_sanitized_sheet_names() {
         .defined_names
         .iter()
         .find(|n| n.name == "TestName")
-        .unwrap_or_else(|| panic!("TestName missing; defined_names={:?}", result.workbook.defined_names));
+        .unwrap_or_else(|| {
+            panic!(
+                "TestName missing; defined_names={:?}; warnings={:?}",
+                result.workbook.defined_names, result.warnings
+            )
+        });
     assert_eq!(name.scope, DefinedNameScope::Workbook);
     assert_eq!(name.refers_to, "Bad_Name!$A$1:$A$1");
 

@@ -342,6 +342,26 @@ pub fn build_defined_name_sheet_name_sanitization_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture where a worksheet name is invalid and will be sanitized by the
+/// importer, but a workbook-scoped defined name (surfaced via calamine) still references the
+/// original name.
+///
+/// This is used to validate that the `.xls` importer rewrites calamine-defined-name formulas after
+/// sheet name sanitization, similar to how it rewrites cell formulas and internal hyperlinks.
+pub fn build_defined_name_sheet_name_sanitization_calamine_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_defined_name_sheet_name_sanitization_calamine_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a minimal BIFF8 `.xls` fixture containing a single sheet named `Notes`
 /// with a NOTE/OBJ/TXO comment anchored to `A1`.
 pub fn build_note_comment_fixture_xls() -> Vec<u8> {
@@ -1725,6 +1745,68 @@ fn build_defined_name_calamine_workbook_stream_with_sheet_name(sheet_name: &str)
         &mut globals,
         RECORD_NAME,
         &name_record_calamine_compat("TestName", &rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_empty_sheet_stream(xf_general);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_defined_name_sheet_name_sanitization_calamine_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF.
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet with an invalid name (will sanitize to `Bad_Name`).
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Bad:Name");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // Minimal SUPBOOK entry for internal workbook references (calamine-compatible encoding).
+    let supbook = {
+        let mut data = Vec::<u8>::new();
+        data.extend_from_slice(&1u16.to_le_bytes()); // ctab (sheet count)
+        data.extend_from_slice(&1u16.to_le_bytes()); // cch
+        data.push(0); // flags (compressed)
+        data.push(0); // virtPath = "\0" (internal workbook marker)
+        data
+    };
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook);
+
+    // Minimal EXTERNSHEET table with a single internal sheet entry.
+    push_record(&mut globals, RECORD_EXTERNSHEET, &externsheet_record(&[(0, 0)]));
+
+    // Workbook-scoped defined name: BadRef -> Bad:Name!$A$1:$A$1
+    let rgce = ptg_area3d(0, 0, 0, 0, 0);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record_calamine_compat("BadRef", &rgce),
     );
 
     push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
