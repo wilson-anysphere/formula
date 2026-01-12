@@ -168,6 +168,74 @@ describe("updaterUi (dialog + download)", () => {
     expect(restartBtn?.style.display).not.toBe("none");
   });
 
+  it("keeps the update dialog open if the user cancels the unsaved-changes prompt on restart", async () => {
+    const handlers = new Map<string, (event: any) => void>();
+    const listen = vi.fn(async (eventName: string, handler: (event: any) => void) => {
+      handlers.set(eventName, handler);
+      return () => handlers.delete(eventName);
+    });
+
+    const download = vi.fn(async (onProgress?: any) => {
+      onProgress?.({ downloaded: 50, total: 100 });
+      await flushMicrotasks(1);
+      onProgress?.({ downloaded: 100, total: 100 });
+    });
+
+    const install = vi.fn(async () => {});
+    const check = vi.fn(async () => ({
+      version: "1.2.3",
+      body: "notes",
+      download,
+      install,
+    }));
+
+    vi.stubGlobal("__TAURI__", {
+      event: { listen },
+      updater: { check },
+    });
+
+    const { installUpdaterUi } = await import("../updaterUi");
+    await installUpdaterUi();
+
+    handlers.get("update-available")?.({ payload: { source: "manual", version: "1.2.3", body: "notes" } });
+    await flushMicrotasks();
+
+    const dialog = document.querySelector<HTMLDialogElement>('[data-testid="updater-dialog"]');
+    expect(dialog).not.toBeNull();
+
+    const downloadBtn = document.querySelector<HTMLButtonElement>('[data-testid="updater-download"]');
+    expect(downloadBtn).not.toBeNull();
+    downloadBtn?.click();
+    await flushMicrotasks(12);
+
+    const restartBtn = document.querySelector<HTMLButtonElement>('[data-testid="updater-restart"]');
+    expect(restartBtn).not.toBeNull();
+
+    // Simulate the user canceling the quit prompt.
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    const { registerAppQuitHandlers } = await import("../appQuit");
+    const restartApp = vi.fn().mockResolvedValue(undefined);
+    const quitApp = vi.fn().mockResolvedValue(undefined);
+    registerAppQuitHandlers({
+      isDirty: () => true,
+      drainBackendSync: vi.fn().mockResolvedValue(undefined),
+      restartApp,
+      quitApp,
+    });
+
+    restartBtn?.click();
+    await flushMicrotasks(6);
+
+    expect(install).not.toHaveBeenCalled();
+    expect(restartApp).not.toHaveBeenCalled();
+    expect(quitApp).not.toHaveBeenCalled();
+
+    // The dialog should still be open because the restart was cancelled.
+    expect(dialog?.getAttribute("open") === "" || dialog?.open === true).toBe(true);
+
+    registerAppQuitHandlers(null);
+  });
+
   it("promotes 'Download manually' when the update download fails", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 
