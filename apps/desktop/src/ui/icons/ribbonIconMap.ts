@@ -239,10 +239,14 @@ export const ribbonIconMap = {
   "home.number.numberFormat": NumberFormatIcon,
   "home.number.accounting": CurrencyIcon,
   "home.number.percent": PercentIcon,
+  "home.number.date": CalendarIcon,
   "home.number.comma": CommaIcon,
   "home.number.increaseDecimal": IncreaseDecimalIcon,
   "home.number.decreaseDecimal": DecreaseDecimalIcon,
   "home.number.moreFormats": MoreFormatsIcon,
+  "home.number.moreFormats.formatCells": SettingsIcon,
+  "home.number.moreFormats.custom": PencilIcon,
+  "home.number.formatCells": SettingsIcon,
 
   // Styles
   "home.styles.conditionalFormatting": ConditionalFormattingIcon,

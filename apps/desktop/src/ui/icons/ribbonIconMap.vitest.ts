@@ -18,9 +18,11 @@ describe("ribbonIconMap", () => {
       "home.alignment.mergeCenter",
       "home.number.accounting",
       "home.number.percent",
+      "home.number.date",
       "home.number.comma",
       "home.number.increaseDecimal",
       "home.number.decreaseDecimal",
+      "home.number.formatCells",
       "home.editing.sortFilter",
       "home.editing.findSelect",
     ] as const;
@@ -30,4 +32,3 @@ describe("ribbonIconMap", () => {
     }
   });
 });
-
