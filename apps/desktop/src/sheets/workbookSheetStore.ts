@@ -264,6 +264,30 @@ export class WorkbookSheetStore {
     this.emit();
   }
 
+  /**
+   * Set a sheet's Excel visibility value.
+   *
+   * Unlike `hide()` / `unhide()`, this supports transitioning between "hidden" and "veryHidden"
+   * while still enforcing the "cannot hide the last visible sheet" invariant.
+   */
+  setVisibility(id: string, visibility: SheetVisibility): void {
+    const idx = this.sheets.findIndex((s) => s.id === id);
+    if (idx === -1) throw new Error("Sheet not found");
+    const sheet = this.sheets[idx]!;
+    if (sheet.visibility === visibility) return;
+
+    // Mirror Excel behavior: prevent hiding the last visible sheet.
+    if (sheet.visibility === "visible" && visibility !== "visible") {
+      const visibleCount = this.sheets.reduce((count, s) => count + (s.visibility === "visible" ? 1 : 0), 0);
+      if (visibleCount <= 1) throw new Error("Cannot hide the last visible sheet");
+    }
+
+    const next = this.sheets.slice();
+    next[idx] = { ...sheet, visibility };
+    this.sheets = next;
+    this.emit();
+  }
+
   setTabColor(id: string, color: TabColor | undefined): void {
     const idx = this.sheets.findIndex((s) => s.id === id);
     if (idx === -1) throw new Error("Sheet not found");

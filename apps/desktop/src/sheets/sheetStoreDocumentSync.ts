@@ -193,17 +193,15 @@ export function startSheetStoreDocumentSync(
             }
           }
 
-          // Visibility (treat veryHidden as hidden in the UI store for now).
-          const desiredVisibility = meta.visibility === "visible" ? "visible" : "hidden";
-          if (desiredVisibility === "visible" && storeMeta.visibility !== "visible") {
+          // Visibility.
+          const visibilityRaw = (meta as any)?.visibility;
+          const desiredVisibility =
+            visibilityRaw === "visible" || visibilityRaw === "hidden" || visibilityRaw === "veryHidden"
+              ? visibilityRaw
+              : "visible";
+          if (storeMeta.visibility !== desiredVisibility) {
             try {
-              store.unhide(sheetId);
-            } catch {
-              // ignore
-            }
-          } else if (desiredVisibility !== "visible" && storeMeta.visibility === "visible") {
-            try {
-              store.hide(sheetId);
+              store.setVisibility(sheetId, desiredVisibility);
             } catch {
               // ignore
             }

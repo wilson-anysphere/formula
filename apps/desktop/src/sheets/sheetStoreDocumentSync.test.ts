@@ -203,4 +203,37 @@ describe("sheetStoreDocumentSync", () => {
 
     handle.dispose();
   });
+
+  test("preserves veryHidden visibility from the doc on applyState", async () => {
+    const doc = new MockDoc();
+    doc.sheetIds = ["Sheet1", "Sheet2"];
+    doc.sheetMetaById = {
+      Sheet1: { name: "Sheet1", visibility: "veryHidden" },
+      Sheet2: { name: "Sheet2", visibility: "visible" },
+    };
+
+    const store = new WorkbookSheetStore([
+      { id: "Sheet1", name: "Sheet1", visibility: "visible" },
+      { id: "Sheet2", name: "Sheet2", visibility: "visible" },
+    ]);
+    let activeSheetId = "Sheet1";
+
+    const handle = startSheetStoreDocumentSync(
+      doc,
+      store,
+      () => activeSheetId,
+      (id) => {
+        activeSheetId = id;
+      },
+    );
+
+    await flushMicrotasks();
+
+    doc.emit("change", { source: "applyState" });
+    await flushMicrotasks();
+
+    expect(store.getById("Sheet1")?.visibility).toBe("veryHidden");
+
+    handle.dispose();
+  });
 });
