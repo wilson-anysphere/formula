@@ -1533,18 +1533,18 @@ export const defaultRibbonSchema: RibbonSchema = {
               menuItems: [
                 { id: "pageLayout.arrange.group.group", label: "Group", ariaLabel: "Group", iconId: "link" },
                 { id: "pageLayout.arrange.group.ungroup", label: "Ungroup", ariaLabel: "Ungroup", iconId: "close" },
-                { id: "pageLayout.arrange.group.regroup", label: "Regroup", ariaLabel: "Regroup", icon: "⟳" },
+                { id: "pageLayout.arrange.group.regroup", label: "Regroup", ariaLabel: "Regroup", iconId: "redo" },
               ],
             },
             {
               id: "pageLayout.arrange.rotate",
               label: "Rotate",
               ariaLabel: "Rotate",
-              icon: "↻",
+              iconId: "redo",
               kind: "dropdown",
               menuItems: [
-                { id: "pageLayout.arrange.rotate.rotateRight90", label: "Rotate Right 90°", ariaLabel: "Rotate Right 90 degrees", icon: "↻" },
-                { id: "pageLayout.arrange.rotate.rotateLeft90", label: "Rotate Left 90°", ariaLabel: "Rotate Left 90 degrees", icon: "↺" },
+                { id: "pageLayout.arrange.rotate.rotateRight90", label: "Rotate Right 90°", ariaLabel: "Rotate Right 90 degrees", iconId: "redo" },
+                { id: "pageLayout.arrange.rotate.rotateLeft90", label: "Rotate Left 90°", ariaLabel: "Rotate Left 90 degrees", iconId: "undo" },
                 { id: "pageLayout.arrange.rotate.flipVertical", label: "Flip Vertical", ariaLabel: "Flip Vertical", iconId: "arrowUpDown" },
                 { id: "pageLayout.arrange.rotate.flipHorizontal", label: "Flip Horizontal", ariaLabel: "Flip Horizontal", iconId: "arrowLeftRight" },
               ],
@@ -1615,8 +1615,8 @@ export const defaultRibbonSchema: RibbonSchema = {
           label: "Calculation",
           buttons: [
             { id: "formulas.calculation.calculationOptions", label: "Calculation Options", ariaLabel: "Calculation Options", iconId: "settings", kind: "dropdown", size: "large" },
-            { id: "formulas.calculation.calculateNow", label: "Calculate Now", ariaLabel: "Calculate Now", icon: "⟳", size: "small" },
-            { id: "formulas.calculation.calculateSheet", label: "Calculate Sheet", ariaLabel: "Calculate Sheet", icon: "⟲", size: "small" },
+            { id: "formulas.calculation.calculateNow", label: "Calculate Now", ariaLabel: "Calculate Now", iconId: "refresh", size: "small" },
+            { id: "formulas.calculation.calculateSheet", label: "Calculate Sheet", ariaLabel: "Calculate Sheet", iconId: "refresh", size: "small" },
           ],
         },
         {
@@ -1664,11 +1664,11 @@ export const defaultRibbonSchema: RibbonSchema = {
               id: "data.queriesConnections.refreshAll",
               label: "Refresh All",
               ariaLabel: "Refresh All",
-              icon: "⟳",
+              iconId: "refresh",
               kind: "dropdown",
               size: "large",
               menuItems: [
-                { id: "data.queriesConnections.refreshAll", label: "Refresh All", ariaLabel: "Refresh All", icon: "⟳" },
+                { id: "data.queriesConnections.refreshAll", label: "Refresh All", ariaLabel: "Refresh All", iconId: "refresh" },
                 { id: "data.queriesConnections.refreshAll.refresh", label: "Refresh", ariaLabel: "Refresh", iconId: "refresh" },
                 { id: "data.queriesConnections.refreshAll.refreshAllConnections", label: "Refresh All Connections", ariaLabel: "Refresh All Connections", iconId: "link" },
                 { id: "data.queriesConnections.refreshAll.refreshAllQueries", label: "Refresh All Queries", ariaLabel: "Refresh All Queries", iconId: "folderOpen" },
@@ -1698,7 +1698,7 @@ export const defaultRibbonSchema: RibbonSchema = {
             },
             { id: "data.sortFilter.filter", label: "Filter", ariaLabel: "Filter", icon: "⏷", kind: "toggle" },
             { id: "data.sortFilter.clear", label: "Clear", ariaLabel: "Clear", iconId: "close" },
-            { id: "data.sortFilter.reapply", label: "Reapply", ariaLabel: "Reapply", icon: "⟳" },
+            { id: "data.sortFilter.reapply", label: "Reapply", ariaLabel: "Reapply", iconId: "refresh" },
             {
               id: "data.sortFilter.advanced",
               label: "Advanced",
@@ -2242,7 +2242,7 @@ export const defaultRibbonSchema: RibbonSchema = {
             { id: "view.window.unhide", label: "Unhide", ariaLabel: "Unhide", iconId: "eye" },
             { id: "view.window.viewSideBySide", label: "View Side by Side", ariaLabel: "View Side by Side", icon: "⧉", kind: "toggle" },
             { id: "view.window.synchronousScrolling", label: "Synchronous Scrolling", ariaLabel: "Synchronous Scrolling", icon: "⇵", kind: "toggle" },
-            { id: "view.window.resetWindowPosition", label: "Reset Window Position", ariaLabel: "Reset Window Position", icon: "↺" },
+            { id: "view.window.resetWindowPosition", label: "Reset Window Position", ariaLabel: "Reset Window Position", iconId: "undo" },
             {
               id: "view.window.switchWindows",
               label: "Switch Windows",
