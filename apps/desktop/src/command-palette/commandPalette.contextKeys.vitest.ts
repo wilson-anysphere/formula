@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CommandRegistry } from "../extensions/commandRegistry.js";
 import { ContextKeyService } from "../extensions/contextKeys.js";
+import { KeybindingService } from "../extensions/keybindingService.js";
 import { createCommandPalette } from "./createCommandPalette.js";
 
 function createStorageMock(): Storage {
@@ -101,5 +102,66 @@ describe("createCommandPalette context keys", () => {
     controller.dispose();
     expect(contextKeys.get("workbench.commandPaletteOpen")).toBe(false);
   });
-});
 
+  it("marks the command palette overlay as a keybinding barrier (prevents global shortcuts while interacting with the palette)", async () => {
+    const commandRegistry = new CommandRegistry();
+    const run = vi.fn();
+    commandRegistry.registerBuiltinCommand("builtin.test", "Test", run);
+
+    const contextKeys = new ContextKeyService();
+    const keybindingService = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
+    keybindingService.setBuiltinKeybindings([{ command: "builtin.test", key: "f2" }]);
+
+    const controller = createCommandPalette({
+      commandRegistry,
+      contextKeys,
+      keybindingIndex: new Map([["builtin.test", ["F2"]]]),
+      ensureExtensionsLoaded: async () => {},
+      onCloseFocus: () => {},
+      extensionLoadDelayMs: 60_000,
+    });
+
+    controller.open();
+
+    const overlay = document.querySelector<HTMLElement>(".command-palette-overlay");
+    expect(overlay).toBeTruthy();
+    expect(overlay?.dataset.keybindingBarrier).toBe("true");
+
+    const list = document.querySelector<HTMLElement>('[data-testid="command-palette-list"]');
+    expect(list).toBeTruthy();
+
+    const makeKeydownEvent = (target: EventTarget | null): KeyboardEvent => {
+      const event: any = {
+        key: "F2",
+        code: "F2",
+        ctrlKey: false,
+        metaKey: false,
+        shiftKey: false,
+        altKey: false,
+        repeat: false,
+        target,
+        defaultPrevented: false,
+      };
+      event.preventDefault = () => {
+        event.defaultPrevented = true;
+      };
+      return event as KeyboardEvent;
+    };
+
+    // Inside the palette overlay, global keybindings should be ignored.
+    const insideEvent = makeKeydownEvent(list);
+    const insideHandled = await keybindingService.dispatchKeydown(insideEvent);
+    expect(insideHandled).toBe(false);
+    expect(insideEvent.defaultPrevented).toBe(false);
+    expect(run).toHaveBeenCalledTimes(0);
+
+    // Outside the palette overlay, the keybinding should fire.
+    const outsideEvent = makeKeydownEvent(document.body);
+    const outsideHandled = await keybindingService.dispatchKeydown(outsideEvent);
+    expect(outsideHandled).toBe(true);
+    expect(outsideEvent.defaultPrevented).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+
+    controller.dispose();
+  });
+});
