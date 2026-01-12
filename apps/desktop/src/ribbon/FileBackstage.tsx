@@ -227,7 +227,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
                 className="ribbon-backstage__item"
                 data-testid={item.testId}
                 aria-label={item.ariaLabel}
-                aria-keyshortcuts={item.ariaKeyShortcuts}
+                aria-keyshortcuts={item.ariaKeyShortcuts || undefined}
                 role="menuitem"
                 disabled={disabled}
                 onClick={() => {
