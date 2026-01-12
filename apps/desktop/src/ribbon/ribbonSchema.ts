@@ -454,8 +454,10 @@ export const defaultRibbonSchema: RibbonSchema = {
                 { id: "home.font.fillColor.noFill", label: "No Fill", ariaLabel: "No Fill", icon: "⬜" },
                 { id: "home.font.fillColor.lightGray", label: "Light Gray", ariaLabel: "Light Gray Fill", icon: "⬚" },
                 { id: "home.font.fillColor.yellow", label: "Yellow", ariaLabel: "Yellow Fill", icon: "🟨" },
+                { id: "home.font.fillColor.blue", label: "Blue", ariaLabel: "Blue Fill", icon: "🟦" },
                 { id: "home.font.fillColor.green", label: "Green", ariaLabel: "Green Fill", icon: "🟩" },
                 { id: "home.font.fillColor.red", label: "Red", ariaLabel: "Red Fill", icon: "🟥" },
+                { id: "home.font.fillColor.moreColors", label: "More Colors…", ariaLabel: "More Fill Colors", icon: "🎨" },
               ],
             },
             {
@@ -471,6 +473,7 @@ export const defaultRibbonSchema: RibbonSchema = {
                 { id: "home.font.fontColor.blue", label: "Blue", ariaLabel: "Blue Font Color", icon: "🟦" },
                 { id: "home.font.fontColor.red", label: "Red", ariaLabel: "Red Font Color", icon: "🟥" },
                 { id: "home.font.fontColor.green", label: "Green", ariaLabel: "Green Font Color", icon: "🟩" },
+                { id: "home.font.fontColor.moreColors", label: "More Colors…", ariaLabel: "More Font Colors", icon: "🎨" },
               ],
             },
             {

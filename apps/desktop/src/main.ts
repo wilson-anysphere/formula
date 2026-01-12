@@ -4282,6 +4282,10 @@ mountRibbon(ribbonRoot, {
     const fillColorPrefix = "home.font.fillColor.";
     if (commandId.startsWith(fillColorPrefix)) {
       const preset = commandId.slice(fillColorPrefix.length);
+      if (preset === "moreColors") {
+        openColorPicker(fillColorPicker, "Fill color", (sheetId, ranges, argb) => setFillColor(doc, sheetId, ranges, argb));
+        return;
+      }
       const argb = (() => {
         switch (preset) {
           case "lightGray":
@@ -4317,6 +4321,10 @@ mountRibbon(ribbonRoot, {
     const fontColorPrefix = "home.font.fontColor.";
     if (commandId.startsWith(fontColorPrefix)) {
       const preset = commandId.slice(fontColorPrefix.length);
+      if (preset === "moreColors") {
+        openColorPicker(fontColorPicker, "Font color", (sheetId, ranges, argb) => setFontColor(doc, sheetId, ranges, argb));
+        return;
+      }
       const argb = (() => {
         switch (preset) {
           case "black":
