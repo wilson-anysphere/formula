@@ -162,6 +162,10 @@ fn project_normalized_data_project_properties_accepts_lfcr_newlines() {
 
     // `ProjectNormalizedData` should be insensitive to NWLN being encoded as LFCR instead of CRLF.
     // In particular, the designer storage bytes referenced by `BaseClass=` must still be appended.
+
+    // MS-OVBA §2.4.2.6 appends `NormalizeDesignerStorage` output before appending the BaseClass
+    // property name/value tokens. Our implementation models this by emitting the designer storage
+    // bytes (`FormsNormalizedData`) before the PROJECT stream property tokens.
     let mut expected_designer_storage = Vec::new();
     expected_designer_storage.extend_from_slice(b"DESIGNER");
     expected_designer_storage.extend(std::iter::repeat(0u8).take(1023 - b"DESIGNER".len()));

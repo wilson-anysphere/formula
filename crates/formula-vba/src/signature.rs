@@ -474,49 +474,141 @@ pub fn verify_vba_digital_signature_bound(
                 }
             }
 
-            _ => {
-                // MS-OSHARED §4.3: for legacy signature streams, Office stores the VBA signature
-                // binding digest bytes as MD5 (16 bytes) even when
-                // `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256.
-                // https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
-                if let Ok(content_normalized) = content_normalized_data(vba_project_bin) {
-                    let content_hash: [u8; 16] = Md5::digest(&content_normalized).into();
+            VbaSignatureStreamKind::DigitalSignature => {
+                // ContentsHashV1 (legacy): MD5(ContentNormalizedData).
+                let Ok(content_normalized) = content_normalized_data(vba_project_bin) else {
+                    return Ok(Some(VbaDigitalSignatureBound {
+                        signature,
+                        binding: VbaProjectBindingVerification::BoundUnknown(debug),
+                    }));
+                };
+                let content_hash: [u8; 16] = Md5::digest(&content_normalized).into();
+                debug.computed_digest = Some(content_hash.to_vec());
 
-                    // Best-effort: only compute Agile hash when FormsNormalizedData can be derived.
-                    let agile_hash: Option<[u8; 16]> =
-                        forms_normalized_data(vba_project_bin).ok().map(|forms| {
-                            let mut h = Md5::new();
-                            h.update(&content_normalized);
-                            h.update(&forms);
-                            h.finalize().into()
-                        });
-
-                    // For debug output, pick the digest we actually matched (if any).
-                    let computed_for_debug = if signed.digest.as_slice() == content_hash {
-                        content_hash.to_vec()
-                    } else if let Some(h) = agile_hash {
-                        if signed.digest.as_slice() == h {
-                            h.to_vec()
-                        } else {
-                            content_hash.to_vec()
-                        }
+                if signature.verification == VbaSignatureVerification::SignedVerified {
+                    let binding = if signed.digest.as_slice() == content_hash.as_slice() {
+                        VbaProjectBindingVerification::BoundVerified(debug)
                     } else {
-                        content_hash.to_vec()
+                        VbaProjectBindingVerification::BoundMismatch(debug)
                     };
-                    debug.computed_digest = Some(computed_for_debug);
+                    return Ok(Some(VbaDigitalSignatureBound { signature, binding }));
+                }
+            }
 
-                    if signature.verification == VbaSignatureVerification::SignedVerified {
-                        let binding = if signed.digest.as_slice() == content_hash
-                            || matches!(agile_hash, Some(h) if signed.digest.as_slice() == h)
-                        {
-                            VbaProjectBindingVerification::BoundVerified(debug)
-                        } else if agile_hash.is_some() {
-                            VbaProjectBindingVerification::BoundMismatch(debug)
-                        } else {
-                            VbaProjectBindingVerification::BoundUnknown(debug)
-                        };
-                        return Ok(Some(VbaDigitalSignatureBound { signature, binding }));
+            VbaSignatureStreamKind::DigitalSignatureEx => {
+                // ContentsHashV2 (Agile): MD5(ContentNormalizedData || FormsNormalizedData).
+                let Ok(content_normalized) = content_normalized_data(vba_project_bin) else {
+                    return Ok(Some(VbaDigitalSignatureBound {
+                        signature,
+                        binding: VbaProjectBindingVerification::BoundUnknown(debug),
+                    }));
+                };
+                let content_hash: [u8; 16] = Md5::digest(&content_normalized).into();
+
+                let Ok(forms) = forms_normalized_data(vba_project_bin) else {
+                    // We can't compute the Agile hash. Still surface the legacy ContentHash as a
+                    // best-effort debug value.
+                    debug.computed_digest = Some(content_hash.to_vec());
+                    return Ok(Some(VbaDigitalSignatureBound {
+                        signature,
+                        binding: VbaProjectBindingVerification::BoundUnknown(debug),
+                    }));
+                };
+
+                let mut h = Md5::new();
+                h.update(&content_normalized);
+                h.update(&forms);
+                let agile_hash: [u8; 16] = h.finalize().into();
+                debug.computed_digest = Some(agile_hash.to_vec());
+
+                if signature.verification == VbaSignatureVerification::SignedVerified {
+                    let binding = if signed.digest.as_slice() == agile_hash.as_slice() {
+                        VbaProjectBindingVerification::BoundVerified(debug)
+                    } else {
+                        VbaProjectBindingVerification::BoundMismatch(debug)
+                    };
+                    return Ok(Some(VbaDigitalSignatureBound { signature, binding }));
+                }
+            }
+
+            VbaSignatureStreamKind::Unknown => {
+                // Unknown stream variant: conservative fallback.
+                //
+                // Only treat the signature as bound if exactly one supported Contents Hash version
+                // matches the signed digest.
+                let signed_digest = signed.digest.as_slice();
+                let mut match_count = 0usize;
+                let mut missing_candidate = false;
+                let mut first_computed: Option<Vec<u8>> = None;
+                let mut matching_digest: Option<Vec<u8>> = None;
+
+                let want_md5 = signed_digest.len() == 16;
+                let mut content_normalized: Option<Vec<u8>> = None;
+                if want_md5 {
+                    match content_normalized_data(vba_project_bin) {
+                        Ok(v) => content_normalized = Some(v),
+                        Err(_) => missing_candidate = true,
                     }
+                }
+
+                if want_md5 {
+                    if let Some(content_normalized) = content_normalized.as_deref() {
+                        let content_hash: [u8; 16] = Md5::digest(content_normalized).into();
+                        let content_hash_vec = content_hash.to_vec();
+                        if first_computed.is_none() {
+                            first_computed = Some(content_hash_vec.clone());
+                        }
+                        if signed_digest == content_hash.as_slice() {
+                            match_count += 1;
+                            matching_digest = Some(content_hash_vec.clone());
+                        }
+
+                        match forms_normalized_data(vba_project_bin) {
+                            Ok(forms) => {
+                                let mut h = Md5::new();
+                                h.update(content_normalized);
+                                h.update(&forms);
+                                let agile_hash: [u8; 16] = h.finalize().into();
+                                let agile_vec = agile_hash.to_vec();
+                                if first_computed.is_none() {
+                                    first_computed = Some(agile_vec.clone());
+                                }
+                                if signed_digest == agile_hash.as_slice() {
+                                    match_count += 1;
+                                    matching_digest = Some(agile_vec);
+                                }
+                            }
+                            Err(_) => missing_candidate = true,
+                        }
+                    }
+                }
+
+                // ContentsHashV3 is SHA-256 (32 bytes).
+                if signed_digest.len() == 32 {
+                    match crate::contents_hash_v3(vba_project_bin) {
+                        Ok(v3) => {
+                            if first_computed.is_none() {
+                                first_computed = Some(v3.clone());
+                            }
+                            if signed_digest == v3.as_slice() {
+                                match_count += 1;
+                                matching_digest = Some(v3);
+                            }
+                        }
+                        Err(_) => missing_candidate = true,
+                    }
+                }
+
+                debug.computed_digest = matching_digest.or(first_computed);
+
+                if signature.verification == VbaSignatureVerification::SignedVerified
+                    && match_count == 1
+                    && !missing_candidate
+                {
+                    return Ok(Some(VbaDigitalSignatureBound {
+                        signature,
+                        binding: VbaProjectBindingVerification::BoundVerified(debug),
+                    }));
                 }
             }
         }
@@ -725,16 +817,21 @@ pub fn verify_vba_digital_signature_with_trust(
 /// Verify whether a VBA signature blob is bound to the given `vbaProject.bin` payload via the
 /// MS-OVBA "Contents Hash" mechanism.
 ///
-/// Notes:
-/// - For legacy `\x05DigitalSignature` / `\x05DigitalSignatureEx`, Office stores a **16-byte MD5**
-///   binding digest even when `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256
-///   (MS-OSHARED §4.3).
-/// - For `\x05DigitalSignatureExt`, binding is against MS-OVBA v3 `ContentsHashV3`
-///   (`SHA-256(ProjectNormalizedData)`).
+/// Excel associates each `\x05DigitalSignature*` stream name with a specific MS-OVBA
+/// contents-hash transcript:
+/// - `\x05DigitalSignature`    → ContentsHashV1 (MD5 over `ContentNormalizedData`)
+/// - `\x05DigitalSignatureEx`  → ContentsHashV2 (Agile Content Hash; MD5 over
+///                               `ContentNormalizedData || FormsNormalizedData`)
+/// - `\x05DigitalSignatureExt` → ContentsHashV3 (SHA-256 over v3 `ProjectNormalizedData`)
 ///
-/// This is a best-effort helper: it returns [`VbaSignatureBinding::Unknown`] when the signature does
-/// not contain a supported digest structure, uses an unsupported hash algorithm, or the binding
-/// digest cannot be computed.
+/// When the stream path is unknown or ambiguous, this uses a conservative fallback: it computes
+/// every supported contents-hash version that could plausibly match the signed digest length and
+/// returns [`VbaSignatureBinding::Bound`] only if **exactly one** version matches. Otherwise it
+/// returns [`VbaSignatureBinding::Unknown`].
+///
+/// This is a best-effort helper: it returns [`VbaSignatureBinding::Unknown`] when the signature
+/// does not contain a supported digest structure, uses an unsupported hash algorithm, or the
+/// binding digest cannot be computed.
 pub fn verify_vba_signature_binding_with_stream_path(
     vba_project_bin: &[u8],
     signature_stream_path: &str,
@@ -755,52 +852,103 @@ pub fn verify_vba_signature_binding_with_stream_path(
 
         let signed_digest = signed.digest.as_slice();
 
-        if matches!(
-            signature_path_stream_kind(signature_stream_path),
-            Some(VbaSignatureStreamKind::DigitalSignatureExt)
-        ) {
-            // V3 (`\x05DigitalSignatureExt`) binds against MS-OVBA `ContentsHashV3` (SHA-256) over
-            // v3 `ProjectNormalizedData`. The on-disk DigestInfo algorithm OID is not authoritative
-            // for binding (some producers emit inconsistent OIDs).
-            let computed = match crate::contents_hash_v3(vba_project_bin) {
-                Ok(v) => v,
-                Err(_) => return VbaSignatureBinding::Unknown,
-            };
-            return if signed_digest == computed.as_slice() {
-                VbaSignatureBinding::Bound
-            } else {
-                VbaSignatureBinding::NotBound
-            };
-        }
+        let stream_kind = signature_path_known_variant(signature_stream_path);
 
-        // Legacy/v2 binding: ContentHash (v1) or AgileContentHash (v2).
-        //
-        // MS-OSHARED §4.3: for legacy VBA signatures, Office stores an MD5 digest in
-        // `DigestInfo.digest` even when `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256.
-        let content_normalized = match content_normalized_data(vba_project_bin) {
-            Ok(v) => v,
-            Err(_) => return VbaSignatureBinding::Unknown,
-        };
-
-        let content_hash_md5: [u8; 16] = Md5::digest(&content_normalized).into();
-        if signed_digest == content_hash_md5 {
-            return VbaSignatureBinding::Bound;
-        }
-
-        // Agile Content Hash (MS-OVBA §2.4.2.4) incorporates designer storages.
-        let agile_hash_md5: Option<[u8; 16]> = forms_normalized_data(vba_project_bin)
-            .ok()
-            .map(|forms_normalized| {
+        match stream_kind {
+            Some(VbaSignatureStreamKind::DigitalSignature) => {
+                let Ok(content_normalized) = content_normalized_data(vba_project_bin) else {
+                    return VbaSignatureBinding::Unknown;
+                };
+                let content_hash_md5: [u8; 16] = Md5::digest(&content_normalized).into();
+                if signed_digest == content_hash_md5.as_slice() {
+                    VbaSignatureBinding::Bound
+                } else {
+                    VbaSignatureBinding::NotBound
+                }
+            }
+            Some(VbaSignatureStreamKind::DigitalSignatureEx) => {
+                let Ok(content_normalized) = content_normalized_data(vba_project_bin) else {
+                    return VbaSignatureBinding::Unknown;
+                };
+                let Ok(forms_normalized) = forms_normalized_data(vba_project_bin) else {
+                    return VbaSignatureBinding::Unknown;
+                };
                 let mut h = Md5::new();
                 h.update(&content_normalized);
                 h.update(&forms_normalized);
-                h.finalize().into()
-            });
+                let agile_hash_md5: [u8; 16] = h.finalize().into();
+                if signed_digest == agile_hash_md5.as_slice() {
+                    VbaSignatureBinding::Bound
+                } else {
+                    VbaSignatureBinding::NotBound
+                }
+            }
+            Some(VbaSignatureStreamKind::DigitalSignatureExt) => {
+                let Ok(computed) = crate::contents_hash_v3(vba_project_bin) else {
+                    return VbaSignatureBinding::Unknown;
+                };
+                if signed_digest == computed.as_slice() {
+                    VbaSignatureBinding::Bound
+                } else {
+                    VbaSignatureBinding::NotBound
+                }
+            }
+            Some(VbaSignatureStreamKind::Unknown) | None => {
+                let mut match_count = 0usize;
+                let mut missing_candidate = false;
 
-        match agile_hash_md5 {
-            Some(h) if signed_digest == h => VbaSignatureBinding::Bound,
-            Some(_) => VbaSignatureBinding::NotBound,
-            None => VbaSignatureBinding::Unknown,
+                // ContentsHashV1 / ContentsHashV2 are MD5 (16 bytes).
+                if signed_digest.len() == 16 {
+                    let content_normalized = match content_normalized_data(vba_project_bin) {
+                        Ok(v) => Some(v),
+                        Err(_) => {
+                            // Both v1 and v2 are plausible candidates for a 16-byte digest.
+                            missing_candidate = true;
+                            None
+                        }
+                    };
+
+                    if let Some(content_normalized) = content_normalized.as_deref() {
+                        let content_hash_md5: [u8; 16] = Md5::digest(content_normalized).into();
+                        if signed_digest == content_hash_md5.as_slice() {
+                            match_count += 1;
+                        }
+
+                        match forms_normalized_data(vba_project_bin) {
+                            Ok(forms_normalized) => {
+                                let mut h = Md5::new();
+                                h.update(content_normalized);
+                                h.update(&forms_normalized);
+                                let agile_hash_md5: [u8; 16] = h.finalize().into();
+                                if signed_digest == agile_hash_md5.as_slice() {
+                                    match_count += 1;
+                                }
+                            }
+                            Err(_) => {
+                                missing_candidate = true;
+                            }
+                        }
+                    }
+                }
+
+                // ContentsHashV3 is SHA-256 (32 bytes).
+                if signed_digest.len() == 32 {
+                    match crate::contents_hash_v3(vba_project_bin) {
+                        Ok(computed) => {
+                            if signed_digest == computed.as_slice() {
+                                match_count += 1;
+                            }
+                        }
+                        Err(_) => missing_candidate = true,
+                    }
+                }
+
+                if match_count == 1 && !missing_candidate {
+                    VbaSignatureBinding::Bound
+                } else {
+                    VbaSignatureBinding::Unknown
+                }
+            }
         }
     }
 }
@@ -819,45 +967,7 @@ pub fn verify_vba_signature_binding(
     vba_project_bin: &[u8],
     signature: &[u8],
 ) -> VbaSignatureBinding {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = (vba_project_bin, signature);
-        return VbaSignatureBinding::Unknown;
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        // When callers don't know which `\x05DigitalSignature*` stream a signature blob came from
-        // (e.g. `xl/vbaProjectSignature.bin` stored as raw PKCS#7/CMS bytes), we can't reliably know
-        // whether to apply legacy (Content/Agile) or v3 (`DigitalSignatureExt`) binding rules.
-        //
-        // Best-effort: try v3 binding first (ContentsHashV3), then fall back to the legacy
-        // Content/Agile Content Hash checks.
-        let signed = match extract_vba_signature_signed_digest(signature) {
-            Ok(Some(v)) => v,
-            _ => return VbaSignatureBinding::Unknown,
-        };
-
-        let signed_digest = signed.digest.as_slice();
-
-        let v3 = crate::contents_hash_v3(vba_project_bin).ok();
-        if let Some(ref computed) = v3 {
-            if signed_digest == computed.as_slice() {
-                return VbaSignatureBinding::Bound;
-            }
-        }
-
-        let legacy = verify_vba_signature_binding_with_stream_path(vba_project_bin, "", signature);
-        if legacy == VbaSignatureBinding::Bound {
-            return legacy;
-        }
-
-        if v3.is_none() {
-            return VbaSignatureBinding::Unknown;
-        }
-
-        legacy
-    }
+    verify_vba_signature_binding_with_stream_path(vba_project_bin, "", signature)
 }
 
 /// Evaluate whether the signing certificate embedded in a PKCS#7/CMS VBA signature blob chains to
@@ -926,6 +1036,33 @@ fn signature_component_stream_kind(component: &str) -> Option<VbaSignatureStream
         _ if trimmed.starts_with("DigitalSignature") => Some(VbaSignatureStreamKind::Unknown),
         _ => None,
     }
+}
+
+/// Determine the `DigitalSignature*` variant from an OLE stream path for purposes of selecting
+/// the MS-OVBA contents-hash version.
+///
+/// This is intentionally stricter than [`signature_path_stream_kind`]:
+/// - Only exact, known variant names map to a contents-hash version.
+/// - If the path contains multiple distinct known variants, we treat it as ambiguous and return
+///   `None` (callers should fall back to a conservative "try all versions" strategy).
+fn signature_path_known_variant(path: &str) -> Option<VbaSignatureStreamKind> {
+    let mut found: Option<VbaSignatureStreamKind> = None;
+    for component in path.split(|c| c == '/' || c == ':') {
+        let trimmed = component.trim_start_matches(|c: char| c <= '\u{001F}');
+        let kind = match trimmed {
+            "DigitalSignatureExt" => VbaSignatureStreamKind::DigitalSignatureExt,
+            "DigitalSignatureEx" => VbaSignatureStreamKind::DigitalSignatureEx,
+            "DigitalSignature" => VbaSignatureStreamKind::DigitalSignature,
+            _ => continue,
+        };
+        if let Some(prev) = found {
+            if prev != kind {
+                return None;
+            }
+        }
+        found = Some(kind);
+    }
+    found
 }
 
 fn signature_path_stream_kind(path: &str) -> Option<VbaSignatureStreamKind> {
@@ -1415,15 +1552,22 @@ pub fn verify_vba_project_signature_binding(
     let payloads = signature_payload_candidates(signature_bytes);
 
     let mut any_signed_digest = None::<VbaProjectDigestDebugInfo>;
-    let mut first_mismatch = None::<VbaProjectDigestDebugInfo>;
-    let mut first_unknown = None::<VbaProjectDigestDebugInfo>;
-    // Lazily computed MS-OVBA Content/Agile hashes for the project bytes.
-    let mut content_hash_md5: Option<[u8; 16]> = None;
+    // First comparison attempt (may be ambiguous/unknown).
+    let mut first_any_comparison = None::<VbaProjectDigestDebugInfo>;
+    // First *definite* mismatch (stream kind is known and we could compute the expected digest).
+    let mut first_definite_mismatch = None::<VbaProjectDigestDebugInfo>;
+
+    // Lazily computed MS-OVBA v1/v2 digests for the project bytes.
+    //
     // Outer Option = attempted; inner Option = computed successfully.
+    let mut content_hash_md5: Option<Option<[u8; 16]>> = None;
+    let mut content_normalized: Option<Vec<u8>> = None;
     let mut agile_hash_md5: Option<Option<[u8; 16]>> = None;
-    // Lazily computed MS-OVBA v3 binding digest (`ContentsHashV3`, SHA-256) for `\x05DigitalSignatureExt`.
+
+    // Lazily computed MS-OVBA v3 digest (ContentsHashV3, SHA-256).
     // Outer Option = attempted; inner Option = computed successfully.
-    let mut v3_digest: Option<Option<Vec<u8>>> = None;
+    let mut contents_hash_v3: Option<Option<Vec<u8>>> = None;
+
     for payload in payloads {
         let signed = match extract_vba_signature_signed_digest(&payload.bytes) {
             Ok(Some(signed)) => signed,
@@ -1444,121 +1588,215 @@ pub fn verify_vba_project_signature_binding(
 
         let signed_digest = signed.digest.as_slice();
 
-        // Determine which binding rules apply based on the signature stream kind (when known).
-        //
-        // When the signature bytes come from an OLE container (e.g. `xl/vbaProjectSignature.bin`),
-        // we can usually detect the `DigitalSignature*` variant from the stream path and apply the
-        // correct MS-OVBA digest:
-        // - `DigitalSignature` / `DigitalSignatureEx`: legacy Content/Agile Content Hash (MD5)
-        // - `DigitalSignatureExt`: v3 binding digest (`ContentsHashV3`; SHA-256)
-        //
-        // When the signature bytes are provided as a raw PKCS#7/CMS blob, the original stream name
-        // is unknown; in that case we try both legacy and v3 binding digests.
-        let try_v3 = matches!(
-            payload.stream_kind,
-            Some(VbaSignatureStreamKind::DigitalSignatureExt)
-                | Some(VbaSignatureStreamKind::Unknown)
-                | None
-        );
-        let try_legacy =
-            !matches!(payload.stream_kind, Some(VbaSignatureStreamKind::DigitalSignatureExt));
+        // Helper to record debug info for later if we don't find a bound signature.
+        let mut record_any = |debug: &VbaProjectDigestDebugInfo| {
+            if first_any_comparison.is_none() {
+                first_any_comparison = Some(debug.clone());
+            }
+        };
+        let mut record_definite_mismatch = |debug: &VbaProjectDigestDebugInfo| {
+            record_any(debug);
+            if first_definite_mismatch.is_none() {
+                first_definite_mismatch = Some(debug.clone());
+            }
+        };
 
-        // Track whether we were able to compute all digests relevant to this payload; if not, a
-        // mismatch is treated as `BoundUnknown` rather than `BoundMismatch`.
-        let mut can_decide_mismatch = true;
+        match payload.stream_kind {
+            Some(VbaSignatureStreamKind::DigitalSignatureExt) => {
+                if contents_hash_v3.is_none() {
+                    contents_hash_v3 = Some(crate::contents_hash_v3(project_ole).ok());
+                }
+                let Some(computed) = contents_hash_v3.as_ref().and_then(|v| v.as_ref()) else {
+                    record_any(&debug);
+                    continue;
+                };
 
-        // ---- V3 binding (`DigitalSignatureExt`) ----
-        if try_v3 {
-            if v3_digest.is_none() {
-                v3_digest = Some(crate::contents_hash_v3(project_ole).ok());
+                debug.computed_digest = Some(computed.clone());
+
+                if signed_digest == computed.as_slice() {
+                    return Ok(VbaProjectBindingVerification::BoundVerified(debug));
+                }
+                record_definite_mismatch(&debug);
             }
 
-            match v3_digest.as_ref().and_then(|v| v.as_ref()) {
-                Some(computed) => {
-                    if signed_digest == computed.as_slice() {
-                        debug.computed_digest = Some(computed.clone());
-                        return Ok(VbaProjectBindingVerification::BoundVerified(debug));
-                    }
-                    // For explicit `DigitalSignatureExt` payloads, surface the v3 digest even on
-                    // mismatch.
-                    if matches!(
-                        payload.stream_kind,
-                        Some(VbaSignatureStreamKind::DigitalSignatureExt)
-                    ) {
-                        debug.computed_digest = Some(computed.clone());
+            Some(VbaSignatureStreamKind::DigitalSignature) => {
+                // ContentsHashV1: MD5(ContentNormalizedData).
+                if content_hash_md5.is_none() {
+                    match content_normalized_data(project_ole) {
+                        Ok(v) => {
+                            let hash: [u8; 16] = Md5::digest(&v).into();
+                            content_normalized = Some(v);
+                            content_hash_md5 = Some(Some(hash));
+                        }
+                        Err(_) => {
+                            content_hash_md5 = Some(None);
+                        }
                     }
                 }
-                None => {
-                    can_decide_mismatch = false;
-                }
-            }
-        }
 
-        // ---- Legacy binding (`DigitalSignature` / `DigitalSignatureEx`) ----
-        if try_legacy {
-            // MS-OSHARED §4.3: for legacy VBA signatures, Office stores an MD5 digest in
-            // `DigestInfo.digest` even when `DigestInfo.algorithm` indicates SHA-256.
-            if content_hash_md5.is_none() {
-                match content_normalized_data(project_ole) {
-                    Ok(content_normalized) => {
-                        content_hash_md5 = Some(Md5::digest(&content_normalized).into());
-                        // Agile Content Hash (MS-OVBA §2.4.2.4) incorporates designer storages. Only
-                        // compute it when `FormsNormalizedData` is available.
+                let Some(Some(content_hash_md5)) = content_hash_md5 else {
+                    record_any(&debug);
+                    continue;
+                };
+
+                debug.computed_digest = Some(content_hash_md5.to_vec());
+
+                if signed_digest == content_hash_md5.as_slice() {
+                    return Ok(VbaProjectBindingVerification::BoundVerified(debug));
+                }
+                record_definite_mismatch(&debug);
+            }
+
+            Some(VbaSignatureStreamKind::DigitalSignatureEx) => {
+                // ContentsHashV2 (Agile): MD5(ContentNormalizedData || FormsNormalizedData).
+                if content_hash_md5.is_none() {
+                    match content_normalized_data(project_ole) {
+                        Ok(v) => {
+                            let hash: [u8; 16] = Md5::digest(&v).into();
+                            content_normalized = Some(v);
+                            content_hash_md5 = Some(Some(hash));
+                        }
+                        Err(_) => {
+                            content_hash_md5 = Some(None);
+                        }
+                    }
+                }
+
+                // Surface ContentHashV1 as a best-effort debug prefix even though we need the Agile
+                // hash for actual comparison.
+                if let Some(Some(content_hash_md5)) = content_hash_md5 {
+                    debug.computed_digest = Some(content_hash_md5.to_vec());
+                }
+
+                if agile_hash_md5.is_none() {
+                    if let Some(content_normalized) = content_normalized.as_deref() {
                         agile_hash_md5 = Some(forms_normalized_data(project_ole).ok().map(|forms| {
                             let mut h = Md5::new();
-                            h.update(&content_normalized);
+                            h.update(content_normalized);
                             h.update(&forms);
                             h.finalize().into()
                         }));
+                    } else {
+                        agile_hash_md5 = Some(None);
                     }
-                    Err(_) => {
-                        can_decide_mismatch = false;
+                }
+
+                match agile_hash_md5 {
+                    Some(Some(agile)) => {
+                        debug.computed_digest = Some(agile.to_vec());
+                        if signed_digest == agile.as_slice() {
+                            return Ok(VbaProjectBindingVerification::BoundVerified(debug));
+                        }
+                        record_definite_mismatch(&debug);
+                    }
+                    _ => {
+                        // Can't compute FormsNormalizedData; treat as unknown.
+                        record_any(&debug);
                     }
                 }
             }
 
-            if let Some(content_hash_md5) = content_hash_md5 {
-                if signed_digest == content_hash_md5 {
-                    debug.computed_digest = Some(content_hash_md5.to_vec());
+            Some(VbaSignatureStreamKind::Unknown) | None => {
+                // Unknown stream kind: conservative fallback.
+                //
+                // Only treat the signature as bound when **exactly one** supported contents hash
+                // version matches the signed digest, and we were able to compute every plausible
+                // candidate.
+                let mut match_count = 0usize;
+                let mut missing_candidate = false;
+                let mut first_computed: Option<Vec<u8>> = None;
+                let mut matching_digest: Option<Vec<u8>> = None;
+
+                if signed_digest.len() == 16 {
+                    if content_hash_md5.is_none() {
+                        match content_normalized_data(project_ole) {
+                            Ok(v) => {
+                                let hash: [u8; 16] = Md5::digest(&v).into();
+                                content_normalized = Some(v);
+                                content_hash_md5 = Some(Some(hash));
+                            }
+                            Err(_) => {
+                                content_hash_md5 = Some(None);
+                            }
+                        }
+                    }
+
+                    match content_hash_md5 {
+                        Some(Some(content)) => {
+                            let v = content.to_vec();
+                            if first_computed.is_none() {
+                                first_computed = Some(v.clone());
+                            }
+                            if signed_digest == content.as_slice() {
+                                match_count += 1;
+                                matching_digest = Some(v);
+                            }
+                        }
+                        _ => missing_candidate = true,
+                    }
+
+                    if agile_hash_md5.is_none() {
+                        if let Some(content_normalized) = content_normalized.as_deref() {
+                            agile_hash_md5 = Some(forms_normalized_data(project_ole).ok().map(|forms| {
+                                let mut h = Md5::new();
+                                h.update(content_normalized);
+                                h.update(&forms);
+                                h.finalize().into()
+                            }));
+                        } else {
+                            agile_hash_md5 = Some(None);
+                        }
+                    }
+
+                    match agile_hash_md5 {
+                        Some(Some(agile)) => {
+                            let v = agile.to_vec();
+                            if first_computed.is_none() {
+                                first_computed = Some(v.clone());
+                            }
+                            if signed_digest == agile.as_slice() {
+                                match_count += 1;
+                                matching_digest = Some(v);
+                            }
+                        }
+                        _ => missing_candidate = true,
+                    }
+                }
+
+                if signed_digest.len() == 32 {
+                    if contents_hash_v3.is_none() {
+                        contents_hash_v3 = Some(crate::contents_hash_v3(project_ole).ok());
+                    }
+
+                    match contents_hash_v3.as_ref().and_then(|v| v.as_ref()) {
+                        Some(v3) => {
+                            if first_computed.is_none() {
+                                first_computed = Some(v3.clone());
+                            }
+                            if signed_digest == v3.as_slice() {
+                                match_count += 1;
+                                matching_digest = Some(v3.clone());
+                            }
+                        }
+                        None => missing_candidate = true,
+                    }
+                }
+
+                debug.computed_digest = matching_digest.or(first_computed);
+
+                if match_count == 1 && !missing_candidate {
                     return Ok(VbaProjectBindingVerification::BoundVerified(debug));
                 }
 
-                let agile_hash_md5 = agile_hash_md5.unwrap_or(None);
-                match agile_hash_md5 {
-                    Some(h) => {
-                        if signed_digest == h {
-                            debug.computed_digest = Some(h.to_vec());
-                            return Ok(VbaProjectBindingVerification::BoundVerified(debug));
-                        }
-                    }
-                    None => {
-                        can_decide_mismatch = false;
-                    }
-                }
-
-                // If we haven't already populated a v3 digest for debug output, surface the legacy
-                // content hash.
-                if debug.computed_digest.is_none() {
-                    debug.computed_digest = Some(content_hash_md5.to_vec());
-                }
-            } else {
-                can_decide_mismatch = false;
+                record_any(&debug);
             }
-        }
-
-        if can_decide_mismatch {
-            if first_mismatch.is_none() {
-                first_mismatch = Some(debug.clone());
-            }
-        } else if first_unknown.is_none() {
-            first_unknown = Some(debug.clone());
         }
     }
 
-    if let Some(debug) = first_mismatch {
+    if let Some(debug) = first_definite_mismatch {
         return Ok(VbaProjectBindingVerification::BoundMismatch(debug));
     }
-    if let Some(debug) = first_unknown {
+    if let Some(debug) = first_any_comparison {
         return Ok(VbaProjectBindingVerification::BoundUnknown(debug));
     }
 
@@ -1566,6 +1804,7 @@ pub fn verify_vba_project_signature_binding(
         any_signed_digest.unwrap_or_default(),
     ))
 }
+
 
 
 #[derive(Debug, Clone)]

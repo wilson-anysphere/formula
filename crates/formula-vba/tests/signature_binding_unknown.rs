@@ -17,7 +17,10 @@ fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
     out.extend_from_slice(data);
 }
 
-fn build_project_with_missing_designer_storage(signature_blob: Option<&[u8]>) -> Vec<u8> {
+fn build_project_with_missing_designer_storage(
+    signature_stream_path: &str,
+    signature_blob: Option<&[u8]>,
+) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
 
@@ -90,7 +93,7 @@ fn build_project_with_missing_designer_storage(signature_blob: Option<&[u8]>) ->
 
     if let Some(sig) = signature_blob {
         let mut s = ole
-            .create_stream("\u{0005}DigitalSignature")
+            .create_stream(signature_stream_path)
             .expect("signature stream");
         s.write_all(sig).expect("write signature");
     }
@@ -172,7 +175,7 @@ fn make_signature_stream_detached(digest: &[u8]) -> Vec<u8> {
 #[test]
 fn binding_is_unknown_when_forms_normalized_data_is_unavailable() {
     // FormsNormalizedData should error due to the missing root designer storage.
-    let unsigned = build_project_with_missing_designer_storage(None);
+    let unsigned = build_project_with_missing_designer_storage("\u{0005}DigitalSignatureEx", None);
     assert!(
         forms_normalized_data(&unsigned).is_err(),
         "expected FormsNormalizedData computation to fail for a missing designer storage"
@@ -186,7 +189,8 @@ fn binding_is_unknown_when_forms_normalized_data_is_unavailable() {
     wrong_digest[0] ^= 0xFF;
 
     let sig_stream = make_signature_stream_detached(&wrong_digest);
-    let signed = build_project_with_missing_designer_storage(Some(&sig_stream));
+    let signed =
+        build_project_with_missing_designer_storage("\u{0005}DigitalSignatureEx", Some(&sig_stream));
 
     let sig = verify_vba_digital_signature(&signed)
         .expect("signature inspection should succeed")
@@ -227,7 +231,7 @@ fn binding_is_unknown_when_forms_normalized_data_is_unavailable() {
 
 #[test]
 fn binding_is_bound_when_content_hash_matches_even_if_forms_normalized_data_is_unavailable() {
-    let unsigned = build_project_with_missing_designer_storage(None);
+    let unsigned = build_project_with_missing_designer_storage("\u{0005}DigitalSignature", None);
     assert!(
         forms_normalized_data(&unsigned).is_err(),
         "expected FormsNormalizedData computation to fail for a missing designer storage"
@@ -238,7 +242,8 @@ fn binding_is_bound_when_content_hash_matches_even_if_forms_normalized_data_is_u
     let digest: [u8; 16] = Md5::digest(&content).into();
 
     let sig_stream = make_signature_stream_detached(&digest);
-    let signed = build_project_with_missing_designer_storage(Some(&sig_stream));
+    let signed =
+        build_project_with_missing_designer_storage("\u{0005}DigitalSignature", Some(&sig_stream));
 
     let sig = verify_vba_digital_signature(&signed)
         .expect("signature inspection should succeed")
@@ -257,13 +262,16 @@ fn binding_is_bound_when_content_hash_matches_even_if_forms_normalized_data_is_u
         other => panic!("expected BoundVerified, got {other:?}"),
     }
 
+    // When verifying binding without an accompanying stream path/variant, we conservatively return
+    // BoundUnknown even if the digest matches the legacy Content Hash: the same 16-byte MD5 value
+    // could also correspond to the Agile Content Hash for a project with no designer storages.
     let binding =
         verify_vba_project_signature_binding(&signed, &sig_stream).expect("binding verification");
     match binding {
-        VbaProjectBindingVerification::BoundVerified(info) => {
+        VbaProjectBindingVerification::BoundUnknown(info) => {
             assert_eq!(info.signed_digest.as_deref(), Some(digest.as_slice()));
             assert_eq!(info.computed_digest.as_deref(), Some(digest.as_slice()));
         }
-        other => panic!("expected BoundVerified, got {other:?}"),
+        other => panic!("expected BoundUnknown, got {other:?}"),
     }
 }

@@ -168,10 +168,10 @@ fn build_vba_project_bin_with_designer(designer_bytes: &[u8], signature_blob: Op
         s.write_all(designer_bytes).expect("write designer bytes");
     }
 
-    // Signature stream.
+    // Signature stream: Agile Content Hash binding is associated with `DigitalSignatureEx`.
     if let Some(sig) = signature_blob {
         let mut s = ole
-            .create_stream("\u{0005}DigitalSignature")
+            .create_stream("\u{0005}DigitalSignatureEx")
             .expect("signature stream");
         s.write_all(sig).expect("write signature");
     }

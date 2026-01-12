@@ -29,7 +29,10 @@ fn md5_content_plus_forms(content: &[u8], forms: &[u8]) -> Vec<u8> {
     hasher.finalize().to_vec()
 }
 
-fn build_project_with_designer(signature_blob: Option<&[u8]>) -> Vec<u8> {
+fn build_project_with_designer(
+    signature_stream_path: &str,
+    signature_blob: Option<&[u8]>,
+) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
 
@@ -114,7 +117,7 @@ fn build_project_with_designer(signature_blob: Option<&[u8]>) -> Vec<u8> {
 
     if let Some(sig) = signature_blob {
         let mut s = ole
-            .create_stream("\u{0005}DigitalSignature")
+            .create_stream(signature_stream_path)
             .expect("signature stream");
         s.write_all(sig).expect("write signature");
     }
@@ -196,7 +199,7 @@ fn make_signature_stream_detached(digest: &[u8]) -> Vec<u8> {
 #[test]
 fn signature_binding_accepts_content_only_or_content_plus_forms_transcripts() {
     // Build the unsigned project first so we can compute both candidate digests.
-    let unsigned = build_project_with_designer(None);
+    let unsigned = build_project_with_designer("\u{0005}DigitalSignature", None);
     let content = content_normalized_data(&unsigned).expect("ContentNormalizedData");
     let forms = forms_normalized_data(&unsigned).expect("FormsNormalizedData");
     assert!(
@@ -213,7 +216,7 @@ fn signature_binding_accepts_content_only_or_content_plus_forms_transcripts() {
 
     // ---- Case 1: content-only digest ----
     let sig_stream = make_signature_stream_detached(&digest_content_only);
-    let signed = build_project_with_designer(Some(&sig_stream));
+    let signed = build_project_with_designer("\u{0005}DigitalSignature", Some(&sig_stream));
     let sig = verify_vba_digital_signature(&signed)
         .expect("signature inspection should succeed")
         .expect("signature should be present");
@@ -236,7 +239,7 @@ fn signature_binding_accepts_content_only_or_content_plus_forms_transcripts() {
 
     // ---- Case 2: content + forms digest ----
     let sig_stream = make_signature_stream_detached(&digest_content_plus_forms);
-    let signed = build_project_with_designer(Some(&sig_stream));
+    let signed = build_project_with_designer("\u{0005}DigitalSignatureEx", Some(&sig_stream));
     let sig = verify_vba_digital_signature(&signed)
         .expect("signature inspection should succeed")
         .expect("signature should be present");
@@ -275,7 +278,7 @@ fn signature_binding_accepts_content_only_or_content_plus_forms_transcripts() {
     let mut wrong_digest = digest_content_plus_forms.clone();
     wrong_digest[0] ^= 0xFF;
     let sig_stream = make_signature_stream_detached(&wrong_digest);
-    let signed = build_project_with_designer(Some(&sig_stream));
+    let signed = build_project_with_designer("\u{0005}DigitalSignatureEx", Some(&sig_stream));
     let sig = verify_vba_digital_signature(&signed)
         .expect("signature inspection should succeed")
         .expect("signature should be present");
@@ -283,16 +286,16 @@ fn signature_binding_accepts_content_only_or_content_plus_forms_transcripts() {
     assert_eq!(sig.binding, VbaSignatureBinding::NotBound);
     assert_eq!(
         verify_vba_signature_binding(&signed, &sig_stream),
-        VbaSignatureBinding::NotBound
+        VbaSignatureBinding::Unknown
     );
     match verify_vba_project_signature_binding(&signed, &sig_stream).expect("binding verification") {
-        VbaProjectBindingVerification::BoundMismatch(info) => {
+        VbaProjectBindingVerification::BoundUnknown(info) => {
             assert_eq!(info.signed_digest.as_deref(), Some(wrong_digest.as_slice()));
             assert!(
-                matches!(info.computed_digest.as_deref(), Some(d) if d == digest_content_only.as_slice() || d == digest_content_plus_forms.as_slice()),
-                "expected computed_digest to be one of the candidate digests"
+                matches!(info.computed_digest.as_deref(), Some(d) if d == digest_content_only.as_slice()),
+                "expected computed_digest to be the legacy ContentHash digest"
             );
         }
-        other => panic!("expected BoundMismatch, got {other:?}"),
+        other => panic!("expected BoundUnknown, got {other:?}"),
     }
 }
