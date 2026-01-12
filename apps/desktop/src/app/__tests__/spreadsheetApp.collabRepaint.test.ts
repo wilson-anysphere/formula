@@ -235,4 +235,47 @@ describe("SpreadsheetApp collab repaint", () => {
     app.destroy();
     root.remove();
   });
+
+  it("does not call SpreadsheetApp.refresh for external deltas in shared-grid mode", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect(app.getGridMode()).toBe("shared");
+
+      const refreshSpy = vi.spyOn(app, "refresh");
+
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      const before = doc.getCell(sheetId, { row: 0, col: 0 }) as any;
+
+      doc.applyExternalDeltas(
+        [
+          {
+            sheetId,
+            row: 0,
+            col: 0,
+            before,
+            after: { value: "Remote Shared", formula: null, styleId: before?.styleId ?? 0 },
+          },
+        ],
+        { source: "collab" },
+      );
+
+      expect(refreshSpy).not.toHaveBeenCalled();
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });
