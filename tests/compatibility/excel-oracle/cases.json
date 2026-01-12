@@ -19696,6 +19696,16 @@
       "id": "gauss_7376976e7474"
     },
     {
+      "formula": "=FREQUENCY({79,85,78,85,50,81,95,88,97},{70,79,89})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "FREQUENCY"
+      ],
+      "id": "frequency_0bb91b1b0dd3"
+    },
+    {
       "formula": "=LARGE({1,2,3,4},2)",
       "outputCell": "C1",
       "inputs": [],

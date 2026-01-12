@@ -266,7 +266,7 @@ mod tests {
             recalc_value, en_us_value,
             "recalc should evaluate using the engine's deterministic context"
         );
- 
+
         // Ensure `recalc` restores the thread-local context after it finishes.
         let after_value = vm.eval(&program, &empty_grid, origin, &locale_config);
         assert_eq!(

@@ -53,6 +53,7 @@ mod builtins_reference;
 mod builtins_statistical;
 mod builtins_statistical_moments;
 mod builtins_statistical_distributions;
+mod builtins_statistical_more;
 mod builtins_text;
 mod builtins_text_dbcs;
 mod builtins_thai;

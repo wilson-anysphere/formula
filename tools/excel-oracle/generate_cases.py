@@ -857,6 +857,7 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="devsq", tags=["stat", "DEVSQ"], formula="=DEVSQ({1,2,3})")
     _add_case(cases, prefix="geomean", tags=["stat", "GEOMEAN"], formula="=GEOMEAN({1,2,3,4})")
     _add_case(cases, prefix="harmean", tags=["stat", "HARMEAN"], formula="=HARMEAN({1,2,4})")
+
     _add_case(cases, prefix="kurt", tags=["stat", "KURT"], formula="=KURT({3,4,5,2,3,4,5,6,4,7})")
     _add_case(cases, prefix="skew", tags=["stat", "SKEW"], formula="=SKEW({3,4,5,2,3,4,5,6,4,7})")
     _add_case(cases, prefix="skew_p", tags=["stat", "SKEW.P"], formula="=SKEW.P({3,4,5,2,3,4,5,6,4,7})")
@@ -872,6 +873,14 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="normsinv", tags=["stat", "NORMSINV"], formula="=NORMSINV(0.975)")
     _add_case(cases, prefix="phi", tags=["stat", "PHI"], formula="=PHI(0)")
     _add_case(cases, prefix="gauss", tags=["stat", "GAUSS"], formula="=GAUSS(1)")
+
+    _add_case(
+        cases,
+        prefix="frequency",
+        tags=["stat", "FREQUENCY"],
+        formula="=FREQUENCY({79,85,78,85,50,81,95,88,97},{70,79,89})",
+        output_cell="C1",
+    )
 
     _add_case(cases, prefix="large", tags=["stat", "LARGE"], formula="=LARGE({1,2,3,4},2)")
     _add_case(cases, prefix="small", tags=["stat", "SMALL"], formula="=SMALL({1,2,3,4},2)")

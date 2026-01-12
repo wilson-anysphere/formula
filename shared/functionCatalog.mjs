@@ -1173,6 +1173,17 @@ export default {
       ]
     },
     {
+      "name": "FREQUENCY",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "any"
+      ]
+    },
+    {
       "name": "FV",
       "min_args": 3,
       "max_args": 5,
