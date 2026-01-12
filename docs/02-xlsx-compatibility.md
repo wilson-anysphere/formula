@@ -253,6 +253,23 @@ These pieces are connected via OPC relationships:
 - `xl/_rels/workbook.xml.rels` typically has a relationship from the workbook to `xl/metadata.xml`.
 - `xl/_rels/metadata.xml.rels` typically has relationships from `xl/metadata.xml` to `xl/richData/*` parts.
 
+Simplified relationship sketch (type URIs vary across Excel builds; targets are the reliable signal):
+
+```xml
+<!-- xl/_rels/workbook.xml.rels -->
+<Relationship Id="rIdMeta"
+              Type="…/relationships/metadata"
+              Target="metadata.xml"/>
+
+<!-- xl/_rels/metadata.xml.rels -->
+<Relationship Id="rIdRich1"
+              Type="…/relationships/richData"
+              Target="richData/richValueTypes.xml"/>
+<Relationship Id="rIdRich2"
+              Type="…/relationships/richData"
+              Target="richData/richValue.xml"/>
+```
+
 **Formula’s current strategy:**
 
 - Preserve `vm` / `cm` attributes on `<c>` elements when editing cell values.
