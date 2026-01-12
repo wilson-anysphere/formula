@@ -423,7 +423,6 @@ The repository still contains Node-only marketplace/host code paths that rely on
         "command": "myExtension.run",
         "title": "Run My Extension",
         "category": "My Extension",
-        "icon": "$(play)",
         "description": "Run the extension's main workflow",
         "keywords": ["run", "execute", "workflow"]
       },
@@ -456,8 +455,7 @@ The repository still contains Node-only marketplace/host code paths that rely on
     "panels": [
       {
         "id": "myExtension.panel",
-        "title": "My Panel",
-        "icon": "$(graph)"
+        "title": "My Panel"
       }
     ],
     
@@ -481,8 +479,7 @@ The repository still contains Node-only marketplace/host code paths that rely on
     "dataConnectors": [
       {
         "id": "myExtension.connector",
-        "name": "My Data Source",
-        "icon": "$(database)"
+        "name": "My Data Source"
       }
     ],
     
@@ -524,7 +521,7 @@ Supported fields:
 - `command` (string, required): the **command id** (must be unique).
 - `title` (string, required): the human-readable label shown in the UI.
 - `category` (string, optional): a group label used by the command palette.
-- `icon` (string, optional): an icon identifier (VS Code-style `$(...)`).
+- `icon` (string, optional): opaque icon metadata (currently not rendered by most desktop UI surfaces).
 - `description` (string, optional): additional context for the command.
   - In the desktop command palette, `description` may be rendered as secondary text under the command title.
 - `keywords` (string[], optional): extra search terms/synonyms for the command.
