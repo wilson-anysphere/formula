@@ -969,6 +969,7 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
             out.push(0x16); // PtgMissArg
         }
         Expr::NameRef(_) => return Err(EncodeRgceError::Unsupported("named references")),
+        Expr::FieldAccess(_) => return Err(EncodeRgceError::Unsupported("field access")),
         Expr::ColRef(_) => return Err(EncodeRgceError::Unsupported("column references")),
         Expr::RowRef(_) => return Err(EncodeRgceError::Unsupported("row references")),
         Expr::StructuredRef(_) => {
@@ -976,7 +977,6 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                 "structured references require workbook table-id context",
             ))
         }
-        Expr::FieldAccess(_) => return Err(EncodeRgceError::Unsupported("field access")),
         Expr::Array(_) => return Err(EncodeRgceError::Unsupported("array literals")),
     }
 

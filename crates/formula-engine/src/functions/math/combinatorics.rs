@@ -141,6 +141,9 @@ fn pow_u64(mut base: f64, mut exp: u64) -> ExcelResult<f64> {
 pub fn permutationa(number: f64, number_chosen: f64) -> ExcelResult<f64> {
     let n = trunc_to_u64_nonnegative(number)?;
     let k = trunc_to_u64_nonnegative(number_chosen)?;
+    if n == 0 {
+        return Err(ExcelError::Num);
+    }
     pow_u64(n as f64, k)
 }
 
@@ -169,4 +172,3 @@ pub fn multinomial(numbers: &[f64]) -> ExcelResult<f64> {
     }
     Ok(acc)
 }
-
