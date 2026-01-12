@@ -708,9 +708,7 @@ impl fmt::Display for Value {
             Value::Bool(b) => write!(f, "{b}"),
             Value::Blank => f.write_str(""),
             Value::Error(e) => write!(f, "{e}"),
-            Value::Reference(_) | Value::ReferenceUnion(_) => {
-                f.write_str(ErrorKind::Value.as_code())
-            }
+            Value::Reference(_) | Value::ReferenceUnion(_) => f.write_str(ErrorKind::Value.as_code()),
             Value::Array(arr) => write!(f, "{}", arr.top_left()),
             Value::Lambda(_) => f.write_str(ErrorKind::Calc.as_code()),
             Value::Spill { .. } => f.write_str(ErrorKind::Spill.as_code()),
