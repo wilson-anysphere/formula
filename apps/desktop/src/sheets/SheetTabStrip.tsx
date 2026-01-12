@@ -580,6 +580,7 @@ export function SheetTabStrip({
               if (!input) return;
 
               // Best-effort: use current color as the initial value when it's a #RRGGBB hex string.
+              // Otherwise, keep the existing <input type="color"> value (browser default or last selection).
               const currentCss = normalizeExcelColorToCss(sheet.tabColor?.rgb);
               const initialValue = (() => {
                 const normalized = String(currentCss ?? "").trim();
