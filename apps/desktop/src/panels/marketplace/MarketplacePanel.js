@@ -344,12 +344,14 @@ async function renderSearchResults({
       }
 
       if (installed.corrupted || installed.incompatible) {
+        const installedVersion = installed?.version ? String(installed.version) : null;
+        const shouldTryUpdate = Boolean(installed?.incompatible);
         actions.append(
           el(
             "button",
             {
               onClick: async () => {
-                actions.textContent = "Repairing…";
+                actions.textContent = shouldTryUpdate ? "Updating…" : "Repairing…";
                 try {
                   if (extensionHostManager) {
                     await extensionHostManager.unloadExtension(item.id);
@@ -360,10 +362,26 @@ async function renderSearchResults({
                 }
 
                 try {
-                  const record =
-                    typeof extensionManager.repair === "function"
-                      ? await extensionManager.repair(item.id)
-                      : await extensionManager.install(item.id);
+                  let record;
+                  if (shouldTryUpdate && typeof extensionManager.update === "function") {
+                    record = await extensionManager.update(item.id);
+                    // If the update is a no-op (already on the latest version), fall back to a
+                    // repair/reinstall so users still have a recovery path when an incompatible
+                    // quarantine is caused by corrupted manifest metadata rather than an engine
+                    // mismatch.
+                    if (
+                      installedVersion &&
+                      record &&
+                      String(record.version ?? "") === installedVersion &&
+                      typeof extensionManager.repair === "function"
+                    ) {
+                      record = await extensionManager.repair(item.id);
+                    }
+                  } else if (typeof extensionManager.repair === "function") {
+                    record = await extensionManager.repair(item.id);
+                  } else {
+                    record = await extensionManager.install(item.id);
+                  }
 
                   if (Array.isArray(record?.warnings)) {
                     for (const warning of record.warnings) {
@@ -374,12 +392,13 @@ async function renderSearchResults({
 
                    if (extensionHostManager?.syncInstalledExtensions) {
                      await extensionHostManager.syncInstalledExtensions();
-                   } else if (extensionHostManager) {
-                     await extensionHostManager.reloadExtension(item.id);
-                   }
-                   updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
-                   actions.textContent = "Repaired";
-                   tryNotifyExtensionsChanged();
+                    } else if (extensionHostManager) {
+                      await extensionHostManager.reloadExtension(item.id);
+                    }
+                    updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
+                    actions.textContent =
+                      installedVersion && record?.version && String(record.version) !== installedVersion ? "Updated" : "Repaired";
+                    tryNotifyExtensionsChanged();
                 } catch (error) {
                   // eslint-disable-next-line no-console
                   console.error(error);
