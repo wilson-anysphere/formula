@@ -3,6 +3,9 @@ use std::time::Duration;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
+use windows::Win32::Globalization::{
+    MultiByteToWideChar, CP_ACP, MB_ERR_INVALID_CHARS, MULTI_BYTE_TO_WIDE_CHAR_FLAGS,
+};
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, RegisterClipboardFormatW,
     SetClipboardData,
@@ -20,7 +23,9 @@ use super::{
 
 // Built-in clipboard formats that we use directly. Keeping these as numeric constants avoids
 // needing Win32 System Ole bindings just for format IDs.
+const CF_TEXT: u32 = 1;
 const CF_UNICODETEXT: u32 = 13;
+const CF_OEMTEXT: u32 = 7;
 const CF_DIB: u32 = 8;
 const CF_DIBV5: u32 = 17;
 
@@ -151,6 +156,48 @@ fn try_get_unicode_text() -> Result<Option<String>, ClipboardError> {
     }
 }
 
+fn try_get_ansi_text(format: u32) -> Result<Option<String>, ClipboardError> {
+    let bytes = match try_get_clipboard_bytes(format, MAX_TEXT_BYTES)? {
+        Some(bytes) => bytes,
+        None => return Ok(None),
+    };
+
+    let nul = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    let bytes = &bytes[..nul];
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+
+    unsafe {
+        // `MultiByteToWideChar` returns 0 on error.
+        let mut flags = MB_ERR_INVALID_CHARS;
+        let mut wide_len = MultiByteToWideChar(CP_ACP, flags, bytes, None);
+        if wide_len == 0 {
+            // Be permissive: fall back to lossy conversion when the input contains invalid bytes.
+            flags = MULTI_BYTE_TO_WIDE_CHAR_FLAGS(0);
+            wide_len = MultiByteToWideChar(CP_ACP, flags, bytes, None);
+        }
+        if wide_len <= 0 {
+            return Ok(None);
+        }
+
+        let wide_len = wide_len as usize;
+        let mut wide = vec![0u16; wide_len];
+        let written = MultiByteToWideChar(CP_ACP, flags, bytes, Some(&mut wide));
+        if written <= 0 {
+            return Ok(None);
+        }
+        wide.truncate(written as usize);
+
+        let text = String::from_utf16_lossy(&wide);
+        if text.is_empty() {
+            Ok(None)
+        } else {
+            Ok(string_within_limit(text, MAX_TEXT_BYTES))
+        }
+    }
+}
+
 fn set_clipboard_bytes(format: u32, bytes: &[u8]) -> Result<(), ClipboardError> {
     if bytes.is_empty() {
         return Ok(());
@@ -249,7 +296,11 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
     let _guard = open_clipboard_with_retry()?;
 
     // Best-effort reads: don't fail the entire operation if a single format can't be decoded.
-    let text = try_get_unicode_text().ok().flatten();
+    let text = try_get_unicode_text()
+        .ok()
+        .flatten()
+        .or_else(|| try_get_ansi_text(CF_TEXT).ok().flatten())
+        .or_else(|| try_get_ansi_text(CF_OEMTEXT).ok().flatten());
 
     let mut html = format_html
         .and_then(|format| try_get_clipboard_bytes(format, MAX_TEXT_BYTES).ok().flatten())
