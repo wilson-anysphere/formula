@@ -951,7 +951,21 @@ pub async fn list_dir(path: String, recursive: Option<bool>) -> Result<Vec<ListD
 /// decryptable across app restarts.
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn power_query_cache_key_get_or_create() -> Result<PowerQueryCacheKey, String> {
+pub async fn power_query_cache_key_get_or_create(
+    window: tauri::WebviewWindow,
+) -> Result<PowerQueryCacheKey, String> {
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "power query cache key access",
+        ipc_origin::Verb::Is,
+    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(
+        &url,
+        "power query cache key access",
+        ipc_origin::Verb::Is,
+    )?;
+
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryCacheKeyStore::open_default();
         store.get_or_create().map_err(|e| e.to_string())
@@ -964,8 +978,17 @@ pub async fn power_query_cache_key_get_or_create() -> Result<PowerQueryCacheKey,
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn power_query_credential_get(
+    window: tauri::WebviewWindow,
     scope_key: String,
 ) -> Result<Option<PowerQueryCredentialEntry>, String> {
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "power query credentials",
+        ipc_origin::Verb::Are,
+    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "power query credentials", ipc_origin::Verb::Are)?;
+
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryCredentialStore::open_default().map_err(|e| e.to_string())?;
         store.get(&scope_key).map_err(|e| e.to_string())
@@ -978,9 +1001,18 @@ pub async fn power_query_credential_get(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn power_query_credential_set(
+    window: tauri::WebviewWindow,
     scope_key: String,
     secret: JsonValue,
 ) -> Result<PowerQueryCredentialEntry, String> {
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "power query credentials",
+        ipc_origin::Verb::Are,
+    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "power query credentials", ipc_origin::Verb::Are)?;
+
     crate::power_query_validation::validate_power_query_credential_payload(&scope_key, &secret)
         .map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -994,7 +1026,18 @@ pub async fn power_query_credential_set(
 /// Power Query: delete any persisted credential entry for a scope key.
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn power_query_credential_delete(scope_key: String) -> Result<(), String> {
+pub async fn power_query_credential_delete(
+    window: tauri::WebviewWindow,
+    scope_key: String,
+) -> Result<(), String> {
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "power query credentials",
+        ipc_origin::Verb::Are,
+    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "power query credentials", ipc_origin::Verb::Are)?;
+
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryCredentialStore::open_default().map_err(|e| e.to_string())?;
         store.delete(&scope_key).map_err(|e| e.to_string())
@@ -1006,7 +1049,17 @@ pub async fn power_query_credential_delete(scope_key: String) -> Result<(), Stri
 /// Power Query: list persisted credential scope keys and IDs (for debugging).
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn power_query_credential_list() -> Result<Vec<PowerQueryCredentialListEntry>, String> {
+pub async fn power_query_credential_list(
+    window: tauri::WebviewWindow,
+) -> Result<Vec<PowerQueryCredentialListEntry>, String> {
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "power query credentials",
+        ipc_origin::Verb::Are,
+    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "power query credentials", ipc_origin::Verb::Are)?;
+
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryCredentialStore::open_default().map_err(|e| e.to_string())?;
         store.list().map_err(|e| e.to_string())
@@ -1019,8 +1072,21 @@ pub async fn power_query_credential_list() -> Result<Vec<PowerQueryCredentialLis
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn power_query_refresh_state_get(
+    window: tauri::WebviewWindow,
     workbook_id: String,
 ) -> Result<Option<JsonValue>, String> {
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "power query refresh state",
+        ipc_origin::Verb::Is,
+    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(
+        &url,
+        "power query refresh state",
+        ipc_origin::Verb::Is,
+    )?;
+
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryRefreshStateStore::open_default().map_err(|e| e.to_string())?;
         store.load(&workbook_id).map_err(|e| e.to_string())
@@ -1033,9 +1099,22 @@ pub async fn power_query_refresh_state_get(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn power_query_refresh_state_set(
+    window: tauri::WebviewWindow,
     workbook_id: String,
     state: JsonValue,
 ) -> Result<(), String> {
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "power query refresh state",
+        ipc_origin::Verb::Is,
+    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(
+        &url,
+        "power query refresh state",
+        ipc_origin::Verb::Is,
+    )?;
+
     crate::power_query_validation::validate_power_query_refresh_state_payload(&state)
         .map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -1052,11 +1131,22 @@ pub async fn power_query_refresh_state_set(
 /// when no workbook is loaded / the part is absent.
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub fn power_query_state_get(state: State<'_, SharedAppState>) -> Option<String> {
+pub fn power_query_state_get(
+    window: tauri::WebviewWindow,
+    state: State<'_, SharedAppState>,
+) -> Result<Option<String>, String> {
+    ipc_origin::ensure_main_window(window.label(), "power query state", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "power query state", ipc_origin::Verb::Is)?;
+
     let state = state.inner().lock().unwrap();
-    let workbook = state.get_workbook().ok()?;
-    let bytes = workbook.power_query_xml.as_deref()?;
-    std::str::from_utf8(bytes).ok().map(|s| s.to_string())
+    let Ok(workbook) = state.get_workbook() else {
+        return Ok(None);
+    };
+    let Some(bytes) = workbook.power_query_xml.as_deref() else {
+        return Ok(None);
+    };
+    Ok(std::str::from_utf8(bytes).ok().map(|s| s.to_string()))
 }
 
 /// Power Query: set (or clear) the workbook-backed query definition payload in memory.
@@ -1066,9 +1156,14 @@ pub fn power_query_state_get(state: State<'_, SharedAppState>) -> Option<String>
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn power_query_state_set(
+    window: tauri::WebviewWindow,
     xml: Option<String>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
+    ipc_origin::ensure_main_window(window.label(), "power query state", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "power query state", ipc_origin::Verb::Is)?;
+
     if let Some(xml) = xml.as_deref() {
         crate::power_query_validation::validate_power_query_xml_payload(xml)
             .map_err(|e| e.to_string())?;
@@ -1088,11 +1183,16 @@ pub fn power_query_state_set(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn sql_query(
+    window: tauri::WebviewWindow,
     connection: JsonValue,
     sql: String,
     params: Option<Vec<JsonValue>>,
     credentials: Option<JsonValue>,
 ) -> Result<crate::sql::SqlQueryResult, String> {
+    ipc_origin::ensure_main_window(window.label(), "SQL queries", ipc_origin::Verb::Are)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "SQL queries", ipc_origin::Verb::Are)?;
+
     crate::sql::sql_query(connection, sql, params.unwrap_or_default(), credentials)
         .await
         .map_err(|e| e.to_string())
@@ -1102,10 +1202,15 @@ pub async fn sql_query(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn sql_get_schema(
+    window: tauri::WebviewWindow,
     connection: JsonValue,
     sql: String,
     credentials: Option<JsonValue>,
 ) -> Result<crate::sql::SqlSchemaResult, String> {
+    ipc_origin::ensure_main_window(window.label(), "SQL queries", ipc_origin::Verb::Are)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "SQL queries", ipc_origin::Verb::Are)?;
+
     crate::sql::sql_get_schema(connection, sql, credentials)
         .await
         .map_err(|e| e.to_string())
