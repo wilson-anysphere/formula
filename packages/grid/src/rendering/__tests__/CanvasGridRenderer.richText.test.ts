@@ -152,4 +152,49 @@ describe("CanvasGridRenderer rich text rendering", () => {
     // We expect at least one underline stroke from the italic+underline run.
     expect(strokeCalls.length).toBeGreaterThan(0);
   });
+
+  it("interprets run start/end as Unicode code point indices (surrogate pairs)", () => {
+    const richText = {
+      text: "A😀B",
+      // 😀 is a surrogate pair in UTF-16, but occupies 1 code point.
+      // If we treat start/end as code points, (1,2) should select only the emoji.
+      runs: [{ start: 1, end: 2, style: { underline: true } }]
+    };
+
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row !== 0 || col !== 0) return null;
+        return { row, col, value: richText.text, richText };
+      }
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const fillTextCalls: Array<{ text: string; x: number; y: number; font: string; fillStyle: FillStyle }> = [];
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
+    contexts.set(gridCanvas, createMock2dContext({ canvas: gridCanvas }));
+    contexts.set(
+      contentCanvas,
+      createMock2dContext({
+        canvas: contentCanvas,
+        onFillText: (args) => fillTextCalls.push(args)
+      })
+    );
+    contexts.set(selectionCanvas, createMock2dContext({ canvas: selectionCanvas }));
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const ctx = contexts.get(this);
+      return ctx ?? createMock2dContext({ canvas: this });
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 1, colCount: 1 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(200, 80, 1);
+    renderer.renderImmediately();
+
+    expect(fillTextCalls.map((c) => c.text)).toContain("😀");
+  });
 });
