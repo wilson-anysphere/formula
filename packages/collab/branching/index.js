@@ -2,6 +2,28 @@ import {
   applyDocumentStateToYjsDoc,
   yjsDocToDocumentState,
 } from "../../versioning/branches/src/yjs/index.js";
+import * as Y from "yjs";
+
+function getYMap(value) {
+  if (value instanceof Y.Map) return value;
+  if (!value || typeof value !== "object") return null;
+  const maybe = value;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.set !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.keys !== "function") return null;
+  if (typeof maybe.forEach !== "function") return null;
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
+  return maybe;
+}
+
+function getMapRoot(doc, name) {
+  const existing = doc.share.get(name);
+  const map = getYMap(existing);
+  if (map) return map;
+  return doc.getMap(name);
+}
 
 /**
  * @typedef {import("@formula/collab-session").CollabSession} CollabSession
@@ -54,7 +76,7 @@ export class CollabBranchingWorkflow {
    */
   getCurrentBranchName() {
     const name = this.#getGlobalCurrentBranchName();
-    const branches = this.#session.doc.getMap(`${this.#rootName}:branches`);
+    const branches = getMapRoot(this.#session.doc, `${this.#rootName}:branches`);
     return branches.get(name) !== undefined ? name : "main";
   }
 
@@ -116,7 +138,7 @@ export class CollabBranchingWorkflow {
    * @returns {string}
    */
   #getGlobalCurrentBranchName() {
-    const meta = this.#session.doc.getMap(`${this.#rootName}:meta`);
+    const meta = getMapRoot(this.#session.doc, `${this.#rootName}:meta`);
     const name = meta.get("currentBranchName");
     return typeof name === "string" && name.length > 0 ? name : "main";
   }

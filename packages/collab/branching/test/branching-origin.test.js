@@ -1,9 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createRequire } from "node:module";
 import * as Y from "yjs";
 
 import { createCollabSession } from "../../session/src/index.ts";
 import { CollabBranchingWorkflow } from "../index.js";
+
+function requireYjsCjs() {
+  const require = createRequire(import.meta.url);
+  const prevError = console.error;
+  console.error = (...args) => {
+    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
+    prevError(...args);
+  };
+  try {
+    // eslint-disable-next-line import/no-named-as-default-member
+    return require("yjs");
+  } finally {
+    console.error = prevError;
+  }
+}
 
 /**
  * @param {string} value
@@ -84,4 +100,30 @@ test("CollabBranchingWorkflow: checkout/merge can opt into session.origin for un
 
   assert.ok(origins.includes(session.origin), "expected checkout/merge to apply with session.origin when opted in");
   assert.equal(session.undo.canUndo(), true);
+});
+
+test("CollabBranchingWorkflow.getCurrentBranchName works when branching roots were created by a different Yjs instance (CJS getMap)", () => {
+  const Ycjs = requireYjsCjs();
+
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc });
+
+  // Simulate a mixed module loader environment where another Yjs instance eagerly
+  // instantiates the branching roots before this workflow code touches them.
+  const meta = Ycjs.Doc.prototype.getMap.call(doc, "branching:meta");
+  const branches = Ycjs.Doc.prototype.getMap.call(doc, "branching:branches");
+  meta.set("currentBranchName", "feature");
+  branches.set("feature", 1);
+
+  assert.throws(() => doc.getMap("branching:meta"), /different constructor/);
+  assert.throws(() => doc.getMap("branching:branches"), /different constructor/);
+
+  /** @type {any} */
+  const branchService = {};
+  const workflow = new CollabBranchingWorkflow({ session, branchService });
+
+  assert.equal(workflow.getCurrentBranchName(), "feature");
+
+  session.destroy();
+  doc.destroy();
 });
