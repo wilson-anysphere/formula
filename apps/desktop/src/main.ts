@@ -1732,6 +1732,42 @@ class CollabWorkbookSheetStore extends WorkbookSheetStore {
     });
   }
 
+  override hide(id: string): void {
+    const before = this.getById(id)?.visibility;
+    super.hide(id);
+    const after = this.getById(id)?.visibility;
+    if (!after || after === before) return;
+
+    this.session.transactLocal(() => {
+      const idx = findCollabSheetIndexById(this.session, id);
+      if (idx < 0) return;
+      const entry: any = this.session.sheets.get(idx);
+      if (!entry || typeof entry.set !== "function") return;
+      entry.set("visibility", after);
+      // This update originated locally; update the cached key so our observer
+      // doesn't unnecessarily rebuild the sheet store instance.
+      lastCollabSheetsKey = collabSheetsKey(this.session);
+    });
+  }
+
+  override unhide(id: string): void {
+    const before = this.getById(id)?.visibility;
+    super.unhide(id);
+    const after = this.getById(id)?.visibility;
+    if (!after || after === before) return;
+
+    this.session.transactLocal(() => {
+      const idx = findCollabSheetIndexById(this.session, id);
+      if (idx < 0) return;
+      const entry: any = this.session.sheets.get(idx);
+      if (!entry || typeof entry.set !== "function") return;
+      entry.set("visibility", after);
+      // This update originated locally; update the cached key so our observer
+      // doesn't unnecessarily rebuild the sheet store instance.
+      lastCollabSheetsKey = collabSheetsKey(this.session);
+    });
+  }
+
   override move(id: string, toIndex: number): void {
     const before = this.listAll().map((s) => s.id).join("|");
     super.move(id, toIndex);
