@@ -174,6 +174,17 @@ fn days360_accounts_for_lotus_bug_feb_1900() {
 }
 
 #[test]
+fn days360_respects_lotus_compat_flag_for_feb_1900() {
+    let system = ExcelDateSystem::Excel1900 { lotus_compat: false };
+    let feb28 = ymd_to_serial(ExcelDate::new(1900, 2, 28), system).unwrap();
+    let mar1 = ymd_to_serial(ExcelDate::new(1900, 3, 1), system).unwrap();
+
+    // Without the Lotus bug, Feb 28 1900 is month-end (so the US/NASD method adjusts it to day 30).
+    assert_eq!(date_time::days360(feb28, mar1, false, system).unwrap(), 1);
+    assert_eq!(date_time::days360(feb28, mar1, true, system).unwrap(), 3);
+}
+
+#[test]
 fn yearfrac_respects_basis_conventions() {
     let system = ExcelDateSystem::EXCEL_1900;
     let start = ymd_to_serial(ExcelDate::new(2011, 1, 1), system).unwrap();
@@ -320,6 +331,24 @@ fn yearfrac_basis1_accounts_for_lotus_bug_feb_1900() {
     let feb29_to_feb28_1901 = date_time::yearfrac(feb29, feb28_1901, 1, system).unwrap();
     assert!((feb29_to_feb28_1901 - 1.0).abs() < 1e-12);
     assert!((feb29_to_feb28_1901 + date_time::yearfrac(feb28_1901, feb29, 1, system).unwrap()).abs() < 1e-12);
+}
+
+#[test]
+fn yearfrac_basis1_respects_lotus_compat_flag_for_1900() {
+    let system = ExcelDateSystem::Excel1900 { lotus_compat: false };
+    let jan1 = ymd_to_serial(ExcelDate::new(1900, 1, 1), system).unwrap();
+    let dec31 = ymd_to_serial(ExcelDate::new(1900, 12, 31), system).unwrap();
+
+    // Without the Lotus bug, 1900 is not a leap year, so the denominator is 365 days.
+    let jan_to_dec = date_time::yearfrac(jan1, dec31, 1, system).unwrap();
+    assert!((jan_to_dec - (364.0 / 365.0)).abs() < 1e-12);
+    assert!((jan_to_dec + date_time::yearfrac(dec31, jan1, 1, system).unwrap()).abs() < 1e-12);
+
+    let feb28 = ymd_to_serial(ExcelDate::new(1900, 2, 28), system).unwrap();
+    let mar1 = ymd_to_serial(ExcelDate::new(1900, 3, 1), system).unwrap();
+    let frac = date_time::yearfrac(feb28, mar1, 1, system).unwrap();
+    assert!((frac - (1.0 / 365.0)).abs() < 1e-12);
+    assert!((frac + date_time::yearfrac(mar1, feb28, 1, system).unwrap()).abs() < 1e-12);
 }
 
 #[test]

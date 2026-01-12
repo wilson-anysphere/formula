@@ -355,6 +355,22 @@ fn days360_accounts_for_lotus_bug_feb_1900() {
 }
 
 #[test]
+fn days360_respects_lotus_compat_flag_for_feb_1900() {
+    let mut sheet = TestSheet::new();
+    sheet.set_date_system(ExcelDateSystem::Excel1900 { lotus_compat: false });
+
+    // Without the Lotus bug, Feb 28 1900 is month-end.
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(1900,2,28),DATE(1900,3,1))"),
+        1.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(1900,2,28),DATE(1900,3,1),TRUE)"),
+        3.0,
+    );
+}
+
+#[test]
 fn days360_spills_over_array_inputs() {
     let mut sheet = TestSheet::new();
     sheet.set_formula("A1", "=DAYS360({DATE(2011,1,1);DATE(2011,1,31)},DATE(2011,12,31))");
@@ -525,6 +541,25 @@ fn yearfrac_basis1_accounts_for_lotus_bug_feb_1900() {
     assert_number(
         &sheet.eval("=YEARFRAC(DATE(1900,2,29),DATE(1901,2,28),1)"),
         1.0,
+    );
+}
+
+#[test]
+fn yearfrac_basis1_respects_lotus_compat_flag_for_1900() {
+    let mut sheet = TestSheet::new();
+    sheet.set_date_system(ExcelDateSystem::Excel1900 { lotus_compat: false });
+
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(1900,1,1),DATE(1900,12,31),1)"),
+        364.0 / 365.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(1900,2,28),DATE(1900,3,1),1)"),
+        1.0 / 365.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(1900,3,1),DATE(1900,2,28),1)"),
+        -(1.0 / 365.0),
     );
 }
 
