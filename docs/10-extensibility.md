@@ -230,13 +230,17 @@ the `:` key on layouts where that shares the same physical key.
   focus is not in a text input/textarea/contenteditable element.
 - The extension keybinding listener runs in the **bubble** phase so the core spreadsheet keyboard handling can
   `preventDefault()` first.
+- The desktop keybinding dispatcher ignores auto-repeat (`event.repeat === true`), so holding a key does not
+  repeatedly trigger extension commands.
 - Desktop lazily loads extensions for performance; extension-contributed keybindings become active once extensions
   have been loaded in the current session (e.g. after opening the Extensions panel or triggering an extension UI surface).
 - Built-in keybindings always win over extension keybindings (extensions cannot override core shortcuts).
 - When an extension keybinding matches, the desktop host calls `preventDefault()` and executes the extension command.
 - Some shortcuts are reserved and extensions can never claim them (safety net):
   - `Ctrl/Cmd+C`, `Ctrl/Cmd+X`, `Ctrl/Cmd+V` (copy/cut/paste)
+  - `Ctrl/Cmd+Shift+V` (paste special)
   - `Ctrl/Cmd+Shift+P` (command palette)
+  - `Ctrl+Cmd+Shift+P` (some keyboards emit both ctrl+meta on the same chord)
 - Additional shortcuts are used by the desktop app and extensions should avoid binding them:
   - `Ctrl/Cmd+K` (inline AI edit)
   - `Ctrl/Cmd+Shift+M` (comments panel)
