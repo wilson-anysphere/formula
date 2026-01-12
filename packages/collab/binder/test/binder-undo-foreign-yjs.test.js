@@ -5,7 +5,7 @@ import { EventEmitter } from "node:events";
 
 import * as Y from "yjs";
 
-import { createUndoService } from "@formula/collab-undo";
+import { createUndoService } from "../../undo/index.js";
 
 import { bindYjsToDocumentController } from "../index.js";
 import { decryptCellPlaintext, encryptCellPlaintext, isEncryptedCellPayload } from "../../encryption/src/index.node.js";
@@ -35,7 +35,13 @@ async function flushAsync(times = 3) {
 async function waitFor(predicate, { timeoutMs = 2000 } = {}) {
   const start = Date.now();
   while (true) {
-    if (predicate()) return;
+    let ok = false;
+    try {
+      ok = await predicate();
+    } catch {
+      ok = false;
+    }
+    if (ok) return;
     if (Date.now() - start > timeoutMs) {
       throw new Error("Timed out waiting for condition");
     }
@@ -148,7 +154,7 @@ class TestDocumentController {
   }
 }
 
-test("binder normalizes foreign nested cell maps before mutating so collab undo works", async () => {
+test("binder normalizes foreign nested cell maps before delete+undo so collab undo works", async () => {
   const Ycjs = requireYjsCjs();
 
   const remote = new Ycjs.Doc();
@@ -196,21 +202,15 @@ test("binder normalizes foreign nested cell maps before mutating so collab undo 
   assert.equal(documentController.getCell("Sheet1", { row: 0, col: 0 }).value, "from-cjs");
   assert.equal(documentController.externalDeltaCount, 1, "initial hydration should apply exactly one external delta batch");
 
-  // Clear the cell (null write). This exercises the case where the binder is about to
-  // mutate a foreign nested Y.Map even though the resulting value is empty.
+  // Clear the cell (null write). With default binder semantics (conflict mode off),
+  // this deletes the cell entry. We still expect normalization to occur *before*
+  // the delete so undo restores a local Y.Map (not a foreign one).
   documentController.setCellValue("Sheet1", { row: 0, col: 0 }, null);
   await flushAsync();
   assert.equal(documentController.externalDeltaCount, 1, "binder should not echo local edits back into DocumentController");
 
-  const afterWrite = cellsRoot.get("Sheet1:0:0");
-  assert.ok(afterWrite);
-  assert.ok(afterWrite instanceof Y.Map, "cell map should be normalized to local Y.Map");
-  assert.equal(afterWrite.get("value"), null);
-
-  const afterWriteLegacy = cellsRoot.get("Sheet1:0,0");
-  assert.ok(afterWriteLegacy);
-  assert.ok(afterWriteLegacy instanceof Y.Map, "legacy key cell map should also be normalized to local Y.Map");
-  assert.equal(afterWriteLegacy.get("value"), null);
+  assert.equal(cellsRoot.get("Sheet1:0:0"), undefined, "empty cell should be deleted when conflict semantics are off");
+  assert.equal(cellsRoot.get("Sheet1:0,0"), undefined, "legacy key cell should be deleted when conflict semantics are off");
 
   assert.equal(undoService.canUndo(), true);
   undoService.undo();
@@ -234,7 +234,7 @@ test("binder normalizes foreign nested cell maps before mutating so collab undo 
   doc.destroy();
 });
 
-test("binder normalizes foreign nested cell maps when only legacy keys exist", async () => {
+test("binder normalizes foreign nested cell maps when only legacy keys exist (delete+undo)", async () => {
   const Ycjs = requireYjsCjs();
 
   const remote = new Ycjs.Doc();
@@ -273,16 +273,14 @@ test("binder normalizes foreign nested cell maps when only legacy keys exist", a
   assert.equal(documentController.getCell("Sheet1", { row: 0, col: 0 }).value, "from-cjs");
   assert.equal(documentController.externalDeltaCount, 1);
 
-  // Clear via canonical coordinates. Binder should target the legacy raw key and
-  // normalize it before mutating so undo remains reliable.
+  // Clear via canonical coordinates. Binder targets the legacy raw key. With
+  // conflict semantics off, this deletes the legacy entry; undo should restore
+  // it as a local Y.Map.
   documentController.setCellValue("Sheet1", { row: 0, col: 0 }, null);
   await flushAsync();
   assert.equal(documentController.externalDeltaCount, 1);
 
-  const afterWriteLegacy = cellsRoot.get("Sheet1:0,0");
-  assert.ok(afterWriteLegacy);
-  assert.ok(afterWriteLegacy instanceof Y.Map);
-  assert.equal(afterWriteLegacy.get("value"), null);
+  assert.equal(cellsRoot.get("Sheet1:0,0"), undefined);
 
   assert.equal(undoService.canUndo(), true);
   undoService.undo();
@@ -300,7 +298,7 @@ test("binder normalizes foreign nested cell maps when only legacy keys exist", a
   doc.destroy();
 });
 
-test("binder normalizes foreign nested cell maps when only r{row}c{col} keys exist", async () => {
+test("binder normalizes foreign nested cell maps when only r{row}c{col} keys exist (delete+undo)", async () => {
   const Ycjs = requireYjsCjs();
 
   const remote = new Ycjs.Doc();
@@ -343,10 +341,7 @@ test("binder normalizes foreign nested cell maps when only r{row}c{col} keys exi
   await flushAsync();
   assert.equal(documentController.externalDeltaCount, 1);
 
-  const afterWriteLegacy = cellsRoot.get("r0c0");
-  assert.ok(afterWriteLegacy);
-  assert.ok(afterWriteLegacy instanceof Y.Map);
-  assert.equal(afterWriteLegacy.get("value"), null);
+  assert.equal(cellsRoot.get("r0c0"), undefined);
 
   assert.equal(undoService.canUndo(), true);
   undoService.undo();
@@ -503,7 +498,18 @@ test("binder normalizes foreign nested cell maps for encrypted edits so collab u
   assert.equal(documentController.externalDeltaCount, 1);
 
   documentController.setCellValue("Sheet1", { row: 0, col: 0 }, "edited");
-  await flushAsync(5);
+  await waitFor(async () => {
+    const cell = cellsRoot.get("Sheet1:0:0");
+    if (!(cell instanceof Y.Map)) return false;
+    const enc = cell.get("enc");
+    if (!isEncryptedCellPayload(enc)) return false;
+    const plaintext = await decryptCellPlaintext({
+      encrypted: enc,
+      key,
+      context: { docId: guid, sheetId: "Sheet1", row: 0, col: 0 },
+    });
+    return plaintext?.value === "edited";
+  });
 
   const afterWrite = cellsRoot.get("Sheet1:0:0");
   assert.ok(afterWrite);

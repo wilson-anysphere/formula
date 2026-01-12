@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import * as Y from "yjs";
 
-import { createUndoService } from "@formula/collab-undo";
+import { createUndoService } from "../../undo/index.js";
 import { bindYjsToDocumentController } from "../index.js";
 
 async function waitForCondition(fn, timeoutMs = 2000) {
@@ -231,4 +231,3 @@ test("binder propagates collaborative undo into DocumentController", async () =>
   binder.destroy();
   ydoc.destroy();
 });
-
