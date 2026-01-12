@@ -62,6 +62,34 @@ fn translates_xlfn_prefixed_external_data_functions() {
 }
 
 #[test]
+fn translates_external_data_functions_with_whitespace_before_paren() {
+    // Excel tolerates whitespace between the function name and `(`; ensure translation does too.
+    for (locale, localized, canonical) in [
+        (
+            &locale::DE_DE,
+            "=CUBEWERT (\"conn\";\"member\";1,5)",
+            "=CUBEVALUE (\"conn\",\"member\",1.5)",
+        ),
+        (
+            &locale::FR_FR,
+            "=VALEUR.CUBE (\"conn\";\"member\";1,5)",
+            "=CUBEVALUE (\"conn\",\"member\",1.5)",
+        ),
+        (
+            &locale::ES_ES,
+            "=VALOR.CUBO (\"conn\";\"member\";1,5)",
+            "=CUBEVALUE (\"conn\",\"member\",1.5)",
+        ),
+    ] {
+        assert_eq!(
+            locale::canonicalize_formula(localized, locale).unwrap(),
+            canonical
+        );
+        assert_eq!(locale::localize_formula(canonical, locale).unwrap(), localized);
+    }
+}
+
+#[test]
 fn canonicalize_and_localize_round_trip_for_fr_fr_and_es_es() {
     let fr = "=SOMME(1,5;2,5)";
     let fr_canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
