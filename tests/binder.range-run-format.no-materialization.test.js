@@ -404,3 +404,39 @@ test("binder: hydrates range-run formatting from plain-object sheet entries", as
     ydoc.destroy();
   }
 });
+
+test("binder: hydrates range-run formatting from array-of-object formatRunsByCol encodings", async () => {
+  const ydoc = new Y.Doc();
+  const cells = ydoc.getMap("cells");
+  const sheets = ydoc.getArray("sheets");
+
+  // Some producers may encode the per-column runs as an array of objects instead of
+  // a map keyed by column indices.
+  ydoc.transact(() => {
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheet.set("formatRunsByCol", [
+      { col: 0, runs: [{ startRow: 0, endRowExclusive: 3, format: { font: { italic: true } } }] },
+    ]);
+    sheets.push([sheet]);
+  });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({ ydoc, documentController, defaultSheetId: "Sheet1", userId: "u-a" });
+
+  try {
+    await waitForCondition(() => Boolean(documentController.getCellFormat("Sheet1", "A1")?.font?.italic));
+    assert.equal(documentController.getCellFormat("Sheet1", "A1")?.font?.italic, true);
+    assert.equal(documentController.getCellFormat("Sheet1", "A4")?.font?.italic, undefined);
+
+    const runs = documentController.model.sheets.get("Sheet1")?.formatRunsByCol?.get?.(0) ?? [];
+    assert.ok(Array.isArray(runs) && runs.length > 0, "expected range-run formatting to hydrate into the sheet model");
+
+    assert.equal(cells.size, 0);
+    assert.equal(documentController.model?.sheets?.get?.("Sheet1")?.cells?.size ?? 0, 0);
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+  }
+});
