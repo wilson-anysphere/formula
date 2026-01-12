@@ -448,6 +448,20 @@ def generate(
     )
     add_case(
         cases,
+        prefix="oddfyield_neg_rate",
+        tags=["financial", "odd_coupon", "ODDFYIELD"],
+        formula="=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),-0.01,98,100,2,0)",
+        description="ODDFYIELD with negative coupon rate (confirm whether Excel returns #NUM!)",
+    )
+    add_case(
+        cases,
+        prefix="oddlyield_neg_rate",
+        tags=["financial", "odd_coupon", "ODDLYIELD"],
+        formula="=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),-0.01,98,100,2,0)",
+        description="ODDLYIELD with negative coupon rate (confirm whether Excel returns #NUM!)",
+    )
+    add_case(
+        cases,
         prefix="oddfyield_high_price",
         tags=["financial", "odd_coupon", "ODDFYIELD"],
         formula="=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,300,100,2,0)",

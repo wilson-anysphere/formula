@@ -32193,6 +32193,30 @@
       "id": "oddlprice_neg_rate_f21f6281f932"
     },
     {
+      "formula": "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),-0.01,98,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFYIELD"
+      ],
+      "description": "ODDFYIELD with negative coupon rate (confirm whether Excel returns #NUM!)",
+      "id": "oddfyield_neg_rate_72af92333e7a"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),-0.01,98,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD"
+      ],
+      "description": "ODDLYIELD with negative coupon rate (confirm whether Excel returns #NUM!)",
+      "id": "oddlyield_neg_rate_892570c2f519"
+    },
+    {
       "formula": "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,300,100,2,0)",
       "outputCell": "C1",
       "inputs": [],

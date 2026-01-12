@@ -3112,11 +3112,13 @@ fn odd_coupon_prices_are_finite_for_large_redemption_values() {
 }
 
 #[test]
-fn odd_coupon_bond_price_rejects_negative_coupon_rate() {
+fn odd_coupon_bond_functions_reject_negative_coupon_rate() {
     let mut sheet = TestSheet::new();
 
     let oddf = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),-0.01,0.0625,100,2,0)";
     let oddl = "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),-0.01,0.0625,100,2,0)";
+    let oddfy = "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),-0.01,98,100,2,0)";
+    let oddly = "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),-0.01,98,100,2,0)";
 
     let Some(out) = eval_value_or_skip(&mut sheet, oddf) else {
         return;
@@ -3132,6 +3134,22 @@ fn odd_coupon_bond_price_rejects_negative_coupon_rate() {
     assert!(
         matches!(out, Value::Error(ErrorKind::Num)),
         "expected #NUM! for negative rate in ODDLPRICE, got {out:?}"
+    );
+
+    let Some(out) = eval_value_or_skip(&mut sheet, oddfy) else {
+        return;
+    };
+    assert!(
+        matches!(out, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for negative rate in ODDFYIELD, got {out:?}"
+    );
+
+    let Some(out) = eval_value_or_skip(&mut sheet, oddly) else {
+        return;
+    };
+    assert!(
+        matches!(out, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for negative rate in ODDLYIELD, got {out:?}"
     );
 }
 
