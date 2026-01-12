@@ -59,14 +59,17 @@ test.describe("collaboration: sheet metadata", () => {
           userName: user.name,
           // Ensure sync goes through the websocket server (not BroadcastChannel).
           disableBc: "1",
+          // IndexedDB-backed collab persistence can delay sheet schema initialization on first-run.
+          // Disable it in this e2e so Sheet1 is deterministically present before we mutate `session.sheets`.
+          collabPersistence: "0",
         });
         return `/?${params.toString()}`;
       };
 
-      await Promise.all([
-        gotoDesktop(pageA, makeUrl({ id: "u-a", name: "User A" }), { idleTimeoutMs: 10_000, appReadyTimeoutMs: 120_000 }),
-        gotoDesktop(pageB, makeUrl({ id: "u-b", name: "User B" }), { idleTimeoutMs: 10_000, appReadyTimeoutMs: 120_000 }),
-      ]);
+      // Start clients sequentially to avoid concurrent "brand new doc" schema init races that can
+      // briefly create duplicate Sheet1 entries (and transient empty-sheet lists) on first sync.
+      await gotoDesktop(pageA, makeUrl({ id: "u-a", name: "User A" }), { idleTimeoutMs: 10_000, appReadyTimeoutMs: 120_000 });
+      await gotoDesktop(pageB, makeUrl({ id: "u-b", name: "User B" }), { idleTimeoutMs: 10_000, appReadyTimeoutMs: 120_000 });
 
       // Wait for providers to complete initial sync before applying edits.
       await Promise.all([
@@ -82,21 +85,26 @@ test.describe("collaboration: sheet metadata", () => {
         }, undefined, { timeout: 60_000 }),
       ]);
 
-      // Collab schema initialization (creating the default Sheet1 entry) can lag
-      // slightly behind provider sync. Ensure the authoritative `session.sheets`
-      // list contains Sheet1 before we apply sheet-list edits.
+      // Wait for the default sheet metadata ("Sheet1") to be materialized in the Yjs sheet list.
+      // In collab mode, `provider.synced` can flip true before schema initialization finishes.
       await Promise.all([
         pageA.waitForFunction(() => {
           const app = (window as any).__formulaApp;
           const session = app?.getCollabSession?.() ?? null;
-          const entries = session?.sheets?.toArray?.() ?? [];
-          return entries.some((entry: any) => String(entry?.get?.("id") ?? entry?.id ?? "").trim() === "Sheet1");
+          if (!session?.provider?.synced) return false;
+          if (session?.sheets?.length !== 1) return false;
+          const entry = session?.sheets?.get?.(0) ?? null;
+          const id = String(entry?.get?.("id") ?? entry?.id ?? "").trim();
+          return id === "Sheet1";
         }, undefined, { timeout: 60_000 }),
         pageB.waitForFunction(() => {
           const app = (window as any).__formulaApp;
           const session = app?.getCollabSession?.() ?? null;
-          const entries = session?.sheets?.toArray?.() ?? [];
-          return entries.some((entry: any) => String(entry?.get?.("id") ?? entry?.id ?? "").trim() === "Sheet1");
+          if (!session?.provider?.synced) return false;
+          if (session?.sheets?.length !== 1) return false;
+          const entry = session?.sheets?.get?.(0) ?? null;
+          const id = String(entry?.get?.("id") ?? entry?.id ?? "").trim();
+          return id === "Sheet1";
         }, undefined, { timeout: 60_000 }),
       ]);
 
@@ -157,28 +165,31 @@ test.describe("collaboration: sheet metadata", () => {
       });
       await expect(pageB.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2", { timeout: 30_000 });
 
+      const menuA = pageA.getByTestId("sheet-tab-context-menu");
+      const openSheetTabContextMenuA = async (sheetId: string) => {
+        await pageA.evaluate((sheetId) => {
+          const el = document.querySelector<HTMLElement>(`[data-testid="sheet-tab-${sheetId}"]`);
+          if (!el) throw new Error(`Missing sheet tab: ${sheetId}`);
+          const rect = el.getBoundingClientRect();
+          el.dispatchEvent(
+            new MouseEvent("contextmenu", {
+              bubbles: true,
+              cancelable: true,
+              clientX: rect.left + rect.width / 2,
+              clientY: rect.top + rect.height / 2,
+            }),
+          );
+        }, sheetId);
+        await expect(menuA).toBeVisible({ timeout: 10_000 });
+      };
+
       // 1.5) Perform sheet-tab UI actions on client A and assert they propagate to client B
       // via the shared session.sheets schema (this exercises CollabWorkbookSheetStore write-backs).
       //
       // Hide Sheet2.
       const sheet2TabA = pageA.getByTestId("sheet-tab-Sheet2");
       await expect(sheet2TabA).toBeVisible();
-      // Avoid flaky right-click / keyboard contextmenu behavior in the desktop shell; dispatch a deterministic contextmenu event.
-      await pageA.evaluate(() => {
-        const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
-        if (!tab) throw new Error("Missing Sheet2 tab");
-        const rect = tab.getBoundingClientRect();
-        tab.dispatchEvent(
-          new MouseEvent("contextmenu", {
-            bubbles: true,
-            cancelable: true,
-            clientX: rect.left + rect.width / 2,
-            clientY: rect.top + rect.height / 2,
-          }),
-        );
-      });
-      const menuA = pageA.getByTestId("sheet-tab-context-menu");
-      await expect(menuA).toBeVisible({ timeout: 10_000 });
+      await openSheetTabContextMenuA("Sheet2");
       await menuA.getByRole("button", { name: "Hide", exact: true }).click();
       await expect(pageA.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0);
       await expect(pageB.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0, { timeout: 30_000 });
@@ -186,21 +197,7 @@ test.describe("collaboration: sheet metadata", () => {
 
       // Unhide Sheet2.
       const sheet1TabA = pageA.getByTestId("sheet-tab-Sheet1");
-      await expect(sheet1TabA).toBeVisible();
-      await pageA.evaluate(() => {
-        const tab = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
-        if (!tab) throw new Error("Missing Sheet1 tab");
-        const rect = tab.getBoundingClientRect();
-        tab.dispatchEvent(
-          new MouseEvent("contextmenu", {
-            bubbles: true,
-            cancelable: true,
-            clientX: rect.left + rect.width / 2,
-            clientY: rect.top + rect.height / 2,
-          }),
-        );
-      });
-      await expect(menuA).toBeVisible({ timeout: 10_000 });
+      await openSheetTabContextMenuA("Sheet1");
       await menuA.getByRole("button", { name: "Unhide…", exact: true }).click();
       await menuA.getByRole("button", { name: "Sheet2" }).click();
       await expect(pageA.getByTestId("sheet-tab-Sheet2")).toBeVisible();
@@ -208,25 +205,17 @@ test.describe("collaboration: sheet metadata", () => {
       await expect(pageB.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2", { timeout: 30_000 });
 
       // Set Sheet2 tab color (pick a non-red color so we can distinguish from Sheet1 later).
-      await pageA.evaluate(() => {
-        const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
-        if (!tab) throw new Error("Missing Sheet2 tab");
-        const rect = tab.getBoundingClientRect();
-        tab.dispatchEvent(
-          new MouseEvent("contextmenu", {
-            bubbles: true,
-            cancelable: true,
-            clientX: rect.left + rect.width / 2,
-            clientY: rect.top + rect.height / 2,
-          }),
-        );
-      });
-      await expect(menuA).toBeVisible({ timeout: 10_000 });
-      // The context menu can re-render while open (collab updates / focus changes), causing
-      // Playwright's default actionability checks ("stable") to flake. Force the click so the
-      // submenu opens reliably.
-      await menuA.getByRole("button", { name: "Tab Color", exact: true }).click({ force: true });
-      await menuA.getByRole("button", { name: "Blue" }).click();
+      await openSheetTabContextMenuA("Sheet2");
+      // Avoid a flaky click on the submenu button (menu can reflow during collab updates).
+      // Navigate via keyboard instead: Rename -> Hide -> Tab Color -> Blue.
+      await pageA.keyboard.press("ArrowDown");
+      await pageA.keyboard.press("ArrowDown");
+      await pageA.keyboard.press("ArrowRight");
+      // No Color -> Red -> Orange -> Yellow -> Green -> Teal -> Blue
+      for (let i = 0; i < 6; i += 1) {
+        await pageA.keyboard.press("ArrowDown");
+      }
+      await pageA.keyboard.press("Enter");
       await expect(pageB.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-tab-color", "#0070c0", {
         timeout: 30_000,
       });

@@ -457,9 +457,11 @@ export function SheetTabStrip({
       if (!ok) return;
     }
 
+    // Excel-style rename: start inline editing directly on the tab.
     setEditingSheetId(sheet.id);
     setDraftName(sheet.name);
     setRenameError(null);
+    requestAnimationFrame(() => renameInputRef.current?.focus());
   };
 
   const openSheetPicker = useCallback(async () => {
@@ -886,34 +888,34 @@ export function SheetTabStrip({
       <div
         className="sheet-tabs"
         ref={containerRef}
-         role="tablist"
-         aria-label="Sheets"
-         aria-orientation="horizontal"
-         data-dragging={draggingSheetId ? "true" : undefined}
-         onContextMenu={(e) => {
-           const target = e.target as Element | null;
-           if (!target) return;
- 
-           // Let the native input context menu work while inline renaming.
-           if (target.closest("input.sheet-tab__input")) return;
- 
-           // Tab context menus are handled by the tab button itself.
-           if (target.closest('button[role="tab"][data-sheet-id]')) return;
- 
-           e.preventDefault();
-           e.stopPropagation();
- 
-           // Restore focus to the surface that was active before the menu opened (typically the grid).
-           const active = document.activeElement;
-           lastContextMenuFocusRef.current = active instanceof HTMLElement ? active : null;
- 
-           openSheetTabStripContextMenu({ x: e.clientX, y: e.clientY });
-         }}
-         onKeyDown={(e) => {
-           if (e.defaultPrevented) return;
- 
-           const target = e.target as HTMLElement | null;
-           if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+        role="tablist"
+        aria-label="Sheets"
+        aria-orientation="horizontal"
+        data-dragging={draggingSheetId ? "true" : undefined}
+        onContextMenu={(e) => {
+          const target = e.target as Element | null;
+          if (!target) return;
+
+          // Let the native input context menu work while inline renaming.
+          if (target.closest("input.sheet-tab__input")) return;
+
+          // Tab context menus are handled by the tab button itself.
+          if (target.closest('button[role="tab"][data-sheet-id]')) return;
+
+          e.preventDefault();
+          e.stopPropagation();
+
+          // Restore focus to the surface that was active before the menu opened (typically the grid).
+          const active = document.activeElement;
+          lastContextMenuFocusRef.current = active instanceof HTMLElement ? active : null;
+
+          openSheetTabStripContextMenu({ x: e.clientX, y: e.clientY });
+        }}
+        onKeyDown={(e) => {
+          if (e.defaultPrevented) return;
+
+          const target = e.target as HTMLElement | null;
+          if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
 
           const tabs = containerRef.current
             ? Array.from(containerRef.current.querySelectorAll<HTMLButtonElement>('button[role="tab"]'))

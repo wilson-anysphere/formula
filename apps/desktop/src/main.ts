@@ -907,6 +907,35 @@ window.__formulaApp = app;
 (app as unknown as { getWorkbookSheetStore: () => unknown }).getWorkbookSheetStore = () => workbookSheetStore;
 window.__workbookSheetStore = workbookSheetStore;
 
+// DocumentController creates sheets lazily whenever code reads/writes a new sheet id (via `getCell`).
+// When undo/redo removes the currently active sheet id, downstream listeners can accidentally
+// "recreate" the sheet by reading from it during the same `document.on("change")` dispatch.
+//
+// Keep the active sheet id valid *before* other `document.on("change")` listeners run so undo/redo
+// of sheet add/delete behaves predictably (and stays in sync with the sheet metadata store).
+app.getDocument().on("change", (payload: any) => {
+  const source = typeof payload?.source === "string" ? payload.source : "";
+  if (source !== "undo" && source !== "redo" && source !== "applyState") return;
+
+  const activeId = app.getCurrentSheetId();
+  if (!activeId) return;
+
+  const doc = app.getDocument();
+  const docSheetIds = doc.getSheetIds();
+  if (docSheetIds.length === 0) return;
+  if (docSheetIds.includes(activeId)) return;
+
+  const docIdSet = new Set(docSheetIds);
+  const fallback =
+    workbookSheetStore.listVisible().map((s) => s.id).find((id) => docIdSet.has(id)) ??
+    workbookSheetStore.listAll().map((s) => s.id).find((id) => docIdSet.has(id)) ??
+    docSheetIds[0] ??
+    null;
+  if (!fallback || fallback === activeId) return;
+
+  app.activateSheet(fallback);
+});
+
 // Panels persist state keyed by a workbook/document identifier. For file-backed workbooks we use
 // their on-disk path; for unsaved sessions we generate a random session id so distinct new
 // workbooks don't collide.

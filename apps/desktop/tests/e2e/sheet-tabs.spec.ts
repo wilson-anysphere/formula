@@ -20,6 +20,8 @@ function installTauriStubForSheetTabDelete() {
       invoke: async (cmd: string, args: any) => {
         pushCall(cmd, args);
         switch (cmd) {
+          case "add_sheet":
+            return { id: args?.name ?? "SheetX", name: args?.name ?? "SheetX" };
           case "delete_sheet":
           case "set_cell":
           case "set_range":
@@ -195,9 +197,7 @@ test.describe("sheet tabs", () => {
   });
 
   test("delete sheet marks the document dirty and undo returns to clean state", async ({ page }) => {
-    await page.addInitScript(() => {
-      window.confirm = () => true;
-    });
+    await page.addInitScript(installTauriStubForSheetTabDelete);
     await gotoDesktop(page);
 
     const nextSheetId = await page.evaluate(() => {
@@ -717,16 +717,20 @@ test.describe("sheet tabs", () => {
 
     await expect(page.locator('[data-testid="toast"]').filter({ hasText: /invalid character/i })).toBeVisible();
 
-    // Cancel the in-progress rename; the sheet name should remain unchanged.
+    // Invalid names keep rename mode active until the user fixes or cancels.
+    await expect(input).toBeVisible();
+    await expect(input).toBeFocused();
+
+    // Cancel rename and ensure the sheet name remains unchanged.
     await input.press("Escape");
     await expect(sheet1Tab.locator(".sheet-tab__name")).toHaveText("Sheet1");
 
-    // Switching sheets remains possible after the invalid attempt.
+    // Switching sheets is possible after canceling.
     await page.getByTestId("sheet-tab-Sheet2").click();
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
   });
 
-  test("invalid rename does not block opening the sheet overflow menu", async ({ page }) => {
+  test("invalid rename blocks opening the sheet overflow menu until cancel", async ({ page }) => {
     await gotoDesktop(page);
 
     // Create a second sheet so the overflow menu would normally show multiple options.
@@ -747,7 +751,12 @@ test.describe("sheet tabs", () => {
     await input.press("Enter");
     await expect(page.locator('[data-testid="toast"]').filter({ hasText: /invalid character/i })).toBeVisible();
 
-    // Cancel rename to exit edit mode, then open the overflow menu. Invalid rename should not wedge the sheet UI.
+    // Attempt to open the overflow menu; invalid rename should keep the user in rename mode.
+    await page.getByTestId("sheet-overflow").click();
+    await expect(page.getByTestId("quick-pick")).toHaveCount(0);
+    await expect(input).toBeFocused();
+
+    // Cancel rename; overflow menu should work again.
     await input.press("Escape");
     await page.getByTestId("sheet-overflow").click();
     const quickPick = page.getByTestId("quick-pick");
@@ -758,7 +767,7 @@ test.describe("sheet tabs", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
   });
 
-  test("invalid rename does not block switching sheets via the sheet switcher <select>", async ({ page }) => {
+  test("invalid rename blocks switching sheets via the sheet switcher <select> until cancel", async ({ page }) => {
     await gotoDesktop(page);
 
     // Create a second sheet we can attempt to switch to.
@@ -777,14 +786,18 @@ test.describe("sheet tabs", () => {
     await input.press("Enter");
     await expect(page.locator('[data-testid="toast"]').filter({ hasText: /invalid character/i })).toBeVisible();
 
-    // Cancel rename; sheet name remains unchanged.
-    await input.press("Escape");
-    await expect(sheet1Tab.locator(".sheet-tab__name")).toHaveText("Sheet1");
-
-    // Attempt to switch via the status-bar sheet switcher. Invalid rename should not wedge the sheet UI.
+    // Invalid rename keeps rename mode active and blocks sheet switching until the user fixes/cancels.
     const switcher = page.getByTestId("sheet-switcher");
     await switcher.selectOption("Sheet2", { force: true });
 
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
+    await expect(switcher).toHaveValue("Sheet1");
+    await expect(input).toBeFocused();
+
+    // Cancel rename; switching via the sheet switcher should work again.
+    await input.press("Escape");
+    await expect(sheet1Tab.locator(".sheet-tab__name")).toHaveText("Sheet1");
+    await switcher.selectOption("Sheet2", { force: true });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
     await expect(switcher).toHaveValue("Sheet2");
@@ -1429,6 +1442,9 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("active-value")).toHaveText("Seed");
 
     // Unhide via background menu restores Sheet2.
+    // The last tab stretches to fill the strip width (so drag/drop after it remains targetable),
+    // which makes it hard to right-click the strip background with a trusted mouse event. Instead,
+    // dispatch a deterministic contextmenu event directly on the strip container element.
     await page.evaluate(() => {
       const strip = document.querySelector<HTMLElement>("#sheet-tabs .sheet-tabs");
       if (!strip) throw new Error("Missing sheet tab strip");
@@ -1445,7 +1461,9 @@ test.describe("sheet tabs", () => {
 
     await expect(tabMenu).toBeVisible();
     await tabMenu.getByRole("button", { name: "Unhide…", exact: true }).click();
-    await page.getByTestId("quick-pick").getByRole("button", { name: "Sheet2" }).click();
+    const quickPick = page.getByTestId("quick-pick");
+    await expect(quickPick).toBeVisible();
+    await quickPick.getByRole("button", { name: "Sheet2" }).click();
 
     await expect(sheet2Tab).toBeVisible();
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
