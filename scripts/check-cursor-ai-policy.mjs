@@ -100,8 +100,10 @@ const SCANNED_FILE_EXTENSIONS = new Set([
   ".patch",
   ".diff",
   ".json",
+  ".jsonl",
   ".yaml",
   ".yml",
+  ".plist",
   ".toml",
   ".lock",
   ".sql",
@@ -109,6 +111,8 @@ const SCANNED_FILE_EXTENSIONS = new Set([
   ".tsv",
   ".csv",
   ".txt",
+  ".bas",
+  ".m",
   ".rs",
   ".py",
   ".go",
@@ -122,6 +126,7 @@ const SCANNED_FILE_EXTENSIONS = new Set([
   ".h",
   ".hpp",
   ".proto",
+  ".wgsl",
   ".sh",
 ]);
 
@@ -139,6 +144,7 @@ const CONFIG_FILE_EXTENSIONS = new Set([".json", ".toml", ".yaml", ".yml", ".loc
 const SCANNED_BASENAMES_WITHOUT_EXTENSION = new Set([
   "dockerfile",
   "makefile",
+  "config",
   "license",
   "notice",
   ".gitignore",
