@@ -1652,7 +1652,7 @@ function canRunGridFormattingShortcuts(event: KeyboardEvent): boolean {
 
 function canRunAiPanelShortcut(event: KeyboardEvent): boolean {
   if (event.defaultPrevented) return false;
-  if (app.isEditing()) return false;
+  if (isSpreadsheetEditing()) return false;
   if (isTextInputTarget(event.target)) return false;
   return true;
 }
