@@ -6372,6 +6372,19 @@ export class SpreadsheetApp {
       return;
     }
 
+    if (
+      this.lastHoveredCommentCellKey === metaKey &&
+      this.lastHoveredCommentIndexVersion === this.commentIndexVersion &&
+      this.commentTooltip.classList.contains("comment-tooltip--visible")
+    ) {
+      // Keep tooltip pinned to the cursor without re-setting text content on every move.
+      this.commentTooltip.style.setProperty("--comment-tooltip-x", `${x + 12}px`);
+      this.commentTooltip.style.setProperty("--comment-tooltip-y", `${y + 12}px`);
+      return;
+    }
+
+    this.lastHoveredCommentCellKey = metaKey;
+    this.lastHoveredCommentIndexVersion = this.commentIndexVersion;
     this.commentTooltip.textContent = preview;
     this.commentTooltip.style.setProperty("--comment-tooltip-x", `${x + 12}px`);
     this.commentTooltip.style.setProperty("--comment-tooltip-y", `${y + 12}px`);
