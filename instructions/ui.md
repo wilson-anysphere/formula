@@ -168,6 +168,7 @@ FUNCTIONALITY (# of Excel buttons/features)
 | Shortcut | Action |
 |----------|--------|
 | `Cmd/Ctrl+K` | Inline AI edit |
+| `Cmd/Ctrl+Shift+A` | Toggle AI chat sidebar |
 | `Cmd+I` (macOS) | Toggle AI sidebar |
 | `Tab` | Accept AI suggestion |
 
