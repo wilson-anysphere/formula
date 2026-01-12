@@ -65,6 +65,7 @@ export class ContextMenu {
     const overlay = document.createElement("div");
     overlay.dataset.testid = "context-menu";
     overlay.className = "context-menu-overlay";
+    overlay.hidden = true;
 
     const menu = document.createElement("div");
     menu.className = "context-menu";
@@ -100,7 +101,7 @@ export class ContextMenu {
 
     this.buildMenuContents(this.menu, items, { level: "menu" });
 
-    this.overlay.style.display = "block";
+    this.overlay.hidden = false;
     this.positionMenu(x, y);
 
     // Close on outside clicks without swallowing the click (Excel-like behavior).
@@ -204,7 +205,7 @@ export class ContextMenu {
     this.isShown = false;
     this.lastAnchor = null;
 
-    this.overlay.style.display = "none";
+    this.overlay.hidden = true;
     this.menu.replaceChildren();
     this.closeSubmenu();
 
@@ -255,6 +256,12 @@ export class ContextMenu {
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
+      if (this.submenu) {
+        const parent = this.submenuParent;
+        this.closeSubmenu();
+        if (focusInSubmenu) parent?.focus({ preventScroll: true });
+        return;
+      }
       this.close();
       return;
     }
