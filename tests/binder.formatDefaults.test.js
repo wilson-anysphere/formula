@@ -77,3 +77,59 @@ test("binder: Yjs→DocumentController hydrates layered format defaults without 
   }
 });
 
+test("binder: DocumentController→Yjs syncs layered format defaults (sheet/row/col)", async () => {
+  const ydoc = new Y.Doc();
+  const documentController = new DocumentController();
+
+  /** @type {any[]} */
+  const changeEvents = [];
+  const unsubscribe = documentController.on("change", (payload) => changeEvents.push(payload));
+
+  const binder = bindYjsToDocumentController({ ydoc, documentController, defaultSheetId: "Sheet1" });
+
+  try {
+    // Allow any initial hydration to settle.
+    await new Promise((r) => setTimeout(r, 25));
+    changeEvents.length = 0;
+
+    // Local user edits (undoable in DocumentController) should sync into Yjs metadata.
+    documentController.setSheetFormat("Sheet1", { font: { bold: true } });
+    documentController.setRowFormat("Sheet1", 0, { font: { italic: true } });
+    documentController.setColFormat("Sheet1", 0, { fill: { fgColor: "red" } });
+
+    await waitForCondition(() => {
+      const sheets = ydoc.getArray("sheets");
+      const entry = sheets.toArray().find((e) => (e?.get?.("id") ?? e?.id) === "Sheet1") ?? null;
+      if (!entry || typeof entry.get !== "function") return false;
+
+      const defaultFormat = entry.get("defaultFormat");
+      const rowFormats = entry.get("rowFormats");
+      const colFormats = entry.get("colFormats");
+
+      return (
+        defaultFormat?.font?.bold === true &&
+        typeof rowFormats?.get === "function" &&
+        rowFormats.get("0")?.font?.italic === true &&
+        typeof colFormats?.get === "function" &&
+        colFormats.get("0")?.fill?.fgColor === "red"
+      );
+    });
+
+    const sheets = ydoc.getArray("sheets");
+    const entry = sheets.toArray().find((e) => (e?.get?.("id") ?? e?.id) === "Sheet1") ?? null;
+    assert.ok(entry && typeof entry.get === "function", "expected a Yjs sheets entry for Sheet1");
+
+    assert.deepEqual(entry.get("defaultFormat"), { font: { bold: true } });
+    assert.equal(entry.get("rowFormats")?.get("0")?.font?.italic, true);
+    assert.equal(entry.get("colFormats")?.get("0")?.fill?.fgColor, "red");
+
+    // Local writes should not echo back as collab-sourced external changes.
+    await new Promise((r) => setTimeout(r, 25));
+    const collabEvents = changeEvents.filter((evt) => evt?.source === "collab");
+    assert.equal(collabEvents.length, 0);
+  } finally {
+    unsubscribe();
+    binder.destroy();
+    ydoc.destroy();
+  }
+});
