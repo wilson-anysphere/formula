@@ -529,6 +529,55 @@ pub fn build_note_comment_biff5_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF5 `.xls` fixture containing a NOTE/OBJ/TXO comment whose TXO text is split across
+/// multiple `CONTINUE` records (no per-fragment flags bytes).
+pub fn build_note_comment_biff5_split_across_continues_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_biff5_split_across_continues_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF5 `.xls` fixture containing a NOTE/OBJ/TXO comment whose TXO text is split across
+/// multiple `CONTINUE` records and each fragment begins with a BIFF8-style 0/1 "high-byte" flag
+/// byte.
+pub fn build_note_comment_biff5_split_across_continues_with_flags_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_biff5_split_across_continues_with_flags_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF5 `.xls` fixture containing a NOTE/OBJ/TXO comment whose TXO text is split across
+/// `CONTINUE` records in the middle of a multibyte codepage character (Shift-JIS / codepage 932).
+pub fn build_note_comment_biff5_split_across_continues_codepage_932_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_biff5_split_across_continues_codepage_932_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a single sheet with a merged region (`A1:B1`).
 ///
 /// The NOTE record is targeted at the non-anchor cell (`B1`), but the importer should
@@ -1875,6 +1924,30 @@ fn build_note_comment_biff5_workbook_stream() -> Vec<u8> {
     )
 }
 
+fn build_note_comment_biff5_split_across_continues_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream_biff5(
+        "NotesBiff5Split",
+        &build_note_comment_biff5_split_across_continues_sheet_stream(false),
+        1251,
+    )
+}
+
+fn build_note_comment_biff5_split_across_continues_with_flags_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream_biff5(
+        "NotesBiff5SplitFlags",
+        &build_note_comment_biff5_split_across_continues_sheet_stream(true),
+        1251,
+    )
+}
+
+fn build_note_comment_biff5_split_across_continues_codepage_932_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream_biff5(
+        "NotesBiff5SplitCp932",
+        &build_note_comment_biff5_split_across_continues_codepage_932_sheet_stream(),
+        932,
+    )
+}
+
 fn build_note_comment_codepage_1251_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream(
         "NotesCp1251",
@@ -2033,8 +2106,8 @@ fn build_single_sheet_workbook_stream_biff5(
 
     push_record(
         &mut globals,
-        // Note: BIFF5 BOF record ids vary across producers; calamine accepts 0x0809 here when the
-        // payload version is 0x0500, so we keep using the BIFF8-style id for test fixtures.
+        // BIFF5 and BIFF8 both use BOF record id 0x0809; the BIFF version is encoded in the BOF
+        // payload (0x0500 for BIFF5, 0x0600 for BIFF8).
         RECORD_BOF,
         &bof_biff5(BOF_DT_WORKBOOK_GLOBALS),
     );
@@ -2082,16 +2155,46 @@ fn build_note_comment_sheet_stream(include_merged_region: bool) -> Vec<u8> {
 }
 
 fn build_note_comment_biff5_sheet_stream() -> Vec<u8> {
+    // In Windows-1251, 0xC0 maps to Cyrillic "А" (U+0410).
+    let author_bytes = [0xC0u8];
+    let text_bytes = [b'H', b'i', b' ', 0xC0u8];
+    let segments: [&[u8]; 1] = [&text_bytes];
+    build_note_comment_biff5_sheet_stream_with_ansi_txo(&author_bytes, &segments, false)
+}
+
+fn build_note_comment_biff5_split_across_continues_sheet_stream(prefix_flags: bool) -> Vec<u8> {
+    // In Windows-1251, 0xC0 maps to Cyrillic "А" (U+0410).
+    let author_bytes = [0xC0u8];
+    let part1 = [b'H', b'i', b' '];
+    let part2 = [0xC0u8];
+    let segments: [&[u8]; 2] = [&part1, &part2];
+    build_note_comment_biff5_sheet_stream_with_ansi_txo(&author_bytes, &segments, prefix_flags)
+}
+
+fn build_note_comment_biff5_split_across_continues_codepage_932_sheet_stream() -> Vec<u8> {
+    // In Shift-JIS (codepage 932), '\u{3042}' ('あ') is encoded as 0x82 0xA0. Split across two
+    // `CONTINUE` records as 0x82 + 0xA0 so we exercise decoding across record boundaries.
+    let author_bytes = [0x82u8, 0xA0u8];
+    let part1 = [0x82u8];
+    let part2 = [0xA0u8];
+    let segments: [&[u8]; 2] = [&part1, &part2];
+    build_note_comment_biff5_sheet_stream_with_ansi_txo(&author_bytes, &segments, false)
+}
+
+fn build_note_comment_biff5_sheet_stream_with_ansi_txo(
+    author_bytes: &[u8],
+    text_segments: &[&[u8]],
+    prefix_flags: bool,
+) -> Vec<u8> {
     const OBJECT_ID: u16 = 1;
     // The workbook globals above create 16 style XFs + 1 cell XF, so the first usable
     // cell XF index is 16.
     const XF_GENERAL_CELL: u16 = 16;
 
-    // In Windows-1251, 0xC0 maps to Cyrillic "А" (U+0410).
-    let author_bytes = [0xC0u8];
-    let text_bytes = [b'H', b'i', b' ', 0xC0u8];
-    let cch_text: u16 = text_bytes
-        .len()
+    let cch_text: u16 = text_segments
+        .iter()
+        .map(|seg| seg.len())
+        .sum::<usize>()
         .try_into()
         .expect("comment text too long for u16 length");
 
@@ -2117,7 +2220,7 @@ fn build_note_comment_biff5_sheet_stream() -> Vec<u8> {
     push_record(
         &mut sheet,
         RECORD_NOTE,
-        &note_record_biff5_author_bytes(0u16, 0u16, OBJECT_ID, &author_bytes),
+        &note_record_biff5_author_bytes(0u16, 0u16, OBJECT_ID, author_bytes),
     );
     push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
 
@@ -2127,8 +2230,19 @@ fn build_note_comment_biff5_sheet_stream() -> Vec<u8> {
     txo[12..14].copy_from_slice(&4u16.to_le_bytes()); // cbRuns
     push_record(&mut sheet, RECORD_TXO, &txo);
 
-    // CONTINUE: raw bytes (no per-fragment encoding flags byte).
-    push_record(&mut sheet, RECORD_CONTINUE, &text_bytes);
+    // CONTINUE records: BIFF5 typically stores raw bytes, but some producers appear to prefix
+    // each fragment with a BIFF8-style 0/1 option byte. The parser should handle both.
+    for &seg in text_segments {
+        if prefix_flags {
+            let mut cont = Vec::<u8>::with_capacity(1 + seg.len());
+            cont.push(0); // compressed 8-bit fragment
+            cont.extend_from_slice(seg);
+            push_record(&mut sheet, RECORD_CONTINUE, &cont);
+        } else {
+            push_record(&mut sheet, RECORD_CONTINUE, seg);
+        }
+    }
+
     // Formatting runs continuation (dummy bytes).
     push_record(&mut sheet, RECORD_CONTINUE, &[0u8; 4]);
 

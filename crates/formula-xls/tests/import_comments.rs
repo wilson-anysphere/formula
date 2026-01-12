@@ -64,6 +64,62 @@ fn imports_note_comment_records_biff5() {
 }
 
 #[test]
+fn imports_note_comment_text_split_across_multiple_continue_records_biff5() {
+    let bytes = xls_fixture_builder::build_note_comment_biff5_split_across_continues_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("NotesBiff5Split")
+        .expect("NotesBiff5Split missing");
+
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let comments = sheet.comments_for_cell(a1);
+    assert_eq!(comments.len(), 1, "expected 1 comment on A1");
+    assert_eq!(comments[0].content, "Hi \u{0410}");
+    assert_eq!(comments[0].author.name, "\u{0410}");
+    assert_eq!(comments[0].id, "xls-note:A1:1");
+}
+
+#[test]
+fn imports_note_comment_text_split_across_multiple_continue_records_with_flags_biff5() {
+    let bytes =
+        xls_fixture_builder::build_note_comment_biff5_split_across_continues_with_flags_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("NotesBiff5SplitFlags")
+        .expect("NotesBiff5SplitFlags missing");
+
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let comments = sheet.comments_for_cell(a1);
+    assert_eq!(comments.len(), 1, "expected 1 comment on A1");
+    assert_eq!(comments[0].content, "Hi \u{0410}");
+    assert_eq!(comments[0].author.name, "\u{0410}");
+    assert_eq!(comments[0].id, "xls-note:A1:1");
+}
+
+#[test]
+fn imports_note_comment_text_split_across_continue_records_using_multibyte_codepage_biff5() {
+    let bytes =
+        xls_fixture_builder::build_note_comment_biff5_split_across_continues_codepage_932_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("NotesBiff5SplitCp932")
+        .expect("NotesBiff5SplitCp932 missing");
+
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let comments = sheet.comments_for_cell(a1);
+    assert_eq!(comments.len(), 1, "expected 1 comment on A1");
+    assert_eq!(comments[0].content, "あ");
+    assert_eq!(comments[0].author.name, "あ");
+    assert_eq!(comments[0].id, "xls-note:A1:1");
+}
+
+#[test]
 fn anchors_note_comments_to_merged_region_top_left_cell() {
     let bytes = xls_fixture_builder::build_note_comment_in_merged_region_fixture_xls();
     let result = import_fixture(&bytes);
