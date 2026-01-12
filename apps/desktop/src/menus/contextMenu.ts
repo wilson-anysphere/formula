@@ -243,7 +243,7 @@ export class ContextMenu {
 
     const activeEl = document.activeElement as HTMLElement | null;
     const focusInSubmenu = Boolean(this.submenu && activeEl && this.submenu.contains(activeEl));
-    const focusContainer = focusInSubmenu ? this.submenu : this.menu;
+    const focusContainer = focusInSubmenu && this.submenu ? this.submenu : this.menu;
 
     if (e.key === "Escape") {
       e.preventDefault();
@@ -339,7 +339,7 @@ export class ContextMenu {
   private moveFocus(delta: 1 | -1): void {
     const active = document.activeElement;
     const inSubmenu = this.submenu != null && active instanceof Node && this.submenu.contains(active);
-    const container = inSubmenu ? this.submenu : this.menu;
+    const container = inSubmenu && this.submenu ? this.submenu : this.menu;
 
     const enabled = this.getEnabledButtons(container);
     if (enabled.length === 0) return;
