@@ -689,6 +689,7 @@ fn lower_canonical_expr_inner(
                 scopes,
                 lambda_self_name,
             ),
+            "ISOMITTED" => lower_isomitted(call),
             name_upper => {
                 let func = Function::from_name(name_upper);
                 match func {
@@ -931,4 +932,22 @@ fn lower_lambda(
     })();
     scopes.pop_scope();
     result
+}
+
+fn lower_isomitted(call: &crate::FunctionCall) -> Result<BytecodeExpr, LowerError> {
+    // ISOMITTED is a special form: it expects a bare identifier and does not evaluate the
+    // argument expression. Outside of a lambda invocation, it returns FALSE. For non-identifier
+    // arguments (or invalid arity), it returns #VALUE!.
+    if call.args.len() != 1 {
+        return Ok(value_error_literal());
+    }
+
+    let Some(name) = bare_identifier(&call.args[0]) else {
+        return Ok(value_error_literal());
+    };
+    let key = casefold(name.trim());
+    Ok(BytecodeExpr::FuncCall {
+        func: Function::IsOmitted,
+        args: vec![BytecodeExpr::NameRef(Arc::from(key))],
+    })
 }

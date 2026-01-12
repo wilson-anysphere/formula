@@ -838,6 +838,22 @@ fn bytecode_backend_supports_isomitted_inside_lambdas() {
 }
 
 #[test]
+fn bytecode_backend_supports_isomitted_outside_lambda() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=ISOMITTED(x)")
+        .unwrap();
+
+    // `x` is not a LAMBDA parameter here, so ISOMITTED should return FALSE; this should still be
+    // bytecode-eligible (the identifier argument is not evaluated as a name reference).
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, "=ISOMITTED(x)", "A1");
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Bool(false));
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_sum_and_countif() {
     let mut engine = Engine::new();
 
