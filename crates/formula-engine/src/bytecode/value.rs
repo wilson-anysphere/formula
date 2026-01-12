@@ -320,17 +320,19 @@ impl PartialEq for Value {
         match (self, other) {
             (Number(a), Number(b)) => a.to_bits() == b.to_bits(),
             (Bool(a), Bool(b)) => a == b,
-            (Text(a), Text(b)) => a == b,
-            (Entity(a), Entity(b)) => a == b,
-            (Record(a), Record(b)) => a == b,
+            (Text(a), Text(b)) => Arc::ptr_eq(a, b) || a == b,
+            (Entity(a), Entity(b)) => Arc::ptr_eq(a, b) || a == b,
+            (Record(a), Record(b)) => Arc::ptr_eq(a, b) || a == b,
             (Empty, Empty) => true,
             (Missing, Missing) => true,
             (Error(a), Error(b)) => a == b,
             (Range(a), Range(b)) => a == b,
-            (MultiRange(a), MultiRange(b)) => a == b,
+            (MultiRange(a), MultiRange(b)) => Arc::ptr_eq(&a.areas, &b.areas) || a.areas == b.areas,
             (Lambda(a), Lambda(b)) => a == b,
             (Array(a), Array(b)) => {
-                a.rows == b.rows && a.cols == b.cols && a.values == b.values
+                a.rows == b.rows
+                    && a.cols == b.cols
+                    && (Arc::ptr_eq(&a.values, &b.values) || a.values == b.values)
             }
             _ => false,
         }
