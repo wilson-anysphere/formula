@@ -125,17 +125,46 @@ function normalizeExtensionStorageStore(data) {
 }
 
 function serializeError(error) {
-  if (error instanceof Error) {
-    const payload = { message: error.message, stack: error.stack };
-    if (typeof error.name === "string" && error.name.trim().length > 0) {
-      payload.name = error.name;
+  const payload = { message: "Unknown error" };
+
+  try {
+    if (error && typeof error === "object" && "message" in error) {
+      payload.message = String(error.message);
+    } else {
+      payload.message = String(error);
     }
-    if (Object.prototype.hasOwnProperty.call(error, "code")) {
-      payload.code = error.code;
-    }
-    return payload;
+  } catch {
+    payload.message = "Unknown error";
   }
-  return { message: String(error) };
+
+  try {
+    if (error && typeof error === "object" && "stack" in error && error.stack != null) {
+      payload.stack = String(error.stack);
+    }
+  } catch {
+    // ignore stack serialization failures
+  }
+
+  try {
+    if (error && typeof error === "object") {
+      if (typeof error.name === "string" && error.name.trim().length > 0) {
+        payload.name = String(error.name);
+      }
+      if (Object.prototype.hasOwnProperty.call(error, "code")) {
+        const code = error.code;
+        const primitive =
+          code == null ||
+          typeof code === "string" ||
+          typeof code === "number" ||
+          typeof code === "boolean";
+        payload.code = primitive ? code : String(code);
+      }
+    }
+  } catch {
+    // ignore metadata serialization failures
+  }
+
+  return payload;
 }
 
 function deserializeError(payload) {

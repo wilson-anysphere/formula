@@ -905,3 +905,81 @@ test("BrowserExtensionHost: workbookOpened sent via _sendEventToExtension update
   assert.equal(apiResult?.path, "/tmp/opened.xlsx");
   assert.equal(apiResult?.name, "opened.xlsx");
 });
+
+test("BrowserExtensionHost: api_error preserves name/code for non-Error throws", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  /** @type {any} */
+  let apiError;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "api_error" && msg.id === "req1") {
+          apiError = msg.error;
+          resolveDone();
+        }
+      }
+    }
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async getActiveWorkbook() {
+        return { name: "Initial", path: null };
+      },
+      async openWorkbook() {
+        // Simulate a DOMException-like value (not an Error instance) that still has
+        // useful `name`/`code` metadata.
+        throw { name: "AbortError", message: "Open workbook cancelled", code: { reason: "cancelled" } };
+      }
+    },
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.workbook-error-serialization";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-error-serialization/",
+    mainUrl: "memory://workbook-error-serialization/main.mjs",
+    manifest: {
+      name: "workbook-error-serialization",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"]
+    }
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "openWorkbook",
+    args: ["/tmp/Example.xlsx"]
+  });
+
+  await done;
+
+  assert.equal(apiError?.message, "Open workbook cancelled");
+  assert.equal(apiError?.name, "AbortError");
+  assert.equal(typeof apiError?.code, "string");
+});
