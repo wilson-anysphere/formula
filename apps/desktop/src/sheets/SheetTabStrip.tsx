@@ -492,8 +492,10 @@ export function SheetTabStrip({
     const hiddenSheets = allSheets.filter((s) => s.visibility === "hidden");
 
     // Prevent deleting/hiding the last visible sheet.
-    const hasTauriWorkbookBridge = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
-    const canDelete = hasTauriWorkbookBridge && visibleSheets.length > 1;
+    //
+    // Note: deletion is still allowed in non-Tauri (web / e2e harness) environments; the optional
+    // `onPersistSheetDelete` hook can no-op when no workbook backend is available.
+    const canDelete = visibleSheets.length > 1;
     const canHide = sheet.visibility === "visible" && visibleSheets.length > 1;
 
     const items: ContextMenuItem[] = [
