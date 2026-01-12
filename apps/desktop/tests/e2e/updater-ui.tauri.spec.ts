@@ -600,7 +600,11 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     const dialog = page.getByTestId("updater-dialog");
     await expect(dialog).toBeVisible();
     await expect(page.getByTestId("updater-later")).toBeVisible();
-    await page.getByTestId("updater-later").click();
+    // Exercise the ESC/cancel path: it should behave like clicking "Later" and persist suppression.
+    await page.evaluate(() => {
+      const dialogEl = document.querySelector("dialog[data-testid=\"updater-dialog\"]");
+      dialogEl?.dispatchEvent(new Event("cancel", { cancelable: true }));
+    });
     await expect(dialog).toBeHidden();
 
     const dismissal = await page.evaluate(() => ({
