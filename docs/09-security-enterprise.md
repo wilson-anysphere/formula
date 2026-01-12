@@ -435,7 +435,7 @@ Classifications are stored as `document_classifications` records with a `selecto
 
 ### Effective classification resolution
 
-`services/api` supports two related (but intentionally different) classification resolution modes:
+`services/api` supports three related (but intentionally different) classification resolution modes:
 
 1) **Selector precedence** (used by the classification resolve endpoint)
    - Cell queries:
@@ -448,7 +448,7 @@ Classifications are stored as `document_classifications` records with a `selecto
      - otherwise matching `sheet` → `document` → default `Public`
 
 2) **Aggregate semantics** (used for DLP evaluation of `range` selectors)
-    - When DLP is evaluated for a `range` selector, the backend computes the **maximum** classification level across all selectors that *intersect* the queried range (including cells inside the range) and unions labels across all matches. This is intentionally conservative for bulk operations like copy/export.
+   - When DLP is evaluated for a `range` selector, the backend computes the **maximum** classification level across all selectors that *intersect* the queried range (including cells inside the range) and unions labels across all matches. This is intentionally conservative for bulk operations like copy/export.
 
 3) **Document-wide aggregate semantics** (used for DLP evaluation when no `selector` is provided)
    - For document-scoped actions like external share-link checks, the backend computes the **maximum** classification level across **all** classifications in the document (including cells/ranges) and unions labels across all matches. This is intentionally conservative: if *any* part of the document is `Confidential`, the document is treated as `Confidential` for those actions.
