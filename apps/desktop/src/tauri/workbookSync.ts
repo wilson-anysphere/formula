@@ -308,7 +308,12 @@ function captureSheetSnapshot(document: DocumentControllerLike): SheetSnapshot |
     const meta = document.getSheetMeta(id);
     metaById.set(id, normalizeSheetMeta(meta, id));
   }
-  return { order: order.map((id) => String(id ?? "").trim()).filter(Boolean), metaById };
+  const normalizedOrder = order.map((id) => String(id ?? "").trim()).filter(Boolean);
+  // DocumentController sheets are lazily materialized: a freshly constructed controller may
+  // report zero sheets until the first access/edit. Treat an empty snapshot as "unknown"
+  // so we don't accidentally filter out the first batch of cell edits.
+  if (normalizedOrder.length === 0) return null;
+  return { order: normalizedOrder, metaById };
 }
 
 function applySheetDeltaToSnapshot(snapshot: SheetSnapshot, deltas: SheetMetaDelta[], sheetOrderDelta: SheetOrderDelta | null): SheetSnapshot {
