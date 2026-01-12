@@ -42,7 +42,7 @@ async function main() {
   const buildDesktopCode = await run("cargo", [
     "build",
     "-p",
-    "formula-desktop-tauri",
+    "desktop",
     "--features",
     "desktop",
     "--bin",
@@ -79,4 +79,3 @@ main().catch((err) => {
   console.error("[coi-check] ERROR:", err);
   process.exit(1);
 });
-

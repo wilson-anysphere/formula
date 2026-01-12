@@ -286,7 +286,7 @@ Where it’s defined:
 
 Practical effect:
 
-- `bash scripts/cargo_agent.sh test -p formula-desktop-tauri` can run in CI without installing WebView toolchains.
+- `bash scripts/cargo_agent.sh test -p desktop` can run in CI without installing WebView toolchains.
 - Building/running the app uses the `desktop` feature and therefore requires the platform WebView dependencies.
 
 ---
