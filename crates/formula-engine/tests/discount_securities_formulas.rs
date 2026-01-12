@@ -246,3 +246,32 @@ fn discount_security_functions_validate_additional_constraints() {
     assert_eq!(engine.get_cell_value("Sheet1", "A5"), Value::Error(ErrorKind::Num));
     assert_eq!(engine.get_cell_value("Sheet1", "A6"), Value::Error(ErrorKind::Num));
 }
+
+#[test]
+fn discount_security_functions_reject_non_finite_numbers() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_value("Sheet1", "B1", f64::INFINITY)
+        .unwrap();
+
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            "=DISC(DATE(2020,1,1),DATE(2021,1,1),B1,100)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            "=TBILLYIELD(DATE(2020,1,1),DATE(2020,7,1),B1)",
+        )
+        .unwrap();
+
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Num));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Error(ErrorKind::Num));
+}
