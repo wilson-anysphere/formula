@@ -3172,6 +3172,92 @@ fn bytecode_backend_discount_security_text_dates_reject_numeric_strings() {
 }
 
 #[test]
+fn bytecode_backend_bond_text_dates_reject_numeric_strings() {
+    let mut engine = Engine::new();
+
+    // Standard and odd-coupon bond functions should use DATEVALUE-style parsing for *text* date
+    // arguments. Numeric-looking strings like "1" must be rejected as dates (#VALUE!), not coerced
+    // as date serials.
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=YIELD("1","2025-01-15",0.05,95,100,2)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", r#"=DURATION("1","2025-01-15",0.05,0.04,2)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", r#"=MDURATION("1","2025-01-15",0.05,0.04,2)"#)
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A4",
+            r#"=ODDFPRICE("1","2025-01-01","2020-01-01","2020-07-01",0.05,0.04,100,2)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A5",
+            r#"=ODDFYIELD("1","2025-01-01","2020-01-01","2020-07-01",0.05,95,100,2)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A6",
+            r#"=ODDLPRICE("1","2021-03-01","2020-10-15",0.05,0.06,100,2)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A7",
+            r#"=ODDLYIELD("1","2021-03-01","2020-10-15",0.05,95,100,2)"#,
+        )
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 7);
+    assert_eq!(stats.compiled, 7);
+    assert_eq!(stats.fallback, 0);
+    assert_eq!(engine.bytecode_program_count(), 7);
+
+    engine.recalculate_single_threaded();
+
+    for cell in ["A1", "A2", "A3", "A4", "A5", "A6", "A7"] {
+        assert_eq!(
+            engine.get_cell_value("Sheet1", cell),
+            Value::Error(ErrorKind::Value),
+            "expected {cell} to error for invalid text date input"
+        );
+    }
+
+    for (formula, cell) in [
+        (r#"=YIELD("1","2025-01-15",0.05,95,100,2)"#, "A1"),
+        (r#"=DURATION("1","2025-01-15",0.05,0.04,2)"#, "A2"),
+        (r#"=MDURATION("1","2025-01-15",0.05,0.04,2)"#, "A3"),
+        (
+            r#"=ODDFPRICE("1","2025-01-01","2020-01-01","2020-07-01",0.05,0.04,100,2)"#,
+            "A4",
+        ),
+        (
+            r#"=ODDFYIELD("1","2025-01-01","2020-01-01","2020-07-01",0.05,95,100,2)"#,
+            "A5",
+        ),
+        (
+            r#"=ODDLPRICE("1","2021-03-01","2020-10-15",0.05,0.06,100,2)"#,
+            "A6",
+        ),
+        (
+            r#"=ODDLYIELD("1","2021-03-01","2020-10-15",0.05,95,100,2)"#,
+            "A7",
+        ),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_financial_date_text_respects_value_locale() {
     let mut engine = Engine::new();
     let formula = r#"=DISC("01/02/2020","01/03/2020",97,100)"#;
