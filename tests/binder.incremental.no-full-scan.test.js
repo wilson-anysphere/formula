@@ -72,3 +72,61 @@ test("binder: Yjs→DocumentController incremental updates avoid full cells-map 
     ydoc.destroy();
   }
 });
+
+test("binder: Yjs sheet formatRunsByCol array edits avoid full sheets-array scans", async () => {
+  const ydoc = new Y.Doc();
+  const sheets = ydoc.getArray("sheets");
+
+  // Store format runs using a nested Y.Array encoding (some snapshots/clients may do this).
+  ydoc.transact(() => {
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+
+    const runsByCol = new Y.Array();
+    runsByCol.push([
+      {
+        col: 0,
+        runs: [{ startRow: 0, endRowExclusive: 1, format: { font: { bold: true } } }],
+      },
+    ]);
+    sheet.set("formatRunsByCol", runsByCol);
+
+    sheets.push([sheet]);
+  });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({ ydoc, documentController, defaultSheetId: "Sheet1" });
+
+  // Wait for initial hydration to settle.
+  await waitForCondition(() => Boolean(documentController.getCellFormat("Sheet1", "A1")?.font?.bold), 10_000);
+
+  // After initial hydration, the binder should not scan all sheets when applying a single-sheet
+  // nested array edit (Y.Array change where `changes.keys` is empty).
+  const originalToArray = sheets.toArray.bind(sheets);
+  sheets.toArray = () => {
+    throw new Error("sheets.toArray should not be called after initial hydration");
+  };
+
+  try {
+    const remoteOrigin = { type: "remote-test" };
+    ydoc.transact(() => {
+      const sheet = sheets.get(0);
+      assert.ok(sheet instanceof Y.Map);
+      const runsByCol = sheet.get("formatRunsByCol");
+      assert.ok(runsByCol instanceof Y.Array);
+      runsByCol.push([
+        {
+          col: 1,
+          runs: [{ startRow: 0, endRowExclusive: 1, format: { font: { italic: true } } }],
+        },
+      ]);
+    }, remoteOrigin);
+
+    await waitForCondition(() => Boolean(documentController.getCellFormat("Sheet1", "B1")?.font?.italic), 10_000);
+  } finally {
+    sheets.toArray = originalToArray;
+    binder.destroy();
+    ydoc.destroy();
+  }
+});
