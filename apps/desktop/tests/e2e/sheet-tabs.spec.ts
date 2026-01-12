@@ -958,9 +958,9 @@ test.describe("sheet tabs", () => {
       await expect(page.getByTestId("context-menu")).toBeHidden();
       await expect(menu).toBeVisible();
       await menu.getByRole("button", { name: "Hide", exact: true }).click();
+      await expect(menu).toBeHidden();
     }
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
-
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
 
     // Unhide Sheet2 and ensure position updates.
@@ -981,12 +981,19 @@ test.describe("sheet tabs", () => {
       const menu = page.getByTestId("sheet-tab-context-menu");
       await expect(page.getByTestId("context-menu")).toBeHidden();
       await expect(menu).toBeVisible();
-      await menu.getByRole("button", { name: "Unhide…" }).click();
+      await menu.getByRole("button", { name: /^Unhide/ }).click();
       await menu.getByRole("button", { name: "Sheet2" }).click();
+      await expect(menu).toBeHidden();
     }
-    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
 
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
+
+    // Set a tab color via the sheet tab context menu and verify it renders.
+    await page.getByTestId("sheet-tab-Sheet3").click({ button: "right" });
+    await page.getByRole("button", { name: "Tab Color" }).click();
+    await page.getByRole("button", { name: "Red" }).click();
+    await expect(page.getByTestId("sheet-tab-Sheet3").locator(".sheet-tab__color")).toBeVisible();
   });
 
   test("renaming a sheet marks the document dirty", async ({ page }) => {

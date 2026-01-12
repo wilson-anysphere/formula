@@ -7,7 +7,8 @@ use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as Colum
 use formula_fs::{atomic_write_with_path, AtomicWriteError};
 use formula_model::{
     import::{import_csv_to_columnar_table, CsvOptions, CsvTextEncoding},
-    sanitize_sheet_name, CellValue as ModelCellValue, DateSystem as WorkbookDateSystem, WorksheetId,
+    sanitize_sheet_name, CellValue as ModelCellValue, DateSystem as WorkbookDateSystem,
+    SheetVisibility, TabColor, WorksheetId,
 };
 use formula_xlsb::{
     CellEdit as XlsbCellEdit, CellValue as XlsbCellValue, OpenOptions as XlsbOpenOptions,
@@ -20,8 +21,9 @@ use formula_xlsx::print::{
 use formula_xlsx::{
     patch_xlsx_streaming_workbook_cell_patches,
     patch_xlsx_streaming_workbook_cell_patches_with_part_overrides, strip_vba_project_streaming,
-    CellPatch as XlsxCellPatch, PartOverride, PreservedPivotParts, WorkbookCellPatches,
-    WorkbookKind, XlsxPackage,
+    parse_sheet_tab_color, parse_workbook_sheets, write_sheet_tab_color, write_workbook_sheets,
+    CellPatch as XlsxCellPatch, PartOverride, PreservedPivotParts, WorkbookCellPatches, WorkbookKind,
+    XlsxPackage,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufReader, Cursor, Read};
@@ -46,6 +48,10 @@ const XLAM_WORKBOOK_CONTENT_TYPE: &str = "application/vnd.ms-excel.addin.macroEn
 pub struct Sheet {
     pub id: String,
     pub name: String,
+    /// Excel-style sheet visibility state (visible/hidden/veryHidden).
+    pub visibility: SheetVisibility,
+    /// Excel-style tab color (OpenXML CT_Color).
+    pub tab_color: Option<TabColor>,
     /// Stable worksheet identifier for XLSX/XLSM inputs (`xl/worksheets/sheetN.xml`).
     ///
     /// We prefer this over `name` when writing cell patches so in-app sheet renames don't break
@@ -83,6 +89,8 @@ impl Sheet {
         Self {
             id,
             name,
+            visibility: SheetVisibility::Visible,
+            tab_color: None,
             xlsx_worksheet_part: None,
             origin_ordinal: None,
             cells: HashMap::new(),
@@ -1011,6 +1019,8 @@ fn formula_model_sheet_to_app_sheet(
     styles: &formula_model::StyleTable,
 ) -> anyhow::Result<Sheet> {
     let mut out = Sheet::new(sheet.name.clone(), sheet.name.clone());
+    out.visibility = sheet.visibility;
+    out.tab_color = sheet.tab_color.clone();
 
     for (cell_ref, cell) in sheet.iter_cells() {
         let row = cell_ref.row as usize;
@@ -1638,6 +1648,127 @@ fn workbook_xml_sheet_order_override(
     Ok(Some(rewritten.into_bytes()))
 }
 
+fn sheet_metadata_part_overrides(
+    bytes: &[u8],
+    workbook: &Workbook,
+) -> anyhow::Result<HashMap<String, PartOverride>> {
+    let mut part_overrides: HashMap<String, PartOverride> = HashMap::new();
+
+    // --- workbook.xml sheet visibility (state="hidden"/"veryHidden") ---
+    let workbook_xml_bytes = formula_xlsx::read_part_from_reader(Cursor::new(bytes), "xl/workbook.xml")
+        .map_err(|e| anyhow::anyhow!(e.to_string()))
+        .context("read xl/workbook.xml")?
+        .ok_or_else(|| anyhow::anyhow!("missing xl/workbook.xml"))?;
+    let workbook_xml =
+        std::str::from_utf8(&workbook_xml_bytes).context("parse xl/workbook.xml as utf8")?;
+
+    let mut sheets = parse_workbook_sheets(workbook_xml)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))
+        .context("parse workbook sheet metadata")?;
+
+    // Resolve worksheet part <-> relId so we can update visibility even when the sheet has been
+    // renamed in-app (the origin workbook.xml might not be rewritten yet).
+    let mut worksheet_parts_by_name: HashMap<String, String> = HashMap::new();
+    let mut rel_id_by_part: HashMap<String, String> = HashMap::new();
+    if let Ok(parts) = formula_xlsx::worksheet_parts_from_reader(Cursor::new(bytes)) {
+        for part in parts {
+            rel_id_by_part.insert(part.worksheet_part.clone(), part.rel_id.clone());
+            worksheet_parts_by_name.insert(part.name, part.worksheet_part);
+        }
+    }
+
+    let mut desired_visibility_by_name: HashMap<&str, SheetVisibility> = HashMap::new();
+    let mut desired_visibility_by_rel_id: HashMap<String, SheetVisibility> = HashMap::new();
+    for sheet in &workbook.sheets {
+        if let Some(part) = sheet.xlsx_worksheet_part.as_deref() {
+            if let Some(rel_id) = rel_id_by_part.get(part) {
+                desired_visibility_by_rel_id.insert(rel_id.clone(), sheet.visibility);
+                continue;
+            }
+        }
+        desired_visibility_by_name.insert(sheet.name.as_str(), sheet.visibility);
+    }
+
+    let mut workbook_xml_changed = false;
+    for sheet in &mut sheets {
+        let desired = desired_visibility_by_rel_id
+            .get(&sheet.rel_id)
+            .copied()
+            .or_else(|| desired_visibility_by_name.get(sheet.name.as_str()).copied());
+        if let Some(visibility) = desired {
+            if sheet.visibility != visibility {
+                sheet.visibility = visibility;
+                workbook_xml_changed = true;
+            }
+        }
+    }
+
+    if workbook_xml_changed {
+        let updated = write_workbook_sheets(workbook_xml, &sheets)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))
+            .context("rewrite xl/workbook.xml sheet metadata")?;
+        part_overrides.insert(
+            "xl/workbook.xml".to_string(),
+            PartOverride::Replace(updated.into_bytes()),
+        );
+    }
+
+    // --- worksheet XML tabColor ---
+    // Use the cached worksheet part when available; fall back to re-discovering parts from the package.
+    for sheet in &workbook.sheets {
+        let part_name = sheet
+            .xlsx_worksheet_part
+            .as_deref()
+            .or_else(|| worksheet_parts_by_name.get(&sheet.name).map(|s| s.as_str()));
+        let Some(part_name) = part_name else {
+            continue;
+        };
+
+        let sheet_xml_bytes = formula_xlsx::read_part_from_reader(Cursor::new(bytes), part_name)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))
+            .with_context(|| format!("read worksheet part {part_name}"))?
+            .ok_or_else(|| anyhow::anyhow!("missing worksheet part {part_name}"))?;
+        let sheet_xml = std::str::from_utf8(&sheet_xml_bytes)
+            .with_context(|| format!("parse worksheet part {part_name} as utf8"))?;
+
+        let current = parse_sheet_tab_color(sheet_xml)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))
+            .with_context(|| format!("parse tabColor in {part_name}"))?;
+        if current == sheet.tab_color {
+            continue;
+        }
+
+        let updated = write_sheet_tab_color(sheet_xml, sheet.tab_color.as_ref())
+            .map_err(|e| anyhow::anyhow!(e.to_string()))
+            .with_context(|| format!("rewrite tabColor in {part_name}"))?;
+        part_overrides.insert(part_name.to_string(), PartOverride::Replace(updated.into_bytes()));
+    }
+
+    Ok(part_overrides)
+}
+
+fn patch_sheet_metadata_in_package(
+    bytes: &[u8],
+    workbook: &Workbook,
+) -> anyhow::Result<Option<Vec<u8>>> {
+    let part_overrides = sheet_metadata_part_overrides(bytes, workbook)?;
+    if part_overrides.is_empty() {
+        return Ok(None);
+    }
+
+    let mut cursor = Cursor::new(Vec::new());
+    let empty_patches = WorkbookCellPatches::default();
+    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
+        Cursor::new(bytes),
+        &mut cursor,
+        &empty_patches,
+        &part_overrides,
+    )
+    .context("apply sheet metadata overrides (streaming)")?;
+
+    Ok(Some(cursor.into_inner()))
+}
+
 pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[u8]>> {
     let extension = path
         .extension()
@@ -1808,22 +1939,40 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
                 })
                 .unwrap_or(true);
 
-        if patches.is_empty()
+        let fast_path_possible = patches.is_empty()
             && !print_settings_changed
             && !power_query_changed
             && sheet_order_override.is_none()
             && !needs_strip_vba
             && !needs_inject_vba
             && !needs_workbook_content_type_update
-            && !needs_date_system_update
-        {
-            write_file_atomic(path, origin_bytes)
+            && !needs_date_system_update;
+
+        if fast_path_possible {
+            let part_overrides = sheet_metadata_part_overrides(origin_bytes, workbook)?;
+            if part_overrides.is_empty() {
+                write_file_atomic(path, origin_bytes)
+                    .with_context(|| format!("write workbook {:?}", path))?;
+                return Ok(workbook
+                    .origin_xlsx_bytes
+                    .as_ref()
+                    .expect("origin_xlsx_bytes should be Some when origin_bytes is Some")
+                    .clone());
+            }
+
+            let empty_patches = WorkbookCellPatches::default();
+            let mut cursor = Cursor::new(Vec::new());
+            patch_xlsx_streaming_workbook_cell_patches_with_part_overrides(
+                Cursor::new(origin_bytes),
+                &mut cursor,
+                &empty_patches,
+                &part_overrides,
+            )
+            .context("patch sheet metadata (streaming)")?;
+            let bytes = Arc::<[u8]>::from(cursor.into_inner());
+            write_file_atomic(path, bytes.as_ref())
                 .with_context(|| format!("write workbook {:?}", path))?;
-            return Ok(workbook
-                .origin_xlsx_bytes
-                .as_ref()
-                .expect("origin_xlsx_bytes should be Some when origin_bytes is Some")
-                .clone());
+            return Ok(bytes);
         }
 
         let mut part_overrides: HashMap<String, PartOverride> = HashMap::new();
@@ -1907,6 +2056,10 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             if let Some(updated) = patch_workbook_main_content_type_in_package(&bytes, desired)? {
                 bytes = updated;
             }
+        }
+
+        if let Some(updated) = patch_sheet_metadata_in_package(&bytes, workbook)? {
+            bytes = updated;
         }
 
         let bytes = Arc::<[u8]>::from(bytes);
@@ -2364,6 +2517,10 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
             .add_sheet(sheet.name.clone())
             .map_err(|e| anyhow::anyhow!(e.to_string()))
             .with_context(|| format!("add sheet {}", sheet.name))?;
+        if let Some(model_sheet) = out.sheet_mut(sheet_id) {
+            model_sheet.visibility = sheet.visibility;
+            model_sheet.tab_color = sheet.tab_color.clone();
+        }
         sheet_id_by_app_id.insert(sheet.id.clone(), sheet_id);
         sheet_id_by_name.insert(sheet.name.clone(), sheet_id);
     }
@@ -3667,6 +3824,60 @@ mod tests {
             sheet.value(formula_model::CellRef::new(0, 0)),
             ModelCellValue::Number(123.0)
         );
+    }
+
+    #[test]
+    fn sheet_visibility_and_tab_color_are_patched_on_save() {
+        // Create a small workbook that we can treat as an "origin XLSX" package.
+        let mut model = formula_model::Workbook::new();
+        model.add_sheet("Sheet1").expect("add Sheet1");
+        model.add_sheet("Sheet2").expect("add Sheet2");
+        model.add_sheet("Sheet3").expect("add Sheet3");
+        let mut cursor = Cursor::new(Vec::new());
+        formula_xlsx::write_workbook_to_writer(&model, &mut cursor).expect("write base workbook");
+        let base_bytes = cursor.into_inner();
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let base_path = tmp.path().join("base.xlsx");
+        std::fs::write(&base_path, &base_bytes).expect("write base file");
+
+        let mut workbook = read_xlsx_blocking(&base_path).expect("read base workbook");
+        assert!(
+            workbook.origin_xlsx_bytes.is_some(),
+            "expected read_xlsx_blocking to retain origin bytes"
+        );
+
+        // Apply in-app edits that must be persisted via patching workbook.xml / worksheet sheetPr.
+        workbook.sheets[0].tab_color = Some(TabColor::rgb("FFFF0000"));
+        workbook.sheets[1].visibility = SheetVisibility::Hidden;
+        workbook.sheets[2].visibility = SheetVisibility::VeryHidden;
+
+        // Include at least one cell patch so this exercises "cell patches + metadata overrides"
+        // rather than only the metadata fast-path.
+        workbook.sheets[0].set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(123.0))));
+
+        let out_path = tmp.path().join("patched.xlsx");
+        let written_bytes = write_xlsx_blocking(&out_path, &workbook).expect("write patched workbook");
+
+        let roundtrip =
+            formula_xlsx::read_workbook_from_reader(Cursor::new(written_bytes.as_ref()))
+                .expect("read patched workbook");
+
+        let sheet1 = roundtrip.sheet_by_name("Sheet1").expect("Sheet1 exists");
+        assert_eq!(
+            sheet1.tab_color.as_ref().and_then(|c| c.rgb.as_deref()),
+            Some("FFFF0000")
+        );
+        assert_eq!(
+            sheet1.value(formula_model::CellRef::new(0, 0)),
+            ModelCellValue::Number(123.0)
+        );
+
+        let sheet2 = roundtrip.sheet_by_name("Sheet2").expect("Sheet2 exists");
+        assert_eq!(sheet2.visibility, SheetVisibility::Hidden);
+
+        let sheet3 = roundtrip.sheet_by_name("Sheet3").expect("Sheet3 exists");
+        assert_eq!(sheet3.visibility, SheetVisibility::VeryHidden);
     }
 
     #[test]

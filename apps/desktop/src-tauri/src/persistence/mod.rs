@@ -51,7 +51,11 @@ pub fn workbook_to_model(workbook: &AppWorkbook) -> anyhow::Result<ModelWorkbook
     let mut number_format_style_ids: HashMap<String, u32> = HashMap::new();
 
     for sheet in &workbook.sheets {
-        let _sheet_id = model.add_sheet(sheet.name.clone())?;
+        let sheet_id = model.add_sheet(sheet.name.clone())?;
+        if let Some(model_sheet) = model.sheet_mut(sheet_id) {
+            model_sheet.visibility = sheet.visibility;
+            model_sheet.tab_color = sheet.tab_color.clone();
+        }
         let sheet_idx = model.sheets.len().saturating_sub(1);
 
         for ((row, col), cell) in sheet.cells_iter() {
@@ -163,6 +167,8 @@ fn sheet_from_model(
     style_table: &formula_model::StyleTable,
 ) -> anyhow::Result<AppSheet> {
     let mut out = AppSheet::new(sheet.name.clone(), sheet.name.clone());
+    out.visibility = sheet.visibility;
+    out.tab_color = sheet.tab_color.clone();
 
     for (cell_ref, cell) in sheet.iter_cells() {
         let row = cell_ref.row as usize;

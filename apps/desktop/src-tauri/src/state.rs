@@ -27,6 +27,7 @@ use formula_storage::{
     AutoSaveConfig, AutoSaveManager, CellChange, CellData as StorageCellData,
     CellRange as StorageCellRange, ImportModelWorkbookOptions,
 };
+use formula_model::{SheetVisibility, TabColor};
 use formula_xlsx::print::{
     CellRange as PrintCellRange, ManualPageBreaks, PageSetup, SheetPrintSettings,
 };
@@ -200,6 +201,8 @@ pub struct CellUpdateData {
 pub struct SheetInfoData {
     pub id: String,
     pub name: String,
+    pub visibility: SheetVisibility,
+    pub tab_color: Option<TabColor>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -341,6 +344,8 @@ impl AppState {
                 .map(|sheet| SheetInfoData {
                     id: sheet.id.clone(),
                     name: sheet.name.clone(),
+                    visibility: sheet.visibility,
+                    tab_color: sheet.tab_color.clone(),
                 })
                 .collect(),
         })
@@ -536,6 +541,8 @@ impl AppState {
         Ok(SheetInfoData {
             id: candidate_id,
             name: candidate_name,
+            visibility: SheetVisibility::Visible,
+            tab_color: None,
         })
     }
 
@@ -926,6 +933,132 @@ impl AppState {
         self.rebuild_engine_from_workbook()?;
         self.engine.recalculate();
         let _ = self.refresh_computed_values()?;
+
+        self.dirty = true;
+        self.redo_stack.clear();
+        Ok(())
+    }
+
+    pub fn set_sheet_visibility(
+        &mut self,
+        sheet_id: &str,
+        visibility: SheetVisibility,
+    ) -> Result<(), AppStateError> {
+        let (current, visible_count) = {
+            let workbook = self.get_workbook()?;
+            let sheet = workbook
+                .sheet(sheet_id)
+                .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+            let current = sheet.visibility;
+            if current == visibility {
+                return Ok(());
+            }
+            let visible_count = workbook
+                .sheets
+                .iter()
+                .filter(|s| matches!(s.visibility, SheetVisibility::Visible))
+                .count();
+            (current, visible_count)
+        };
+
+        // Excel invariant: cannot hide the last visible sheet.
+        if matches!(current, SheetVisibility::Visible)
+            && !matches!(visibility, SheetVisibility::Visible)
+            && visible_count <= 1
+        {
+            return Err(AppStateError::WhatIf(
+                "cannot hide the last visible sheet".to_string(),
+            ));
+        }
+
+        // Persist first so we don't leave the in-memory workbook in a partially-updated state if
+        // the storage backend rejects the write.
+        if let Some(persistent) = self.persistent.as_ref() {
+            let sheet_uuid = persistent.sheet_uuid(sheet_id).ok_or_else(|| {
+                AppStateError::Persistence(format!(
+                    "missing persistence mapping for sheet id {sheet_id}"
+                ))
+            })?;
+            let storage_visibility = match visibility {
+                SheetVisibility::Visible => formula_storage::SheetVisibility::Visible,
+                SheetVisibility::Hidden => formula_storage::SheetVisibility::Hidden,
+                SheetVisibility::VeryHidden => formula_storage::SheetVisibility::VeryHidden,
+            };
+            persistent
+                .storage
+                .set_sheet_visibility(sheet_uuid, storage_visibility)
+                .map_err(|e| match e {
+                    formula_storage::StorageError::SheetNotFound(_) => {
+                        AppStateError::UnknownSheet(sheet_id.to_string())
+                    }
+                    other => AppStateError::Persistence(other.to_string()),
+                })?;
+        }
+
+        {
+            let workbook = self.get_workbook_mut()?;
+            let sheet = workbook
+                .sheet_mut(sheet_id)
+                .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+            sheet.visibility = visibility;
+        }
+
+        self.dirty = true;
+        self.redo_stack.clear();
+        Ok(())
+    }
+
+    pub fn set_sheet_tab_color(
+        &mut self,
+        sheet_id: &str,
+        tab_color: Option<TabColor>,
+    ) -> Result<(), AppStateError> {
+        {
+            let workbook = self.get_workbook()?;
+            let sheet = workbook
+                .sheet(sheet_id)
+                .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+            if sheet.tab_color == tab_color {
+                return Ok(());
+            }
+        }
+
+        // Persist first so we don't leave the in-memory workbook in a partially-updated state if
+        // the storage backend rejects the write.
+        if let Some(persistent) = self.persistent.as_ref() {
+            let sheet_uuid = persistent.sheet_uuid(sheet_id).ok_or_else(|| {
+                AppStateError::Persistence(format!(
+                    "missing persistence mapping for sheet id {sheet_id}"
+                ))
+            })?;
+
+            // The storage API currently supports fast-path RGB values; treat non-RGB tab colors
+            // as unsupported for updates (they are still preserved on read+write).
+            let rgb = tab_color.as_ref().and_then(|c| c.rgb.as_deref());
+            if tab_color.is_some() && rgb.is_none() {
+                return Err(AppStateError::WhatIf(
+                    "tab color must be specified as an ARGB hex value".to_string(),
+                ));
+            }
+
+            persistent
+                .storage
+                .set_sheet_tab_color(sheet_uuid, rgb)
+                .map_err(|e| match e {
+                    formula_storage::StorageError::SheetNotFound(_) => {
+                        AppStateError::UnknownSheet(sheet_id.to_string())
+                    }
+                    other => AppStateError::Persistence(other.to_string()),
+                })?;
+        }
+
+        {
+            let workbook = self.get_workbook_mut()?;
+            let sheet = workbook
+                .sheet_mut(sheet_id)
+                .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+            sheet.tab_color = tab_color;
+        }
 
         self.dirty = true;
         self.redo_stack.clear();

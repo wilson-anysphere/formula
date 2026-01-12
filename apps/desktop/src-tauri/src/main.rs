@@ -812,6 +812,8 @@ fn main() {
             commands::new_workbook,
             commands::add_sheet,
             commands::rename_sheet,
+            commands::set_sheet_visibility,
+            commands::set_sheet_tab_color,
             commands::move_sheet,
             commands::delete_sheet,
             commands::read_text_file,

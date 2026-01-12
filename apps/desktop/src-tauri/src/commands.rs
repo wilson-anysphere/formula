@@ -113,9 +113,41 @@ pub struct RangeData {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum SheetVisibility {
+    Visible,
+    Hidden,
+    VeryHidden,
+}
+
+impl From<formula_model::SheetVisibility> for SheetVisibility {
+    fn from(value: formula_model::SheetVisibility) -> Self {
+        match value {
+            formula_model::SheetVisibility::Visible => SheetVisibility::Visible,
+            formula_model::SheetVisibility::Hidden => SheetVisibility::Hidden,
+            formula_model::SheetVisibility::VeryHidden => SheetVisibility::VeryHidden,
+        }
+    }
+}
+
+impl From<SheetVisibility> for formula_model::SheetVisibility {
+    fn from(value: SheetVisibility) -> Self {
+        match value {
+            SheetVisibility::Visible => formula_model::SheetVisibility::Visible,
+            SheetVisibility::Hidden => formula_model::SheetVisibility::Hidden,
+            SheetVisibility::VeryHidden => formula_model::SheetVisibility::VeryHidden,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct SheetInfo {
     pub id: String,
     pub name: String,
+    pub visibility: SheetVisibility,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_color: Option<formula_model::TabColor>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -518,6 +550,8 @@ pub async fn open_workbook(
             .map(|s| SheetInfo {
                 id: s.id,
                 name: s.name,
+                visibility: s.visibility.into(),
+                tab_color: s.tab_color,
             })
             .collect(),
     })
@@ -552,6 +586,8 @@ pub async fn new_workbook(state: State<'_, SharedAppState>) -> Result<WorkbookIn
             .map(|s| SheetInfo {
                 id: s.id,
                 name: s.name,
+                visibility: s.visibility.into(),
+                tab_color: s.tab_color,
             })
             .collect(),
     })
@@ -577,6 +613,8 @@ pub async fn add_sheet(
         Ok::<_, String>(SheetInfo {
             id: sheet.id,
             name: sheet.name,
+            visibility: sheet.visibility.into(),
+            tab_color: sheet.tab_color,
         })
     })
     .await
@@ -594,6 +632,85 @@ pub async fn rename_sheet(
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
         state.rename_sheet(&sheet_id, name).map_err(app_error)?;
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn set_sheet_visibility(
+    sheet_id: String,
+    visibility: SheetVisibility,
+    state: State<'_, SharedAppState>,
+) -> Result<(), String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        state
+            .set_sheet_visibility(&sheet_id, visibility.into())
+            .map_err(app_error)?;
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "desktop")]
+fn normalize_tab_color_rgb(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("tab color rgb cannot be empty".to_string());
+    }
+    let hex = trimmed.strip_prefix('#').unwrap_or(trimmed);
+    if hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Ok(format!("FF{}", hex.to_ascii_uppercase()));
+    }
+    if hex.len() == 8 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Ok(hex.to_ascii_uppercase());
+    }
+    Err("tab color rgb must be 6-digit (RRGGBB) or 8-digit (AARRGGBB) hex".to_string())
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn set_sheet_tab_color(
+    sheet_id: String,
+    tab_color: Option<formula_model::TabColor>,
+    state: State<'_, SharedAppState>,
+) -> Result<(), String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        let tab_color = match tab_color {
+            None => None,
+            Some(mut color) => {
+                if let Some(rgb) = color.rgb.as_deref() {
+                    let trimmed = rgb.trim();
+                    if trimmed.is_empty() {
+                        color.rgb = None;
+                    } else {
+                        color.rgb = Some(normalize_tab_color_rgb(trimmed)?);
+                    }
+                }
+
+                // Treat an all-empty payload as clearing the tab color.
+                if color.rgb.is_none()
+                    && color.theme.is_none()
+                    && color.indexed.is_none()
+                    && color.tint.is_none()
+                    && color.auto.is_none()
+                {
+                    None
+                } else {
+                    Some(color)
+                }
+            }
+        };
+        state
+            .set_sheet_tab_color(&sheet_id, tab_color)
+            .map_err(app_error)?;
         Ok::<_, String>(())
     })
     .await
@@ -629,6 +746,7 @@ pub async fn delete_sheet(sheet_id: String, state: State<'_, SharedAppState>) ->
     .await
     .map_err(|e| e.to_string())?
 }
+
 #[cfg(any(feature = "desktop", test))]
 fn read_text_file_blocking(path: &std::path::Path) -> Result<String, String> {
     use std::io::Read;
