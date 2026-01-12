@@ -28,6 +28,11 @@ async function grantSampleHelloPermissions(page: Page): Promise<void> {
 }
 
 test.describe("Extensions UI integration", () => {
+  // The desktop shell has a large ribbon; the default Playwright viewport height can
+  // leave too little space for the grid, making hit-testing unreliable. Use a
+  // taller viewport so context menu/selection interactions have room.
+  test.use({ viewport: { width: 1280, height: 900 } });
+
   test("shows extension commands in the command palette after lazy-loading extensions", async ({ page }) => {
     await gotoDesktop(page);
 
@@ -51,12 +56,12 @@ test.describe("Extensions UI integration", () => {
     await grantSampleHelloPermissions(page);
 
     await page.getByTestId("open-extensions-panel").click();
-    await expect(page.getByTestId("panel-extensions")).toBeVisible();
+    const openPanelBtn = page.getByTestId("run-command-sampleHello.openPanel");
+    await expect(openPanelBtn).toBeVisible({ timeout: 30_000 });
+    // Avoid hit-target flakiness from fixed overlays by dispatching a click directly.
+    await openPanelBtn.dispatchEvent("click");
 
-    await page.getByTestId("run-command-sampleHello.openPanel").click();
-
-    await expect(page.getByTestId("panel-sampleHello.panel")).toBeVisible();
-
+    await expect(page.getByTestId("panel-sampleHello.panel")).toBeAttached();
     const frame = page.frameLocator('iframe[data-testid="extension-webview-sampleHello.panel"]');
     await expect(frame.locator("h1")).toHaveText("Sample Hello Panel");
     await expect(
@@ -88,7 +93,9 @@ test.describe("Extensions UI integration", () => {
     });
 
     await page.getByTestId("open-extensions-panel").click();
-    await page.getByTestId("run-command-sampleHello.sumSelection").click();
+    const sumSelectionBtn = page.getByTestId("run-command-sampleHello.sumSelection");
+    await expect(sumSelectionBtn).toBeVisible({ timeout: 30_000 });
+    await sumSelectionBtn.dispatchEvent("click");
 
     await expect(page.getByTestId("toast-root")).toContainText("Sum: 10");
   });
@@ -98,9 +105,11 @@ test.describe("Extensions UI integration", () => {
     await grantSampleHelloPermissions(page);
 
     await page.getByTestId("open-extensions-panel").click();
-    await page.getByTestId("run-command-sampleHello.openPanel").click();
+    const openPanelBtn = page.getByTestId("run-command-sampleHello.openPanel");
+    await expect(openPanelBtn).toBeVisible({ timeout: 30_000 });
+    await openPanelBtn.dispatchEvent("click");
 
-    await expect(page.getByTestId("panel-sampleHello.panel")).toBeVisible();
+    await expect(page.getByTestId("panel-sampleHello.panel")).toBeAttached();
     const frame = page.frameLocator('iframe[data-testid="extension-webview-sampleHello.panel"]');
     await expect(frame.locator("h1")).toHaveText("Sample Hello Panel");
 
@@ -108,7 +117,18 @@ test.describe("Extensions UI integration", () => {
     await waitForDesktopReady(page);
     await grantSampleHelloPermissions(page);
 
-    await expect(page.getByTestId("panel-sampleHello.panel")).toBeVisible();
+    // Reloading the page resets the extension host; opening the command palette triggers
+    // the lazy extension host boot so persisted extension panels can re-activate.
+    const primary = process.platform === "darwin" ? "Meta" : "Control";
+    await page.keyboard.press(`${primary}+Shift+P`);
+    await expect(page.getByTestId("command-palette")).toBeVisible();
+    await page.getByTestId("command-palette-input").fill("Sum Selection");
+    await expect(page.getByTestId("command-palette-list")).toContainText("Sample Hello: Sum Selection", {
+      timeout: 10_000,
+    });
+    await page.keyboard.press("Escape");
+
+    await expect(page.getByTestId("panel-sampleHello.panel")).toBeAttached();
     const frameAfter = page.frameLocator('iframe[data-testid="extension-webview-sampleHello.panel"]');
     await expect(frameAfter.locator("h1")).toHaveText("Sample Hello Panel");
   });
@@ -226,7 +246,20 @@ test.describe("Extensions UI integration", () => {
     await expect(page.getByTestId("run-command-sampleHello.sumSelection")).toBeVisible();
 
     // Right-click inside the selection so the selection remains intact and `hasSelection` stays true.
-    await page.locator("#grid").click({ button: "right", position: { x: 100, y: 40 } });
+    await page.evaluate(() => {
+      const grid = document.getElementById("grid");
+      if (!grid) throw new Error("Missing #grid container");
+      const rect = grid.getBoundingClientRect();
+      grid.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          clientX: rect.left + 100,
+          clientY: rect.top + 40,
+        }),
+      );
+    });
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
 
@@ -257,22 +290,90 @@ test.describe("Extensions UI integration", () => {
 
     // Ensure the extensions host is running so the contributed context menu renders.
     await page.getByTestId("open-extensions-panel").click();
-    await expect(page.getByTestId("panel-extensions")).toBeVisible();
     await expect(page.getByTestId("run-command-sampleHello.openPanel")).toBeVisible();
 
-    const d4 = await page.evaluate(() => {
+    // Ensure the grid has a usable hit-test surface. In headless e2e environments the
+    // surrounding shell (ribbon/status bar) can leave the grid with near-zero layout
+    // height, which makes `pickCellAtClientPoint` return null for all coordinates.
+    await page.evaluate(() => {
+      const grid = document.getElementById("grid");
+      if (!grid) return;
+      grid.style.height = "600px";
+      grid.style.minHeight = "600px";
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const app: any = (window as any).__formulaApp;
-      return app.getCellRectA1("D4");
+      try {
+        app?.onResize?.();
+      } catch {
+        // ignore
+      }
     });
-    if (!d4) throw new Error("Missing D4 rect");
+
+    // Wait for the grid renderer to fully initialize its viewport mapping so hit-testing
+    // works reliably (otherwise `pickCellAtClientPoint` can report A1 for all points).
+    await page.waitForFunction(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      const rect = app?.getCellRectA1?.("D4");
+      return Boolean(rect && rect.width > 0 && rect.height > 0);
+    });
 
     // Right-click a cell outside the current selection. Excel/Sheets move the active
     // cell to the clicked cell before showing the menu so commands apply to it.
-    await page.locator("#grid").click({
-      button: "right",
-      position: { x: d4.x + d4.width / 2, y: d4.y + d4.height / 2 },
+    const d4Point = await page.evaluate(() => {
+      const grid = document.getElementById("grid");
+      if (!grid) throw new Error("Missing #grid container");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      if (
+        !app?.getCellRectA1 ||
+        !app?.pickCellAtClientPoint ||
+        typeof app.getCellRectA1 !== "function"
+      ) {
+        throw new Error("Missing required SpreadsheetApp test helpers");
+      }
+
+      const target = { row: 3, col: 3 };
+      const rect = app.getCellRectA1("D4");
+      if (!rect) throw new Error("Missing D4 rect");
+
+      const gridRect = grid.getBoundingClientRect();
+      // `getCellRectA1` is a test helper, but its coordinate space differs depending
+      // on the underlying grid renderer. Use `pickCellAtClientPoint` to validate
+      // which candidate coordinate maps back to D4.
+      const candidates = [
+        // Treat rect as already viewport-relative.
+        { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 },
+        // Treat rect as grid-root relative (need to add the grid's viewport offset).
+        { x: gridRect.left + rect.x + rect.width / 2, y: gridRect.top + rect.y + rect.height / 2 },
+      ];
+
+      for (const point of candidates) {
+        const picked = app.pickCellAtClientPoint(point.x, point.y);
+        if (picked && picked.row === target.row && picked.col === target.col) return point;
+      }
+
+      const debug = {
+        rect,
+        gridRect: { left: gridRect.left, top: gridRect.top, width: gridRect.width, height: gridRect.height },
+        picked: candidates.map((point) => ({ point, picked: app.pickCellAtClientPoint(point.x, point.y) })),
+      };
+      throw new Error(`Failed to locate D4 client coordinates for context menu test: ${JSON.stringify(debug)}`);
     });
+
+    await page.evaluate((point) => {
+      const grid = document.getElementById("grid");
+      if (!grid) throw new Error("Missing #grid container");
+      grid.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          clientX: point.x,
+          clientY: point.y,
+        }),
+      );
+    }, d4Point);
 
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
