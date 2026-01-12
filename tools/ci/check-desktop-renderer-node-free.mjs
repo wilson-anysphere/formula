@@ -83,17 +83,31 @@ function listImportSpecifiers(sourceText) {
   /** @type {{ specifier: string, index: number, kind: string }[]} */
   const out = [];
 
+  // Note: these regexes are intentionally simple and conservative. They aim to catch
+  // literal import specifiers in common patterns, including with inline `/* ... */` and
+  // `// ...` comments (e.g. `import(/* webpackChunkName: "x" */ "foo")`).
+  const wsOrComment = "(?:\\s+|\\/\\*[\\s\\S]*?\\*\\/|\\/\\/[^\\n]*\\n)+";
+  const optWsOrComment = "(?:\\s|\\/\\*[\\s\\S]*?\\*\\/|\\/\\/[^\\n]*\\n)*";
+
   const patterns = [
-    { kind: "import-from", re: /\bimport\s+(?:type\s+)?[^'"]*?\s+from\s+['"]([^'"]+)['"]/g },
-    { kind: "import-side-effect", re: /\bimport\s+['"]([^'"]+)['"]/g },
-    { kind: "export-from", re: /\bexport\s+[^'"]*?\s+from\s+['"]([^'"]+)['"]/g },
-    { kind: "dynamic-import", re: /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g },
-    { kind: "require", re: /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g },
+    {
+      kind: "import-from",
+      re: new RegExp(`\\bimport\\s+(?:type\\s+)?[^'"]*?\\s+from${wsOrComment}['"]([^'"]+)['"]`, "g"),
+    },
+    { kind: "import-side-effect", re: new RegExp(`\\bimport${wsOrComment}['"]([^'"]+)['"]`, "g") },
+    { kind: "export-from", re: new RegExp(`\\bexport\\s+[^'"]*?\\s+from${wsOrComment}['"]([^'"]+)['"]`, "g") },
+    {
+      kind: "dynamic-import",
+      re: new RegExp(`\\bimport\\s*\\(${optWsOrComment}['"]([^'"]+)['"]${optWsOrComment}\\)`, "g"),
+    },
+    { kind: "require", re: new RegExp(`\\brequire\\s*\\(${optWsOrComment}['"]([^'"]+)['"]${optWsOrComment}\\)`, "g") },
   ];
 
   for (const { kind, re } of patterns) {
     for (const match of sourceText.matchAll(re)) {
-      out.push({ kind, specifier: match[1], index: match.index ?? 0 });
+      const baseIndex = match.index ?? 0;
+      const offset = match[0].lastIndexOf(match[1]);
+      out.push({ kind, specifier: match[1], index: offset >= 0 ? baseIndex + offset : baseIndex });
     }
   }
 

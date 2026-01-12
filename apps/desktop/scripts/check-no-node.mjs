@@ -49,10 +49,15 @@ const IGNORED_DIRS = new Set([
   "test-results",
 ]);
 
-const importFromRe = /\b(?:import|export)\s+(?:type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
-const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
-const dynamicImportRe = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
-const requireCallRe = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
+// Match literal specifiers for common import/require forms, including with inline comments
+// (e.g. `import(/* webpackChunkName: "x" */ "./foo")`).
+const wsOrComment = "(?:\\s+|\\/\\*[\\s\\S]*?\\*\\/|\\/\\/[^\\n]*\\n)+";
+const optWsOrComment = "(?:\\s|\\/\\*[\\s\\S]*?\\*\\/|\\/\\/[^\\n]*\\n)*";
+
+const importFromRe = new RegExp(`\\b(?:import|export)\\s+(?:type\\s+)?[^"']*?\\sfrom${wsOrComment}["']([^"']+)["']`, "g");
+const sideEffectImportRe = new RegExp(`\\bimport${wsOrComment}["']([^"']+)["']`, "g");
+const dynamicImportRe = new RegExp(`\\bimport\\(${optWsOrComment}["']([^"']+)["']${optWsOrComment}\\)`, "g");
+const requireCallRe = new RegExp(`\\brequire\\(${optWsOrComment}["']([^"']+)["']${optWsOrComment}\\)`, "g");
 
 // Catch `process.versions.node` in a few variants (including optional chaining and TS casts),
 // but keep it line-local to reduce false positives.
