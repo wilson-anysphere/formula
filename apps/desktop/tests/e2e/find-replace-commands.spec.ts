@@ -35,8 +35,20 @@ test.describe("command palette: find/replace/go to", () => {
     // Ensure key events go to the spreadsheet shell.
     await page.evaluate(() => (window as any).__formulaApp.focus());
 
-    const replaceShortcut = process.platform === "darwin" ? "Meta+Alt+F" : "Control+H";
-    await page.keyboard.press(replaceShortcut);
+    // Avoid using Playwright's `keyboard.press()` here since Ctrl+H / Cmd+Option+F may be
+    // intercepted by the browser shell (History, toolbar focus, etc.) in some environments.
+    // Dispatching a keydown event directly validates our in-app handler logic deterministically.
+    await page.evaluate((isMac) => {
+      const evt = new KeyboardEvent("keydown", {
+        key: isMac ? "f" : "h",
+        metaKey: isMac,
+        altKey: isMac,
+        ctrlKey: !isMac,
+        bubbles: true,
+        cancelable: true,
+      });
+      window.dispatchEvent(evt);
+    }, process.platform === "darwin");
 
     const replaceDialog = page.locator("dialog.find-replace-dialog[open]");
     await expect(replaceDialog).toBeVisible();

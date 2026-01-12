@@ -29,9 +29,17 @@ class MemoryLocalStorage implements Storage {
 
 function localStorageUsable(): boolean {
   try {
-    // Node 22+ ships an experimental `localStorage` accessor that throws unless started with
-    // `--localstorage-file`. We only care that the storage APIs are callable.
-    globalThis.localStorage?.getItem("vitest-probe");
+    // Node ships an experimental `globalThis.localStorage` that can be present but unusable
+    // unless the process is started with `--localstorage-file`. Some methods may throw even if
+    // simple reads appear to work, so probe the full API surface we rely on in tests.
+    const storage = globalThis.localStorage;
+    if (!storage) return false;
+
+    const probeKey = "vitest-probe";
+    storage.setItem(probeKey, "1");
+    storage.getItem(probeKey);
+    storage.removeItem(probeKey);
+    storage.clear();
     return true;
   } catch {
     return false;
@@ -39,7 +47,11 @@ function localStorageUsable(): boolean {
 }
 
 if (!localStorageUsable()) {
-  // eslint-disable-next-line no-global-assign
-  globalThis.localStorage = new MemoryLocalStorage();
+  const storage = new MemoryLocalStorage();
+  try {
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+  } catch {
+    // eslint-disable-next-line no-global-assign
+    globalThis.localStorage = storage;
+  }
 }
-
