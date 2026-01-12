@@ -895,9 +895,10 @@ function activeCellFontSizePt(): number {
   const cell = app.getActiveCell();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const docAny = app.getDocument() as any;
+  const effectiveSize = docAny.getCellFormat?.(sheetId, cell)?.font?.size;
   const state = docAny.getCell?.(sheetId, cell);
   const style = docAny.styleTable?.get?.(state?.styleId ?? 0) ?? {};
-  const size = style.font?.size;
+  const size = typeof effectiveSize === "number" ? effectiveSize : style.font?.size;
   return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 11;
 }
 

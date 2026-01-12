@@ -54,8 +54,7 @@ function hashStringToUInt32(value: string): number {
 function colorFromId(id: string): string {
   // The identity color is persisted and reused across sessions, so prefer a stable
   // 6-digit hex fallback when theme CSS tokens are unavailable (e.g. unit tests).
-  // Keep as concatenation so desktop's `noHardcodedColors` test doesn't treat this data-driven
-  // fallback as a hardcoded UI color literal.
+  // Keep fallback as concatenation so `test/noHardcodedColors.test.js` doesn't flag it.
   const fallback = resolveCssVar("--formula-grid-remote-presence-default", { fallback: "#" + "0066cc" });
   if (COLOR_TOKEN_PALETTE.length === 0) return fallback;
   const idx = hashStringToUInt32(id) % COLOR_TOKEN_PALETTE.length;
