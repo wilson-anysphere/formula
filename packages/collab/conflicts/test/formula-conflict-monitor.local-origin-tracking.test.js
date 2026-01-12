@@ -93,3 +93,69 @@ test("FormulaConflictMonitor tracks local-origin edits for causal conflict detec
   docB.destroy();
 });
 
+test("FormulaConflictMonitor tracks local-origin value clears for value conflicts (binder-style order, formula+value mode)", () => {
+  // Ensure deterministic map-entry overwrite tie-breaking: higher clientID wins.
+  const docA = new Y.Doc();
+  docA.clientID = 1;
+  const docB = new Y.Doc();
+  docB.clientID = 2;
+
+  let disconnect = connectDocs(docA, docB);
+
+  const localOrigin = { type: "local-a" };
+  const cellKey = "Sheet1:0:0";
+
+  // Establish base state with a literal value and no formula key present.
+  docA.transact(() => {
+    const cell = new Y.Map();
+    cell.set("value", "base");
+    docA.getMap("cells").set(cellKey, cell);
+  }, localOrigin);
+
+  const cellB = /** @type {any} */ (docB.getMap("cells").get(cellKey));
+  assert.ok(cellB, "expected base cell map to sync to docB");
+  assert.equal(cellB.get("value"), "base");
+  assert.equal(cellB.get("formula"), undefined);
+
+  /** @type {Array<any>} */
+  const conflicts = [];
+
+  const monitor = new FormulaConflictMonitor({
+    doc: docA,
+    localUserId: "user-a",
+    origin: localOrigin,
+    localOrigins: new Set([localOrigin]),
+    mode: "formula+value",
+    onConflict: (c) => conflicts.push(c)
+  });
+
+  // Simulate offline concurrent edits:
+  // - A clears the cell using binder-style ordering: formula=null marker, then value=null.
+  // - B overwrites with a literal value (and omits modifiedBy).
+  disconnect();
+  docA.transact(() => {
+    const cell = /** @type {Y.Map<any>} */ (docA.getMap("cells").get(cellKey));
+    cell.set("formula", null);
+    cell.set("value", null);
+    // Intentionally omit `modifiedBy` so conflict detection must rely on causality.
+  }, localOrigin);
+
+  docB.transact(() => {
+    const cell = /** @type {Y.Map<any>} */ (docB.getMap("cells").get(cellKey));
+    cell.set("value", "theirs");
+    // Intentionally omit `modifiedBy`.
+  });
+
+  // Reconnect and sync state.
+  disconnect = connectDocs(docA, docB);
+
+  const valueConflict = conflicts.find((c) => c.kind === "value") ?? null;
+  assert.ok(valueConflict, "expected a value conflict to be detected");
+  assert.equal(valueConflict.localValue, null);
+  assert.equal(valueConflict.remoteValue, "theirs");
+
+  monitor.dispose();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});

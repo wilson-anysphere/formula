@@ -418,21 +418,14 @@ export class FormulaConflictMonitor {
         kind = "formula";
       } else if (nextValue !== null) {
         kind = "value";
-      } else if (formulaChange?.action === "delete") {
-        // In formula-only mode, `setLocalValue` clears formulas via key deletion.
-        // Treat those clears as part of the value edit so we don't accidentally
-        // record them as local formula edits.
-        kind = "value";
-      } else if (formulaItemId && valueItemId && formulaItemId.client === valueItemId.client) {
-        // Both formula and value cleared; infer whether this was a formula edit
-        // or value edit based on which key was written first in the transaction.
-        // - setLocalFormula writes formula first, then value.
-        // - setLocalValue writes value first, then formula.
-        kind = formulaItemId.clock <= valueItemId.clock ? "formula" : "value";
       } else {
-        // Fallback: treat ambiguous clears as formula clears (matches the
-        // existing restart fallback behavior when local value is null).
-        kind = "formula";
+        // Both formula and value cleared. Disambiguate based on what the cell
+        // previously contained:
+        // - If the old formula was non-empty, treat this as a formula clear.
+        // - Otherwise treat it as a value clear (including binder-style writes
+        //   that set `formula=null` before `value=null`).
+        const priorFormula = (formulaChange?.oldValue ?? "").toString().trim();
+        kind = priorFormula ? "formula" : "value";
       }
     }
 
