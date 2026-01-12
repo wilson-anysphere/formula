@@ -371,6 +371,206 @@ function toggleDockPanel(panelId: string): void {
 }
 let handleCloseRequestForRibbon: ((opts: { quit: boolean }) => Promise<void>) | null = null;
 
+function installCollabStatusIndicator(app: unknown, element: HTMLElement): void {
+  const abortController = new AbortController();
+
+  const cleanup = (): void => {
+    if (abortController.signal.aborted) return;
+    abortController.abort();
+  };
+
+  window.addEventListener("unload", cleanup, { once: true });
+
+  // If SpreadsheetApp exposes a `destroy()` method, wrap it so collab listeners detach
+  // in tests / fast-refresh scenarios.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const anyApp = app as any;
+  if (anyApp && typeof anyApp.destroy === "function") {
+    const originalDestroy = anyApp.destroy.bind(anyApp) as () => void;
+    anyApp.destroy = () => {
+      cleanup();
+      originalDestroy();
+    };
+  }
+
+  let currentProvider: unknown = null;
+  let providerStatus: string | null = null;
+  let providerSynced: boolean | null = null;
+  let currentOffline: unknown = null;
+  let offlineWaitStarted = false;
+
+  const detachProviderListeners = (provider: unknown): void => {
+    if (!provider) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyProvider = provider as any;
+    if (typeof anyProvider.off !== "function") return;
+    try {
+      anyProvider.off("status", onProviderStatus);
+    } catch {
+      // ignore
+    }
+    try {
+      anyProvider.off("sync", onProviderSync);
+    } catch {
+      // ignore
+    }
+  };
+
+  const attachProviderListeners = (provider: unknown): void => {
+    if (!provider) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyProvider = provider as any;
+    if (typeof anyProvider.on !== "function") return;
+    try {
+      anyProvider.on("status", onProviderStatus);
+    } catch {
+      // ignore
+    }
+    try {
+      anyProvider.on("sync", onProviderSync);
+    } catch {
+      // ignore
+    }
+  };
+
+  const getSession = (): unknown | null => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const maybeGetter = (app as any)?.getCollabSession as (() => unknown) | undefined;
+    if (typeof maybeGetter !== "function") return null;
+    try {
+      return maybeGetter.call(app) ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  const getDocId = (session: unknown): string => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const s = session as any;
+    const direct = s?.docId ?? s?.doc_id ?? s?.id;
+    if (typeof direct === "string" && direct.trim() !== "") return direct;
+    const guid = s?.doc?.guid;
+    if (typeof guid === "string" && guid.trim() !== "") return guid;
+    return "unknown";
+  };
+
+  const onProviderStatus = (evt: unknown): void => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const status = (evt as any)?.status;
+    providerStatus = typeof status === "string" ? status : null;
+    render();
+  };
+
+  const onProviderSync = (isSynced: unknown): void => {
+    providerSynced = Boolean(isSynced);
+    render();
+  };
+
+  const render = (): void => {
+    if (abortController.signal.aborted) return;
+
+    const session = getSession();
+    if (!session) {
+      detachProviderListeners(currentProvider);
+      currentProvider = null;
+      providerStatus = null;
+      providerSynced = null;
+      currentOffline = null;
+      offlineWaitStarted = false;
+      element.textContent = "Local";
+      return;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const s = session as any;
+    const docId = getDocId(session);
+
+    const offline = s?.offline as unknown;
+    let offlineLoaded: boolean | null = null;
+    if (offline && typeof offline === "object") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const loaded = (offline as any).isLoaded;
+      if (typeof loaded === "boolean") offlineLoaded = loaded;
+    }
+
+    const offlineLoading = offlineLoaded === false;
+    if (offline !== currentOffline) {
+      currentOffline = offline;
+      offlineWaitStarted = false;
+    }
+
+    if (offlineLoading && offline && typeof offline === "object" && !offlineWaitStarted) {
+      offlineWaitStarted = true;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const whenLoaded = (offline as any).whenLoaded as (() => Promise<void>) | undefined;
+      if (typeof whenLoaded === "function") {
+        void Promise.resolve()
+          .then(() => whenLoaded.call(offline))
+          .catch(() => {
+            // Offline persistence load failures should not crash the UI.
+          })
+          .finally(() => {
+            if (!abortController.signal.aborted) render();
+          });
+      }
+    }
+
+    const provider = (s?.provider as unknown) ?? null;
+    if (provider !== currentProvider) {
+      detachProviderListeners(currentProvider);
+      currentProvider = provider;
+      providerStatus = null;
+      providerSynced = null;
+      attachProviderListeners(currentProvider);
+    }
+
+    if (offlineLoading) {
+      element.textContent = `${docId} • Loading…`;
+      return;
+    }
+
+    const connected = (() => {
+      if (!currentProvider) return null;
+      if (providerStatus === "connected") return true;
+      if (providerStatus === "disconnected") return false;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const anyProvider = currentProvider as any;
+      if (typeof anyProvider.wsconnected === "boolean") return anyProvider.wsconnected;
+      if (typeof anyProvider.connected === "boolean") return anyProvider.connected;
+      return null;
+    })();
+
+    const synced = (() => {
+      if (!currentProvider) return null;
+      if (typeof providerSynced === "boolean") return providerSynced;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const anyProvider = currentProvider as any;
+      if (typeof anyProvider.synced === "boolean") return anyProvider.synced;
+      return null;
+    })();
+
+    const connectionLabel = currentProvider
+      ? connected === true
+        ? "Connected"
+        : connected === false
+          ? "Disconnected"
+          : "Connecting…"
+      : "Offline";
+
+    const syncLabel = currentProvider ? (synced === true ? "Synced" : "Syncing…") : "Local";
+
+    element.textContent = `${docId} • ${connectionLabel} • ${syncLabel}`;
+  };
+
+  abortController.signal.addEventListener("abort", () => {
+    window.removeEventListener("unload", cleanup);
+    detachProviderListeners(currentProvider);
+  });
+
+  render();
+}
+
 const gridRoot = document.getElementById("grid");
 if (!gridRoot) {
   throw new Error("Missing #grid container");
@@ -395,6 +595,7 @@ if (!formulaBarRoot) {
 const activeCell = document.querySelector<HTMLElement>('[data-testid="active-cell"]');
 const selectionRange = document.querySelector<HTMLElement>('[data-testid="selection-range"]');
 const activeValue = document.querySelector<HTMLElement>('[data-testid="active-value"]');
+const collabStatus = document.querySelector<HTMLElement>('[data-testid="collab-status"]');
 const selectionSum = document.querySelector<HTMLElement>('[data-testid="selection-sum"]');
 const selectionAverage = document.querySelector<HTMLElement>('[data-testid="selection-avg"]');
 const selectionCount = document.querySelector<HTMLElement>('[data-testid="selection-count"]');
@@ -629,6 +830,7 @@ function stepDecimalPlacesInNumberFormat(format: string | null, direction: "incr
 // their on-disk path; for unsaved sessions we generate a random session id so distinct new
 // workbooks don't collide.
 let activePanelWorkbookId = workbookId;
+if (collabStatus) installCollabStatusIndicator(app, collabStatus);
 // Treat the seeded demo workbook as an initial "saved" baseline so web reloads
 // and Playwright tests aren't blocked by unsaved-changes prompts.
 app.getDocument().markSaved();
