@@ -748,6 +748,23 @@ class ExtensionHost {
     } catch {
       // ignore
     }
+
+    // Best-effort: clear any on-disk extension data directories.
+    // While extensions cannot currently access the filesystem directly, the host
+    // already provisions `globalStoragePath`/`workspaceStoragePath` folders. Clearing
+    // them on uninstall ensures future file-backed storage additions behave like a
+    // clean reinstall.
+    try {
+      if (/[/\\]/.test(id) || id.includes("\0")) return;
+      const root = path.resolve(this._extensionDataRoot);
+      const target = path.resolve(path.join(root, id));
+      const rel = path.relative(root, target);
+      const inside = rel === "" || (!rel.startsWith(".." + path.sep) && rel !== ".." && !path.isAbsolute(rel));
+      if (!inside) return;
+      await fs.rm(target, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
   }
 
   _getWorkerResourceLimits() {
