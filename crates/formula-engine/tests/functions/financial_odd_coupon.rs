@@ -3390,6 +3390,127 @@ fn oddlprice_matches_excel_model_for_actual_day_bases_with_eom_last_interest() {
 }
 
 #[test]
+fn oddfprice_matches_excel_model_for_30_360_bases() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    // Month-end / Feb dates so 30/360 US vs EU diverge and exercise non-additive DAYS360 behavior.
+    // issue=2019-01-31, settlement=2019-02-28, first_coupon=2019-03-31, maturity=2019-09-30
+    let issue = ymd_to_serial(ExcelDate::new(2019, 1, 31), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap();
+    let first_coupon = ymd_to_serial(ExcelDate::new(2019, 3, 31), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2019, 9, 30), system).unwrap();
+
+    let rate = 0.05;
+    let yld = 0.06;
+    let redemption = 100.0;
+    let frequency = 2;
+
+    for basis in [0, 4] {
+        let expected = oddf_price_excel_model(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            rate,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        );
+
+        let actual = oddfprice(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            rate,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .unwrap();
+
+        assert_close(actual, expected, 1e-10);
+
+        let recovered = oddfyield(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            rate,
+            expected,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .unwrap();
+        assert_close(recovered, yld, 1e-9);
+    }
+}
+
+#[test]
+fn oddlprice_matches_excel_model_for_30_360_bases() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Month-end / Feb dates so 30/360 US vs EU diverge (e.g. Mar 31 handling).
+    // last_interest=2019-02-28, settlement=2019-03-15, maturity=2019-03-31
+    let last_interest = ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2019, 3, 15), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2019, 3, 31), system).unwrap();
+
+    let rate = 0.05;
+    let yld = 0.06;
+    let redemption = 100.0;
+    let frequency = 2;
+
+    for basis in [0, 4] {
+        let expected = oddl_price_excel_model(
+            settlement,
+            maturity,
+            last_interest,
+            rate,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        );
+
+        let actual = oddlprice(
+            settlement,
+            maturity,
+            last_interest,
+            rate,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .unwrap();
+
+        assert_close(actual, expected, 1e-10);
+
+        let recovered = oddlyield(
+            settlement,
+            maturity,
+            last_interest,
+            rate,
+            expected,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .unwrap();
+        assert_close(recovered, yld, 1e-9);
+    }
+}
+
+#[test]
 fn odd_coupon_bond_functions_reject_non_finite_numeric_inputs() {
     let mut sheet = TestSheet::new();
 
