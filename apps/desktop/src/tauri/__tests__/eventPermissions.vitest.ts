@@ -292,43 +292,75 @@ describe("tauri capability event permissions", () => {
     // - `.emit(...)` => must be allowlisted for the frontend to listen
     // - `.listen(...)` / `.listen_global(...)` => must be allowlisted for the frontend to emit
     {
-      const rustFiles = runtimeFiles.filter((filePath) => path.extname(filePath) === ".rs");
-      const rustText = rustFiles.map((p) => readFileSync(p, "utf8")).join("\n");
+      const rustFiles = runtimeFiles
+        .filter((filePath) => path.extname(filePath) === ".rs")
+        // Ensure deterministic behavior if the filesystem ordering changes.
+        .sort();
 
-      const constMap = new Map<string, string>();
-      for (const match of rustText.matchAll(/\b(?:pub\s+)?const\s+([A-Z0-9_]+)\s*:\s*&str\s*=\s*"([^"]+)"/g)) {
-        constMap.set(match[1], match[2]);
+      // Some Rust modules use overlapping constant names (e.g. both `tray.rs` and `menu.rs` define
+      // `ITEM_OPEN`). To avoid resolving those incorrectly, we:
+      // - resolve constants within their declaring file when possible
+      // - only fall back to a global constant map when the name is unambiguous (defined exactly once)
+      const globalConstDefs = new Map<string, Set<string>>();
+      for (const rustPath of rustFiles) {
+        const rustText = readFileSync(rustPath, "utf8");
+        for (const match of rustText.matchAll(/\b(?:pub\s+)?const\s+([A-Z0-9_]+)\s*:\s*&str\s*=\s*"([^"]+)"/g)) {
+          const name = match[1];
+          const value = match[2];
+          const set = globalConstDefs.get(name) ?? new Set<string>();
+          set.add(value);
+          globalConstDefs.set(name, set);
+        }
+      }
+      const globalUniqueConsts = new Map<string, string>();
+      for (const [name, values] of globalConstDefs) {
+        if (values.size === 1) {
+          globalUniqueConsts.set(name, Array.from(values)[0]);
+        }
       }
 
       const rustEmits = new Set<string>();
-      for (const match of rustText.matchAll(/\.emit\s*\(\s*"([^"]+)"/g)) {
-        rustEmits.add(match[1]);
-      }
-      for (const match of rustText.matchAll(/\.emit\s*\(\s*([A-Z0-9_]+)\s*,/g)) {
-        const value = constMap.get(match[1]);
-        if (value) rustEmits.add(value);
+      const rustListens = new Set<string>();
+
+      for (const rustPath of rustFiles) {
+        const rustText = readFileSync(rustPath, "utf8");
+
+        const localConsts = new Map<string, string>();
+        for (const match of rustText.matchAll(/\b(?:pub\s+)?const\s+([A-Z0-9_]+)\s*:\s*&str\s*=\s*"([^"]+)"/g)) {
+          localConsts.set(match[1], match[2]);
+        }
+
+        const resolveConst = (name: string): string | null => {
+          return localConsts.get(name) ?? globalUniqueConsts.get(name) ?? null;
+        };
+
+        for (const match of rustText.matchAll(/\.emit\s*\(\s*"([^"]+)"/g)) {
+          rustEmits.add(match[1]);
+        }
+        for (const match of rustText.matchAll(/\.emit\s*\(\s*([A-Z0-9_]+)\s*,/g)) {
+          const value = resolveConst(match[1]);
+          if (value) rustEmits.add(value);
+        }
+
+        for (const match of rustText.matchAll(/\.listen\s*\(\s*"([^"]+)"/g)) {
+          rustListens.add(match[1]);
+        }
+        for (const match of rustText.matchAll(/\.listen\s*\(\s*([A-Z0-9_]+)\s*,/g)) {
+          const value = resolveConst(match[1]);
+          if (value) rustListens.add(value);
+        }
+        for (const match of rustText.matchAll(/\.listen_global\s*\(\s*"([^"]+)"/g)) {
+          rustListens.add(match[1]);
+        }
+        for (const match of rustText.matchAll(/\.listen_global\s*\(\s*([A-Z0-9_]+)\s*,/g)) {
+          const value = resolveConst(match[1]);
+          if (value) rustListens.add(value);
+        }
       }
 
       for (const event of rustEmits) {
         expect(allowListenEvents.has(event)).toBe(true);
       }
-
-      const rustListens = new Set<string>();
-      for (const match of rustText.matchAll(/\.listen\s*\(\s*"([^"]+)"/g)) {
-        rustListens.add(match[1]);
-      }
-      for (const match of rustText.matchAll(/\.listen\s*\(\s*([A-Z0-9_]+)\s*,/g)) {
-        const value = constMap.get(match[1]);
-        if (value) rustListens.add(value);
-      }
-      for (const match of rustText.matchAll(/\.listen_global\s*\(\s*"([^"]+)"/g)) {
-        rustListens.add(match[1]);
-      }
-      for (const match of rustText.matchAll(/\.listen_global\s*\(\s*([A-Z0-9_]+)\s*,/g)) {
-        const value = constMap.get(match[1]);
-        if (value) rustListens.add(value);
-      }
-
       for (const event of rustListens) {
         expect(allowEmitEvents.has(event)).toBe(true);
       }
