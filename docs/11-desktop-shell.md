@@ -152,12 +152,12 @@ Capabilities are scoped per window in the capability file itself via `"windows":
 capability includes `"windows": ["main"]`).
 
 Some toolchains also support an additional window-level opt-in layer via `app.windows[].capabilities` in
-`apps/desktop/src-tauri/tauri.conf.json` (for example: the `main` window includes `"capabilities": ["main"]`).
+`apps/desktop/src-tauri/tauri.conf.json` (when present: the `main` window includes `"capabilities": ["main"]`).
 
 When both are present, keep them in sync so adding a new window never implicitly grants it the `main` capability
 (guardrailed by `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`). New windows should be unprivileged by
 default: keep each capability file’s `"windows"` list intentional (or define a separate capability for that window), and
-only opt additional windows into a capability when it’s supported by your toolchain and explicitly desired.
+if `app.windows[].capabilities` is present, opt windows in explicitly (do not grant `main` by default).
 
 Example excerpt:
 
@@ -333,7 +333,7 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
       "csp": "..." // see `apps/desktop/src-tauri/tauri.conf.json` for the full, current CSP
     },
     "windows": [
-      { "label": "main", "title": "Formula", "width": 1280, "height": 800, "capabilities": ["main"], "dragDropEnabled": true }
+      { "label": "main", "title": "Formula", "width": 1280, "height": 800, "dragDropEnabled": true }
     ]
   },
   "bundle": {
@@ -846,8 +846,9 @@ Capabilities are scoped per window in **two** places (explicit scoping / defense
   - When present, the `main` window includes `"capabilities": ["main"]`.
 
 Keep these two layers in sync so adding a new window never implicitly grants it the main capability. This keeps new windows
-unprivileged by default, and makes granting a capability to additional windows an intentional two-file change (guardrailed by
-`apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`).
+unprivileged by default, and makes granting a capability to additional windows an intentional change: update the capability
+file’s `"windows"` list, and if `app.windows[].capabilities` is present in `tauri.conf.json`, opt the window in there too
+(guardrailed by `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`).
 ### What `main.json` does
 
 `apps/desktop/src-tauri/capabilities/main.json` is intentionally an explicit allowlist for what the webview is allowed to do.
