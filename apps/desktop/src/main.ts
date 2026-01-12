@@ -986,16 +986,18 @@ app.activateSheet = (sheetId: string): void => {
 };
 
 const originalActivateCell = app.activateCell.bind(app);
-app.activateCell = (target: Parameters<SpreadsheetApp["activateCell"]>[0]): void => {
+app.activateCell = (...args: Parameters<SpreadsheetApp["activateCell"]>): void => {
+  const target = args[0];
   const prevSheet = app.getCurrentSheetId();
-  originalActivateCell(target);
+  originalActivateCell(...args);
   if (target.sheetId && target.sheetId !== prevSheet) syncSheetUi();
 };
 
 const originalSelectRange = app.selectRange.bind(app);
-app.selectRange = (target: Parameters<SpreadsheetApp["selectRange"]>[0]): void => {
+app.selectRange = (...args: Parameters<SpreadsheetApp["selectRange"]>): void => {
+  const target = args[0];
   const prevSheet = app.getCurrentSheetId();
-  originalSelectRange(target);
+  originalSelectRange(...args);
   if (target.sheetId && target.sheetId !== prevSheet) syncSheetUi();
 };
 
