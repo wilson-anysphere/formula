@@ -11,8 +11,9 @@ import process from "node:process";
  * slip past review (especially if the module is not currently imported by the
  * entrypoint) and later break at runtime.
  *
- * This script scans `apps/desktop/src/**` (excluding test files) for any import
- * that targets a Node built-in module.
+ * This script scans `apps/desktop/src/**` (excluding test files) and fails if it:
+ * - imports a Node built-in module (e.g. `node:fs`, `path`, `worker_threads`)
+ * - imports code from `apps/desktop/tools/**` or `apps/desktop/scripts/**` (Node-only tooling)
  */
 
 const repoRoot = process.cwd();

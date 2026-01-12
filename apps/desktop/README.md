@@ -137,11 +137,17 @@ localStorage.removeItem("formula.extensionHost.permissions");
 
 The repo still contains Node-only marketplace/host modules used by Node integration tests and earlier experiments:
 
-- Installer: `apps/desktop/src/marketplace/extensionManager.js`
-- Marketplace client: `apps/desktop/src/marketplace/client.js`
-- Runtime: `apps/desktop/src/extensions/ExtensionHostManager.js`
+- Installer: `apps/desktop/tools/marketplace/extensionManager.js`
+- Marketplace client: `apps/desktop/tools/marketplace/client.js`
+- Runtime: `apps/desktop/tools/extensions/ExtensionHostManager.js`
 
 They rely on `node:fs` / `worker_threads` and are **not used by the desktop renderer**.
+
+CI enforces that the desktop renderer (`apps/desktop/src/**`) stays Node-free (no `node:*`/`fs`/`path` imports, and no
+imports from `apps/desktop/tools/**` or `apps/desktop/scripts/**`). If you need Node-only code, keep it under one of
+those tooling directories and bridge it into the real app via IPC/Tauri plumbing.
+
+See `docs/10-extensibility.md` for the end-to-end flow.
 
 ## Power Query caching + credentials (security)
 
