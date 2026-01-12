@@ -3,7 +3,26 @@ import { expect, test } from "@playwright/test";
 import { gotoDesktop } from "./helpers";
 
 async function getActiveCell(page: import("@playwright/test").Page): Promise<{ row: number; col: number }> {
-  return page.evaluate(() => (window as any).__formulaApp.getActiveCell());
+  return page.evaluate(() => (window.__formulaApp as any).getActiveCell());
+}
+
+async function dispatchF6(page: import("@playwright/test").Page, opts: { shiftKey?: boolean } = {}): Promise<void> {
+  // Browsers can reserve F6 for built-in chrome focus cycling (address bar/toolbars),
+  // which can prevent Playwright's `keyboard.press("F6")` from reaching the app.
+  // Dispatching a synthetic `keydown` exercises our in-app focus cycling handler
+  // deterministically.
+  await page.evaluate(({ shiftKey }) => {
+    const target = (document.activeElement as HTMLElement | null) ?? document.getElementById("grid") ?? window;
+    target.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "F6",
+        code: "F6",
+        shiftKey: Boolean(shiftKey),
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  }, opts);
 }
 
 test.describe("keyboard navigation: Tab grid traversal + F6 focus cycling", () => {
@@ -15,7 +34,7 @@ test.describe("keyboard navigation: Tab grid traversal + F6 focus cycling", () =
       await gotoDesktop(page, url);
 
       const limits = await page.evaluate(() => {
-        const app = (window as any).__formulaApp as any;
+        const app = window.__formulaApp as any;
         const limits = app.limits as { maxRows: number; maxCols: number };
         app.activateCell({ row: 0, col: limits.maxCols - 1 });
         app.focus();
@@ -42,37 +61,45 @@ test.describe("keyboard navigation: Tab grid traversal + F6 focus cycling", () =
     const ribbonRoot = page.getByTestId("ribbon-root");
     await expect(ribbonRoot).toBeVisible();
 
-    await page.evaluate(() => (window as any).__formulaApp.focus());
+    await page.evaluate(() => (window.__formulaApp as any).focus());
     await expect(page.locator("#grid")).toBeFocused();
 
     const activeRibbonTab = ribbonRoot.locator('[role="tab"][aria-selected="true"]');
-    const sheetTabsActiveTab = page.locator('#sheet-tabs button[role="tab"][tabindex="0"]');
+    const sheetTabsActiveTab = page.locator('#sheet-tabs button[role="tab"][aria-selected="true"]');
+    const statusBarFirstFocusable = page.locator(".statusbar").getByTestId("open-version-history-panel");
 
-    // Forward cycle: grid -> ribbon -> formula bar -> sheet tabs -> grid.
-    await page.keyboard.press("F6");
-    await expect(activeRibbonTab).toBeFocused();
-
-    await page.keyboard.press("F6");
-    await expect(page.getByTestId("formula-address")).toBeFocused();
-
-    await page.keyboard.press("F6");
+    // The in-app focus cycle follows the vertical UI layout:
+    // ribbon -> formula bar -> grid -> sheet tabs -> status bar -> ribbon (etc).
+    // Forward cycle from the grid: grid -> sheet tabs -> status bar -> ribbon -> formula bar -> grid.
+    await dispatchF6(page);
     await expect(sheetTabsActiveTab).toBeFocused();
 
-    await page.keyboard.press("F6");
+    await dispatchF6(page);
+    await expect(statusBarFirstFocusable).toBeFocused();
+
+    await dispatchF6(page);
+    await expect(activeRibbonTab).toBeFocused();
+
+    await dispatchF6(page);
+    await expect(page.getByTestId("formula-address")).toBeFocused();
+
+    await dispatchF6(page);
     await expect(page.locator("#grid")).toBeFocused();
 
-    // Reverse cycle: grid -> sheet tabs -> formula bar -> ribbon -> grid.
-    await page.keyboard.press("Shift+F6");
-    await expect(sheetTabsActiveTab).toBeFocused();
-
-    await page.keyboard.press("Shift+F6");
+    // Reverse cycle from the grid: grid -> formula bar -> ribbon -> status bar -> sheet tabs -> grid.
+    await dispatchF6(page, { shiftKey: true });
     await expect(page.getByTestId("formula-address")).toBeFocused();
 
-    await page.keyboard.press("Shift+F6");
+    await dispatchF6(page, { shiftKey: true });
     await expect(activeRibbonTab).toBeFocused();
 
-    await page.keyboard.press("Shift+F6");
+    await dispatchF6(page, { shiftKey: true });
+    await expect(statusBarFirstFocusable).toBeFocused();
+
+    await dispatchF6(page, { shiftKey: true });
+    await expect(sheetTabsActiveTab).toBeFocused();
+
+    await dispatchF6(page, { shiftKey: true });
     await expect(page.locator("#grid")).toBeFocused();
   });
 });
-

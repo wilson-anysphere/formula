@@ -2326,7 +2326,7 @@ function focusSheetTabsRegion(): void {
 }
 
 function focusStatusBarRegion(): void {
-  const zoom = statusBarRootEl.querySelector<HTMLElement>('[data-testid="zoom-control"]');
+  const zoom = statusBarRootEl.querySelector<HTMLElement>('[data-testid="zoom-control"]:not([disabled])');
   if (zoom) {
     focusWithoutScroll(zoom);
     return;
