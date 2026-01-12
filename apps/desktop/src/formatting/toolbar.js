@@ -22,9 +22,10 @@ function isLayeredFormatRange(range) {
   // - full sheet (sheet format layer)
   // - full-width rows (row format layer)
   // - full-height columns (column format layer)
-  const isFullHeightCols = range.start.row === 0 && range.end.row === EXCEL_MAX_ROW;
-  const isFullWidthRows = range.start.col === 0 && range.end.col === EXCEL_MAX_COL;
-  return isFullHeightCols || isFullWidthRows;
+  return (
+    (range.start.row === 0 && range.end.row === EXCEL_MAX_ROW) ||
+    (range.start.col === 0 && range.end.col === EXCEL_MAX_COL)
+  );
 }
 
 function ensureSafeFormattingRange(rangeOrRanges) {
