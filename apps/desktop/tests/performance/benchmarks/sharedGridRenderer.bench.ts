@@ -135,19 +135,35 @@ export function createSharedGridRendererBenchmarks(): BenchmarkDef[] {
 
   const provider = createDeterministicProvider();
 
-  // Reuse a single renderer instance for scroll benchmarking to avoid mixing in setup cost.
-  const scrollRenderer = new CanvasGridRenderer({ provider, rowCount, colCount });
-  scrollRenderer.setPerfStatsEnabled(false);
-  scrollRenderer.attach({
+  const createInitializedRenderer = (): CanvasGridRenderer => {
+    const renderer = new CanvasGridRenderer({ provider, rowCount, colCount });
+    renderer.setPerfStatsEnabled(false);
+    renderer.attach({
+      grid: document.createElement('canvas'),
+      content: document.createElement('canvas'),
+      selection: document.createElement('canvas'),
+    });
+    renderer.setFrozen(frozenRows, frozenCols);
+    renderer.resize(viewportWidth, viewportHeight, devicePixelRatio);
+    renderer.renderImmediately();
+    return renderer;
+  };
+
+  // Lazily create renderers so `gridRenderer.firstFrame.p95` measures in isolation.
+  // The scroll benchmarks have warmup iterations, so the one-time init cost is absorbed there.
+  let scrollRendererY: CanvasGridRenderer | null = null;
+  let scrollRendererX: CanvasGridRenderer | null = null;
+
+  const deltaY = 21 * 5; // 5 rows per "wheel" step at default 21px row height.
+  const deltaX = 100 * 3; // 3 columns per step at default 100px col width.
+
+  // Reuse DOM canvases across first-frame iterations to avoid benchmarking JSDOM element allocation
+  // rather than renderer work.
+  const firstFrameCanvases = {
     grid: document.createElement('canvas'),
     content: document.createElement('canvas'),
     selection: document.createElement('canvas'),
-  });
-  scrollRenderer.setFrozen(frozenRows, frozenCols);
-  scrollRenderer.resize(viewportWidth, viewportHeight, devicePixelRatio);
-  scrollRenderer.renderImmediately();
-
-  const deltaY = 21 * 5; // 5 rows per "wheel" step at default 21px row height.
+  };
 
   // Separate renderer for axis override benchmarking so we don't perturb the scroll benchmark.
   const axisRenderer = new CanvasGridRenderer({ provider, rowCount, colCount });
@@ -188,11 +204,7 @@ export function createSharedGridRendererBenchmarks(): BenchmarkDef[] {
       fn: () => {
         const renderer = new CanvasGridRenderer({ provider, rowCount, colCount });
         renderer.setPerfStatsEnabled(false);
-        renderer.attach({
-          grid: document.createElement('canvas'),
-          content: document.createElement('canvas'),
-          selection: document.createElement('canvas'),
-        });
+        renderer.attach(firstFrameCanvases);
         renderer.setFrozen(frozenRows, frozenCols);
         renderer.resize(viewportWidth, viewportHeight, devicePixelRatio);
         renderer.renderImmediately();
@@ -206,8 +218,18 @@ export function createSharedGridRendererBenchmarks(): BenchmarkDef[] {
     {
       name: 'gridRenderer.scrollStep.p95',
       fn: () => {
-        scrollRenderer.scrollBy(0, deltaY);
-        scrollRenderer.renderImmediately();
+        const renderer = (scrollRendererY ??= createInitializedRenderer());
+        renderer.scrollBy(0, deltaY);
+        renderer.renderImmediately();
+      },
+      targetMs: 16,
+    },
+    {
+      name: 'gridRenderer.scrollStepHorizontal.p95',
+      fn: () => {
+        const renderer = (scrollRendererX ??= createInitializedRenderer());
+        renderer.scrollBy(deltaX, 0);
+        renderer.renderImmediately();
       },
       targetMs: 16,
     },
