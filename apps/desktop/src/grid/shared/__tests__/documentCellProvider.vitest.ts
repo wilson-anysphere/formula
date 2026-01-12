@@ -63,6 +63,30 @@ describe("DocumentCellProvider formatting integration", () => {
     expect(cell?.style?.color).not.toMatch(/^#[0-9a-f]{8}$/i);
   });
 
+  it("maps vertical alignment + text rotation from DocumentController styles into grid CellStyle", () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", "hello");
+    doc.setRangeFormat("Sheet1", "A1", { alignment: { vertical: "top", textRotation: 45 } });
+
+    const headerRows = 1;
+    const headerCols = 1;
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows,
+      headerCols,
+      rowCount: 2 + headerRows,
+      colCount: 2 + headerCols,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(headerRows, headerCols);
+    expect(cell?.style?.verticalAlign).toBe("top");
+    expect(cell?.style?.rotationDeg).toBe(45);
+  });
+
   it("emits grid invalidation updates for format-layer-only deltas", () => {
     class FakeDocument {
       private readonly listeners = new Set<(payload: any) => void>();

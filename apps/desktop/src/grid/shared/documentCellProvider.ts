@@ -39,6 +39,10 @@ function isRichTextValue(value: unknown): value is RichTextValue {
   return Array.isArray(v.runs);
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
 function toColumnName(col0: number): string {
   let value = col0 + 1;
   let name = "";
@@ -134,6 +138,25 @@ export class DocumentCellProvider implements CellProvider {
     else if (horizontal === "right") out.textAlign = "end";
     // "general"/undefined: leave undefined so renderer can pick based on value type.
     if (alignment?.wrapText === true) out.wrapMode = "word";
+
+    const vertical = alignment?.vertical;
+    if (vertical === "top") out.verticalAlign = "top";
+    else if (vertical === "center") out.verticalAlign = "middle";
+    else if (vertical === "bottom") out.verticalAlign = "bottom";
+
+    const rotationRaw =
+      typeof (alignment as any)?.textRotation === "number" && Number.isFinite((alignment as any).textRotation)
+        ? (alignment as any).textRotation
+        : typeof (alignment as any)?.rotation === "number" && Number.isFinite((alignment as any).rotation)
+          ? (alignment as any).rotation
+          : undefined;
+
+    if (rotationRaw != null) {
+      // Excel's OOXML `textRotation` uses `255` as a sentinel for "vertical text"
+      // (stacked letters). We approximate this in the grid by rotating 90 degrees.
+      const normalized = rotationRaw === 255 ? 90 : rotationRaw;
+      out.rotationDeg = clamp(normalized, -180, 180);
+    }
 
     const border = isPlainObject(docStyle.border) ? docStyle.border : null;
     if (border) {
