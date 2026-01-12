@@ -1578,6 +1578,68 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="db", tags=["financial", "DB"], formula="=DB(10000, 1000, 5, 1)")
     _add_case(cases, prefix="vdb", tags=["financial", "VDB"], formula="=VDB(2400, 300, 10, 0, 1)")
 
+    # Discount securities / T-bills.
+    _add_case(
+        cases,
+        prefix="disc",
+        tags=["financial", "DISC"],
+        formula="=DISC(DATE(2020,1,1),DATE(2021,1,1),97,100)",
+    )
+    _add_case(
+        cases,
+        prefix="pricedisc",
+        tags=["financial", "PRICEDISC"],
+        formula="=PRICEDISC(DATE(2020,1,1),DATE(2021,1,1),0.05,100)",
+    )
+    _add_case(
+        cases,
+        prefix="yielddisc",
+        tags=["financial", "YIELDDISC"],
+        formula="=YIELDDISC(DATE(2020,1,1),DATE(2021,1,1),97,100)",
+    )
+    _add_case(
+        cases,
+        prefix="intrate",
+        tags=["financial", "INTRATE"],
+        formula="=INTRATE(DATE(2020,1,1),DATE(2021,1,1),97,100)",
+    )
+    _add_case(
+        cases,
+        prefix="received",
+        tags=["financial", "RECEIVED"],
+        formula="=RECEIVED(DATE(2020,1,1),DATE(2021,1,1),95,0.05)",
+    )
+    _add_case(
+        cases,
+        prefix="pricemat",
+        tags=["financial", "PRICEMAT"],
+        formula="=PRICEMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,0.04)",
+    )
+    _add_case(
+        cases,
+        prefix="yieldmat",
+        tags=["financial", "YIELDMAT"],
+        formula="=YIELDMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,100.76923076923077)",
+    )
+    _add_case(
+        cases,
+        prefix="tbillprice",
+        tags=["financial", "TBILLPRICE"],
+        formula="=TBILLPRICE(DATE(2020,1,1),DATE(2020,7,1),0.05)",
+    )
+    _add_case(
+        cases,
+        prefix="tbillyield",
+        tags=["financial", "TBILLYIELD"],
+        formula="=TBILLYIELD(DATE(2020,1,1),DATE(2020,7,1),97.47222222222223)",
+    )
+    _add_case(
+        cases,
+        prefix="tbilleq",
+        tags=["financial", "TBILLEQ"],
+        formula="=TBILLEQ(DATE(2020,1,1),DATE(2020,12,31),0.05)",
+    )
+
     # Range-based cashflow functions.
     cashflows = [-100.0, 30.0, 40.0, 50.0]
     cf_inputs = [CellInput(f"A{i+1}", v) for i, v in enumerate(cashflows)]

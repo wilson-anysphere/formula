@@ -29208,6 +29208,106 @@
       "id": "vdb_fc81ac00a5c2"
     },
     {
+      "formula": "=DISC(DATE(2020,1,1),DATE(2021,1,1),97,100)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "DISC"
+      ],
+      "id": "disc_816f7b8fb795"
+    },
+    {
+      "formula": "=PRICEDISC(DATE(2020,1,1),DATE(2021,1,1),0.05,100)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "PRICEDISC"
+      ],
+      "id": "pricedisc_c0ba7c6e35b0"
+    },
+    {
+      "formula": "=YIELDDISC(DATE(2020,1,1),DATE(2021,1,1),97,100)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "YIELDDISC"
+      ],
+      "id": "yielddisc_c0ce703a8f95"
+    },
+    {
+      "formula": "=INTRATE(DATE(2020,1,1),DATE(2021,1,1),97,100)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "INTRATE"
+      ],
+      "id": "intrate_47147f5e0eb8"
+    },
+    {
+      "formula": "=RECEIVED(DATE(2020,1,1),DATE(2021,1,1),95,0.05)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "RECEIVED"
+      ],
+      "id": "received_e30404ee3543"
+    },
+    {
+      "formula": "=PRICEMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,0.04)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "PRICEMAT"
+      ],
+      "id": "pricemat_3a94d6cbb2a2"
+    },
+    {
+      "formula": "=YIELDMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,100.76923076923077)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "YIELDMAT"
+      ],
+      "id": "yieldmat_46441701164a"
+    },
+    {
+      "formula": "=TBILLPRICE(DATE(2020,1,1),DATE(2020,7,1),0.05)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "TBILLPRICE"
+      ],
+      "id": "tbillprice_cba2022248c6"
+    },
+    {
+      "formula": "=TBILLYIELD(DATE(2020,1,1),DATE(2020,7,1),97.47222222222223)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "TBILLYIELD"
+      ],
+      "id": "tbillyield_1e04c46858b7"
+    },
+    {
+      "formula": "=TBILLEQ(DATE(2020,1,1),DATE(2020,12,31),0.05)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "TBILLEQ"
+      ],
+      "id": "tbilleq_fd491a02769a"
+    },
+    {
       "formula": "=NPV(0.1,A1:A4)",
       "outputCell": "C1",
       "inputs": [

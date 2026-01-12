@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T06:34:54.425433923Z",
+  "generatedAt": "2026-01-12T06:42:18.209134877Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "404a74d0e90f742e7bf234a2364451e50591b3f3a138eeb774909030f122f5c2",
-    "count": 1468
+    "sha256": "976dd492cd7be06e4ba07473da919e222c760677f27731ec444e80dcb7512d7b",
+    "count": 1478
   },
   "results": [
     {
@@ -13938,6 +13938,106 @@
       },
       "address": "C1",
       "displayText": "480"
+    },
+    {
+      "caseId": "disc_816f7b8fb795",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.03
+      },
+      "address": "C1",
+      "displayText": "0.03"
+    },
+    {
+      "caseId": "pricedisc_c0ba7c6e35b0",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 95.0
+      },
+      "address": "C1",
+      "displayText": "95"
+    },
+    {
+      "caseId": "yielddisc_c0ce703a8f95",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.030927835051546393
+      },
+      "address": "C1",
+      "displayText": "0.030927835051546393"
+    },
+    {
+      "caseId": "intrate_47147f5e0eb8",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.030927835051546393
+      },
+      "address": "C1",
+      "displayText": "0.030927835051546393"
+    },
+    {
+      "caseId": "received_e30404ee3543",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.0
+      },
+      "address": "C1",
+      "displayText": "100"
+    },
+    {
+      "caseId": "pricemat_3a94d6cbb2a2",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.76923076923077
+      },
+      "address": "C1",
+      "displayText": "100.76923076923077"
+    },
+    {
+      "caseId": "yieldmat_46441701164a",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.040000000000000036
+      },
+      "address": "C1",
+      "displayText": "0.040000000000000036"
+    },
+    {
+      "caseId": "tbillprice_cba2022248c6",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 97.47222222222223
+      },
+      "address": "C1",
+      "displayText": "97.47222222222223"
+    },
+    {
+      "caseId": "tbillyield_1e04c46858b7",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.051296665716728286
+      },
+      "address": "C1",
+      "displayText": "0.051296665716728286"
+    },
+    {
+      "caseId": "tbilleq_fd491a02769a",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.052707099771976636
+      },
+      "address": "C1",
+      "displayText": "0.052707099771976636"
     },
     {
       "caseId": "npv_b9b2bb2deab1",

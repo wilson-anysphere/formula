@@ -645,6 +645,20 @@ export default {
       ]
     },
     {
+      "name": "DISC",
+      "min_args": 4,
+      "max_args": 5,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "DOLLAR",
       "min_args": 1,
       "max_args": 2,
@@ -1056,6 +1070,20 @@ export default {
       "arg_types": [
         "any",
         "any"
+      ]
+    },
+    {
+      "name": "INTRATE",
+      "min_args": 4,
+      "max_args": 5,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number",
+        "number",
+        "number"
       ]
     },
     {
@@ -1856,6 +1884,35 @@ export default {
       ]
     },
     {
+      "name": "PRICEDISC",
+      "min_args": 4,
+      "max_args": 5,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "PRICEMAT",
+      "min_args": 5,
+      "max_args": 6,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "PRODUCT",
       "min_args": 0,
       "max_args": 255,
@@ -2015,6 +2072,20 @@ export default {
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "RECEIVED",
+      "min_args": 4,
+      "max_args": 5,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number",
+        "number",
         "number"
       ]
     },
@@ -2621,6 +2692,42 @@ export default {
       ]
     },
     {
+      "name": "TBILLEQ",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number"
+      ]
+    },
+    {
+      "name": "TBILLPRICE",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number"
+      ]
+    },
+    {
+      "name": "TBILLYIELD",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number"
+      ]
+    },
+    {
       "name": "TEXT",
       "min_args": 2,
       "max_args": 2,
@@ -3049,6 +3156,35 @@ export default {
       "arg_types": [
         "any",
         "any",
+        "number"
+      ]
+    },
+    {
+      "name": "YIELDDISC",
+      "min_args": 4,
+      "max_args": 5,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "YIELDMAT",
+      "min_args": 5,
+      "max_args": 6,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any",
+        "number",
+        "number",
         "number"
       ]
     }
