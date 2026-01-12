@@ -21,7 +21,10 @@ function installTauriStubForSheetTabDelete() {
         pushCall(cmd, args);
         switch (cmd) {
           case "add_sheet":
-            return { id: args?.name ?? "SheetX", name: args?.name ?? "SheetX" };
+            return {
+              id: args?.sheet_id ?? args?.name ?? "SheetX",
+              name: args?.name ?? args?.sheet_id ?? "SheetX",
+            };
           case "delete_sheet":
           case "set_cell":
           case "set_range":
@@ -1025,6 +1028,7 @@ test.describe("sheet tabs", () => {
         new MouseEvent("contextmenu", {
           bubbles: true,
           cancelable: true,
+          button: 2,
           clientX: rect.left + 10,
           clientY: rect.top + 10,
         }),
@@ -1035,7 +1039,7 @@ test.describe("sheet tabs", () => {
       // Ensure the sheet tab context menu is the one that's open.
       await expect(page.getByTestId("context-menu")).toBeHidden();
       await expect(menu).toBeVisible();
-      await menu.getByRole("button", { name: "Hide", exact: true }).click();
+      await menu.getByRole("button", { name: "Hide", exact: true }).evaluate((el) => (el as HTMLButtonElement).click());
       await expect(menu).toBeHidden();
     }
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
@@ -1087,6 +1091,7 @@ test.describe("sheet tabs", () => {
         new MouseEvent("contextmenu", {
           bubbles: true,
           cancelable: true,
+          button: 2,
           clientX: rect.left + 10,
           clientY: rect.top + 10,
         }),
@@ -1096,8 +1101,8 @@ test.describe("sheet tabs", () => {
       const menu = page.getByTestId("sheet-tab-context-menu");
       await expect(page.getByTestId("context-menu")).toBeHidden();
       await expect(menu).toBeVisible();
-      await menu.getByRole("button", { name: "Unhide…" }).click();
-      await menu.getByRole("button", { name: "Sheet2" }).click();
+      await menu.getByRole("button", { name: "Unhide…" }).evaluate((el) => (el as HTMLButtonElement).click());
+      await menu.getByRole("button", { name: "Sheet2" }).evaluate((el) => (el as HTMLButtonElement).click());
     }
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
 
@@ -1136,6 +1141,7 @@ test.describe("sheet tabs", () => {
         new MouseEvent("contextmenu", {
           bubbles: true,
           cancelable: true,
+          button: 2,
           clientX: rect.left + 10,
           clientY: rect.top + 10,
         }),
@@ -1145,7 +1151,9 @@ test.describe("sheet tabs", () => {
       const menu = page.getByTestId("sheet-tab-context-menu");
       await expect(page.getByTestId("context-menu")).toBeHidden();
       await expect(menu).toBeVisible();
-      await menu.getByRole("button", { name: "Hide", exact: true }).click();
+      await menu
+        .getByRole("button", { name: "Hide", exact: true })
+        .evaluate((el) => (el as HTMLButtonElement).click());
       await expect(menu).toBeHidden();
     }
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
@@ -1160,6 +1168,7 @@ test.describe("sheet tabs", () => {
         new MouseEvent("contextmenu", {
           bubbles: true,
           cancelable: true,
+          button: 2,
           clientX: rect.left + 10,
           clientY: rect.top + 10,
         }),
@@ -1169,8 +1178,10 @@ test.describe("sheet tabs", () => {
       const menu = page.getByTestId("sheet-tab-context-menu");
       await expect(page.getByTestId("context-menu")).toBeHidden();
       await expect(menu).toBeVisible();
-      await menu.getByRole("button", { name: /^Unhide/ }).click();
-      await menu.getByRole("button", { name: "Sheet2" }).click();
+      await menu
+        .getByRole("button", { name: /^Unhide/ })
+        .evaluate((el) => (el as HTMLButtonElement).click());
+      await menu.getByRole("button", { name: "Sheet2" }).evaluate((el) => (el as HTMLButtonElement).click());
       await expect(menu).toBeHidden();
     }
 
@@ -1301,6 +1312,7 @@ test.describe("sheet tabs", () => {
         new MouseEvent("contextmenu", {
           bubbles: true,
           cancelable: true,
+          button: 2,
           clientX: rect.left + 10,
           clientY: rect.top + 10,
         }),
@@ -1310,7 +1322,7 @@ test.describe("sheet tabs", () => {
       const menu = page.getByTestId("sheet-tab-context-menu");
       await expect(page.getByTestId("context-menu")).toBeHidden();
       await expect(menu).toBeVisible();
-      await menu.getByRole("button", { name: "Hide", exact: true }).click();
+      await menu.getByRole("button", { name: "Hide", exact: true }).evaluate((el) => (el as HTMLButtonElement).click());
     }
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
 
@@ -1457,7 +1469,9 @@ test.describe("sheet tabs", () => {
       );
     });
     await expect(tabMenu).toBeVisible();
-    await tabMenu.getByRole("button", { name: "Hide", exact: true }).click();
+    await tabMenu
+      .getByRole("button", { name: "Hide", exact: true })
+      .evaluate((el) => (el as HTMLButtonElement).click());
     await expect(tabMenu).toBeHidden();
 
     await expect(sheet2Tab).toHaveCount(0);
@@ -1476,6 +1490,7 @@ test.describe("sheet tabs", () => {
         new MouseEvent("contextmenu", {
           bubbles: true,
           cancelable: true,
+          button: 2,
           clientX: rect.left + rect.width - 4,
           clientY: rect.top + rect.height / 2,
         }),
@@ -1483,7 +1498,9 @@ test.describe("sheet tabs", () => {
     });
 
     await expect(tabMenu).toBeVisible();
-    await tabMenu.getByRole("button", { name: "Unhide…", exact: true }).click();
+    await tabMenu
+      .getByRole("button", { name: "Unhide…", exact: true })
+      .evaluate((el) => (el as HTMLButtonElement).click());
     const quickPick = page.getByTestId("quick-pick");
     await expect(quickPick).toBeVisible();
     await quickPick.getByRole("button", { name: "Sheet2" }).click();
