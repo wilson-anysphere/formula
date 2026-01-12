@@ -281,8 +281,7 @@ fn odd_coupon_settlement_boundary_behavior() {
         matches!(v, Value::Number(n) if n.is_finite()),
         "expected finite number for worksheet ODDFPRICE when settlement == first_coupon, got {v:?}"
     );
-    let v =
-        sheet.eval("=ODDFYIELD(DATE(2023,1,31),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,99,100,2,0)");
+    let v = sheet.eval("=ODDFYIELD(DATE(2023,1,31),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,ODDFPRICE(DATE(2023,1,31),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0),100,2,0)");
     assert!(
         matches!(v, Value::Number(n) if n.is_finite()),
         "expected finite number for worksheet ODDFYIELD when settlement == first_coupon, got {v:?}"

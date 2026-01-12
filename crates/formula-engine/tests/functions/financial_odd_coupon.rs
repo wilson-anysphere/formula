@@ -248,10 +248,7 @@ fn odd_coupon_boundary_date_validations_match_engine_behavior() {
     }
 
     // first_coupon > maturity
-    if !assert_num_error_or_skip(
-        &mut sheet,
-        "=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2021,8,1),0.05,0.06,100,2,0)",
-    ) {
+    if !assert_num_error_or_skip(&mut sheet, "=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2021,8,1),0.05,0.06,100,2,0)") {
         return;
     }
     if !assert_num_error_or_skip(
@@ -262,10 +259,7 @@ fn odd_coupon_boundary_date_validations_match_engine_behavior() {
     }
 
     // settlement >= maturity
-    if !assert_num_error_or_skip(
-        &mut sheet,
-        "=ODDFPRICE(DATE(2021,8,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,0.06,100,2,0)",
-    ) {
+    if !assert_num_error_or_skip(&mut sheet, "=ODDFPRICE(DATE(2021,8,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,0.06,100,2,0)") {
         return;
     }
     if !assert_num_error_or_skip(
@@ -317,6 +311,7 @@ fn odd_coupon_boundary_date_validations_match_engine_behavior() {
         return;
     }
 }
+
 #[test]
 fn odd_coupon_date_serials_are_floored_like_excel() {
     let mut sheet = TestSheet::new();

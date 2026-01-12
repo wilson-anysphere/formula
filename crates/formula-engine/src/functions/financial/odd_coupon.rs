@@ -346,6 +346,8 @@ fn oddf_equation(
     // - `issue <= settlement <= first_coupon <= maturity`
     // - `issue < first_coupon` (otherwise there is no first coupon period)
     // - `settlement < maturity`
+    //
+    // Boundary behaviors are locked in `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`.
     if !(issue <= settlement
         && settlement <= first_coupon
         && issue < first_coupon
@@ -374,6 +376,7 @@ fn oddf_equation(
     let dfc = days_between(issue, first_coupon, basis, system)?;
     let dsc = days_between(settlement, first_coupon, basis, system)?;
 
+    // `dsc` can be 0 when settlement is exactly on the first coupon date.
     if a < 0.0 || dfc <= 0.0 || dsc < 0.0 {
         return Err(ExcelError::Num);
     }
