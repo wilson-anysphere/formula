@@ -28,16 +28,17 @@ struct ModuleInfo {
 ///   not alphabetical sorting and not OLE directory enumeration order.
 /// - **Module source normalization** treats CR and lone-LF as line breaks, ignores the LF of CRLF,
 ///   and strips `Attribute ...` lines (case-insensitive, start-of-line match).
-/// - **Reference records** are incorporated for the MS-OVBA record types used by
-///   `ContentNormalizedData` / `V3ContentNormalizedData`:
+/// - **Project name and constants** are incorporated by appending the raw record payload bytes for
+///   `PROJECTNAME.ProjectName` (0x0004) and `PROJECTCONSTANTS.Constants` (0x000C) in `VBA/dir`
+///   record order.
+/// - **Reference records** are incorporated for a subset of record types, matching the MS-OVBA
+///   §2.4.2.1 pseudocode allowlist:
 ///   - `REFERENCEREGISTERED` (0x000D)
 ///   - `REFERENCEPROJECT` (0x000E)
 ///   - `REFERENCECONTROL` (0x002F)
 ///   - `REFERENCEEXTENDED` (0x0030)
 ///   - `REFERENCEORIGINAL` (0x0033)
-/// - **Project name and constants** are incorporated by appending the raw record payload bytes for
-///   `PROJECTNAME.ProjectName` (0x0004) and `PROJECTCONSTANTS.Constants` (0x000C) in `VBA/dir`
-///   record order.
+///   Other reference-related records (e.g. `REFERENCENAME` (0x0016)) MUST NOT contribute.
 ///
 /// Spec reference: MS-OVBA §2.4.2.1 "Content Normalized Data".
 pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
@@ -80,39 +81,29 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
 
         match id {
             // PROJECTNAME.ProjectName
-            0x0004 => {
-                out.extend_from_slice(data);
-            }
+            0x0004 => out.extend_from_slice(data),
 
             // PROJECTCONSTANTS.Constants
-            0x000C => {
-                out.extend_from_slice(data);
-            }
+            0x000C => out.extend_from_slice(data),
 
-            // REFERENCEREGISTERED
-            0x000D => {
-                out.extend_from_slice(data);
-            }
+            // MS-OVBA §2.4.2.1 ContentNormalizedData reference record allowlist.
+            //
+            // NOTE: The spec explicitly includes only some REFERENCE* record variants.
+            //
+            // REFERENCEREGISTERED (0x000D)
+            0x000D => out.extend_from_slice(data),
 
-            // REFERENCEPROJECT
-            0x000E => {
-                out.extend_from_slice(&normalize_reference_project(data)?);
-            }
+            // REFERENCEPROJECT (0x000E)
+            0x000E => out.extend_from_slice(&normalize_reference_project(data)?),
 
-            // REFERENCECONTROL
-            0x002F => {
-                out.extend_from_slice(&normalize_reference_control(data)?);
-            }
+            // REFERENCECONTROL (0x002F)
+            0x002F => out.extend_from_slice(&normalize_reference_control(data)?),
 
-            // REFERENCEEXTENDED
-            0x0030 => {
-                out.extend_from_slice(data);
-            }
+            // REFERENCEEXTENDED (0x0030)
+            0x0030 => out.extend_from_slice(data),
 
-            // REFERENCEORIGINAL
-            0x0033 => {
-                out.extend_from_slice(&normalize_reference_original(data)?);
-            }
+            // REFERENCEORIGINAL (0x0033)
+            0x0033 => out.extend_from_slice(&normalize_reference_original(data)?),
 
             // MODULENAME: start a new module record group.
             0x0019 => {
@@ -589,7 +580,6 @@ fn is_attribute_line(line: &[u8]) -> bool {
     }
     matches!(line[keyword.len()], b' ' | b'\t')
 }
-
 fn encoding_for_codepage(codepage: u16) -> &'static Encoding {
     match codepage as u32 {
         874 => WINDOWS_874,
