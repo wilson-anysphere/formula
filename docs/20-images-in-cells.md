@@ -272,7 +272,7 @@ checked in):
 **Round-trip rule:** `vm`, `cm`, and the entire `<extLst>` subtree must be preserved verbatim unless we
 explicitly implement full rich-value editing.
 
-### How `vm` maps to `xl/metadata.xml` and `xl/richData/richValue.xml`
+### How `vm` maps to `xl/metadata.xml` and the rich value store (`xl/richData/richValue*.xml` / `xl/richData/rdrichvalue.xml`)
 
 Formula’s current understanding (implemented in `crates/formula-xlsx/src/rich_data/metadata.rs`) is:
 
@@ -284,7 +284,8 @@ Formula’s current understanding (implemented in `crates/formula-xlsx/src/rich_
     - `t` is the **1-based** index of `"XLRICHVALUE"` inside `<metadataTypes>`.
     - `v` is **0-based** (in this schema it indexes into `<futureMetadata name="XLRICHVALUE">`’s `<bk>` list; other schemas may use `v` differently).
 4. That future-metadata `<bk>` contains an extension element (commonly `xlrd:rvb`) with an `i="…"`
-    attribute, which is a **0-based** index into `xl/richData/richValue.xml`.
+    attribute, which is a **0-based** index into the rich value store part (either `xl/richData/richValue*.xml`
+    or `xl/richData/rdrichvalue.xml`, depending on file/Excel build).
 
 Representative snippet (from the unit tests in `crates/formula-xlsx/src/rich_data/metadata.rs`):
 
