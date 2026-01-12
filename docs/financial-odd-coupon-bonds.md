@@ -73,8 +73,9 @@ When adding odd-coupon coverage to the oracle corpus, prefer:
 - cases that cover both Excel 1900 and 1904 date systems (the engine should match in both)
 
 The generator includes a small set of boundary-date equality cases (e.g. `issue == settlement`,
-`settlement == first_coupon`, `settlement == last_interest`) so the pinned oracle dataset can catch
-regressions in date validation rules over time.
+`settlement == first_coupon`, `settlement == last_interest`). In Excel these are expected to return
+`#NUM!`, and we keep them in the pinned oracle dataset to catch regressions in date validation rules
+over time.
 
 ## High-risk compatibility areas
 
