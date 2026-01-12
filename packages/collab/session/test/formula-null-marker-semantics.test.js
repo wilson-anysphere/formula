@@ -34,3 +34,23 @@ test("CollabSession clears formulas via formula=null markers when writing litera
   }
 });
 
+test("CollabSession clears formulas via formula=null markers when using cellValueConflicts monitor", async () => {
+  const session = createCollabSession({
+    cellValueConflicts: {
+      localUserId: "u",
+      onConflict: () => {},
+    },
+  });
+  try {
+    await session.setCellFormula("Sheet1:0:0", "=1");
+    await session.setCellValue("Sheet1:0:0", "literal");
+
+    const cell = session.cells.get("Sheet1:0:0");
+    assert.ok(cell, "expected Yjs cell map to exist");
+    assert.equal(cell.get("formula"), null);
+    assert.equal(cell.get("value"), "literal");
+  } finally {
+    session.destroy();
+    session.doc.destroy();
+  }
+});
