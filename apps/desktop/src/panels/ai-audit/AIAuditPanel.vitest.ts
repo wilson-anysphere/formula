@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { describe, expect, it } from "vitest";
 
 import type { AIAuditEntry } from "@formula/ai-audit/browser";

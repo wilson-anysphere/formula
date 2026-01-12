@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { LLMMessage } from "../../../../../packages/llm/src/types.js";
-import { createLLMClient } from "../../../../../packages/llm/src/createLLMClient.js";
 
 import { createAiChatOrchestrator } from "../../ai/chat/orchestrator.js";
 import { runAgentTask, type AgentProgressEvent, type AgentTaskResult } from "../../ai/agent/agentOrchestrator.js";
@@ -11,92 +10,16 @@ import type { LLMToolCall } from "../../../../../packages/ai-tools/src/llm/integ
 import type { ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
 import { getDesktopAIAuditStore } from "../../ai/audit/auditStore.js";
+import { getDesktopLLMClient, getDesktopModel } from "../../ai/llm/desktopLLMClient.js";
 
 import { AIChatPanel, type AIChatPanelSendMessage } from "./AIChatPanel.js";
 import { ApprovalModal } from "./ApprovalModal.js";
 import { confirmPreviewApproval } from "./previewApproval.js";
 
-import {
-  DEFAULT_OLLAMA_BASE_URL,
-  DEFAULT_OLLAMA_MODEL,
-  LEGACY_OPENAI_API_KEY_STORAGE_KEY,
-  LLM_PROVIDER_STORAGE_KEY,
-  OLLAMA_BASE_URL_STORAGE_KEY,
-  OLLAMA_MODEL_STORAGE_KEY,
-  OPENAI_API_KEY_STORAGE_KEY,
-  OPENAI_BASE_URL_STORAGE_KEY,
-  OPENAI_MODEL_STORAGE_KEY,
-  ANTHROPIC_API_KEY_STORAGE_KEY,
-  ANTHROPIC_MODEL_STORAGE_KEY,
-  clearDesktopLLMConfig,
-  loadDesktopLLMConfig,
-  migrateLegacyOpenAIKey,
-  saveDesktopLLMConfig,
-  type DesktopLLMConfig,
-  type LLMProvider,
-} from "../../ai/llm/settings.js";
-
 function generateSessionId(): string {
   const maybeCrypto = globalThis.crypto as Crypto | undefined;
   if (maybeCrypto && typeof maybeCrypto.randomUUID === "function") return maybeCrypto.randomUUID();
   return `session-${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-}
-
-function safeGetStorageItem(key: string): string | null {
-  try {
-    return globalThis.localStorage?.getItem(key) ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function loadProviderPreference(): LLMProvider {
-  migrateLegacyOpenAIKey();
-  const raw = safeGetStorageItem(LLM_PROVIDER_STORAGE_KEY);
-  if (raw === "openai" || raw === "anthropic" || raw === "ollama") return raw;
-  return "openai";
-}
-
-function loadOpenAIApiKeyDraft(): string {
-  // Prefer new key, fall back to legacy and Vite env injection.
-  const stored = safeGetStorageItem(OPENAI_API_KEY_STORAGE_KEY) ?? safeGetStorageItem(LEGACY_OPENAI_API_KEY_STORAGE_KEY);
-  if (stored) return stored;
-  const envKey = (import.meta as any)?.env?.VITE_OPENAI_API_KEY;
-  return typeof envKey === "string" ? envKey : "";
-}
-
-function loadOpenAIBaseUrlDraft(): string {
-  const stored = safeGetStorageItem(OPENAI_BASE_URL_STORAGE_KEY);
-  if (stored) return stored;
-  const envUrl = (import.meta as any)?.env?.VITE_OPENAI_BASE_URL;
-  return typeof envUrl === "string" ? envUrl : "";
-}
-
-function loadOpenAIModelDraft(): string {
-  return safeGetStorageItem(OPENAI_MODEL_STORAGE_KEY) ?? "";
-}
-
-function loadAnthropicApiKeyDraft(): string {
-  const stored = safeGetStorageItem(ANTHROPIC_API_KEY_STORAGE_KEY);
-  if (stored) return stored;
-  const envKey = (import.meta as any)?.env?.VITE_ANTHROPIC_API_KEY;
-  return typeof envKey === "string" ? envKey : "";
-}
-
-function loadAnthropicModelDraft(): string {
-  return safeGetStorageItem(ANTHROPIC_MODEL_STORAGE_KEY) ?? "";
-}
-
-function loadOllamaBaseUrlDraft(): string {
-  return safeGetStorageItem(OLLAMA_BASE_URL_STORAGE_KEY) ?? DEFAULT_OLLAMA_BASE_URL;
-}
-
-function loadOllamaModelDraft(): string {
-  return safeGetStorageItem(OLLAMA_MODEL_STORAGE_KEY) ?? DEFAULT_OLLAMA_MODEL;
-}
-
-function normalizeBaseUrl(baseUrl: string): string {
-  return baseUrl.trim().replace(/\/$/, "");
 }
 
 export interface AIChatPanelContainerProps {
@@ -122,223 +45,10 @@ export interface AIChatPanelContainerProps {
 }
 
 export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
-  const [config, setConfig] = useState<DesktopLLMConfig | null>(() => loadDesktopLLMConfig());
-  const [editing, setEditing] = useState(() => config === null);
-
-  const [provider, setProvider] = useState<LLMProvider>(() => loadProviderPreference());
-  const [openaiApiKey, setOpenaiApiKey] = useState(() => loadOpenAIApiKeyDraft());
-  const [openaiBaseUrl, setOpenaiBaseUrl] = useState(() => loadOpenAIBaseUrlDraft());
-  const [openaiModel, setOpenaiModel] = useState(() => loadOpenAIModelDraft());
-  const [anthropicApiKey, setAnthropicApiKey] = useState(() => loadAnthropicApiKeyDraft());
-  const [anthropicModel, setAnthropicModel] = useState(() => loadAnthropicModelDraft());
-  const [ollamaBaseUrl, setOllamaBaseUrl] = useState(() => loadOllamaBaseUrlDraft());
-  const [ollamaModel, setOllamaModel] = useState(() => loadOllamaModelDraft());
-
-  useEffect(() => {
-    if (provider === "openai") {
-      setOpenaiApiKey((prev) => prev || loadOpenAIApiKeyDraft());
-      setOpenaiBaseUrl((prev) => prev || loadOpenAIBaseUrlDraft());
-      setOpenaiModel((prev) => prev || loadOpenAIModelDraft());
-      return;
-    }
-    if (provider === "anthropic") {
-      setAnthropicApiKey((prev) => prev || loadAnthropicApiKeyDraft());
-      setAnthropicModel((prev) => prev || loadAnthropicModelDraft());
-      return;
-    }
-    setOllamaBaseUrl((prev) => prev || DEFAULT_OLLAMA_BASE_URL);
-    setOllamaModel((prev) => prev || DEFAULT_OLLAMA_MODEL);
-  }, [provider]);
-
-  const onSave = useCallback(() => {
-    if (provider === "openai") {
-      const apiKey = openaiApiKey.trim();
-      if (!apiKey) return;
-      const baseUrl = normalizeBaseUrl(openaiBaseUrl);
-      const model = openaiModel.trim() || undefined;
-      const next: DesktopLLMConfig = {
-        provider: "openai",
-        apiKey,
-        ...(model ? { model } : {}),
-        ...(baseUrl ? { baseUrl } : {}),
-      };
-      saveDesktopLLMConfig(next);
-      setConfig(next);
-      setEditing(false);
-      return;
-    }
-
-    if (provider === "anthropic") {
-      const apiKey = anthropicApiKey.trim();
-      if (!apiKey) return;
-      const model = anthropicModel.trim() || undefined;
-      const next: DesktopLLMConfig = { provider: "anthropic", apiKey, ...(model ? { model } : {}) };
-      saveDesktopLLMConfig(next);
-      setConfig(next);
-      setEditing(false);
-      return;
-    }
-
-    const baseUrl = normalizeBaseUrl(ollamaBaseUrl) || DEFAULT_OLLAMA_BASE_URL;
-    const model = ollamaModel.trim() || DEFAULT_OLLAMA_MODEL;
-    const next: DesktopLLMConfig = { provider: "ollama", baseUrl, model };
-    saveDesktopLLMConfig(next);
-    setConfig(next);
-    setEditing(false);
-  }, [
-    anthropicApiKey,
-    anthropicModel,
-    ollamaBaseUrl,
-    ollamaModel,
-    openaiApiKey,
-    openaiBaseUrl,
-    openaiModel,
-    provider,
-  ]);
-
-  const onClear = useCallback(() => {
-    clearDesktopLLMConfig();
-    setConfig(null);
-    setEditing(true);
-  }, []);
-
-  if (config === null || editing) {
-    return (
-      <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ fontWeight: 600 }}>AI chat setup</div>
-        <div style={{ fontSize: 12, opacity: 0.8 }}>
-          Choose a provider and enter credentials. Settings are stored in localStorage under <code>formula:llm:*</code>{" "}
-          (OpenAI keys are also mirrored to <code>{LEGACY_OPENAI_API_KEY_STORAGE_KEY}</code> for backward
-          compatibility).
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <label style={{ fontSize: 12, fontWeight: 600 }}>Provider</label>
-          <select
-            value={provider}
-            onChange={(e) => setProvider(e.target.value as LLMProvider)}
-            style={{ padding: 8 }}
-            data-testid="ai-provider-select"
-          >
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic</option>
-            <option value="ollama">Ollama (local)</option>
-          </select>
-        </div>
-
-        {provider === "openai" ? (
-          <>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 600 }}>OpenAI API key</label>
-              <input
-                value={openaiApiKey}
-                placeholder="sk-..."
-                onChange={(e) => setOpenaiApiKey(e.target.value)}
-                style={{ padding: 8, fontFamily: "monospace" }}
-                data-testid="ai-openai-api-key"
-              />
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 600 }}>OpenAI base URL (optional)</label>
-              <input
-                value={openaiBaseUrl}
-                placeholder="https://api.openai.com/v1"
-                onChange={(e) => setOpenaiBaseUrl(e.target.value)}
-                style={{ padding: 8, fontFamily: "monospace" }}
-                data-testid="ai-openai-base-url"
-              />
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 600 }}>Model (optional)</label>
-              <input
-                value={openaiModel}
-                placeholder="gpt-4o-mini"
-                onChange={(e) => setOpenaiModel(e.target.value)}
-                style={{ padding: 8, fontFamily: "monospace" }}
-                data-testid="ai-openai-model"
-              />
-            </div>
-          </>
-        ) : null}
-
-        {provider === "anthropic" ? (
-          <>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 600 }}>Anthropic API key</label>
-              <input
-                value={anthropicApiKey}
-                placeholder="sk-ant-..."
-                onChange={(e) => setAnthropicApiKey(e.target.value)}
-                style={{ padding: 8, fontFamily: "monospace" }}
-                data-testid="ai-anthropic-api-key"
-              />
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 600 }}>Model (optional)</label>
-              <input
-                value={anthropicModel}
-                placeholder="claude-3-5-sonnet-latest"
-                onChange={(e) => setAnthropicModel(e.target.value)}
-                style={{ padding: 8, fontFamily: "monospace" }}
-                data-testid="ai-anthropic-model"
-              />
-            </div>
-          </>
-        ) : null}
-
-        {provider === "ollama" ? (
-          <>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 600 }}>Ollama base URL</label>
-              <input
-                value={ollamaBaseUrl}
-                placeholder={DEFAULT_OLLAMA_BASE_URL}
-                onChange={(e) => setOllamaBaseUrl(e.target.value)}
-                style={{ padding: 8, fontFamily: "monospace" }}
-                data-testid="ai-ollama-base-url"
-              />
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 600 }}>Model</label>
-              <input
-                value={ollamaModel}
-                placeholder={DEFAULT_OLLAMA_MODEL}
-                onChange={(e) => setOllamaModel(e.target.value)}
-                style={{ padding: 8, fontFamily: "monospace" }}
-                data-testid="ai-ollama-model"
-              />
-            </div>
-          </>
-        ) : null}
-
-        <div style={{ display: "flex", gap: 8 }}>
-          <button type="button" style={{ padding: "8px 12px" }} onClick={onSave} data-testid="ai-save-settings">
-            Save
-          </button>
-          <button type="button" style={{ padding: "8px 12px" }} onClick={onClear} data-testid="ai-clear-settings">
-            Clear
-          </button>
-          {config !== null && editing ? (
-            <button
-              type="button"
-              style={{ padding: "8px 12px", marginLeft: "auto" }}
-              onClick={() => setEditing(false)}
-              data-testid="ai-cancel-settings"
-            >
-              Cancel
-            </button>
-          ) : null}
-        </div>
-      </div>
-    );
-  }
-
-  return <AIChatPanelRuntime {...props} llmConfig={config} onOpenSettings={() => setEditing(true)} />;
+  return <AIChatPanelRuntime {...props} />;
 }
 
-function AIChatPanelRuntime(
-  props: AIChatPanelContainerProps & { llmConfig: DesktopLLMConfig; onOpenSettings: () => void },
-) {
+function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
   const [tab, setTab] = useState<"chat" | "agent">("chat");
 
   const sessionId = useRef<string>(generateSessionId());
@@ -379,7 +89,8 @@ function AIChatPanelRuntime(
     };
   }, []);
 
-  const client = useMemo(() => createLLMClient(props.llmConfig as any), [props.llmConfig]);
+  const client = useMemo(() => getDesktopLLMClient(), []);
+  const model = useMemo(() => getDesktopModel(), []);
 
   const workbookId = props.workbookId ?? "local-workbook";
   const auditStore = useMemo(() => getDesktopAIAuditStore(), []);
@@ -416,7 +127,7 @@ function AIChatPanelRuntime(
       documentController,
       workbookId,
       llmClient: client as any,
-      model: (client as any).model ?? "gpt-4o-mini",
+      model,
       getActiveSheetId: props.getActiveSheetId,
       getSelectedRange: props.getSelection as any,
       schemaProvider,
@@ -431,6 +142,7 @@ function AIChatPanelRuntime(
     auditStore,
     client,
     documentController,
+    model,
     onApprovalRequired,
     props.createChart,
     props.getActiveSheetId,
@@ -548,7 +260,7 @@ function AIChatPanelRuntime(
         maxIterations: 20,
         maxDurationMs: 5 * 60 * 1000,
         signal: controller.signal,
-        model: (client as any).model ?? "gpt-4o-mini"
+        model,
       });
       setAgentResult(result);
     } catch (err) {
@@ -566,6 +278,7 @@ function AIChatPanelRuntime(
     auditStore,
     client,
     documentController,
+    model,
     onApprovalRequired,
     props,
     ragService,
@@ -581,7 +294,7 @@ function AIChatPanelRuntime(
           gap: 6,
           padding: 8,
           borderBottom: "1px solid var(--border)",
-          background: "var(--bg-secondary)"
+          background: "var(--bg-secondary)",
         }}
       >
         <TabButton active={tab === "chat"} onClick={() => setTab("chat")} testId="ai-tab-chat">
@@ -591,21 +304,6 @@ function AIChatPanelRuntime(
           Agent
         </TabButton>
         <div style={{ flex: 1 }} />
-        <button
-          type="button"
-          onClick={props.onOpenSettings}
-          style={{
-            padding: "6px 10px",
-            borderRadius: 8,
-            border: "1px solid var(--border)",
-            background: "transparent",
-            color: "var(--text-primary)",
-            fontWeight: 500
-          }}
-          data-testid="ai-open-settings"
-        >
-          Settings
-        </button>
       </div>
       <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
         {tab === "chat" ? (

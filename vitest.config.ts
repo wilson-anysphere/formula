@@ -12,6 +12,8 @@ export default defineConfig({
       "packages/**/*.test.tsx",
       "apps/**/*.test.ts",
       "apps/**/*.test.tsx",
+      "apps/**/*.vitest.ts",
+      "apps/**/*.vitest.tsx",
       "services/api/src/__tests__/**/*.test.ts"
     ],
     environment: "node",
