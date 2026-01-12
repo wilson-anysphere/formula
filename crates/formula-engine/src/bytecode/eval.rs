@@ -59,8 +59,21 @@ impl Vm {
         self.locals.resize(program.locals.len(), Value::Empty);
         self.eval_program(program, grid, base, locale)
     }
- 
+
     fn eval_program(
+        &mut self,
+        program: &Program,
+        grid: &dyn Grid,
+        base: CellCoord,
+        locale: &crate::LocaleConfig,
+    ) -> Value {
+        let v = self.eval_program_raw(program, grid, base, locale);
+        // Match the AST evaluator: the final result uses dynamic dereference, so range references
+        // spill instead of producing a scalar `#SPILL!`.
+        deref_value_dynamic(v, grid, base)
+    }
+
+    fn eval_program_raw(
         &mut self,
         program: &Program,
         grid: &dyn Grid,
@@ -249,12 +262,9 @@ impl Vm {
             }
             pc += 1;
         }
-        let v = self.stack.pop().unwrap_or(Value::Empty);
-        // Match the AST evaluator: the final result uses dynamic dereference, so range references
-        // spill instead of producing a scalar `#SPILL!`.
-        deref_value_dynamic(v, grid, base)
+        self.stack.pop().unwrap_or(Value::Empty)
     }
- 
+
     fn call_lambda(
         &mut self,
         lambda: Lambda,
@@ -308,11 +318,14 @@ impl Vm {
  
         self.stack = Vec::new();
         self.locals = locals;
-        let result = self.eval_program(&body_program, grid, base, locale);
- 
+        // Lambdas can return references, which should be preserved so that reference-only
+        // functions (e.g. ROW/COLUMN) can consume the reference value without forcing an eager
+        // dereference/spill inside the lambda body.
+        let result = self.eval_program_raw(&body_program, grid, base, locale);
+
         self.stack = saved_stack;
         self.locals = saved_locals;
- 
+
         self.lambda_depth = self.lambda_depth.saturating_sub(1);
         result
     }

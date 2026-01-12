@@ -735,6 +735,21 @@ fn bytecode_backend_matches_ast_for_lambda_invocation_call_expr() {
 }
 
 #[test]
+fn bytecode_backend_preserves_reference_results_from_lambda_calls() {
+    // Lambdas can return references, which should remain as references so reference-only functions
+    // can consume them (rather than forcing an eager dereference/spill inside the lambda body).
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=ROW(LAMBDA(r,r)(A10))")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, "=ROW(LAMBDA(r,r)(A10))", "A1");
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(10.0));
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_lambda_call_with_array_literal_arg() {
     let mut engine = Engine::new();
     engine

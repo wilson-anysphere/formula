@@ -8234,14 +8234,11 @@ fn bytecode_expr_is_eligible_inner(
             bytecode::ast::Function::Row | bytecode::ast::Function::Column => match args.as_slice()
             {
                 [] => true,
-                [bytecode::Expr::CellRef(_)] => true,
-                [bytecode::Expr::RangeRef(_)] => true,
-                [bytecode::Expr::MultiRangeRef(_)] => true,
-                [bytecode::Expr::SpillRange(_)] => true,
-                [bytecode::Expr::NameRef(name)] => matches!(
-                    local_binding_kind(lexical_scopes, name),
-                    Some(BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::RefSingle)
-                ),
+                // ROW/COLUMN are reference-only, but the bytecode runtime will still produce the
+                // correct `#VALUE!` error for non-reference arguments. Allow any eligible argument
+                // expression so higher-order constructs (e.g. `ROW(LAMBDA(r,r)(A1))`) can be
+                // evaluated by the bytecode backend without forcing an AST fallback.
+                [arg] => bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes),
                 _ => false,
             },
             bytecode::ast::Function::Rows | bytecode::ast::Function::Columns => {
