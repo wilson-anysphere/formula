@@ -62,7 +62,8 @@ fixtures/xlsx/
 - `macros/`:
   - `basic.xlsm` - minimal VBA project preservation fixture.
   - `signed-basic.xlsm` - `basic.xlsm` with a `\x05DigitalSignature` stream containing an
-    Authenticode-like PKCS#7/CMS `SignedData` blob (self-signed fixture cert; no private key).
+    MS-OFFCRYPTO `DigSigInfoSerialized` wrapper whose PKCS#7/CMS `SignedData` payload embeds an
+    Authenticode `SpcIndirectDataContent` digest (self-signed fixture cert; no private key).
 
 ## Regenerating the initial fixtures
 
