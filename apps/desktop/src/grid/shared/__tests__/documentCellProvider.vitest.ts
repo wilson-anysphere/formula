@@ -77,6 +77,72 @@ describe("DocumentCellProvider formatting integration", () => {
     expect(cell?.style?.rotationDeg).toBe(45);
   });
 
+  it("prefers alignment.textRotation over alignment.rotation", () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", "hello");
+    doc.setRangeFormat("Sheet1", "A1", { alignment: { textRotation: 45, rotation: 30 } });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 3,
+      colCount: 3,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell?.style?.rotationDeg).toBe(45);
+  });
+
+  it("falls back to alignment.rotation when textRotation is not finite", () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", "hello");
+    doc.setRangeFormat("Sheet1", "A1", { alignment: { textRotation: Number.NaN, rotation: 30 } });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 3,
+      colCount: 3,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell?.style?.rotationDeg).toBe(30);
+  });
+
+  it("clamps rotation values and handles Excel vertical-text sentinel 255", () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", "hello");
+    doc.setCellValue("Sheet1", "A2", "hello");
+    doc.setCellValue("Sheet1", "A3", "hello");
+
+    doc.setRangeFormat("Sheet1", "A1", { alignment: { textRotation: 999 } });
+    doc.setRangeFormat("Sheet1", "A2", { alignment: { textRotation: -999 } });
+    doc.setRangeFormat("Sheet1", "A3", { alignment: { rotation: 255 } });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 5,
+      colCount: 3,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    expect(provider.getCell(1, 1)?.style?.rotationDeg).toBe(180);
+    expect(provider.getCell(2, 1)?.style?.rotationDeg).toBe(-180);
+    expect(provider.getCell(3, 1)?.style?.rotationDeg).toBe(90);
+  });
+
   it('maps Excel horizontal alignment "fill" into a deterministic shared-grid textAlign fallback', () => {
     const doc = new DocumentController();
     doc.setRangeFormat("Sheet1", "A1", { alignment: { horizontal: "fill" } });
