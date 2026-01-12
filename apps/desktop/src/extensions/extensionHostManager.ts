@@ -301,11 +301,35 @@ export class DesktopExtensionHostManager {
     // Clears all stored grants for a single extension, forcing the next privileged API
     // call to re-prompt for permissions.
     await this.host.resetPermissions(extensionId);
+    // Resetting grants should behave like a fresh install: drop any in-memory registrations that
+    // were established under the old permission set so the next activation re-prompts as needed.
+    try {
+      await this.host.reloadExtension(extensionId);
+    } catch {
+      // ignore reload failures (extension may not be loaded yet)
+    }
     this.emit();
   }
 
   async resetAllPermissions(): Promise<void> {
     await this.host.resetAllPermissions();
+    // Like per-extension reset, reload any already-loaded extensions so their workers are reset
+    // and will re-request permissions on next activation.
+    try {
+      const exts = this.host.listExtensions?.() ?? [];
+      for (const ext of exts as any[]) {
+        const id = typeof ext?.id === "string" ? ext.id : null;
+        if (!id) continue;
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await this.host.reloadExtension(id);
+        } catch {
+          // ignore individual failures
+        }
+      }
+    } catch {
+      // ignore
+    }
     this.emit();
   }
 

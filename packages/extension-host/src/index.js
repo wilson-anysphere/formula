@@ -431,6 +431,11 @@ class ExtensionHost {
   }
 
   async activateView(viewId) {
+    // `viewActivated` is exposed as `formula.events.onViewActivated`. Like other workbook/grid
+    // events, it should be delivered to any active extensions immediately (even if the view's
+    // owning extension later requests permissions during activation).
+    this._broadcastEvent("viewActivated", { viewId });
+
     const activationEvent = `onView:${viewId}`;
     const targets = [];
     for (const extension of this._extensions.values()) {
@@ -441,8 +446,12 @@ class ExtensionHost {
 
     const panelReadyTasks = [];
     for (const extension of targets) {
-      if (!extension.active) {
+      // Extensions that were already active received the broadcast above. Extensions that are
+      // activated as a result of this view activation need to be notified after activation.
+      const wasActive = extension.active;
+      if (!wasActive) {
         await this._activateExtension(extension, activationEvent);
+        this._sendEventToExtension(extension, "viewActivated", { viewId });
       }
       // If the view corresponds to a contributed panel, wait for it to render so callers can
       // treat `activateView()` as "ready to show" (important for flaky/shared test runners).
@@ -450,10 +459,6 @@ class ExtensionHost {
         panelReadyTasks.push(this._waitForPanelHtml(viewId, this._activationTimeoutMs));
       }
     }
-
-    // Match the browser host behavior: view activation is broadcast to all loaded extensions
-    // (active listeners can filter by viewId).
-    this._broadcastEvent("viewActivated", { viewId });
 
     if (panelReadyTasks.length > 0) {
       await Promise.all(panelReadyTasks);

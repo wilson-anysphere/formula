@@ -101,7 +101,7 @@ import { DesktopExtensionHostManager } from "./extensions/extensionHostManager.j
 import { ExtensionPanelBridge } from "./extensions/extensionPanelBridge.js";
 import { ContextKeyService } from "./extensions/contextKeys.js";
 import { resolveMenuItems } from "./extensions/contextMenus.js";
-import { CELL_CONTEXT_MENU_ID } from "./extensions/menuIds.js";
+import { CELL_CONTEXT_MENU_ID, COLUMN_CONTEXT_MENU_ID, CORNER_CONTEXT_MENU_ID, ROW_CONTEXT_MENU_ID } from "./extensions/menuIds.js";
 import { buildContextMenuModel } from "./extensions/contextMenuModel.js";
 import { getPrimaryCommandKeybindingDisplay, type ContributedKeybinding } from "./extensions/keybindings.js";
 import { KeybindingService } from "./extensions/keybindingService.js";
@@ -3448,6 +3448,8 @@ if (
   }
 
   const contextKeys = new ContextKeyService();
+  type GridArea = "cell" | "rowHeader" | "colHeader" | "corner";
+  let currentGridArea: GridArea = "cell";
 
   let lastSelection: SelectionState | null = null;
 
@@ -3467,6 +3469,10 @@ if (
       cellHasValue: (value != null && String(value).trim().length > 0) || (formula != null && formula.trim().length > 0),
       commentsPanelVisible: app.isCommentsPanelVisible(),
       cellHasComment: app.activeCellHasComment(),
+      gridArea: currentGridArea,
+      isRowHeader: currentGridArea === "rowHeader",
+      isColHeader: currentGridArea === "colHeader",
+      isCorner: currentGridArea === "corner",
     });
   };
 
@@ -3503,6 +3509,14 @@ if (
   let lastSelectionEventKey = "";
   let lastSelectionEventSheetId = app.getCurrentSheetId();
   let selectionSubscriptionInitialized = false;
+
+  const recordLastExtensionSelection = (
+    _sheetId: string,
+    _range: { startRow: number; startCol: number; endRow: number; endCol: number },
+  ): void => {
+    void _sheetId;
+    void _range;
+  };
 
   function ensureSelectionSubscription(): void {
     if (selectionSubscription) return;
@@ -4439,6 +4453,11 @@ if (
 
   const contextMenu = new ContextMenu({
     onClose: () => {
+      // Reset the "where was the context menu opened" context keys when the menu closes so
+      // keybindings / when-clauses don't keep matching header-specific items.
+      currentGridArea = "cell";
+      updateContextKeys();
+
       // Best-effort: restore focus to the appropriate editing surface after closing.
       // (Typically the grid, but preserve formula-bar focus during range-selection workflows.)
       app.focusAfterSheetNavigation();
@@ -4456,218 +4475,388 @@ if (
   const primaryShortcut = (key: string) => (isMac ? `⌘${key}` : `Ctrl+${key}`);
   const primaryShiftShortcut = (key: string) => (isMac ? `⌘⇧${key}` : `Ctrl+Shift+${key}`);
 
+  type GridHitTest = { area: GridArea; row: number | null; col: number | null };
+
+  const hitTestGridAreaAtClientPoint = (clientX: number, clientY: number): GridHitTest => {
+    const anyApp = app as any;
+    const rootRect = gridRoot.getBoundingClientRect();
+    const x = clientX - rootRect.left;
+    const y = clientY - rootRect.top;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return { area: "cell", row: null, col: null };
+
+    // Shared-grid mode: row/col headers are rendered as real cells (headerRows/headerCols = 1),
+    // so rely on the renderer's hit-test instead of legacy pixel thresholds.
+    const sharedGrid = (anyApp.sharedGrid ?? null) as
+      | { renderer?: { pickCellAt?: (x: number, y: number) => { row: number; col: number } | null } }
+      | null;
+    const selectionCanvas = (anyApp.selectionCanvas ?? null) as HTMLElement | null;
+    if (sharedGrid?.renderer && typeof sharedGrid.renderer.pickCellAt === "function" && selectionCanvas) {
+      const canvasRect = selectionCanvas.getBoundingClientRect();
+      const vx = clientX - canvasRect.left;
+      const vy = clientY - canvasRect.top;
+      if (Number.isFinite(vx) && Number.isFinite(vy) && vx >= 0 && vy >= 0 && vx <= canvasRect.width && vy <= canvasRect.height) {
+        const picked = sharedGrid.renderer.pickCellAt(vx, vy);
+        if (picked) {
+          const headerRows = 1;
+          const headerCols = 1;
+          if (picked.row < headerRows && picked.col < headerCols) return { area: "corner", row: null, col: null };
+          if (picked.col < headerCols) return { area: "rowHeader", row: picked.row - headerRows, col: null };
+          if (picked.row < headerRows) return { area: "colHeader", row: null, col: picked.col - headerCols };
+          return { area: "cell", row: picked.row - headerRows, col: picked.col - headerCols };
+        }
+      }
+    }
+
+    const rowHeaderWidth = Number.isFinite(anyApp.rowHeaderWidth) ? Number(anyApp.rowHeaderWidth) : 0;
+    const colHeaderHeight = Number.isFinite(anyApp.colHeaderHeight) ? Number(anyApp.colHeaderHeight) : 0;
+
+    const inRowHeader = x < rowHeaderWidth;
+    const inColHeader = y < colHeaderHeight;
+    if (inRowHeader && inColHeader) return { area: "corner", row: null, col: null };
+
+    if (inRowHeader || inColHeader) {
+      let cell: { row: number; col: number } | null = null;
+      if (typeof anyApp.cellFromPoint === "function") {
+        try {
+          cell = anyApp.cellFromPoint(x, y) as { row: number; col: number } | null;
+        } catch {
+          cell = null;
+        }
+      }
+      if (!cell) {
+        const picked = app.pickCellAtClientPoint(clientX, clientY);
+        if (picked) cell = { row: picked.row, col: picked.col };
+      }
+      if (inRowHeader) return { area: "rowHeader", row: cell?.row ?? null, col: null };
+      return { area: "colHeader", row: null, col: cell?.col ?? null };
+    }
+
+    // Task 40 hit-test: if we're over a sheet cell, treat this as a cell-area click.
+    const pickedCell = app.pickCellAtClientPoint(clientX, clientY);
+    if (pickedCell) return { area: "cell", row: pickedCell.row, col: pickedCell.col };
+
+    return { area: "cell", row: null, col: null };
+  };
+
+  const selectedRowIndices = (): number[] => {
+    const rows = new Set<number>();
+    for (const range of app.getSelectionRanges()) {
+      const r = normalizeSelectionRange(range);
+      for (let row = r.startRow; row <= r.endRow; row += 1) rows.add(row);
+    }
+    return [...rows].sort((a, b) => a - b);
+  };
+
+  const selectedColIndices = (): number[] => {
+    const cols = new Set<number>();
+    for (const range of app.getSelectionRanges()) {
+      const r = normalizeSelectionRange(range);
+      for (let col = r.startCol; col <= r.endCol; col += 1) cols.add(col);
+    }
+    return [...cols].sort((a, b) => a - b);
+  };
+
+  const applyRowHeight = async () => {
+    const input = await showInputBox({ prompt: "Row Height", placeHolder: "Enter a row height (px)" });
+    if (input == null) return;
+    const height = Number(input);
+    if (!Number.isFinite(height) || height <= 0) {
+      showToast("Row height must be a positive number.", "error");
+      return;
+    }
+
+    const sheetId = app.getCurrentSheetId();
+    const rows = selectedRowIndices();
+    if (rows.length === 0) return;
+
+    const doc = app.getDocument();
+    doc.beginBatch({ label: "Row Height" });
+    for (const row of rows) {
+      doc.setRowHeight(sheetId, row, height, { label: "Row Height" });
+    }
+    doc.endBatch();
+  };
+
+  const applyColWidth = async () => {
+    const input = await showInputBox({ prompt: "Column Width", placeHolder: "Enter a column width (px)" });
+    if (input == null) return;
+    const width = Number(input);
+    if (!Number.isFinite(width) || width <= 0) {
+      showToast("Column width must be a positive number.", "error");
+      return;
+    }
+
+    const sheetId = app.getCurrentSheetId();
+    const cols = selectedColIndices();
+    if (cols.length === 0) return;
+
+    const doc = app.getDocument();
+    doc.beginBatch({ label: "Column Width" });
+    for (const col of cols) {
+      doc.setColWidth(sheetId, col, width, { label: "Column Width" });
+    }
+    doc.endBatch();
+  };
+
   const buildGridContextMenuItems = (): ContextMenuItem[] => {
-    const undoRedo = app.getUndoRedoState();
-    const undoLabelText = typeof undoRedo.undoLabel === "string" ? undoRedo.undoLabel.trim() : "";
-    const redoLabelText = typeof undoRedo.redoLabel === "string" ? undoRedo.redoLabel.trim() : "";
-    const undoLabel = undoLabelText
-      ? tWithVars("menu.undoWithLabel", { label: undoLabelText })
-      : t("command.edit.undo");
-    const redoLabel = redoLabelText
-      ? tWithVars("menu.redoWithLabel", { label: redoLabelText })
-      : t("command.edit.redo");
     const allowEditCommands = !isSpreadsheetEditing();
 
-    const menuItems: ContextMenuItem[] = [
-      {
-        type: "item",
-        label: undoLabel,
-        enabled: undoRedo.canUndo,
-        shortcut: getPrimaryCommandKeybindingDisplay("edit.undo", commandKeybindingDisplayIndex) ?? primaryShortcut("Z"),
-        onSelect: () => executeBuiltinCommand("edit.undo"),
-      },
-      {
-        type: "item",
-        label: redoLabel,
-        enabled: undoRedo.canRedo,
-        shortcut:
-          getPrimaryCommandKeybindingDisplay("edit.redo", commandKeybindingDisplayIndex) ?? (isMac ? "⇧⌘Z" : "Ctrl+Y"),
-        onSelect: () => executeBuiltinCommand("edit.redo"),
-      },
-      { type: "separator" },
-      {
-        type: "item",
-        label: t("clipboard.cut"),
-        shortcut: getPrimaryCommandKeybindingDisplay("clipboard.cut", commandKeybindingDisplayIndex) ?? primaryShortcut("X"),
-        onSelect: () => executeBuiltinCommand("clipboard.cut"),
-      },
-      {
-        type: "item",
-        label: t("clipboard.copy"),
-        shortcut: getPrimaryCommandKeybindingDisplay("clipboard.copy", commandKeybindingDisplayIndex) ?? primaryShortcut("C"),
-        onSelect: () => executeBuiltinCommand("clipboard.copy"),
-      },
-      {
-        type: "item",
-        label: t("clipboard.paste"),
-        shortcut: getPrimaryCommandKeybindingDisplay("clipboard.paste", commandKeybindingDisplayIndex) ?? primaryShortcut("V"),
-        onSelect: () => executeBuiltinCommand("clipboard.paste"),
-      },
-      { type: "separator" },
-      {
-        type: "item",
-        label: t("clipboard.pasteSpecial.title"),
-        shortcut:
-          getPrimaryCommandKeybindingDisplay("clipboard.pasteSpecial", commandKeybindingDisplayIndex) ??
-          (isMac ? "⇧⌘V" : "Ctrl+Shift+V"),
-        onSelect: () => executeBuiltinCommand("clipboard.pasteSpecial"),
-      },
-      { type: "separator" },
-      {
-        type: "item",
-        label: t("menu.clearContents"),
-        enabled: (() => {
-          if (!allowEditCommands) return false;
+    let menuItems: ContextMenuItem[] = [];
+    if (currentGridArea === "rowHeader") {
+      menuItems = [
+        { type: "item", label: "Row Height…", enabled: allowEditCommands, onSelect: applyRowHeight },
+        {
+          type: "item",
+          label: "Hide",
+          enabled: allowEditCommands,
+          onSelect: () => {
+            showToast("Hide row is not implemented yet.", "info");
+          },
+        },
+        {
+          type: "item",
+          label: "Unhide",
+          enabled: allowEditCommands,
+          onSelect: () => {
+            showToast("Unhide row is not implemented yet.", "info");
+          },
+        },
+      ];
+    } else if (currentGridArea === "colHeader") {
+      menuItems = [
+        { type: "item", label: "Column Width…", enabled: allowEditCommands, onSelect: applyColWidth },
+        {
+          type: "item",
+          label: "Hide",
+          enabled: allowEditCommands,
+          onSelect: () => {
+            showToast("Hide column is not implemented yet.", "info");
+          },
+        },
+        {
+          type: "item",
+          label: "Unhide",
+          enabled: allowEditCommands,
+          onSelect: () => {
+            showToast("Unhide column is not implemented yet.", "info");
+          },
+        },
+      ];
+    } else if (currentGridArea === "corner") {
+      menuItems = [
+        {
+          type: "item",
+          label: "Select All",
+          onSelect: () => {
+            const limits = getGridLimitsForFormatting();
+            app.selectRange({ range: { startRow: 0, endRow: limits.maxRows - 1, startCol: 0, endCol: limits.maxCols - 1 } });
+          },
+        },
+      ];
+    } else {
+      const undoRedo = app.getUndoRedoState();
+      const undoLabelText = typeof undoRedo.undoLabel === "string" ? undoRedo.undoLabel.trim() : "";
+      const redoLabelText = typeof undoRedo.redoLabel === "string" ? undoRedo.redoLabel.trim() : "";
+      const undoLabel = undoLabelText ? tWithVars("menu.undoWithLabel", { label: undoLabelText }) : t("command.edit.undo");
+      const redoLabel = redoLabelText ? tWithVars("menu.redoWithLabel", { label: redoLabelText }) : t("command.edit.redo");
 
-          const isSingleCell = contextKeys.get("isSingleCell") === true;
-          const activeHasValue = contextKeys.get("cellHasValue") === true;
-          if (isSingleCell) return activeHasValue;
-          if (activeHasValue) return true;
+      menuItems = [
+        {
+          type: "item",
+          label: undoLabel,
+          enabled: undoRedo.canUndo,
+          shortcut: getPrimaryCommandKeybindingDisplay("edit.undo", commandKeybindingDisplayIndex) ?? primaryShortcut("Z"),
+          onSelect: () => executeBuiltinCommand("edit.undo"),
+        },
+        {
+          type: "item",
+          label: redoLabel,
+          enabled: undoRedo.canRedo,
+          shortcut:
+            getPrimaryCommandKeybindingDisplay("edit.redo", commandKeybindingDisplayIndex) ?? (isMac ? "⇧⌘Z" : "Ctrl+Y"),
+          onSelect: () => executeBuiltinCommand("edit.redo"),
+        },
+        { type: "separator" },
+        {
+          type: "item",
+          label: t("clipboard.cut"),
+          shortcut: getPrimaryCommandKeybindingDisplay("clipboard.cut", commandKeybindingDisplayIndex) ?? primaryShortcut("X"),
+          onSelect: () => executeBuiltinCommand("clipboard.cut"),
+        },
+        {
+          type: "item",
+          label: t("clipboard.copy"),
+          shortcut: getPrimaryCommandKeybindingDisplay("clipboard.copy", commandKeybindingDisplayIndex) ?? primaryShortcut("C"),
+          onSelect: () => executeBuiltinCommand("clipboard.copy"),
+        },
+        {
+          type: "item",
+          label: t("clipboard.paste"),
+          shortcut: getPrimaryCommandKeybindingDisplay("clipboard.paste", commandKeybindingDisplayIndex) ?? primaryShortcut("V"),
+          onSelect: () => executeBuiltinCommand("clipboard.paste"),
+        },
+        { type: "separator" },
+        {
+          type: "item",
+          label: t("clipboard.pasteSpecial.title"),
+          shortcut:
+            getPrimaryCommandKeybindingDisplay("clipboard.pasteSpecial", commandKeybindingDisplayIndex) ??
+            (isMac ? "⇧⌘V" : "Ctrl+Shift+V"),
+          onSelect: () => executeBuiltinCommand("clipboard.pasteSpecial"),
+        },
+        { type: "separator" },
+        {
+          type: "item",
+          label: t("menu.clearContents"),
+          enabled: (() => {
+            if (!allowEditCommands) return false;
 
-          // More accurate (but still sparse/efficient) check for multi-cell selections:
-          // scan the sheet's sparse cell map and see if any non-empty cell falls within
-          // the current selection ranges.
-          //
-          // This avoids scanning potentially huge rectangular selections.
-          const sheetId = app.getCurrentSheetId();
-          const doc: any = app.getDocument() as any;
-          const sheetModel = doc?.model?.sheets?.get?.(sheetId) ?? null;
-          const cells: Map<string, any> | null = sheetModel?.cells ?? null;
-          if (!cells || cells.size === 0) return false;
+            const isSingleCell = contextKeys.get("isSingleCell") === true;
+            const activeHasValue = contextKeys.get("cellHasValue") === true;
+            if (isSingleCell) return activeHasValue;
+            if (activeHasValue) return true;
 
-          const ranges = app.getSelectionRanges();
-          if (ranges.length === 0) return false;
-          const normalized = ranges.map((range) => ({
-            startRow: Math.min(range.startRow, range.endRow),
-            endRow: Math.max(range.startRow, range.endRow),
-            startCol: Math.min(range.startCol, range.endCol),
-            endCol: Math.max(range.startCol, range.endCol),
-          }));
+            // More accurate (but still sparse/efficient) check for multi-cell selections:
+            // scan the sheet's sparse cell map and see if any non-empty cell falls within
+            // the current selection ranges.
+            //
+            // This avoids scanning potentially huge rectangular selections.
+            const sheetId = app.getCurrentSheetId();
+            const doc: any = app.getDocument() as any;
+            const sheetModel = doc?.model?.sheets?.get?.(sheetId) ?? null;
+            const cells: Map<string, any> | null = sheetModel?.cells ?? null;
+            if (!cells || cells.size === 0) return false;
 
-          for (const [key, cell] of cells.entries()) {
-            if (!cell) continue;
-            const value = normalizeExtensionCellValue(cell.value ?? null);
-            const formula = typeof cell.formula === "string" ? cell.formula : null;
-            const cellHasValue =
-              (value != null && String(value).trim().length > 0) || (formula != null && formula.trim().length > 0);
-            if (!cellHasValue) continue;
-            const [rowStr, colStr] = String(key).split(",", 2);
-            const row = Number(rowStr);
-            const col = Number(colStr);
-            if (!Number.isInteger(row) || !Number.isInteger(col)) continue;
-            for (const range of normalized) {
-              if (row < range.startRow || row > range.endRow) continue;
-              if (col < range.startCol || col > range.endCol) continue;
-              return true;
+            const ranges = app.getSelectionRanges();
+            if (ranges.length === 0) return false;
+            const normalized = ranges.map(normalizeSelectionRange);
+
+            for (const [key, cell] of cells.entries()) {
+              if (!cell) continue;
+              const value = normalizeExtensionCellValue(cell.value ?? null);
+              const formula = typeof cell.formula === "string" ? cell.formula : null;
+              const cellHasValue =
+                (value != null && String(value).trim().length > 0) || (formula != null && formula.trim().length > 0);
+              if (!cellHasValue) continue;
+              const [rowStr, colStr] = String(key).split(",", 2);
+              const row = Number(rowStr);
+              const col = Number(colStr);
+              if (!Number.isInteger(row) || !Number.isInteger(col)) continue;
+              for (const range of normalized) {
+                if (row < range.startRow || row > range.endRow) continue;
+                if (col < range.startCol || col > range.endCol) continue;
+                return true;
+              }
             }
-          }
 
-          return false;
-        })(),
-        shortcut:
-          getPrimaryCommandKeybindingDisplay("edit.clearContents", commandKeybindingDisplayIndex) ?? (isMac ? "⌫" : "Del"),
-        onSelect: () => executeBuiltinCommand("edit.clearContents"),
-      },
-      {
-        type: "item",
-        label: t("command.ai.inlineEdit"),
-        enabled: allowEditCommands,
-        shortcut: getPrimaryCommandKeybindingDisplay("ai.inlineEdit", commandKeybindingDisplayIndex) ?? primaryShortcut("K"),
-        onSelect: () => executeBuiltinCommand("ai.inlineEdit"),
-      },
-      { type: "separator" },
-      {
-        type: "submenu",
-        label: t("menu.format"),
-        items: [
-          {
-            type: "item",
-            label: t("command.format.toggleBold"),
-            shortcut: getPrimaryCommandKeybindingDisplay("format.toggleBold", commandKeybindingDisplayIndex) ?? primaryShortcut("B"),
-            onSelect: () => executeBuiltinCommand("format.toggleBold"),
-          },
-          {
-            type: "item",
-            label: t("command.format.toggleItalic"),
-            shortcut:
-              getPrimaryCommandKeybindingDisplay("format.toggleItalic", commandKeybindingDisplayIndex) ?? (isMac ? "⌃I" : "Ctrl+I"),
-            onSelect: () => executeBuiltinCommand("format.toggleItalic"),
-          },
-          {
-            type: "item",
-            label: t("command.format.toggleUnderline"),
-            shortcut:
-              getPrimaryCommandKeybindingDisplay("format.toggleUnderline", commandKeybindingDisplayIndex) ??
-              primaryShortcut("U"),
-            onSelect: () => executeBuiltinCommand("format.toggleUnderline"),
-          },
-          { type: "separator" },
-          {
-            type: "item",
-            label: t("command.format.numberFormat.currency"),
-            shortcut:
-              getPrimaryCommandKeybindingDisplay("format.numberFormat.currency", commandKeybindingDisplayIndex) ??
-              primaryShiftShortcut("$"),
-            onSelect: () => executeBuiltinCommand("format.numberFormat.currency"),
-          },
-          {
-            type: "item",
-            label: t("command.format.numberFormat.percent"),
-            shortcut:
-              getPrimaryCommandKeybindingDisplay("format.numberFormat.percent", commandKeybindingDisplayIndex) ??
-              primaryShiftShortcut("%"),
-            onSelect: () => executeBuiltinCommand("format.numberFormat.percent"),
-          },
-          {
-            type: "item",
-            label: t("command.format.numberFormat.date"),
-            shortcut:
-              getPrimaryCommandKeybindingDisplay("format.numberFormat.date", commandKeybindingDisplayIndex) ??
-              primaryShiftShortcut("#"),
-            onSelect: () => executeBuiltinCommand("format.numberFormat.date"),
-          },
-          { type: "separator" },
-          {
-            type: "item",
-            label: t("command.format.openFormatCells"),
-            shortcut:
-              getPrimaryCommandKeybindingDisplay("format.openFormatCells", commandKeybindingDisplayIndex) ?? primaryShortcut("1"),
-            onSelect: () => executeBuiltinCommand("format.openFormatCells"),
-          },
-        ],
-      },
-      { type: "separator" },
-      {
-        type: "item",
-        label: t("menu.addComment"),
-        shortcut: getPrimaryCommandKeybindingDisplay("comments.addComment", commandKeybindingDisplayIndex) ?? undefined,
-        onSelect: () => executeBuiltinCommand("comments.addComment"),
-      },
-      {
-        type: "item",
-        label: t("command.view.toggleShowFormulas"),
-        enabled: allowEditCommands,
-        shortcut:
-          getPrimaryCommandKeybindingDisplay("view.toggleShowFormulas", commandKeybindingDisplayIndex) ?? primaryShortcut("`"),
-        onSelect: () => executeBuiltinCommand("view.toggleShowFormulas"),
-      },
-      {
-        type: "item",
-        label: t("command.audit.togglePrecedents"),
-        enabled: allowEditCommands,
-        shortcut:
-          getPrimaryCommandKeybindingDisplay("audit.togglePrecedents", commandKeybindingDisplayIndex) ?? primaryShortcut("["),
-        onSelect: () => executeBuiltinCommand("audit.togglePrecedents"),
-      },
-      {
-        type: "item",
-        label: t("command.audit.toggleDependents"),
-        enabled: allowEditCommands,
-        shortcut:
-          getPrimaryCommandKeybindingDisplay("audit.toggleDependents", commandKeybindingDisplayIndex) ?? primaryShortcut("]"),
-        onSelect: () => executeBuiltinCommand("audit.toggleDependents"),
-      },
-    ];
+            return false;
+          })(),
+          shortcut:
+            getPrimaryCommandKeybindingDisplay("edit.clearContents", commandKeybindingDisplayIndex) ?? (isMac ? "⌫" : "Del"),
+          onSelect: () => executeBuiltinCommand("edit.clearContents"),
+        },
+        {
+          type: "item",
+          label: t("command.ai.inlineEdit"),
+          enabled: allowEditCommands,
+          shortcut: getPrimaryCommandKeybindingDisplay("ai.inlineEdit", commandKeybindingDisplayIndex) ?? primaryShortcut("K"),
+          onSelect: () => executeBuiltinCommand("ai.inlineEdit"),
+        },
+        { type: "separator" },
+        {
+          type: "submenu",
+          label: t("menu.format"),
+          items: [
+            {
+              type: "item",
+              label: t("command.format.toggleBold"),
+              shortcut:
+                getPrimaryCommandKeybindingDisplay("format.toggleBold", commandKeybindingDisplayIndex) ?? primaryShortcut("B"),
+              onSelect: () => executeBuiltinCommand("format.toggleBold"),
+            },
+            {
+              type: "item",
+              label: t("command.format.toggleItalic"),
+              shortcut:
+                getPrimaryCommandKeybindingDisplay("format.toggleItalic", commandKeybindingDisplayIndex) ??
+                (isMac ? "⌘I" : "Ctrl+I"),
+              onSelect: () => executeBuiltinCommand("format.toggleItalic"),
+            },
+            {
+              type: "item",
+              label: t("command.format.toggleUnderline"),
+              shortcut:
+                getPrimaryCommandKeybindingDisplay("format.toggleUnderline", commandKeybindingDisplayIndex) ?? primaryShortcut("U"),
+              onSelect: () => executeBuiltinCommand("format.toggleUnderline"),
+            },
+            { type: "separator" },
+            {
+              type: "item",
+              label: t("command.format.numberFormat.currency"),
+              shortcut:
+                getPrimaryCommandKeybindingDisplay("format.numberFormat.currency", commandKeybindingDisplayIndex) ??
+                primaryShiftShortcut("$"),
+              onSelect: () => executeBuiltinCommand("format.numberFormat.currency"),
+            },
+            {
+              type: "item",
+              label: t("command.format.numberFormat.percent"),
+              shortcut:
+                getPrimaryCommandKeybindingDisplay("format.numberFormat.percent", commandKeybindingDisplayIndex) ??
+                primaryShiftShortcut("%"),
+              onSelect: () => executeBuiltinCommand("format.numberFormat.percent"),
+            },
+            {
+              type: "item",
+              label: t("command.format.numberFormat.date"),
+              shortcut:
+                getPrimaryCommandKeybindingDisplay("format.numberFormat.date", commandKeybindingDisplayIndex) ??
+                primaryShiftShortcut("#"),
+              onSelect: () => executeBuiltinCommand("format.numberFormat.date"),
+            },
+            { type: "separator" },
+            {
+              type: "item",
+              label: t("command.format.openFormatCells"),
+              shortcut:
+                getPrimaryCommandKeybindingDisplay("format.openFormatCells", commandKeybindingDisplayIndex) ?? primaryShortcut("1"),
+              onSelect: () => executeBuiltinCommand("format.openFormatCells"),
+            },
+          ],
+        },
+        { type: "separator" },
+        {
+          type: "item",
+          label: t("menu.addComment"),
+          shortcut: getPrimaryCommandKeybindingDisplay("comments.addComment", commandKeybindingDisplayIndex) ?? undefined,
+          onSelect: () => executeBuiltinCommand("comments.addComment"),
+        },
+        {
+          type: "item",
+          label: t("command.view.toggleShowFormulas"),
+          enabled: allowEditCommands,
+          shortcut:
+            getPrimaryCommandKeybindingDisplay("view.toggleShowFormulas", commandKeybindingDisplayIndex) ?? primaryShortcut("`"),
+          onSelect: () => executeBuiltinCommand("view.toggleShowFormulas"),
+        },
+        {
+          type: "item",
+          label: t("command.audit.togglePrecedents"),
+          enabled: allowEditCommands,
+          shortcut:
+            getPrimaryCommandKeybindingDisplay("audit.togglePrecedents", commandKeybindingDisplayIndex) ?? primaryShortcut("["),
+          onSelect: () => executeBuiltinCommand("audit.togglePrecedents"),
+        },
+        {
+          type: "item",
+          label: t("command.audit.toggleDependents"),
+          enabled: allowEditCommands,
+          shortcut:
+            getPrimaryCommandKeybindingDisplay("audit.toggleDependents", commandKeybindingDisplayIndex) ?? primaryShortcut("]"),
+          onSelect: () => executeBuiltinCommand("audit.toggleDependents"),
+        },
+      ];
+    }
 
     if (!extensionHostManager.ready) {
       // Extensions are loaded lazily. Show a non-blocking placeholder while the host spins up
@@ -4700,10 +4889,17 @@ if (
     // Ensure command labels are available.
     syncContributedCommands();
 
-    const contributed = resolveMenuItems(
-      extensionHostManager.getContributedMenu(CELL_CONTEXT_MENU_ID),
-      contextKeys.asLookup(),
-    );
+    // Extensions can contribute context menu items for different grid areas:
+    // - cell/context (default), row/context, column/context, corner/context
+    const menuId =
+      currentGridArea === "rowHeader"
+        ? ROW_CONTEXT_MENU_ID
+        : currentGridArea === "colHeader"
+          ? COLUMN_CONTEXT_MENU_ID
+          : currentGridArea === "corner"
+            ? CORNER_CONTEXT_MENU_ID
+            : CELL_CONTEXT_MENU_ID;
+    const contributed = resolveMenuItems(extensionHostManager.getContributedMenu(menuId), contextKeys.asLookup());
     if (contributed.length > 0) {
       menuItems.push({ type: "separator" });
       const model = buildContextMenuModel(contributed, commandRegistry);
@@ -4765,24 +4961,53 @@ if (
     const anchorX = e.clientX;
     const anchorY = e.clientY;
 
-    const picked = app.pickCellAtClientPoint(anchorX, anchorY);
-    if (picked) {
-      // Excel-like behavior: if the user right-clicks outside the current selection,
-      // move the active cell to the clicked coordinate. If they right-click within
-      // the selection, keep it intact (important for when-clause context keys like
-      // `hasSelection`).
-      const ranges = app.getSelectionRanges();
-      const inSelection = ranges.some((range) => {
-        const startRow = Math.min(range.startRow, range.endRow);
-        const endRow = Math.max(range.startRow, range.endRow);
-        const startCol = Math.min(range.startCol, range.endCol);
-        const endCol = Math.max(range.startCol, range.endCol);
-        return picked.row >= startRow && picked.row <= endRow && picked.col >= startCol && picked.col <= endCol;
-      });
+    const hit = hitTestGridAreaAtClientPoint(anchorX, anchorY);
+    currentGridArea = hit.area;
+
+    const limits = getGridLimitsForFormatting();
+    const ranges = app.getSelectionRanges();
+    const normalizedRanges = ranges.map(normalizeSelectionRange);
+
+    // Excel-like behavior: right-click updates selection differently depending on the area.
+    if (hit.area === "cell" && hit.row != null && hit.col != null) {
+      // Move the active cell only when right-clicking outside the current selection.
+      const inSelection = normalizedRanges.some(
+        (range) =>
+          hit.row! >= range.startRow && hit.row! <= range.endRow && hit.col! >= range.startCol && hit.col! <= range.endCol,
+      );
       if (!inSelection) {
-        app.activateCell({ row: picked.row, col: picked.col });
+        app.activateCell({ row: hit.row, col: hit.col });
+      }
+    } else if (hit.area === "rowHeader" && hit.row != null) {
+      const row = hit.row;
+      const alreadySelected = normalizedRanges.some(
+        (range) => range.startCol === 0 && range.endCol === limits.maxCols - 1 && row >= range.startRow && row <= range.endRow,
+      );
+      if (!alreadySelected) {
+        app.selectRange({ range: { startRow: row, endRow: row, startCol: 0, endCol: limits.maxCols - 1 } });
+      }
+    } else if (hit.area === "colHeader" && hit.col != null) {
+      const col = hit.col;
+      const alreadySelected = normalizedRanges.some(
+        (range) => range.startRow === 0 && range.endRow === limits.maxRows - 1 && col >= range.startCol && col <= range.endCol,
+      );
+      if (!alreadySelected) {
+        app.selectRange({ range: { startRow: 0, endRow: limits.maxRows - 1, startCol: col, endCol: col } });
+      }
+    } else if (hit.area === "corner") {
+      const alreadySelected = normalizedRanges.some(
+        (range) =>
+          range.startRow === 0 &&
+          range.endRow === limits.maxRows - 1 &&
+          range.startCol === 0 &&
+          range.endCol === limits.maxCols - 1,
+      );
+      if (!alreadySelected) {
+        app.selectRange({ range: { startRow: 0, endRow: limits.maxRows - 1, startCol: 0, endCol: limits.maxCols - 1 } });
       }
     }
+
+    updateContextKeys();
 
     openGridContextMenuAtPoint(anchorX, anchorY);
   });
@@ -4816,11 +5041,15 @@ if (
 
     const rect = app.getActiveCellRect();
     if (rect) {
+      currentGridArea = "cell";
+      updateContextKeys();
       openGridContextMenuAtPoint(rect.x, rect.y + rect.height);
       return;
     }
 
     const gridRect = gridRoot.getBoundingClientRect();
+    currentGridArea = "cell";
+    updateContextKeys();
     openGridContextMenuAtPoint(gridRect.left + gridRect.width / 2, gridRect.top + gridRect.height / 2);
   };
 

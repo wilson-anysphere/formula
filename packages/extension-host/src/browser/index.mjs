@@ -794,6 +794,11 @@ class BrowserExtensionHost {
   }
 
   async activateView(viewId) {
+    // `viewActivated` is exposed as `formula.events.onViewActivated`. Like the other workbook/grid
+    // events, it should be delivered to any active extensions immediately (even if the view's
+    // owning extension later needs to request permissions during activation).
+    this._broadcastEvent("viewActivated", { viewId });
+
     const activationEvent = `onView:${viewId}`;
     const targets = [];
     for (const extension of this._extensions.values()) {
@@ -809,20 +814,18 @@ class BrowserExtensionHost {
     // extensions, and avoids a single failing extension activation preventing other
     // extensions from receiving the `viewActivated` signal.
     for (const extension of targets) {
+      // Extensions that were already active received the broadcast above. Extensions that are
+      // activated as a result of this view activation need to be notified after activation.
       if (extension.active) continue;
       try {
         // eslint-disable-next-line no-await-in-loop
         await this._activateExtension(extension, activationEvent);
+        this._sendEventToExtension(extension, "viewActivated", { viewId });
       } catch {
         // Ignore activation failures so the view event can still be delivered to other
         // running extensions.
       }
     }
-
-    // `formula.events.onViewActivated` should behave like other event channels: once the
-    // host knows a view is active, broadcast it to every loaded extension so any active
-    // listeners can react (e.g. analytics, syncing, etc).
-    this._broadcastEvent("viewActivated", { viewId });
   }
 
   async activateCustomFunction(functionName) {

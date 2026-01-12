@@ -5,7 +5,6 @@ import { PanelIds } from "./panelRegistry.js";
 import { AIChatPanelContainer } from "./ai-chat/AIChatPanelContainer.js";
 import { DataQueriesPanelContainer } from "./data-queries/DataQueriesPanelContainer.js";
 import { QueryEditorPanelContainer } from "./query-editor/QueryEditorPanelContainer.js";
-import type { CollabVersioning, VersionRecord } from "@formula/collab-versioning";
 import { createAIAuditPanel } from "./ai-audit/index.js";
 import { mountPythonPanel } from "./python/index.js";
 import { VbaMigratePanel } from "./vba-migrate/index.js";
@@ -48,23 +47,23 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
   // Node-only modules (e.g. `node:events`). Avoid importing it at desktop shell startup so
   // split-view/grid e2e can boot without requiring those polyfills; load it lazily when the
   // panel is actually opened.
-  const [collabVersioning, setCollabVersioning] = useState<CollabVersioning | null>(null);
+  const [collabVersioning, setCollabVersioning] = useState<any | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [versions, setVersions] = useState<VersionRecord[]>([]);
+  const [versions, setVersions] = useState<any[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let disposed = false;
-    let instance: CollabVersioning | null = null;
+    let instance: any | null = null;
 
     void (async () => {
       try {
         setLoadError(null);
         setCollabVersioning(null);
-        const mod = await import("@formula/collab-versioning");
+        const mod = await import("../../../../packages/collab/versioning/src/index.js");
         if (disposed) return;
         const localPresence = session.presence?.localPresence ?? null;
         instance = mod.createCollabVersioning({
