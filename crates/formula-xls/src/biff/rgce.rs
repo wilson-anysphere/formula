@@ -501,6 +501,27 @@ pub(crate) fn decode_biff8_rgce(rgce: &[u8], ctx: &RgceDecodeContext<'_>) -> Dec
 
                 stack.push(ExprFragment::new(text));
             }
+            // PtgNameX (external name reference).
+            //
+            // [MS-XLS] 2.5.198.41
+            // Payload: [ixti: u16][iname: u16][reserved: u16]
+            //
+            // We do not currently parse the supporting `SUPBOOK`/`EXTERNNAME` tables needed to
+            // resolve the external name, so decode best-effort as `#REF!` (but still consume the
+            // payload so we can keep decoding the remainder of the rgce stream).
+            0x39 | 0x59 | 0x79 => {
+                if input.len() < 6 {
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
+                }
+                let ixti = u16::from_le_bytes([input[0], input[1]]);
+                let iname = u16::from_le_bytes([input[2], input[3]]);
+                input = &input[6..];
+                warnings.push(format!(
+                    "PtgNameX external name reference is not supported (ixti={ixti}, iname={iname})"
+                ));
+                stack.push(ExprFragment::new("#REF!".to_string()));
+            }
             // PtgRef (2D)
             0x24 | 0x44 | 0x64 => {
                 if input.len() < 4 {
@@ -1438,6 +1459,28 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Sheet1!A1");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_namex_to_ref_placeholder() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // Dummy payload (6 bytes): ixti=0, iname=1, reserved=0.
+        let rgce = [0x39, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#REF!");
+        assert!(
+            decoded
+                .warnings
+                .iter()
+                .any(|w| w.contains("PtgNameX external name reference is not supported")),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 }
