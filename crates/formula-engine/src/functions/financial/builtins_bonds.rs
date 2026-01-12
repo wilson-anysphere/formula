@@ -86,7 +86,10 @@ fn eval_date_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<i32, 
     }
 }
 
-fn eval_finite_number_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<f64, ErrorKind> {
+fn eval_finite_number_arg(
+    ctx: &dyn FunctionContext,
+    expr: &CompiledExpr,
+) -> Result<f64, ErrorKind> {
     let v = eval_scalar_arg(ctx, expr);
     match v {
         Value::Error(e) => Err(e),

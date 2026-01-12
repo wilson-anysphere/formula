@@ -306,11 +306,17 @@ fn oddf_equation(
         return Err(ExcelError::Num);
     }
 
-    // Excel-style chronology: issue < settlement < first_coupon <= maturity.
+    // Excel-style chronology constraints.
     //
-    // In Excel, boundary equalities such as `issue == settlement` or `settlement == first_coupon`
-    // evaluate to `#NUM!` and are covered by parity tests.
-    if !(issue < settlement && settlement < first_coupon && first_coupon <= maturity) {
+    // - `issue` must be strictly before `first_coupon` (otherwise there's no odd first period).
+    // - `issue <= settlement <= first_coupon <= maturity`.
+    // - `settlement` must be strictly before `maturity`.
+    if !(issue <= settlement
+        && settlement <= first_coupon
+        && issue < first_coupon
+        && first_coupon <= maturity
+        && settlement < maturity)
+    {
         return Err(ExcelError::Num);
     }
 
@@ -333,7 +339,7 @@ fn oddf_equation(
     let dfc = days_between(issue, first_coupon, basis, system)?;
     let dsc = days_between(settlement, first_coupon, basis, system)?;
 
-    if a < 0.0 || dfc <= 0.0 || dsc <= 0.0 {
+    if a < 0.0 || dfc <= 0.0 || dsc < 0.0 {
         return Err(ExcelError::Num);
     }
 
@@ -478,10 +484,12 @@ fn oddl_equation(
         }
         let k = k_found.ok_or(ExcelError::Num)?;
         let k_prev = k.checked_sub(1).ok_or(ExcelError::Num)?;
-        let pcd_offset = i32::try_from(k).map_err(|_| ExcelError::Num)?
+        let pcd_offset = i32::try_from(k)
+            .map_err(|_| ExcelError::Num)?
             .checked_mul(months_per_period)
             .ok_or(ExcelError::Num)?;
-        let ncd_offset = i32::try_from(k_prev).map_err(|_| ExcelError::Num)?
+        let ncd_offset = i32::try_from(k_prev)
+            .map_err(|_| ExcelError::Num)?
             .checked_mul(months_per_period)
             .ok_or(ExcelError::Num)?;
 

@@ -209,32 +209,28 @@ fn odd_coupon_boundary_date_validations_match_engine_behavior() {
     let mut sheet = TestSheet::new();
 
     // ODDF* boundaries
-    // issue == settlement
-    if !assert_num_error_or_skip(
-        &mut sheet,
-        "=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.06,100,2,0)",
-    ) {
-        return;
+    // issue == settlement is allowed (zero accrued interest).
+    match sheet.eval("=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.06,100,2,0)") {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Number(n) => assert!(n.is_finite(), "expected finite number, got {n}"),
+        other => panic!("expected number from ODDFPRICE boundary case, got {other:?}"),
     }
-    if !assert_num_error_or_skip(
-        &mut sheet,
-        "=ODDFYIELD(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,98,100,2,0)",
-    ) {
-        return;
+    match sheet.eval("=ODDFYIELD(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,99,100,2,0)") {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Number(n) => assert!(n.is_finite(), "expected finite number, got {n}"),
+        other => panic!("expected number from ODDFYIELD boundary case, got {other:?}"),
     }
 
-    // settlement == first_coupon
-    if !assert_num_error_or_skip(
-        &mut sheet,
-        "=ODDFPRICE(DATE(2020,7,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,0.06,100,2,0)",
-    ) {
-        return;
+    // settlement == first_coupon is allowed.
+    match sheet.eval("=ODDFPRICE(DATE(2020,7,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,0.06,100,2,0)") {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Number(n) => assert!(n.is_finite(), "expected finite number, got {n}"),
+        other => panic!("expected number from ODDFPRICE boundary case, got {other:?}"),
     }
-    if !assert_num_error_or_skip(
-        &mut sheet,
-        "=ODDFYIELD(DATE(2020,7,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,98,100,2,0)",
-    ) {
-        return;
+    match sheet.eval("=ODDFYIELD(DATE(2020,7,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,99,100,2,0)") {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Number(n) => assert!(n.is_finite(), "expected finite number, got {n}"),
+        other => panic!("expected number from ODDFYIELD boundary case, got {other:?}"),
     }
 
     // first_coupon > maturity
@@ -1368,7 +1364,10 @@ fn odd_last_coupon_supports_settlement_before_last_interest() {
         system,
     )
     .expect("ODDLPRICE should accept settlement before last_interest");
-    assert!(price.is_finite() && price > 0.0, "expected finite positive price, got {price}");
+    assert!(
+        price.is_finite() && price > 0.0,
+        "expected finite positive price, got {price}"
+    );
 
     let recovered_yield = oddlyield(
         settlement,
@@ -1577,8 +1576,7 @@ fn odd_coupon_functions_truncate_frequency_like_excel() {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM! for ODDFPRICE frequency=0.9 (trunc->0), got {other:?}"),
     }
-    let oddf_text_0_9 =
-        r#"=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,"0.9",0)"#;
+    let oddf_text_0_9 = r#"=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,"0.9",0)"#;
     match sheet.eval(oddf_text_0_9) {
         Value::Error(ErrorKind::Name) => return,
         Value::Error(ErrorKind::Num) => {}
@@ -2078,8 +2076,7 @@ fn odd_coupon_yield_functions_truncate_frequency_like_excel() {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM! for ODDFYIELD frequency=0.9 (trunc->0), got {other:?}"),
     }
-    let oddf_text_0_9 =
-        r#"=LET(pr,ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1,0),ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,pr,100,"0.9",0))"#;
+    let oddf_text_0_9 = r#"=LET(pr,ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1,0),ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,pr,100,"0.9",0))"#;
     match sheet.eval(oddf_text_0_9) {
         Value::Error(ErrorKind::Name) => return,
         Value::Error(ErrorKind::Num) => {}
@@ -2130,8 +2127,7 @@ fn odd_coupon_yield_functions_truncate_frequency_like_excel() {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM! for ODDLYIELD frequency=0.9 (trunc->0), got {other:?}"),
     }
-    let oddl_text_0_9 =
-        r#"=LET(pr,ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,1,0),ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,pr,100,"0.9",0))"#;
+    let oddl_text_0_9 = r#"=LET(pr,ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,1,0),ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,pr,100,"0.9",0))"#;
     match sheet.eval(oddl_text_0_9) {
         Value::Error(ErrorKind::Name) => return,
         Value::Error(ErrorKind::Num) => {}
@@ -2170,8 +2166,7 @@ fn odd_coupon_yield_functions_truncate_basis_like_excel() {
     let oddf_basis_neg_0_9_value = eval_number_or_skip(&mut sheet, oddf_basis_neg_0_9)
         .expect("ODDFYIELD should truncate basis toward zero");
     assert_close(oddf_basis_neg_0_9_value, oddf_basis_0_value, 1e-9);
-    let oddf_basis_text_neg_0_9 =
-        r#"=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,2,"-0.9"))"#;
+    let oddf_basis_text_neg_0_9 = r#"=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,2,"-0.9"))"#;
     let oddf_basis_text_neg_0_9_value = eval_number_or_skip(&mut sheet, oddf_basis_text_neg_0_9)
         .expect("ODDFYIELD should truncate basis supplied as numeric text toward zero");
     assert_close(oddf_basis_text_neg_0_9_value, oddf_basis_0_value, 1e-9);
@@ -2206,8 +2201,7 @@ fn odd_coupon_yield_functions_truncate_basis_like_excel() {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM! for ODDFYIELD basis=5.1 (trunc->5), got {other:?}"),
     }
-    let oddf_basis_text_5_1 =
-        r#"=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,2,"5.1"))"#;
+    let oddf_basis_text_5_1 = r#"=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,2,"5.1"))"#;
     match sheet.eval(oddf_basis_text_5_1) {
         Value::Error(ErrorKind::Name) => return,
         Value::Error(ErrorKind::Num) => {}
@@ -2235,8 +2229,7 @@ fn odd_coupon_yield_functions_truncate_basis_like_excel() {
     let oddl_basis_neg_0_9_value = eval_number_or_skip(&mut sheet, oddl_basis_neg_0_9)
         .expect("ODDLYIELD should truncate basis toward zero");
     assert_close(oddl_basis_neg_0_9_value, oddl_basis_0_value, 1e-9);
-    let oddl_basis_text_neg_0_9 =
-        r#"=LET(pr,ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0),ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,pr,100,2,"-0.9"))"#;
+    let oddl_basis_text_neg_0_9 = r#"=LET(pr,ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0),ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,pr,100,2,"-0.9"))"#;
     let oddl_basis_text_neg_0_9_value = eval_number_or_skip(&mut sheet, oddl_basis_text_neg_0_9)
         .expect("ODDLYIELD should truncate basis supplied as numeric text toward zero");
     assert_close(oddl_basis_text_neg_0_9_value, oddl_basis_0_value, 1e-9);
@@ -2268,8 +2261,7 @@ fn odd_coupon_yield_functions_truncate_basis_like_excel() {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM! for ODDLYIELD basis=5.1 (trunc->5), got {other:?}"),
     }
-    let oddl_basis_text_5_1 =
-        r#"=LET(pr,ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0),ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,pr,100,2,"5.1"))"#;
+    let oddl_basis_text_5_1 = r#"=LET(pr,ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0),ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,pr,100,2,"5.1"))"#;
     match sheet.eval(oddl_basis_text_5_1) {
         Value::Error(ErrorKind::Name) => return,
         Value::Error(ErrorKind::Num) => {}
@@ -2450,8 +2442,7 @@ fn odd_coupon_functions_truncate_basis_like_excel() {
     let oddf_basis_neg_0_9_value = eval_number_or_skip(&mut sheet, oddf_basis_neg_0_9)
         .expect("ODDFPRICE should truncate basis toward zero");
     assert_close(oddf_basis_neg_0_9_value, oddf_basis_0_value, 1e-9);
-    let oddf_basis_text_neg_0_9 =
-        r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,"-0.9")"#;
+    let oddf_basis_text_neg_0_9 = r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,"-0.9")"#;
     let oddf_basis_text_neg_0_9_value = eval_number_or_skip(&mut sheet, oddf_basis_text_neg_0_9)
         .expect("ODDFPRICE should truncate basis supplied as numeric text toward zero");
     assert_close(oddf_basis_text_neg_0_9_value, oddf_basis_0_value, 1e-9);
@@ -2491,8 +2482,7 @@ fn odd_coupon_functions_truncate_basis_like_excel() {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM! for ODDFPRICE basis=5.1 (trunc->5), got {other:?}"),
     }
-    let oddf_basis_text_5_1 =
-        r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,"5.1")"#;
+    let oddf_basis_text_5_1 = r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,"5.1")"#;
     match sheet.eval(oddf_basis_text_5_1) {
         Value::Error(ErrorKind::Name) => return,
         Value::Error(ErrorKind::Num) => {}
@@ -2523,8 +2513,7 @@ fn odd_coupon_functions_truncate_basis_like_excel() {
     let oddl_basis_neg_0_9_value = eval_number_or_skip(&mut sheet, oddl_basis_neg_0_9)
         .expect("ODDLPRICE should truncate basis toward zero");
     assert_close(oddl_basis_neg_0_9_value, oddl_basis_0_value, 1e-9);
-    let oddl_basis_text_neg_0_9 =
-        r#"=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,"-0.9")"#;
+    let oddl_basis_text_neg_0_9 = r#"=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,"-0.9")"#;
     let oddl_basis_text_neg_0_9_value = eval_number_or_skip(&mut sheet, oddl_basis_text_neg_0_9)
         .expect("ODDLPRICE should truncate basis supplied as numeric text toward zero");
     assert_close(oddl_basis_text_neg_0_9_value, oddl_basis_0_value, 1e-9);
@@ -3405,8 +3394,10 @@ fn odd_coupon_worksheet_price_rejects_yield_at_or_below_negative_frequency() {
         "expected #NUM! for worksheet ODDFPRICE when yld < -frequency, got {out:?}"
     );
 
-    let oddl_boundary = "=ODDLPRICE(DATE(2020,7,15),DATE(2033,1,15),DATE(2020,1,15),0.05,-2,100,2,0)";
-    let oddl_below = "=ODDLPRICE(DATE(2020,7,15),DATE(2033,1,15),DATE(2020,1,15),0.05,-2.5,100,2,0)";
+    let oddl_boundary =
+        "=ODDLPRICE(DATE(2020,7,15),DATE(2033,1,15),DATE(2020,1,15),0.05,-2,100,2,0)";
+    let oddl_below =
+        "=ODDLPRICE(DATE(2020,7,15),DATE(2033,1,15),DATE(2020,1,15),0.05,-2.5,100,2,0)";
 
     let Some(out) = eval_value_or_skip(&mut sheet, oddl_boundary) else {
         return;
@@ -4125,8 +4116,7 @@ fn oddlprice_matches_excel_model_for_30_360_bases() {
     let eom = is_end_of_month(last_interest, system);
     assert!(eom, "expected last_interest to be EOM for this scenario");
     let prev_coupon = coupon_date_with_eom(last_interest, -months_per_period, eom, system);
-    let days360_eu =
-        date_time::days360(prev_coupon, last_interest, true, system).unwrap() as f64;
+    let days360_eu = date_time::days360(prev_coupon, last_interest, true, system).unwrap() as f64;
     assert_close(days360_eu, 178.0, 0.0);
     let e4 = coupon_period_e(prev_coupon, last_interest, 4, frequency, system);
     assert_close(e4, 178.0, 0.0);
@@ -4245,15 +4235,21 @@ fn odd_coupon_bond_functions_reject_non_finite_numeric_inputs() {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
-    match sheet.eval("=ODDFPRICE(DATE(2020,3,1),A1,DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1,0)") {
+    match sheet
+        .eval("=ODDFPRICE(DATE(2020,3,1),A1,DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1,0)")
+    {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
-    match sheet.eval("=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),A2,DATE(2020,7,1),0.06,0.05,100,1,0)") {
+    match sheet
+        .eval("=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),A2,DATE(2020,7,1),0.06,0.05,100,1,0)")
+    {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
-    match sheet.eval("=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),A1,0.06,0.05,100,1,0)") {
+    match sheet
+        .eval("=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),A1,0.06,0.05,100,1,0)")
+    {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
@@ -4286,11 +4282,13 @@ fn odd_coupon_bond_functions_reject_non_finite_numeric_inputs() {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
-    match sheet.eval("=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,A1,0)") {
+    match sheet.eval("=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,A1,0)")
+    {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
-    match sheet.eval("=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,1,A2)") {
+    match sheet.eval("=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,1,A2)")
+    {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
@@ -4312,37 +4310,49 @@ fn odd_coupon_bond_functions_reject_non_finite_numeric_inputs() {
     }
 
     // Non-finite dates in ODDFYIELD should also return #NUM!.
-    match sheet.eval("=ODDFYIELD(A1,DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,95,100,1,0)") {
+    match sheet.eval("=ODDFYIELD(A1,DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,95,100,1,0)")
+    {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
-    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),A1,DATE(2020,1,1),DATE(2020,7,1),0.06,95,100,1,0)") {
+    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),A1,DATE(2020,1,1),DATE(2020,7,1),0.06,95,100,1,0)")
+    {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
-    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),A2,DATE(2020,7,1),0.06,95,100,1,0)") {
+    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),A2,DATE(2020,7,1),0.06,95,100,1,0)")
+    {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
-    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),A1,0.06,95,100,1,0)") {
+    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),A1,0.06,95,100,1,0)")
+    {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
 
     // Non-finite numeric args in ODDFYIELD should return #NUM!.
-    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),A3,95,100,1,0)") {
+    match sheet.eval(
+        "=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),A3,95,100,1,0)",
+    ) {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
-    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,95,A2,1,0)") {
+    match sheet.eval(
+        "=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,95,A2,1,0)",
+    ) {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
-    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,95,100,A1,0)") {
+    match sheet.eval(
+        "=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,95,100,A1,0)",
+    ) {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
-    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,95,100,1,A2)") {
+    match sheet.eval(
+        "=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,95,100,1,A2)",
+    ) {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
@@ -4408,11 +4418,15 @@ fn odd_coupon_bond_functions_return_value_for_unparseable_date_text() {
     }
 
     // Parseable-but-invalid dates should also return #VALUE! (e.g. Feb 30).
-    match sheet.eval(r#"=ODDFPRICE("2020-02-30",DATE(2025,1,1),DATE(2019,1,1),DATE(2020,7,1),0.05,0.05,100,2)"#) {
+    match sheet.eval(
+        r#"=ODDFPRICE("2020-02-30",DATE(2025,1,1),DATE(2019,1,1),DATE(2020,7,1),0.05,0.05,100,2)"#,
+    ) {
         Value::Error(ErrorKind::Value) => {}
         other => panic!("expected #VALUE!, got {other:?}"),
     }
-    match sheet.eval(r#"=ODDFYIELD("2020-02-30",DATE(2025,1,1),DATE(2019,1,1),DATE(2020,7,1),0.05,95,100,2)"#) {
+    match sheet.eval(
+        r#"=ODDFYIELD("2020-02-30",DATE(2025,1,1),DATE(2019,1,1),DATE(2020,7,1),0.05,95,100,2)"#,
+    ) {
         Value::Error(ErrorKind::Value) => {}
         other => panic!("expected #VALUE!, got {other:?}"),
     }
@@ -4426,7 +4440,9 @@ fn odd_coupon_bond_functions_return_value_for_unparseable_date_text() {
     }
 
     // Other date positions.
-    match sheet.eval(r#"=ODDFPRICE(DATE(2020,3,1),"nope",DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1,0)"#) {
+    match sheet.eval(
+        r#"=ODDFPRICE(DATE(2020,3,1),"nope",DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1,0)"#,
+    ) {
         Value::Error(ErrorKind::Value) => {}
         other => panic!("expected #VALUE!, got {other:?}"),
     }
@@ -4457,15 +4473,21 @@ fn odd_coupon_bond_functions_return_value_for_unparseable_date_text() {
         Value::Error(ErrorKind::Value) => {}
         other => panic!("expected #VALUE!, got {other:?}"),
     }
-    match sheet.eval(r#"=ODDFYIELD(DATE(2020,3,1),"nope",DATE(2019,1,1),DATE(2020,7,1),0.05,95,100,2)"#) {
+    match sheet
+        .eval(r#"=ODDFYIELD(DATE(2020,3,1),"nope",DATE(2019,1,1),DATE(2020,7,1),0.05,95,100,2)"#)
+    {
         Value::Error(ErrorKind::Value) => {}
         other => panic!("expected #VALUE!, got {other:?}"),
     }
-    match sheet.eval(r#"=ODDFYIELD(DATE(2020,3,1),DATE(2025,1,1),"nope",DATE(2020,7,1),0.05,95,100,2)"#) {
+    match sheet
+        .eval(r#"=ODDFYIELD(DATE(2020,3,1),DATE(2025,1,1),"nope",DATE(2020,7,1),0.05,95,100,2)"#)
+    {
         Value::Error(ErrorKind::Value) => {}
         other => panic!("expected #VALUE!, got {other:?}"),
     }
-    match sheet.eval(r#"=ODDFYIELD(DATE(2020,3,1),DATE(2025,1,1),DATE(2019,1,1),"nope",0.05,95,100,2)"#) {
+    match sheet
+        .eval(r#"=ODDFYIELD(DATE(2020,3,1),DATE(2025,1,1),DATE(2019,1,1),"nope",0.05,95,100,2)"#)
+    {
         Value::Error(ErrorKind::Value) => {}
         other => panic!("expected #VALUE!, got {other:?}"),
     }
@@ -4684,8 +4706,7 @@ fn odd_coupon_bond_functions_coerce_time_text_in_frequency_and_basis_like_value(
         "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0)";
     let baseline_oddlprice_value = eval_number_or_skip(&mut sheet, baseline_oddlprice)
         .expect("ODDLPRICE should return a number for the baseline");
-    let time_basis_oddlprice =
-        r#"=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,"1:00")"#;
+    let time_basis_oddlprice = r#"=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,"1:00")"#;
     let time_basis_oddlprice_value = eval_number_or_skip(&mut sheet, time_basis_oddlprice)
         .expect("ODDLPRICE should accept time-like text for basis and truncate it to 0");
     assert_close(time_basis_oddlprice_value, baseline_oddlprice_value, 1e-9);
@@ -4736,8 +4757,7 @@ fn odd_coupon_bond_functions_accept_time_text_that_truncates_to_valid_frequency_
         "=LET(pr,ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1,0),ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,pr,100,1,0))";
     let baseline_oddfyield_value = eval_number_or_skip(&mut sheet, baseline_oddfyield)
         .expect("ODDFYIELD should return a number for the baseline");
-    let time_freq_oddfyield =
-        r#"=LET(pr,ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1,0),ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,pr,100,"24:00",0))"#;
+    let time_freq_oddfyield = r#"=LET(pr,ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1,0),ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,pr,100,"24:00",0))"#;
     let time_freq_oddfyield_value = eval_number_or_skip(&mut sheet, time_freq_oddfyield)
         .expect("ODDFYIELD should accept time-like text for frequency that truncates to 1");
     assert_close(time_freq_oddfyield_value, baseline_oddfyield_value, 1e-9);
@@ -4746,8 +4766,7 @@ fn odd_coupon_bond_functions_accept_time_text_that_truncates_to_valid_frequency_
         "=LET(pr,ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,1,0),ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,pr,100,1,0))";
     let baseline_oddlyield_value = eval_number_or_skip(&mut sheet, baseline_oddlyield)
         .expect("ODDLYIELD should return a number for the baseline");
-    let time_freq_oddlyield =
-        r#"=LET(pr,ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,1,0),ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,pr,100,"24:00",0))"#;
+    let time_freq_oddlyield = r#"=LET(pr,ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,1,0),ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,pr,100,"24:00",0))"#;
     let time_freq_oddlyield_value = eval_number_or_skip(&mut sheet, time_freq_oddlyield)
         .expect("ODDLYIELD should accept time-like text for frequency that truncates to 1");
     assert_close(time_freq_oddlyield_value, baseline_oddlyield_value, 1e-9);
@@ -4760,7 +4779,11 @@ fn odd_coupon_bond_functions_accept_time_text_that_truncates_to_valid_frequency_
     let time_basis_oddfprice = r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,"24:00")"#;
     let time_basis_oddfprice_value = eval_number_or_skip(&mut sheet, time_basis_oddfprice)
         .expect("ODDFPRICE should accept time-like text for basis that truncates to 1");
-    assert_close(time_basis_oddfprice_value, baseline_oddfprice_basis_1_value, 1e-9);
+    assert_close(
+        time_basis_oddfprice_value,
+        baseline_oddfprice_basis_1_value,
+        1e-9,
+    );
 
     let baseline_oddlprice_basis_1 =
         "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,1)";
@@ -4770,23 +4793,37 @@ fn odd_coupon_bond_functions_accept_time_text_that_truncates_to_valid_frequency_
     let time_basis_oddlprice = r#"=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,"24:00")"#;
     let time_basis_oddlprice_value = eval_number_or_skip(&mut sheet, time_basis_oddlprice)
         .expect("ODDLPRICE should accept time-like text for basis that truncates to 1");
-    assert_close(time_basis_oddlprice_value, baseline_oddlprice_basis_1_value, 1e-9);
+    assert_close(
+        time_basis_oddlprice_value,
+        baseline_oddlprice_basis_1_value,
+        1e-9,
+    );
 
     let baseline_oddfyield_basis_1 = "=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,1),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,2,1))";
-    let baseline_oddfyield_basis_1_value = eval_number_or_skip(&mut sheet, baseline_oddfyield_basis_1)
-        .expect("ODDFYIELD baseline basis=1 should evaluate");
+    let baseline_oddfyield_basis_1_value =
+        eval_number_or_skip(&mut sheet, baseline_oddfyield_basis_1)
+            .expect("ODDFYIELD baseline basis=1 should evaluate");
     let time_basis_oddfyield = r#"=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,1),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,2,"24:00"))"#;
     let time_basis_oddfyield_value = eval_number_or_skip(&mut sheet, time_basis_oddfyield)
         .expect("ODDFYIELD should accept time-like text for basis that truncates to 1");
-    assert_close(time_basis_oddfyield_value, baseline_oddfyield_basis_1_value, 1e-9);
+    assert_close(
+        time_basis_oddfyield_value,
+        baseline_oddfyield_basis_1_value,
+        1e-9,
+    );
 
     let baseline_oddlyield_basis_1 = "=LET(pr,ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,1),ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,pr,100,2,1))";
-    let baseline_oddlyield_basis_1_value = eval_number_or_skip(&mut sheet, baseline_oddlyield_basis_1)
-        .expect("ODDLYIELD baseline basis=1 should evaluate");
+    let baseline_oddlyield_basis_1_value =
+        eval_number_or_skip(&mut sheet, baseline_oddlyield_basis_1)
+            .expect("ODDLYIELD baseline basis=1 should evaluate");
     let time_basis_oddlyield = r#"=LET(pr,ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,1),ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,pr,100,2,"24:00"))"#;
     let time_basis_oddlyield_value = eval_number_or_skip(&mut sheet, time_basis_oddlyield)
         .expect("ODDLYIELD should accept time-like text for basis that truncates to 1");
-    assert_close(time_basis_oddlyield_value, baseline_oddlyield_basis_1_value, 1e-9);
+    assert_close(
+        time_basis_oddlyield_value,
+        baseline_oddlyield_basis_1_value,
+        1e-9,
+    );
 }
 
 #[test]
@@ -4840,19 +4877,23 @@ fn odd_coupon_bond_functions_respect_value_locale_for_numeric_text_in_frequency_
     let baseline_basis_1 = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,1)";
     let baseline_basis_1_value = eval_number_or_skip(&mut sheet, baseline_basis_1)
         .expect("ODDFPRICE baseline basis=1 should evaluate");
-    let oddf_text_basis =
-        r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,"1,9")"#;
+    let oddf_text_basis = r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,"1,9")"#;
     let oddf_text_basis_value = eval_number_or_skip(&mut sheet, oddf_text_basis)
         .expect("ODDFPRICE should parse basis=\"1,9\" under de-DE locale and truncate");
     assert_close(oddf_text_basis_value, baseline_basis_1_value, 1e-9);
 
     let baseline_oddfyield_basis_1 = "=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,1),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,2,1))";
-    let baseline_oddfyield_basis_1_value = eval_number_or_skip(&mut sheet, baseline_oddfyield_basis_1)
-        .expect("ODDFYIELD baseline basis=1 should evaluate");
+    let baseline_oddfyield_basis_1_value =
+        eval_number_or_skip(&mut sheet, baseline_oddfyield_basis_1)
+            .expect("ODDFYIELD baseline basis=1 should evaluate");
     let oddf_text_basis = r#"=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,1),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,2,"1,9"))"#;
     let oddf_text_basis_value = eval_number_or_skip(&mut sheet, oddf_text_basis)
         .expect("ODDFYIELD should parse basis=\"1,9\" under de-DE locale and truncate");
-    assert_close(oddf_text_basis_value, baseline_oddfyield_basis_1_value, 1e-9);
+    assert_close(
+        oddf_text_basis_value,
+        baseline_oddfyield_basis_1_value,
+        1e-9,
+    );
 }
 
 #[test]
