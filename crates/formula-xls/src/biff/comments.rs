@@ -614,6 +614,7 @@ fn parse_txo_text_biff8(
 
     let mut out = String::new();
     let mut ansi_bytes: Vec<u8> = Vec::new();
+    let mut pending_unicode_byte: Option<u8> = None;
     let mut remaining = cch_text;
     let mut remaining_bytes = text_continue_bytes;
     for frag in continues {
@@ -628,28 +629,60 @@ fn parse_txo_text_biff8(
             continue;
         };
         let is_unicode = (flags & 0x01) != 0;
-        let bytes_per_char = if is_unicode { 2 } else { 1 };
-        let available_chars = bytes.len() / bytes_per_char;
-        if available_chars == 0 {
-            continue;
-        }
-
-        let take_chars = remaining.min(available_chars);
-        let take_bytes = take_chars * bytes_per_char;
-        let slice = &bytes[..take_bytes];
         if is_unicode {
             // Flush any buffered ANSI bytes so multi-byte sequences can span CONTINUE fragments.
             if !ansi_bytes.is_empty() {
                 out.push_str(&strings::decode_ansi(codepage, &ansi_bytes));
                 ansi_bytes.clear();
             }
-            out.push_str(&decode_utf16le(slice));
+
+            // Best-effort: some files split UTF-16LE code units across CONTINUE fragments. Buffer
+            // a single leftover byte so we can recover the character when the next fragment arrives.
+            let combined_len = bytes.len() + usize::from(pending_unicode_byte.is_some());
+            let available_chars = combined_len / 2;
+            if available_chars == 0 {
+                if pending_unicode_byte.is_none() {
+                    if let Some(&b) = bytes.first() {
+                        pending_unicode_byte = Some(b);
+                    }
+                }
+                continue;
+            }
+
+            let take_chars = remaining.min(available_chars);
+            let take_bytes_total = take_chars * 2;
+            let mut buf = Vec::with_capacity(take_bytes_total);
+            if let Some(b) = pending_unicode_byte.take() {
+                buf.push(b);
+            }
+            let need_from_current = take_bytes_total.saturating_sub(buf.len());
+            let take_from_current = need_from_current.min(bytes.len());
+            buf.extend_from_slice(&bytes[..take_from_current]);
+            let used_current = take_from_current;
+            out.push_str(&decode_utf16le(&buf));
+
+            remaining -= take_chars;
+
+            // Preserve any trailing odd byte for the next UTF-16LE fragment (only relevant when
+            // we haven't satisfied `cchText` yet).
+            if remaining > 0 && bytes.len() > used_current {
+                pending_unicode_byte = bytes.get(used_current).copied();
+            } else {
+                pending_unicode_byte = None;
+            }
         } else {
+            pending_unicode_byte = None;
             // Accumulate and decode once to preserve stateful multibyte encodings (e.g. Shift-JIS)
             // when a character boundary is split across CONTINUE records.
+            let available_chars = bytes.len();
+            if available_chars == 0 {
+                continue;
+            }
+            let take_chars = remaining.min(available_chars);
+            let slice = &bytes[..take_chars];
             ansi_bytes.extend_from_slice(slice);
+            remaining -= take_chars;
         }
-        remaining -= take_chars;
     }
 
     if remaining > 0 {
@@ -839,6 +872,7 @@ fn fallback_decode_continue_fragments(
 
     let mut out = String::new();
     let mut ansi_bytes: Vec<u8> = Vec::new();
+    let mut pending_unicode_byte: Option<u8> = None;
     let mut remaining_chars = TXO_MAX_TEXT_CHARS;
     for frag in continues {
         if remaining_chars == 0 {
@@ -863,25 +897,53 @@ fn fallback_decode_continue_fragments(
         }
 
         let is_unicode = (flags & 0x01) != 0;
-        let bytes_per_char = if is_unicode { 2 } else { 1 };
-        let available_chars = bytes.len() / bytes_per_char;
-        if available_chars == 0 {
-            continue;
-        }
-
-        let take_chars = remaining_chars.min(available_chars);
-        let take_bytes = take_chars * bytes_per_char;
-        let slice = &bytes[..take_bytes];
         if is_unicode {
             if !ansi_bytes.is_empty() {
                 out.push_str(&strings::decode_ansi(codepage, &ansi_bytes));
                 ansi_bytes.clear();
             }
-            out.push_str(&decode_utf16le(slice));
+
+            let combined_len = bytes.len() + usize::from(pending_unicode_byte.is_some());
+            let available_chars = combined_len / 2;
+            if available_chars == 0 {
+                if pending_unicode_byte.is_none() {
+                    if let Some(&b) = bytes.first() {
+                        pending_unicode_byte = Some(b);
+                    }
+                }
+                continue;
+            }
+
+            let take_chars = remaining_chars.min(available_chars);
+            let take_bytes_total = take_chars * 2;
+            let mut buf = Vec::with_capacity(take_bytes_total);
+            if let Some(b) = pending_unicode_byte.take() {
+                buf.push(b);
+            }
+            let need_from_current = take_bytes_total.saturating_sub(buf.len());
+            let take_from_current = need_from_current.min(bytes.len());
+            buf.extend_from_slice(&bytes[..take_from_current]);
+            let used_current = take_from_current;
+            out.push_str(&decode_utf16le(&buf));
+            remaining_chars -= take_chars;
+
+            if remaining_chars > 0 && bytes.len() > used_current {
+                pending_unicode_byte = bytes.get(used_current).copied();
+            } else {
+                pending_unicode_byte = None;
+            }
         } else {
+            pending_unicode_byte = None;
+            let available_chars = bytes.len();
+            if available_chars == 0 {
+                continue;
+            }
+
+            let take_chars = remaining_chars.min(available_chars);
+            let slice = &bytes[..take_chars];
             ansi_bytes.extend_from_slice(slice);
+            remaining_chars -= take_chars;
         }
-        remaining_chars -= take_chars;
     }
     if !ansi_bytes.is_empty() {
         out.push_str(&strings::decode_ansi(codepage, &ansi_bytes));
@@ -1529,6 +1591,30 @@ mod tests {
         assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "Hi");
+    }
+
+    #[test]
+    fn parses_unicode_text_split_mid_code_unit_across_continue_records() {
+        // Some malformed `.xls` files split UTF-16LE code units across CONTINUE boundaries (odd byte
+        // counts per fragment). Best-effort decoding should still recover the intended character.
+        //
+        // '€' (U+20AC) is 0xAC 0x20 in UTF-16LE. Split as 0xAC + 0x20 across two CONTINUE records.
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text(1),
+            record(records::RECORD_CONTINUE, &[0x01, 0xAC]),
+            record(records::RECORD_CONTINUE, &[0x01, 0x20]),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "€");
     }
 
     #[test]

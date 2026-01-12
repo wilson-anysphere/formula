@@ -641,6 +641,27 @@ pub fn build_note_comment_split_across_continues_codepage_65001_fixture_xls() ->
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a single sheet with a NOTE/OBJ/TXO comment where the
+/// UTF-16LE TXO text payload is split mid-code-unit across `CONTINUE` records.
+///
+/// This is technically malformed BIFF (Unicode fragments should contain an even number of bytes),
+/// but some files in the wild appear to split UTF-16LE code units across record boundaries. The
+/// importer should still recover the intended character.
+pub fn build_note_comment_split_utf16_code_unit_across_continues_fixture_xls() -> Vec<u8> {
+    let workbook_stream =
+        build_note_comment_split_utf16_code_unit_across_continues_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a NOTE/OBJ pair but **missing** the associated TXO text
 /// payload.
 ///
@@ -1298,6 +1319,14 @@ fn build_note_comment_split_across_continues_codepage_65001_workbook_stream() ->
     )
 }
 
+fn build_note_comment_split_utf16_code_unit_across_continues_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream(
+        "NotesSplitUtf16Odd",
+        &build_note_comment_split_utf16_code_unit_across_continues_sheet_stream(),
+        1252,
+    )
+}
+
 fn build_note_comment_missing_txo_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream(
         "NotesMissingTxo",
@@ -1513,6 +1542,61 @@ fn build_note_comment_split_across_continues_codepage_65001_sheet_stream() -> Ve
     let segments: [&[u8]; 3] = [&part1, &part2, &part3];
 
     build_note_comment_sheet_stream_with_compressed_txo(false, OBJECT_ID, AUTHOR, &segments)
+}
+
+fn build_note_comment_split_utf16_code_unit_across_continues_sheet_stream() -> Vec<u8> {
+    const OBJECT_ID: u16 = 1;
+    const AUTHOR: &str = "Alice";
+    const XF_GENERAL_CELL: u16 = 16;
+    const CCH_TEXT: u16 = 1; // one Unicode character
+
+    // '€' (U+20AC) is 0xAC 0x20 in UTF-16LE. Split across two CONTINUE records as 0xAC + 0x20.
+    let part1 = [0xACu8];
+    let part2 = [0x20u8];
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes());
+    dims.extend_from_slice(&1u32.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&1u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Ensure the anchor cell exists in the calamine value grid.
+    push_record(&mut sheet, RECORD_BLANK, &blank_cell(0, 0, XF_GENERAL_CELL));
+
+    push_record(
+        &mut sheet,
+        RECORD_NOTE,
+        &note_record(0u16, 0u16, OBJECT_ID, AUTHOR),
+    );
+    push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
+
+    // TXO header: cchText at offset 6, cbRuns=0 (no formatting runs).
+    let mut txo = [0u8; 18];
+    txo[6..8].copy_from_slice(&CCH_TEXT.to_le_bytes());
+    push_record(&mut sheet, RECORD_TXO, &txo);
+
+    // CONTINUE #1: flags=1 (UTF-16LE), then first byte of the code unit.
+    let mut cont1 = Vec::<u8>::new();
+    cont1.push(0x01);
+    cont1.extend_from_slice(&part1);
+    push_record(&mut sheet, RECORD_CONTINUE, &cont1);
+
+    // CONTINUE #2: flags=1 (UTF-16LE), then second byte of the code unit.
+    let mut cont2 = Vec::<u8>::new();
+    cont2.push(0x01);
+    cont2.extend_from_slice(&part2);
+    push_record(&mut sheet, RECORD_CONTINUE, &cont2);
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
 }
 
 fn build_note_comment_missing_txo_sheet_stream() -> Vec<u8> {
