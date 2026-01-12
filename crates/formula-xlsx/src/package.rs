@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Cursor, Read, Write};
 
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::events::{BytesEnd, BytesStart, Event};
 use quick_xml::{Reader as XmlReader, Writer as XmlWriter};
 use thiserror::Error;
 
@@ -561,60 +561,231 @@ fn ensure_xlsm_content_types(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<()
         return Ok(());
     };
 
-    let mut xml = String::from_utf8(existing)?;
-
-    ensure_content_type_override(
-        &mut xml,
-        parts.contains_key("xl/vbaProject.bin"),
-        "/xl/vbaProject.bin",
-        "application/vnd.ms-office.vbaProject",
-    );
-    ensure_content_type_override(
-        &mut xml,
-        parts.contains_key("xl/vbaProjectSignature.bin"),
-        "/xl/vbaProjectSignature.bin",
-        "application/vnd.ms-office.vbaProjectSignature",
-    );
-    ensure_content_type_override(
-        &mut xml,
-        parts.contains_key("xl/vbaData.xml"),
-        "/xl/vbaData.xml",
-        "application/vnd.ms-office.vbaData+xml",
-    );
-
-    // Ensure workbook content type reflects macro-enabled if we can find it.
-    if xml.contains(r#"PartName="/xl/workbook.xml""#)
-        && !xml.contains("application/vnd.ms-excel.sheet.macroEnabled.main+xml")
-    {
-        xml = xml.replace(
-            r#"ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml""#,
-            r#"ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml""#,
-        );
+    // Only repair to XLSM if the package actually contains the VBA project payload.
+    if !parts.contains_key("xl/vbaProject.bin") {
+        return Ok(());
     }
 
-    parts.insert(ct_name.to_string(), xml.into_bytes());
+    const WORKBOOK_PART_NAME: &str = "/xl/workbook.xml";
+    const WORKBOOK_MACRO_CONTENT_TYPE: &str =
+        "application/vnd.ms-excel.sheet.macroEnabled.main+xml";
+    const VBA_PART_NAME: &str = "/xl/vbaProject.bin";
+    const VBA_CONTENT_TYPE: &str = "application/vnd.ms-office.vbaProject";
+    const VBA_SIGNATURE_PART_NAME: &str = "/xl/vbaProjectSignature.bin";
+    const VBA_SIGNATURE_CONTENT_TYPE: &str = "application/vnd.ms-office.vbaProjectSignature";
+    const VBA_DATA_PART_NAME: &str = "/xl/vbaData.xml";
+    const VBA_DATA_CONTENT_TYPE: &str = "application/vnd.ms-office.vbaData+xml";
+
+    let needs_signature = parts.contains_key("xl/vbaProjectSignature.bin");
+    let needs_vba_data = parts.contains_key("xl/vbaData.xml");
+
+    let mut reader = XmlReader::from_reader(existing.as_slice());
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(existing.len() + 256));
+    let mut buf = Vec::new();
+
+    let mut has_workbook_override = false;
+    let mut has_vba_override = false;
+    let mut has_vba_signature_override = false;
+    let mut has_vba_data_override = false;
+    let mut changed = false;
+
+    fn part_name_matches(candidate: &str, expected: &str) -> bool {
+        let candidate = candidate.trim().strip_prefix('/').unwrap_or(candidate.trim());
+        let expected = expected.trim().strip_prefix('/').unwrap_or(expected.trim());
+        candidate == expected
+    }
+
+    fn handle_override(
+        e: BytesStart<'_>,
+        is_start: bool,
+        needs_signature: bool,
+        needs_vba_data: bool,
+        writer: &mut XmlWriter<Vec<u8>>,
+        changed: &mut bool,
+        has_workbook_override: &mut bool,
+        has_vba_override: &mut bool,
+        has_vba_signature_override: &mut bool,
+        has_vba_data_override: &mut bool,
+    ) -> Result<(), XlsxError> {
+        let mut part_name = None;
+        let mut content_type = None;
+        for attr in e.attributes().with_checks(false) {
+            let attr = attr?;
+            match local_name(attr.key.as_ref()) {
+                b"PartName" => part_name = Some(attr.unescape_value()?.into_owned()),
+                b"ContentType" => content_type = Some(attr.unescape_value()?.into_owned()),
+                _ => {}
+            }
+        }
+
+        let desired_content_type = match part_name.as_deref() {
+            Some(part) if part_name_matches(part, WORKBOOK_PART_NAME) => {
+                *has_workbook_override = true;
+                Some(WORKBOOK_MACRO_CONTENT_TYPE)
+            }
+            Some(part) if part_name_matches(part, VBA_PART_NAME) => {
+                *has_vba_override = true;
+                Some(VBA_CONTENT_TYPE)
+            }
+            Some(part) if needs_signature && part_name_matches(part, VBA_SIGNATURE_PART_NAME) => {
+                *has_vba_signature_override = true;
+                Some(VBA_SIGNATURE_CONTENT_TYPE)
+            }
+            Some(part) if needs_vba_data && part_name_matches(part, VBA_DATA_PART_NAME) => {
+                *has_vba_data_override = true;
+                Some(VBA_DATA_CONTENT_TYPE)
+            }
+            _ => None,
+        };
+
+        if let Some(desired_content_type) = desired_content_type {
+            if content_type.as_deref() != Some(desired_content_type) {
+                *changed = true;
+
+                let mut patched = BytesStart::new("Override");
+                let mut saw_content_type = false;
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr?;
+                    if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"ContentType") {
+                        saw_content_type = true;
+                        patched.push_attribute((attr.key.as_ref(), desired_content_type.as_bytes()));
+                    } else {
+                        patched.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+                    }
+                }
+                if !saw_content_type {
+                    patched.push_attribute(("ContentType", desired_content_type));
+                }
+
+                if is_start {
+                    writer.write_event(Event::Start(patched.into_owned()))?;
+                } else {
+                    writer.write_event(Event::Empty(patched.into_owned()))?;
+                }
+            } else if is_start {
+                writer.write_event(Event::Start(e))?;
+            } else {
+                writer.write_event(Event::Empty(e))?;
+            }
+        } else if is_start {
+            writer.write_event(Event::Start(e))?;
+        } else {
+            writer.write_event(Event::Empty(e))?;
+        }
+
+        Ok(())
+    }
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Start(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Override") => {
+                handle_override(
+                    e,
+                    true,
+                    needs_signature,
+                    needs_vba_data,
+                    &mut writer,
+                    &mut changed,
+                    &mut has_workbook_override,
+                    &mut has_vba_override,
+                    &mut has_vba_signature_override,
+                    &mut has_vba_data_override,
+                )?;
+            }
+            Event::Empty(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Override") => {
+                handle_override(
+                    e,
+                    false,
+                    needs_signature,
+                    needs_vba_data,
+                    &mut writer,
+                    &mut changed,
+                    &mut has_workbook_override,
+                    &mut has_vba_override,
+                    &mut has_vba_signature_override,
+                    &mut has_vba_data_override,
+                )?;
+            }
+            Event::End(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Types") => {
+                if !has_workbook_override {
+                    changed = true;
+                    let mut override_el = BytesStart::new("Override");
+                    override_el.push_attribute(("PartName", WORKBOOK_PART_NAME));
+                    override_el.push_attribute(("ContentType", WORKBOOK_MACRO_CONTENT_TYPE));
+                    writer.write_event(Event::Empty(override_el))?;
+                }
+
+                if !has_vba_override {
+                    changed = true;
+                    let mut override_el = BytesStart::new("Override");
+                    override_el.push_attribute(("PartName", VBA_PART_NAME));
+                    override_el.push_attribute(("ContentType", VBA_CONTENT_TYPE));
+                    writer.write_event(Event::Empty(override_el))?;
+                }
+
+                if needs_signature && !has_vba_signature_override {
+                    changed = true;
+                    let mut override_el = BytesStart::new("Override");
+                    override_el.push_attribute(("PartName", VBA_SIGNATURE_PART_NAME));
+                    override_el.push_attribute(("ContentType", VBA_SIGNATURE_CONTENT_TYPE));
+                    writer.write_event(Event::Empty(override_el))?;
+                }
+
+                if needs_vba_data && !has_vba_data_override {
+                    changed = true;
+                    let mut override_el = BytesStart::new("Override");
+                    override_el.push_attribute(("PartName", VBA_DATA_PART_NAME));
+                    override_el.push_attribute(("ContentType", VBA_DATA_CONTENT_TYPE));
+                    writer.write_event(Event::Empty(override_el))?;
+                }
+
+                writer.write_event(Event::End(e))?;
+            }
+            Event::Empty(e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Types") => {
+                // Degenerate case: a self-closing `<Types/>` root. Expand it so we can inject
+                // the required overrides.
+                changed = true;
+                writer.write_event(Event::Start(e))?;
+
+                let mut workbook_override = BytesStart::new("Override");
+                workbook_override.push_attribute(("PartName", WORKBOOK_PART_NAME));
+                workbook_override.push_attribute(("ContentType", WORKBOOK_MACRO_CONTENT_TYPE));
+                writer.write_event(Event::Empty(workbook_override))?;
+
+                let mut vba_override = BytesStart::new("Override");
+                vba_override.push_attribute(("PartName", VBA_PART_NAME));
+                vba_override.push_attribute(("ContentType", VBA_CONTENT_TYPE));
+                writer.write_event(Event::Empty(vba_override))?;
+
+                if needs_signature {
+                    let mut sig_override = BytesStart::new("Override");
+                    sig_override.push_attribute(("PartName", VBA_SIGNATURE_PART_NAME));
+                    sig_override.push_attribute(("ContentType", VBA_SIGNATURE_CONTENT_TYPE));
+                    writer.write_event(Event::Empty(sig_override))?;
+                }
+
+                if needs_vba_data {
+                    let mut data_override = BytesStart::new("Override");
+                    data_override.push_attribute(("PartName", VBA_DATA_PART_NAME));
+                    data_override.push_attribute(("ContentType", VBA_DATA_CONTENT_TYPE));
+                    writer.write_event(Event::Empty(data_override))?;
+                }
+
+                writer.write_event(Event::End(BytesEnd::new("Types")))?;
+            }
+            Event::Eof => break,
+            other => writer.write_event(other)?,
+        }
+
+        buf.clear();
+    }
+
+    if changed {
+        parts.insert(ct_name.to_string(), writer.into_inner());
+    }
     Ok(())
-}
-
-fn ensure_content_type_override(
-    xml: &mut String,
-    part_exists: bool,
-    part_name: &str,
-    content_type: &str,
-) {
-    if !part_exists {
-        return;
-    }
-
-    // Avoid creating duplicate override entries.
-    if xml.contains(&format!(r#"PartName="{part_name}""#)) {
-        return;
-    }
-
-    if let Some(idx) = xml.rfind("</Types>") {
-        let insert = format!(r#"<Override PartName="{part_name}" ContentType="{content_type}"/>"#);
-        xml.insert_str(idx, &insert);
-    }
 }
 
 fn ensure_workbook_rels_has_vba(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<(), XlsxError> {
@@ -623,21 +794,138 @@ fn ensure_workbook_rels_has_vba(parts: &mut BTreeMap<String, Vec<u8>>) -> Result
         return Ok(());
     };
 
-    let mut xml = String::from_utf8(existing)?;
-    let rel_type = "http://schemas.microsoft.com/office/2006/relationships/vbaProject";
-    if xml.contains(rel_type) {
-        parts.insert(rels_name.to_string(), xml.into_bytes());
-        return Ok(());
-    }
+    const VBA_REL_TYPE: &str = "http://schemas.microsoft.com/office/2006/relationships/vbaProject";
+    const VBA_TARGET: &str = "vbaProject.bin";
 
+    let xml = String::from_utf8(existing.clone())?;
     let next_rid = next_relationship_id(&xml);
-    let rel =
-        format!(r#"<Relationship Id="rId{next_rid}" Type="{rel_type}" Target="vbaProject.bin"/>"#);
 
-    if let Some(idx) = xml.rfind("</Relationships>") {
-        xml.insert_str(idx, &rel);
+    let mut reader = XmlReader::from_reader(existing.as_slice());
+    reader.config_mut().trim_text(false);
+    let mut writer = XmlWriter::new(Vec::with_capacity(existing.len() + 128));
+    let mut buf = Vec::new();
+
+    let mut has_vba_rel = false;
+    let mut changed = false;
+
+    fn handle_relationship(
+        e: BytesStart<'_>,
+        is_start: bool,
+        writer: &mut XmlWriter<Vec<u8>>,
+        changed: &mut bool,
+        has_vba_rel: &mut bool,
+    ) -> Result<(), XlsxError> {
+        let mut type_uri = None;
+        let mut target = None;
+        for attr in e.attributes().with_checks(false) {
+            let attr = attr?;
+            match local_name(attr.key.as_ref()) {
+                b"Type" => type_uri = Some(attr.unescape_value()?.into_owned()),
+                b"Target" => target = Some(attr.unescape_value()?.into_owned()),
+                _ => {}
+            }
+        }
+
+        let is_vba = type_uri
+            .as_deref()
+            .is_some_and(|t| t.trim() == VBA_REL_TYPE);
+        if is_vba {
+            if target.as_deref().is_some_and(|t| t.trim() == VBA_TARGET) {
+                *has_vba_rel = true;
+                if is_start {
+                    writer.write_event(Event::Start(e))?;
+                } else {
+                    writer.write_event(Event::Empty(e))?;
+                }
+            } else {
+                // Relationship exists, but is missing/has an unexpected Target; patch it.
+                *has_vba_rel = true;
+                *changed = true;
+
+                let mut patched = BytesStart::new("Relationship");
+                let mut saw_target = false;
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr?;
+                    if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"Target") {
+                        saw_target = true;
+                        patched.push_attribute((attr.key.as_ref(), VBA_TARGET.as_bytes()));
+                    } else {
+                        patched.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+                    }
+                }
+                if !saw_target {
+                    patched.push_attribute(("Target", VBA_TARGET));
+                }
+
+                if is_start {
+                    writer.write_event(Event::Start(patched.into_owned()))?;
+                } else {
+                    writer.write_event(Event::Empty(patched.into_owned()))?;
+                }
+            }
+        } else if is_start {
+            writer.write_event(Event::Start(e))?;
+        } else {
+            writer.write_event(Event::Empty(e))?;
+        }
+
+        Ok(())
     }
-    parts.insert(rels_name.to_string(), xml.into_bytes());
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Start(e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+            {
+                handle_relationship(e, true, &mut writer, &mut changed, &mut has_vba_rel)?;
+            }
+            Event::Empty(e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+            {
+                handle_relationship(e, false, &mut writer, &mut changed, &mut has_vba_rel)?;
+            }
+            Event::End(e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") =>
+            {
+                if !has_vba_rel {
+                    changed = true;
+                    let rel_id = format!("rId{next_rid}");
+                    let mut rel = BytesStart::new("Relationship");
+                    rel.push_attribute(("Id", rel_id.as_str()));
+                    rel.push_attribute(("Type", VBA_REL_TYPE));
+                    rel.push_attribute(("Target", VBA_TARGET));
+                    writer.write_event(Event::Empty(rel))?;
+                }
+                writer.write_event(Event::End(e))?;
+            }
+            Event::Empty(e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") =>
+            {
+                // Degenerate case: self-closing `<Relationships/>` root; expand to insert the vba
+                // relationship.
+                changed = true;
+                writer.write_event(Event::Start(e))?;
+
+                let rel_id = format!("rId{next_rid}");
+                let mut rel = BytesStart::new("Relationship");
+                rel.push_attribute(("Id", rel_id.as_str()));
+                rel.push_attribute(("Type", VBA_REL_TYPE));
+                rel.push_attribute(("Target", VBA_TARGET));
+                writer.write_event(Event::Empty(rel))?;
+
+                writer.write_event(Event::End(BytesEnd::new("Relationships")))?;
+            }
+            Event::Eof => break,
+            other => writer.write_event(other)?,
+        }
+
+        buf.clear();
+    }
+
+    if changed {
+        parts.insert(rels_name.to_string(), writer.into_inner());
+    }
     Ok(())
 }
 
@@ -710,6 +998,7 @@ fn next_relationship_id(xml: &str) -> u32 {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+    use roxmltree::Document;
 
     fn build_package(files: &[(&str, &[u8])]) -> Vec<u8> {
         let cursor = Cursor::new(Vec::new());
@@ -790,6 +1079,85 @@ mod tests {
 
         let rels = std::str::from_utf8(pkg2.part("xl/_rels/workbook.xml.rels").unwrap()).unwrap();
         assert!(rels.contains("http://schemas.microsoft.com/office/2006/relationships/vbaProject"));
+    }
+
+    fn build_macro_package_needing_repair() -> Vec<u8> {
+        let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
+            PartName="/xl/workbook.xml"/>
+</Types >"#;
+
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"></worksheet>"#;
+
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Target="worksheets/sheet1.xml" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Id="rId1"/>
+</Relationships >"#;
+
+        build_package(&[
+            ("[Content_Types].xml", content_types.as_bytes()),
+            ("xl/workbook.xml", workbook_xml.as_bytes()),
+            ("xl/_rels/workbook.xml.rels", workbook_rels.as_bytes()),
+            ("xl/worksheets/sheet1.xml", worksheet_xml.as_bytes()),
+            ("xl/vbaProject.bin", b"fake-vba-project"),
+        ])
+    }
+
+    #[test]
+    fn repairs_xlsm_content_types_and_workbook_rels_with_unusual_formatting() {
+        let bytes = build_macro_package_needing_repair();
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+        let written = pkg.write_to_bytes().expect("write repaired pkg");
+        let pkg2 = XlsxPackage::from_bytes(&written).expect("read pkg2");
+
+        let ct = std::str::from_utf8(pkg2.part("[Content_Types].xml").unwrap()).unwrap();
+        let doc = Document::parse(ct).expect("parse content types");
+
+        let workbook_ct = doc
+            .descendants()
+            .find(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "Override"
+                    && n.attribute("PartName") == Some("/xl/workbook.xml")
+            })
+            .and_then(|n| n.attribute("ContentType"));
+        assert_eq!(
+            workbook_ct,
+            Some("application/vnd.ms-excel.sheet.macroEnabled.main+xml")
+        );
+
+        let vba_ct = doc
+            .descendants()
+            .find(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "Override"
+                    && n.attribute("PartName") == Some("/xl/vbaProject.bin")
+            })
+            .and_then(|n| n.attribute("ContentType"));
+        assert_eq!(vba_ct, Some("application/vnd.ms-office.vbaProject"));
+
+        let rels_bytes = pkg2.part("xl/_rels/workbook.xml.rels").unwrap();
+        let rels = crate::openxml::parse_relationships(rels_bytes).expect("parse rels");
+        assert!(
+            rels.iter().any(|rel| {
+                rel.type_uri == "http://schemas.microsoft.com/office/2006/relationships/vbaProject"
+                    && rel.target == "vbaProject.bin"
+            }),
+            "expected workbook.xml.rels to contain a vbaProject relationship"
+        );
     }
 
     #[test]
