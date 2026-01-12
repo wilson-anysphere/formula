@@ -1768,7 +1768,7 @@ fn plan_shared_strings<R: Read + Seek>(
             .copied()
             .flatten();
 
-                let reuse_idx = if existing_t == Some("s") {
+        let reuse_idx = if existing_t == Some("s") {
             existing_idx.and_then(|idx| {
                 let matches = match &patch.value {
                     CellValue::String(s) => shared_strings
