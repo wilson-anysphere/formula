@@ -22,6 +22,7 @@ mod financial_french_depreciation;
 mod financial_discount_securities;
 mod financial_misc;
 mod financial_odd_coupon;
+mod financial_oddcoupons;
 mod financial_pduration;
 mod financial_time_value;
 #[cfg(not(target_arch = "wasm32"))]

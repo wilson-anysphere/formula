@@ -32324,6 +32324,149 @@
       "id": "lambda_makearray_ce970103b29c"
     },
     {
+      "formula": "=ODDLPRICE(DATE(2023,2,15),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLPRICE",
+        "odd_coupon"
+      ],
+      "id": "fin_oddlprice_in_period_b0_6f4f85c5e0a7"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2023,1,31),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLPRICE",
+        "odd_coupon"
+      ],
+      "id": "fin_oddlprice_settle_eq_last_b0_4d1a6e0a2d2a"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2022,11,1),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLPRICE",
+        "odd_coupon"
+      ],
+      "id": "fin_oddlprice_settle_before_last_b0_1c3c4e93d8f2"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2023,2,15),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,1)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLPRICE",
+        "odd_coupon"
+      ],
+      "id": "fin_oddlprice_in_period_b1_6948f06e1c6b"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2023,2,15),DATE(2023,5,15),DATE(2023,1,31),0.05,ODDLPRICE(DATE(2023,2,15),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,0),100,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLYIELD",
+        "odd_coupon"
+      ],
+      "id": "fin_oddlyield_roundtrip_b0_3517a63547f2"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2022,11,1),DATE(2023,5,15),DATE(2023,1,31),0.05,99,100,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLYIELD",
+        "odd_coupon"
+      ],
+      "id": "fin_oddlyield_settle_before_last_b0_4ef7acb86b86"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2023,2,15),DATE(2023,5,15),DATE(2023,1,31),0.05,ODDLPRICE(DATE(2023,2,15),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,1),100,2,1)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLYIELD",
+        "odd_coupon"
+      ],
+      "id": "fin_oddlyield_roundtrip_b1_0336d3a84bb5"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE",
+        "odd_coupon"
+      ],
+      "id": "fin_oddfprice_in_period_b0_9fe0c2e3c0ed"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2023,1,31),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE",
+        "odd_coupon"
+      ],
+      "id": "fin_oddfprice_settle_eq_first_b0_4d9f4b7e1d1a"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2023,2,1),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE",
+        "odd_coupon"
+      ],
+      "id": "fin_oddfprice_settle_after_first_b0_0e5d51d6b24d"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,1)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE",
+        "odd_coupon"
+      ],
+      "id": "fin_oddfprice_in_period_b1_7b00d37ce88f"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,ODDFPRICE(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0),100,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFYIELD",
+        "odd_coupon"
+      ],
+      "id": "fin_oddfyield_roundtrip_b0_5b76f8166e82"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,ODDFPRICE(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,1),100,2,1)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFYIELD",
+        "odd_coupon"
+      ],
+      "id": "fin_oddfyield_roundtrip_b1_aa9bf2df61d5"
+    },
+    {
       "formula": "=1/0",
       "outputCell": "A1",
       "inputs": [],

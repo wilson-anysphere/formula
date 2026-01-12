@@ -9700,46 +9700,6 @@
       "displayText": "4"
     },
     {
-      "caseId": "forecast_ets_fd60a0f105e9",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#VALUE!"
-      },
-      "address": "C1",
-      "displayText": "#VALUE!"
-    },
-    {
-      "caseId": "forecast_ets_confint_8eafb6e3d87f",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#VALUE!"
-      },
-      "address": "C1",
-      "displayText": "#VALUE!"
-    },
-    {
-      "caseId": "forecast_ets_seasonality_a4855868338a",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#VALUE!"
-      },
-      "address": "C1",
-      "displayText": "#VALUE!"
-    },
-    {
-      "caseId": "forecast_ets_stat_c8d98934d450",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#VALUE!"
-      },
-      "address": "C1",
-      "displayText": "#VALUE!"
-    },
-    {
       "caseId": "steyx_069420cb8eee",
       "outputCell": "C1",
       "result": {
