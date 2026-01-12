@@ -198,6 +198,7 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     );
     expect(openExternal).not.toBeNull();
     expect(String(openExternal.args?.url ?? "")).toContain("github.com/wilson-anysphere/formula/releases");
+    await expect(dialog).toBeHidden();
 
     await waitForTauriListeners(page, "update-not-available");
     await dispatchTauriEvent(page, "update-not-available", { source: "manual" });
