@@ -1300,6 +1300,51 @@ mod tests {
     }
 
     #[test]
+    fn parses_biff5_txo_text_when_cchtext_is_stored_at_alternate_offset() {
+        // The spec-defined cchText field (offset 6) is zero, but offset 4 contains the correct
+        // value. Best-effort decoding should still recover the full text.
+        let stream = [
+            bof_biff5(),
+            note_biff5(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text_at_offset_4(5),
+            continue_text_biff5(b"Hello"),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1252).expect("parse");
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
+    }
+
+    #[test]
+    fn parses_biff5_txo_text_when_cchtext_is_zero_but_continue_has_text() {
+        // Some files report `cchText=0` in the TXO header even though the continuation area still
+        // contains the text. Best-effort decoding should still recover it.
+        let stream = [
+            bof_biff5(),
+            note_biff5(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text(0),
+            continue_text_biff5(b"Hello"),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
+        assert!(
+            warnings.iter().any(|w| w.contains("malformed header/cchText")),
+            "expected fallback warning; warnings={warnings:?}"
+        );
+    }
+
+    #[test]
     fn parses_biff5_note_author_using_codepage() {
         // Windows-1251 0xC0 => Cyrillic 'А' (U+0410). This ensures the BIFF5 short ANSI author
         // string goes through `strings::decode_ansi` using the workbook codepage.
