@@ -78,6 +78,7 @@ import { MacroIcon } from "./MacroIcon";
 import { MergeCenterIcon } from "./MergeCenterIcon";
 import { MinusIcon } from "./MinusIcon";
 import { MoreFormatsIcon } from "./MoreFormatsIcon";
+import { MoonIcon } from "./MoonIcon";
 import { NoteIcon } from "./NoteIcon";
 import { NumberFormatIcon } from "./NumberFormatIcon";
 import { OrientationIcon } from "./OrientationIcon";
@@ -140,6 +141,7 @@ import { WarningIcon } from "./WarningIcon";
 import { WindowIcon } from "./WindowIcon";
 import { WrapTextIcon } from "./WrapTextIcon";
 import { ZoomInIcon } from "./ZoomInIcon";
+import { SunIcon } from "./SunIcon";
 import { SyncScrollIcon } from "./SyncScrollIcon";
 import { HelpIcon } from "./HelpIcon";
 import { GraduationCapIcon } from "./GraduationCapIcon";
@@ -494,6 +496,14 @@ export const ribbonIconMap = {
   "view.show.gridlines": GridlinesIcon,
   "view.show.formulaBar": FunctionIcon,
   "view.show.headings": HeadingsIcon,
+  "view.show.showFormulas": FunctionIcon,
+  "view.show.performanceStats": ChartIcon,
+
+  "view.appearance.theme": PaletteIcon,
+  "view.appearance.theme.system": WindowIcon,
+  "view.appearance.theme.light": SunIcon,
+  "view.appearance.theme.dark": MoonIcon,
+  "view.appearance.theme.highContrast": ShieldIcon,
 
   "view.zoom.zoom": ZoomInIcon,
   "view.zoom.zoom100": PercentIcon,
