@@ -61,7 +61,7 @@ fn writer_emits_vm_cm_on_added_sheet() {
         cell,
         CellValue::String("MSFT".to_string()),
     );
-
+ 
     // Inject value/cell metadata that should be serialized onto the `<c>` element.
     let meta = doc
         .xlsx_meta_mut()

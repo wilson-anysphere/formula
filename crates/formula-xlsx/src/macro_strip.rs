@@ -738,7 +738,7 @@ mod tests {
         let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
   <ct:Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"></ct:Override>
-</ct:Types>"#;
+        </ct:Types>"#;
 
         let delete_parts = BTreeSet::new();
         let updated = strip_content_types(xml, &delete_parts, WorkbookKind::Workbook)
