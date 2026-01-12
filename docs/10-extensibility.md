@@ -273,8 +273,13 @@ the `:` key on layouts where that shares the same physical key.
   - `Ctrl/Cmd+Shift+V` (paste special)
   - `Ctrl/Cmd+Shift+P` (command palette)
   - `Ctrl+Cmd+Shift+P` (some keyboards emit both ctrl+meta on the same chord)
-- Additional shortcuts are used by the desktop app and extensions should avoid binding them:
+  - `Ctrl/Cmd+Shift+O` (quick open; Tauri global shortcut)
+  - `Ctrl+Cmd+Shift+O` (some keyboards emit both ctrl+meta on the same chord)
   - `Ctrl/Cmd+K` (inline AI edit)
+  - `Ctrl+Cmd+K` (some keyboards emit both ctrl+meta on the same chord)
+  - `Cmd+H` (macOS: Hide app, system shortcut)
+  - `Ctrl+Cmd+H` (some keyboards emit both ctrl+meta on the same chord)
+- Additional shortcuts are used by the desktop app and extensions should avoid binding them:
   - `Ctrl/Cmd+Shift+M` (comments panel)
 
 ---

@@ -45,10 +45,10 @@ describe("KeybindingService", () => {
     );
 
     const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
-    service.setBuiltinKeybindings([{ command: "builtin.doThing", key: "ctrl+k" }]);
-    service.setExtensionKeybindings([{ extensionId: "ext", command: "ext.doThing", key: "ctrl+k", mac: null, when: null }]);
+    service.setBuiltinKeybindings([{ command: "builtin.doThing", key: "ctrl+j" }]);
+    service.setExtensionKeybindings([{ extensionId: "ext", command: "ext.doThing", key: "ctrl+j", mac: null, when: null }]);
 
-    await service.dispatchKeydown(makeKeydownEvent({ key: "k", ctrlKey: true }));
+    await service.dispatchKeydown(makeKeydownEvent({ key: "j", ctrlKey: true }));
 
     expect(builtinRun).toHaveBeenCalledTimes(1);
     expect(extRun).not.toHaveBeenCalled();
@@ -67,19 +67,19 @@ describe("KeybindingService", () => {
     );
 
     const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
-    service.setBuiltinKeybindings([{ command: "builtin.conditional", key: "ctrl+k", when: "hasSelection" }]);
-    service.setExtensionKeybindings([{ extensionId: "ext", command: "ext.fallback", key: "ctrl+k", mac: null, when: null }]);
+    service.setBuiltinKeybindings([{ command: "builtin.conditional", key: "ctrl+j", when: "hasSelection" }]);
+    service.setExtensionKeybindings([{ extensionId: "ext", command: "ext.fallback", key: "ctrl+j", mac: null, when: null }]);
 
     // when-clause false -> should skip builtin and run extension.
     contextKeys.set("hasSelection", false);
-    await service.dispatchKeydown(makeKeydownEvent({ key: "k", ctrlKey: true }));
+    await service.dispatchKeydown(makeKeydownEvent({ key: "j", ctrlKey: true }));
     expect(builtinRun).not.toHaveBeenCalled();
     expect(extRun).toHaveBeenCalledTimes(1);
 
     // when-clause true -> builtin should win.
     extRun.mockClear();
     contextKeys.set("hasSelection", true);
-    await service.dispatchKeydown(makeKeydownEvent({ key: "k", ctrlKey: true }));
+    await service.dispatchKeydown(makeKeydownEvent({ key: "j", ctrlKey: true }));
     expect(builtinRun).toHaveBeenCalledTimes(1);
     expect(extRun).not.toHaveBeenCalled();
   });
@@ -100,6 +100,12 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+cmd+c", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealPasteSpecial", key: "ctrl+shift+v", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealPasteSpecial", key: "ctrl+cmd+shift+v", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealQuickOpen", key: "ctrl+shift+o", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealQuickOpen", key: "cmd+shift+o", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealQuickOpen", key: "ctrl+cmd+shift+o", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealInlineAI", key: "ctrl+k", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealInlineAI", key: "cmd+k", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealInlineAI", key: "ctrl+cmd+k", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealCopy", key: "cmd+h", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+cmd+h", mac: null, when: null },
     ]);
@@ -142,6 +148,32 @@ describe("KeybindingService", () => {
     expect(handled6).toBe(false);
     expect(event6.defaultPrevented).toBe(false);
     expect(extRun).not.toHaveBeenCalled();
+
+    // Quick Open (Tauri global): Ctrl/Cmd+Shift+O.
+    const event7 = makeKeydownEvent({ key: "O", ctrlKey: true, shiftKey: true });
+    const handled7 = await service.dispatchKeydown(event7);
+    expect(handled7).toBe(false);
+    expect(event7.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    const event8 = makeKeydownEvent({ key: "O", metaKey: true, shiftKey: true });
+    const handled8 = await service.dispatchKeydown(event8);
+    expect(handled8).toBe(false);
+    expect(event8.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    // Inline AI edit: Ctrl/Cmd+K.
+    const event9 = makeKeydownEvent({ key: "k", ctrlKey: true });
+    const handled9 = await service.dispatchKeydown(event9);
+    expect(handled9).toBe(false);
+    expect(event9.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    const event10 = makeKeydownEvent({ key: "k", metaKey: true });
+    const handled10 = await service.dispatchKeydown(event10);
+    expect(handled10).toBe(false);
+    expect(event10.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
   });
 
   it("does not advertise reserved shortcuts in the command keybinding display index", () => {
@@ -152,15 +184,19 @@ describe("KeybindingService", () => {
     service.setExtensionKeybindings([
       { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+c", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealPasteSpecial", key: "ctrl+cmd+shift+v", mac: null, when: null },
-      { extensionId: "ext", command: "ext.allowed", key: "ctrl+k", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealQuickOpen", key: "ctrl+shift+o", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealInlineAI", key: "ctrl+k", mac: null, when: null },
+      { extensionId: "ext", command: "ext.allowed", key: "ctrl+j", mac: null, when: null },
     ]);
 
     const index = service.getCommandKeybindingDisplayIndex();
-    expect(index.get("ext.allowed")).toEqual(["Ctrl+K"]);
+    expect(index.get("ext.allowed")).toEqual(["Ctrl+J"]);
 
     // Reserved bindings should not be surfaced as hints since they will never fire.
     expect(index.get("ext.stealCopy")).toBeUndefined();
     expect(index.get("ext.stealPasteSpecial")).toBeUndefined();
+    expect(index.get("ext.stealQuickOpen")).toBeUndefined();
+    expect(index.get("ext.stealInlineAI")).toBeUndefined();
   });
 
   it("matches shifted punctuation keybindings via KeyboardEvent.code fallback", async () => {

@@ -64,6 +64,16 @@ const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   "cmd+shift+p",
   // Some keyboards emit both ctrl+meta on the same chord.
   "ctrl+cmd+shift+p",
+  // Quick Open (Tauri global shortcut; extensions should not claim it).
+  "ctrl+shift+o",
+  "cmd+shift+o",
+  // Some keyboards emit both ctrl+meta on the same chord.
+  "ctrl+cmd+shift+o",
+  // Inline AI edit (core UX shortcut; extensions should not claim it).
+  "ctrl+k",
+  "cmd+k",
+  // Some keyboards emit both ctrl+meta on the same chord.
+  "ctrl+cmd+k",
   // macOS system shortcut: Hide (Cmd+H). Extensions should never be able to claim it.
   "cmd+h",
   // Some keyboards emit both ctrl+meta on the same chord.
