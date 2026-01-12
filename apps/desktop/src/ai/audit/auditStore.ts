@@ -50,7 +50,7 @@ function coerceViteUrlToNodeFileUrl(href: string): string {
   // In Node, sql.js uses `fs.readFileSync` for wasm loading, so convert these to a
   // file:// URL rooted at the repository cwd.
   if (href.startsWith("/")) {
-    const cwd = typeof process.cwd === "function" ? process.cwd() : "";
+    const cwd = typeof (globalThis as any).process?.cwd === "function" ? (globalThis as any).process.cwd() : "";
     if (cwd) return `file://${cwd}${href}`;
   }
 
