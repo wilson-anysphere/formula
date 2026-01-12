@@ -157,6 +157,36 @@ fn workbook_sheet_names(xml: &[u8]) -> Vec<String> {
     out
 }
 
+fn workbook_sheets_with_rids(xml: &[u8]) -> Vec<(String, String)> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf).expect("read xml") {
+            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"sheet" => {
+                let mut name = None;
+                let mut rid = None;
+                for attr in e.attributes().flatten() {
+                    let val = attr.unescape_value().expect("attr").into_owned();
+                    match attr.key.as_ref() {
+                        b"name" => name = Some(val),
+                        b"r:id" => rid = Some(val),
+                        _ => {}
+                    }
+                }
+                if let (Some(name), Some(rid)) = (name, rid) {
+                    out.push((name, rid));
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
+}
+
 fn workbook_relationship_targets(xml: &[u8]) -> std::collections::BTreeMap<String, String> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(true);
@@ -230,6 +260,7 @@ fn sheet_edits_preserve_richdata_parts_and_relationships() {
     // Sanity: ensure we actually exercised the sheet-structure rewrite path.
     let workbook_xml = zip_part(&saved, "xl/workbook.xml");
     let workbook_sheets = workbook_sheet_names(&workbook_xml);
+    let workbook_sheet_rids = workbook_sheets_with_rids(&workbook_xml);
     assert!(
         !workbook_sheets.iter().any(|s| s == "Sheet2"),
         "expected deleted sheet to be removed from xl/workbook.xml"
@@ -243,10 +274,6 @@ fn sheet_edits_preserve_richdata_parts_and_relationships() {
     assert!(
         archive.by_name("xl/worksheets/sheet2.xml").is_err(),
         "expected deleted sheet2 part to be removed from output package"
-    );
-    assert!(
-        archive.by_name("xl/worksheets/sheet3.xml").is_ok(),
-        "expected newly-added sheet to be materialized as sheet3.xml"
     );
 
     assert_eq!(
@@ -270,11 +297,30 @@ fn sheet_edits_preserve_richdata_parts_and_relationships() {
         "xl/richData/richValues.xml must be preserved byte-for-byte across sheet edits"
     );
 
-    let workbook_rels = workbook_relationship_targets(&zip_part(&saved, "xl/_rels/workbook.xml.rels"));
+    let workbook_rels =
+        workbook_relationship_targets(&zip_part(&saved, "xl/_rels/workbook.xml.rels"));
     assert_eq!(
         workbook_rels.get("rId9").map(String::as_str),
         Some("metadata.xml"),
         "workbook.xml.rels must retain the metadata relationship (rId9 -> metadata.xml)"
+    );
+
+    let added_rid = workbook_sheet_rids
+        .iter()
+        .find(|(name, _)| name == "Added")
+        .map(|(_, rid)| rid.as_str())
+        .expect("Added sheet must have an r:id");
+    let added_target = workbook_rels
+        .get(added_rid)
+        .expect("Added sheet r:id must exist in workbook.xml.rels");
+    let added_part_name = if let Some(path) = added_target.strip_prefix('/') {
+        path.to_string()
+    } else {
+        format!("xl/{added_target}")
+    };
+    assert!(
+        archive.by_name(&added_part_name).is_ok(),
+        "expected Added sheet backing part to exist in output package: {added_part_name}"
     );
 
     let content_types = content_type_overrides(&zip_part(&saved, "[Content_Types].xml"));
