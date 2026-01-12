@@ -239,6 +239,22 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     options.systemPrompt ??
     "You are an AI assistant inside a spreadsheet app. Prefer using tools to read data before making claims.";
 
+  // Reuse a single WorkbookContextBuilder instance across messages so it can cache
+  // schema + sampled blocks and avoid expensive re-scans when the workbook hasn't changed.
+  // DLP is still supplied per-message via `build({ dlp })`.
+  const contextBuilder = new WorkbookContextBuilder({
+    workbookId: options.workbookId,
+    documentController: options.documentController,
+    spreadsheet,
+    ragService: contextProvider as any,
+    schemaProvider: options.schemaProvider ?? null,
+    mode: "chat",
+    model: options.model,
+    contextWindowTokens,
+    reserveForOutputTokens,
+    tokenEstimator: estimator as any
+  });
+
   let disposePromise: Promise<void> | null = null;
   async function dispose(): Promise<void> {
     if (disposePromise) return disposePromise;
@@ -305,24 +321,11 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     let workbookContext: any;
     try {
       throwIfAborted(signal);
-      const contextBuilder = new WorkbookContextBuilder({
-        workbookId: options.workbookId,
-        documentController: options.documentController,
-        spreadsheet,
-        ragService: contextProvider as any,
-        schemaProvider: options.schemaProvider ?? null,
-        dlp,
-        mode: "chat",
-        model: options.model,
-        contextWindowTokens,
-        reserveForOutputTokens,
-        tokenEstimator: estimator as any
-      });
-
       workbookContext = await withAbort(
         signal,
         contextBuilder.build({
           activeSheetId,
+          dlp,
           ...(selectedRange ? { selectedRange } : {}),
           focusQuestion: text,
           attachments

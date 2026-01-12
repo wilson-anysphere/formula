@@ -383,6 +383,65 @@ describe("WorkbookContextBuilder", () => {
     expect(ctx.promptContext).not.toContain("TOP SECRET");
   });
 
+  it("does not reuse cached unredacted blocks when DLP settings tighten (cache is keyed by DLP state)", async () => {
+    const workbookId = "wb_dlp_cache_key";
+    const documentController = new DocumentController();
+    documentController.setRangeValues("Sheet1", "A1", [
+      ["Public"],
+      ["TOP SECRET"],
+    ]);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+    const builder = new WorkbookContextBuilder({
+      workbookId,
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+      maxSheets: 1,
+    });
+
+    // Build once with no DLP: caches will contain unredacted values.
+    const ctx1 = await builder.build({ activeSheetId: "Sheet1" });
+    expect(ctx1.promptContext).toContain("TOP SECRET");
+
+    // Now apply DLP that redacts the restricted cell.
+    const storage = createMemoryStorage();
+    const classificationStore = new LocalClassificationStore({ storage });
+    classificationStore.upsert(
+      workbookId,
+      { scope: "cell", documentId: workbookId, sheetId: "Sheet1", row: 1, col: 0 },
+      { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: ["test"] },
+    );
+
+    const classificationRecords = classificationStore.list(workbookId);
+    const policy = createDefaultOrgPolicy();
+    const auditLogger = { log: (_event: any) => {} };
+
+    const dlp = {
+      // ContextManager style
+      documentId: workbookId,
+      sheetId: "Sheet1",
+      policy,
+      classificationRecords,
+      classificationStore,
+      includeRestrictedContent: false,
+      auditLogger,
+      // ToolExecutor style
+      document_id: workbookId,
+      sheet_id: "Sheet1",
+      classification_records: classificationRecords,
+      classification_store: classificationStore,
+      include_restricted_content: false,
+      audit_logger: auditLogger,
+    };
+
+    const ctx2 = await builder.build({ activeSheetId: "Sheet1", dlp });
+    expect(ctx2.promptContext).toContain("[REDACTED]");
+    expect(ctx2.promptContext).not.toContain("TOP SECRET");
+  });
+
   it("reuses a single ToolExecutor instance for all read_range calls in a build", async () => {
     const documentController = new DocumentController();
     documentController.setRangeValues("Sheet1", "A1", [
@@ -478,6 +537,41 @@ describe("WorkbookContextBuilder", () => {
     expect(ctx1.promptContext).toContain('"kind": "selection"');
     // Ensure we don't regress to minified JSON for core fields.
     expect(ctx1.promptContext).not.toContain('"kind":"selection"');
+  });
+
+  it("reuses cached sheet summaries + blocks when the workbook hasn't changed, and invalidates on content edits", async () => {
+    const documentController = new DocumentController();
+    documentController.setRangeValues("Sheet1", "A1", [
+      ["Name", "Age"],
+      ["Alice", 30],
+    ]);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+    const readSpy = vi.spyOn(spreadsheet, "readRange");
+
+    const builder = new WorkbookContextBuilder({
+      workbookId: "wb_cache_basic",
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+      maxSheets: 1,
+    });
+
+    await builder.build({ activeSheetId: "Sheet1" });
+    const readsAfterFirst = readSpy.mock.calls.length;
+
+    await builder.build({ activeSheetId: "Sheet1" });
+    expect(readSpy.mock.calls.length).toBe(readsAfterFirst);
+
+    // Content edit should bump sheet content version -> cache miss -> another read_range.
+    documentController.setCellValue("Sheet1", "A2", "Alicia");
+
+    await builder.build({ activeSheetId: "Sheet1" });
+    expect(readSpy.mock.calls.length).toBeGreaterThan(readsAfterFirst);
+
+    readSpy.mockRestore();
   });
 
   it("reuses cached sheet samples when only sheet view changes (no extra read_range calls)", async () => {

@@ -310,7 +310,6 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       spreadsheet,
       ragService,
       schemaProvider: params.schemaProvider ?? null,
-      dlp,
       mode: "agent",
       model: modelName,
       contextWindowTokens,
@@ -322,6 +321,7 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       const ctx = await guard(
         contextBuilder.build({
           activeSheetId: defaultSheetId,
+          dlp,
           focusQuestion: goal
         })
       );

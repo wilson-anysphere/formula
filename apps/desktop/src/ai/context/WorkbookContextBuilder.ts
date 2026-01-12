@@ -96,6 +96,14 @@ export interface BuildWorkbookContextInput {
   activeSheetId: string;
   selectedRange?: { sheetId: string; range: Range };
   /**
+   * Optional DLP settings to apply for this build. This is passed through to the
+   * tool executor (`read_range`) and to any RAG service used for retrieval.
+   *
+   * IMPORTANT: Callers may provide a fresh object on every build (e.g. `maybeGetAiCloudDlpOptions`),
+   * so caching must never rely on object identity.
+   */
+  dlp?: any;
+  /**
    * Optional focus question string used to drive semantic retrieval.
    * Surfaces should pass the user's latest prompt/request here.
    */
@@ -236,12 +244,11 @@ export class WorkbookContextBuilder {
   >;
   private readonly estimator: TokenEstimator;
 
-  private readonly sheetSummaryCache = new Map<
-    string,
-    { contentVersion: number; schemaVersion: number; summary: WorkbookContextSheetSummary }
-  >();
+  private readonly sheetSummaryCache = new Map<string, { contentVersion: number; summary: WorkbookContextSheetSummary }>();
+  private readonly maxSheetSummaryCacheEntries = 50;
 
   private readonly blockCache = new Map<string, { contentVersion: number; block: WorkbookContextDataBlock }>();
+  private readonly maxBlockCacheEntries = 75;
 
   private cachedSchemaMetadata:
     | {
@@ -275,6 +282,9 @@ export class WorkbookContextBuilder {
     const selection = input.selectedRange;
     const schemaProvider = this.options.schemaProvider ?? null;
 
+    const dlp = input.dlp ?? this.options.dlp ?? undefined;
+    const dlpCacheKey = computeDlpCacheKey(dlp);
+
     const schemaMetadata = this.getSchemaMetadata(schemaProvider);
     const schemaNamedRangesBySheet = schemaMetadata.schemaNamedRangesBySheet;
     const schemaTablesBySheet = schemaMetadata.schemaTablesBySheet;
@@ -291,12 +301,12 @@ export class WorkbookContextBuilder {
       this.options.maxBlockRows * this.options.maxBlockCols,
     );
     const defaultSheetForTools =
-      typeof (this.options.dlp as any)?.sheet_id === "string" && String((this.options.dlp as any).sheet_id).trim()
-        ? String((this.options.dlp as any).sheet_id).trim()
+      typeof (dlp as any)?.sheet_id === "string" && String((dlp as any).sheet_id).trim()
+        ? String((dlp as any).sheet_id).trim()
         : input.activeSheetId;
     const executor = new ToolExecutor(this.options.spreadsheet, {
       default_sheet: defaultSheetForTools,
-      dlp: this.options.dlp,
+      dlp,
       max_read_range_cells: maxReadRangeCells,
       max_read_range_chars: 200_000,
     });
@@ -312,7 +322,7 @@ export class WorkbookContextBuilder {
             // WorkbookContextBuilder builds its own promptContext; avoid redundant string formatting
             // + token estimation work inside the underlying RAG service.
             includePromptContext: false,
-            dlp: this.options.dlp,
+            dlp,
           })
         : null;
 
@@ -321,6 +331,7 @@ export class WorkbookContextBuilder {
 
     const selectionBlock = selection
       ? await this.readBlock(executor, {
+          dlpCacheKey,
           kind: "selection",
           sheetId: selection.sheetId,
           range: selection.range,
@@ -341,6 +352,7 @@ export class WorkbookContextBuilder {
 
     for (const sheetId of sheetsToSummarize) {
       const summary = await this.buildSheetSummary(executor, sheetId, {
+        dlpCacheKey,
         schemaVersion: schemaMetadata.schemaVersion,
         namedRanges: schemaNamedRangesBySheet.get(sheetId),
         tables: schemaTablesBySheet.get(sheetId),
@@ -356,21 +368,13 @@ export class WorkbookContextBuilder {
           startCol: summary.analyzedRange.startCol,
           endCol: summary.analyzedRange.endCol,
         };
-        blocks.push(
-          await this.readBlock(executor, {
-            kind: "sheet_sample",
-            sheetId,
-            range: sampleRange,
-            maxRows: this.options.maxBlockRows,
-            maxCols: this.options.maxBlockCols,
-          }),
-        );
+        blocks.push(await this.buildSheetSampleBlock(executor, { dlpCacheKey, sheetId, analyzedRange: sampleRange }));
       }
     }
 
     // Add sampled blocks for retrieved chunks (query-aware).
     if (retrieved.length && this.options.maxRetrievedBlocks > 0) {
-      const retrievedBlocks = await this.blocksFromRetrievedChunks(executor, retrieved, this.options.maxRetrievedBlocks);
+      const retrievedBlocks = await this.blocksFromRetrievedChunks(executor, retrieved, this.options.maxRetrievedBlocks, { dlpCacheKey });
       blocks.push(...retrievedBlocks);
     }
 
@@ -473,10 +477,75 @@ export class WorkbookContextBuilder {
     return out;
   }
 
+  private rememberSheetSummary(
+    key: string,
+    entry: { contentVersion: number; summary: WorkbookContextSheetSummary },
+  ): void {
+    // Bump recency when overwriting.
+    if (this.sheetSummaryCache.has(key)) this.sheetSummaryCache.delete(key);
+    this.sheetSummaryCache.set(key, entry);
+    while (this.sheetSummaryCache.size > this.maxSheetSummaryCacheEntries) {
+      const oldest = this.sheetSummaryCache.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.sheetSummaryCache.delete(oldest);
+    }
+  }
+
+  private getReadBlockCacheKey(params: {
+    dlpCacheKey: string;
+    kind: WorkbookContextBlockKind;
+    sheetId: string;
+    range: Range;
+    maxRows: number;
+    maxCols: number;
+  }): { key: string; clamped: Range; rangeRef: string } {
+    const clamped = clampRange(params.range, { maxRows: params.maxRows, maxCols: params.maxCols });
+    const rangeRef = this.rangeRef(params.sheetId, clamped);
+    const key = `${params.dlpCacheKey}\u0000${params.kind}\u0000${params.sheetId}\u0000${rangeRef}`;
+    return { key, clamped, rangeRef };
+  }
+
+  private getCachedReadBlock(params: {
+    dlpCacheKey: string;
+    kind: WorkbookContextBlockKind;
+    sheetId: string;
+    range: Range;
+    maxRows: number;
+    maxCols: number;
+  }): WorkbookContextDataBlock | null {
+    const { key } = this.getReadBlockCacheKey(params);
+    const cached = this.blockCache.get(key);
+    if (!cached) return null;
+
+    const contentVersion = this.options.documentController.getSheetContentVersion?.(params.sheetId) ?? 0;
+    if (cached.contentVersion !== contentVersion) {
+      // Drop stale entries eagerly to keep the cache small.
+      this.blockCache.delete(key);
+      return null;
+    }
+
+    // Bump recency for eviction.
+    this.blockCache.delete(key);
+    this.blockCache.set(key, cached);
+    return cached.block;
+  }
+
+  private rememberReadBlock(key: string, entry: { contentVersion: number; block: WorkbookContextDataBlock }): void {
+    // Bump recency when overwriting.
+    if (this.blockCache.has(key)) this.blockCache.delete(key);
+    this.blockCache.set(key, entry);
+    while (this.blockCache.size > this.maxBlockCacheEntries) {
+      const oldest = this.blockCache.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.blockCache.delete(oldest);
+    }
+  }
+
   private async buildSheetSummary(
     executor: ToolExecutor,
     sheetId: string,
-    extras?: {
+    extras: {
+      dlpCacheKey: string;
       schemaVersion?: number;
       namedRanges?: Array<{ name: string; range: string }>;
       tables?: Array<{ name: string; range: string }>;
@@ -486,15 +555,36 @@ export class WorkbookContextBuilder {
     const schemaVersion =
       typeof extras?.schemaVersion === "number" && Number.isFinite(extras.schemaVersion) ? Math.trunc(extras.schemaVersion) : 0;
 
-    const cached = this.sheetSummaryCache.get(sheetId);
-    if (cached && cached.contentVersion === contentVersion && cached.schemaVersion === schemaVersion) {
+    const extrasJson = safeStableJsonStringify({
+      namedRanges: extras?.namedRanges ?? [],
+      tables: extras?.tables ?? [],
+    });
+    const cacheKey = [
+      sheetId,
+      extras.dlpCacheKey,
+      `schema:${this.options.maxSchemaRows}x${this.options.maxSchemaCols}`,
+      `schemaVersion:${schemaVersion}`,
+      `extras:${extrasJson.length}:${hashString(extrasJson)}`,
+    ].join("\u0000");
+
+    const cached = this.sheetSummaryCache.get(cacheKey);
+    if (cached && cached.contentVersion === contentVersion) {
+      // Bump recency for eviction.
+      this.sheetSummaryCache.delete(cacheKey);
+      this.sheetSummaryCache.set(cacheKey, cached);
       return cached.summary;
     }
 
     const used = this.options.documentController.getUsedRange(sheetId);
     if (!used) {
-      const summary = { sheetId, schema: { name: sheetId, tables: [], namedRanges: [], dataRegions: [] } };
-      this.sheetSummaryCache.set(sheetId, { contentVersion, schemaVersion, summary });
+      const schema = extractSheetSchema({
+        name: sheetId,
+        values: [],
+        ...(extras?.namedRanges?.length ? { namedRanges: extras.namedRanges } : {}),
+        ...(extras?.tables?.length ? { tables: extras.tables } : {}),
+      } as any);
+      const summary = { sheetId, schema };
+      this.rememberSheetSummary(cacheKey, { contentVersion, summary });
       return summary;
     }
 
@@ -504,6 +594,7 @@ export class WorkbookContextBuilder {
     );
 
     const block = await this.readBlock(executor, {
+      dlpCacheKey: extras.dlpCacheKey,
       kind: "sheet_sample",
       sheetId,
       range: analyzedRange,
@@ -514,8 +605,14 @@ export class WorkbookContextBuilder {
     // If we couldn't read the sheet sample (DLP denied, runtime error, etc), do not attempt
     // schema extraction from placeholder values (it would create misleading fake tables).
     if (block.error) {
-      const summary = { sheetId, analyzedRange, schema: { name: sheetId, tables: [], namedRanges: [], dataRegions: [] } };
-      this.sheetSummaryCache.set(sheetId, { contentVersion, schemaVersion, summary });
+      const schema = extractSheetSchema({
+        name: sheetId,
+        values: [],
+        ...(extras?.namedRanges?.length ? { namedRanges: extras.namedRanges } : {}),
+        ...(extras?.tables?.length ? { tables: extras.tables } : {}),
+      } as any);
+      const summary = { sheetId, analyzedRange, schema };
+      this.rememberSheetSummary(cacheKey, { contentVersion, summary });
       return summary;
     }
 
@@ -530,16 +627,58 @@ export class WorkbookContextBuilder {
     } as any);
 
     const summary = { sheetId, analyzedRange, schema };
-    this.sheetSummaryCache.set(sheetId, { contentVersion, schemaVersion, summary });
+    this.rememberSheetSummary(cacheKey, { contentVersion, summary });
     return summary;
+  }
+
+  private async buildSheetSampleBlock(
+    executor: ToolExecutor,
+    params: { dlpCacheKey: string; sheetId: string; analyzedRange: Range },
+  ): Promise<WorkbookContextDataBlock> {
+    const sampleRange = clampRange(params.analyzedRange, { maxRows: this.options.maxBlockRows, maxCols: this.options.maxBlockCols });
+
+    // First try to reuse the (larger) schema extraction sample block, if it's cached.
+    // This avoids an extra `read_range` call for the active sheet.
+    const cachedSchemaSample = this.getCachedReadBlock({
+      dlpCacheKey: params.dlpCacheKey,
+      kind: "sheet_sample",
+      sheetId: params.sheetId,
+      range: params.analyzedRange,
+      maxRows: this.options.maxSchemaRows,
+      maxCols: this.options.maxSchemaCols,
+    });
+
+    if (cachedSchemaSample) {
+      return sliceBlock({
+        block: cachedSchemaSample,
+        kind: "sheet_sample",
+        sheetId: params.sheetId,
+        sourceRange: params.analyzedRange,
+        targetRange: sampleRange,
+        rangeRef: this.rangeRef(params.sheetId, sampleRange),
+      });
+    }
+
+    // If the schema sample isn't cached (e.g. sheet summary served from cache but block cache evicted),
+    // fall back to reading just the smaller prompt sample.
+    return this.readBlock(executor, {
+      dlpCacheKey: params.dlpCacheKey,
+      kind: "sheet_sample",
+      sheetId: params.sheetId,
+      range: params.analyzedRange,
+      maxRows: this.options.maxBlockRows,
+      maxCols: this.options.maxBlockCols,
+    });
   }
 
   private async blocksFromRetrievedChunks(
     executor: ToolExecutor,
     retrieved: unknown[],
     maxBlocks: number,
+    params: { dlpCacheKey: string },
   ): Promise<WorkbookContextDataBlock[]> {
     const out: WorkbookContextDataBlock[] = [];
+    const seen = new Set<string>();
 
     for (const chunk of retrieved) {
       if (out.length >= maxBlocks) break;
@@ -552,8 +691,15 @@ export class WorkbookContextBuilder {
       const range = rectToRange(rect);
       if (!range) continue;
 
+      // Deduplicate retrieved reads by the actual (clamped) range we will read.
+      const clamped = clampRange(range, { maxRows: this.options.maxBlockRows, maxCols: this.options.maxBlockCols });
+      const dedupeKey = `${sheetId}\u0000${clamped.startRow},${clamped.startCol},${clamped.endRow},${clamped.endCol}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+
       out.push(
         await this.readBlock(executor, {
+          dlpCacheKey: params.dlpCacheKey,
           kind: "retrieved",
           sheetId,
           range,
@@ -673,6 +819,7 @@ export class WorkbookContextBuilder {
   private async readBlock(
     executor: ToolExecutor,
     params: {
+      dlpCacheKey: string;
       kind: WorkbookContextBlockKind;
       sheetId: string;
       range: Range;
@@ -680,14 +827,19 @@ export class WorkbookContextBuilder {
       maxCols: number;
     },
   ): Promise<WorkbookContextDataBlock> {
-    const clamped = clampRange(params.range, { maxRows: params.maxRows, maxCols: params.maxCols });
-    const rangeRef = this.rangeRef(params.sheetId, clamped);
-
     const contentVersion = this.options.documentController.getSheetContentVersion?.(params.sheetId) ?? 0;
-    const cacheKey = `${params.kind}\u0000${params.sheetId}\u0000${rangeRef}`;
+    const { key: cacheKey, clamped, rangeRef } = this.getReadBlockCacheKey(params);
+
     const cached = this.blockCache.get(cacheKey);
     if (cached && cached.contentVersion === contentVersion) {
+      // Bump recency for eviction.
+      this.blockCache.delete(cacheKey);
+      this.blockCache.set(cacheKey, cached);
       return cached.block;
+    }
+    if (cached && cached.contentVersion !== contentVersion) {
+      // Drop stale entries eagerly to keep the cache small.
+      this.blockCache.delete(cacheKey);
     }
 
     const toolResult = await executor.execute({
@@ -705,7 +857,7 @@ export class WorkbookContextBuilder {
         colHeaders: colHeaders(clamped),
         values,
       };
-      this.blockCache.set(cacheKey, { contentVersion, block });
+      this.rememberReadBlock(cacheKey, { contentVersion, block });
       return block;
     }
 
@@ -721,7 +873,7 @@ export class WorkbookContextBuilder {
       values: [[placeholder]],
       error: { code: String(error.code ?? "runtime_error"), message: String(error.message ?? "Unknown error") },
     };
-    this.blockCache.set(cacheKey, { contentVersion, block });
+    this.rememberReadBlock(cacheKey, { contentVersion, block });
     return block;
   }
 
@@ -855,6 +1007,106 @@ function safeList<T>(fn: () => T[] | null | undefined): T[] {
   } catch {
     return [];
   }
+}
+
+function safeStableJsonStringify(value: unknown): string {
+  try {
+    return stableJsonStringify(value);
+  } catch {
+    try {
+      return JSON.stringify(value) ?? "";
+    } catch {
+      return "";
+    }
+  }
+}
+
+function fnv1a32(value: string): number {
+  // 32-bit FNV-1a hash. (Stable across runs.)
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+function hashString(value: string): string {
+  return fnv1a32(value).toString(16);
+}
+
+function computeDlpCacheKey(dlp: any): string {
+  if (!dlp) return "no_dlp";
+
+  const includeRestrictedContent = Boolean(dlp.includeRestrictedContent ?? dlp.include_restricted_content ?? false);
+
+  const policyJson = safeStableJsonStringify(dlp.policy ?? null);
+  const policyKey = `${policyJson.length}:${hashString(policyJson)}`;
+
+  const records: Array<any> = Array.isArray(dlp.classificationRecords)
+    ? dlp.classificationRecords
+    : Array.isArray(dlp.classification_records)
+      ? dlp.classification_records
+      : [];
+
+  let maxUpdatedAt = "";
+  for (const record of records) {
+    const updatedAt =
+      typeof record?.updatedAt === "string"
+        ? record.updatedAt
+        : typeof record?.updated_at === "string"
+          ? record.updated_at
+          : "";
+    if (updatedAt > maxUpdatedAt) maxUpdatedAt = updatedAt;
+  }
+
+  const classKey = `${records.length}:${maxUpdatedAt}`;
+  return `dlp:${includeRestrictedContent ? "incl" : "excl"}:${policyKey}:${classKey}`;
+}
+
+function sliceBlock(params: {
+  block: WorkbookContextDataBlock;
+  kind: WorkbookContextBlockKind;
+  sheetId: string;
+  sourceRange: Range;
+  targetRange: Range;
+  rangeRef: string;
+}): WorkbookContextDataBlock {
+  const { block, kind, sheetId, sourceRange, targetRange, rangeRef } = params;
+
+  if (block.error) {
+    return {
+      kind,
+      sheetId,
+      range: rangeRef,
+      rowHeaders: rowHeaders(targetRange),
+      colHeaders: colHeaders(targetRange),
+      values: block.values,
+      error: block.error,
+    };
+  }
+
+  const rowOffset = Math.max(0, targetRange.startRow - sourceRange.startRow);
+  const colOffset = Math.max(0, targetRange.startCol - sourceRange.startCol);
+  const rows = Math.max(1, targetRange.endRow - targetRange.startRow + 1);
+  const cols = Math.max(1, targetRange.endCol - targetRange.startCol + 1);
+
+  const values = Array.isArray(block.values)
+    ? block.values
+        .slice(rowOffset, rowOffset + rows)
+        .map((row) => (Array.isArray(row) ? row.slice(colOffset, colOffset + cols) : []))
+    : block.values;
+
+  const fallback = Array.isArray(values) && values.length > 0 ? values : block.values;
+
+  return {
+    kind,
+    sheetId,
+    range: rangeRef,
+    rowHeaders: rowHeaders(targetRange),
+    colHeaders: colHeaders(targetRange),
+    values: fallback,
+  };
 }
 
 function clampRange(range: Range, limits: { maxRows: number; maxCols: number }): Range {

@@ -1127,6 +1127,15 @@ export class DocumentController {
   }
 
   /**
+   * Monotonically increasing workbook mutation counter.
+   *
+   * @returns {number}
+   */
+  getUpdateVersion() {
+    return this.updateVersion;
+  }
+
+  /**
    * @param {string} sheetId
    * @param {CellCoord | string} coord
    * @returns {CellState}
@@ -2940,6 +2949,6 @@ export class DocumentController {
       this.#emit("change", payload);
     }
 
-    this.#emit("update", {});
+    this.#emit("update", { version: this.updateVersion });
   }
 }
