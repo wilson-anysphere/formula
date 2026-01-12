@@ -8,9 +8,11 @@ security.
 
 ## Desktop UX (current)
 
-The desktop app wires `@formula/extension-host` contribution points into the UI so extensions are actually usable without devtools:
+The desktop app wires `@formula/extension-host` contribution points into the UI so extensions are actually usable without
+devtools:
 
-- **Extensions panel**: open via the status bar **Extensions** button. It lists installed extensions, their contributed commands, and contributed panels.
+- **Extensions panel**: open via the ribbon (**Home → Panels → Extensions**). It lists installed extensions, their
+  contributed commands, and contributed panels. (Opening the panel triggers the lazy extension host boot.)
 - **Marketplace panel**: installs and updates marketplace extensions via `WebExtensionManager` (IndexedDB-backed).
   - Panel id: `"marketplace"` (`PanelIds.MARKETPLACE`)
   - In dev builds you can open it via the ribbon (**View → Panels → Marketplace**) or via DevTools:
