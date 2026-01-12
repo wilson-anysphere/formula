@@ -7,6 +7,7 @@ use quick_xml::name::QName;
 use quick_xml::Reader;
 
 use crate::path::{rels_for_part, resolve_target};
+use crate::rich_data::{scan_cells_with_metadata_indices, RichDataError};
 use crate::{parse_worksheet_hyperlinks, XlsxError, XlsxPackage};
 
 const RICH_VALUE_REL_PART: &str = "xl/richData/richValueRel.xml";
@@ -63,6 +64,16 @@ impl XlsxPackage {
         let image_targets_by_rel_id =
             parse_rich_value_rel_image_targets(rich_value_rel_rels_bytes)?;
 
+        // Value metadata mapping: worksheet `c/@vm` -> rich value index.
+        //
+        // Optional: some producers omit `xl/metadata.xml` and instead use `vm=` as a direct index
+        // into `richValueRel.xml`.
+        let vm_to_rich_value = match self.part("xl/metadata.xml") {
+            Some(metadata_bytes) => crate::rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map(metadata_bytes)
+                .map_err(|e| XlsxError::Invalid(format!("failed to parse xl/metadata.xml: {e}")))?,
+            None => HashMap::new(),
+        };
+
         // Full-fidelity path: use `xl/metadata.xml` + `xl/richData/rdrichvalue*.xml` to map the
         // worksheet cell's `vm=` attribute to a rich-value entry that contains a local image
         // identifier (plus calcOrigin + alt text).
@@ -77,16 +88,9 @@ impl XlsxPackage {
 
         let full_lookup: Option<FullImageLookup> =
             (|| -> Result<Option<FullImageLookup>, XlsxError> {
-                let Some(metadata_bytes) = self.part("xl/metadata.xml") else {
+                if vm_to_rich_value.is_empty() {
                     return Ok(None);
-                };
-                let vm_to_rich_value =
-                    crate::rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map(
-                        metadata_bytes,
-                    )
-                    .map_err(|e| {
-                        XlsxError::Invalid(format!("failed to parse xl/metadata.xml: {e}"))
-                    })?;
+                }
 
                 let Some(rd_rich_value_bytes) = self.part(RD_RICH_VALUE_PART) else {
                     return Ok(None);
@@ -104,12 +108,12 @@ impl XlsxPackage {
                 let local_image_by_rich_value_index =
                     parse_local_image_rich_values(rd_rich_value_bytes, &local_image_structure)?;
 
-                if vm_to_rich_value.is_empty() || local_image_by_rich_value_index.is_empty() {
+                if local_image_by_rich_value_index.is_empty() {
                     return Ok(None);
                 }
 
                 Ok(Some(FullImageLookup {
-                    vm_to_rich_value,
+                    vm_to_rich_value: vm_to_rich_value.clone(),
                     local_image_by_rich_value_index,
                 }))
             })()?;
@@ -132,7 +136,7 @@ impl XlsxPackage {
             let hyperlinks =
                 parse_worksheet_hyperlinks(sheet_xml, sheet_rels_xml).unwrap_or_default();
 
-            for (cell_ref, vm) in parse_sheet_vm_image_cells(sheet_xml)? {
+            for (cell_ref, vm) in parse_sheet_vm_image_cells(sheet_xml_bytes)? {
                 let (local_image_identifier, calc_origin, alt_text) = if let Some(full) =
                     full_lookup.as_ref()
                 {
@@ -149,9 +153,25 @@ impl XlsxPackage {
                         local_image.calc_origin,
                         local_image.alt_text.clone(),
                     )
+                } else if let Some(&local_image_identifier) = vm_to_rich_value.get(&vm) {
+                    // Some producers index directly into `richValueRel.xml` via the rich-value
+                    // index resolved from metadata.
+                    (local_image_identifier, 0, None)
                 } else {
-                    // Best-effort fallback: treat `vm` as a 1-based index into richValueRel.xml.
-                    (vm.saturating_sub(1), 0, None)
+                    // Best-effort fallback: treat `vm` as an index into richValueRel.xml.
+                    //
+                    // Excel's `vm` is 1-based, while `_rvRel` identifiers are typically 0-based, so
+                    // try `vm-1` first.
+                    let idx_one_based = vm.saturating_sub(1) as usize;
+                    let idx_zero_based = vm as usize;
+                    let local_image_identifier = if idx_one_based < rich_value_rel_ids.len() {
+                        idx_one_based as u32
+                    } else if idx_zero_based < rich_value_rel_ids.len() {
+                        idx_zero_based as u32
+                    } else {
+                        continue;
+                    };
+                    (local_image_identifier, 0, None)
                 };
 
                 let Some(image_part) = resolve_local_image_identifier_to_image_part(
@@ -249,84 +269,22 @@ fn strip_fragment(target: &str) -> &str {
         .unwrap_or(target)
 }
 
-fn parse_sheet_vm_image_cells(sheet_xml: &str) -> Result<Vec<(CellRef, u32)>, XlsxError> {
-    let mut reader = Reader::from_reader(Cursor::new(sheet_xml.as_bytes()));
-    reader.config_mut().trim_text(true);
+fn parse_sheet_vm_image_cells(sheet_xml: &[u8]) -> Result<Vec<(CellRef, u32)>, XlsxError> {
+    let cells_with_metadata =
+        scan_cells_with_metadata_indices(sheet_xml).map_err(|err| match err {
+            RichDataError::Xlsx(err) => err,
+            RichDataError::XmlNonUtf8 { source, .. } => XlsxError::Invalid(format!(
+                "worksheet xml contains invalid UTF-8: {source}"
+            )),
+            RichDataError::XmlParse { source, .. } => XlsxError::RoXml(source),
+        })?;
 
-    let mut buf = Vec::new();
-    let mut out = Vec::new();
-
-    loop {
-        match reader.read_event_into(&mut buf)? {
-            Event::Eof => break,
-            Event::Start(e) if e.local_name().as_ref() == b"c" => {
-                let mut cell_ref: Option<CellRef> = None;
-                let mut vm: Option<u32> = None;
-
-                for attr in e.attributes() {
-                    let attr = attr?;
-                    match attr.key.as_ref() {
-                        b"r" => {
-                            let a1 = attr.unescape_value()?.into_owned();
-                            let parsed = CellRef::from_a1(&a1)
-                                .map_err(|e| XlsxError::Invalid(format!("invalid cell ref {a1}: {e}")))?;
-                            cell_ref = Some(parsed);
-                        }
-                        b"vm" => {
-                            vm = attr
-                                .unescape_value()?
-                                .into_owned()
-                                .trim()
-                                .parse::<u32>()
-                                .ok();
-                        }
-                        _ => {}
-                    }
-                }
-
-                if let (Some(cell_ref), Some(vm)) = (cell_ref, vm) {
-                    out.push((cell_ref, vm));
-                }
-
-                // We only care about attributes on `<c>`; skip its subtree (value, formula, etc.).
-                reader.read_to_end_into(e.name(), &mut Vec::new())?;
-            }
-            Event::Empty(e) if e.local_name().as_ref() == b"c" => {
-                // Empty `<c/>` can still carry a `vm=` attribute; treat it as a candidate.
-                let mut cell_ref: Option<CellRef> = None;
-                let mut vm: Option<u32> = None;
-
-                for attr in e.attributes() {
-                    let attr = attr?;
-                    match attr.key.as_ref() {
-                        b"r" => {
-                            let a1 = attr.unescape_value()?.into_owned();
-                            let parsed = CellRef::from_a1(&a1)
-                                .map_err(|e| XlsxError::Invalid(format!("invalid cell ref {a1}: {e}")))?;
-                            cell_ref = Some(parsed);
-                        }
-                        b"vm" => {
-                            vm = attr
-                                .unescape_value()?
-                                .into_owned()
-                                .trim()
-                                .parse::<u32>()
-                                .ok();
-                        }
-                        _ => {}
-                    }
-                }
-
-                if let (Some(cell_ref), Some(vm)) = (cell_ref, vm) {
-                    out.push((cell_ref, vm));
-                }
-            }
-            _ => {}
-        }
-        buf.clear();
-    }
-
-    Ok(out)
+    // Filter to `vm`-annotated cells; the rich value structure parsing in the caller will determine
+    // which `vm`s are actually local images.
+    Ok(cells_with_metadata
+        .into_iter()
+        .filter_map(|(cell, vm, _cm)| vm.map(|vm| (cell, vm)))
+        .collect())
 }
 
 fn resolve_local_image_identifier_to_image_part(
