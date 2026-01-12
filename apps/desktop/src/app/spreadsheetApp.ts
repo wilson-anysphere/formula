@@ -3280,13 +3280,19 @@ export class SpreadsheetApp {
   getSelectionSummary(): SpreadsheetSelectionSummary {
     const sheetId = this.sheetId;
     const workbookContentVersion = this.document.contentVersion;
+    // `getCellComputedValue` only consults the WASM engine cache when a single sheet is present.
+    // When multiple sheets exist we evaluate formulas in-process, so engine computed-value updates
+    // should not invalidate the selection summary cache.
+    const sheetCount = (this.document as any)?.model?.sheets?.size;
+    const useEngineCache = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
+    const computedValuesVersionKey = useEngineCache ? this.computedValuesVersion : 0;
 
     const cached = this.selectionSummaryCache;
     if (
       cached &&
       cached.sheetId === sheetId &&
       cached.workbookContentVersion === workbookContentVersion &&
-      cached.computedValuesVersion === this.computedValuesVersion &&
+      cached.computedValuesVersion === computedValuesVersionKey &&
       cached.rangesKey.length === this.selection.ranges.length * 4
     ) {
       let sameRanges = true;
@@ -3355,7 +3361,7 @@ export class SpreadsheetApp {
       this.selectionSummaryCache = {
         sheetId,
         workbookContentVersion,
-        computedValuesVersion: this.computedValuesVersion,
+        computedValuesVersion: computedValuesVersionKey,
         rangesKey,
         summary,
       };
@@ -3373,7 +3379,7 @@ export class SpreadsheetApp {
       this.selectionSummaryCache = {
         sheetId,
         workbookContentVersion,
-        computedValuesVersion: this.computedValuesVersion,
+        computedValuesVersion: computedValuesVersionKey,
         rangesKey,
         summary,
       };
@@ -3496,7 +3502,7 @@ export class SpreadsheetApp {
     this.selectionSummaryCache = {
       sheetId,
       workbookContentVersion,
-      computedValuesVersion: this.computedValuesVersion,
+      computedValuesVersion: computedValuesVersionKey,
       rangesKey,
       summary,
     };

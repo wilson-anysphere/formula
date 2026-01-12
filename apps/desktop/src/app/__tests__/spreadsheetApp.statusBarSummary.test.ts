@@ -610,4 +610,46 @@ describe("SpreadsheetApp selection summary (status bar)", () => {
     app.destroy();
     root.remove();
   });
+
+  it("does not invalidate selection summary cache on computed-value updates when multiple sheets exist", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    clearSeededCells(app);
+    const doc = app.getDocument();
+
+    // Materialize a second sheet so SpreadsheetApp falls back to the in-process evaluator
+    // (the engine computed-value cache is not used in multi-sheet mode).
+    doc.setCellValue("Sheet2", "A1", 123);
+
+    const sheetId = app.getCurrentSheetId();
+    doc.setCellValue(sheetId, "A1", 5);
+    app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 } }); // A1
+
+    const getCellSpy = vi.spyOn(doc, "getCell");
+    const sparseSpy = vi.spyOn(doc as any, "forEachCellInSheet");
+
+    const first = app.getSelectionSummary();
+    expect(first.sum).toBe(5);
+    getCellSpy.mockClear();
+    sparseSpy.mockClear();
+
+    // Simulate an engine computed-value update for an unrelated cell. This should not invalidate
+    // the selection summary cache in multi-sheet mode.
+    (app as any).uiReady = false;
+    (app as any).applyComputedChanges([{ sheetId, row: 10, col: 10, value: 999 }]);
+
+    const second = app.getSelectionSummary();
+    expect(second).toEqual(first);
+    expect(getCellSpy).not.toHaveBeenCalled();
+    expect(sparseSpy).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
 });
