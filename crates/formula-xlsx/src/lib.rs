@@ -532,6 +532,75 @@ impl XlsxDocument {
         }
         true
     }
+
+    /// Resolve a worksheet cell's `c/@vm` (value metadata index) to a rich value index.
+    ///
+    /// This is a best-effort helper for Excel rich values (including images-in-cell).
+    ///
+    /// Returns:
+    /// - `Ok(None)` if the cell has no stored `CellMeta.vm` (no `c/@vm`), or if the workbook has no
+    ///   `xl/metadata.xml` part.
+    /// - `Ok(Some(index))` if the cell's `vm` can be resolved to an `xl/richData/richValue.xml`
+    ///   record index.
+    /// - `Err(_)` only if `xl/metadata.xml` exists but is not valid UTF-8 or valid XML.
+    pub fn rich_value_index_for_cell(
+        &self,
+        sheet_id: WorksheetId,
+        cell: CellRef,
+    ) -> Result<Option<u32>, XlsxError> {
+        let Some(vm) = self
+            .meta
+            .cell_meta
+            .get(&(sheet_id, cell))
+            .and_then(|m| m.vm)
+        else {
+            return Ok(None);
+        };
+
+        let Some(metadata_xml) = self.parts.get("xl/metadata.xml") else {
+            return Ok(None);
+        };
+
+        let map =
+            parse_value_metadata_vm_to_rich_value_index_map(metadata_xml).map_err(|err| match err {
+                XmlDomError::Utf8(err) => {
+                    XlsxError::Invalid(format!("xl/metadata.xml is not valid UTF-8: {err}"))
+                }
+                XmlDomError::Parse(err) => XlsxError::RoXml(err),
+            })?;
+
+        Ok(map.get(&vm).copied())
+    }
+
+    /// Resolve all cells with a stored `c/@vm` (value metadata index) to rich value indices.
+    ///
+    /// This is a best-effort helper that returns an empty map if `xl/metadata.xml` is missing.
+    pub fn rich_value_indices(&self) -> Result<HashMap<(WorksheetId, CellRef), u32>, XlsxError> {
+        let Some(metadata_xml) = self.parts.get("xl/metadata.xml") else {
+            return Ok(HashMap::new());
+        };
+
+        let vm_to_rich_value_index =
+            parse_value_metadata_vm_to_rich_value_index_map(metadata_xml).map_err(|err| match err {
+                XmlDomError::Utf8(err) => {
+                    XlsxError::Invalid(format!("xl/metadata.xml is not valid UTF-8: {err}"))
+                }
+                XmlDomError::Parse(err) => XlsxError::RoXml(err),
+            })?;
+
+        let mut out = HashMap::new();
+        for (&(worksheet_id, cell_ref), meta) in &self.meta.cell_meta {
+            let Some(vm) = meta.vm else {
+                continue;
+            };
+            let Some(rich_value_index) = vm_to_rich_value_index.get(&vm).copied() else {
+                continue;
+            };
+            out.insert((worksheet_id, cell_ref), rich_value_index);
+        }
+
+        Ok(out)
+    }
 }
 
 fn cell_meta_from_value(value: &CellValue) -> (Option<CellValueKind>, Option<String>) {
