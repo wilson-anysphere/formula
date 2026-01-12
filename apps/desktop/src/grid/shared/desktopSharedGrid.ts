@@ -162,6 +162,11 @@ export class DesktopSharedGrid {
   private selectionAnchor: { row: number; col: number } | null = null;
   private keyboardAnchor: { row: number; col: number } | null = null;
   private selectionPointerId: number | null = null;
+  /**
+   * Cached selection canvas origin (client-space), used to avoid layout reads in
+   * hot pointer-move paths.
+   */
+  private selectionCanvasViewportOrigin: { left: number; top: number } | null = null;
   private transientRange: CellRange | null = null;
   private lastPointerViewport: { x: number; y: number } | null = null;
   private autoScrollFrame: number | null = null;
@@ -321,6 +326,7 @@ export class DesktopSharedGrid {
     this.fillHandleState = null;
     this.lastPointerViewport = null;
     this.selectionAnchor = null;
+    this.clearViewportOrigin();
     this.stopAutoScroll();
 
     const pointerId = this.selectionPointerId;
@@ -1121,7 +1127,23 @@ export class DesktopSharedGrid {
     this.renderer.setFillPreviewRange(unionRange);
   }
 
+  private cacheViewportOrigin(): { left: number; top: number } {
+    const rect = this.selectionCanvas.getBoundingClientRect();
+    const origin = { left: rect.left, top: rect.top };
+    this.selectionCanvasViewportOrigin = origin;
+    return origin;
+  }
+
+  private clearViewportOrigin(): void {
+    this.selectionCanvasViewportOrigin = null;
+  }
+
   private getViewportPoint(event: { clientX: number; clientY: number }): { x: number; y: number } {
+    const origin = this.selectionCanvasViewportOrigin;
+    if (origin) {
+      return { x: event.clientX - origin.left, y: event.clientY - origin.top };
+    }
+
     const rect = this.selectionCanvas.getBoundingClientRect();
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   }
@@ -1208,14 +1230,13 @@ export class DesktopSharedGrid {
 
     const onPointerDown = (event: PointerEvent) => {
       const renderer = this.renderer;
-      const point = this.getViewportPoint(event);
-      this.lastPointerViewport = point;
 
       // Excel/Sheets behavior: right-clicking inside an existing selection keeps the
       // selection intact; right-clicking outside moves the active cell to the clicked
       // cell. We intentionally only support sheet cells for now (not row/col header
       // context menus).
       if (event.pointerType === "mouse" && event.button !== 0) {
+        const point = this.getViewportPoint(event);
         const picked = renderer.pickCellAt(point.x, point.y);
         if (!picked) return;
 
@@ -1257,6 +1278,9 @@ export class DesktopSharedGrid {
       this.dragMode = null;
       this.fillHandleState = null;
       renderer.setFillPreviewRange(null);
+      this.cacheViewportOrigin();
+      const point = this.getViewportPoint(event);
+      this.lastPointerViewport = point;
 
       if (options.enableResize) {
         const hit = this.getResizeHit(point.x, point.y);
@@ -1317,7 +1341,10 @@ export class DesktopSharedGrid {
       }
 
       const picked = renderer.pickCellAt(point.x, point.y);
-      if (!picked) return;
+      if (!picked) {
+        this.clearViewportOrigin();
+        return;
+      }
 
       if (this.interactionMode === "rangeSelection") {
         this.selectionPointerId = event.pointerId;
@@ -1458,6 +1485,7 @@ export class DesktopSharedGrid {
         this.emitSelectionChange(prevSelection, nextSelection);
         this.emitSelectionRangeChange(prevRange, nextRange);
         this.scheduleAutoScroll();
+        this.clearViewportOrigin();
         return;
       }
 
@@ -1538,6 +1566,7 @@ export class DesktopSharedGrid {
         const drag = this.resizeDrag;
         this.resizePointerId = null;
         this.resizeDrag = null;
+        this.clearViewportOrigin();
         selectionCanvas.style.cursor = "default";
         try {
           selectionCanvas.releasePointerCapture?.(event.pointerId);
@@ -1573,6 +1602,7 @@ export class DesktopSharedGrid {
       this.selectionPointerId = null;
       this.selectionAnchor = null;
       this.lastPointerViewport = null;
+      this.clearViewportOrigin();
       this.stopAutoScroll();
 
       if (dragMode === "fillHandle") {
@@ -1920,6 +1950,9 @@ export class DesktopSharedGrid {
 
   resize(width: number, height: number, devicePixelRatio: number): void {
     this.renderer.resize(width, height, devicePixelRatio);
+    if (this.selectionCanvasViewportOrigin) {
+      this.cacheViewportOrigin();
+    }
     this.syncScrollbars();
     this.emitScroll();
   }

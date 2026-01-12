@@ -349,6 +349,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const selectionAnchorRef = useRef<{ row: number; col: number } | null>(null);
   const keyboardAnchorRef = useRef<{ row: number; col: number } | null>(null);
   const selectionPointerIdRef = useRef<number | null>(null);
+  const selectionCanvasViewportOriginRef = useRef<{ left: number; top: number } | null>(null);
   const transientRangeRef = useRef<CellRange | null>(null);
   const lastPointerViewportRef = useRef<{ x: number; y: number } | null>(null);
   const autoScrollFrameRef = useRef<number | null>(null);
@@ -753,6 +754,10 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const rect = container.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
       renderer.resize(rect.width, rect.height, dpr);
+      if (selectionCanvasViewportOriginRef.current) {
+        const canvasRect = selectionCanvas.getBoundingClientRect();
+        selectionCanvasViewportOriginRef.current = { left: canvasRect.left, top: canvasRect.top };
+      }
       syncScrollbars();
     };
 
@@ -970,7 +975,23 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       autoScrollFrameRef.current = null;
     };
 
+    const cacheViewportOrigin = () => {
+      const rect = selectionCanvas.getBoundingClientRect();
+      const origin = { left: rect.left, top: rect.top };
+      selectionCanvasViewportOriginRef.current = origin;
+      return origin;
+    };
+
+    const clearViewportOrigin = () => {
+      selectionCanvasViewportOriginRef.current = null;
+    };
+
     const getViewportPoint = (event: { clientX: number; clientY: number }) => {
+      const origin = selectionCanvasViewportOriginRef.current;
+      if (origin) {
+        return { x: event.clientX - origin.left, y: event.clientY - origin.top };
+      }
+
       const rect = selectionCanvas.getBoundingClientRect();
       return { x: event.clientX - rect.left, y: event.clientY - rect.top };
     };
@@ -1286,6 +1307,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
       const touchMode = touchModeRef.current ?? "auto";
       if (event.pointerType === "touch" && touchMode !== "select" && interactionModeRef.current !== "rangeSelection") {
+        cacheViewportOrigin();
         // Allow resizing (and double-tap auto-fit) on touch devices even when touch interactions
         // are primarily configured for pan/zoom. Treat a touch that starts on a resize handle as
         // a resize gesture instead of a pan.
@@ -1368,6 +1390,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
       event.preventDefault();
       keyboardAnchorRef.current = null;
+      cacheViewportOrigin();
       const point = getViewportPoint(event);
       lastPointerViewportRef.current = point;
       dragModeRef.current = null;
@@ -1428,7 +1451,10 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       }
 
       const picked = renderer.pickCellAt(point.x, point.y);
-      if (!picked) return;
+      if (!picked) {
+        clearViewportOrigin();
+        return;
+      }
 
       if (interactionModeRef.current === "rangeSelection") {
         selectionPointerIdRef.current = event.pointerId;
@@ -1567,6 +1593,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           onSelectionRangeChangeRef.current?.(nextRange);
         }
 
+        clearViewportOrigin();
         return;
       }
 
@@ -1660,11 +1687,11 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           const a = points[0]!;
           const b = points[1]!;
           const distance = Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY) || 1;
-          const rect = selectionCanvas.getBoundingClientRect();
           const centerClientX = (a.clientX + b.clientX) / 2;
           const centerClientY = (a.clientY + b.clientY) / 2;
-          const anchorX = centerClientX - rect.left;
-          const anchorY = centerClientY - rect.top;
+          const origin = selectionCanvasViewportOriginRef.current ?? cacheViewportOrigin();
+          const anchorX = centerClientX - origin.left;
+          const anchorY = centerClientY - origin.top;
           setZoomInternal(touchPinch.startZoom * (distance / touchPinch.startDistance), { anchorX, anchorY });
           return;
         }
@@ -1714,6 +1741,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
         resizePointerIdRef.current = null;
         resizeDragRef.current = null;
+        clearViewportOrigin();
         selectionCanvas.style.cursor = "default";
         try {
           selectionCanvas.releasePointerCapture?.(event.pointerId);
@@ -1796,6 +1824,9 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         const wasPinching = touchPinch !== null;
 
         touchPointers.delete(event.pointerId);
+        if (touchPointers.size < 2) {
+          clearViewportOrigin();
+        }
 
         try {
           selectionCanvas.releasePointerCapture?.(event.pointerId);
@@ -1945,6 +1976,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           touchPan = null;
           touchPinch = null;
           touchTapDisabled = false;
+          clearViewportOrigin();
         }
 
         if (wasPinching && touchPointers.size === 1 && !touchPan) {
@@ -1970,6 +2002,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       selectionPointerIdRef.current = null;
       selectionAnchorRef.current = null;
       lastPointerViewportRef.current = null;
+      clearViewportOrigin();
       stopAutoScroll();
 
       const dragMode = dragModeRef.current;
@@ -2053,6 +2086,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       selectionPointerIdRef.current = null;
       selectionAnchorRef.current = null;
       lastPointerViewportRef.current = null;
+      clearViewportOrigin();
       stopAutoScroll();
 
       dragModeRef.current = null;
