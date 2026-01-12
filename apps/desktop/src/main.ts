@@ -208,17 +208,35 @@ if (!formulaBarRoot) {
 const activeCell = document.querySelector<HTMLElement>('[data-testid="active-cell"]');
 const selectionRange = document.querySelector<HTMLElement>('[data-testid="selection-range"]');
 const activeValue = document.querySelector<HTMLElement>('[data-testid="active-value"]');
+const selectionSum = document.querySelector<HTMLElement>('[data-testid="selection-sum"]');
+const selectionAverage = document.querySelector<HTMLElement>('[data-testid="selection-avg"]');
+const selectionCount = document.querySelector<HTMLElement>('[data-testid="selection-count"]');
 const statusMode = document.querySelector<HTMLElement>('[data-testid="status-mode"]');
 const sheetSwitcher = document.querySelector<HTMLSelectElement>('[data-testid="sheet-switcher"]');
+const zoomControl = document.querySelector<HTMLSelectElement>('[data-testid="zoom-control"]');
+const sheetPosition = document.querySelector<HTMLElement>('[data-testid="sheet-position"]');
 const openComments = document.querySelector<HTMLButtonElement>('[data-testid="open-comments-panel"]');
 const auditPrecedents = document.querySelector<HTMLButtonElement>('[data-testid="audit-precedents"]');
 const auditDependents = document.querySelector<HTMLButtonElement>('[data-testid="audit-dependents"]');
 const auditTransitive = document.querySelector<HTMLButtonElement>('[data-testid="audit-transitive"]');
 const openVbaMigratePanel = document.querySelector<HTMLButtonElement>('[data-testid="open-vba-migrate-panel"]');
-if (!activeCell || !selectionRange || !activeValue || !statusMode || !sheetSwitcher) {
+if (
+  !activeCell ||
+  !selectionRange ||
+  !activeValue ||
+  !selectionSum ||
+  !selectionAverage ||
+  !selectionCount ||
+  !statusMode ||
+  !sheetSwitcher ||
+  !zoomControl ||
+  !sheetPosition
+) {
   throw new Error("Missing status bar elements");
 }
 const sheetSwitcherEl = sheetSwitcher;
+const zoomControlEl = zoomControl;
+const sheetPositionEl = sheetPosition;
 if (!openComments) {
   throw new Error("Missing comments panel toggle button");
 }
@@ -229,7 +247,7 @@ if (!auditPrecedents || !auditDependents || !auditTransitive) {
 const workbookId = "local-workbook";
 const app = new SpreadsheetApp(
   gridRoot,
-  { activeCell, selectionRange, activeValue },
+  { activeCell, selectionRange, activeValue, selectionSum, selectionAverage, selectionCount },
   { formulaBar: formulaBarRoot, workbookId },
 );
 
@@ -367,6 +385,32 @@ auditDependents.addEventListener("click", () => {
 });
 auditTransitive.addEventListener("click", () => {
   app.toggleAuditingTransitive();
+  app.focus();
+});
+
+function ensureZoomOption(percent: number): void {
+  const existing = zoomControlEl.querySelector(`option[value="${percent}"]`);
+  if (existing) return;
+  const option = document.createElement("option");
+  option.value = String(percent);
+  option.textContent = `${percent}%`;
+  zoomControlEl.appendChild(option);
+}
+
+function syncZoomControl(): void {
+  const percent = Math.round(app.getZoom() * 100);
+  ensureZoomOption(percent);
+  zoomControlEl.value = String(percent);
+  zoomControlEl.disabled = !app.supportsZoom();
+}
+
+syncZoomControl();
+
+zoomControlEl.addEventListener("change", () => {
+  const nextPercent = Number(zoomControlEl.value);
+  if (!Number.isFinite(nextPercent) || nextPercent <= 0) return;
+  app.setZoom(nextPercent / 100);
+  syncZoomControl();
   app.focus();
 });
 
@@ -602,10 +646,19 @@ function renderSheetTabs(sheets: SheetUiInfo[] = listSheetsForUi()) {
   activeTabEl?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
+function renderSheetPosition(sheets: SheetUiInfo[], activeId: string): void {
+  const total = sheets.length;
+  const index = sheets.findIndex((sheet) => sheet.id === activeId);
+  const position = index >= 0 ? index + 1 : 1;
+  sheetPositionEl.textContent = `Sheet ${position} of ${total}`;
+}
+
 function syncSheetUi(): void {
   const sheets = listSheetsForUi();
+  const activeId = app.getCurrentSheetId();
   renderSheetTabs(sheets);
-  renderSheetSwitcher(sheets, app.getCurrentSheetId());
+  renderSheetSwitcher(sheets, activeId);
+  renderSheetPosition(sheets, activeId);
 }
 
 syncSheetUi();

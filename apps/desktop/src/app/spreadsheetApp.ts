@@ -254,6 +254,9 @@ export interface SpreadsheetAppStatusElements {
   activeCell: HTMLElement;
   selectionRange: HTMLElement;
   activeValue: HTMLElement;
+  selectionSum?: HTMLElement;
+  selectionAverage?: HTMLElement;
+  selectionCount?: HTMLElement;
 }
 
 export type UndoRedoState = {
@@ -1252,6 +1255,24 @@ export class SpreadsheetApp {
 
   getGridMode(): DesktopGridMode {
     return this.gridMode;
+  }
+
+  supportsZoom(): boolean {
+    return this.sharedGrid != null;
+  }
+
+  getZoom(): number {
+    return this.sharedGrid ? this.sharedGrid.renderer.getZoom() : 1;
+  }
+
+  setZoom(nextZoom: number): void {
+    if (!this.sharedGrid) return;
+    this.sharedGrid.renderer.setZoom(nextZoom);
+    // Document sheet views store base axis sizes at zoom=1; apply zoom scaling and resync.
+    this.syncSharedGridAxisSizesFromDocument();
+    // Re-emit scroll so overlays (charts, auditing, etc) can re-layout at the new zoom level.
+    const scroll = this.sharedGrid.getScroll();
+    this.sharedGrid.scrollTo(scroll.x, scroll.y);
   }
 
   /**
@@ -3219,6 +3240,7 @@ export class SpreadsheetApp {
     this.status.selectionRange.textContent =
       this.selection.ranges.length === 1 ? rangeToA1(this.selection.ranges[0]) : `${this.selection.ranges.length} ranges`;
     this.status.activeValue.textContent = this.getCellDisplayValue(this.selection.active);
+    this.updateSelectionStats();
 
     if (this.formulaBar && !this.formulaBar.isEditing()) {
       const address = cellToA1(this.selection.active);
@@ -3235,6 +3257,101 @@ export class SpreadsheetApp {
     }
 
     this.maybeScheduleAuditingUpdate();
+  }
+
+  private updateSelectionStats(): void {
+    const sumEl = this.status.selectionSum;
+    const avgEl = this.status.selectionAverage;
+    const countEl = this.status.selectionCount;
+    if (!sumEl && !avgEl && !countEl) return;
+
+    const { sum, avg, count } = this.computeSelectionStats();
+    const formatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+
+    if (sumEl) sumEl.textContent = `Sum: ${formatter.format(sum)}`;
+    if (avgEl) avgEl.textContent = `Avg: ${formatter.format(avg)}`;
+    if (countEl) countEl.textContent = `Count: ${formatter.format(count)}`;
+  }
+
+  private computeSelectionStats(): { sum: number; avg: number; count: number } {
+    const ranges = this.selection.ranges;
+    if (ranges.length === 0) return { sum: 0, avg: 0, count: 0 };
+
+    const normalized = ranges.map((range) => {
+      const startRow = Math.min(range.startRow, range.endRow);
+      const endRow = Math.max(range.startRow, range.endRow);
+      const startCol = Math.min(range.startCol, range.endCol);
+      const endCol = Math.max(range.startCol, range.endCol);
+      return { startRow, endRow, startCol, endCol };
+    });
+
+    let selectedCellCount = 0;
+    for (const range of normalized) {
+      const rows = Math.max(0, range.endRow - range.startRow + 1);
+      const cols = Math.max(0, range.endCol - range.startCol + 1);
+      selectedCellCount += rows * cols;
+    }
+
+    const useEngineCache = this.document.getSheetIds().length <= 1;
+    const memo = new Map<string, SpreadsheetValue>();
+    const stack = new Set<string>();
+
+    let sum = 0;
+    let count = 0;
+
+    const addValue = (value: SpreadsheetValue): void => {
+      const num = coerceNumber(value);
+      if (num == null) return;
+      sum += num;
+      count += 1;
+    };
+
+    // For small selections, iterate the selection window directly.
+    // For large selections (e.g. select-all), iterate sparse sheet data to avoid O(rows*cols) scans.
+    const SPARSE_SELECTION_THRESHOLD = 10_000;
+    if (selectedCellCount <= SPARSE_SELECTION_THRESHOLD) {
+      for (const range of normalized) {
+        for (let row = range.startRow; row <= range.endRow; row += 1) {
+          for (let col = range.startCol; col <= range.endCol; col += 1) {
+            const coord = { row, col };
+            const state = this.document.getCell(this.sheetId, coord) as { value: unknown; formula: string | null };
+            if (state?.formula != null) {
+              addValue(this.computeCellValue(this.sheetId, coord, memo, stack, { useEngineCache }));
+            } else if (isRichTextValue(state?.value)) {
+              // Rich text is treated as text (non-numeric) in the status bar quick stats.
+            } else {
+              addValue((state?.value as SpreadsheetValue) ?? null);
+            }
+          }
+        }
+      }
+    } else {
+      const sheetModel = (this.document as any)?.model?.sheets?.get(this.sheetId) as { cells?: Map<string, any> } | undefined;
+      const cells: Map<string, { value: unknown; formula: string | null }> | undefined = sheetModel?.cells;
+      if (cells) {
+        const inSelection = (row: number, col: number): boolean =>
+          normalized.some((range) => row >= range.startRow && row <= range.endRow && col >= range.startCol && col <= range.endCol);
+
+        for (const [key, cell] of cells.entries()) {
+          const [rowStr, colStr] = key.split(",");
+          const row = Number(rowStr);
+          const col = Number(colStr);
+          if (!Number.isInteger(row) || !Number.isInteger(col)) continue;
+          if (!inSelection(row, col)) continue;
+          const coord = { row, col };
+          if (cell.formula != null) {
+            addValue(this.computeCellValue(this.sheetId, coord, memo, stack, { useEngineCache }));
+          } else if (isRichTextValue(cell.value)) {
+            // Ignore rich text (non-numeric).
+          } else {
+            addValue((cell.value as SpreadsheetValue) ?? null);
+          }
+        }
+      }
+    }
+
+    const avg = count === 0 ? 0 : sum / count;
+    return { sum, avg, count };
   }
 
   private syncEngineNow(): void {

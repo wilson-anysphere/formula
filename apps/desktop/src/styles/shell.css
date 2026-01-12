@@ -199,15 +199,47 @@ dialog.goto-dialog::backdrop {
 
 .statusbar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 6px;
   padding: 8px 12px;
   border-top: 1px solid var(--border);
   background: var(--bg-secondary);
   color: var(--text-primary);
   font-size: 12px;
-  align-items: center;
+  align-items: stretch;
   min-width: 0;
+}
+
+.statusbar__main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.statusbar__item {
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.statusbar__spacer {
+  flex: 1;
+  min-width: 0;
+}
+
+.statusbar__debug {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  color: var(--text-secondary);
+}
+
+.statusbar__debug > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .statusbar-mode {
@@ -230,6 +262,7 @@ dialog.goto-dialog::backdrop {
     "Liberation Mono",
     "Courier New",
     monospace;
+  color: var(--text-primary);
 }
 
 .statusbar button {

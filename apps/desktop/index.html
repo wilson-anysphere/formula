@@ -29,42 +29,59 @@
       </div>
       <div id="sheet-tabs" class="sheet-tabs" data-testid="sheet-tabs"></div>
       <div class="statusbar">
-        <div class="statusbar-mode" data-testid="status-mode">Ready</div>
-        <div>
-          Active:
-          <code data-testid="active-cell">A1</code>
+        <div class="statusbar__main">
+          <div class="statusbar-mode" data-testid="status-mode">Ready</div>
+          <div class="statusbar__item" data-testid="selection-sum">Sum: 0</div>
+          <div class="statusbar__item" data-testid="selection-avg">Avg: 0</div>
+          <div class="statusbar__item" data-testid="selection-count">Count: 0</div>
+          <div class="statusbar__spacer"></div>
+          <select data-testid="zoom-control" aria-label="Zoom">
+            <option value="50">50%</option>
+            <option value="75">75%</option>
+            <option value="100">100%</option>
+            <option value="125">125%</option>
+            <option value="150">150%</option>
+            <option value="200">200%</option>
+          </select>
+          <div class="statusbar__item" data-testid="sheet-position">Sheet 1 of 1</div>
         </div>
-        <div>
-          Sheet:
-          <select data-testid="sheet-switcher"></select>
+        <div class="statusbar__debug">
+          <div>
+            Active:
+            <code data-testid="active-cell">A1</code>
+          </div>
+          <div>
+            Sheet:
+            <select data-testid="sheet-switcher"></select>
+          </div>
+          <div>
+            Selection:
+            <code data-testid="selection-range">A1</code>
+          </div>
+          <div>
+            Value:
+            <code data-testid="active-value"></code>
+          </div>
+          <button type="button" data-testid="audit-precedents">Trace precedents</button>
+          <button type="button" data-testid="audit-dependents">Trace dependents</button>
+          <button type="button" data-testid="audit-transitive">Transitive</button>
+          <button type="button" data-testid="split-vertical">Split vertical</button>
+          <button type="button" data-testid="split-horizontal">Split horizontal</button>
+          <button type="button" data-testid="split-none">Unsplit</button>
+          <button type="button" data-testid="freeze-panes">Freeze Panes</button>
+          <button type="button" data-testid="freeze-top-row">Freeze Top Row</button>
+          <button type="button" data-testid="freeze-first-column">Freeze First Column</button>
+          <button type="button" data-testid="unfreeze-panes">Unfreeze Panes</button>
+          <button type="button" data-testid="open-ai-panel">AI panel</button>
+          <button type="button" data-testid="open-ai-audit-panel">Audit log</button>
+          <button type="button" data-testid="open-data-queries-panel">Queries</button>
+          <button type="button" data-testid="open-macros-panel">Macros</button>
+          <button type="button" data-testid="open-script-editor-panel">Scripts</button>
+          <button type="button" data-testid="open-python-panel">Python</button>
+          <button type="button" data-testid="open-extensions-panel">Extensions</button>
+          <button type="button" data-testid="open-vba-migrate-panel">Migrate Macros</button>
+          <button type="button" data-testid="open-comments-panel">Comments</button>
         </div>
-        <div>
-          Selection:
-          <code data-testid="selection-range">A1</code>
-        </div>
-        <div>
-          Value:
-          <code data-testid="active-value"></code>
-        </div>
-        <button type="button" data-testid="audit-precedents">Trace precedents</button>
-        <button type="button" data-testid="audit-dependents">Trace dependents</button>
-        <button type="button" data-testid="audit-transitive">Transitive</button>
-        <button type="button" data-testid="split-vertical">Split vertical</button>
-        <button type="button" data-testid="split-horizontal">Split horizontal</button>
-        <button type="button" data-testid="split-none">Unsplit</button>
-        <button type="button" data-testid="freeze-panes">Freeze Panes</button>
-        <button type="button" data-testid="freeze-top-row">Freeze Top Row</button>
-        <button type="button" data-testid="freeze-first-column">Freeze First Column</button>
-        <button type="button" data-testid="unfreeze-panes">Unfreeze Panes</button>
-        <button type="button" data-testid="open-ai-panel">AI panel</button>
-        <button type="button" data-testid="open-ai-audit-panel">Audit log</button>
-        <button type="button" data-testid="open-data-queries-panel">Queries</button>
-        <button type="button" data-testid="open-macros-panel">Macros</button>
-        <button type="button" data-testid="open-script-editor-panel">Scripts</button>
-        <button type="button" data-testid="open-python-panel">Python</button>
-        <button type="button" data-testid="open-extensions-panel">Extensions</button>
-        <button type="button" data-testid="open-vba-migrate-panel">Migrate Macros</button>
-        <button type="button" data-testid="open-comments-panel">Comments</button>
       </div>
     </div>
     <div id="toast-root" data-testid="toast-root" aria-live="polite" aria-atomic="true"></div>
