@@ -551,5 +551,55 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     expect(requestCount).toBe(0);
     expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
   });
-});
 
+  test("extension panels are sandboxed with connect-src 'none' (no network bypass) under CSP", async ({
+    page
+  }) => {
+    const cspViolations: string[] = [];
+
+    page.on("console", (msg) => {
+      if (msg.type() !== "error" && msg.type() !== "warning") {
+        return;
+      }
+      const text = msg.text();
+      if (/content security policy/i.test(text)) {
+        cspViolations.push(text);
+      }
+    });
+
+    const response = await page.goto("/");
+    const cspHeader = response?.headers()["content-security-policy"];
+    expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
+
+    await expect(page.locator("#grid")).toHaveCount(1);
+
+    const manifestUrl = viteFsUrl(path.join(repoRoot, "extensions/sample-hello/package.json"));
+
+    await page.evaluate(async ({ manifestUrl }) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const host: any = (window as any).__formulaExtensionHost;
+      if (!host) throw new Error("Missing window.__formulaExtensionHost (desktop e2e harness)");
+      await host.loadExtensionFromUrl(manifestUrl);
+      await host.executeCommand("sampleHello.openPanel");
+    }, {
+      manifestUrl
+    });
+
+    const iframe = page.locator('[data-testid="extension-webview-sampleHello.panel"]');
+    await expect(iframe).toHaveCount(1);
+    await expect(iframe).toHaveAttribute("sandbox", "allow-scripts");
+    await expect(iframe).toHaveAttribute("src", /^(blob:|data:)/);
+
+    const iframeSrc = await iframe.getAttribute("src");
+    expect(iframeSrc).toBeTruthy();
+
+    const panelHtml = await page.evaluate(async (src) => {
+      const res = await fetch(String(src));
+      return await res.text();
+    }, iframeSrc);
+
+    expect(panelHtml).toContain("Content-Security-Policy");
+    expect(panelHtml).toContain("connect-src 'none'");
+    expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
+  });
+});
