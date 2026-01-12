@@ -2656,7 +2656,8 @@ class BrowserExtensionHost {
         // emit selectionChanged events with empty matrices (e.g. large selections) to avoid
         // catastrophic allocations; those payloads do not expose cell values/formulas and should
         // not contribute to clipboard DLP enforcement.
-        let matrixBounds = null;
+        let valuesBounds = null;
+        let formulasBounds = null;
         try {
           if (Object.prototype.hasOwnProperty.call(selection, "values")) {
             const values = selection.values;
@@ -2670,7 +2671,7 @@ class BrowserExtensionHost {
                 maxCol = Math.max(maxCol, row.length - 1);
               }
               if (maxRow >= 0 && maxCol >= 0) {
-                matrixBounds = { rows: maxRow + 1, cols: maxCol + 1 };
+                valuesBounds = { rows: maxRow + 1, cols: maxCol + 1 };
               }
             }
           }
@@ -2679,7 +2680,7 @@ class BrowserExtensionHost {
         }
 
         try {
-          if (!matrixBounds && Object.prototype.hasOwnProperty.call(selection, "formulas")) {
+          if (Object.prototype.hasOwnProperty.call(selection, "formulas")) {
             const formulas = selection.formulas;
             if (Array.isArray(formulas)) {
               let maxRow = -1;
@@ -2695,7 +2696,7 @@ class BrowserExtensionHost {
                 }
               }
               if (maxRow >= 0 && maxCol >= 0) {
-                matrixBounds = { rows: maxRow + 1, cols: maxCol + 1 };
+                formulasBounds = { rows: maxRow + 1, cols: maxCol + 1 };
               }
             }
           }
@@ -2703,7 +2704,7 @@ class BrowserExtensionHost {
           // ignore
         }
 
-        if (!matrixBounds) return;
+        if (!valuesBounds && !formulasBounds) return;
 
         const looksLikeRange =
           Object.prototype.hasOwnProperty.call(selection, "startRow") &&
@@ -2739,26 +2740,44 @@ class BrowserExtensionHost {
         // Some hosts may include truncated/partial matrices that do not fully match the declared
         // selection range. Align taint tracking with the data that was actually delivered by
         // clamping the range to the matrix bounds (best-effort).
+        let sr = null;
+        let sc = null;
+        let er = null;
+        let ec = null;
         try {
           if (
-            matrixBounds &&
             Number.isFinite(Number(range.startRow)) &&
             Number.isFinite(Number(range.startCol)) &&
             Number.isFinite(Number(range.endRow)) &&
             Number.isFinite(Number(range.endCol))
           ) {
-            const sr = Math.min(Number(range.startRow), Number(range.endRow));
-            const sc = Math.min(Number(range.startCol), Number(range.endCol));
-            const er = Math.max(Number(range.startRow), Number(range.endRow));
-            const ec = Math.max(Number(range.startCol), Number(range.endCol));
-
-            const boundedEndRow = Math.min(er, sr + matrixBounds.rows - 1);
-            const boundedEndCol = Math.min(ec, sc + matrixBounds.cols - 1);
-            range = { startRow: sr, startCol: sc, endRow: boundedEndRow, endCol: boundedEndCol };
+            sr = Math.min(Number(range.startRow), Number(range.endRow));
+            sc = Math.min(Number(range.startCol), Number(range.endCol));
+            er = Math.max(Number(range.startRow), Number(range.endRow));
+            ec = Math.max(Number(range.startCol), Number(range.endCol));
           }
         } catch {
           // ignore
         }
+        if (sr == null || sc == null || er == null || ec == null) return;
+
+        /** @type {Array<{ startRow: number, startCol: number, endRow: number, endCol: number }>} */
+        const deliveredRanges = [];
+        try {
+          const seen = new Set();
+          for (const bounds of [valuesBounds, formulasBounds]) {
+            if (!bounds) continue;
+            const boundedEndRow = Math.min(er, sr + bounds.rows - 1);
+            const boundedEndCol = Math.min(ec, sc + bounds.cols - 1);
+            const key = `${sr},${sc},${boundedEndRow},${boundedEndCol}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            deliveredRanges.push({ startRow: sr, startCol: sc, endRow: boundedEndRow, endCol: boundedEndCol });
+          }
+        } catch {
+          // ignore
+        }
+        if (deliveredRanges.length === 0) return;
 
         const sheetId =
           (typeof data?.sheetId === "string" && data.sheetId.trim()) ||
@@ -2768,13 +2787,15 @@ class BrowserExtensionHost {
         if (!sheetId) return;
         this._activeSheetId = sheetId;
 
-        this._taintExtensionRange(extension, {
-          sheetId,
-          startRow: range.startRow,
-          startCol: range.startCol,
-          endRow: range.endRow,
-          endCol: range.endCol
-        });
+        for (const delivered of deliveredRanges) {
+          this._taintExtensionRange(extension, {
+            sheetId,
+            startRow: delivered.startRow,
+            startCol: delivered.startCol,
+            endRow: delivered.endRow,
+            endCol: delivered.endCol
+          });
+        }
         return;
       }
 

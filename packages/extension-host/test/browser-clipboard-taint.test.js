@@ -650,6 +650,58 @@ test("BrowserExtensionHost: selectionChanged taints when formulas matrix include
   ]);
 });
 
+test("BrowserExtensionHost: selectionChanged taints formulas that extend beyond values matrix bounds", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.selection-event-values-and-formulas";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "selection-event-values-and-formulas",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: [],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+  extension.active = true;
+
+  host._broadcastEvent("selectionChanged", {
+    sheetId: "sheet1",
+    selection: {
+      startRow: 0,
+      startCol: 0,
+      endRow: 0,
+      endCol: 10,
+      values: [[1]],
+      formulas: [["=A1", "=B1"]],
+    },
+  });
+
+  assert.deepEqual(sortRanges(extension.taintedRanges), [
+    { sheetId: "sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 1 },
+  ]);
+});
+
 test("BrowserExtensionHost: taints selectionChanged events when payload is truncated but includes values", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
