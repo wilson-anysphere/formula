@@ -1313,6 +1313,17 @@ mod tests {
         assert_eq!(root.tag_name().name(), "workbook");
         assert_eq!(root.tag_name().namespace(), Some(SPREADSHEETML_NS));
 
+        let count = root
+            .descendants()
+            .filter(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "definedName"
+                    && n.attribute("name") == Some("_xlnm.Print_Titles")
+                    && n.attribute("localSheetId") == Some("0")
+            })
+            .count();
+        assert_eq!(count, 1, "expected exactly one updated definedName, got {count}");
+
         let defined_name = root
             .descendants()
             .find(|n| {
@@ -1354,6 +1365,17 @@ mod tests {
         let root = doc.root_element();
         assert_eq!(root.tag_name().name(), "workbook");
         assert_eq!(root.tag_name().namespace(), Some(SPREADSHEETML_NS));
+
+        let count = root
+            .descendants()
+            .filter(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "definedName"
+                    && n.attribute("name") == Some("_xlnm.Print_Titles")
+                    && n.attribute("localSheetId") == Some("0")
+            })
+            .count();
+        assert_eq!(count, 1, "expected exactly one updated definedName, got {count}");
 
         let defined_name = root
             .descendants()
