@@ -722,6 +722,12 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="percentile_inc", tags=["stat", "PERCENTILE.INC"], formula="=PERCENTILE.INC({1,2,3,4},0.25)")
     _add_case(cases, prefix="percentile_exc", tags=["stat", "PERCENTILE.EXC"], formula="=PERCENTILE.EXC({1,2,3,4},0.25)")
 
+    # PERCENTRANK and variants: use a 1..9 set so both inclusive and exclusive variants
+    # yield simple finite decimals without needing explicit `significance`.
+    _add_case(cases, prefix="percentrank", tags=["stat", "PERCENTRANK"], formula="=PERCENTRANK({1,2,3,4,5,6,7,8,9},2)")
+    _add_case(cases, prefix="percentrank_inc", tags=["stat", "PERCENTRANK.INC"], formula="=PERCENTRANK.INC({1,2,3,4,5,6,7,8,9},2)")
+    _add_case(cases, prefix="percentrank_exc", tags=["stat", "PERCENTRANK.EXC"], formula="=PERCENTRANK.EXC({1,2,3,4,5,6,7,8,9},2)")
+
     _add_case(cases, prefix="quartile", tags=["stat", "QUARTILE"], formula="=QUARTILE({1,2,3,4},1)")
     _add_case(cases, prefix="quartile_inc", tags=["stat", "QUARTILE.INC"], formula="=QUARTILE.INC({1,2,3,4},1)")
     _add_case(cases, prefix="quartile_exc", tags=["stat", "QUARTILE.EXC"], formula="=QUARTILE.EXC({1,2,3,4},1)")
@@ -746,6 +752,8 @@ def generate_cases() -> dict[str, Any]:
 
     _add_case(cases, prefix="trimmean", tags=["stat", "TRIMMEAN"], formula="=TRIMMEAN({1,2,3,100},0.5)")
 
+    _add_case(cases, prefix="standardize", tags=["stat", "STANDARDIZE"], formula="=STANDARDIZE(1,3,2)")
+
     _add_case(cases, prefix="correl", tags=["stat", "CORREL"], formula="=CORREL({1,2,3},{1,5,7})")
     _add_case(cases, prefix="pearson", tags=["stat", "PEARSON"], formula="=PEARSON({1,2,3},{1,5,7})")
     _add_case(cases, prefix="covar", tags=["stat", "COVAR"], formula="=COVAR({1,2,3},{1,5,7})")
@@ -757,6 +765,9 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="intercept", tags=["stat", "INTERCEPT"], formula="=INTERCEPT({1,2,3},{1,2,3})")
     _add_case(cases, prefix="forecast", tags=["stat", "FORECAST"], formula="=FORECAST(4,{1,2,3},{1,2,3})")
     _add_case(cases, prefix="forecast_linear", tags=["stat", "FORECAST.LINEAR"], formula="=FORECAST.LINEAR(4,{1,2,3},{1,2,3})")
+
+    # STEYX should be 0 for a perfectly linear relationship (y = 2x + 1).
+    _add_case(cases, prefix="steyx", tags=["stat", "STEYX"], formula="=STEYX({3,5,7,9,11},{1,2,3,4,5})")
 
     # MAXIFS / MINIFS (criteria-based aggregates)
     maxifs_inputs = [

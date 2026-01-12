@@ -10,8 +10,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "9d093fa4ee02da46fc95b05341de1c7c323ebaaeae707a30e40c055a22caacbe",
-    "count": 1373
+    "sha256": "0f5e8d4ad22953dc197a70be4113246c22786e0c50646ce909cc20189726a53f",
+    "count": 1378
   },
   "results": [
     {
@@ -8818,6 +8818,36 @@
       "displayText": "1.25"
     },
     {
+      "caseId": "percentrank_00c3b168c5fc",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.125
+      },
+      "address": "C1",
+      "displayText": "0.125"
+    },
+    {
+      "caseId": "percentrank_inc_0978009ee57b",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.125
+      },
+      "address": "C1",
+      "displayText": "0.125"
+    },
+    {
+      "caseId": "percentrank_exc_a00d0e971371",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.2
+      },
+      "address": "C1",
+      "displayText": "0.2"
+    },
+    {
       "caseId": "quartile_6aed64177c5d",
       "outputCell": "C1",
       "result": {
@@ -9008,6 +9038,16 @@
       "displayText": "2.5"
     },
     {
+      "caseId": "standardize_f798ac3ecdd6",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": -1.0
+      },
+      "address": "C1",
+      "displayText": "-1"
+    },
+    {
       "caseId": "correl_77381123d78f",
       "outputCell": "C1",
       "result": {
@@ -9106,6 +9146,16 @@
       },
       "address": "C1",
       "displayText": "4"
+    },
+    {
+      "caseId": "steyx_069420cb8eee",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0
+      },
+      "address": "C1",
+      "displayText": "0"
     },
     {
       "caseId": "maxifs_f0ddb81e2295",

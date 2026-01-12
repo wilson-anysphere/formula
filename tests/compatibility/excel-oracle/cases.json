@@ -19236,6 +19236,36 @@
       "id": "percentile_exc_8cb094597481"
     },
     {
+      "formula": "=PERCENTRANK({1,2,3,4,5,6,7,8,9},2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "PERCENTRANK"
+      ],
+      "id": "percentrank_00c3b168c5fc"
+    },
+    {
+      "formula": "=PERCENTRANK.INC({1,2,3,4,5,6,7,8,9},2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "PERCENTRANK.INC"
+      ],
+      "id": "percentrank_inc_0978009ee57b"
+    },
+    {
+      "formula": "=PERCENTRANK.EXC({1,2,3,4,5,6,7,8,9},2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "PERCENTRANK.EXC"
+      ],
+      "id": "percentrank_exc_a00d0e971371"
+    },
+    {
       "formula": "=QUARTILE({1,2,3,4},1)",
       "outputCell": "C1",
       "inputs": [],
@@ -19426,6 +19456,16 @@
       "id": "trimmean_ded6b994d483"
     },
     {
+      "formula": "=STANDARDIZE(1,3,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "STANDARDIZE"
+      ],
+      "id": "standardize_f798ac3ecdd6"
+    },
+    {
       "formula": "=CORREL({1,2,3},{1,5,7})",
       "outputCell": "C1",
       "inputs": [],
@@ -19524,6 +19564,16 @@
         "FORECAST.LINEAR"
       ],
       "id": "forecast_linear_484b837287c3"
+    },
+    {
+      "formula": "=STEYX({3,5,7,9,11},{1,2,3,4,5})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "STEYX"
+      ],
+      "id": "steyx_069420cb8eee"
     },
     {
       "formula": "=MAXIFS(A1:A3,B1:B3,\"A\")",
