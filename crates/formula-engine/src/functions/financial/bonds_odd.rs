@@ -125,7 +125,8 @@
 //!
 //! Typical validation (Excel-style `#NUM!`):
 //!
-//! - `I < S < F <= M`
+//! - `I <= S <= F <= M` with strict `I < F` and `S < M` (Excel allows some equality boundaries;
+//!   see `tests/odd_coupon_date_boundaries.rs`)
 //! - `rate >= 0`, `yld` (or `pr`) finite, `redemption > 0`
 //! - `frequency ∈ {1,2,4}`, `basis ∈ 0..=4`
 //!
@@ -190,7 +191,8 @@
 //!
 //! Typical validation (Excel-style `#NUM!`):
 //!
-//! - `L < S < M`
+//! - `L <= S < M` with strict `L < M` (Excel allows `S == L`; see
+//!   `tests/odd_coupon_date_boundaries.rs`)
 //! - `rate >= 0`, `yld` (or `pr`) finite, `redemption > 0`
 //! - `frequency ∈ {1,2,4}`, `basis ∈ 0..=4`
 //!
