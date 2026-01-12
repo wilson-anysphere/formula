@@ -109,6 +109,21 @@ test("desktop index.html exposes required shell containers and testids", () => {
     `apps/desktop/index.html contains duplicate data-testid values:\\n${allDuplicateTestIds.map((m) => `- ${m}`).join("\\n")}`,
   );
 
+  // Similar guard for HTML ids: the app boot code relies on `getElementById` for key shell
+  // mounts (grid, ribbon, docks). Duplicate ids can cause subtle startup bugs.
+  const allIdMatches = [...htmlWithoutScripts.matchAll(/\bid=["']([^"']+)["']/g)].map((m) => m[1]);
+  const idCounts = new Map();
+  for (const id of allIdMatches) idCounts.set(id, (idCounts.get(id) ?? 0) + 1);
+  const duplicateIds = [...idCounts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([id, count]) => `${id} (${count}x)`)
+    .sort();
+  assert.deepEqual(
+    duplicateIds,
+    [],
+    `apps/desktop/index.html contains duplicate id attributes:\\n${duplicateIds.map((m) => `- ${m}`).join("\\n")}`,
+  );
+
   // The collaboration indicator is part of the visible status bar (it should not be
   // hidden inside `.statusbar__debug`, which is display:none in production styles).
   const collabStatusIndex = html.indexOf('data-testid="collab-status"');
