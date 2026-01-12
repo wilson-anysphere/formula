@@ -436,6 +436,13 @@ mod tests {
     }
 
     #[test]
+    fn choose_best_target_supports_text_plain_with_charset_suffix() {
+        let targets = vec!["text/plain;charset=utf-8", "UTF8_STRING"];
+        let best = choose_best_target(&targets, &["text/plain"]);
+        assert_eq!(best, Some("text/plain;charset=utf-8"));
+    }
+
+    #[test]
     fn choose_best_target_falls_back_to_prefix_match_case_insensitive() {
         let targets = vec!["UTF8_STRING", "TEXT/HTML;CHARSET=UTF-8", "text/plain"];
         let best = choose_best_target(&targets, &["text/html"]);
