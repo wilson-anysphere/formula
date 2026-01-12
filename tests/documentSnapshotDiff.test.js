@@ -109,6 +109,16 @@ test("sheetStateFromDocumentSnapshot merges range-run formats when present (Task
   assert.deepEqual(state.cells.get(cellKey(0, 0))?.format, { font: { bold: true } });
 });
 
+test("sheetStateFromDocumentSnapshot merges formatRunsByCol formats from DocumentController snapshots", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  doc.setRangeFormat("Sheet1", "A1:Z1000000", { font: { bold: true } });
+
+  const snapshot = doc.encodeState();
+  const state = sheetStateFromDocumentSnapshot(snapshot, { sheetId: "Sheet1" });
+  assert.deepEqual(state.cells.get(cellKey(0, 0))?.format, { font: { bold: true } });
+});
+
 test("exportSheetForSemanticDiff exports effective formats from column defaults", () => {
   const doc = new DocumentController();
   doc.setCellValue("Sheet1", "A1", 1);
@@ -185,6 +195,22 @@ test("diffDocumentVersionAgainstCurrent uses exportSheetForSemanticDiff (and inc
   });
 
   assert.equal(exportCalls, 1);
+  assert.equal(diff.formatOnly.length, 1);
+  assert.deepEqual(diff.formatOnly[0].cell, { row: 0, col: 0 });
+  assert.equal(diff.modified.length, 0);
+  assert.equal(diff.added.length, 0);
+  assert.equal(diff.removed.length, 0);
+});
+
+test("diffDocumentSnapshots detects formatOnly edits from formatRunsByCol range-run formatting", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  const beforeSnapshot = doc.encodeState();
+
+  doc.setRangeFormat("Sheet1", "A1:Z1000000", { font: { bold: true } });
+  const afterSnapshot = doc.encodeState();
+
+  const diff = diffDocumentSnapshots({ beforeSnapshot, afterSnapshot, sheetId: "Sheet1" });
   assert.equal(diff.formatOnly.length, 1);
   assert.deepEqual(diff.formatOnly[0].cell, { row: 0, col: 0 });
   assert.equal(diff.modified.length, 0);

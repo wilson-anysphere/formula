@@ -167,6 +167,66 @@ function normalizeRangeRuns(raw) {
 }
 
 /**
+ * Parse per-column row interval format runs (DocumentController `formatRunsByCol` snapshot field).
+ *
+ * Newer document snapshots can store compressed range formatting as per-column runs:
+ * `[{ col: 0, runs: [{ startRow, endRowExclusive, format }, ...] }, ...]`.
+ *
+ * We normalize this into the rectangle run shape used by `normalizeRangeRuns` so downstream
+ * diff logic can reuse a single merge path.
+ *
+ * @param {any} raw
+ * @returns {Array<{ startRow: number, startCol: number, endRow: number, endCol: number, format: Record<string, any> }>}
+ */
+function normalizeColFormatRuns(raw) {
+  /** @type {Array<{ startRow: number, startCol: number, endRow: number, endCol: number, format: Record<string, any> }>} */
+  const out = [];
+  if (!raw) return out;
+
+  const addRunsForCol = (colKey, rawRuns) => {
+    const col = Number(colKey);
+    if (!Number.isInteger(col) || col < 0) return;
+    if (!Array.isArray(rawRuns)) return;
+    for (const entry of rawRuns) {
+      if (!entry || typeof entry !== "object") continue;
+      const startRow = Number(entry.startRow ?? entry.start?.row ?? entry.sr ?? entry.r0);
+      const endRowExclusiveNum = Number(entry.endRowExclusive ?? entry.endRowExcl ?? entry.erx ?? entry.r1x);
+      const endRowNum = Number(entry.endRow ?? entry.end?.row ?? entry.er ?? entry.r1);
+      const endRowExclusive = Number.isInteger(endRowExclusiveNum)
+        ? endRowExclusiveNum
+        : Number.isInteger(endRowNum)
+          ? endRowNum + 1
+          : NaN;
+      if (!Number.isInteger(startRow) || startRow < 0) continue;
+      if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow) continue;
+      const format = extractStyleObject(entry.format ?? entry.style ?? entry.value);
+      if (!format) continue;
+      out.push({ startRow, startCol: col, endRow: endRowExclusive - 1, endCol: col, format });
+    }
+  };
+
+  // Preferred encoding: array of { col, runs } entries.
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      if (!entry || typeof entry !== "object") continue;
+      const col = entry.col ?? entry.index ?? entry.column;
+      const runs = entry.runs ?? entry.formatRuns ?? entry.segments ?? entry.items;
+      addRunsForCol(col, runs);
+    }
+    return out;
+  }
+
+  // Also accept object keyed by column index.
+  if (typeof raw === "object") {
+    for (const [key, value] of Object.entries(raw)) {
+      addRunsForCol(key, value?.runs ?? value?.formatRuns ?? value);
+    }
+  }
+
+  return out;
+}
+
+/**
  * Convert a snapshot produced by `apps/desktop/src/document/DocumentController.encodeState()`
  * into the `SheetState` shape expected by `semanticDiff`.
  *
@@ -288,6 +348,18 @@ export function sheetStateFromDocumentSnapshot(snapshot, opts) {
       sheet?.view?.formattingRuns ??
       null,
   );
+  const formatRunsByCol = normalizeColFormatRuns(
+    sheet?.formatRunsByCol ??
+      sheet?.rangeRunsByCol ??
+      sheet?.rangeFormatRunsByCol ??
+      sheet?.formattingRunsByCol ??
+      sheet?.view?.formatRunsByCol ??
+      sheet?.view?.rangeRunsByCol ??
+      sheet?.view?.rangeFormatRunsByCol ??
+      sheet?.view?.formattingRunsByCol ??
+      null,
+  );
+  const allFormatRuns = formatRunsByCol.length > 0 ? [...formatRuns, ...formatRunsByCol] : formatRuns;
 
   /**
    * Apply range format runs without enumerating the full sheet:
@@ -324,7 +396,7 @@ export function sheetStateFromDocumentSnapshot(snapshot, opts) {
     cellsByRow.set(row, bucket);
   }
 
-  if (formatRuns.length > 0 && cellsByRow.size > 0) {
+  if (allFormatRuns.length > 0 && cellsByRow.size > 0) {
     const sortedRows = Array.from(cellsByRow.keys()).sort((a, b) => a - b);
     const lowerBound = (arr, value) => {
       let lo = 0;
@@ -347,7 +419,7 @@ export function sheetStateFromDocumentSnapshot(snapshot, opts) {
       return lo;
     };
 
-    for (const run of formatRuns) {
+    for (const run of allFormatRuns) {
       const startIdx = lowerBound(sortedRows, run.startRow);
       const endIdx = upperBound(sortedRows, run.endRow);
       for (let i = startIdx; i < endIdx; i++) {
