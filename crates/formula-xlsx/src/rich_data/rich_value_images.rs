@@ -108,6 +108,24 @@ impl XlsxPackage {
                 continue;
             };
 
+            // Some producers emit relationship targets like `media/...` (relative to `xl/`) or
+            // `xl/...` (missing the leading `/`), which incorrectly resolve relative to
+            // `xl/richData/`. Make a best-effort guess for these cases when the resolved target is
+            // missing.
+            let mut target_part = target_part;
+            if self.part(&target_part).is_none() {
+                if let Some(rest) = target_part.strip_prefix("xl/richData/") {
+                    if rest.starts_with("media/") {
+                        let alt = format!("xl/{rest}");
+                        if self.part(&alt).is_some() {
+                            target_part = alt;
+                        }
+                    } else if rest.starts_with("xl/") && self.part(rest).is_some() {
+                        target_part = rest.to_string();
+                    }
+                }
+            }
+
             let Some(bytes) = self.part(&target_part) else {
                 out.warnings.push(RichValueWarning::MissingTargetPart {
                     index: rv_index,

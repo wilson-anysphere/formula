@@ -163,3 +163,77 @@ fn rich_value_images_tolerate_non_r_prefixes_for_embed_and_id_attrs() {
     assert_eq!(images.get(&10).map(Vec::as_slice), Some(image_bytes.as_slice()));
     assert!(warnings.is_empty(), "did not expect warnings, got: {warnings:?}");
 }
+
+#[test]
+fn rich_value_images_fallbacks_for_media_targets_relative_to_xl() {
+    let rich_value = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<richValue xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+           xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <rv id="0">
+    <a:blip r:embed="rIdImg"/>
+  </rv>
+</richValue>"#;
+
+    let rich_value_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdImg" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>"#;
+
+    let metadata = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <rvb i="0"/>
+</metadata>"#;
+
+    let image_bytes = b"fake-png";
+
+    let bytes = build_package(&[
+        ("xl/metadata.xml", metadata),
+        ("xl/richData/richValue1.xml", rich_value),
+        ("xl/richData/_rels/richValue1.xml.rels", rich_value_rels),
+        ("xl/media/image1.png", image_bytes),
+    ]);
+
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+    let ExtractedRichValueImages { images, warnings } =
+        pkg.extract_rich_value_images().expect("extract");
+
+    assert_eq!(images.get(&0).map(Vec::as_slice), Some(image_bytes.as_slice()));
+    assert!(warnings.is_empty(), "did not expect warnings, got: {warnings:?}");
+}
+
+#[test]
+fn rich_value_images_fallbacks_for_xl_prefixed_targets_without_leading_slash() {
+    let rich_value = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<richValue xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+           xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <rv id="0">
+    <a:blip r:embed="rIdImg"/>
+  </rv>
+</richValue>"#;
+
+    let rich_value_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdImg" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="xl/media/image1.png"/>
+</Relationships>"#;
+
+    let metadata = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <rvb i="0"/>
+</metadata>"#;
+
+    let image_bytes = b"fake-png";
+
+    let bytes = build_package(&[
+        ("xl/metadata.xml", metadata),
+        ("xl/richData/richValue1.xml", rich_value),
+        ("xl/richData/_rels/richValue1.xml.rels", rich_value_rels),
+        ("xl/media/image1.png", image_bytes),
+    ]);
+
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+    let ExtractedRichValueImages { images, warnings } =
+        pkg.extract_rich_value_images().expect("extract");
+
+    assert_eq!(images.get(&0).map(Vec::as_slice), Some(image_bytes.as_slice()));
+    assert!(warnings.is_empty(), "did not expect warnings, got: {warnings:?}");
+}
