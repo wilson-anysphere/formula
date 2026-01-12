@@ -129,10 +129,10 @@ Cells that reference rich values always carry `vm="…"` to select a record in `
   <sheetData>
     <row r="2">
       <!-- vm="1" => the first valueMetadata record in xl/metadata.xml -->
-      <c r="B2" vm="1">
-        <!-- The cell's plain <v> is not the image payload.
+      <c r="B2" t="e" vm="1">
+        <!-- The cached <v> (here `#VALUE!`) is not the image payload.
              The image binding is driven by vm + metadata.xml. -->
-        <v>0</v>
+        <v>#VALUE!</v>
       </c>
     </row>
   </sheetData>

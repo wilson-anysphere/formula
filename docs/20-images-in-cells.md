@@ -129,6 +129,10 @@ variant shapes are documented further below.
     - image bytes are resolved via `xl/metadata.xml` + `xl/richData/rd*` + `xl/richData/richValueRel.xml(.rels)` → `xl/media/*`
     - no `xl/cellImages.xml`/`xl/cellimages.xml` part is used in that case
     - see: [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md)
+  - Confirmed for a real Excel-generated fixture workbook checked into this repo:
+    - `fixtures/xlsx/basic/image-in-cell.xlsx` (see `fixtures/xlsx/basic/image-in-cell.md`)
+    - same pattern: error cell `t="e"`/`#VALUE!` + `vm="…"` → `xl/metadata.xml` + `xl/richData/rd*` + `richValueRel` → `xl/media/*`
+    - no `xl/cellImages.xml`/`xl/cellimages.xml` part is used in that fixture
   - Still an open question for real Excel-generated `IMAGE()` results and other producers (where `xl/cellImages*.xml` may appear).
 
 #### Parts
