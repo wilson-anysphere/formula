@@ -1,10 +1,10 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::io::{BufRead, Cursor, Read};
+use std::io::{BufRead, BufReader, Cursor, Read};
 use std::sync::Arc;
 
 use csv::ByteRecord;
-use encoding_rs::WINDOWS_1252;
+use encoding_rs::{CoderResult, UTF_16BE, UTF_16LE, WINDOWS_1252};
 use formula_columnar::{
     ColumnSchema, ColumnType as ColumnarType, ColumnarTable, ColumnarTableBuilder, PageCacheConfig,
     TableOptions, Value as ColumnarValue,
@@ -87,6 +87,20 @@ pub fn sniff_csv_delimiter(sample: &[u8]) -> u8 {
 ///
 /// This still honors Excel's `sep=<delimiter>` directive when present on the first line.
 pub fn sniff_csv_delimiter_with_decimal_separator(sample: &[u8], decimal_separator: char) -> u8 {
+    // Best-effort: handle UTF-16 samples by transcoding to UTF-8 before sniffing.
+    if sample.starts_with(&[0xFF, 0xFE]) || sample.starts_with(&[0xFE, 0xFF]) {
+        let decoder = if sample.starts_with(&[0xFF, 0xFE]) {
+            UTF_16LE.new_decoder_with_bom_removal()
+        } else {
+            UTF_16BE.new_decoder_with_bom_removal()
+        };
+        let utf8 = Utf16ToUtf8Reader::new(Cursor::new(sample), decoder);
+        let mut reader = BufReader::new(utf8);
+        return sniff_csv_delimiter_prefix(&mut reader, decimal_separator)
+            .map(|(_, delimiter)| delimiter)
+            .unwrap_or(b',');
+    }
+
     let mut cursor = Cursor::new(sample);
     sniff_csv_delimiter_prefix(&mut cursor, decimal_separator)
         .map(|(_, delimiter)| delimiter)
@@ -157,6 +171,29 @@ pub enum CsvImportError {
 
 /// Import a CSV stream into a [`ColumnarTable`] without materializing a full grid.
 pub fn import_csv_to_columnar_table<R: BufRead>(
+    mut reader: R,
+    options: CsvOptions,
+) -> Result<ColumnarTable, CsvImportError> {
+    // Excel can export delimited text as UTF-16LE/BE (commonly via "Unicode Text"). The CSV parser
+    // expects an 8-bit stream, so detect a UTF-16 BOM and transcode to UTF-8 on the fly.
+    let buf = reader.fill_buf().map_err(CsvImportError::Io)?;
+    if buf.starts_with(&[0xFF, 0xFE]) || buf.starts_with(&[0xFE, 0xFF]) {
+        let decoder = if buf.starts_with(&[0xFF, 0xFE]) {
+            UTF_16LE.new_decoder_with_bom_removal()
+        } else {
+            UTF_16BE.new_decoder_with_bom_removal()
+        };
+        let utf8 = Utf16ToUtf8Reader::new(reader, decoder);
+        let mut options = options;
+        // The transcoder yields valid UTF-8, so force UTF-8 decoding for field values.
+        options.encoding = CsvTextEncoding::Utf8;
+        return import_csv_to_columnar_table_impl(BufReader::new(utf8), options);
+    }
+
+    import_csv_to_columnar_table_impl(reader, options)
+}
+
+fn import_csv_to_columnar_table_impl<R: BufRead>(
     mut reader: R,
     options: CsvOptions,
 ) -> Result<ColumnarTable, CsvImportError> {
@@ -302,6 +339,115 @@ pub fn import_csv_to_columnar_table<R: BufRead>(
     }
 
     Ok(builder.finalize())
+}
+
+/// Streaming UTF-16 → UTF-8 transcoder used for CSV import.
+///
+/// This intentionally keeps the implementation small and best-effort: it relies on `encoding_rs`
+/// for correctness around surrogate pairs and malformed sequences.
+struct Utf16ToUtf8Reader<R> {
+    inner: R,
+    decoder: encoding_rs::Decoder,
+    pending: Vec<u8>,
+    out_buf: Vec<u8>,
+    out_pos: usize,
+    eof: bool,
+    finished: bool,
+}
+
+impl<R: Read> Utf16ToUtf8Reader<R> {
+    fn new(inner: R, decoder: encoding_rs::Decoder) -> Self {
+        Self {
+            inner,
+            decoder,
+            pending: Vec::new(),
+            out_buf: Vec::new(),
+            out_pos: 0,
+            eof: false,
+            finished: false,
+        }
+    }
+}
+
+impl<R: Read> Read for Utf16ToUtf8Reader<R> {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        if out.is_empty() {
+            return Ok(0);
+        }
+        if self.finished {
+            return Ok(0);
+        }
+
+        loop {
+            if self.out_pos < self.out_buf.len() {
+                let available = self.out_buf.len() - self.out_pos;
+                let n = out.len().min(available);
+                out[..n].copy_from_slice(&self.out_buf[self.out_pos..self.out_pos + n]);
+                self.out_pos += n;
+                if self.out_pos == self.out_buf.len() {
+                    self.out_buf.clear();
+                    self.out_pos = 0;
+                }
+                return Ok(n);
+            }
+
+            // Ensure we have some pending input unless we've hit EOF.
+            if self.pending.is_empty() && !self.eof {
+                let mut buf = [0u8; 8 * 1024];
+                let n = self.inner.read(&mut buf)?;
+                if n == 0 {
+                    self.eof = true;
+                } else {
+                    self.pending.extend_from_slice(&buf[..n]);
+                }
+            }
+
+            let mut decoded = [0u8; 8 * 1024];
+            let (result, read, written, _) =
+                self.decoder
+                    .decode_to_utf8(&self.pending, &mut decoded, self.eof);
+            if read > 0 {
+                self.pending.drain(..read);
+            }
+            if written > 0 {
+                self.out_buf.clear();
+                self.out_pos = 0;
+                self.out_buf.extend_from_slice(&decoded[..written]);
+                continue;
+            }
+
+            match result {
+                CoderResult::OutputFull => {
+                    // `decoded` is large enough for any single UTF-8 code point, so if the decoder
+                    // reports an output buffer overflow with no progress, treat it as an internal
+                    // error.
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "UTF-16 to UTF-8 decoder made no progress (output full)",
+                    ));
+                }
+                CoderResult::InputEmpty => {
+                    if self.eof {
+                        // The decoder has reached EOF and has no more output to flush. Mark it as
+                        // finished so subsequent `read` calls return EOF without invoking the
+                        // decoder again.
+                        self.finished = true;
+                        return Ok(0);
+                    }
+                    // Need more input. This can happen even when `pending` is non-empty (e.g. the
+                    // input ended mid-code-unit), so always try to read another chunk.
+                    let mut buf = [0u8; 8 * 1024];
+                    let n = self.inner.read(&mut buf)?;
+                    if n == 0 {
+                        self.eof = true;
+                    } else {
+                        self.pending.extend_from_slice(&buf[..n]);
+                    }
+                    continue;
+                }
+            }
+        }
+    }
 }
 
 const CSV_SNIFF_DELIMITERS: [u8; 4] = [b',', b';', b'\t', b'|'];

@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
-use encoding_rs::WINDOWS_1252;
+use encoding_rs::{UTF_16BE, UTF_16LE, WINDOWS_1252};
 use formula_fs::{atomic_write, AtomicWriteError};
 use formula_model::import::{
     import_csv_into_workbook, CsvImportError, CsvOptions,
@@ -141,6 +141,21 @@ fn looks_like_text_csv_prefix(prefix: &[u8]) -> bool {
         return false;
     }
 
+    // Excel can export delimited text as UTF-16 (e.g. via "Unicode Text"). Those files contain
+    // NUL bytes, so detect a UTF-16 BOM and apply the heuristics to a decoded UTF-8 preview instead
+    // of rejecting the file as binary.
+    if prefix.starts_with(&[0xFF, 0xFE]) || prefix.starts_with(&[0xFE, 0xFF]) {
+        let (encoding, rest) = if prefix.starts_with(&[0xFF, 0xFE]) {
+            (UTF_16LE, &prefix[2..])
+        } else {
+            (UTF_16BE, &prefix[2..])
+        };
+        // UTF-16 requires an even number of bytes; ignore a trailing odd byte in the preview.
+        let rest = &rest[..rest.len().saturating_sub(rest.len() % 2)];
+        let (cow, _) = encoding.decode_without_bom_handling(rest);
+        return looks_like_text_csv_str(cow.as_ref());
+    }
+
     // Avoid misclassifying binary formats as text.
     if prefix.iter().any(|b| *b == 0) {
         return false;
@@ -170,6 +185,10 @@ fn looks_like_text_csv_prefix(prefix: &[u8]) -> bool {
     };
     let decoded = decoded.as_ref();
 
+    looks_like_text_csv_str(decoded)
+}
+
+fn looks_like_text_csv_str(decoded: &str) -> bool {
     // Require at least one newline so we don't classify single-line text/binary fragments as CSV.
     if !decoded.contains('\n') && !decoded.contains('\r') {
         return false;
