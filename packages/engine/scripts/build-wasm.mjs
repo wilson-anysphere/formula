@@ -278,10 +278,19 @@ function defaultWasmConcurrency() {
       // When CARGO_BUILD_JOBS is explicitly set, prefer that.
       jobsFromEnv ??
       jobs,
+    // wasm-pack's release mode runs wasm-opt (Binaryen) which can spawn one worker per CPU core.
+    // Mirror our Cargo concurrency defaults so constrained environments don't fail with
+    // `Resource temporarily unavailable` due to thread/process limits.
+    binaryenCores:
+      process.env.BINARYEN_CORES ??
+      process.env.FORMULA_BINARYEN_CORES ??
+      // When CARGO_BUILD_JOBS is explicitly set, prefer that.
+      jobsFromEnv ??
+      jobs,
   };
 }
 
-function runWasmPack({ jobs, makeflags, rustflags, rayonThreads }) {
+function runWasmPack({ jobs, makeflags, rustflags, rayonThreads, binaryenCores }) {
   return spawnSync(
     wasmPackBin,
     [
@@ -312,6 +321,7 @@ function runWasmPack({ jobs, makeflags, rustflags, rayonThreads }) {
         // large and can even fail to initialize ("Resource temporarily unavailable"). Default it
         // to our safe cargo job count unless explicitly overridden by the caller.
         RAYON_NUM_THREADS: rayonThreads,
+        BINARYEN_CORES: binaryenCores,
       },
     },
   );
@@ -326,6 +336,7 @@ let result = runWasmPack({
   makeflags: concurrency.makeflags,
   rustflags: concurrency.rustflags,
   rayonThreads: concurrency.rayonThreads,
+  binaryenCores: concurrency.binaryenCores,
 });
 
 // When running on heavily loaded/locked-down hosts, even modest parallelism can fail with
@@ -333,11 +344,23 @@ let result = runWasmPack({
 // explicitly opt into custom concurrency settings, retry once with the most conservative config.
 if ((result.status ?? 0) !== 0) {
   const userProvidedConcurrency =
-    process.env.CARGO_BUILD_JOBS || process.env.MAKEFLAGS || process.env.RUSTFLAGS || process.env.RAYON_NUM_THREADS || process.env.FORMULA_RAYON_NUM_THREADS;
+    process.env.CARGO_BUILD_JOBS ||
+    process.env.MAKEFLAGS ||
+    process.env.RUSTFLAGS ||
+    process.env.RAYON_NUM_THREADS ||
+    process.env.FORMULA_RAYON_NUM_THREADS ||
+    process.env.BINARYEN_CORES ||
+    process.env.FORMULA_BINARYEN_CORES;
   if (!userProvidedConcurrency && concurrency.jobs !== "1") {
     console.warn("[formula] wasm-pack build failed; retrying with CARGO_BUILD_JOBS=1 for stability.");
     await rm(outDir, { recursive: true, force: true });
-    result = runWasmPack({ jobs: "1", makeflags: "-j1", rustflags: "-C codegen-units=1", rayonThreads: "1" });
+    result = runWasmPack({
+      jobs: "1",
+      makeflags: "-j1",
+      rustflags: "-C codegen-units=1",
+      rayonThreads: "1",
+      binaryenCores: "1",
+    });
   }
 }
 
