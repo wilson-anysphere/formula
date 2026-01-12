@@ -3274,14 +3274,6 @@ fn append_cell_xml(
     }
 
     let meta = lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
-    if let Some(meta) = meta {
-        if let Some(vm) = meta.vm.as_deref() {
-            out.push_str(&format!(r#" vm="{}""#, escape_attr(vm)));
-        }
-        if let Some(cm) = meta.cm.as_deref() {
-            out.push_str(&format!(r#" cm="{}""#, escape_attr(cm)));
-        }
-    }
     let value_kind = effective_value_kind(meta, cell);
 
     let meta_sheet_id = cell_meta_sheet_ids
