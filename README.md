@@ -69,6 +69,11 @@ The web + desktop Vite entrypoints run this automatically via `predev`/`prebuild
 - `engine.lexFormula(formula, options?)` → token DTOs for syntax highlighting
 - `engine.parseFormulaPartial(formula, cursor?, options?)` → best-effort partial parse + function-call context for autocomplete/signature help
 
+`options` is a small JS-friendly object (`FormulaParseOptions`):
+
+- `localeId?: string` (e.g. `"en-US"`, `"de-DE"`) — affects argument separators, decimal separators, localized function names, etc.
+- `referenceStyle?: "A1" | "R1C1"`
+
 Note: spans and cursor positions are expressed as **UTF-16 code unit offsets** (matching JS string indexing).
 
 Smoke-check that the generated wrapper (`packages/engine/pkg/formula_wasm.js`) exists:
