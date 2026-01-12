@@ -56,6 +56,19 @@
   min-height: 0;
 }
 
+#grid-split[data-split-direction="none"] #grid-secondary,
+#grid-split[data-split-direction="none"] #grid-splitter {
+  display: none;
+}
+
+#grid-split[data-split-direction="vertical"] #grid-splitter {
+  cursor: col-resize;
+}
+
+#grid-split[data-split-direction="horizontal"] #grid-splitter {
+  cursor: row-resize;
+}
+
 .grid-root[data-split-active="true"] {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
@@ -211,6 +224,12 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+
+.dock-panel__mount {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .macros-panel {

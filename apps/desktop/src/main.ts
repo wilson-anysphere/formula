@@ -348,10 +348,7 @@ function createHiddenColorInput(): HTMLInputElement {
   const input = document.createElement("input");
   input.type = "color";
   input.tabIndex = -1;
-  input.style.position = "fixed";
-  input.style.left = "-1000px";
-  input.style.top = "-1000px";
-  input.style.opacity = "0";
+  input.className = "hidden-color-input";
   document.body.appendChild(input);
   return input;
 }
@@ -1076,12 +1073,12 @@ if (
     const clamped = Math.max(0.1, Math.min(0.9, ratio));
     const primaryPct = Math.round(clamped * 1000) / 10;
     const secondaryPct = Math.round((100 - primaryPct) * 10) / 10;
+    gridSplitEl.dataset.splitDirection = split.direction;
 
     if (split.direction === "none") {
-      gridSplitEl.style.gridTemplateColumns = "1fr 0px 0px";
-      gridSplitEl.style.gridTemplateRows = "1fr";
-      gridSecondaryEl.style.display = "none";
-      gridSplitterEl.style.display = "none";
+      // Reset to the default split-view layout defined in CSS.
+      gridSplitEl.style.gridTemplateColumns = "";
+      gridSplitEl.style.gridTemplateRows = "";
       secondaryGridView?.destroy();
       secondaryGridView = null;
       gridRoot.dataset.splitActive = "false";
@@ -1089,17 +1086,12 @@ if (
       return;
     }
 
-    gridSecondaryEl.style.display = "block";
-    gridSplitterEl.style.display = "block";
-
     if (split.direction === "vertical") {
       gridSplitEl.style.gridTemplateColumns = `${primaryPct}% 4px ${secondaryPct}%`;
       gridSplitEl.style.gridTemplateRows = "1fr";
-      gridSplitterEl.style.cursor = "col-resize";
     } else {
       gridSplitEl.style.gridTemplateColumns = "1fr";
       gridSplitEl.style.gridTemplateRows = `${primaryPct}% 4px ${secondaryPct}%`;
-      gridSplitterEl.style.cursor = "row-resize";
     }
 
     if (!secondaryGridView) {
@@ -2037,9 +2029,7 @@ if (
       let mount = panelMounts.get(panelId);
       if (!mount) {
         const container = document.createElement("div");
-        container.style.height = "100%";
-        container.style.display = "flex";
-        container.style.flexDirection = "column";
+        container.className = "dock-panel__mount";
         const mounted = mountScriptEditorPanel({ workbook: scriptingWorkbook, container });
         mount = { container, dispose: mounted.dispose };
         panelMounts.set(panelId, mount);
@@ -2054,9 +2044,7 @@ if (
       let mount = panelMounts.get(panelId);
       if (!mount) {
         const container = document.createElement("div");
-        container.style.height = "100%";
-        container.style.display = "flex";
-        container.style.flexDirection = "column";
+        container.className = "dock-panel__mount";
         container.textContent = "Loading Python runtime…";
 
         let disposed = false;
