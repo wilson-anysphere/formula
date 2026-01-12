@@ -432,24 +432,68 @@ Frontend entry point:
 
 - `apps/desktop/src/clipboard/platform/provider.js`
 
+Provider selection:
+
+- `createClipboardProvider()` chooses **Tauri vs web** by checking for `globalThis.__TAURI__`.
+
+End-to-end flow (grid copy/paste):
+
+1. UI handlers in `apps/desktop/src/app/spreadsheetApp.ts` intercept `Cmd/Ctrl+C`, `X`, `V`.
+2. Copy/cut serializes the selection via `copyRangeToClipboardPayload()` (`apps/desktop/src/clipboard/clipboard.js`), producing `{ text, html }`.
+3. The platform provider (`apps/desktop/src/clipboard/platform/provider.js`) writes/reads the system clipboard.
+4. Paste prefers `text/html` (HTML tables) when available and falls back to `text/plain`.
+
 Desktop vs web behavior:
 
 - **Desktop (Tauri)**: prefers custom Rust commands `clipboard_read` / `clipboard_write` for
-  **rich, multi-format** clipboard access. If those commands are unavailable (older builds), it
+  **rich, multi-format** clipboard access via `globalThis.__TAURI__.core.invoke(...)`. If those
+  commands are unavailable or return an error (older builds / unsupported platforms), it
   falls back to the Web Clipboard API (`navigator.clipboard`) and finally to the legacy
   `globalThis.__TAURI__.clipboard.readText` / `writeText` helpers (plain text).
 - **Web**: uses the browser Clipboard API only (permission + user-gesture gated).
 
-Supported formats:
+Supported MIME types (read + write, best-effort):
 
 - `text/plain`
 - `text/html`
 - `text/rtf`
 - `image/png`
 
-Image encoding:
+Tauri command contract:
+
+- Read: `invoke("clipboard_read")` → `{ text?: string, html?: string, rtf?: string, pngBase64?: string }`
+- Write: `invoke("clipboard_write", { payload: { text?, html?, rtf?, pngBase64? } })` → `void`
+
+Image wire format:
 
 - PNG bytes are transported over IPC as `pngBase64` (**raw base64**, no `data:image/png;base64,` prefix).
+- When interacting with browser APIs, convert **base64 PNG ↔ `Uint8Array`** and wrap bytes in a `Blob`:
+
+  - base64 → `Uint8Array` (for `Blob` / `ClipboardItem`)
+  - `Uint8Array` → base64 (for `invoke("clipboard_write", ...)`)
+
+```ts
+// base64 PNG (from Rust) -> Uint8Array
+const bytes = Uint8Array.from(atob(pngBase64), (c) => c.charCodeAt(0));
+
+// Uint8Array -> base64 PNG (to Rust)
+const pngBase64Out = btoa(String.fromCharCode(...bytes));
+```
+
+Known platform limitations:
+
+- **Web Clipboard API permission gating**: `navigator.clipboard.read/write` is user-gesture gated and may be denied by the OS/WebView permission model.
+- **HTML/RTF availability varies** by WebView and OS: some platforms allow reading `text/html`/`text/rtf` but deny writing them (or vice versa).
+- **Image clipboard support varies**: `image/png` via `ClipboardItem` is not consistently supported across all embedded WebViews.
+- The native clipboard commands are implemented per-OS; when they are missing or unimplemented, the provider falls back to Web Clipboard (and then plain text).
+
+Security boundaries:
+
+- **DLP enforcement happens before writing**: grid copy/cut paths perform DLP checks before touching the system clipboard:
+  - `SpreadsheetApp.copySelectionToClipboard()` / `cutSelectionToClipboard()`
+  - → `copyRangeToClipboardPayload()`
+  - → `enforceClipboardCopy` (`apps/desktop/src/dlp/enforceClipboardCopy.js`)
+- **Extension sandboxing**: extension panels run in sandboxed iframes; do not expose Tauri IPC (`invoke`) or native clipboard APIs directly to untrusted iframe content. Clipboard operations must be mediated by the trusted host UI layer.
 
 ### Manual QA matrix (recommended)
 
