@@ -83,8 +83,7 @@ const RICH_VALUE_REL_RELS_XML_NON_IMAGE: &str = r#"<?xml version="1.0" encoding=
 </Relationships>
 "#;
 
-#[test]
-fn extracts_embedded_image_from_cell_vm_metadata_richdata_schema() {
+fn assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(metadata_xml: &str) {
     let png_bytes = STANDARD
         .decode(PNG_1X1_TRANSPARENT_B64)
         .expect("decode png base64");
@@ -105,7 +104,7 @@ fn extracts_embedded_image_from_cell_vm_metadata_richdata_schema() {
     pkg.set_part(sheet_part, sheet_xml.into_bytes());
 
     // Add the rich value parts + image payload.
-    pkg.set_part("xl/metadata.xml", METADATA_XML.as_bytes().to_vec());
+    pkg.set_part("xl/metadata.xml", metadata_xml.as_bytes().to_vec());
     pkg.set_part(
         "xl/richData/rdrichvalue.xml",
         RDRICHVALUE_XML.as_bytes().to_vec(),
@@ -150,6 +149,19 @@ fn extracts_embedded_image_from_cell_vm_metadata_richdata_schema() {
     assert_eq!(image.bytes, png_bytes);
     assert_eq!(image.alt_text.as_deref(), Some("ExampleAltText"));
     assert!(!image.decorative);
+}
+
+#[test]
+fn extracts_embedded_image_from_cell_vm_metadata_richdata_schema() {
+    assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(METADATA_XML);
+}
+
+#[test]
+fn extracts_embedded_image_with_0_based_metadata_type_index() {
+    // Some non-Excel producers have been observed to encode the `metadataTypes` index as 0-based
+    // (`t="0"`) rather than Excel's typical 1-based (`t="1"`).
+    let metadata_xml = METADATA_XML.replace(r#"t="1""#, r#"t="0""#);
+    assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(&metadata_xml);
 }
 
 #[test]

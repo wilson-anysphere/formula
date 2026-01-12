@@ -277,8 +277,10 @@ fn parse_vm_to_rich_value_index(xml: &[u8]) -> Result<HashMap<u32, u32>, XlsxErr
 
     let mut buf = Vec::new();
     let mut xlr_type_index: Option<u32> = None;
-    // `<rc t="...">` uses a **1-based** index into the `<metadataTypes>` list.
-    let mut next_metadata_type_index = 1u32;
+    // Excel appears to emit `<rc t="...">` as a 1-based index into the `<metadataTypes>` list, but
+    // some producers use 0-based indices. Track metadataTypes with a 0-based counter and accept
+    // both forms when matching `rc/@t`.
+    let mut next_metadata_type_index = 0u32;
 
     // `futureMetadata` bk entries in order: each entry contains `xlrd:rvb i="..."`
     let mut future_bk_rich_value_index: Vec<Option<u32>> = Vec::new();
@@ -401,10 +403,10 @@ fn parse_vm_to_rich_value_index(xml: &[u8]) -> Result<HashMap<u32, u32>, XlsxErr
     let mut vm_to_rich_value_index: HashMap<u32, u32> = HashMap::new();
     for (bk_idx, rc_records) in value_bk_rc_records.iter().enumerate() {
         // Excel emits `rc/@t` (metadata type index) as either 0-based *or* 1-based depending on
-        // version/producer. We derive a 1-based index from the `<metadataTypes>` list, so accept
-        // both the exact value and its 0-based equivalent.
-        let xlr_type_index_0 = xlr_type_index.saturating_sub(1);
-        let xlr_type_index_1 = xlr_type_index;
+        // version/producer. We derive a 0-based index from the `<metadataTypes>` list, so accept
+        // both the exact value and its 1-based equivalent.
+        let xlr_type_index_0 = xlr_type_index;
+        let xlr_type_index_1 = xlr_type_index.saturating_add(1);
         let Some(future_idx) = rc_records.iter().find_map(|(t, v)| {
             (*t == xlr_type_index_0 || *t == xlr_type_index_1).then_some(*v)
         }) else {
