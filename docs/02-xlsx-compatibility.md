@@ -23,6 +23,7 @@ workbook.xlsx (ZIP archive)
 │   ├── styles.xml               # All cell formatting
 │   ├── sharedStrings.xml        # Deduplicated text strings
 │   ├── cellimages.xml           # Excel “image in cell” definitions (in-cell pictures)
+│   ├── metadata.xml             # Workbook metadata tables (rich values / linked data types)
 │   ├── calcChain.xml            # Calculation order hints
 │   ├── richData/                # RichData tables (images-in-cell, linked data types)
 │   │   ├── richValue.xml
@@ -56,7 +57,8 @@ workbook.xlsx (ZIP archive)
 │   └── vbaProject.bin           # VBA macros (binary)
 └── xl/_rels/
     ├── workbook.xml.rels        # Workbook relationships
-    └── cellimages.xml.rels      # Relationships for in-cell images (to xl/media/*)
+    ├── cellimages.xml.rels      # Relationships for in-cell images (to xl/media/*)
+    └── metadata.xml.rels        # Relationships from metadata.xml to xl/richData/*
 ```
 
 See also:
