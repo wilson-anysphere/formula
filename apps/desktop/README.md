@@ -1,5 +1,28 @@
 # Formula Desktop (Vite/Webview)
 
+## Workbook load limits (snapshot loading)
+
+When opening a workbook in the desktop app, the renderer fetches a **cell snapshot** from the backend to populate the UI.
+To avoid excessive memory/time costs for very large workbooks, snapshot loading is capped by default:
+
+- **Rows:** first `10,000`
+- **Columns:** first `200`
+
+If the workbook’s used range exceeds these limits, the app will show a **warning toast** indicating that only a prefix of the
+workbook was loaded.
+
+### Overriding the limits
+
+Preferred (runtime):
+
+- URL query params: `?maxRows=<n>&maxCols=<n>` (e.g. `?maxRows=50000&maxCols=1000`)
+
+Fallback (build/dev-time):
+
+- Environment variables: `DESKTOP_LOAD_MAX_ROWS` / `DESKTOP_LOAD_MAX_COLS`
+
+Invalid / non-positive values are ignored and fall back to the defaults above.
+
 ## Pyodide / Python scripting
 
 The Pyodide-based Python runtime (`@formula/python-runtime`) supports two internal backends:
