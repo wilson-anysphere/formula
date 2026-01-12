@@ -124,6 +124,10 @@ Supported menu locations (desktop UI):
   - While the menu is open, the desktop re-evaluates `when` clauses as context keys change (e.g. selection changes),
     updating enabled/disabled state live.
 
+Other built-in context menus (not extension-contributed today):
+
+- Sheet tabs (bottom bar): includes actions like Rename/Delete, but does not currently accept extension menu contributions.
+
 Reserved menu locations (not yet wired in the desktop UI, but reserved for future parity):
 
 - `row/context` — row header context menu
