@@ -2903,11 +2903,6 @@ class BrowserExtensionHost {
       const selection = data.selection;
       if (!selection || typeof selection !== "object") return data;
 
-      // If the host already marked the payload as truncated, preserve whatever partial
-      // matrices it included. Some hosts send "huge range + small values matrix" events
-      // (with `truncated: true`) to avoid allocating the full selection.
-      if (selection.truncated === true) return data;
-
       // Prefer numeric coords, but fall back to parsing A1 address when needed.
       let coords = null;
       const looksLikeRange =
@@ -2935,14 +2930,13 @@ class BrowserExtensionHost {
       const size = getRangeSize(coords);
       if (!size || size.cellCount <= DEFAULT_EXTENSION_RANGE_CELL_LIMIT) return data;
 
-      // Some hosts may emit very large selections but still attach a small (already truncated)
-      // value/formula matrix (e.g. a 1×1 preview cell). Treat those payloads as safe to forward
-      // so extensions can receive the limited data, and so taint tracking can reflect what was
-      // actually delivered.
+      // Mirror desktop and Node-host guardrails: `selectionChanged` payloads may include a full
+      // 2D values/formulas matrix. For Excel-scale selections this can allocate hundreds of
+      // thousands of cells and OOM the extension worker.
       //
-      // We intentionally avoid computing the full logical selection size (it can be millions of
-      // cells); instead, we bound based on the *delivered* matrix sizes, with early-exit to avoid
-      // scanning huge arrays.
+      // If the host explicitly marks the payload as `truncated`, allow small partial matrices
+      // to pass through (e.g. a preview cell). Otherwise, strip the matrices and mark the payload
+      // as truncated.
       const matrixCellCount = (matrix) => {
         if (!Array.isArray(matrix)) return 0;
         let total = 0;
@@ -2957,10 +2951,8 @@ class BrowserExtensionHost {
       const deliveredValuesCells = matrixCellCount(selection.values);
       const deliveredFormulasCells = matrixCellCount(selection.formulas);
       const deliveredCells = Math.max(deliveredValuesCells, deliveredFormulasCells);
-      // Only preserve matrices when the producer explicitly marks them as truncated; otherwise,
-      // mismatched payloads (huge declared range but tiny matrix) are treated as unsafe/inconsistent
-      // and are stripped to avoid extensions misinterpreting partial data as complete.
-      if (selection.truncated === true && deliveredCells > 0 && deliveredCells <= DEFAULT_EXTENSION_RANGE_CELL_LIMIT) {
+
+      if (selection.truncated === true && deliveredCells <= DEFAULT_EXTENSION_RANGE_CELL_LIMIT) {
         return data;
       }
 
