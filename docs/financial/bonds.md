@@ -336,7 +336,7 @@ For regular coupon bonds, Excel’s accrued interest within the current coupon p
 Note the scaling difference:
 
 - `PRICE`/`YIELD` are **per 100 face value**:
-  - Coupon cashflows use `100 * rate / f`.
+  - Coupon cashflows use `C = 100 * rate / f` (**independent of `redemption`**).
   - `redemption` is a *separate* maturity cashflow (amount repaid per 100 face value).
 - `ACCRINT` scales coupon cashflows by `par` and returns an amount in the same units as `par`.
 
@@ -663,3 +663,11 @@ Excel’s bond functions are historically underspecified. The following are know
    - Resolution: if `maturity` is month-end, treat the entire coupon schedule as month-end pinned:
      `coupon_date(k) = EOMONTH(EDATE(maturity, -k*m), 0)`.
    - This matches Excel and avoids day-of-month drift on month-end schedules.
+
+6. **Coupon payment scaling (`redemption` vs $100 face value)**
+   - Resolution: `PRICE` and `YIELD` treat `rate` as an annual coupon rate **per $100 face value**,
+     and compute the regular coupon payment as `C = 100 * rate / frequency` (independent of
+     `redemption`).
+   - `redemption` affects only the final principal cashflow at maturity.
+   - (Odd-coupon bond functions `ODDF*`/`ODDL*` have their own separate spec; see
+     [`docs/financial-odd-coupon-bonds.md`](../financial-odd-coupon-bonds.md).)

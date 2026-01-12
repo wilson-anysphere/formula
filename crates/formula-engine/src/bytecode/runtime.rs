@@ -7943,6 +7943,12 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if matches!(lookup_value, Value::Lambda(_)) {
         return Value::Error(ErrorKind::Value);
     }
+    // MATCH treats LAMBDA values as invalid lookup values (Excel returns #VALUE! when a lambda is
+    // passed where a scalar is expected). Keep behavior aligned with the AST evaluator's MATCH
+    // implementation in `functions/builtins_lookup.rs`.
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Value::Error(ErrorKind::Value);
+    }
     if matches!(
         lookup_value,
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_)
@@ -8119,6 +8125,9 @@ fn fn_xmatch(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }
+    // XMATCH treats LAMBDA values as invalid lookup values (Excel returns #VALUE! when a lambda is
+    // passed where a scalar is expected). Keep behavior aligned with the AST evaluator which
+    // rejects `Value::Lambda` in `lookup::xmatch_with_modes_impl`.
     if matches!(lookup_value, Value::Lambda(_)) {
         return Value::Error(ErrorKind::Value);
     }
@@ -8222,6 +8231,8 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }
+    // XLOOKUP treats LAMBDA values as invalid lookup values (Excel returns #VALUE! when a lambda is
+    // passed where a scalar is expected). Keep behavior aligned with the AST evaluator.
     if matches!(lookup_value, Value::Lambda(_)) {
         return Value::Error(ErrorKind::Value);
     }

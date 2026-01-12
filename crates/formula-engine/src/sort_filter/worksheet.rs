@@ -405,7 +405,7 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                             v.get("altText")
                                                 .or_else(|| v.get("alt_text"))
                                                 .and_then(|v| v.as_str())
-                                        });
+                                    });
                                     let display = alt_text.filter(|s| !s.is_empty()).unwrap_or("[Image]");
                                     Some(CellValue::Text(display.to_string()))
                                 }
