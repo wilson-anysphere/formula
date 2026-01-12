@@ -47,7 +47,9 @@ pub fn count_distinct_sheets(references: &[Reference]) -> usize {
 /// Normalizes a stored formula string so it matches Excel's `FORMULATEXT` output convention of
 /// including the leading `=`.
 pub fn normalize_formula_text(formula: &str) -> String {
-    if formula.starts_with('=') {
+    // Match `CELL("contents")` behavior: preserve any leading whitespace, but ensure the first
+    // *non-whitespace* character is `=` by inserting one if missing.
+    if formula.trim_start().starts_with('=') {
         return formula.to_string();
     }
     format!("={formula}")

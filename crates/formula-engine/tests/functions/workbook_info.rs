@@ -79,3 +79,11 @@ fn formulatext_and_isformula_reflect_cell_formula_presence() {
     assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Bool(true));
     assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Bool(false));
 }
+
+#[test]
+fn normalize_formula_text_does_not_duplicate_equals_for_leading_whitespace_formulas() {
+    assert_eq!(
+        formula_engine::functions::information::workbook::normalize_formula_text(" =1+1"),
+        " =1+1".to_string()
+    )
+}
