@@ -10,14 +10,26 @@ export type ContributedCommand = {
   keywords: string[] | null;
 };
 
+export type ClipboardApi = {
+  readText: () => Promise<string>;
+  writeText: (text: string) => Promise<void>;
+};
+
 export class BrowserExtensionHost {
   constructor(options: {
     engineVersion: string;
     spreadsheetApi: any;
-    uiApi: any;
+    uiApi?: any;
     permissionPrompt?: (...args: any[]) => unknown;
-    sandboxOptions?: any;
-    storage?: any;
+    permissionStorage?: any;
+    permissionStorageKey?: string;
+    clipboardApi?: ClipboardApi;
+    storageApi?: any;
+    activationTimeoutMs?: number;
+    commandTimeoutMs?: number;
+    customFunctionTimeoutMs?: number;
+    dataConnectorTimeoutMs?: number;
+    sandbox?: any;
   });
 
   loadExtensionFromUrl(manifestUrl: string): Promise<string>;
