@@ -28,11 +28,11 @@ jobs:
       # CARGO_HOME so cargo installs and builds share the same cache.
       - name: Use shared Cargo home for CI caching
         run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
-      - name: Run formula-desktop-tauri tests (backend only; no WebView toolchain)
+      - name: Run desktop tests (backend only; no WebView toolchain)
         # NOTE: Do NOT enable the `desktop` feature here. That feature pulls in
         # the system WebView toolchain (gtk/webkit2gtk) on Linux, which is not
         # required for backend unit/integration tests.
-        run: cargo test -p formula-desktop-tauri
+        run: cargo test -p desktop
 
   excel-oracle-compat:
     name: Excel oracle compatibility (pinned)
@@ -141,8 +141,8 @@ jobs:
             librsvg2-dev \
             libssl-dev \
             patchelf
-      - name: Check formula-desktop-tauri builds with full desktop feature set
-        run: cargo check -p formula-desktop-tauri --features desktop
+      - name: Check desktop builds with full desktop feature set
+        run: cargo check -p desktop --features desktop
 
   node-tests:
     name: Node tests
