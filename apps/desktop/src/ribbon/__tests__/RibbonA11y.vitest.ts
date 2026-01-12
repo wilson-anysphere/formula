@@ -108,6 +108,26 @@ describe("Ribbon a11y + keyboard navigation", () => {
     act(() => root.unmount());
   });
 
+  it("moves focus into the active tabpanel when pressing Tab on the active tab", () => {
+    const { container, root } = renderRibbon();
+
+    const home = getSelectedTab(container);
+    home.focus();
+    expect(document.activeElement).toBe(home);
+
+    const panel = getActivePanel(container);
+    const firstButton = panel.querySelector<HTMLButtonElement>("button:not(:disabled)");
+    expect(firstButton).toBeInstanceOf(HTMLButtonElement);
+
+    act(() => {
+      home.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    });
+
+    expect(document.activeElement).toBe(firstButton);
+
+    act(() => root.unmount());
+  });
+
   it("renders focusable ribbon buttons with aria-labels in the active tabpanel", () => {
     const { container, root } = renderRibbon();
 
@@ -123,4 +143,3 @@ describe("Ribbon a11y + keyboard navigation", () => {
     act(() => root.unmount());
   });
 });
-

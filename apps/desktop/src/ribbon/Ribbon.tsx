@@ -191,6 +191,19 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                   focusFirstControl(tab.id);
                   return;
                 }
+                if (event.key === "Tab" && !event.shiftKey) {
+                  // Excel-style: Tab from the active tab moves focus into the tab panel.
+                  // Shift+Tab should keep browser default behavior (move focus backwards).
+                  event.preventDefault();
+                  if (!isActive) {
+                    setActiveTabId(tab.id);
+                    actions.onTabChange?.(tab.id);
+                    requestAnimationFrame(() => focusFirstControl(tab.id));
+                    return;
+                  }
+                  focusFirstControl(tab.id);
+                  return;
+                }
               }}
             >
               {tab.label}
