@@ -62,7 +62,7 @@ function collectSecretRefsFromConfig(config: SiemEndpointConfig | null): string[
 
 function sanitizeConfigForResponse(config: SiemEndpointConfig): Record<string, unknown> {
   const auth = config.auth;
-  if (!auth || auth.type === "none") return config;
+  if (!auth || auth.type === "none") return config as unknown as Record<string, unknown>;
 
   if (auth.type === "bearer") {
     return { ...config, auth: { type: "bearer" } };
@@ -76,7 +76,7 @@ function sanitizeConfigForResponse(config: SiemEndpointConfig): Record<string, u
     return { ...config, auth: { type: "header", name: auth.name } };
   }
 
-  return config;
+  return config as unknown as Record<string, unknown>;
 }
 
 async function secretConfigured(db: FastifyInstance["db"], config: SiemEndpointConfig): Promise<boolean> {
@@ -486,8 +486,10 @@ export function registerSiemRoutes(app: FastifyInstance): void {
       return reply.code(400).send({ error: "invalid_request" });
     }
 
-    const config: SiemEndpointConfig = {
-      ...incomingConfig,
+    const { auth: incomingAuth, ...incomingWithoutAuth } = incomingConfig;
+
+    const config: Omit<SiemEndpointConfig, "auth"> = {
+      ...incomingWithoutAuth,
       endpointUrl,
       dataRegion: effectiveDataRegion,
       batchSize:
@@ -499,13 +501,6 @@ export function registerSiemRoutes(app: FastifyInstance): void {
     try {
       if (config.idempotencyKeyHeader) {
         config.idempotencyKeyHeader = validateHeaderName(config.idempotencyKeyHeader, "idempotencyKeyHeader");
-      }
-
-      if (config.auth?.type === "header") {
-        config.auth = {
-          ...config.auth,
-          name: validateHeaderName(config.auth.name, "auth.name")
-        };
       }
 
       if (config.headers) {
@@ -520,9 +515,8 @@ export function registerSiemRoutes(app: FastifyInstance): void {
       return reply.code(400).send({ error: "invalid_request" });
     }
 
-      const isEnabling = Boolean(enabled) && !Boolean(prevEnabled);
-      if (isEnabling) {
-        const incomingAuth = incomingConfig.auth;
+    const isEnabling = Boolean(enabled) && !Boolean(prevEnabled);
+    if (isEnabling) {
         if (!incomingAuth) {
           // Enabling after SIEM was previously disabled requires re-supplying
           // secrets (they are deleted when disabled). If an existing auth mode
@@ -548,7 +542,7 @@ export function registerSiemRoutes(app: FastifyInstance): void {
             return reply.code(400).send({ error: "invalid_request" });
           }
         }
-      }
+    }
 
     let storedAuth: SiemAuthConfig | undefined;
     try {
@@ -557,7 +551,7 @@ export function registerSiemRoutes(app: FastifyInstance): void {
         keyring: app.config.secretStoreKeys,
         orgId,
         enabled,
-        auth: incomingConfig.auth,
+        auth: incomingAuth,
         existingAuth: existingConfig?.auth
       });
     } catch {

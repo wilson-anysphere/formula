@@ -594,6 +594,64 @@ describeSaml("SAML SSO", () => {
   );
 
   it(
+    "rejects invalid base64 SAMLResponse values (defense against permissive base64 decoding)",
+    async () => {
+      const { db, app } = await createTestApp();
+      try {
+        const ownerRegister = await app.inject({
+          method: "POST",
+          url: "/auth/register",
+          payload: { email: "saml-owner-b64@example.com", password: "password1234", name: "Owner", orgName: "SSO Org B64" }
+        });
+        expect(ownerRegister.statusCode).toBe(200);
+        const orgId = (ownerRegister.json() as any).organization.id as string;
+
+        await db.query("UPDATE org_settings SET allowed_auth_methods = $2::jsonb WHERE org_id = $1", [
+          orgId,
+          JSON.stringify(["password", "saml"])
+        ]);
+
+        const cookie = extractCookie(ownerRegister.headers["set-cookie"]);
+        const putProvider = await app.inject({
+          method: "PUT",
+          url: `/orgs/${orgId}/saml-providers/test`,
+          headers: { cookie },
+          payload: {
+            idpEntryPoint: "http://idp.example.test/sso",
+            spEntityId: "http://sp.example.test/metadata",
+            idpIssuer: "https://idp.example.test/metadata",
+            idpCertPem: TEST_CERT_PEM,
+            wantAssertionsSigned: true,
+            wantResponseSigned: false,
+            attributeMapping: { email: "email", name: "name" },
+            enabled: true
+          }
+        });
+        expect(putProvider.statusCode).toBe(200);
+
+        const startRes = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
+        expect(startRes.statusCode).toBe(302);
+        const startUrl = new URL(startRes.headers.location as string);
+        const relayState = startUrl.searchParams.get("RelayState");
+        expect(relayState).toBeTruthy();
+
+        const callback = await app.inject({
+          method: "POST",
+          url: `/auth/saml/${orgId}/test/callback`,
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          payload: new URLSearchParams({ SAMLResponse: "abc$123", RelayState: relayState! }).toString()
+        });
+        expect(callback.statusCode).toBe(401);
+        expect((callback.json() as any).error).toBe("invalid_response");
+      } finally {
+        await app.close();
+        await db.end();
+      }
+    },
+    15_000
+  );
+
+  it(
     "rejects invalid signatures, wrong audience, expired assertions, and replayed assertion IDs",
     async () => {
       const { db, config, app } = await createTestApp();
