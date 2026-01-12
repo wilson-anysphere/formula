@@ -118,15 +118,15 @@ pub struct VbaDigitalSignatureStream {
     /// Verification state (best-effort).
     pub verification: VbaSignatureVerification,
     /// If the signature stream is wrapped in a [MS-OSHARED] `DigSigInfoSerialized` prefix (VBA
-    /// digital signature storage, §2.3.2) and the wrapper includes a version DWORD, this is the
+    /// digital signature storage, §2.3.2.1) and the wrapper includes a version DWORD, this is the
     /// parsed value.
     pub digsig_info_version: Option<u32>,
     /// If the signature stream is wrapped in a [MS-OSHARED] `DigSigInfoSerialized` prefix (VBA
-    /// digital signature storage, §2.3.2), this is the byte offset (from the start of the stream)
+    /// digital signature storage, §2.3.2.1), this is the byte offset (from the start of the stream)
     /// where the PKCS#7/CMS `ContentInfo` begins.
     pub pkcs7_offset: Option<usize>,
     /// If the signature stream is wrapped in a [MS-OSHARED] `DigSigInfoSerialized` prefix (VBA
-    /// digital signature storage, §2.3.2), this is the length (in bytes) of the PKCS#7/CMS
+    /// digital signature storage, §2.3.2.1), this is the length (in bytes) of the PKCS#7/CMS
     /// `ContentInfo` TLV (supports both strict DER and BER/indefinite-length encodings).
     pub pkcs7_len: Option<usize>,
     /// Best-effort DigestInfo algorithm OID extracted from Authenticode's
@@ -991,7 +991,8 @@ fn parse_pkcs7_with_offset(signature: &[u8]) -> Option<(openssl::pkcs7::Pkcs7, u
         }
     }
 
-    // Office commonly wraps the PKCS#7 blob in a [MS-OSHARED] DigSigInfoSerialized structure.
+    // Office commonly wraps the PKCS#7 blob in a [MS-OSHARED] DigSigInfoSerialized structure
+    // (§2.3.2.1).
     // Parsing the header is deterministic and avoids the worst-case behavior of scanning/parsing
     // from every 0x30 offset.
     if let Some(info) = crate::offcrypto::parse_digsig_info_serialized(signature) {

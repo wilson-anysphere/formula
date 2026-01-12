@@ -92,7 +92,9 @@ In the wild, the signature stream bytes are not always “just a PKCS#7 blob”.
    - `ContentInfo.contentType` is typically `signedData` (`1.2.840.113549.1.7.2`).
 2. **MS-OSHARED `DigSigInfoSerialized` wrapper/prefix**
    - Some Office producers wrap or prefix the CMS bytes with a `DigSigInfoSerialized` structure
-     (see MS-OSHARED).
+     (see MS-OSHARED §2.3.2.1 `DigSigInfoSerialized`).
+   - Spec note: some third-party references attribute this structure to MS-OFFCRYPTO, but the
+     Office Open Specifications define the VBA signature wrapper in MS-OSHARED.
    - `DigSigInfoSerialized` is a little-endian length-prefixed structure; parsing it lets us locate
      the embedded CMS payload deterministically instead of scanning for a DER `SEQUENCE`.
    - Common (but not universal) layout:
@@ -442,6 +444,7 @@ and binding behavior:
 - **MS-OVBA**: VBA project storage and VBA project digest computation / binding verification.
   - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/
 - **MS-OSHARED**: VBA digital signature storage (`DigSigInfoSerialized`) and the MD5 “VBA project hash” rule (MS-OSHARED §4.3).
+  - `DigSigInfoSerialized`: MS-OSHARED §2.3.2.1
   - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/
 - **RFC 5652**: Cryptographic Message Syntax (CMS) (PKCS#7 `SignedData`).
   - https://www.rfc-editor.org/rfc/rfc5652

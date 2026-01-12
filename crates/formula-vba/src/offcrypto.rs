@@ -2,12 +2,16 @@
 //!
 //! Excel stores a signed VBA project in an OLE stream named `\x05DigitalSignature*`.
 //! In many real-world files the PKCS#7/CMS `SignedData` payload is wrapped in a
-//! `[MS-OSHARED] DigSigInfoSerialized` header (VBA Digital Signature Storage, §2.3.2). The header
-//! contains size fields for the surrounding metadata, making it possible to locate the PKCS#7 blob
-//! deterministically instead of scanning the whole stream (and works for both strict DER and
-//! BER/indefinite encodings).
+//! `[MS-OSHARED] DigSigInfoSerialized` header (VBA Digital Signature Storage, §2.3.2.1). The header
+//! contains size/offset fields for the surrounding metadata, making it possible to locate the
+//! PKCS#7 blob deterministically instead of scanning the whole stream (and works for both strict
+//! DER and BER/indefinite encodings).
+//!
+//! Spec note: Some third-party references attribute `DigSigInfoSerialized` to MS-OFFCRYPTO, but the
+//! Office Open Specifications define the VBA signature wrapper in MS-OSHARED.
 //!
 //! https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/
+//! https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/30a00273-dbee-422f-b488-f4b8430ae046
 
 /// Parsed information from a `[MS-OSHARED] DigSigInfoSerialized` prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
