@@ -513,4 +513,50 @@ mod tests {
         let bytes = [0u8; 6];
         assert_eq!(bytes_to_base64_within_limit(&bytes, 5), None);
     }
+
+    #[test]
+    fn serde_contract_uses_image_png_base64_and_accepts_legacy_aliases() {
+        let content = ClipboardContent {
+            text: None,
+            html: None,
+            rtf: None,
+            image_png_base64: Some("CQgH".to_string()),
+        };
+        let json = serde_json::to_value(&content).expect("serialize ClipboardContent");
+
+        // The canonical wire key is `image_png_base64` (snake_case) to match the existing JS
+        // clipboard provider contract.
+        assert_eq!(json.get("image_png_base64").and_then(|v| v.as_str()), Some("CQgH"));
+        assert!(json.get("pngBase64").is_none());
+        assert!(json.get("png_base64").is_none());
+
+        // But we must remain backwards-compatible with older/alternate bridges that used
+        // `pngBase64` or `png_base64`.
+        let from_png_base64: ClipboardContent =
+            serde_json::from_value(serde_json::json!({ "png_base64": "CQgH" }))
+                .expect("deserialize from png_base64");
+        assert_eq!(from_png_base64.image_png_base64.as_deref(), Some("CQgH"));
+
+        let from_png_base64_camel: ClipboardContent =
+            serde_json::from_value(serde_json::json!({ "pngBase64": "CQgH" }))
+                .expect("deserialize from pngBase64");
+        assert_eq!(from_png_base64_camel.image_png_base64.as_deref(), Some("CQgH"));
+
+        let payload_from_png_base64: ClipboardWritePayload =
+            serde_json::from_value(serde_json::json!({ "pngBase64": "CQgH" }))
+                .expect("deserialize write payload from pngBase64");
+        assert_eq!(payload_from_png_base64.image_png_base64.as_deref(), Some("CQgH"));
+
+        let payload = ClipboardWritePayload {
+            text: None,
+            html: None,
+            rtf: None,
+            image_png_base64: Some("CQgH".to_string()),
+        };
+        let payload_json = serde_json::to_value(&payload).expect("serialize ClipboardWritePayload");
+        assert_eq!(
+            payload_json.get("image_png_base64").and_then(|v| v.as_str()),
+            Some("CQgH")
+        );
+    }
 }
