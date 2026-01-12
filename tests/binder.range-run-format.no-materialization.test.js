@@ -5,6 +5,7 @@ import * as Y from "yjs";
 
 import { DocumentController } from "../apps/desktop/src/document/documentController.js";
 import { bindYjsToDocumentController } from "../packages/collab/binder/index.js";
+import { createUndoService } from "../packages/collab/undo/index.js";
 
 async function waitForCondition(condition, timeoutMs = 10_000, intervalMs = 10) {
   const start = Date.now();
@@ -136,6 +137,70 @@ test("binder: top-level formatRunsByCol overrides legacy view.formatRunsByCol (p
     }
   } finally {
     binderA.destroy();
+    ydoc.destroy();
+  }
+});
+
+test("binder: collab undo/redo reverts range-run formatting changes (formatRunsByCol in undo scope)", async () => {
+  const ydoc = new Y.Doc();
+  const cells = ydoc.getMap("cells");
+  const sheets = ydoc.getArray("sheets");
+
+  ydoc.transact(() => {
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheets.push([sheet]);
+  });
+
+  const undo = createUndoService({ mode: "collab", doc: ydoc, scope: sheets });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({
+    ydoc,
+    documentController,
+    undoService: undo,
+    defaultSheetId: "Sheet1",
+    userId: "u-a",
+  });
+
+  try {
+    // A1:Z2000 is just over the range-run threshold (26 * 2000 = 52,000).
+    documentController.setRangeFormat("Sheet1", "A1:Z2000", { font: { bold: true } });
+
+    await waitForCondition(() => Boolean(documentController.getCellFormat("Sheet1", "A1")?.font?.bold));
+    assert.equal(documentController.getCellFormat("Sheet1", "A1")?.font?.bold, true);
+    assert.equal(documentController.getCellFormat("Sheet1", "Z2000")?.font?.bold, true);
+
+    // Ensure the write landed in Yjs so the UndoManager has something to undo.
+    await waitForCondition(() => {
+      const sheetEntry = sheets.get(0);
+      if (!(sheetEntry instanceof Y.Map)) return false;
+      const runs = sheetEntry.get("formatRunsByCol");
+      if (!(runs instanceof Y.Map)) return false;
+      const col0 = runs.get("0");
+      return Array.isArray(col0) && col0.length > 0 && col0[0]?.format?.font?.bold === true;
+    });
+
+    undo.stopCapturing();
+    assert.equal(undo.canUndo(), true);
+
+    undo.undo();
+    await waitForCondition(() => !documentController.getCellFormat("Sheet1", "A1")?.font?.bold);
+    assert.equal(documentController.getCellFormat("Sheet1", "A1")?.font?.bold, undefined);
+    assert.equal(documentController.getCellFormat("Sheet1", "Z2000")?.font?.bold, undefined);
+
+    assert.equal(undo.canRedo(), true);
+    undo.redo();
+    await waitForCondition(() => Boolean(documentController.getCellFormat("Sheet1", "A1")?.font?.bold));
+    assert.equal(documentController.getCellFormat("Sheet1", "A1")?.font?.bold, true);
+    assert.equal(documentController.getCellFormat("Sheet1", "Z2000")?.font?.bold, true);
+
+    // No per-cell materialization should occur; range formatting lives on sheet metadata.
+    assert.equal(cells.size, 0);
+    assert.equal(documentController.model?.sheets?.get?.("Sheet1")?.cells?.size ?? 0, 0);
+  } finally {
+    binder.destroy();
     ydoc.destroy();
   }
 });
