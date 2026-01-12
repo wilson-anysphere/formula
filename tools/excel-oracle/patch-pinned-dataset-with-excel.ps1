@@ -56,7 +56,8 @@ param(
   [int]$MaxCases = 0,
   [string[]]$IncludeTags = @(),
   [string[]]$ExcludeTags = @(),
-  [switch]$Visible
+  [switch]$Visible,
+  [switch]$DryRun
 )
 
 Set-StrictMode -Version Latest
@@ -89,6 +90,19 @@ if (-not (Test-Path -LiteralPath $casesFull)) {
 }
 if (-not (Test-Path -LiteralPath $pinnedFull)) {
   throw "PinnedDatasetPath not found: $pinnedFull"
+}
+
+if ($DryRun) {
+  Write-Host "Dry run: patch-pinned-dataset-with-excel.ps1"
+  Write-Host ""
+  Write-Host "Would run Excel oracle:"
+  Write-Host "  $excelScript -CasesPath $subsetCasesFull -OutPath $excelResultsFull -Visible:$Visible -MaxCases $MaxCases -IncludeTags <...> -ExcludeTags <...>"
+  Write-Host ""
+  Write-Host "Would patch pinned dataset:"
+  Write-Host "  python $updateScript --cases $casesFull --pinned $pinnedFull --merge-results $excelResultsFull --overwrite-existing --no-engine"
+  Write-Host ""
+  Write-Host "No files were written."
+  return
 }
 
 Push-Location $repoRoot

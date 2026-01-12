@@ -284,6 +284,8 @@ For a one-command flow that runs Excel on a subset corpus and patches the pinned
 
 * `tools/excel-oracle/patch-pinned-dataset-with-excel.ps1`
 
+Tip: pass `-DryRun` to preview the commands without running Excel or modifying the pinned dataset.
+
 Example (patch only the odd-coupon negative yield / negative coupon validation scenarios):
 
 ```powershell
