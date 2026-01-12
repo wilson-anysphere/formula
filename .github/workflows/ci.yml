@@ -138,6 +138,9 @@ jobs:
         # without paying the JS dependency install cost.
         run: node packages/engine/scripts/build-wasm.mjs
 
+      - name: Smoke-check WASM assets (no pnpm install)
+        run: node packages/engine/scripts/smoke-wasm.mjs
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
