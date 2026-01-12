@@ -217,8 +217,10 @@ To open the built-in Extensions panel (and trigger the lazy extension host boot)
 ### Marketplace base URL (Desktop)
 
 The marketplace base URL is chosen by `getMarketplaceBaseUrl()` (`apps/desktop/src/panels/marketplace/getMarketplaceBaseUrl.ts`).
-In dev, you can override it via `localStorage["formula:marketplace:baseUrl"]` and reload (the value should include the
-`/api` suffix).
+In dev, you can override it via `localStorage["formula:marketplace:baseUrl"]` and reload. You can provide either:
+
+- an **origin** (`https://marketplace.formula.app`) — it will be normalized to `.../api`, or
+- the explicit API base URL (`https://marketplace.formula.app/api`).
 
 ```js
 localStorage.setItem("formula:marketplace:baseUrl", "https://marketplace.formula.app/api");

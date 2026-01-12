@@ -1325,7 +1325,8 @@ to the app-level CSP (`apps/desktop/src-tauri/tauri.conf.json`, `connect-src`).
      bash ../../scripts/cargo_agent.sh tauri dev
      ```
 
-4. Point Desktop at your local marketplace API (note the `/api` suffix) and reload:
+4. Point Desktop at your local marketplace API and reload.
+   You can provide either the origin (`http://127.0.0.1:8787`) or the explicit API base URL (`.../api`):
 
    ```js
    localStorage.setItem("formula:marketplace:baseUrl", "http://127.0.0.1:8787/api");

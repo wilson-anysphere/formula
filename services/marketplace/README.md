@@ -51,7 +51,8 @@ Notes:
 
 - The API origin is `http://127.0.0.1:8787`.
 - Marketplace API routes are under `/api/*` (e.g. `/api/search`, `/api/extensions/:id`, …).
-- Desktop/Tauri uses a **base URL that includes** `/api` (e.g. `http://127.0.0.1:8787/api`).
+- Desktop/Tauri uses a base URL whose routes are under `/api` (e.g. `http://127.0.0.1:8787/api`).
+  - For convenience, it also accepts an origin (`http://127.0.0.1:8787`) and normalizes it to `/api`.
 
 ## Publisher bootstrap (local dev / tests)
 
