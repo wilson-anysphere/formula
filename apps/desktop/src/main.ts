@@ -8260,6 +8260,10 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   (window as any).__workbookSheetStore = workbookSheetStore;
 
   const { maxRows: MAX_ROWS, maxCols: MAX_COLS, chunkRows: CHUNK_ROWS } = getWorkbookLoadLimits();
+  // Backend-enforced Tauri limits for `get_range` requests. Keep in sync with:
+  // `apps/desktop/src-tauri/src/resource_limits.rs`.
+  const MAX_RANGE_DIM = 10_000;
+  const MAX_RANGE_CELLS_PER_CALL = 1_000_000;
 
   const snapshotSheets: Array<{
     id: string;
@@ -8311,33 +8315,45 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
       continue;
     }
 
-    for (let chunkStartRow = startRow; chunkStartRow <= endRow; chunkStartRow += CHUNK_ROWS) {
-      const chunkEndRow = Math.min(endRow, chunkStartRow + CHUNK_ROWS - 1);
-      const range = await tauriBackend.getRange({
-        sheetId: sheet.id,
-        startRow: chunkStartRow,
-        startCol,
-        endRow: chunkEndRow,
-        endCol
-      });
+    const effectiveChunkRows = Math.max(1, Math.min(CHUNK_ROWS, MAX_RANGE_DIM));
 
-      const rows = Array.isArray(range?.values) ? range.values : [];
+    for (let chunkStartRow = startRow; chunkStartRow <= endRow; chunkStartRow += effectiveChunkRows) {
+      const chunkEndRow = Math.min(endRow, chunkStartRow + effectiveChunkRows - 1);
+      const rowCount = chunkEndRow - chunkStartRow + 1;
+      // Tauri bounds each `get_range` call by total cell count and per-axis dimensions.
+      // Chunk columns automatically based on the requested rowCount so large width
+      // workbooks can still load without failing backend range-size checks.
+      const maxColsByCellLimit = Math.max(1, Math.floor(MAX_RANGE_CELLS_PER_CALL / Math.max(1, rowCount)));
+      const effectiveChunkCols = Math.max(1, Math.min(MAX_RANGE_DIM, maxColsByCellLimit));
 
-      for (let r = 0; r < rows.length; r++) {
-        const rowValues = Array.isArray(rows[r]) ? rows[r] : [];
-        for (let c = 0; c < rowValues.length; c++) {
-          const cell = rowValues[c] as any;
-          const formula = typeof cell?.formula === "string" ? cell.formula : null;
-          const value = cell?.value ?? null;
-          if (formula == null && value == null) continue;
+      for (let chunkStartCol = startCol; chunkStartCol <= endCol; chunkStartCol += effectiveChunkCols) {
+        const chunkEndCol = Math.min(endCol, chunkStartCol + effectiveChunkCols - 1);
+        const range = await tauriBackend.getRange({
+          sheetId: sheet.id,
+          startRow: chunkStartRow,
+          startCol: chunkStartCol,
+          endRow: chunkEndRow,
+          endCol: chunkEndCol,
+        });
 
-          cells.push({
-            row: chunkStartRow + r,
-            col: startCol + c,
-            value: formula != null ? null : value,
-            formula,
-            format: null
-          });
+        const rows = Array.isArray(range?.values) ? range.values : [];
+
+        for (let r = 0; r < rows.length; r++) {
+          const rowValues = Array.isArray(rows[r]) ? rows[r] : [];
+          for (let c = 0; c < rowValues.length; c++) {
+            const cell = rowValues[c] as any;
+            const formula = typeof cell?.formula === "string" ? cell.formula : null;
+            const value = cell?.value ?? null;
+            if (formula == null && value == null) continue;
+
+            cells.push({
+              row: chunkStartRow + r,
+              col: chunkStartCol + c,
+              value: formula != null ? null : value,
+              formula,
+              format: null,
+            });
+          }
         }
       }
     }
