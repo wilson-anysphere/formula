@@ -201,9 +201,9 @@ test.describe("IndexedDB extension install corruption", () => {
     await waitForDesktopReady(page);
 
     // Opening the extensions panel triggers extension host startup + auto-load of installed extensions.
-    // `index.html` includes a fallback toolbar with `data-testid="open-extensions-panel"`, and the
-    // ribbon UI also exposes a command button with the same test id. Prefer the ribbon button so
-    // we exercise the real command dispatch that triggers lazy extension loading.
+    // The toggle lives in the ribbon UI; `apps/desktop/index.html` should not include a fallback
+    // debug button with the same test id (duplicate locators). Scope to the ribbon so we exercise
+    // the real command dispatch that triggers lazy extension loading.
     await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
     await expect(page.getByTestId("panel-extensions")).toBeVisible();
     // Wait for the Extensions panel to finish lazy-loading the extension host manager (built-ins +

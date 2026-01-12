@@ -185,7 +185,7 @@ export async function activate(context) {
     await page.reload();
     await waitForDesktopReady(page);
 
-    await page.getByTestId("open-extensions-panel").click();
+    await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
     await expect(page.getByTestId(`extension-card-${extensionId}`)).toBeVisible({ timeout: 30_000 });
 
     const runBtn = page.getByTestId(`run-command-${commandId}`);
@@ -195,4 +195,3 @@ export async function activate(context) {
     await expect(page.getByTestId("toast-root")).toContainText("Hello from marketplace!");
   });
 });
-
