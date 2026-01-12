@@ -125,6 +125,7 @@ fn prop_oddf_yield_price_roundtrip_basis0() {
     let mut runner = TestRunner::new_with_rng(
         Config {
             cases: CASES,
+            failure_persistence: None,
             ..Config::default()
         },
         TestRng::from_seed(RngAlgorithm::ChaCha, &ODDF_SEED),
@@ -184,6 +185,7 @@ fn prop_oddl_yield_price_roundtrip_basis0() {
     let mut runner = TestRunner::new_with_rng(
         Config {
             cases: CASES,
+            failure_persistence: None,
             ..Config::default()
         },
         TestRng::from_seed(RngAlgorithm::ChaCha, &ODDL_SEED),
