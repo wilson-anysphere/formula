@@ -3700,7 +3700,6 @@ if (
     },
     true,
   );
-
   // Keybindings: central dispatch with built-in precedence over extensions.
   const commandKeybindingDisplayIndex = new Map<string, string[]>();
   let lastLoadedExtensionIds = new Set<string>();

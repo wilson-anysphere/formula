@@ -156,6 +156,9 @@ export class KeybindingService {
 
   async dispatchKeydown(event: KeyboardEvent): Promise<boolean> {
     if (event.defaultPrevented) return false;
+    // Avoid repeatedly firing commands when the user holds a key down (e.g. toggles like
+    // command palette / AI chat). Spreadsheet-style repeat behavior is handled by the grid.
+    if (event.repeat) return false;
     if (shouldIgnoreTarget(event.target)) return false;
 
     const match = this.findMatchingBinding(event);
