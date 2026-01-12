@@ -181,32 +181,41 @@ fn detect_workbook_sheet_qnames(
     let mut sheets_prefix: Option<String> = None;
     let mut sheet_tag: Option<String> = None;
     let mut rel_id_attr: Option<String> = None;
-    let mut office_relationships_prefix: Option<String> = None;
+    let mut office_relationships_prefixes_root: Vec<String> = Vec::new();
+    let mut office_relationships_prefixes_sheets: Vec<String> = Vec::new();
+    let mut office_relationships_prefixes_in_scope: Vec<String> = Vec::new();
     let mut in_sheets = false;
 
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Eof => break,
             Event::Start(ref e) | Event::Empty(ref e) if e.local_name().as_ref() == b"workbook" => {
-                let ns = crate::xml::workbook_xml_namespaces_from_workbook_start(e)?;
-                office_relationships_prefix = ns.office_relationships_prefix;
+                collect_office_relationships_prefixes_from_xmlns(
+                    e,
+                    &mut office_relationships_prefixes_root,
+                    &mut office_relationships_prefixes_in_scope,
+                )?;
             }
             Event::Start(ref e) if e.local_name().as_ref() == b"sheets" => {
                 if sheets_prefix.is_none() {
                     sheets_prefix = name_prefix(e.name().as_ref());
                 }
-                if office_relationships_prefix.is_none() {
-                    office_relationships_prefix = office_relationships_prefix_from_xmlns(e)?;
-                }
+                collect_office_relationships_prefixes_from_xmlns(
+                    e,
+                    &mut office_relationships_prefixes_sheets,
+                    &mut office_relationships_prefixes_in_scope,
+                )?;
                 in_sheets = true;
             }
             Event::Empty(ref e) if e.local_name().as_ref() == b"sheets" => {
                 if sheets_prefix.is_none() {
                     sheets_prefix = name_prefix(e.name().as_ref());
                 }
-                if office_relationships_prefix.is_none() {
-                    office_relationships_prefix = office_relationships_prefix_from_xmlns(e)?;
-                }
+                collect_office_relationships_prefixes_from_xmlns(
+                    e,
+                    &mut office_relationships_prefixes_sheets,
+                    &mut office_relationships_prefixes_in_scope,
+                )?;
             }
             Event::End(ref e) if e.local_name().as_ref() == b"sheets" => {
                 in_sheets = false;
@@ -244,30 +253,33 @@ fn detect_workbook_sheet_qnames(
     // elements will be dropped when we replace them with new elements.
     //
     // Therefore:
-    // - If we found an existing `*:id` attribute, only keep its prefix if that prefix is also
-    //   declared on the workbook root or `<sheets>` element.
-    // - Otherwise, use the prefix declared on the workbook root / `<sheets>`, or fall back to an
+    // - If we found an existing `*:id` attribute, only keep its prefix if that prefix is declared
+    //   on the workbook root or `<sheets>` element.
+    // - Otherwise, use an in-scope relationships prefix if one exists, or fall back to an
     //   unprefixed `id` to keep the output namespace-well-formed.
+    let fallback_prefix = office_relationships_prefixes_root
+        .first()
+        .or_else(|| office_relationships_prefixes_sheets.first())
+        .map(|s| s.as_str());
+
     let rel_id_attr = match rel_id_attr {
-        Some(found) => {
-            let found_prefix = found.split_once(':').map(|(p, _)| p);
-            match (found_prefix, office_relationships_prefix.as_deref()) {
-                // Existing attribute is unprefixed (`id`) => always safe to keep as-is.
-                (None, _) => Some(found),
-                // Existing attribute prefix matches the declared prefix => safe to keep.
-                (Some(p), Some(declared)) if p == declared => Some(found),
-                // Existing attribute prefix doesn't match the in-scope declared prefix; use the
-                // in-scope prefix so we don't emit an undeclared one.
-                (Some(_), Some(declared)) => Some(crate::xml::prefixed_tag(Some(declared), "id")),
-                // No in-scope declaration for the relationships namespace; avoid emitting any
-                // prefix at all.
-                (Some(_), None) => Some("id".to_string()),
+        Some(found) => match found.split_once(':') {
+            // Existing attribute is unprefixed (`id`) => always safe to keep as-is.
+            None => Some(found),
+            Some((prefix, _)) => {
+                if office_relationships_prefixes_in_scope
+                    .iter()
+                    .any(|p| p.as_str() == prefix)
+                {
+                    Some(found)
+                } else if let Some(fallback_prefix) = fallback_prefix {
+                    Some(crate::xml::prefixed_tag(Some(fallback_prefix), "id"))
+                } else {
+                    Some("id".to_string())
+                }
             }
-        }
-        None => Some(crate::xml::prefixed_tag(
-            office_relationships_prefix.as_deref(),
-            "id",
-        )),
+        },
+        None => Some(crate::xml::prefixed_tag(fallback_prefix, "id")),
     };
 
     Ok((sheet_tag, rel_id_attr))
@@ -280,7 +292,11 @@ fn name_prefix(name: &[u8]) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn office_relationships_prefix_from_xmlns(e: &BytesStart<'_>) -> Result<Option<String>, XlsxError> {
+fn collect_office_relationships_prefixes_from_xmlns(
+    e: &BytesStart<'_>,
+    out: &mut Vec<String>,
+    in_scope: &mut Vec<String>,
+) -> Result<(), XlsxError> {
     for attr in e.attributes().with_checks(false) {
         let attr = attr?;
         let key = attr.key.as_ref();
@@ -288,10 +304,16 @@ fn office_relationships_prefix_from_xmlns(e: &BytesStart<'_>) -> Result<Option<S
             continue;
         };
         if attr.value.as_ref() == crate::xml::OFFICE_RELATIONSHIPS_NS.as_bytes() {
-            return Ok(Some(String::from_utf8_lossy(prefix).into_owned()));
+            let prefix = String::from_utf8_lossy(prefix).into_owned();
+            if !out.iter().any(|p| p == &prefix) {
+                out.push(prefix.clone());
+            }
+            if !in_scope.iter().any(|p| p == &prefix) {
+                in_scope.push(prefix);
+            }
         }
     }
-    Ok(None)
+    Ok(())
 }
 
 pub fn parse_sheet_tab_color(worksheet_xml: &str) -> Result<Option<TabColor>, XlsxError> {
@@ -740,6 +762,41 @@ mod tests {
         assert!(
             !rewritten.contains(" r:id="),
             "should not emit an undeclared r:id prefix, got:\n{rewritten}"
+        );
+    }
+
+    #[test]
+    fn write_workbook_sheets_prefers_existing_rel_id_prefix_when_multiple_prefixes_in_scope() {
+        // When multiple prefixes are bound to the relationships namespace, prefer the exact
+        // `*:id` qname used by existing <sheet> elements (as long as the prefix is declared in
+        // scope).
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+  xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:sheets>
+    <x:sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </x:sheets>
+</x:workbook>
+"#;
+
+        let sheets = vec![WorkbookSheetInfo {
+            name: "Sheet1".to_string(),
+            sheet_id: 1,
+            rel_id: "rId1".to_string(),
+            visibility: SheetVisibility::Visible,
+        }];
+
+        let rewritten = write_workbook_sheets(workbook_xml, &sheets).unwrap();
+
+        roxmltree::Document::parse(&rewritten).expect("rewritten workbook.xml should be valid XML");
+        assert!(
+            rewritten.contains(r#"r:id="rId1""#),
+            "expected output to keep r:id, got:\n{rewritten}"
+        );
+        assert!(
+            !rewritten.contains(r#"rel:id="rId1""#),
+            "should not rewrite to a different relationships prefix, got:\n{rewritten}"
         );
     }
 
