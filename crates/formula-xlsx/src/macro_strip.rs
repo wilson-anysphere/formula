@@ -10,7 +10,8 @@ const CUSTOM_UI_REL_TYPES: [&str; 2] = [
     "http://schemas.microsoft.com/office/2007/relationships/ui/extensibility",
 ];
 
-const RELATIONSHIPS_NS: &[u8] = b"http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const RELATIONSHIPS_NS: &[u8] =
+    b"http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 pub(crate) fn strip_macros(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<(), XlsxError> {
     let delete_parts = compute_macro_delete_set(parts)?;
@@ -25,7 +26,9 @@ pub(crate) fn strip_macros(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<(), 
     Ok(())
 }
 
-fn compute_macro_delete_set(parts: &BTreeMap<String, Vec<u8>>) -> Result<BTreeSet<String>, XlsxError> {
+fn compute_macro_delete_set(
+    parts: &BTreeMap<String, Vec<u8>>,
+) -> Result<BTreeSet<String>, XlsxError> {
     let mut delete = BTreeSet::new();
 
     // VBA project payloads.
@@ -45,7 +48,6 @@ fn compute_macro_delete_set(parts: &BTreeMap<String, Vec<u8>>) -> Result<BTreeSe
         if name.starts_with("xl/activeX/")
             || name.starts_with("xl/ctrlProps/")
             || name.starts_with("xl/controls/")
-            || name.starts_with("xl/embeddings/")
         {
             delete.insert(name.clone());
         }
@@ -56,6 +58,13 @@ fn compute_macro_delete_set(parts: &BTreeMap<String, Vec<u8>>) -> Result<BTreeSe
         let targets = parse_internal_relationship_targets(rels_bytes, "xl/vbaProject.bin")?;
         delete.extend(targets);
     }
+
+    // ActiveX controls embedded into VML drawings can reference OLE/ActiveX binaries via
+    // `xl/drawings/_rels/vmlDrawing*.vml.rels`. These VML parts are often shared with legacy
+    // comments (ObjectType="Note"), so we cannot delete the whole VML drawing; instead we delete
+    // the specific relationship targets used by `<o:OLEObject>` shapes so the cleanup pass can
+    // remove only those shapes while preserving comments.
+    delete.extend(find_vml_ole_object_targets(parts)?);
 
     // Build a relationship graph so we can delete any extra parts that are only
     // referenced by macro-related parts (e.g. `xl/embeddings/*` referenced by ActiveX rels).
@@ -73,6 +82,132 @@ fn compute_macro_delete_set(parts: &BTreeMap<String, Vec<u8>>) -> Result<BTreeSe
     delete.extend(rels_to_remove);
 
     Ok(delete)
+}
+
+fn find_vml_ole_object_targets(
+    parts: &BTreeMap<String, Vec<u8>>,
+) -> Result<BTreeSet<String>, XlsxError> {
+    let mut out = BTreeSet::new();
+
+    for (vml_part, vml_bytes) in parts {
+        if !vml_part.ends_with(".vml") {
+            continue;
+        }
+
+        // Only VML drawings can contain `<o:OLEObject>` control shapes (commentsDrawing* parts are
+        // DrawingML XML, not VML).
+        if !vml_part.starts_with("xl/drawings/") {
+            continue;
+        }
+
+        let rel_ids = parse_vml_ole_object_relationship_ids(vml_bytes)?;
+        if rel_ids.is_empty() {
+            continue;
+        }
+
+        let rels_part = crate::path::rels_for_part(vml_part);
+        let Some(rels_bytes) = parts.get(&rels_part) else {
+            continue;
+        };
+
+        out.extend(parse_relationship_targets_for_ids(
+            rels_bytes, vml_part, &rel_ids,
+        )?);
+    }
+
+    Ok(out)
+}
+
+fn parse_vml_ole_object_relationship_ids(xml: &[u8]) -> Result<BTreeSet<String>, XlsxError> {
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut namespace_context = NamespaceContext::default();
+    let mut ids = BTreeSet::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(ref e) => {
+                let changes = namespace_context.apply_namespace_decls(e)?;
+                if crate::openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"OLEObject")
+                {
+                    collect_relationship_id_attrs(e, &namespace_context, &mut ids)?;
+                }
+                namespace_context.push(changes);
+            }
+            Event::Empty(ref e) => {
+                let changes = namespace_context.apply_namespace_decls(e)?;
+                if crate::openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"OLEObject")
+                {
+                    collect_relationship_id_attrs(e, &namespace_context, &mut ids)?;
+                }
+                namespace_context.rollback(changes);
+            }
+            Event::End(_) => namespace_context.pop(),
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(ids)
+}
+
+fn parse_relationship_targets_for_ids(
+    xml: &[u8],
+    source_part: &str,
+    ids: &BTreeSet<String>,
+) -> Result<BTreeSet<String>, XlsxError> {
+    let mut reader = XmlReader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut out = BTreeSet::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(ref e) | Event::Empty(ref e)
+                if crate::openxml::local_name(e.name().as_ref()) == b"Relationship" =>
+            {
+                let mut id = None;
+                let mut target = None;
+                let mut target_mode = None;
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr?;
+                    match crate::openxml::local_name(attr.key.as_ref()) {
+                        b"Id" => id = Some(attr.unescape_value()?.into_owned()),
+                        b"Target" => target = Some(attr.unescape_value()?.into_owned()),
+                        b"TargetMode" => target_mode = Some(attr.unescape_value()?.into_owned()),
+                        _ => {}
+                    }
+                }
+
+                if target_mode
+                    .as_deref()
+                    .is_some_and(|mode| mode.eq_ignore_ascii_case("External"))
+                {
+                    continue;
+                }
+
+                let Some(id) = id else {
+                    continue;
+                };
+                if !ids.contains(&id) {
+                    continue;
+                }
+
+                let Some(target) = target else {
+                    continue;
+                };
+                let target = strip_fragment(&target);
+                out.insert(resolve_target_for_source(source_part, target));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
 }
 
 fn delete_orphan_targets(graph: &RelationshipGraph, delete: &mut BTreeSet<String>) {
@@ -278,7 +413,10 @@ fn relationship_id(e: &BytesStart<'_>) -> Result<Option<String>, XlsxError> {
     Ok(None)
 }
 
-fn strip_content_types(xml: &[u8], delete_parts: &BTreeSet<String>) -> Result<Option<Vec<u8>>, XlsxError> {
+fn strip_content_types(
+    xml: &[u8],
+    delete_parts: &BTreeSet<String>,
+) -> Result<Option<Vec<u8>>, XlsxError> {
     let mut reader = XmlReader::from_reader(xml);
     reader.config_mut().trim_text(false);
     let mut writer = XmlWriter::new(Vec::with_capacity(xml.len()));
@@ -397,7 +535,10 @@ fn patched_override(
     Ok(None)
 }
 
-fn parse_internal_relationship_targets(xml: &[u8], source_part: &str) -> Result<Vec<String>, XlsxError> {
+fn parse_internal_relationship_targets(
+    xml: &[u8],
+    source_part: &str,
+) -> Result<Vec<String>, XlsxError> {
     let mut reader = XmlReader::from_reader(xml);
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
@@ -442,7 +583,10 @@ fn parse_internal_relationship_targets(xml: &[u8], source_part: &str) -> Result<
 }
 
 fn strip_fragment(target: &str) -> &str {
-    target.split_once('#').map(|(base, _)| base).unwrap_or(target)
+    target
+        .split_once('#')
+        .map(|(base, _)| base)
+        .unwrap_or(target)
 }
 
 fn resolve_target_for_source(source_part: &str, target: &str) -> String {
@@ -631,7 +775,10 @@ struct NamespaceContext {
 }
 
 impl NamespaceContext {
-    fn apply_namespace_decls(&mut self, e: &BytesStart<'_>) -> Result<Vec<(Vec<u8>, Option<Vec<u8>>)>, XlsxError> {
+    fn apply_namespace_decls(
+        &mut self,
+        e: &BytesStart<'_>,
+    ) -> Result<Vec<(Vec<u8>, Option<Vec<u8>>)>, XlsxError> {
         let mut changes = Vec::new();
 
         for attr in e.attributes().with_checks(false) {
@@ -704,8 +851,14 @@ impl RelationshipGraph {
 
             let targets = parse_internal_relationship_targets(bytes, &source_part)?;
             for target in targets {
-                outgoing.entry(source_part.clone()).or_default().insert(target.clone());
-                inbound.entry(target).or_default().insert(source_part.clone());
+                outgoing
+                    .entry(source_part.clone())
+                    .or_default()
+                    .insert(target.clone());
+                inbound
+                    .entry(target)
+                    .or_default()
+                    .insert(source_part.clone());
             }
         }
 
@@ -714,7 +867,9 @@ impl RelationshipGraph {
 }
 
 #[cfg(test)]
-pub(crate) fn validate_opc_relationships(parts: &BTreeMap<String, Vec<u8>>) -> Result<(), XlsxError> {
+pub(crate) fn validate_opc_relationships(
+    parts: &BTreeMap<String, Vec<u8>>,
+) -> Result<(), XlsxError> {
     for rels_part in parts.keys().filter(|name| name.ends_with(".rels")) {
         let Some(source_part) = source_part_from_rels_part(rels_part) else {
             continue;
@@ -771,7 +926,8 @@ fn parse_relationship_ids(xml: &[u8]) -> Result<BTreeSet<String>, XlsxError> {
         match reader.read_event_into(&mut buf)? {
             Event::Eof => break,
             Event::Start(ref e) | Event::Empty(ref e)
-                if crate::openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+                if crate::openxml::local_name(e.name().as_ref())
+                    .eq_ignore_ascii_case(b"Relationship") =>
             {
                 for attr in e.attributes().with_checks(false) {
                     let attr = attr?;
@@ -818,7 +974,6 @@ fn parse_relationship_id_references(xml: &[u8]) -> Result<BTreeSet<String>, Xlsx
     Ok(out)
 }
 
-#[cfg(test)]
 fn collect_relationship_id_attrs(
     e: &BytesStart<'_>,
     namespace_context: &NamespaceContext,
