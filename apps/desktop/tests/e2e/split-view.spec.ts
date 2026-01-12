@@ -3,13 +3,27 @@ import { expect, test } from "@playwright/test";
 import { gotoDesktop, waitForDesktopReady } from "./helpers";
 
 async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
-  await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
-  await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+  // Vite may occasionally trigger a one-time full reload after dependency optimization.
+  // Retry once if the execution context is destroyed mid-wait.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
+      await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+      return;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (attempt === 0 && message.includes("Execution context was destroyed")) {
+        await page.waitForLoadState("load");
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
-const LAYOUT_KEY = "formula.layout.workbook.local-workbook.v1";
-
 test.describe("split view", () => {
+  const LAYOUT_KEY = "formula.layout.workbook.local-workbook.v1";
+
   test("secondary pane mounts a real grid with independent scroll + zoom and persists state", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
 
@@ -391,6 +405,35 @@ test.describe("split view", () => {
     await expect
       .poll(async () => Number((await page.locator("#grid-secondary").getAttribute("data-scroll-y")) ?? 0))
       .toBeCloseTo(secondaryScrollY, 1);
+  });
+
+  test("dragging a range in the secondary pane inserts it into the formula bar", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await waitForIdle(page);
+
+    await page.getByTestId("split-vertical").click();
+    await expect(page.getByTestId("grid-secondary")).toBeVisible();
+
+    // Select C1 in the primary pane (same offsets as formula-bar.spec.ts).
+    await page.click("#grid", { position: { x: 260, y: 40 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("C1");
+
+    // Start editing in the formula bar.
+    await page.getByTestId("formula-highlight").click();
+    const input = page.getByTestId("formula-input");
+    await expect(input).toBeVisible();
+    await input.fill("=SUM(");
+
+    // Drag select A1:A2 in the secondary pane to insert a range reference.
+    const gridBox = await page.locator("#grid-secondary").boundingBox();
+    if (!gridBox) throw new Error("Missing grid-secondary bounding box");
+
+    await page.mouse.move(gridBox.x + 60, gridBox.y + 40);
+    await page.mouse.down();
+    await page.mouse.move(gridBox.x + 60, gridBox.y + 64);
+    await page.mouse.up();
+
+    await expect(input).toHaveValue("=SUM(A1:A2");
   });
 });
 

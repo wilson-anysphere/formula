@@ -1,7 +1,6 @@
-import type { GridAxisSizeChange } from "@formula/grid";
+import type { CellRange, GridAxisSizeChange } from "@formula/grid";
 import type { DocumentController } from "../../document/documentController.js";
-import type { CellRange } from "@formula/grid";
-import { DesktopSharedGrid } from "../shared/desktopSharedGrid.js";
+import { DesktopSharedGrid, type DesktopSharedGridCallbacks } from "../shared/desktopSharedGrid.js";
 import { DocumentCellProvider } from "../shared/documentCellProvider.js";
 
 type ScrollState = { scrollX: number; scrollY: number };
@@ -59,6 +58,7 @@ export class SecondaryGridView {
     onSelectionChange?: (selection: { row: number; col: number } | null) => void;
     onSelectionRangeChange?: (range: CellRange | null) => void;
     getCommentMeta?: (row: number, col: number) => { resolved: boolean } | null;
+    callbacks?: DesktopSharedGridCallbacks;
     initialScroll?: ScrollState;
     initialZoom?: number;
     persistScroll?: (scroll: ScrollState) => void;
@@ -130,6 +130,8 @@ export class SecondaryGridView {
         getCommentMeta: options.getCommentMeta
       });
 
+    const externalCallbacks: DesktopSharedGridCallbacks = options.callbacks ?? {};
+
     this.grid = new DesktopSharedGrid({
       container: this.container,
       provider: this.provider,
@@ -144,7 +146,8 @@ export class SecondaryGridView {
       canvases: { grid: gridCanvas, content: contentCanvas, selection: selectionCanvas },
       scrollbars: { vTrack, vThumb, hTrack, hThumb },
       callbacks: {
-        onScroll: (scroll) => {
+        ...externalCallbacks,
+        onScroll: (scroll, viewport) => {
           this.container.dataset.scrollX = String(scroll.x);
           this.container.dataset.scrollY = String(scroll.y);
           this.schedulePersistScroll({ scrollX: scroll.x, scrollY: scroll.y });
@@ -155,10 +158,21 @@ export class SecondaryGridView {
             this.lastZoom = zoom;
             this.schedulePersistZoom(zoom);
           }
+
+          externalCallbacks.onScroll?.(scroll, viewport);
         },
-        onAxisSizeChange: (change) => this.onAxisSizeChange(change),
-        onSelectionChange: options.onSelectionChange,
-        onSelectionRangeChange: options.onSelectionRangeChange,
+        onAxisSizeChange: (change) => {
+          this.onAxisSizeChange(change);
+          externalCallbacks.onAxisSizeChange?.(change);
+        },
+        onSelectionChange: (selection) => {
+          options.onSelectionChange?.(selection);
+          externalCallbacks.onSelectionChange?.(selection);
+        },
+        onSelectionRangeChange: (range) => {
+          options.onSelectionRangeChange?.(range);
+          externalCallbacks.onSelectionRangeChange?.(range);
+        },
       }
     });
 

@@ -2745,9 +2745,8 @@ export class SpreadsheetApp {
   }
 
   private syncSharedGridInteractionMode(): void {
-    if (!this.sharedGrid) return;
     const mode = this.formulaBar?.isFormulaEditing() ? "rangeSelection" : "default";
-    this.sharedGrid.setInteractionMode(mode);
+    this.sharedGrid?.setInteractionMode(mode);
   }
 
   private syncSharedGridReferenceHighlights(): void {

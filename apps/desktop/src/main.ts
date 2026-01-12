@@ -1826,6 +1826,44 @@ if (
   let splitPanePersistTimer: number | null = null;
   let splitPanePersistDirty = false;
 
+  const syncSecondaryGridInteractionMode = () => {
+    if (!secondaryGridView) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const formulaBar = (app as any).formulaBar as any;
+    const mode = formulaBar?.isFormulaEditing?.() ? "rangeSelection" : "default";
+    secondaryGridView.grid.setInteractionMode(mode);
+    if (mode === "default") {
+      // Ensure we don't leave behind transient formula-range selection overlays when exiting
+      // formula editing (e.g. after committing/canceling, even if the last drag happened in
+      // the secondary pane).
+      secondaryGridView.grid.clearRangeSelection();
+    }
+  };
+
+  const syncSecondaryGridInteractionModeSoon = () => {
+    const schedule =
+      typeof queueMicrotask === "function"
+        ? queueMicrotask
+        : (cb: () => void) => window.setTimeout(cb, 0);
+    schedule(() => syncSecondaryGridInteractionMode());
+  };
+
+  // Keep the secondary pane interaction mode in sync with the formula bar's state.
+  // We use events rather than polling to avoid unnecessary work.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const formulaBar = (app as any).formulaBar as any;
+  if (formulaBar?.textarea instanceof HTMLTextAreaElement) {
+    formulaBar.textarea.addEventListener("input", () => syncSecondaryGridInteractionMode());
+    formulaBar.textarea.addEventListener("focus", () => syncSecondaryGridInteractionMode());
+    // `blur` fires before FormulaBarView updates its model state during commit/cancel; sync on a microtask.
+    formulaBar.textarea.addEventListener("blur", () => syncSecondaryGridInteractionModeSoon());
+  }
+  if (formulaBar?.root instanceof HTMLElement) {
+    // Clicking fx/commit/cancel can mutate the draft without triggering a textarea input event.
+    // Sync on a microtask so we observe the final FormulaBarView state.
+    formulaBar.root.addEventListener("click", () => syncSecondaryGridInteractionModeSoon());
+  }
+
   // High-frequency split-pane interactions (scroll/zoom) update the in-memory layout
   // without persisting on every event. Flush to storage on a debounce so we avoid
   // spamming localStorage writes.
@@ -2097,6 +2135,11 @@ if (
         getComputedValue: (cell) => app.getCellComputedValueForSheet(app.getCurrentSheetId(), cell),
         onSelectionChange: () => syncPrimarySelectionFromSecondary(),
         onSelectionRangeChange: () => syncPrimarySelectionFromSecondary(),
+        callbacks: {
+          onRangeSelectionStart: (range) => (app as any).onSharedRangeSelectionStart(range),
+          onRangeSelectionChange: (range) => (app as any).onSharedRangeSelectionChange(range),
+          onRangeSelectionEnd: () => (app as any).onSharedRangeSelectionEnd(),
+        },
         initialScroll,
         initialZoom,
         persistScroll: (scroll) => {
@@ -2130,8 +2173,11 @@ if (
           splitSelectionSyncInProgress = false;
         }
       }
-    }
 
+      // Ensure the secondary pane respects the current formula bar state (e.g. when enabling split view
+      // while already editing a formula).
+      syncSecondaryGridInteractionMode();
+    }
     const active = split.activePane ?? "primary";
     gridRoot.dataset.splitActive = active === "primary" ? "true" : "false";
     gridSecondaryEl.dataset.splitActive = active === "secondary" ? "true" : "false";
