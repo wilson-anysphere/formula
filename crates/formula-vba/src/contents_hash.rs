@@ -1563,6 +1563,10 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
     // the UTF-16LE "NameUnicode" bytes. The v3 transcript includes these bytes, so keep a small
     // amount of state to associate the 0x003E record with the preceding 0x0016.
     let mut expect_reference_name_unicode = false;
+    // Some `VBA/dir` layouts provide a Unicode module stream-name record immediately after
+    // MODULESTREAMNAME (0x001A). The canonical ID is 0x0032, but some producers reuse 0x0048.
+    // Track this expectation so we don't misinterpret MODULEDOCSTRINGUNICODE as a stream name.
+    let mut expect_module_stream_name_unicode = false;
 
     let mut offset = 0usize;
     while offset < dir_decompressed.len() {
@@ -1571,6 +1575,10 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
         }
 
         let id = u16::from_le_bytes([dir_decompressed[offset], dir_decompressed[offset + 1]]);
+
+        if expect_module_stream_name_unicode && !matches!(id, 0x0032 | 0x0048) {
+            expect_module_stream_name_unicode = false;
+        }
 
         // Most `VBA/dir` structures begin with an `Id` (u16) followed by a `Size` (u32) and
         // `Size` bytes of payload. However, some fixed-size records (notably `PROJECTVERSION`)
@@ -1644,6 +1652,18 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
         // If we treat the u32 as the total record length, we'll mis-align parsing when the Unicode
         // stream name is present. Parse the full record and advance `offset` correctly.
         if id == 0x001A {
+            if offset + 6 > dir_decompressed.len() {
+                return Err(DirParseError::Truncated.into());
+            }
+            // For disambiguation, compute `SizeOfStreamName` from the raw bytes. In spec-compliant
+            // records this is the MBCS stream-name length; in TLV-ish fixtures it is typically the
+            // full payload length.
+            let size_name = u32::from_le_bytes([
+                dir_decompressed[offset + 2],
+                dir_decompressed[offset + 3],
+                dir_decompressed[offset + 4],
+                dir_decompressed[offset + 5],
+            ]) as usize;
             let mut cur = DirCursor::new(&dir_decompressed[offset..]);
             let stream_name =
                 parse_module_stream_name(&mut cur, encoding).ok_or(DirParseError::Truncated)?;
@@ -1654,6 +1674,9 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                 m.stream_name = stream_name;
                 m.seen_non_name_record = true;
             }
+            // Only expect a separate Unicode stream-name record when the MODULESTREAMNAME record did
+            // not include an in-record Unicode tail (Reserved=0x0032 + StreamNameUnicode bytes).
+            expect_module_stream_name_unicode = cur.offset == 6 + size_name && current_module.is_some();
             continue;
         }
 
@@ -1898,6 +1921,17 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                     m.stream_name = decode_dir_unicode_string(data);
                     m.seen_non_name_record = true;
                 }
+                expect_module_stream_name_unicode = false;
+            }
+            // Some producers use 0x0048 as the module stream name Unicode record id (even though
+            // 0x0048 is canonically MODULEDOCSTRINGUNICODE). Accept it only when it immediately
+            // follows MODULESTREAMNAME.
+            0x0048 if expect_module_stream_name_unicode => {
+                if let Some(m) = current_module.as_mut() {
+                    m.stream_name = decode_dir_unicode_string(data);
+                    m.seen_non_name_record = true;
+                }
+                expect_module_stream_name_unicode = false;
             }
 
             // MODULETYPE
