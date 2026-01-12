@@ -36,6 +36,15 @@ export interface CellStyle {
    */
   fontStyle?: string;
   textAlign?: CanvasTextAlign;
+  /**
+   * Text indentation in CSS pixels at zoom=1 (the renderer scales this by the current zoom).
+   *
+   * Semantics: the text content box is indented inwards from the *aligned edge*:
+   * - left/start alignment → extra padding on the left edge
+   * - right/end alignment → extra padding on the right edge
+   * - center alignment → indent is ignored (deterministic)
+   */
+  textIndentPx?: number;
   underline?: boolean;
   strike?: boolean;
   borders?: CellBorders;

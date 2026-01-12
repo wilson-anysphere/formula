@@ -105,6 +105,11 @@ function clampIndex(value: number, min: number, max: number): number {
   return clamp(Math.trunc(value), min, max);
 }
 
+function resolveTextIndentPx(textIndentPx: number | undefined, zoom: number): number {
+  if (typeof textIndentPx !== "number" || !Number.isFinite(textIndentPx) || textIndentPx <= 0) return 0;
+  return textIndentPx * zoom;
+}
+
 // Keep zoom bounds aligned with the desktop layout pane zoom clamp so the app can
 // persist values without "snapping" on reload.
 const MIN_ZOOM = 0.25;
@@ -2650,6 +2655,16 @@ export class CanvasGridRenderer {
               ? (align as "left" | "right" | "center" | "start" | "end")
               : "start";
 
+          const baseDirection = direction === "auto" ? detectBaseDirection(text) : direction;
+          const resolvedAlign =
+            layoutAlign === "left" || layoutAlign === "right" || layoutAlign === "center"
+              ? layoutAlign
+              : resolveAlign(layoutAlign, baseDirection);
+          const textIndentX = rotationDeg === 0 ? resolveTextIndentPx(style?.textIndentPx, zoom) : 0;
+          const indentX = resolvedAlign === "left" || resolvedAlign === "right" ? textIndentX : 0;
+          const maxWidth = Math.max(0, availableWidth - indentX);
+          const originX = x + paddingX + (resolvedAlign === "left" ? indentX : 0);
+
           const hasExplicitNewline = EXPLICIT_NEWLINE_RE.test(text);
           const rotationRad = (rotationDeg * Math.PI) / 180;
 
@@ -2729,12 +2744,6 @@ export class CanvasGridRenderer {
 
           if (wrapMode === "none" && !hasExplicitNewline && rotationDeg === 0) {
             // Fast path: single-line rich text (no wrapping). Uses cached measurements.
-            const baseDirection = direction === "auto" ? detectBaseDirection(text) : direction;
-            const resolvedAlign =
-              layoutAlign === "left" || layoutAlign === "right" || layoutAlign === "center"
-                ? layoutAlign
-                : resolveAlign(layoutAlign, baseDirection);
-
             const fragments = layoutRuns
               .map((fragment) => {
                 if (fragment.text.length === 0) return null;
@@ -2755,11 +2764,11 @@ export class CanvasGridRenderer {
             const lineAscent = fragments.reduce((acc, fragment) => Math.max(acc, fragment.ascent), 0);
             const lineDescent = fragments.reduce((acc, fragment) => Math.max(acc, fragment.descent), 0);
 
-            let cursorX = x + paddingX;
+            let cursorX = originX;
             if (resolvedAlign === "center") {
               cursorX = x + paddingX + (availableWidth - totalWidth) / 2;
             } else if (resolvedAlign === "right") {
-              cursorX = x + paddingX + (availableWidth - totalWidth);
+              cursorX = x + paddingX + (maxWidth - totalWidth);
             }
 
             let baselineY = y + paddingY + lineAscent;
@@ -2823,15 +2832,19 @@ export class CanvasGridRenderer {
               }
             };
 
-            const shouldClip = totalWidth > availableWidth;
+            const shouldClip = totalWidth > maxWidth;
             let clipX = x;
             let clipWidth = width;
 
             const rowProbeStart = probeStartRow ?? spanStartRow;
             const rowProbeEnd = probeEndRow ?? spanEndRow;
 
-            if (shouldClip && (resolvedAlign === "left" || resolvedAlign === "right") && totalWidth > width - paddingX) {
-              const requiredExtra = paddingX + totalWidth - width;
+            if (
+              shouldClip &&
+              (resolvedAlign === "left" || resolvedAlign === "right") &&
+              totalWidth > width - (paddingX + indentX)
+            ) {
+              const requiredExtra = paddingX + indentX + totalWidth - width;
               if (requiredExtra > 0) {
                 if (resolvedAlign === "left") {
                   let extra = 0;
@@ -2902,7 +2915,7 @@ export class CanvasGridRenderer {
               drawDecorationSegments(strikeSegments);
               contentCtx.restore();
             }
-          } else if (layoutEngine && availableWidth > 0) {
+          } else if (layoutEngine && maxWidth > 0) {
             const layout = layoutEngine.layout({
               runs: layoutRuns.map((r) => ({
                 text: r.text,
@@ -2914,7 +2927,7 @@ export class CanvasGridRenderer {
               })),
               text: undefined,
               font: defaults,
-              maxWidth: availableWidth,
+              maxWidth,
               wrapMode,
               align: layoutAlign,
               direction,
@@ -2929,8 +2942,7 @@ export class CanvasGridRenderer {
               originY = y + height - paddingY - layout.height;
             }
 
-            const originX = x + paddingX;
-            const shouldClip = layout.width > availableWidth || layout.height > availableHeight || rotationDeg !== 0;
+            const shouldClip = layout.width > maxWidth || layout.height > availableHeight || rotationDeg !== 0;
 
             const drawLayout = () => {
               const underlineSegments: DecorationSegment[] = [];
@@ -3083,28 +3095,31 @@ export class CanvasGridRenderer {
               ? (align as "left" | "right" | "center" | "start" | "end")
               : "start";
 
+          const baseDirection =
+            direction === "auto" ? (typeof cell.value === "string" ? detectBaseDirection(text) : "ltr") : direction;
+          const resolvedAlign =
+            layoutAlign === "left" || layoutAlign === "right" || layoutAlign === "center"
+              ? layoutAlign
+              : resolveAlign(layoutAlign, baseDirection);
+          const textIndentX = rotationDeg === 0 ? resolveTextIndentPx(style?.textIndentPx, zoom) : 0;
+          const indentX = resolvedAlign === "left" || resolvedAlign === "right" ? textIndentX : 0;
+          const maxWidth = Math.max(0, availableWidth - indentX);
+          const originX = x + paddingX + (resolvedAlign === "left" ? indentX : 0);
+
           const hasExplicitNewline = EXPLICIT_NEWLINE_RE.test(text);
           const rotationRad = (rotationDeg * Math.PI) / 180;
 
           if (wrapMode === "none" && !hasExplicitNewline && rotationDeg === 0) {
-            const resolvedAlign =
-              layoutAlign === "left" || layoutAlign === "right" || layoutAlign === "center"
-                ? layoutAlign
-                : resolveAlign(
-                    layoutAlign,
-                    direction === "auto" ? (typeof cell.value === "string" ? detectBaseDirection(text) : "ltr") : direction
-                  );
-
             const measurement = layoutEngine?.measure(text, fontSpec);
             const textWidth = measurement?.width ?? contentCtx.measureText(text).width;
             const ascent = measurement?.ascent ?? fontSize * 0.8;
             const descent = measurement?.descent ?? fontSize * 0.2;
 
-            let textX = x + paddingX;
+            let textX = originX;
             if (resolvedAlign === "center") {
               textX = x + paddingX + (availableWidth - textWidth) / 2;
             } else if (resolvedAlign === "right") {
-              textX = x + paddingX + (availableWidth - textWidth);
+              textX = x + paddingX + (maxWidth - textWidth);
             }
 
             let baselineY = y + paddingY + ascent;
@@ -3114,7 +3129,7 @@ export class CanvasGridRenderer {
               baselineY = y + height - paddingY - descent;
             }
 
-            const shouldClip = textWidth > availableWidth;
+            const shouldClip = textWidth > maxWidth;
             if (shouldClip) {
               let clipX = x;
               let clipWidth = width;
@@ -3122,8 +3137,8 @@ export class CanvasGridRenderer {
               const rowProbeStart = probeStartRow ?? spanStartRow;
               const rowProbeEnd = probeEndRow ?? spanEndRow;
 
-              if ((resolvedAlign === "left" || resolvedAlign === "right") && textWidth > width - paddingX) {
-                const requiredExtra = paddingX + textWidth - width;
+              if ((resolvedAlign === "left" || resolvedAlign === "right") && textWidth > width - (paddingX + indentX)) {
+                const requiredExtra = paddingX + indentX + textWidth - width;
                 if (requiredExtra > 0) {
                   if (resolvedAlign === "left") {
                     let extra = 0;
@@ -3217,11 +3232,11 @@ export class CanvasGridRenderer {
                 }
               }
             }
-          } else if (layoutEngine && availableWidth > 0) {
+          } else if (layoutEngine && maxWidth > 0) {
             const layout = layoutEngine.layout({
               text,
               font: fontSpec,
-              maxWidth: availableWidth,
+              maxWidth,
               wrapMode,
               align: layoutAlign,
               direction,
@@ -3236,8 +3251,7 @@ export class CanvasGridRenderer {
               originY = y + height - paddingY - layout.height;
             }
 
-            const originX = x + paddingX;
-            const shouldClip = layout.width > availableWidth || layout.height > availableHeight || rotationDeg !== 0;
+            const shouldClip = layout.width > maxWidth || layout.height > availableHeight || rotationDeg !== 0;
             const drawLayoutDecorations = () => {
               if (!hasTextDecorations) return;
               prepareDecorationStroke();
@@ -4214,17 +4228,21 @@ export class CanvasGridRenderer {
               layoutAlign === "left" || layoutAlign === "right" || layoutAlign === "center"
                 ? layoutAlign
                 : resolveAlign(layoutAlign, baseDirection);
+            const textIndentX = resolveTextIndentPx(style?.textIndentPx, zoom);
+            const indentX = resolvedAlign === "left" || resolvedAlign === "right" ? textIndentX : 0;
+            const maxWidth = Math.max(0, availableWidth - indentX);
+            const originX = x + paddingX + (resolvedAlign === "left" ? indentX : 0);
 
             const measurement = layoutEngine?.measure(text, fontSpec);
             const textWidth = measurement?.width ?? ctx.measureText(text).width;
             const ascent = measurement?.ascent ?? fontSize * 0.8;
             const descent = measurement?.descent ?? fontSize * 0.2;
 
-            let textX = x + paddingX;
+            let textX = originX;
             if (resolvedAlign === "center") {
               textX = x + paddingX + (availableWidth - textWidth) / 2;
             } else if (resolvedAlign === "right") {
-              textX = x + paddingX + (availableWidth - textWidth);
+              textX = x + paddingX + (maxWidth - textWidth);
             }
 
             let baselineY = y + paddingY + ascent;
@@ -4234,7 +4252,7 @@ export class CanvasGridRenderer {
               baselineY = y + rowHeight - paddingY - descent;
             }
 
-            const shouldClip = textWidth > availableWidth;
+            const shouldClip = textWidth > maxWidth;
             if (shouldClip) {
               ctx.save();
               ctx.beginPath();
@@ -4246,45 +4264,58 @@ export class CanvasGridRenderer {
               ctx.fillText(text, textX, baselineY);
             }
           } else if (layoutEngine && availableWidth > 0) {
-            const layout = layoutEngine.layout({
-              text,
-              font: fontSpec,
-              maxWidth: availableWidth,
-              wrapMode,
-              align: layoutAlign,
-              direction,
-              lineHeightPx: lineHeight,
-              maxLines
-            });
+            const baseDirection = direction === "auto" ? detectBaseDirection(text) : direction;
+            const resolvedAlign =
+              layoutAlign === "left" || layoutAlign === "right" || layoutAlign === "center"
+                ? layoutAlign
+                : resolveAlign(layoutAlign, baseDirection);
+            const textIndentX = rotationDeg === 0 ? resolveTextIndentPx(style?.textIndentPx, zoom) : 0;
+            const indentX = resolvedAlign === "left" || resolvedAlign === "right" ? textIndentX : 0;
+            const maxWidth = Math.max(0, availableWidth - indentX);
+            const originX = x + paddingX + (resolvedAlign === "left" ? indentX : 0);
+            if (maxWidth <= 0) {
+              // Indent fully consumes the available width.
+              // Nothing to render, but keep iterating the grid.
+            } else {
+              const layout = layoutEngine.layout({
+                text,
+                font: fontSpec,
+                maxWidth,
+                wrapMode,
+                align: layoutAlign,
+                direction,
+                lineHeightPx: lineHeight,
+                maxLines
+              });
 
-            let originY = y + paddingY;
-            if (verticalAlign === "middle") {
-              originY = y + paddingY + Math.max(0, (availableHeight - layout.height) / 2);
-            } else if (verticalAlign === "bottom") {
-              originY = y + rowHeight - paddingY - layout.height;
-            }
-
-            const originX = x + paddingX;
-            const shouldClip = layout.width > availableWidth || layout.height > availableHeight || rotationDeg !== 0;
-
-            if (shouldClip) {
-              ctx.save();
-              ctx.beginPath();
-              ctx.rect(x, y, colWidth, rowHeight);
-              ctx.clip();
-
-              if (rotationRad) {
-                const cx = x + colWidth / 2;
-                const cy = y + rowHeight / 2;
-                ctx.translate(cx, cy);
-                ctx.rotate(rotationRad);
-                ctx.translate(-cx, -cy);
+              let originY = y + paddingY;
+              if (verticalAlign === "middle") {
+                originY = y + paddingY + Math.max(0, (availableHeight - layout.height) / 2);
+              } else if (verticalAlign === "bottom") {
+                originY = y + rowHeight - paddingY - layout.height;
               }
 
-              drawTextLayout(ctx, layout, originX, originY);
-              ctx.restore();
-            } else {
-              drawTextLayout(ctx, layout, originX, originY);
+              const shouldClip = layout.width > maxWidth || layout.height > availableHeight || rotationDeg !== 0;
+
+              if (shouldClip) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(x, y, colWidth, rowHeight);
+                ctx.clip();
+
+                if (rotationRad) {
+                  const cx = x + colWidth / 2;
+                  const cy = y + rowHeight / 2;
+                  ctx.translate(cx, cy);
+                  ctx.rotate(rotationRad);
+                  ctx.translate(-cx, -cy);
+                }
+
+                drawTextLayout(ctx, layout, originX, originY);
+                ctx.restore();
+              } else {
+                drawTextLayout(ctx, layout, originX, originY);
+              }
             }
           } else {
             // Fallback: no layout engine available (shouldn't happen in supported environments).
