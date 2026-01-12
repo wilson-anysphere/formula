@@ -2028,3 +2028,45 @@ fn oddlprice_matches_excel_model_for_actual_day_bases_with_eom_last_interest() {
         assert_close(recovered, yld, 1e-10);
     }
 }
+
+#[test]
+fn odd_coupon_bond_functions_reject_non_finite_numeric_inputs() {
+    let mut sheet = TestSheet::new();
+
+    sheet.set_formula("A1", "=1E308*1E308"); // +Inf
+    sheet.set_formula("A2", "=A1-A1"); // NaN
+    sheet.recalc();
+
+    // Infinity in rate.
+    match sheet.eval("=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),A1,0.05,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+
+    // NaN in yield.
+    match sheet.eval("=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,A2,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+
+    // Infinity in price.
+    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,A1,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+}
+
+#[test]
+fn odd_coupon_bond_functions_return_value_for_unparseable_date_text() {
+    let mut sheet = TestSheet::new();
+
+    match sheet.eval(r#"=ODDFPRICE("nope",DATE(2025,1,1),DATE(2019,1,1),DATE(2020,7,1),0.05,0.05,100,2)"#) {
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+
+    match sheet.eval(r#"=ODDLPRICE(DATE(2020,1,1),"nope",DATE(2024,7,1),0.05,0.05,100,2)"#) {
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+}
