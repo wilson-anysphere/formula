@@ -1511,7 +1511,6 @@ fn eval_optional_pad_with(
     }
     let v = eval_scalar_arg(ctx, expr);
     match v {
-        Value::Error(e) => Err(e),
         Value::Array(_) | Value::Spill { .. } => Err(ErrorKind::Value),
         other => Ok(other),
     }

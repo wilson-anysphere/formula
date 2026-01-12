@@ -222,7 +222,10 @@ fn expand_expands_with_default_and_custom_padding() {
         .set_cell_formula("Sheet1", "D5", "=EXPAND(A1:B2,3,4,0)")
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "D9", "=EXPAND(A1:B2,1,2)")
+        .set_cell_formula("Sheet1", "D9", "=EXPAND(A1:B2,3,4,NA())")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D13", "=EXPAND(A1:B2,1,2)")
         .unwrap();
 
     engine.recalculate_single_threaded();
@@ -269,6 +272,15 @@ fn expand_expands_with_default_and_custom_padding() {
 
     assert_eq!(
         engine.get_cell_value("Sheet1", "D9"),
+        Value::Number(1.0)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "F9"),
+        Value::Error(ErrorKind::NA)
+    );
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D13"),
         Value::Error(ErrorKind::Value)
     );
 }

@@ -133,3 +133,16 @@ fn wraprows_wrapcols_blank_pad_argument_defaults_to_na() {
     assert_eq!(sheet.get("B3"), Value::Error(ErrorKind::NA));
     assert_eq!(sheet.get("C7"), Value::Error(ErrorKind::NA));
 }
+
+#[test]
+fn wraprows_wrapcols_allow_error_pad_value() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=WRAPROWS(SEQUENCE(5),2,NA())");
+    sheet.set_formula("A6", "=WRAPCOLS(SEQUENCE(5),2,NA())");
+    sheet.recalc();
+
+    // An explicit error pad value should be used as padding (not short-circuit the function).
+    assert_eq!(sheet.get("A1"), Value::Number(1.0));
+    assert_eq!(sheet.get("B3"), Value::Error(ErrorKind::NA));
+    assert_eq!(sheet.get("C7"), Value::Error(ErrorKind::NA));
+}
