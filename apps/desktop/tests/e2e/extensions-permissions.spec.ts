@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import http from "node:http";
 
-import { gotoDesktop } from "./helpers";
+import { gotoDesktop, waitForDesktopReady } from "./helpers";
 
 test.describe("Extensions permissions UI", () => {
   test("can view and revoke extension network permission from the Extensions panel", async ({ page }) => {
@@ -159,6 +159,74 @@ test.describe("Extensions permissions UI", () => {
       await page.getByTestId("extension-permission-deny").click();
       await expect(page.getByTestId("toast-root")).toContainText("Permission denied");
       await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  test("persists granted permissions across reload", async ({ page }) => {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, {
+        "Content-Type": "text/plain",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end("hello");
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : null;
+    if (!port) throw new Error("Failed to allocate test port");
+
+    const url = `http://127.0.0.1:${port}/`;
+    const extensionId = "formula.sample-hello";
+
+    try {
+      await gotoDesktop(page);
+
+      // Clear any prior permission grants in this browser context, but do it after boot
+      // so we don't clear again on reload.
+      await page.evaluate(() => {
+        try {
+          localStorage.removeItem("formula.extensionHost.permissions");
+        } catch {
+          // ignore
+        }
+      });
+
+      await page.getByTestId("open-extensions-panel").click();
+      await expect(page.getByTestId("panel-extensions")).toBeVisible();
+
+      await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
+
+      await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+      await expect(page.getByTestId("input-box")).toBeVisible();
+      await page.getByTestId("input-box-field").fill(JSON.stringify([url]));
+      await page.getByTestId("input-box-ok").click();
+
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await page.getByTestId("extension-permission-allow").click();
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await page.getByTestId("extension-permission-allow").click();
+
+      await expect(page.getByTestId("toast-root")).toContainText("Fetched: hello");
+      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("127.0.0.1");
+
+      await page.reload();
+      await waitForDesktopReady(page);
+
+      await page.getByTestId("open-extensions-panel").click();
+      await expect(page.getByTestId("panel-extensions")).toBeVisible();
+
+      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("127.0.0.1");
+
+      // Running again should succeed without prompting (permissions were persisted).
+      await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+      await expect(page.getByTestId("input-box")).toBeVisible();
+      await page.getByTestId("input-box-field").fill(JSON.stringify([url]));
+      await page.getByTestId("input-box-ok").click();
+      await expect(page.getByTestId("toast-root")).toContainText("Fetched: hello");
+      await expect(page.getByTestId("extension-permission-prompt")).toHaveCount(0);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
