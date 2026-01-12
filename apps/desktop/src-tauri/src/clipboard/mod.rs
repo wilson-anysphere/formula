@@ -76,6 +76,250 @@ fn estimate_base64_decoded_len(base64: &str) -> Option<usize> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Image dimension helpers (macOS TIFF/PNG conversion guards)
+//
+// Some platforms require converting images to/from other formats for clipboard interoperability
+// (e.g. macOS apps often put `public.tiff` on the pasteboard). Even when the encoded payload is
+// small, highly-compressible images can expand to extremely large decoded pixel buffers.
+//
+// These helpers provide cheap (header-only) dimension parsing so conversion code can skip
+// pathological images before asking platform APIs to decode them.
+
+/// Maximum number of bytes we're willing to allocate for a decoded RGBA buffer when converting
+/// between image formats.
+///
+/// This is intentionally larger than [`MAX_PNG_BYTES`] because decoded pixel buffers are
+/// uncompressed, but still bounded to avoid exhausting memory.
+#[cfg(any(target_os = "macos", test))]
+const MAX_DECODED_IMAGE_BYTES: usize = 4 * MAX_IMAGE_BYTES;
+
+#[cfg(any(target_os = "macos", test))]
+fn decoded_rgba_len(width: u32, height: u32) -> Option<usize> {
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let w = usize::try_from(width).ok()?;
+    let h = usize::try_from(height).ok()?;
+    w.checked_mul(h)?.checked_mul(4)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn png_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    // Parse width/height from the IHDR chunk without decoding pixel data.
+    const SIG: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
+    if bytes.len() < 24 {
+        return None;
+    }
+    if bytes.get(0..8)? != SIG {
+        return None;
+    }
+    if bytes.get(12..16)? != b"IHDR" {
+        return None;
+    }
+    let w = u32::from_be_bytes(bytes.get(16..20)?.try_into().ok()?);
+    let h = u32::from_be_bytes(bytes.get(20..24)?.try_into().ok()?);
+    Some((w, h))
+}
+
+#[cfg(any(target_os = "macos", test))]
+#[derive(Clone, Copy)]
+enum TiffEndian {
+    Little,
+    Big,
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn read_u16_tiff(endian: TiffEndian, bytes: &[u8], offset: usize) -> Option<u16> {
+    let b = bytes.get(offset..offset + 2)?;
+    Some(match endian {
+        TiffEndian::Little => u16::from_le_bytes([b[0], b[1]]),
+        TiffEndian::Big => u16::from_be_bytes([b[0], b[1]]),
+    })
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn read_u32_tiff(endian: TiffEndian, bytes: &[u8], offset: usize) -> Option<u32> {
+    let b = bytes.get(offset..offset + 4)?;
+    Some(match endian {
+        TiffEndian::Little => u32::from_le_bytes([b[0], b[1], b[2], b[3]]),
+        TiffEndian::Big => u32::from_be_bytes([b[0], b[1], b[2], b[3]]),
+    })
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn read_u64_tiff(endian: TiffEndian, bytes: &[u8], offset: usize) -> Option<u64> {
+    let b = bytes.get(offset..offset + 8)?;
+    Some(match endian {
+        TiffEndian::Little => u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]),
+        TiffEndian::Big => u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]),
+    })
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn type_size_tiff(ty: u16) -> Option<usize> {
+    // TIFF field types (subset).
+    match ty {
+        1 => Some(1),  // BYTE
+        2 => Some(1),  // ASCII
+        3 => Some(2),  // SHORT
+        4 => Some(4),  // LONG
+        16 => Some(8), // LONG8 (BigTIFF)
+        _ => None,
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn read_tiff_value_as_u32(
+    bytes: &[u8],
+    endian: TiffEndian,
+    ty: u16,
+    count: u64,
+    value_field_offset: usize,
+    value_or_offset: u64,
+    max_inline_bytes: usize,
+) -> Option<u32> {
+    if count == 0 {
+        return None;
+    }
+    let type_size = type_size_tiff(ty)?;
+    let total_size = type_size.checked_mul(usize::try_from(count).ok()?)?;
+
+    let read_at = if total_size <= max_inline_bytes {
+        // Inline value stored directly in the value field.
+        value_field_offset
+    } else {
+        usize::try_from(value_or_offset).ok()?
+    };
+
+    match ty {
+        3 => read_u16_tiff(endian, bytes, read_at).map(u32::from), // SHORT
+        4 => read_u32_tiff(endian, bytes, read_at),                // LONG
+        16 => read_u64_tiff(endian, bytes, read_at).and_then(|v| u32::try_from(v).ok()), // LONG8
+        _ => None,
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn parse_tiff_ifd_standard(bytes: &[u8], endian: TiffEndian, offset: usize) -> Option<(u32, u32)> {
+    let entry_count = usize::from(read_u16_tiff(endian, bytes, offset)?);
+    let mut width = None;
+    let mut height = None;
+
+    let entries_base = offset.checked_add(2)?;
+    for i in 0..entry_count {
+        let entry_off = entries_base.checked_add(i.checked_mul(12)?)?;
+        let tag = read_u16_tiff(endian, bytes, entry_off)?;
+        let ty = read_u16_tiff(endian, bytes, entry_off + 2)?;
+        let count = u64::from(read_u32_tiff(endian, bytes, entry_off + 4)?);
+        let value_field_offset = entry_off + 8;
+        let value_or_offset = u64::from(read_u32_tiff(endian, bytes, value_field_offset)?);
+
+        if tag == 256 || tag == 257 {
+            let v = read_tiff_value_as_u32(
+                bytes,
+                endian,
+                ty,
+                count,
+                value_field_offset,
+                value_or_offset,
+                4,
+            )?;
+            if tag == 256 {
+                width = Some(v);
+            } else {
+                height = Some(v);
+            }
+            if width.is_some() && height.is_some() {
+                break;
+            }
+        }
+    }
+
+    match (width, height) {
+        (Some(w), Some(h)) if w > 0 && h > 0 => Some((w, h)),
+        _ => None,
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn parse_tiff_ifd_bigtiff(bytes: &[u8], endian: TiffEndian, offset: usize) -> Option<(u32, u32)> {
+    let entry_count = usize::try_from(read_u64_tiff(endian, bytes, offset)?).ok()?;
+    let mut width = None;
+    let mut height = None;
+
+    let entries_base = offset.checked_add(8)?;
+    for i in 0..entry_count {
+        let entry_off = entries_base.checked_add(i.checked_mul(20)?)?;
+        let tag = read_u16_tiff(endian, bytes, entry_off)?;
+        let ty = read_u16_tiff(endian, bytes, entry_off + 2)?;
+        let count = read_u64_tiff(endian, bytes, entry_off + 4)?;
+        let value_field_offset = entry_off + 12;
+        let value_or_offset = read_u64_tiff(endian, bytes, value_field_offset)?;
+
+        if tag == 256 || tag == 257 {
+            let v = read_tiff_value_as_u32(
+                bytes,
+                endian,
+                ty,
+                count,
+                value_field_offset,
+                value_or_offset,
+                8,
+            )?;
+            if tag == 256 {
+                width = Some(v);
+            } else {
+                height = Some(v);
+            }
+            if width.is_some() && height.is_some() {
+                break;
+            }
+        }
+    }
+
+    match (width, height) {
+        (Some(w), Some(h)) if w > 0 && h > 0 => Some((w, h)),
+        _ => None,
+    }
+}
+
+/// Parse TIFF width/height from the first IFD (supports classic TIFF + BigTIFF).
+#[cfg(any(target_os = "macos", test))]
+fn tiff_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    if bytes.len() < 8 {
+        return None;
+    }
+
+    let endian = match bytes.get(0..2)? {
+        b"II" => TiffEndian::Little,
+        b"MM" => TiffEndian::Big,
+        _ => return None,
+    };
+
+    let magic = read_u16_tiff(endian, bytes, 2)?;
+    match magic {
+        42 => {
+            // Classic TIFF: offset to first IFD is a u32 at byte 4.
+            let ifd_offset = usize::try_from(read_u32_tiff(endian, bytes, 4)?).ok()?;
+            parse_tiff_ifd_standard(bytes, endian, ifd_offset)
+        }
+        43 => {
+            // BigTIFF: offset size (u16) at byte 4, then u64 first IFD offset at byte 8.
+            if bytes.len() < 16 {
+                return None;
+            }
+            let offset_size = read_u16_tiff(endian, bytes, 4)?;
+            if offset_size != 8 {
+                return None;
+            }
+            let ifd_offset = usize::try_from(read_u64_tiff(endian, bytes, 8)?).ok()?;
+            parse_tiff_ifd_bigtiff(bytes, endian, ifd_offset)
+        }
+        _ => None,
+    }
+}
+
 #[cfg(any(target_os = "windows", test))]
 mod windows_dib;
 #[cfg(all(target_os = "windows", feature = "desktop"))]
@@ -356,6 +600,110 @@ mod tests {
     fn estimate_base64_decoded_len_is_conservative_for_malformed_lengths() {
         // Not a multiple of 4: use an upper bound (and let base64 decode validation reject it later).
         assert_eq!(estimate_base64_decoded_len("Zg"), Some(3));
+    }
+
+    #[test]
+    fn decoded_rgba_len_computes_pixel_buffer_size() {
+        let len = decoded_rgba_len(100, 200).expect("expected valid dimensions");
+        assert_eq!(len, 100 * 200 * 4);
+        assert!(len < MAX_DECODED_IMAGE_BYTES);
+        assert_eq!(decoded_rgba_len(0, 1), None);
+        assert_eq!(decoded_rgba_len(1, 0), None);
+    }
+
+    #[test]
+    fn png_dimensions_parses_ihdr_chunk() {
+        // 1x1 transparent PNG.
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO9C9VwAAAAASUVORK5CYII=",
+            )
+            .unwrap();
+        assert_eq!(png_dimensions(&png), Some((1, 1)));
+    }
+
+    #[test]
+    fn tiff_dimensions_parses_classic_little_endian_ifd() {
+        // Minimal classic TIFF with ImageWidth=100, ImageLength=200.
+        let tiff: Vec<u8> = vec![
+            0x49, 0x49, // II
+            0x2A, 0x00, // 42
+            0x08, 0x00, 0x00, 0x00, // IFD offset = 8
+            0x02, 0x00, // entry count = 2
+            // Tag 256 (ImageWidth), type LONG, count 1, value 100
+            0x00, 0x01, // tag
+            0x04, 0x00, // type LONG
+            0x01, 0x00, 0x00, 0x00, // count
+            0x64, 0x00, 0x00, 0x00, // value
+            // Tag 257 (ImageLength), type LONG, count 1, value 200
+            0x01, 0x01, // tag
+            0x04, 0x00, // type LONG
+            0x01, 0x00, 0x00, 0x00, // count
+            0xC8, 0x00, 0x00, 0x00, // value
+            // next IFD offset = 0
+            0x00, 0x00, 0x00, 0x00,
+        ];
+
+        assert_eq!(tiff_dimensions(&tiff), Some((100, 200)));
+    }
+
+    #[test]
+    fn tiff_dimensions_parses_classic_big_endian_ifd() {
+        // Minimal big-endian classic TIFF with ImageWidth=10 (SHORT), ImageLength=20 (SHORT).
+        let tiff: Vec<u8> = vec![
+            0x4D, 0x4D, // MM
+            0x00, 0x2A, // 42
+            0x00, 0x00, 0x00, 0x08, // IFD offset = 8
+            0x00, 0x02, // entry count = 2
+            // Tag 256 (ImageWidth), type SHORT, count 1, value 10 (padded)
+            0x01, 0x00, // tag
+            0x00, 0x03, // type SHORT
+            0x00, 0x00, 0x00, 0x01, // count
+            0x00, 0x0A, 0x00, 0x00, // value (big-endian SHORT + padding)
+            // Tag 257 (ImageLength), type SHORT, count 1, value 20 (padded)
+            0x01, 0x01, // tag
+            0x00, 0x03, // type SHORT
+            0x00, 0x00, 0x00, 0x01, // count
+            0x00, 0x14, 0x00, 0x00, // value
+            // next IFD offset = 0
+            0x00, 0x00, 0x00, 0x00,
+        ];
+
+        assert_eq!(tiff_dimensions(&tiff), Some((10, 20)));
+    }
+
+    #[test]
+    fn tiff_dimensions_parses_bigtiff_little_endian_ifd() {
+        // Minimal BigTIFF (little-endian) with ImageWidth=1234, ImageLength=5678 (LONG).
+        let mut tiff: Vec<u8> = vec![
+            0x49, 0x49, // II
+            0x2B, 0x00, // 43 (BigTIFF)
+            0x08, 0x00, // offset size = 8
+            0x00, 0x00, // reserved
+            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // first IFD offset = 16
+            0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // entry count = 2 (u64)
+        ];
+
+        // Entry 1: tag 256, type LONG, count 1, value 1234 (inline, padded to 8 bytes).
+        tiff.extend_from_slice(&[
+            0x00, 0x01, // tag
+            0x04, 0x00, // type LONG
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // count (u64)
+            0xD2, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // value (u64)
+        ]);
+
+        // Entry 2: tag 257, type LONG, count 1, value 5678.
+        tiff.extend_from_slice(&[
+            0x01, 0x01, // tag
+            0x04, 0x00, // type LONG
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // count (u64)
+            0x2E, 0x16, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // value (u64)
+        ]);
+
+        // next IFD offset = 0 (u64)
+        tiff.extend_from_slice(&[0x00; 8]);
+
+        assert_eq!(tiff_dimensions(&tiff), Some((1234, 5678)));
     }
 
     #[test]

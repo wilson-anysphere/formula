@@ -16,7 +16,7 @@ use std::ffi::{c_void, CStr};
 
 use super::{
     normalize_base64_str, string_within_limit, ClipboardContent, ClipboardError, ClipboardWritePayload,
-    MAX_PNG_BYTES, MAX_TEXT_BYTES,
+    MAX_DECODED_IMAGE_BYTES, MAX_PNG_BYTES, MAX_TEXT_BYTES,
 };
 
 // Ensure the framework crates are linked (and silence `unused_crate_dependencies`).
@@ -160,6 +160,20 @@ unsafe fn tiff_to_png_bytes(tiff: &[u8]) -> Result<Vec<u8>, ClipboardError> {
         )));
     }
 
+    // Even a small TIFF can decode to an extremely large pixel buffer. Parse dimensions from the
+    // header and skip conversion when the decoded RGBA size would exceed our limit.
+    let (width, height) = super::tiff_dimensions(tiff).ok_or_else(|| {
+        ClipboardError::OperationFailed("failed to parse TIFF dimensions".to_string())
+    })?;
+    let decoded_len = super::decoded_rgba_len(width, height).ok_or_else(|| {
+        ClipboardError::OperationFailed("TIFF dimensions exceed supported limits".to_string())
+    })?;
+    if decoded_len > MAX_DECODED_IMAGE_BYTES {
+        return Err(ClipboardError::OperationFailed(format!(
+            "TIFF decoded buffer exceeds maximum size ({decoded_len} > {MAX_DECODED_IMAGE_BYTES} bytes)"
+        )));
+    }
+
     // [NSBitmapImageRep imageRepWithData:data]
     let data = nsdata_from_bytes(tiff)?;
     let rep: *mut AnyObject =
@@ -215,6 +229,19 @@ unsafe fn png_to_tiff_bytes(png: &[u8]) -> Result<Vec<u8>, ClipboardError> {
     if png.len() > MAX_PNG_BYTES {
         return Err(ClipboardError::OperationFailed(format!(
             "PNG exceeds maximum size ({MAX_PNG_BYTES} bytes)"
+        )));
+    }
+
+    // Guard against highly-compressible PNGs that expand to large decoded pixel buffers.
+    let (width, height) = super::png_dimensions(png).ok_or_else(|| {
+        ClipboardError::OperationFailed("failed to parse PNG dimensions".to_string())
+    })?;
+    let decoded_len = super::decoded_rgba_len(width, height).ok_or_else(|| {
+        ClipboardError::OperationFailed("PNG dimensions exceed supported limits".to_string())
+    })?;
+    if decoded_len > MAX_DECODED_IMAGE_BYTES {
+        return Err(ClipboardError::OperationFailed(format!(
+            "PNG decoded buffer exceeds maximum size ({decoded_len} > {MAX_DECODED_IMAGE_BYTES} bytes)"
         )));
     }
 
