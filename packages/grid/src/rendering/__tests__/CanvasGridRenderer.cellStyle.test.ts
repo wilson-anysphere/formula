@@ -650,4 +650,53 @@ describe("CanvasGridRenderer CellStyle primitives", () => {
     expect(grid.rec.strokeStyles).toContain(rightColor);
     expect(grid.rec.strokeStyles).not.toContain(leftColor);
   });
+
+  it("resolves shared-edge border conflicts by style rank when widths tie", () => {
+    const solidColor = "#ff0000";
+    const dottedColor = "#0000ff";
+
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row !== 0) return null;
+        if (col === 0) {
+          return { row, col, value: null, style: { borders: { right: { width: 1, style: "solid", color: solidColor } } } };
+        }
+        if (col === 1) {
+          return { row, col, value: null, style: { borders: { left: { width: 1, style: "dotted", color: dottedColor } } } };
+        }
+        return null;
+      }
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const created = createRecordingContext(this).ctx;
+      contexts.set(this, created);
+      return created;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 1, colCount: 2, defaultColWidth: 50, defaultRowHeight: 20 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(200, 80, 1);
+    renderer.renderImmediately();
+
+    expect(grid.rec.strokeStyles).toContain(solidColor);
+    expect(grid.rec.strokeStyles).not.toContain(dottedColor);
+    expect(grid.rec.lineCaps).not.toContain("round");
+  });
 });
