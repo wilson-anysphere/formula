@@ -1896,7 +1896,16 @@ if (
     { command: "edit.insertDate", key: "ctrl+;", mac: "cmd+;" },
     { command: "edit.insertTime", key: "ctrl+shift+;", mac: "cmd+shift+;" },
     { command: "edit.autoSum", key: "alt+=", mac: "option+=" },
+    { command: "workbook.previousSheet", key: "ctrl+pageup", mac: "cmd+pageup" },
+    { command: "workbook.nextSheet", key: "ctrl+pagedown", mac: "cmd+pagedown" },
   ];
+
+  const sheetNavigationKeybindings: Array<NonNullable<ReturnType<typeof parseKeybinding>>> = [
+    parseKeybinding("workbook.previousSheet", "ctrl+pageup"),
+    parseKeybinding("workbook.nextSheet", "ctrl+pagedown"),
+    parseKeybinding("workbook.previousSheet", "cmd+pageup"),
+    parseKeybinding("workbook.nextSheet", "cmd+pagedown"),
+  ].filter((binding): binding is NonNullable<ReturnType<typeof parseKeybinding>> => binding != null);
 
   const syncContributedCommands = () => {
     if (!extensionHostManager.ready || extensionHostManager.error) return;
@@ -2039,7 +2048,6 @@ if (
   window.addEventListener(
     "keydown",
     (e) => {
-      if (!extensionHostManager.ready) return;
       if (e.defaultPrevented) return;
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
@@ -2050,6 +2058,16 @@ if (
       const primary = e.ctrlKey || e.metaKey;
       if (primary && e.shiftKey && (e.key === "P" || e.key === "p")) return;
 
+      for (const binding of sheetNavigationKeybindings) {
+        if (!matchesKeybinding(binding, e)) continue;
+        e.preventDefault();
+        void commandRegistry.executeCommand(binding.command).catch((err) => {
+          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+        });
+        return;
+      }
+
+      if (!extensionHostManager.ready) return;
       for (const binding of parsedKeybindings) {
         if (!binding) continue;
         if (!matchesKeybinding(binding, e)) continue;

@@ -11,6 +11,26 @@ export function registerBuiltinCommands(params: {
 }): void {
   const { commandRegistry, app, layoutController } = params;
 
+  const listVisibleSheetIds = (): string[] => {
+    const ids = app.getDocument().getSheetIds();
+    // DocumentController materializes sheets lazily; mimic the UI fallback behavior so
+    // navigation commands are stable even before any edits occur.
+    return ids.length > 0 ? ids : ["Sheet1"];
+  };
+
+  const activateRelativeSheet = (delta: -1 | 1): void => {
+    const sheetIds = listVisibleSheetIds();
+    if (sheetIds.length <= 1) return;
+    const active = app.getCurrentSheetId();
+    const activeIndex = sheetIds.indexOf(active);
+    const idx = activeIndex >= 0 ? activeIndex : 0;
+    const nextIndex = (idx + delta + sheetIds.length) % sheetIds.length;
+    const next = sheetIds[nextIndex];
+    if (!next || next === active) return;
+    app.activateSheet(next);
+    app.focus();
+  };
+
   commandRegistry.registerBuiltinCommand(
     "workbench.showCommandPalette",
     "Show Command Palette",
@@ -23,6 +43,30 @@ export function registerBuiltinCommands(params: {
       icon: null,
       description: "Show the command palette",
       keywords: ["command palette", "commands"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "workbook.previousSheet",
+    "Previous Sheet",
+    () => activateRelativeSheet(-1),
+    {
+      category: "Navigation",
+      icon: null,
+      description: "Activate the previous visible sheet (wrap around)",
+      keywords: ["sheet", "previous", "navigation", "pageup", "pgup"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "workbook.nextSheet",
+    "Next Sheet",
+    () => activateRelativeSheet(1),
+    {
+      category: "Navigation",
+      icon: null,
+      description: "Activate the next visible sheet (wrap around)",
+      keywords: ["sheet", "next", "navigation", "pagedown", "pgdn"],
     },
   );
 
