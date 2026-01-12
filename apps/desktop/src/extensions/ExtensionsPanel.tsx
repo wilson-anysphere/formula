@@ -43,6 +43,25 @@ function normalizeStringArray(value: unknown): string[] {
     .filter((entry) => entry.length > 0);
 }
 
+function collectDeclaredPermissions(value: unknown): string[] {
+  const list = Array.isArray(value) ? value : [];
+  const out = new Set<string>();
+  for (const entry of list) {
+    if (typeof entry === "string") {
+      const trimmed = entry.trim();
+      if (trimmed) out.add(trimmed);
+      continue;
+    }
+    if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+      for (const key of Object.keys(entry)) {
+        const trimmed = String(key).trim();
+        if (trimmed) out.add(trimmed);
+      }
+    }
+  }
+  return [...out].sort();
+}
+
 export function ExtensionsPanel({
   manager,
   webExtensionManager,
@@ -334,10 +353,10 @@ export function ExtensionsPanel({
       ) : null}
 
       {extensions.map((ext: any) => {
-        const extCommands = commandsByExt.get(ext.id) ?? [];
-        const extPanels = panelsByExt.get(ext.id) ?? [];
-
-        const declaredPermissions = normalizeStringArray(ext.manifest?.permissions);
+         const extCommands = commandsByExt.get(ext.id) ?? [];
+         const extPanels = panelsByExt.get(ext.id) ?? [];
+ 
+        const declaredPermissions = collectDeclaredPermissions(ext.manifest?.permissions);
         const declaredSet = new Set(declaredPermissions);
 
         const granted = permissionsByExtension[ext.id] ?? {};
