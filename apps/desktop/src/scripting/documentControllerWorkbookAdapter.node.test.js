@@ -1,0 +1,40 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { DocumentController } from "../document/documentController.js";
+import { DocumentControllerWorkbookAdapter } from "./documentControllerWorkbookAdapter.js";
+
+test("DocumentControllerWorkbookAdapter uses stable sheet ids for usedRange + formats (no phantom display-name sheets)", () => {
+  const controller = new DocumentController();
+  // Use a stable id that differs from the display name.
+  controller.setCellValue("sheet-1", "C3", 1);
+
+  const sheetNameResolver = {
+    getSheetNameById: (id) => (String(id) === "sheet-1" ? "Budget" : null),
+    getSheetIdByName: (name) => (String(name).trim().toLowerCase() === "budget" ? "sheet-1" : null),
+  };
+
+  const workbook = new DocumentControllerWorkbookAdapter(controller, { sheetNameResolver });
+  const sheet = workbook.getSheet("Budget");
+
+  assert.equal(sheet.name, "Budget");
+  assert.equal(sheet.sheetId, "sheet-1");
+
+  // getUsedRange should use the stable id so it reflects C3 rather than falling back to A1.
+  const used = sheet.getUsedRange();
+  assert.equal(used.address, "C3");
+  assert.deepEqual(controller.getSheetIds(), ["sheet-1"]);
+
+  // getFormats/setFormats must not materialize a phantom sheet keyed by the display name.
+  sheet.getRange("C3").getFormats();
+  assert.deepEqual(controller.getSheetIds(), ["sheet-1"]);
+
+  sheet.getRange("C3").setFormats([[{ bold: true }]]);
+  assert.deepEqual(controller.getSheetIds(), ["sheet-1"]);
+
+  const effective = controller.getCellFormat("sheet-1", "C3");
+  assert.equal(effective?.font?.bold, true);
+
+  workbook.dispose();
+});
+

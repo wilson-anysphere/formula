@@ -1181,7 +1181,7 @@ class DocumentControllerSheetAdapter {
   }
 
   getUsedRange() {
-    const bounds = this.workbook.documentController.getUsedRange(this.name, { includeFormat: true });
+    const bounds = this.workbook.documentController.getUsedRange(this.sheetId, { includeFormat: true });
     if (!bounds) {
       // Match the in-memory workbook behavior: empty sheets return A1.
       return this.getRange("A1");
@@ -1365,7 +1365,7 @@ class DocumentControllerRangeAdapter {
         const coord = { row: this.coords.startRow + r, col: this.coords.startCol + c };
 
         if (typeof doc.getCellFormat === "function") {
-          const effective = doc.getCellFormat(this.sheet.name, coord);
+          const effective = doc.getCellFormat(this.sheet.sheetId, coord);
           if (typeof effective === "number") {
             row.push(scriptFormatFromDocStyle(doc.styleTable?.get(effective) ?? {}));
             continue;
@@ -1378,7 +1378,7 @@ class DocumentControllerRangeAdapter {
           continue;
         }
 
-        const cell = doc.getCell(this.sheet.name, coord);
+        const cell = doc.getCell(this.sheet.sheetId, coord);
         const style = doc.styleTable.get(cell.styleId);
         row.push(scriptFormatFromDocStyle(style));
       }
@@ -1417,7 +1417,7 @@ class DocumentControllerRangeAdapter {
           continue;
         }
 
-        const cell = doc.getCell(this.sheet.name, coord);
+        const cell = doc.getCell(this.sheet.sheetId, coord);
         const baseStyle = styleTable.get(cell.styleId ?? 0);
         const merged = applyStylePatch(baseStyle, patch);
         const styleId = styleTable.intern(merged);
@@ -1426,7 +1426,7 @@ class DocumentControllerRangeAdapter {
       values.push(row);
     }
 
-    doc.setRangeValues(this.sheet.name, this.address, values, { label: "Script: set formats" });
+    doc.setRangeValues(this.sheet.sheetId, this.address, values, { label: "Script: set formats" });
     this.sheet.workbook._notifyMutate();
   }
 }
