@@ -41,18 +41,42 @@ pub fn extract_vba_signature_signed_digest(
     signature_stream: &[u8],
 ) -> Result<Option<VbaSignedDigest>, VbaSignatureSignedDigestError> {
     // Track which offsets we've already attempted so we don't retry them during scanning.
-    let mut attempted_offsets = [None::<usize>; 2];
+    let mut attempted_offsets = [None::<usize>; 3];
     let mut attempted_count = 0usize;
     let mut any_candidate = false;
     let mut last_err = None;
+
+    // Prefer a deterministic MS-OSHARED DigSigBlob location when present.
+    if let Some(info) = crate::offcrypto::parse_digsig_blob(signature_stream) {
+        let end = info.pkcs7_offset.saturating_add(info.pkcs7_len);
+        if end <= signature_stream.len() {
+            any_candidate = true;
+            if attempted_count < attempted_offsets.len() {
+                attempted_offsets[attempted_count] = Some(info.pkcs7_offset);
+                attempted_count += 1;
+            }
+            match extract_signed_digest_from_pkcs7_location(
+                signature_stream,
+                Pkcs7Location {
+                    der: &signature_stream[info.pkcs7_offset..end],
+                    offset: info.pkcs7_offset,
+                },
+            ) {
+                Ok(digest) => return Ok(Some(digest)),
+                Err(err) => last_err = Some(err),
+            }
+        }
+    }
 
     // Prefer a deterministic MS-OSHARED DigSigInfoSerialized location when present.
     if let Some(info) = crate::offcrypto::parse_digsig_info_serialized(signature_stream) {
         let end = info.pkcs7_offset.saturating_add(info.pkcs7_len);
         if end <= signature_stream.len() {
             any_candidate = true;
-            attempted_offsets[attempted_count] = Some(info.pkcs7_offset);
-            attempted_count += 1;
+            if attempted_count < attempted_offsets.len() {
+                attempted_offsets[attempted_count] = Some(info.pkcs7_offset);
+                attempted_count += 1;
+            }
             match extract_signed_digest_from_pkcs7_location(
                 signature_stream,
                 Pkcs7Location {
@@ -126,7 +150,6 @@ pub fn extract_vba_signature_signed_digest(
     if !any_candidate {
         return Ok(None);
     }
-
     Err(last_err.unwrap_or_else(|| {
         VbaSignatureSignedDigestError::Der(
             "no SpcIndirectDataContent digest found in PKCS#7 SignedData candidates".to_owned(),
@@ -140,6 +163,9 @@ pub fn extract_vba_signature_signed_digest(
 /// is the total length of the ASN.1 TLV (including tag/length/EOC for indefinite encodings).
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn locate_pkcs7_signed_data_bounds(signature_stream: &[u8]) -> Option<(usize, usize)> {
+    if let Some(info) = crate::offcrypto::parse_digsig_blob(signature_stream) {
+        return Some((info.pkcs7_offset, info.pkcs7_len));
+    }
     if let Some(info) = crate::offcrypto::parse_digsig_info_serialized(signature_stream) {
         return Some((info.pkcs7_offset, info.pkcs7_len));
     }
@@ -341,7 +367,8 @@ fn parse_pkcs7_signed_data_encap_content(
     let mut encap_cur = encap_content;
 
     let (econtent_type, after_encap_oid) = parse_oid(encap_cur)?;
-    let econtent_type_oid = oid_to_string(econtent_type).unwrap_or_else(|| "<invalid-oid>".to_string());
+    let econtent_type_oid =
+        oid_to_string(econtent_type).unwrap_or_else(|| "<invalid-oid>".to_string());
     encap_cur = after_encap_oid;
 
     // eContent [0] EXPLICIT OCTET STRING OPTIONAL
@@ -395,7 +422,8 @@ fn parse_spc_indirect_data_content(
     }
     let alg_content = slice_constructed_contents(rest, len)?;
     let (alg_oid, _after_alg_oid) = parse_oid(alg_content)?;
-    let digest_algorithm_oid = oid_to_string(alg_oid).unwrap_or_else(|| "<invalid-oid>".to_string());
+    let digest_algorithm_oid =
+        oid_to_string(alg_oid).unwrap_or_else(|| "<invalid-oid>".to_string());
 
     // Skip over AlgorithmIdentifier to reach digest OCTET STRING.
     di_cur = skip_element(di_cur)?;
@@ -766,9 +794,7 @@ fn parse_context_specific_constructed<'a>(
     slice_constructed_contents(rest, len)
 }
 
-fn parse_oid<'a>(
-    input: &'a [u8],
-) -> Result<(&'a [u8], &'a [u8]), VbaSignatureSignedDigestError> {
+fn parse_oid<'a>(input: &'a [u8]) -> Result<(&'a [u8], &'a [u8]), VbaSignatureSignedDigestError> {
     let (tag, len, rest) = parse_tag_and_length(input)?;
     if tag.class != Asn1Class::Universal || tag.constructed || tag.number != 6 {
         return Err(der_err("expected OBJECT IDENTIFIER"));
@@ -779,15 +805,11 @@ fn parse_oid<'a>(
     let val = rest
         .get(..l)
         .ok_or_else(|| der_err("OID length exceeds input"))?;
-    let after = rest
-        .get(l..)
-        .ok_or_else(|| der_err("unexpected EOF"))?;
+    let after = rest.get(l..).ok_or_else(|| der_err("unexpected EOF"))?;
     Ok((val, after))
 }
 
-fn parse_octet_string(
-    input: &[u8],
-) -> Result<(Vec<u8>, &[u8]), VbaSignatureSignedDigestError> {
+fn parse_octet_string(input: &[u8]) -> Result<(Vec<u8>, &[u8]), VbaSignatureSignedDigestError> {
     let (tag, len, rest) = parse_tag_and_length(input)?;
     if tag.class != Asn1Class::Universal || tag.number != 4 {
         return Err(der_err("expected OCTET STRING"));
@@ -800,9 +822,7 @@ fn parse_octet_string(
         let val = rest
             .get(..l)
             .ok_or_else(|| der_err("OCTET STRING length exceeds input"))?;
-        let after = rest
-            .get(l..)
-            .ok_or_else(|| der_err("unexpected EOF"))?;
+        let after = rest.get(l..).ok_or_else(|| der_err("unexpected EOF"))?;
         Ok((val.to_vec(), after))
     } else {
         // BER constructed OCTET STRING: concatenate child OCTET STRING values.
@@ -831,9 +851,7 @@ fn parse_octet_string(
 fn skip_element(input: &[u8]) -> Result<&[u8], VbaSignatureSignedDigestError> {
     let (tag, len, rest) = parse_tag_and_length(input)?;
     match len {
-        Length::Definite(l) => rest
-            .get(l..)
-            .ok_or_else(|| der_err("length exceeds input")),
+        Length::Definite(l) => rest.get(l..).ok_or_else(|| der_err("length exceeds input")),
         Length::Indefinite => {
             if !tag.constructed {
                 return Err(der_err("indefinite length used with primitive tag"));

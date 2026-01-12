@@ -20,6 +20,74 @@ pub(crate) struct DigSigInfoSerialized {
     pub(crate) version: Option<u32>,
 }
 
+fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
+    let b = bytes.get(offset..offset + 4)?;
+    Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+}
+
+/// Parsed PKCS#7 location information from a `[MS-OSHARED] DigSigBlob` wrapper.
+///
+/// Office sometimes wraps the `\x05DigitalSignature*` stream contents in a DigSigBlob structure
+/// that contains offsets to the embedded PKCS#7 buffer (`pbSignatureBuffer`). Parsing this is more
+/// deterministic than scanning the whole stream for DER `SEQUENCE` tags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DigSigBlob {
+    /// Offset (from the start of the stream) where the DER/BER-encoded PKCS#7 `ContentInfo` begins.
+    pub(crate) pkcs7_offset: usize,
+    /// Length (in bytes) of the PKCS#7 `ContentInfo` (best-effort; derived from BER length).
+    pub(crate) pkcs7_len: usize,
+}
+
+/// Best-effort parse of a `[MS-OSHARED] DigSigBlob` wrapper around a PKCS#7 signature.
+///
+/// Returns `None` if the stream does not appear to be a DigSigBlob or if the referenced signature
+/// buffer does not look like a PKCS#7 `SignedData` ContentInfo.
+pub(crate) fn parse_digsig_blob(stream: &[u8]) -> Option<DigSigBlob> {
+    // DigSigBlob header is at least two DWORDs: cb + serializedPointer.
+    if stream.len() < 16 {
+        return None;
+    }
+
+    let cb = read_u32_le(stream, 0)? as usize;
+    let serialized_pointer = read_u32_le(stream, 4)? as usize;
+
+    // MS-OSHARED examples use a fixed pointer to the serialized DigSigInfoSerialized at offset 8.
+    // Requiring this keeps the heuristic conservative and avoids mis-detecting MS-OFFCRYPTO's
+    // length-prefixed DigSigInfoSerialized wrapper.
+    if serialized_pointer != 8 {
+        return None;
+    }
+
+    // Ensure the declared signatureInfo region fits inside the stream when present. Some producers
+    // may set `cb` to the length of the signatureInfo header only (excluding the signature bytes),
+    // so we don't use it to bound `signatureOffset`.
+    if serialized_pointer.checked_add(cb).is_none() || serialized_pointer + cb > stream.len() {
+        return None;
+    }
+
+    // DigSigInfoSerialized (MS-OSHARED) begins at serializedPointer and starts with:
+    //   DWORD cbSignature;
+    //   DWORD signatureOffset;
+    let cb_signature = read_u32_le(stream, serialized_pointer)? as usize;
+    let signature_offset = read_u32_le(stream, serialized_pointer + 4)? as usize;
+    if cb_signature == 0 {
+        return None;
+    }
+
+    let sig_end = signature_offset.checked_add(cb_signature)?;
+    if signature_offset >= stream.len() || sig_end > stream.len() {
+        return None;
+    }
+
+    let sig_slice = &stream[signature_offset..sig_end];
+    let pkcs7_len = pkcs7_signed_data_len(sig_slice)?;
+
+    Some(DigSigBlob {
+        pkcs7_offset: signature_offset,
+        pkcs7_len,
+    })
+}
+
 /// Best-effort parse of `[MS-OSHARED] DigSigInfoSerialized`.
 ///
 /// Returns `None` if the stream does not look like a DigSigInfoSerialized-wrapped PKCS#7 payload.
@@ -43,11 +111,6 @@ pub(crate) fn parse_digsig_info_serialized(stream: &[u8]) -> Option<DigSigInfoSe
         sig_len: usize,
         cert_len: usize,
         proj_len: usize,
-    }
-
-    fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
-        let b = bytes.get(offset..offset + 4)?;
-        Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
 
     // Build a small set of header candidates. The structure uses little-endian DWORD fields.
@@ -148,9 +211,9 @@ pub(crate) fn parse_digsig_info_serialized(stream: &[u8]) -> Option<DigSigInfoSe
             // us locate it by counting back from the end of the stream. Include that as an
             // additional candidate offset.
             let candidate_offsets = [
-                header.header_size, // sig first
+                header.header_size,                                 // sig first
                 header.header_size.saturating_add(header.cert_len), // cert then sig
-                header.header_size.saturating_add(proj_bytes), // project then sig
+                header.header_size.saturating_add(proj_bytes),      // project then sig
                 header
                     .header_size
                     .saturating_add(header.cert_len)
@@ -235,7 +298,13 @@ fn ber_parse_tag(bytes: &[u8]) -> Option<(BerTag, usize /* tag len */)> {
         }
     }
 
-    Some((BerTag { tag_byte: b0, constructed }, idx))
+    Some((
+        BerTag {
+            tag_byte: b0,
+            constructed,
+        },
+        idx,
+    ))
 }
 
 fn ber_parse_len(bytes: &[u8]) -> Option<(BerLen, usize /* len len */)> {
@@ -436,8 +505,8 @@ mod tests {
         // embedded self-signed certificate.
         use openssl::asn1::Asn1Time;
         use openssl::hash::MessageDigest;
-        use openssl::pkey::PKey;
         use openssl::pkcs7::{Pkcs7, Pkcs7Flags};
+        use openssl::pkey::PKey;
         use openssl::rsa::Rsa;
         use openssl::stack::Stack;
         use openssl::x509::X509NameBuilder;

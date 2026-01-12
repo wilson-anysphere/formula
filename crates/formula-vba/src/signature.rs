@@ -244,7 +244,11 @@ pub fn list_vba_digital_signatures(
         .filter(|path| path.split('/').any(is_signature_component))
         .collect::<Vec<_>>();
 
-    candidates.sort_by(|a, b| signature_path_rank(a).cmp(&signature_path_rank(b)).then(a.cmp(b)));
+    candidates.sort_by(|a, b| {
+        signature_path_rank(a)
+            .cmp(&signature_path_rank(b))
+            .then(a.cmp(b))
+    });
 
     let mut out = Vec::new();
     for path in candidates {
@@ -504,7 +508,11 @@ pub fn verify_vba_digital_signature_with_project(
         return Ok(None);
     }
 
-    candidates.sort_by(|a, b| signature_path_rank(a).cmp(&signature_path_rank(b)).then(a.cmp(b)));
+    candidates.sort_by(|a, b| {
+        signature_path_rank(a)
+            .cmp(&signature_path_rank(b))
+            .then(a.cmp(b))
+    });
 
     let mut first: Option<VbaDigitalSignature> = None;
     let mut first_verified: Option<VbaDigitalSignature> = None;
@@ -568,7 +576,11 @@ pub fn verify_vba_digital_signature_with_trust(
         return Ok(None);
     }
 
-    candidates.sort_by(|a, b| signature_path_rank(a).cmp(&signature_path_rank(b)).then(a.cmp(b)));
+    candidates.sort_by(|a, b| {
+        signature_path_rank(a)
+            .cmp(&signature_path_rank(b))
+            .then(a.cmp(b))
+    });
 
     let mut first: Option<VbaDigitalSignatureTrusted> = None;
     let mut first_verified: Option<VbaDigitalSignatureTrusted> = None;
@@ -926,7 +938,9 @@ fn verify_pkcs7_trust_openssl(
                 flags | Pkcs7Flags::DETACHED,
             )
             .is_ok()
-            || pkcs7.verify(certs, &store, Some(prefix), None, flags).is_ok()
+            || pkcs7
+                .verify(certs, &store, Some(prefix), None, flags)
+                .is_ok()
         {
             return VbaCertificateTrust::Trusted;
         }
@@ -963,6 +977,19 @@ fn parse_pkcs7_with_offset(signature: &[u8]) -> Option<(openssl::pkcs7::Pkcs7, u
     // certificate store followed by the actual signature). The signature payload usually appears
     // last, so we prefer the last candidate in the stream.
     let mut best: Option<(Pkcs7, usize)> = None;
+
+    // Office apps sometimes wrap the PKCS#7 blob in an [MS-OSHARED] DigSigBlob that points at the
+    // actual signature buffer via offsets. Parsing it avoids false positives when the stream
+    // contains multiple SignedData blobs (e.g. cert stores or other metadata).
+    if let Some(info) = crate::offcrypto::parse_digsig_blob(signature) {
+        let end = info.pkcs7_offset.saturating_add(info.pkcs7_len);
+        if end <= signature.len() {
+            let slice = &signature[info.pkcs7_offset..end];
+            if let Ok(pkcs7) = Pkcs7::from_der(slice) {
+                return Some((pkcs7, info.pkcs7_offset));
+            }
+        }
+    }
 
     // Office commonly wraps the PKCS#7 blob in a [MS-OSHARED] DigSigInfoSerialized structure.
     // Parsing the header is deterministic and avoids the worst-case behavior of scanning/parsing
@@ -1064,9 +1091,9 @@ fn verify_signature_blob(signature: &[u8]) -> VbaSignatureVerification {
     #[cfg(not(target_arch = "wasm32"))]
     use openssl::stack::Stack;
     #[cfg(not(target_arch = "wasm32"))]
-    use openssl::x509::X509;
-    #[cfg(not(target_arch = "wasm32"))]
     use openssl::x509::store::X509StoreBuilder;
+    #[cfg(not(target_arch = "wasm32"))]
+    use openssl::x509::X509;
 
     #[cfg(not(target_arch = "wasm32"))]
     let Some((pkcs7, pkcs7_offset)) = parse_pkcs7_with_offset(signature) else {
@@ -1115,7 +1142,9 @@ fn verify_signature_blob(signature: &[u8]) -> VbaSignatureVerification {
                     flags | Pkcs7Flags::DETACHED,
                 )
                 .is_ok()
-                || pkcs7.verify(certs, &store, Some(prefix), None, flags).is_ok()
+                || pkcs7
+                    .verify(certs, &store, Some(prefix), None, flags)
+                    .is_ok()
             {
                 return VbaSignatureVerification::SignedVerified;
             }
