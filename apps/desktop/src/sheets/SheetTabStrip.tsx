@@ -8,15 +8,17 @@ import * as nativeDialogs from "../tauri/nativeDialogs";
 import type { SheetMeta, SheetVisibility, TabColor, WorkbookSheetStore } from "./workbookSheetStore";
 import { computeWorkbookSheetMoveIndex } from "./sheetReorder";
 
-const SHEET_TAB_COLOR_PALETTE: Array<{ label: string; token: string }> = [
-  { label: "Red", token: "--sheet-tab-red" },
-  { label: "Orange", token: "--sheet-tab-orange" },
-  { label: "Yellow", token: "--sheet-tab-yellow" },
-  { label: "Green", token: "--sheet-tab-green" },
-  { label: "Teal", token: "--sheet-tab-teal" },
-  { label: "Blue", token: "--sheet-tab-blue" },
-  { label: "Purple", token: "--sheet-tab-purple" },
-  { label: "Gray", token: "--sheet-tab-gray" },
+const SHEET_TAB_COLOR_PALETTE: Array<{ label: string; token: string; fallbackCss: string }> = [
+  // Use hex fallbacks (instead of named colors) so we can reliably convert palette selections
+  // into Excel/OOXML ARGB values even if design tokens are unavailable (e.g. in tests).
+  { label: "Red", token: "--sheet-tab-red", fallbackCss: "#ff0000" },
+  { label: "Orange", token: "--sheet-tab-orange", fallbackCss: "#ff9900" },
+  { label: "Yellow", token: "--sheet-tab-yellow", fallbackCss: "#ffff00" },
+  { label: "Green", token: "--sheet-tab-green", fallbackCss: "#00b050" },
+  { label: "Teal", token: "--sheet-tab-teal", fallbackCss: "#00b0f0" },
+  { label: "Blue", token: "--sheet-tab-blue", fallbackCss: "#0070c0" },
+  { label: "Purple", token: "--sheet-tab-purple", fallbackCss: "#7030a0" },
+  { label: "Gray", token: "--sheet-tab-gray", fallbackCss: "#7f7f7f" },
 ];
 
 function normalizeCssHexToExcelArgb(cssColor: string): string | null {
@@ -485,8 +487,7 @@ export function SheetTabStrip({
           },
           { type: "separator" },
           ...SHEET_TAB_COLOR_PALETTE.map((entry) => {
-            const gray = resolveCssVar("--sheet-tab-gray", { fallback: "currentColor" });
-            const rgb = resolveCssVar(entry.token, { fallback: gray });
+            const rgb = resolveCssVar(entry.token, { fallback: entry.fallbackCss });
             return {
               type: "item" as const,
               label: entry.label,
@@ -732,7 +733,10 @@ export function SheetTabStrip({
   useEffect(() => {
     // Keep the active tab visible when switching sheets via keyboard or programmatically.
     if (editingSheetId) return;
-    activeTabRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const tab = activeTabRef.current;
+    if (tab && typeof (tab as any).scrollIntoView === "function") {
+      tab.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
   }, [activeSheetId, editingSheetId, visibleSheets.length]);
 
   return (
@@ -799,12 +803,14 @@ export function SheetTabStrip({
           if (target instanceof HTMLButtonElement && target.getAttribute("role") === "tab" && tabs.length > 0) {
             const idx = tabs.indexOf(target);
             if (idx !== -1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-              const focusTab = (nextIdx: number) => {
-                const next = tabs[nextIdx];
-                if (!next) return;
-                next.focus();
-                next.scrollIntoView({ block: "nearest", inline: "nearest" });
-              };
+               const focusTab = (nextIdx: number) => {
+                 const next = tabs[nextIdx];
+                 if (!next) return;
+                 next.focus();
+                 if (typeof (next as any).scrollIntoView === "function") {
+                   next.scrollIntoView({ block: "nearest", inline: "nearest" });
+                 }
+               };
 
               const isContextMenuKey = (e.shiftKey && e.key === "F10") || e.key === "ContextMenu" || e.code === "ContextMenu";
               if (isContextMenuKey) {

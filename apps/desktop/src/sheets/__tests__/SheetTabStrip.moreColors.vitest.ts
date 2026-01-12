@@ -6,26 +6,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SheetTabStrip } from "../SheetTabStrip";
 import { WorkbookSheetStore } from "../workbookSheetStore";
 
-const originalScrollIntoView = (HTMLElement.prototype as any).scrollIntoView;
-
 afterEach(() => {
   document.body.innerHTML = "";
   // React 18 act env flag is set per-test in `renderSheetTabStrip`.
   delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
   vi.restoreAllMocks();
-  if (originalScrollIntoView) {
-    (HTMLElement.prototype as any).scrollIntoView = originalScrollIntoView;
-  } else {
-    delete (HTMLElement.prototype as any).scrollIntoView;
-  }
 });
 
 function renderSheetTabStrip(store: WorkbookSheetStore) {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
-  // JSDOM doesn't implement scrollIntoView; SheetTabStrip uses it in an effect.
-  if (typeof (HTMLElement.prototype as any).scrollIntoView !== "function") {
-    (HTMLElement.prototype as any).scrollIntoView = () => {};
-  }
 
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -112,6 +101,7 @@ describe("SheetTabStrip tab color picker", () => {
     // In jsdom there are no real CSS variables; SheetTabStrip should fall back to
     // hardcoded hex values and still be able to convert to ARGB.
     const store = new WorkbookSheetStore([{ id: "s1", name: "Sheet1", visibility: "visible" }]);
+    const setTabColorSpy = vi.spyOn(store, "setTabColor");
 
     const { container, root } = renderSheetTabStrip(store);
 
@@ -153,15 +143,25 @@ describe("SheetTabStrip tab color picker", () => {
       (btn) => btn.querySelector(".context-menu__label")?.textContent === "Red",
     );
     expect(redButton).toBeInstanceOf(HTMLButtonElement);
+    const redFill = redButton!.querySelector("rect")?.getAttribute("fill")?.toLowerCase() ?? null;
+    expect(redFill).toBe("#ff0000");
 
     act(() => {
       redButton!.click();
     });
 
+    // Clicking a submenu action should close the menu synchronously.
+    expect(overlay?.hidden).toBe(true);
+
     await act(async () => {
+      // ContextMenu invokes item actions asynchronously. Palette selection awaits the
+      // persistence hook (even when undefined), so flush at least two microtasks so
+      // the `store.setTabColor(...)` step has run before we assert.
+      await Promise.resolve();
       await Promise.resolve();
     });
 
+    expect(setTabColorSpy).toHaveBeenCalled();
     expect(store.getById("s1")?.tabColor?.rgb).toBe("FFFF0000");
 
     act(() => root.unmount());
