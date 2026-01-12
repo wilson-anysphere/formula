@@ -270,7 +270,7 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
         }
         "record" => {
             let record = serialized.get("value")?;
-            // Current `formula-model` record values are a simple display string.
+            // Some legacy IPC payloads represented record values as a simple display string.
             if let Some(display) = record.as_str() {
                 return if display.is_empty() {
                     Some(CellValue::Blank)
@@ -352,8 +352,8 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
 mod tests {
     use super::model_cell_value_to_sort_value;
     use crate::sort_filter::CellValue;
-    use formula_model::ErrorValue;
     use formula_model::CellValue as ModelCellValue;
+    use formula_model::ErrorValue;
     use serde_json::json;
 
     #[test]
@@ -383,6 +383,20 @@ mod tests {
         assert_eq!(
             model_cell_value_to_sort_value(&entity),
             CellValue::Text("Entity display".to_string())
+        );
+
+        // Canonical camelCase field name (`displayValue`) should also deserialize.
+        let Some(entity_camel_case) = from_json_or_skip_unknown_variant(json!({
+            "type": "entity",
+            "value": {
+                "displayValue": "Entity display (camelCase)"
+            }
+        })) else {
+            return;
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&entity_camel_case),
+            CellValue::Text("Entity display (camelCase)".to_string())
         );
 
         let Some(record) = from_json_or_skip_unknown_variant(json!({
@@ -509,6 +523,34 @@ mod tests {
         };
         assert_eq!(
             model_cell_value_to_sort_value(&record_display_fallback),
+            CellValue::Blank
+        );
+
+        // Canonical camelCase field name (`displayValue`) should also deserialize.
+        let Some(record_display_value_fallback) = from_json_or_skip_unknown_variant(json!({
+            "type": "record",
+            "value": {
+                "displayValue": "Record display (camelCase)"
+            }
+        })) else {
+            return;
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_display_value_fallback),
+            CellValue::Blank
+        );
+
+        // Empty display values should degrade to blank.
+        let Some(record_blank_display) = from_json_or_skip_unknown_variant(json!({
+            "type": "record",
+            "value": {
+                "displayValue": ""
+            }
+        })) else {
+            return;
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_blank_display),
             CellValue::Blank
         );
     }
