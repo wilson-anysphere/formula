@@ -847,7 +847,7 @@ export class SpreadsheetApp {
           // If the comments root was created lazily (e.g. first comment add), ensure it
           // is added to the UndoManager scope before we perform the tracked transaction.
           // This keeps early comment edits undoable even if they happen before provider sync.
-          this.ensureCommentsUndoScope();
+          this.ensureCommentsUndoScope(null, { allowCreateBeforeSync: true });
           const transact = (undoService as any)?.transact;
           if (typeof transact === "function") {
             transact(fn);
@@ -3857,7 +3857,7 @@ export class SpreadsheetApp {
     return this.commentCellRefFromA1(sheetId, cellToA1(cell));
   }
 
-  private ensureCommentsUndoScope(root?: ReturnType<typeof getCommentsRoot> | null): void {
+  private ensureCommentsUndoScope(root?: ReturnType<typeof getCommentsRoot> | null, opts: { allowCreateBeforeSync?: boolean } = {}): void {
     if (this.commentsUndoScopeAdded) return;
     const undoService = this.collabUndoService;
     if (!undoService) return;
@@ -3884,12 +3884,14 @@ export class SpreadsheetApp {
       const session = this.collabSession;
       if (!session) return;
 
-      // Avoid instantiating the `comments` root pre-hydration; older documents may
-      // still use an Array-backed schema and would be clobbered by `doc.getMap`.
+      // Avoid instantiating the `comments` root pre-hydration by default; older
+      // documents may still use an Array-backed schema and would be clobbered by
+      // `doc.getMap`.
       const provider = session.provider;
       const providerSynced =
         provider && typeof (provider as any).on === "function" ? Boolean((provider as any).synced) : true;
-      if (!providerSynced && !session.doc.share.get("comments")) return;
+      const hasRoot = Boolean(session.doc.share.get("comments"));
+      if (!providerSynced && !hasRoot && !opts.allowCreateBeforeSync) return;
 
       try {
         resolvedRoot = getCommentsRoot(session.doc);
