@@ -1840,6 +1840,53 @@ def generate_cases() -> dict[str, Any]:
         ],
     )
 
+    # Odd-coupon bond functions (ODDF*/ODDL*)
+    #
+    # These cases are intentionally small + focused on input validation semantics so the corpus
+    # can be used to confirm Excel behavior around negative yields / negative coupon rates.
+    _add_case(
+        cases,
+        prefix="oddfprice_neg_yld",
+        tags=["financial", "odd_coupon", "ODDFPRICE"],
+        formula="=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-0.01,100,2,0)",
+        description="ODDFPRICE with negative yld (confirm whether Excel returns #NUM! or a price)",
+    )
+    _add_case(
+        cases,
+        prefix="oddlprice_neg_yld",
+        tags=["financial", "odd_coupon", "ODDLPRICE"],
+        formula="=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-0.01,100,2,0)",
+        description="ODDLPRICE with negative yld (confirm whether Excel returns #NUM! or a price)",
+    )
+    _add_case(
+        cases,
+        prefix="oddfprice_neg_rate",
+        tags=["financial", "odd_coupon", "ODDFPRICE"],
+        formula="=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),-0.01,0.0625,100,2,0)",
+        description="ODDFPRICE with negative coupon rate (confirm whether Excel returns #NUM!)",
+    )
+    _add_case(
+        cases,
+        prefix="oddlprice_neg_rate",
+        tags=["financial", "odd_coupon", "ODDLPRICE"],
+        formula="=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),-0.01,0.0625,100,2,0)",
+        description="ODDLPRICE with negative coupon rate (confirm whether Excel returns #NUM!)",
+    )
+    _add_case(
+        cases,
+        prefix="oddfyield_high_price",
+        tags=["financial", "odd_coupon", "ODDFYIELD"],
+        formula="=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,300,100,2,0)",
+        description="ODDFYIELD with a price that implies a negative yield if allowed (confirm whether Excel returns a negative yield or #NUM!)",
+    )
+    _add_case(
+        cases,
+        prefix="oddlyield_high_price",
+        tags=["financial", "odd_coupon", "ODDLYIELD"],
+        formula="=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,300,100,2,0)",
+        description="ODDLYIELD with a price that implies a negative yield if allowed (confirm whether Excel returns a negative yield or #NUM!)",
+    )
+
     # Range-based cashflow functions.
     cashflows = [-100.0, 30.0, 40.0, 50.0]
     cf_inputs = [CellInput(f"A{i+1}", v) for i, v in enumerate(cashflows)]

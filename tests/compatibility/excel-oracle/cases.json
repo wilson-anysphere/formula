@@ -30960,6 +30960,78 @@
       "id": "accrint_07705eb064f2"
     },
     {
+      "formula": "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-0.01,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFPRICE"
+      ],
+      "description": "ODDFPRICE with negative yld (confirm whether Excel returns #NUM! or a price)",
+      "id": "oddfprice_neg_yld_7d02a1e3e38e"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-0.01,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE"
+      ],
+      "description": "ODDLPRICE with negative yld (confirm whether Excel returns #NUM! or a price)",
+      "id": "oddlprice_neg_yld_c0a5d8ea181a"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),-0.01,0.0625,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFPRICE"
+      ],
+      "description": "ODDFPRICE with negative coupon rate (confirm whether Excel returns #NUM!)",
+      "id": "oddfprice_neg_rate_4de60a4da4d5"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),-0.01,0.0625,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE"
+      ],
+      "description": "ODDLPRICE with negative coupon rate (confirm whether Excel returns #NUM!)",
+      "id": "oddlprice_neg_rate_f21f6281f932"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,300,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFYIELD"
+      ],
+      "description": "ODDFYIELD with a price that implies a negative yield if allowed (confirm whether Excel returns a negative yield or #NUM!)",
+      "id": "oddfyield_high_price_3eb6ad8ad840"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,300,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD"
+      ],
+      "description": "ODDLYIELD with a price that implies a negative yield if allowed (confirm whether Excel returns a negative yield or #NUM!)",
+      "id": "oddlyield_high_price_ee9439059f8e"
+    },
+    {
       "formula": "=NPV(0.1,A1:A4)",
       "outputCell": "C1",
       "inputs": [

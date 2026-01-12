@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T07:44:19.00341726Z",
+  "generatedAt": "2026-01-12T07:51:17.094133926Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "b1c885aee7f1f268455f1c80282a7ca33074c7d343d9edefed24be56f9ca66be",
-    "count": 1538
+    "sha256": "5f70f0653666a89b8529421eb6faf017699307a2158b3aa76164c7fef60252c9",
+    "count": 1544
   },
   "results": [
     {
@@ -14593,6 +14593,66 @@
       },
       "address": "C1",
       "displayText": "25"
+    },
+    {
+      "caseId": "oddfprice_neg_yld_7d02a1e3e38e",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NAME?"
+      },
+      "address": "C1",
+      "displayText": "#NAME?"
+    },
+    {
+      "caseId": "oddlprice_neg_yld_c0a5d8ea181a",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NAME?"
+      },
+      "address": "C1",
+      "displayText": "#NAME?"
+    },
+    {
+      "caseId": "oddfprice_neg_rate_4de60a4da4d5",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NAME?"
+      },
+      "address": "C1",
+      "displayText": "#NAME?"
+    },
+    {
+      "caseId": "oddlprice_neg_rate_f21f6281f932",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NAME?"
+      },
+      "address": "C1",
+      "displayText": "#NAME?"
+    },
+    {
+      "caseId": "oddfyield_high_price_3eb6ad8ad840",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NAME?"
+      },
+      "address": "C1",
+      "displayText": "#NAME?"
+    },
+    {
+      "caseId": "oddlyield_high_price_ee9439059f8e",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NAME?"
+      },
+      "address": "C1",
+      "displayText": "#NAME?"
     },
     {
       "caseId": "npv_b9b2bb2deab1",

@@ -13,6 +13,13 @@ fn serial(year: i32, month: u8, day: u8, system: ExcelDateSystem) -> i32 {
     ymd_to_serial(ExcelDate::new(year, month, day), system).expect("valid excel serial")
 }
 
+fn eval_value_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<Value> {
+    match sheet.eval(formula) {
+        Value::Error(ErrorKind::Name) => None,
+        other => Some(other),
+    }
+}
+
 #[test]
 fn oddfyield_extreme_prices_roundtrip() {
     let system = ExcelDateSystem::EXCEL_1900;
@@ -639,6 +646,24 @@ fn oddlprice_returns_num_error_for_non_finite_price_near_negative_frequency_boun
 }
 
 #[test]
+fn odd_coupon_bond_price_allows_negative_yield() {
+    let mut sheet = TestSheet::new();
+
+    let oddf = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-0.01,100,2,0)";
+    let oddl = "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-0.01,100,2,0)";
+
+    let oddf_price = match eval_number_or_skip(&mut sheet, oddf) {
+        Some(v) => v,
+        None => return,
+    };
+    let oddl_price = eval_number_or_skip(&mut sheet, oddl)
+        .expect("ODDLPRICE should return a number for negative yld within (-frequency, ∞)");
+
+    assert!(oddf_price.is_finite(), "expected finite price, got {oddf_price}");
+    assert!(oddl_price.is_finite(), "expected finite price, got {oddl_price}");
+}
+
+#[test]
 fn odd_coupon_prices_are_finite_for_large_redemption_values() {
     let system = ExcelDateSystem::EXCEL_1900;
 
@@ -689,6 +714,30 @@ fn odd_coupon_prices_are_finite_for_large_redemption_values() {
     assert!(
         price_last.is_finite(),
         "expected finite price, got {price_last}"
+    );
+}
+
+#[test]
+fn odd_coupon_bond_price_rejects_negative_coupon_rate() {
+    let mut sheet = TestSheet::new();
+
+    let oddf = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),-0.01,0.0625,100,2,0)";
+    let oddl = "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),-0.01,0.0625,100,2,0)";
+
+    let Some(out) = eval_value_or_skip(&mut sheet, oddf) else {
+        return;
+    };
+    assert!(
+        matches!(out, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for negative rate in ODDFPRICE, got {out:?}"
+    );
+
+    let Some(out) = eval_value_or_skip(&mut sheet, oddl) else {
+        return;
+    };
+    assert!(
+        matches!(out, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for negative rate in ODDLPRICE, got {out:?}"
     );
 }
 
@@ -771,4 +820,55 @@ fn odd_yield_solver_falls_back_when_derivative_is_non_finite() {
     .expect("ODDLYIELD should converge via bisection fallback");
 
     assert_close(recovered_last, target_yield, 1e-6);
+}
+
+#[test]
+fn odd_coupon_bond_yield_can_be_negative() {
+    let mut sheet = TestSheet::new();
+
+    // A price above the undiscounted cashflows implies a negative yield when yields are allowed
+    // below 0. Excel's behavior here is historically ambiguous; this test locks in the current
+    // engine semantics (negative yields are supported down to `-frequency`).
+    let oddf = "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,300,100,2,0)";
+    let oddl = "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,300,100,2,0)";
+
+    let oddf_yld = match eval_number_or_skip(&mut sheet, oddf) {
+        Some(v) => v,
+        None => return,
+    };
+    let oddl_yld = eval_number_or_skip(&mut sheet, oddl).expect("ODDLYIELD should return a number");
+
+    assert!(
+        oddf_yld < 0.0 && oddf_yld > -2.0,
+        "expected ODDFYIELD to return a negative yield in (-2, 0), got {oddf_yld}"
+    );
+    assert!(
+        oddl_yld < 0.0 && oddl_yld > -2.0,
+        "expected ODDLYIELD to return a negative yield in (-2, 0), got {oddl_yld}"
+    );
+}
+
+#[test]
+fn odd_coupon_bond_price_allows_zero_coupon_rate() {
+    let mut sheet = TestSheet::new();
+
+    // Zero-coupon odd-first/odd-last cases should still be valid.
+    let oddf = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0,0.0625,100,2,0)";
+    let oddl = "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0,0.0625,100,2,0)";
+
+    let Some(out) = eval_value_or_skip(&mut sheet, oddf) else {
+        return;
+    };
+    assert!(
+        matches!(out, Value::Number(_)),
+        "expected a numeric price for ODDFPRICE with rate=0, got {out:?}"
+    );
+
+    let Some(out) = eval_value_or_skip(&mut sheet, oddl) else {
+        return;
+    };
+    assert!(
+        matches!(out, Value::Number(_)),
+        "expected a numeric price for ODDLPRICE with rate=0, got {out:?}"
+    );
 }
