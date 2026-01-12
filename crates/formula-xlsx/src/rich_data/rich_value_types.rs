@@ -45,11 +45,25 @@ pub fn parse_rich_value_types_xml(xml: &[u8]) -> Result<RichValueTypes, XlsxErro
     // Typical shape:
     // <rvTypes> <types> <type .../>* </types> </rvTypes>
     //
-    // Be tolerant: don't require specific wrapper/root nodes; scan for `type`-like elements
-    // anywhere in the document.
-    for type_el in doc.descendants().filter(|n| {
-        n.is_element() && matches_local_name(n.tag_name().name(), &["type", "richValueType"])
-    }) {
+    // Be tolerant: allow additional wrapper/container nodes under `<types>`.
+    // If we cannot find a `<types>` container, fall back to scanning the entire document.
+    let mut type_nodes: Vec<Node<'_, '_>> = Vec::new();
+    if let Some(types_el) = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("types"))
+    {
+        type_nodes.extend(types_el.descendants().filter(|n| {
+            n.is_element()
+                && matches_local_name(n.tag_name().name(), &["type", "richValueType", "rvType"])
+        }));
+    } else {
+        type_nodes.extend(doc.descendants().filter(|n| {
+            n.is_element()
+                && matches_local_name(n.tag_name().name(), &["type", "richValueType", "rvType"])
+        }));
+    }
+
+    for type_el in type_nodes {
         let id = attr_local(type_el, &["id", "t", "typeId", "type_id"])
             .and_then(|v| v.trim().parse::<u32>().ok());
         let Some(id) = id else {

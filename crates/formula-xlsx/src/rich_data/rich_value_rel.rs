@@ -96,13 +96,25 @@ pub fn parse_rich_value_rel_table(xml_bytes: &[u8]) -> Result<Vec<String>, XlsxE
 }
 
 fn get_rel_id(node: &roxmltree::Node<'_, '_>) -> Option<String> {
+    // Prefer the correct relationships namespace (`r:id`), but be tolerant and fall back to any
+    // attribute whose local name is `id` (ignoring namespace/prefix).
     node.attribute((REL_NS, "id"))
         .or_else(|| node.attribute("r:id"))
+        .or_else(|| {
+            // Some XML producers may omit namespaces/prefixes entirely.
+            node.attribute("id")
+        })
         .or_else(|| {
             // Some XML libraries represent namespaced attributes using Clark notation:
             // `{namespace}localname`.
             let clark = format!("{{{REL_NS}}}id");
             node.attribute(clark.as_str())
+        })
+        .or_else(|| {
+            // Absolute fallback: scan by local name.
+            node.attributes()
+                .find(|attr| attr.name().eq_ignore_ascii_case("id"))
+                .map(|attr| attr.value())
         })
         .map(|s| s.to_string())
 }
@@ -148,5 +160,18 @@ mod tests {
 
         let parsed = parse_rich_value_rel_table(xml.as_bytes()).expect("parse");
         assert_eq!(parsed, vec!["".to_string(), "rId9".to_string()]);
+    }
+
+    #[test]
+    fn parses_unqualified_id_attribute_for_tolerance() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvRel xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <rels>
+    <rel id="rId3"/>
+  </rels>
+</rvRel>"#;
+
+        let parsed = parse_rich_value_rel_table(xml.as_bytes()).expect("parse");
+        assert_eq!(parsed, vec!["rId3".to_string()]);
     }
 }

@@ -48,12 +48,23 @@ pub fn parse_rich_value_structure_xml(xml: &[u8]) -> Result<RichValueStructures,
     // Typical shape:
     // <rvStruct> <structures> <structure id="..."> <member .../>* </structure>* </structures> </rvStruct>
     //
-    // Be tolerant: don't require a specific `<structures>` wrapper; scan for `structure` nodes
-    // anywhere in the document.
-    for structure_el in doc
+    // Be tolerant: allow additional wrapper/container nodes under `<structures>`.
+    // If we cannot find a `<structures>` container, fall back to scanning the entire document.
+    let mut structure_nodes: Vec<Node<'_, '_>> = Vec::new();
+    if let Some(structures_el) = doc
         .descendants()
-        .filter(|n| n.is_element() && matches_local_name(n.tag_name().name(), &["structure", "s"]))
+        .find(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("structures"))
     {
+        structure_nodes.extend(structures_el.descendants().filter(|n| {
+            n.is_element() && matches_local_name(n.tag_name().name(), &["structure", "s"])
+        }));
+    } else {
+        structure_nodes.extend(doc.descendants().filter(|n| {
+            n.is_element() && matches_local_name(n.tag_name().name(), &["structure", "s"])
+        }));
+    }
+
+    for structure_el in structure_nodes {
         let Some(id) = attr_local(structure_el, &["id", "s", "structureId", "structure_id"]) else {
             // Best-effort: ignore malformed/unrecognized <structure> entries.
             continue;
