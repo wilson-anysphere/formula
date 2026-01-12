@@ -67,6 +67,12 @@ pub struct PreservedSheetOleObjects {
 pub struct PreservedChartSheet {
     pub sheet_index: usize,
     pub sheet_id: Option<u32>,
+    /// The `rId*` referenced by the `<sheet r:id="...">` entry in `xl/workbook.xml`.
+    pub rel_id: String,
+    /// The matching relationship target in `xl/_rels/workbook.xml.rels`.
+    pub rel_target: String,
+    /// Optional `state=` attribute value from `xl/workbook.xml` (`hidden`/`veryHidden`).
+    pub state: Option<String>,
     /// The chartsheet XML part path (e.g. `xl/chartsheets/sheet1.xml`).
     pub part_name: String,
 }
@@ -102,12 +108,15 @@ impl XlsxPackage {
             .part("[Content_Types].xml")
             .ok_or_else(|| ChartExtractionError::MissingPart("[Content_Types].xml".to_string()))?
             .to_vec();
+        let chart_sheets = extract_workbook_chart_sheets(self)?;
         let sheets = workbook_sheet_parts(self)?;
         let mut root_parts: BTreeSet<String> = BTreeSet::new();
+        for sheet in chart_sheets.values() {
+            root_parts.insert(sheet.part_name.clone());
+        }
         let mut sheet_drawings: BTreeMap<String, PreservedSheetDrawings> = BTreeMap::new();
         let mut sheet_pictures: BTreeMap<String, PreservedSheetPicture> = BTreeMap::new();
         let mut sheet_ole_objects: BTreeMap<String, PreservedSheetOleObjects> = BTreeMap::new();
-        let mut chart_sheets: BTreeMap<String, PreservedChartSheet> = BTreeMap::new();
 
         for sheet in sheets {
             let sheet_rels_part = rels_for_part(&sheet.part_name);
@@ -132,14 +141,6 @@ impl XlsxPackage {
 
             if sheet.part_name.starts_with("xl/chartsheets/") {
                 root_parts.insert(sheet.part_name.clone());
-                chart_sheets.insert(
-                    sheet.name.clone(),
-                    PreservedChartSheet {
-                        sheet_index: sheet.index,
-                        sheet_id: sheet.sheet_id,
-                        part_name: sheet.part_name.clone(),
-                    },
-                );
             }
 
             let sheet_xml_str = std::str::from_utf8(sheet_xml)
@@ -435,6 +436,77 @@ impl XlsxPackage {
 
         Ok(())
     }
+}
+
+fn extract_workbook_chart_sheets(
+    pkg: &XlsxPackage,
+) -> Result<BTreeMap<String, PreservedChartSheet>, ChartExtractionError> {
+    let workbook_part = "xl/workbook.xml";
+    let workbook_xml = pkg
+        .part(workbook_part)
+        .ok_or_else(|| ChartExtractionError::MissingPart(workbook_part.to_string()))?;
+    let workbook_xml = std::str::from_utf8(workbook_xml)
+        .map_err(|e| ChartExtractionError::XmlNonUtf8(workbook_part.to_string(), e))?;
+    let workbook_doc = Document::parse(workbook_xml)
+        .map_err(|e| ChartExtractionError::XmlParse(workbook_part.to_string(), e))?;
+
+    let workbook_rels_part = "xl/_rels/workbook.xml.rels";
+    let rel_map: HashMap<String, crate::relationships::Relationship> =
+        match pkg.part(workbook_rels_part) {
+            Some(workbook_rels_xml) => parse_relationships(workbook_rels_xml, workbook_rels_part)?
+                .into_iter()
+                .map(|r| (r.id.clone(), r))
+                .collect(),
+            None => HashMap::new(),
+        };
+
+    let mut out = BTreeMap::new();
+    for (index, sheet_node) in workbook_doc
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "sheet")
+        .enumerate()
+    {
+        let Some(name) = sheet_node.attribute("name") else {
+            continue;
+        };
+        let sheet_id = sheet_node
+            .attribute("sheetId")
+            .and_then(|v| v.parse::<u32>().ok());
+        let Some(rel_id) = sheet_node
+            .attribute((REL_NS, "id"))
+            .or_else(|| sheet_node.attribute("r:id"))
+            .or_else(|| sheet_node.attribute("id"))
+        else {
+            continue;
+        };
+        let state = sheet_node.attribute("state").map(|s| s.to_string());
+
+        let Some(rel) = rel_map.get(rel_id) else {
+            continue;
+        };
+        if rel.type_ != CHARTSHEET_REL_TYPE {
+            continue;
+        }
+
+        let resolved_target = resolve_target(workbook_part, &rel.target);
+        if !resolved_target.starts_with("xl/chartsheets/") || pkg.part(&resolved_target).is_none() {
+            continue;
+        }
+
+        out.insert(
+            name.to_string(),
+            PreservedChartSheet {
+                sheet_index: index,
+                sheet_id,
+                rel_id: rel_id.to_string(),
+                rel_target: rel.target.clone(),
+                state,
+                part_name: resolved_target,
+            },
+        );
+    }
+
+    Ok(out)
 }
 
 fn is_drawing_adjacent_relationship(rel_type: &str, resolved_target: &str) -> bool {
@@ -867,133 +939,114 @@ fn ensure_workbook_has_chartsheets(
     let workbook_part = "xl/workbook.xml";
     let workbook_xml = pkg
         .part(workbook_part)
-        .ok_or_else(|| ChartExtractionError::MissingPart(workbook_part.to_string()))?;
-    let workbook_xml = std::str::from_utf8(workbook_xml)
+        .ok_or_else(|| ChartExtractionError::MissingPart(workbook_part.to_string()))?
+        .to_vec();
+    let workbook_xml = std::str::from_utf8(&workbook_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8(workbook_part.to_string(), e))?
         .to_string();
 
     let doc = Document::parse(&workbook_xml)
         .map_err(|e| ChartExtractionError::XmlParse(workbook_part.to_string(), e))?;
+    let root_start = doc.root_element().range().start;
+    let sheets_node = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "sheets")
+        .ok_or_else(|| ChartExtractionError::XmlStructure("workbook.xml missing <sheets>".to_string()))?;
+    let sheets_prefix = element_prefix_at(&workbook_xml, sheets_node.range().start);
+    let sheet_tag = crate::xml::prefixed_tag(sheets_prefix, "sheet");
+    let sheets_close_tag = format!("</{}>", crate::xml::prefixed_tag(sheets_prefix, "sheets"));
 
-    let mut existing_sheet_names: HashMap<String, ()> = HashMap::new();
+    let mut existing_sheet_names: HashSet<String> = HashSet::new();
+    let mut used_sheet_ids: HashSet<u32> = HashSet::new();
     let mut max_sheet_id = 0u32;
-    for sheet in doc.descendants().filter(|n| n.is_element() && n.tag_name().name() == "sheet") {
+    for sheet in doc
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "sheet")
+    {
         if let Some(name) = sheet.attribute("name") {
-            existing_sheet_names.insert(name.to_string(), ());
+            existing_sheet_names.insert(name.to_string());
         }
         if let Some(sheet_id) = sheet.attribute("sheetId").and_then(|v| v.parse::<u32>().ok()) {
+            used_sheet_ids.insert(sheet_id);
             max_sheet_id = max_sheet_id.max(sheet_id);
         }
     }
 
+    let mut to_insert: Vec<(&String, &PreservedChartSheet)> = chart_sheets
+        .iter()
+        .filter(|(name, _)| !existing_sheet_names.contains(*name))
+        .collect();
+    if to_insert.is_empty() {
+        return Ok(());
+    }
+    to_insert.sort_by_key(|(_, sheet)| sheet.sheet_index);
+
     let rels_part = "xl/_rels/workbook.xml.rels";
-    let rels_xml_bytes = pkg
-        .part(rels_part)
-        .ok_or_else(|| ChartExtractionError::MissingPart(rels_part.to_string()))?;
-    let mut rels_xml = std::str::from_utf8(rels_xml_bytes)
-        .map_err(|e| ChartExtractionError::XmlNonUtf8(rels_part.to_string(), e))?
-        .to_string();
+    let relationship_stubs: Vec<RelationshipStub> = to_insert
+        .iter()
+        .map(|(_, sheet)| RelationshipStub {
+            rel_id: sheet.rel_id.clone(),
+            target: sheet.rel_target.clone(),
+        })
+        .collect();
+    let (updated_rels, rid_map) = ensure_rels_has_relationships(
+        pkg.part(rels_part),
+        rels_part,
+        workbook_part,
+        CHARTSHEET_REL_TYPE,
+        &relationship_stubs,
+    )?;
+    pkg.set_part(rels_part, updated_rels);
 
-    let mut workbook_xml_updated = workbook_xml;
+    let mut insertion = String::new();
+    for (name, sheet) in to_insert {
+        let desired_sheet_id = sheet.sheet_id.filter(|id| *id > 0);
+        let sheet_id = match desired_sheet_id {
+            Some(id) if !used_sheet_ids.contains(&id) => id,
+            _ => {
+                let mut candidate = max_sheet_id + 1;
+                while used_sheet_ids.contains(&candidate) {
+                    candidate += 1;
+                }
+                max_sheet_id = candidate;
+                candidate
+            }
+        };
+        used_sheet_ids.insert(sheet_id);
 
-    // Insert in original sheet order for determinism when multiple chart sheets are present.
-    let mut chart_sheets: Vec<(&String, &PreservedChartSheet)> = chart_sheets.iter().collect();
-    chart_sheets.sort_by_key(|(_, sheet)| sheet.sheet_index);
+        let rel_id = rid_map
+            .get(&sheet.rel_id)
+            .cloned()
+            .unwrap_or_else(|| sheet.rel_id.clone());
 
-    for (name, sheet) in chart_sheets {
-        if existing_sheet_names.contains_key(name) {
-            continue;
+        insertion.push_str(&format!(
+            "    <{sheet_tag} name=\"{}\" sheetId=\"{}\" r:id=\"{}\"",
+            xml_escape(name),
+            sheet_id,
+            xml_escape(&rel_id)
+        ));
+        if let Some(state) = sheet.state.as_deref() {
+            insertion.push_str(&format!(" state=\"{}\"", xml_escape(state)));
         }
-
-        let next_sheet_id = max_sheet_id + 1;
-        max_sheet_id = next_sheet_id;
-
-        let next_rid = next_relationship_id(&rels_xml);
-        let rel_id = format!("rId{next_rid}");
-
-        let target = sheet
-            .part_name
-            .strip_prefix("xl/")
-            .unwrap_or(sheet.part_name.as_str());
-
-        let rels_insert_idx = rels_xml.rfind("</Relationships>").ok_or_else(|| {
-            ChartExtractionError::XmlStructure(format!("{rels_part}: missing </Relationships>"))
-        })?;
-        rels_xml.insert_str(
-            rels_insert_idx,
-            &format!(
-                "  <Relationship Id=\"{}\" Type=\"{}\" Target=\"{}\"/>\n",
-                rel_id,
-                CHARTSHEET_REL_TYPE,
-                xml_escape(target)
-            ),
-        );
-
-        let sheets_end = workbook_xml_updated.rfind("</sheets>").ok_or_else(|| {
-            ChartExtractionError::XmlStructure("workbook.xml missing </sheets>".to_string())
-        })?;
-        workbook_xml_updated.insert_str(
-            sheets_end,
-            &format!(
-                "    <sheet name=\"{}\" sheetId=\"{}\" r:id=\"{}\"/>\n",
-                xml_escape(name),
-                next_sheet_id,
-                xml_escape(&rel_id)
-            ),
-        );
-
-        existing_sheet_names.insert(name.to_string(), ());
+        insertion.push_str("/>\n");
+        existing_sheet_names.insert(name.to_string());
     }
 
-    if workbook_xml_updated.contains("r:id") && !workbook_xml_updated.contains("xmlns:r=") {
-        workbook_xml_updated = ensure_workbook_has_r_namespace(&workbook_xml_updated, workbook_part)?;
+    let sheets_end = workbook_xml.rfind(&sheets_close_tag).ok_or_else(|| {
+        ChartExtractionError::XmlStructure(format!("workbook.xml missing {sheets_close_tag}"))
+    })?;
+    let mut workbook_xml_updated = workbook_xml.clone();
+    workbook_xml_updated.insert_str(sheets_end, &insertion);
+
+    if workbook_xml_updated.contains("r:id")
+        && !root_start_has_r_namespace(&workbook_xml_updated, root_start, workbook_part)?
+    {
+        workbook_xml_updated =
+            add_r_namespace_to_root(&workbook_xml_updated, root_start, workbook_part)?;
     }
 
     pkg.set_part(workbook_part, workbook_xml_updated.into_bytes());
-    pkg.set_part(rels_part, rels_xml.into_bytes());
     Ok(())
-}
-
-fn next_relationship_id(xml: &str) -> u32 {
-    let mut max_id = 0u32;
-    let mut rest = xml;
-    while let Some(idx) = rest.find("Id=\"rId") {
-        let after = &rest[idx + "Id=\"rId".len()..];
-        let mut digits = String::new();
-        for ch in after.chars() {
-            if ch.is_ascii_digit() {
-                digits.push(ch);
-            } else {
-                break;
-            }
-        }
-        if let Ok(n) = digits.parse::<u32>() {
-            max_id = max_id.max(n);
-        }
-        rest = &after[digits.len()..];
-    }
-    max_id + 1
-}
-
-fn ensure_workbook_has_r_namespace(
-    workbook_xml: &str,
-    part_name: &str,
-) -> Result<String, ChartExtractionError> {
-    if workbook_xml.contains("xmlns:r=") {
-        return Ok(workbook_xml.to_string());
-    }
-
-    let workbook_start = workbook_xml.find("<workbook").ok_or_else(|| {
-        ChartExtractionError::XmlStructure(format!("{part_name}: missing <workbook"))
-    })?;
-    let tag_end_rel = workbook_xml[workbook_start..].find('>').ok_or_else(|| {
-        ChartExtractionError::XmlStructure(format!("{part_name}: invalid <workbook> start tag"))
-    })?;
-    let insert_pos = workbook_start + tag_end_rel;
-
-    let mut out = workbook_xml.to_string();
-    out.insert_str(insert_pos, &format!(" xmlns:r=\"{REL_NS}\""));
-    Ok(out)
 }
 
 fn xml_escape(input: &str) -> String {
