@@ -19,6 +19,15 @@ type UpdaterEventPayload = {
   body?: string | null;
   message?: string;
   error?: string;
+  // Optional manual download metadata (may be added to updater payloads in the future).
+  releaseUrl?: string;
+  release_url?: string;
+  homepage?: string;
+  homepageUrl?: string;
+  homepage_url?: string;
+  url?: string;
+  downloadUrl?: string;
+  download_url?: string;
 };
 
 type TauriListen = (event: string, handler: (event: any) => void) => Promise<() => void>;
@@ -56,9 +65,10 @@ type DialogElements = {
 };
 
 let updateDialog: DialogElements | null = null;
-let updateInfo: { version: string; body: string | null } | null = null;
+let updateInfo: { version: string; body: string | null; manualDownloadUrl: string } | null = null;
 let downloadedUpdate: UpdaterUpdate | null = null;
 let downloadInFlight = false;
+let lastUpdateError: string | null = null;
 
 let progressDownloaded = 0;
 let progressTotal: number | null = null;
@@ -115,6 +125,59 @@ async function openExternalUrl(url: string): Promise<void> {
   } catch {
     // Best-effort.
   }
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Best-effort resolver for a human-friendly "manual download" URL.
+ *
+ * If updater metadata includes a homepage/release URL, we prefer that. Otherwise we
+ * fall back to the GitHub releases page.
+ */
+export function resolveUpdateReleaseUrl(update: unknown): string {
+  if (typeof update === "string") {
+    const trimmed = update.trim();
+    if (trimmed && isHttpUrl(trimmed)) return trimmed;
+    return FORMULA_RELEASES_URL;
+  }
+
+  if (!update || typeof update !== "object") return FORMULA_RELEASES_URL;
+  const record = update as Record<string, unknown>;
+  const candidates: unknown[] = [
+    record.releaseUrl,
+    record.release_url,
+    record.homepage,
+    record.homepageUrl,
+    record.homepage_url,
+    // Some updater manifests include `url` / `download_url` which might be a direct
+    // artifact download; still useful as a manual escape hatch.
+    record.url,
+    record.downloadUrl,
+    record.download_url,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+    const trimmed = candidate.trim();
+    if (!trimmed) continue;
+    if (!isHttpUrl(trimmed)) continue;
+    return trimmed;
+  }
+
+  return FORMULA_RELEASES_URL;
+}
+
+export async function openUpdateReleasePage(update: unknown): Promise<void> {
+  const url = resolveUpdateReleaseUrl(update);
+  await shellOpen(url);
 }
 
 function getUpdaterUpdateOrNull(raw: unknown): UpdaterUpdate | null {
@@ -220,6 +283,7 @@ function ensureUpdateDialog(): DialogElements {
   const status = document.createElement("div");
   status.dataset.testid = "updater-status";
   status.style.marginTop = "10px";
+  status.style.whiteSpace = "pre-wrap";
 
   const progressWrap = document.createElement("div");
   progressWrap.dataset.testid = "updater-progress-wrap";
@@ -254,7 +318,7 @@ function ensureUpdateDialog(): DialogElements {
 
   const viewVersionsBtn = document.createElement("button");
   viewVersionsBtn.type = "button";
-  viewVersionsBtn.textContent = "View all versions";
+  viewVersionsBtn.textContent = "Open release page";
   viewVersionsBtn.dataset.testid = "updater-view-versions";
 
   const downloadBtn = document.createElement("button");
@@ -296,7 +360,8 @@ function ensureUpdateDialog(): DialogElements {
   });
 
   viewVersionsBtn.addEventListener("click", () => {
-    void openExternalUrl(FORMULA_RELEASES_URL);
+    const url = updateInfo?.manualDownloadUrl ?? FORMULA_RELEASES_URL;
+    void openExternalUrl(url);
     if (!downloadInFlight) safeClose(dialog, "versions");
   });
 
@@ -306,10 +371,20 @@ function ensureUpdateDialog(): DialogElements {
 
   restartBtn.addEventListener("click", () => {
     void (async () => {
+      lastUpdateError = null;
+      renderUpdateDialog();
       // Keep the dialog open if the restart was cancelled (e.g. user hit "Cancel"
       // on the unsaved-changes prompt).
       const didRestart = await restartToInstallUpdate();
       if (didRestart) safeClose(dialog, "restart");
+      else if (lastUpdateError) {
+        renderUpdateDialog();
+        try {
+          viewVersionsBtn.focus();
+        } catch {
+          // Best-effort focus.
+        }
+      }
     })();
   });
 
@@ -352,12 +427,32 @@ function renderUpdateDialog(): void {
     els.status.textContent = "Downloading update…";
     els.progressWrap.style.display = "";
     renderProgress();
+  } else if (lastUpdateError) {
+    els.progressWrap.style.display = "none";
+    els.status.textContent =
+      downloadedUpdate
+        ? `Update failed to install automatically.\n\nDownload manually from the release page, or try restarting again.\n\n${lastUpdateError}`
+        : `Update failed to download.\n\nDownload manually from the release page.\n\n${lastUpdateError}`;
   } else if (downloadedUpdate) {
     els.status.textContent = "Update ready to install. Restart now?";
     els.progressWrap.style.display = "none";
   } else {
     els.status.textContent = "";
     els.progressWrap.style.display = "none";
+  }
+
+  if (lastUpdateError) {
+    els.viewVersionsBtn.textContent = "Download manually";
+    els.viewVersionsBtn.style.background = "var(--accent)";
+    els.viewVersionsBtn.style.borderColor = "var(--accent-border)";
+    els.viewVersionsBtn.style.color = "var(--text-on-accent)";
+    els.viewVersionsBtn.style.fontWeight = "700";
+  } else {
+    els.viewVersionsBtn.textContent = "Open release page";
+    els.viewVersionsBtn.style.background = "";
+    els.viewVersionsBtn.style.borderColor = "";
+    els.viewVersionsBtn.style.color = "";
+    els.viewVersionsBtn.style.fontWeight = "";
   }
 
   if (readyToInstall && !getRelaunchOrNull()) {
@@ -430,10 +525,18 @@ async function startUpdateDownload(): Promise<void> {
   const updater = getUpdaterApiOrNull();
   if (!updater) {
     console.warn("Updater API not available; cannot download update.");
-    showToast("Auto-updater is unavailable in this build.", "error");
+    lastUpdateError = "Auto-updater is unavailable in this build.";
+    showToast(lastUpdateError, "error");
+    renderUpdateDialog();
+    try {
+      ensureUpdateDialog().viewVersionsBtn.focus();
+    } catch {
+      // Best-effort focus.
+    }
     return;
   }
 
+  lastUpdateError = null;
   downloadInFlight = true;
   downloadedUpdate = null;
   progressDownloaded = 0;
@@ -456,7 +559,13 @@ async function startUpdateDownload(): Promise<void> {
     downloadedUpdate = update;
   } catch (err) {
     console.error("Update download failed:", err);
-    showToast(String(err), "error");
+    lastUpdateError = String(err);
+    showToast(lastUpdateError, "error");
+    try {
+      ensureUpdateDialog().viewVersionsBtn.focus();
+    } catch {
+      // Best-effort focus.
+    }
   } finally {
     downloadInFlight = false;
     renderUpdateDialog();
@@ -474,7 +583,8 @@ function openUpdateAvailableDialog(payload: UpdaterEventPayload): void {
   }
 
   const body = payload?.body == null ? null : String(payload.body);
-  updateInfo = { version, body };
+  updateInfo = { version, body, manualDownloadUrl: resolveUpdateReleaseUrl(payload) };
+  lastUpdateError = null;
   ensureUpdateDialog();
   renderUpdateDialog();
   safeShowModal(updateDialog!.dialog);
@@ -556,11 +666,16 @@ export function installUpdaterUi(listenArg?: TauriListen): void {
 export async function restartToInstallUpdate(): Promise<boolean> {
   return await requestAppRestart({
     beforeQuit: async () => {
-      const update = downloadedUpdate;
-      if (update) {
-        await update.install();
-      } else {
-        await installUpdateAndRestart();
+      try {
+        const update = downloadedUpdate;
+        if (update) {
+          await update.install();
+        } else {
+          await installUpdateAndRestart();
+        }
+      } catch (err) {
+        lastUpdateError = String(err);
+        throw err;
       }
 
       const relaunch = getRelaunchOrNull();
@@ -575,4 +690,3 @@ export async function restartToInstallUpdate(): Promise<boolean> {
     beforeQuitErrorToast: "Failed to restart to install the update.",
   });
 }
-
