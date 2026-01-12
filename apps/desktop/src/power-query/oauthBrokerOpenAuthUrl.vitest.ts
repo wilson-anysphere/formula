@@ -12,9 +12,10 @@ describe("DesktopOAuthBroker.openAuthUrl", () => {
     vi.restoreAllMocks();
   });
 
-  it("opens https auth URLs via the Tauri open_external_url command when available", async () => {
+  it("opens https auth URLs via the Rust open_external_url command when running under Tauri", async () => {
     const invoke = vi.fn().mockResolvedValue(undefined);
-    (globalThis as any).__TAURI__ = { core: { invoke } };
+    const tauriOpen = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { core: { invoke }, plugin: { shell: { open: tauriOpen } } };
     // Guard against accidental webview navigation fallback.
     (globalThis as any).window = { open: vi.fn() };
 
@@ -23,6 +24,7 @@ describe("DesktopOAuthBroker.openAuthUrl", () => {
 
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(invoke).toHaveBeenCalledWith("open_external_url", { url: "https://example.com/auth" });
+    expect(tauriOpen).not.toHaveBeenCalled();
   });
 
   it("rejects non-http(s) auth URLs", async () => {
