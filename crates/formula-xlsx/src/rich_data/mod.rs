@@ -42,6 +42,7 @@ pub use rich_value_rel::RichValueRels;
 pub use worksheet_scan::scan_cells_with_metadata_indices;
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 /// One observed workbook relationship type for `xl/richData/richValueRel.xml`.
 ///
@@ -68,12 +69,25 @@ pub const CONTENT_TYPE_RDRICHVALUESTRUCTURE: &str =
     "application/vnd.ms-excel.rdrichvaluestructure+xml";
 /// `[Content_Types].xml` override content type for `xl/richData/richValueRel.xml`.
 pub const CONTENT_TYPE_RICHVALUEREL: &str = "application/vnd.ms-excel.richvaluerel+xml";
-use std::collections::HashMap;
 
 use formula_model::CellRef;
 use thiserror::Error;
 
 use crate::{path, XlsxError, XlsxPackage};
+
+/// Look up an entry in a rich-value relationship-slot indexed table.
+///
+/// Excel uses 0-based relationship-slot indices:
+/// - `<v kind="rel">0</v>` points at the first `<rel>` in `richValueRel.xml`.
+///
+/// Some third-party generators emit 1-based slot indices. To be tolerant without breaking valid
+/// Excel files, we first try the index as-is and only fall back to `index - 1` when the original
+/// index is out of bounds.
+pub(crate) fn rel_slot_get<T>(table: &[T], index: usize) -> Option<&T> {
+    table
+        .get(index)
+        .or_else(|| index.checked_sub(1).and_then(|idx| table.get(idx)))
+}
 /// Cached lookup tables for resolving worksheet `c/@vm` indices into rich value + media targets.
 ///
 /// This is intended primarily for debugging tooling (like `dump_rich_data`) and is intentionally
@@ -185,8 +199,7 @@ impl RichDataVmIndex {
                 })
         });
         let mut target_part = rel_index.and_then(|idx| {
-            self.rel_index_to_target_part
-                .get(idx as usize)
+            rel_slot_get(&self.rel_index_to_target_part, idx as usize)
                 .cloned()
                 .flatten()
         });
@@ -354,7 +367,7 @@ fn extract_rich_data_images_via_rel_table(
             let Some(&rich_value_idx) = vm_to_rich_value.get(&vm) else {
                 continue;
             };
-            let Some(rid) = rel_index_to_rid.get(rich_value_idx as usize) else {
+            let Some(rid) = rel_slot_get(&rel_index_to_rid, rich_value_idx as usize) else {
                 continue;
             };
             let Some(target) = rid_to_target.get(rid) else {
@@ -489,7 +502,6 @@ pub fn extract_rich_cell_images(
         let Some(pointer) = rich_value_to_image_pointer.get(&rich_value_idx) else {
             continue;
         };
-
         let target_part = match pointer {
             RichValueImagePointer::RelIndex(rel_index) => {
                 let Some(rich_value_rel_part) = rich_value_rel_part.as_deref() else {
@@ -499,7 +511,7 @@ pub fn extract_rich_cell_images(
                     continue;
                 }
 
-                let Some(rid) = rel_index_to_rid.get(*rel_index as usize) else {
+                let Some(rid) = rel_slot_get(&rel_index_to_rid, *rel_index as usize) else {
                     continue;
                 };
                 let Some(target) = rid_to_target.get(rid.as_str()) else {
@@ -985,6 +997,25 @@ fn parse_rich_value_parts_image_pointers(
     pkg: &XlsxPackage,
     part_names: &[&str],
 ) -> Result<HashMap<u32, RichValueImagePointer>, RichDataError> {
+    // Split part names by family so we can apply schema-aware parsing to `richValue*.xml` and
+    // structure-aware parsing to `rdrichvalue*.xml`.
+    let mut rich_value_parts: Vec<&str> = Vec::new();
+    let mut rd_rich_value_parts: Vec<&str> = Vec::new();
+    for part_name in part_names {
+        let Some((family, _idx)) = parse_rich_value_part_name(part_name) else {
+            continue;
+        };
+        match family {
+            RichValuePartFamily::RichValue | RichValuePartFamily::RichValues => {
+                rich_value_parts.push(*part_name)
+            }
+            RichValuePartFamily::RdRichValue => rd_rich_value_parts.push(*part_name),
+        }
+    }
+
+    rich_value_parts.sort_by(|a, b| cmp_rich_value_parts_by_numeric_suffix(a, b));
+    rd_rich_value_parts.sort_by(|a, b| cmp_rich_value_parts_by_numeric_suffix(a, b));
+
     let mut out: HashMap<u32, RichValueImagePointer> = HashMap::new();
     let mut global_idx: u32 = 0;
 
@@ -996,7 +1027,7 @@ fn parse_rich_value_parts_image_pointers(
     // heuristic `<v t="rel">` / first-numeric parsing.
     let rich_value_types = build_rich_value_type_schema_index_best_effort(pkg);
 
-    for part_name in part_names {
+    for part_name in rich_value_parts {
         let Some(bytes) = pkg.part(part_name) else {
             continue;
         };
@@ -1025,6 +1056,25 @@ fn parse_rich_value_parts_image_pointers(
                 );
             }
             global_idx = global_idx.saturating_add(1);
+        }
+    }
+
+    if !rd_rich_value_parts.is_empty() {
+        let rd_structure_xml = pkg.part("xl/richData/rdrichvaluestructure.xml");
+
+        for part_name in rd_rich_value_parts {
+            let Some(bytes) = pkg.part(part_name) else {
+                continue;
+            };
+            let rel_indices = images::parse_rdrichvalue_relationship_indices(bytes, rd_structure_xml)?;
+            for rel_idx in rel_indices {
+                if let Some(rel_idx) = rel_idx {
+                    if let Ok(rel_idx) = u32::try_from(rel_idx) {
+                        out.insert(global_idx, RichValueImagePointer::RelIndex(rel_idx));
+                    }
+                }
+                global_idx = global_idx.saturating_add(1);
+            }
         }
     }
 

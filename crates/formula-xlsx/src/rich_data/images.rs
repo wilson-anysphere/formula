@@ -14,6 +14,7 @@ use roxmltree::Document;
 
 use crate::XlsxError;
 
+use super::rel_slot_get;
 use super::rich_value::parse_rich_value_relationship_indices;
 use super::rich_value_rel::parse_rich_value_rel_table;
 
@@ -104,7 +105,7 @@ pub fn resolve_rich_value_image_targets(
             continue;
         };
 
-        let Some(r_id) = rel_id_table.get(rel_idx) else {
+        let Some(r_id) = rel_slot_get(&rel_id_table, rel_idx) else {
             out.push(None);
             continue;
         };

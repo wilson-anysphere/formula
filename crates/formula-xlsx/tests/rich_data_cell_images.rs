@@ -10,6 +10,15 @@ fn build_rich_image_xlsx(
     include_rich_value_rels: bool,
     fragmented_target: bool,
 ) -> Vec<u8> {
+    build_rich_image_xlsx_with_rel_slot_index(0, include_metadata, include_rich_value_rels, fragmented_target)
+}
+
+fn build_rich_image_xlsx_with_rel_slot_index(
+    rel_slot_index: u32,
+    include_metadata: bool,
+    include_rich_value_rels: bool,
+    fragmented_target: bool,
+) -> Vec<u8> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -55,13 +64,15 @@ fn build_rich_image_xlsx(
   </richValueType>
 </richValueTypes>"#;
 
-    let rich_value_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    let rich_value_xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <richValue xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <rv s="0">
     <v>123</v>
-    <v>0</v>
+    <v>{rel_slot_index}</v>
   </rv>
-</richValue>"#;
+</richValue>"#
+    );
 
     let rich_value_rel_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <richValueRel xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -657,6 +668,23 @@ fn build_rich_image_xlsx_with_rich_value_rel1_referenced_from_rich_value_rels() 
 #[test]
 fn extracts_rich_cell_image_bytes_from_vm_chain() {
     let bytes = build_rich_image_xlsx(true, true, false);
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+    let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
+
+    let mut expected: HashMap<(String, CellRef), Vec<u8>> = HashMap::new();
+    expected.insert(
+        ("Sheet1".to_string(), CellRef::from_a1("A1").unwrap()),
+        b"fakepng".to_vec(),
+    );
+
+    assert_eq!(images, expected);
+}
+
+#[test]
+fn extracts_rich_cell_image_bytes_with_1_based_rel_slot_index() {
+    // Some third-party producers encode the relationship slot stored inside `<rv>` as 1-based.
+    // Excel uses 0-based indices, so this should still resolve to the first `<rel>`.
+    let bytes = build_rich_image_xlsx_with_rel_slot_index(1, true, true, false);
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
     let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
 

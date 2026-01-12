@@ -1142,7 +1142,9 @@ impl XlsxDocument {
             XlsxError::Invalid(format!("{rich_value_rel_part} is not valid UTF-8: {e}"))
         })?;
         let rel_ids = parse_rel_ids(xml)?;
-        let Some(rel_id) = rel_ids.get(rel_index as usize).cloned() else {
+        let Some(rel_id) =
+            crate::rich_data::rel_slot_get(&rel_ids, rel_index as usize).cloned()
+        else {
             return Ok(None);
         };
 

@@ -672,7 +672,7 @@ fn resolve_local_image_identifier_to_image_part(
     image_targets_by_rel_id: &HashMap<String, String>,
     local_image_identifier: u32,
 ) -> Option<String> {
-    let rel_id = rich_value_rel_ids.get(local_image_identifier as usize)?;
+    let rel_id = crate::rich_data::rel_slot_get(rich_value_rel_ids, local_image_identifier as usize)?;
     image_targets_by_rel_id.get(rel_id).cloned()
 }
 
