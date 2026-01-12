@@ -143,8 +143,9 @@ export function injectWebviewCsp(html: string): string {
   // Ensure the CSP applies before any extension-provided markup is parsed (including malformed
   // HTML that places tags before `<html>`/`<head>`). We do this by injecting immediately after the
   // document doctype when present, otherwise by prefixing a doctype and injecting right after it.
-  const withDoctype = /^\s*<!doctype\b/i.test(src) ? src : `<!doctype html>${src}`;
-  const doctypeMatch = /^\s*<!doctype[^>]*>/i.exec(withDoctype);
+  const hasDoctype = /^\s*(?:<!--[\s\S]*?-->\s*)*<!doctype\b/i.test(src);
+  const withDoctype = hasDoctype ? src : `<!doctype html>${src}`;
+  const doctypeMatch = /^\s*(?:<!--[\s\S]*?-->\s*)*<!doctype[^>]*>/i.exec(withDoctype);
   if (doctypeMatch) {
     const insertAt = doctypeMatch.index + doctypeMatch[0].length;
     return `${withDoctype.slice(0, insertAt)}${injectedHeadContent}${withDoctype.slice(insertAt)}`;

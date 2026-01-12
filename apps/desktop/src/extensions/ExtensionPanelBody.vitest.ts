@@ -50,6 +50,16 @@ describe("injectWebviewCsp", () => {
     expect(out).toContain("<h1>Hello</h1>");
   });
 
+  it("does not duplicate an existing doctype when it is preceded by a comment", () => {
+    const html = "<!--comment--><!doctype html><html><head></head><body><h1>Hi</h1></body></html>";
+    const out = injectWebviewCsp(html);
+
+    const doctypes = out.match(/<!doctype/gi) ?? [];
+    expect(doctypes).toHaveLength(1);
+
+    expect(out).toContain("__formulaWebviewSandbox");
+  });
+
   it("injects before scripts even when the markup is a fragment starting with <script>", () => {
     const html = "<script>window.__TAURI__ = 1;</script><h1>Late</h1>";
     const out = injectWebviewCsp(html);
