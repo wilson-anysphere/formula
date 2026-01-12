@@ -669,6 +669,18 @@ impl AppState {
         self.persistent.as_ref().map(|p| p.memory.clone())
     }
 
+    fn is_xlsx_family_extension(ext: &str) -> bool {
+        ext.eq_ignore_ascii_case("xlsx")
+            || ext.eq_ignore_ascii_case("xlsm")
+            || ext.eq_ignore_ascii_case("xltx")
+            || ext.eq_ignore_ascii_case("xltm")
+            || ext.eq_ignore_ascii_case("xlam")
+    }
+
+    fn is_macro_free_extension(ext: &str) -> bool {
+        ext.eq_ignore_ascii_case("xlsx") || ext.eq_ignore_ascii_case("xltx")
+    }
+
     pub fn mark_saved(
         &mut self,
         new_path: Option<String>,
@@ -693,8 +705,7 @@ impl AppState {
         if ext.is_some_and(|ext| ext.eq_ignore_ascii_case("xlsb")) {
             workbook.origin_xlsb_path = workbook.path.clone();
             workbook.origin_xlsx_bytes = None;
-        } else if ext.is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx") || ext.eq_ignore_ascii_case("xlsm"))
-        {
+        } else if ext.is_some_and(Self::is_xlsx_family_extension) {
             workbook.origin_xlsb_path = None;
             if let Some(bytes) = new_origin_xlsx_bytes {
                 workbook.origin_xlsx_bytes = Some(bytes);
@@ -717,12 +728,7 @@ impl AppState {
 
         // If the saved file is `.xlsx`, macros are not preserved; clear any in-memory macro
         // payloads so the UI doesn't continue to treat the workbook as macro-enabled.
-        if workbook
-            .path
-            .as_deref()
-            .and_then(|p| std::path::Path::new(p).extension().and_then(|s| s.to_str()))
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx"))
-        {
+        if ext.is_some_and(Self::is_macro_free_extension) {
             workbook.vba_project_bin = None;
             workbook.macro_fingerprint = None;
         }
@@ -3239,6 +3245,49 @@ mod tests {
             .expect("Dates sheet exists");
         let cell = dates_sheet.get_cell(0, 0);
         assert_eq!(cell.number_format.as_deref(), Some("m/d/yy"));
+    }
+
+    #[test]
+    fn mark_saved_treats_xltm_as_xlsx_family_for_origin_bookkeeping() {
+        let old_bytes = Arc::<[u8]>::from(vec![1u8, 2, 3]);
+        let new_bytes = Arc::<[u8]>::from(vec![9u8, 8, 7]);
+
+        let mut workbook = Workbook::new_empty(Some("/tmp/original.xlsb".to_string()));
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.origin_xlsx_bytes = Some(old_bytes);
+        workbook.origin_xlsb_path = Some("/tmp/original.xlsb".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        state
+            .mark_saved(Some("/tmp/foo.xltm".to_string()), Some(new_bytes.clone()))
+            .expect("mark_saved succeeds");
+
+        let workbook = state.get_workbook().expect("workbook loaded");
+        assert_eq!(workbook.origin_xlsb_path, None);
+        assert_eq!(workbook.origin_xlsx_bytes.as_deref(), Some(new_bytes.as_ref()));
+    }
+
+    #[test]
+    fn mark_saved_clears_macros_when_saving_to_xltx() {
+        let new_bytes = Arc::<[u8]>::from(vec![9u8, 8, 7]);
+
+        let mut workbook = Workbook::new_empty(Some("/tmp/original.xlsm".to_string()));
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.vba_project_bin = Some(vec![1u8, 2, 3]);
+        workbook.macro_fingerprint = Some("abc".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        state
+            .mark_saved(Some("/tmp/foo.xltx".to_string()), Some(new_bytes))
+            .expect("mark_saved succeeds");
+
+        let workbook = state.get_workbook().expect("workbook loaded");
+        assert_eq!(workbook.vba_project_bin, None);
+        assert_eq!(workbook.macro_fingerprint, None);
     }
 
     #[test]

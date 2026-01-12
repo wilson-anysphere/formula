@@ -289,6 +289,20 @@ fn coerce_save_path_to_xlsx(path: &str) -> String {
     path.to_string()
 }
 
+#[cfg(any(feature = "desktop", test))]
+fn wants_origin_bytes_for_save_path(path: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|ext| {
+            ext.eq_ignore_ascii_case("xlsx")
+                || ext.eq_ignore_ascii_case("xlsm")
+                || ext.eq_ignore_ascii_case("xltx")
+                || ext.eq_ignore_ascii_case("xltm")
+                || ext.eq_ignore_ascii_case("xlam")
+        })
+}
+
 #[cfg(feature = "desktop")]
 fn cell_value_from_state(
     state: &AppState,
@@ -953,10 +967,7 @@ pub async fn save_workbook(
 
     let save_path = coerce_save_path_to_xlsx(&save_path);
 
-    let wants_origin_bytes = PathBuf::from(&save_path)
-        .extension()
-        .and_then(|s| s.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx") || ext.eq_ignore_ascii_case("xlsm"));
+    let wants_origin_bytes = wants_origin_bytes_for_save_path(&save_path);
 
     if let Some(autosave) = autosave.as_ref() {
         autosave.flush().await.map_err(|e| e.to_string())?;
@@ -3593,6 +3604,25 @@ mod tests {
             "/tmp/foo.xlsx",
             "expected .xlsx saves to remain unchanged"
         );
+    }
+
+    #[test]
+    fn wants_origin_bytes_for_save_path_includes_xlsx_family() {
+        for ext in ["xlsx", "xlsm", "xltx", "xltm", "xlam"] {
+            let path = format!("/tmp/workbook.{ext}");
+            assert!(
+                wants_origin_bytes_for_save_path(&path),
+                "expected wants_origin_bytes_for_save_path to accept {ext}"
+            );
+        }
+
+        for ext in ["xlsb", "csv", "xls"] {
+            let path = format!("/tmp/workbook.{ext}");
+            assert!(
+                !wants_origin_bytes_for_save_path(&path),
+                "expected wants_origin_bytes_for_save_path to reject {ext}"
+            );
+        }
     }
 
     #[test]
