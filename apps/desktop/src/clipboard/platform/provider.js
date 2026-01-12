@@ -326,13 +326,13 @@ function createTauriClipboardProvider() {
       if (typeof tauriInvoke === "function") {
         try {
           const result = await tauriInvoke("clipboard_read");
-           if (result && typeof result === "object") {
-             /** @type {any} */
-             const r = result;
-             native = {};
-             if (typeof r.text === "string") native.text = r.text;
-             if (typeof r.html === "string" && r.html.length <= MAX_RICH_TEXT_CHARS) native.html = r.html;
-             if (typeof r.rtf === "string" && r.rtf.length <= MAX_RICH_TEXT_CHARS) native.rtf = r.rtf;
+          if (result && typeof result === "object") {
+            /** @type {any} */
+            const r = result;
+            native = {};
+            if (typeof r.text === "string") native.text = r.text;
+            if (typeof r.html === "string" && r.html.length <= MAX_RICH_TEXT_CHARS) native.html = r.html;
+            if (typeof r.rtf === "string" && r.rtf.length <= MAX_RICH_TEXT_CHARS) native.rtf = r.rtf;
 
             const pngBase64 = readPngBase64(r);
             if (pngBase64) {
