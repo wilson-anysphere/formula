@@ -76,6 +76,29 @@ let progressPercent: number | null = null;
 
 let updateDialogShownForVersion: string | null = null;
 
+// If the user triggers a manual check while a background (startup) check is already in-flight,
+// the backend emits `update-check-already-running`. Track that a manual request is "waiting" so
+// we can surface the eventual completion event (no-update / error) even if it comes from a
+// startup-sourced check.
+let manualUpdateCheckFollowUp = false;
+let manualUpdateCheckFollowUpTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function setManualUpdateCheckFollowUp(active: boolean): void {
+  manualUpdateCheckFollowUp = active;
+  if (manualUpdateCheckFollowUpTimeout) {
+    clearTimeout(manualUpdateCheckFollowUpTimeout);
+    manualUpdateCheckFollowUpTimeout = null;
+  }
+  if (active) {
+    // Best-effort reset so a stuck/failed updater check doesn't cause us to surface future
+    // automatic checks as if they were manual.
+    manualUpdateCheckFollowUpTimeout = setTimeout(() => {
+      manualUpdateCheckFollowUp = false;
+      manualUpdateCheckFollowUpTimeout = null;
+    }, 120_000);
+  }
+}
+
 function getTauriListen(): TauriListen | null {
   const listen = (globalThis as any).__TAURI__?.event?.listen as TauriListen | undefined;
   if (typeof listen !== "function") return null;
@@ -599,21 +622,35 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
     await showMainWindowBestEffort();
   }
 
+  const shouldSurfaceCompletion =
+    manualUpdateCheckFollowUp && (name === "update-not-available" || name === "update-check-error");
+  const shouldSurfaceToast = source === "manual" || shouldSurfaceCompletion;
+
   switch (name) {
     case "update-check-already-running": {
-      if (source === "manual") showToast("Already checking for updates…", "info");
+      if (source === "manual") {
+        setManualUpdateCheckFollowUp(true);
+        showToast("Already checking for updates…", "info");
+      }
       break;
     }
     case "update-check-started": {
-      if (source === "manual") showToast("Checking for updates…", "info");
+      if (source === "manual") {
+        setManualUpdateCheckFollowUp(false);
+        showToast("Checking for updates…", "info");
+      }
       break;
     }
     case "update-not-available": {
-      if (source === "manual") showToast("You're up to date.", "info");
+      if (shouldSurfaceToast) {
+        setManualUpdateCheckFollowUp(false);
+        showToast("You're up to date.", "info");
+      }
       break;
     }
     case "update-check-error": {
-      if (source !== "manual") break;
+      if (!shouldSurfaceToast) break;
+      setManualUpdateCheckFollowUp(false);
       const message =
         typeof payload?.error === "string" && payload.error.trim() !== ""
           ? payload.error
@@ -624,7 +661,11 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
       break;
     }
     case "update-available": {
-      const version = typeof payload?.version === "string" && payload.version.trim() !== "" ? payload.version.trim() : "unknown";
+      setManualUpdateCheckFollowUp(false);
+      const version =
+        typeof payload?.version === "string" && payload.version.trim() !== ""
+          ? payload.version.trim()
+          : "unknown";
       const body = typeof payload?.body === "string" && payload.body.trim() !== "" ? payload.body : null;
 
       // Avoid repeatedly showing the startup prompt for the same version.

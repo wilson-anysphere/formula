@@ -117,5 +117,32 @@ describe("updaterUi (events)", () => {
     expect(setFocus).not.toHaveBeenCalled();
     expect(toastSpy).not.toHaveBeenCalled();
   });
-});
 
+  it("surfaces startup completion events after the user clicks 'Check for Updates' during a startup check", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<div id="toast-root"></div>';
+
+    const show = vi.fn(async () => {});
+    const setFocus = vi.fn(async () => {});
+    const handle = { show, setFocus };
+
+    vi.stubGlobal("__TAURI__", {
+      window: {
+        getCurrentWindow: () => handle,
+      },
+    });
+
+    const toastSpy = vi.spyOn(ui, "showToast");
+
+    await handleUpdaterEvent("update-check-already-running", { source: "manual" });
+    await handleUpdaterEvent("update-not-available", { source: "startup" });
+
+    expect(show).toHaveBeenCalledTimes(1);
+    expect(setFocus).toHaveBeenCalledTimes(1);
+    expect(toastSpy).toHaveBeenCalledTimes(2);
+
+    const toasts = document.querySelectorAll('[data-testid="toast"]');
+    expect(toasts).toHaveLength(2);
+    expect(toasts[1]?.textContent).toContain("up to date");
+  });
+});
