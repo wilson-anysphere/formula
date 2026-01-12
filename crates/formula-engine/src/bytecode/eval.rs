@@ -658,6 +658,21 @@ mod tests {
     }
 
     #[test]
+    fn vm_choose_truncates_fractional_index_without_evaluating_other_branches() {
+        let origin = CellCoord::new(0, 0);
+        // Index 2.9 should truncate to 2; the other branches must not be evaluated.
+        let expr =
+            super::super::parse_formula("=CHOOSE(2.9, 1/0, 20, 1/0)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = super::super::grid::ColumnarGrid::new(1, 1);
+        let locale = crate::LocaleConfig::en_us();
+
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Number(20.0));
+    }
+
+    #[test]
     fn vm_choose_out_of_range_returns_value_error_without_evaluating_choices() {
         let origin = CellCoord::new(0, 0);
         // Index 3 is out of range; the choice expressions should not be evaluated.
