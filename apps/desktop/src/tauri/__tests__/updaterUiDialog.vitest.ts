@@ -239,6 +239,11 @@ describe("updaterUi (dialog + download)", () => {
       const restartBtn = document.querySelector<HTMLButtonElement>('[data-testid="updater-restart"]');
       expect(restartBtn).not.toBeNull();
 
+      // Simulate a pre-existing dismissal (e.g. user previously hit "Later"). Clicking "Restart now"
+      // should clear the suppression state immediately, even if the restart is ultimately cancelled.
+      window.localStorage.setItem("formula.updater.dismissedVersion", "1.2.3");
+      window.localStorage.setItem("formula.updater.dismissedAt", String(Date.now()));
+
       // Simulate the user canceling the quit prompt.
       vi.spyOn(window, "confirm").mockReturnValue(false);
       const { registerAppQuitHandlers } = await import("../appQuit");
@@ -257,6 +262,9 @@ describe("updaterUi (dialog + download)", () => {
       expect(install).not.toHaveBeenCalled();
       expect(restartApp).not.toHaveBeenCalled();
       expect(quitApp).not.toHaveBeenCalled();
+
+      expect(window.localStorage.getItem("formula.updater.dismissedVersion")).toBeNull();
+      expect(window.localStorage.getItem("formula.updater.dismissedAt")).toBeNull();
 
       // The dialog should still be open because the restart was cancelled.
       expect(dialog?.getAttribute("open") === "" || dialog?.open === true).toBe(true);
