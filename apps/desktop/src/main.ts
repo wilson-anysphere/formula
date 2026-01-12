@@ -435,9 +435,18 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
   let currentOffline: unknown = null;
   let offlineWaitStarted = false;
 
-  const setIndicatorText = (text: string): void => {
+  const setIndicatorText = (
+    text: string,
+    meta: { mode?: string; conn?: string; sync?: string } = {},
+  ): void => {
     element.textContent = text;
     element.title = text;
+    if (meta.mode) element.dataset.collabMode = meta.mode;
+    else delete element.dataset.collabMode;
+    if (meta.conn) element.dataset.collabConn = meta.conn;
+    else delete element.dataset.collabConn;
+    if (meta.sync) element.dataset.collabSync = meta.sync;
+    else delete element.dataset.collabSync;
   };
 
   const detachProviderListeners = (provider: unknown): void => {
@@ -520,7 +529,7 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
       hasEverSynced = false;
       currentOffline = null;
       offlineWaitStarted = false;
-      setIndicatorText("Local");
+      setIndicatorText("Local", { mode: "local" });
       return;
     }
 
@@ -570,13 +579,13 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
     }
 
     if (offlineLoading) {
-      setIndicatorText(`${docId} • Loading…`);
+      setIndicatorText(`${docId} • Loading…`, { mode: "collab", conn: "loading", sync: "loading" });
       return;
     }
 
     // No provider: offline-only/local collab session.
     if (!currentProvider) {
-      setIndicatorText(`${docId} • Offline`);
+      setIndicatorText(`${docId} • Offline`, { mode: "collab", conn: "offline", sync: "offline" });
       return;
     }
 
@@ -618,7 +627,11 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
 
     const syncLabel = connected ? (synced ? "Synced" : "Syncing…") : hasEverSynced ? "Not synced" : "Syncing…";
 
-    setIndicatorText(`${docId} • ${connectionLabel} • ${syncLabel}`);
+    setIndicatorText(`${docId} • ${connectionLabel} • ${syncLabel}`, {
+      mode: "collab",
+      conn: connected ? "connected" : connecting ? "connecting" : "disconnected",
+      sync: connected ? (synced ? "synced" : "syncing") : hasEverSynced ? "unsynced" : "syncing",
+    });
   };
 
   abortController.signal.addEventListener("abort", () => {
