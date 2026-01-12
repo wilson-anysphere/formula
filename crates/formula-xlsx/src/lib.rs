@@ -56,6 +56,7 @@ mod recalc_policy;
 mod relationships;
 pub mod rich_data;
 mod rich_data_images;
+pub mod rich_data;
 pub mod shared_strings;
 mod sheet_metadata;
 pub mod streaming;
