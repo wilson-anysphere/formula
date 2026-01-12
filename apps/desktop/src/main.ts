@@ -6787,10 +6787,11 @@ if (
     let rafHandle: number | null = null;
 
     const applyRatio = (emit: boolean) => {
-      rect ??= gridSplitEl.getBoundingClientRect();
-      const size = direction === "vertical" ? rect.width : rect.height;
+      if (!rect) rect = gridSplitEl.getBoundingClientRect();
+      const splitRect = rect;
+      const size = direction === "vertical" ? splitRect.width : splitRect.height;
       if (size <= 0) return;
-      const offset = direction === "vertical" ? latestClientX - rect.left : latestClientY - rect.top;
+      const offset = direction === "vertical" ? latestClientX - splitRect.left : latestClientY - splitRect.top;
       const ratio = Math.max(0.1, Math.min(0.9, offset / size));
       // Dragging the splitter updates very frequently; keep updates cheap:
       // - update the in-memory layout without emitting (avoids full renderLayout() churn)
