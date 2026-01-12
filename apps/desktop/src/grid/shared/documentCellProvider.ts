@@ -351,8 +351,8 @@ export class DocumentCellProvider implements CellProvider {
 
     // Best-effort cache eviction for the affected region.
     const cellCount = Math.max(0, gridRange.endRow - gridRange.startRow) * Math.max(0, gridRange.endCol - gridRange.startCol);
+    const sheetId = this.options.getSheetId();
     if (cellCount <= 1000) {
-      const sheetId = this.options.getSheetId();
       const cache = this.sheetCaches.get(sheetId);
       if (cache) {
         for (let r = gridRange.startRow; r < gridRange.endRow; r++) {
@@ -363,12 +363,14 @@ export class DocumentCellProvider implements CellProvider {
         }
       }
     } else {
-      // If the range is large, clear the caches to avoid spending too much time
-      // iterating keys. This mirrors the legacy behavior where a large invalidation
-      // cleared the provider-wide cache.
-      this.sheetCaches.clear();
-      this.lastSheetId = null;
-      this.lastSheetCache = null;
+      // If the range is large, clear the active sheet cache to avoid spending too much
+      // time iterating keys. Keep other sheet caches intact; large formatting edits are
+      // typically scoped to one sheet (and `subscribe` filters by sheetId).
+      this.sheetCaches.delete(sheetId);
+      if (this.lastSheetId === sheetId) {
+        this.lastSheetId = null;
+        this.lastSheetCache = null;
+      }
     }
 
     for (const listener of this.listeners) listener({ type: "cells", range: gridRange });
