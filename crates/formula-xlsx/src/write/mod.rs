@@ -6,7 +6,8 @@ use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
 use formula_model::rich_text::{RichText, Underline};
 use formula_model::{
     CellRef, CellValue, ErrorValue, Hyperlink, HyperlinkTarget, Outline, OutlineEntry, Range,
-    SheetProtection, SheetVisibility, WorkbookProtection, Worksheet, WorksheetId,
+    SheetProtection, SheetVisibility, WorkbookProtection, WorkbookWindowState, Worksheet,
+    WorksheetId,
 };
 use quick_xml::events::attributes::AttrError;
 use quick_xml::events::Event;
@@ -1924,6 +1925,56 @@ fn write_workbook_xml(
             xml.push_str(&format!(r#" workbookPassword="{:04X}""#, hash));
         }
         xml.push_str("/>");
+    }
+
+    // Workbook view state (`bookViews/workbookView`) is optional. Only emit it for new workbooks
+    // when the view is meaningfully non-default (e.g. active tab is not the first sheet, or window
+    // geometry/state is explicitly set). This keeps new document output minimal while still
+    // preserving `.xls`-imported window metadata when exporting to `.xlsx`.
+    let window = doc.workbook.view.window.as_ref().filter(|window| {
+        window.x.is_some()
+            || window.y.is_some()
+            || window.width.is_some()
+            || window.height.is_some()
+            || window.state.is_some()
+    });
+    let active_tab_idx = doc
+        .workbook
+        .active_sheet_id()
+        .and_then(|active| sheets.iter().position(|meta| meta.worksheet_id == active))
+        .unwrap_or(0);
+    let include_book_views = window.is_some() || active_tab_idx != 0;
+    if include_book_views {
+        xml.push_str("<bookViews><workbookView");
+        if active_tab_idx != 0 {
+            xml.push_str(&format!(r#" activeTab="{active_tab_idx}""#));
+        }
+        if let Some(window) = window {
+            if let Some(x) = window.x {
+                xml.push_str(&format!(r#" xWindow="{x}""#));
+            }
+            if let Some(y) = window.y {
+                xml.push_str(&format!(r#" yWindow="{y}""#));
+            }
+            if let Some(width) = window.width {
+                xml.push_str(&format!(r#" windowWidth="{width}""#));
+            }
+            if let Some(height) = window.height {
+                xml.push_str(&format!(r#" windowHeight="{height}""#));
+            }
+            if let Some(state) = window.state {
+                match state {
+                    WorkbookWindowState::Normal => {}
+                    WorkbookWindowState::Minimized => {
+                        xml.push_str(r#" windowState="minimized""#);
+                    }
+                    WorkbookWindowState::Maximized => {
+                        xml.push_str(r#" windowState="maximized""#);
+                    }
+                }
+            }
+        }
+        xml.push_str("/></bookViews>");
     }
 
     xml.push_str("<sheets>");
