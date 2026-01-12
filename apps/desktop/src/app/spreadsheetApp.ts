@@ -3448,14 +3448,6 @@ export class SpreadsheetApp {
 
   private onSharedPointerMove(e: PointerEvent): void {
     if (!this.sharedGrid) return;
-    const target = e.target as HTMLElement | null;
-    if (target) {
-      if (this.vScrollbarTrack.contains(target) || this.hScrollbarTrack.contains(target) || this.outlineLayer.contains(target)) {
-        this.clearSharedHoverCellCache();
-        this.hideCommentTooltip();
-        return;
-      }
-    }
     // Fast path: if there are no comments indexed for the active sheet, we never
     // need to pick cells or update the tooltip.
     if (this.commentMetaByCoord.size === 0) {
@@ -3464,6 +3456,15 @@ export class SpreadsheetApp {
       }
       if (this.lastHoveredCommentCellKey != null) this.hideCommentTooltip();
       return;
+    }
+
+    const target = e.target as HTMLElement | null;
+    if (target) {
+      if (this.vScrollbarTrack.contains(target) || this.hScrollbarTrack.contains(target) || this.outlineLayer.contains(target)) {
+        this.clearSharedHoverCellCache();
+        this.hideCommentTooltip();
+        return;
+      }
     }
     if (this.commentsPanelVisible) {
       this.hideCommentTooltip();
@@ -6743,6 +6744,11 @@ export class SpreadsheetApp {
     if (x < this.rowHeaderWidth || y < this.colHeaderHeight) {
       this.hideCommentTooltip();
       this.root.style.cursor = "";
+      return;
+    }
+
+    if (this.commentMetaByCoord.size === 0) {
+      this.hideCommentTooltip();
       return;
     }
 
