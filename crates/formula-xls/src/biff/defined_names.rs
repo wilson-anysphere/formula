@@ -1359,6 +1359,72 @@ mod tests {
     }
 
     #[test]
+    fn skips_name_record_when_continued_unicode_string_splits_mid_code_unit() {
+        // First record: description string is BIFF8 unicode (fHighByte=1) but is split mid UTF-16LE
+        // code unit across the CONTINUE boundary. The parser should not panic and should skip the
+        // bad NAME record.
+        let bad_name = "Bad";
+
+        let mut bad_header = Vec::new();
+        bad_header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        bad_header.push(0); // chKey
+        bad_header.push(bad_name.len() as u8); // cch
+        bad_header.extend_from_slice(&0u16.to_le_bytes()); // cce (empty rgce)
+        bad_header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        bad_header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        bad_header.push(0); // cchCustMenu
+        bad_header.push(1); // cchDescription (1 char)
+        bad_header.push(0); // cchHelpTopic
+        bad_header.push(0); // cchStatusText
+
+        let bad_name_str = xl_unicode_string_no_cch_compressed(bad_name);
+
+        // Description begins with flags byte (unicode) and then only 1 byte of the 2-byte code unit.
+        let bad_desc_partial = [0x01u8, b'A'].to_vec();
+
+        let name_payload = [bad_header, bad_name_str, bad_desc_partial].concat();
+        // CONTINUE fragment contains the continued-segment option flags byte (unicode), then the
+        // missing second byte of the UTF-16LE code unit.
+        let cont_payload = vec![0x01u8, 0x00u8];
+
+        // Second record: valid defined name.
+        let good_name = "Good";
+        let rgce: Vec<u8> = vec![0x1E, 0x01, 0x00]; // PtgInt 1
+        let mut good_header = Vec::new();
+        good_header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        good_header.push(0); // chKey
+        good_header.push(good_name.len() as u8); // cch
+        good_header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        good_header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        good_header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        good_header.extend_from_slice(&[0, 0, 0, 0]); // no optional strings
+        let good_name_str = xl_unicode_string_no_cch_compressed(good_name);
+        let good_payload = [good_header, good_name_str, rgce].concat();
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &name_payload),
+            record(records::RECORD_CONTINUE, &cont_payload),
+            record(RECORD_NAME, &good_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+        assert_eq!(parsed.names.len(), 1);
+        assert_eq!(parsed.names[0].name, good_name);
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("string continuation split mid-character")),
+            "warnings={:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
     fn parses_name_metadata_and_builtin_name_ids() {
         let rgce: Vec<u8> = vec![0x1E, 0x01, 0x00]; // PtgInt 1
         let description = "My description";

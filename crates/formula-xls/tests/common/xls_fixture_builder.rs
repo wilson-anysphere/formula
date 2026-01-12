@@ -790,8 +790,8 @@ pub fn build_defined_names_builtins_fixture_xls() -> Vec<u8> {
 /// deliberate mismatch between the `NAME.chKey` byte and the built-in name id stored in
 /// `NAME.rgchName`.
 ///
-/// `chKey` is documented as a keyboard shortcut; Excel appears to prefer the `rgchName` built-in id
-/// when both fields are populated.
+/// `chKey` is documented as a keyboard shortcut; when both fields are populated Excel appears to
+/// prefer the built-in id stored in `rgchName` and treat `chKey` as a shortcut.
 pub fn build_defined_names_builtins_chkey_mismatch_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_defined_names_builtins_chkey_mismatch_workbook_stream();
 
