@@ -854,7 +854,9 @@ It gates:
     `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs`.
   - Even with allowlisting, commands must validate scope/authorization in Rust (trusted-origin + window-label checks,
     argument validation, filesystem/network scope checks, etc).
-  - Note: this repo's Tauri permission schema/toolchain does not currently expose `core:allow-invoke`.
+- **`core:allow-invoke`** (scoped core permission, optional): some toolchains include an explicit per-command allowlist in the capability itself.
+  - When present, use the object form with `allow: [{ "command": "..." }]` (no allow-all) and keep it in sync with actual frontend
+    `invoke("...")` usage (guardrailed by `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`).
 - **`core:event:allow-listen` / `core:event:allow-emit`**: which event names the frontend can `listen(...)` for or `emit(...)`.
 - **`core:event:allow-unlisten`**: allows the frontend to unregister event listeners it previously installed (so we don’t leak
   listeners for one-shot flows like close/open/OAuth readiness signals).
