@@ -154,9 +154,9 @@ export type RibbonIconId = keyof typeof ribbonIconMap;
 /**
  * Look up an icon component by ribbon command id.
  *
- * The ribbon schema currently provides `icon` as a placeholder glyph string.
- * This helper lets the ribbon UI migrate to the internal SVG icon set without
- * coupling the ribbon to a hard-coded import list.
+ * The ribbon schema still includes an `icon` string placeholder, but the
+ * desktop ribbon UI renders icons exclusively from the internal SVG icon
+ * library via this mapping.
  */
 export function getRibbonIcon(commandId: string): RibbonIconComponent | undefined {
   return (ribbonIconMap as Record<string, RibbonIconComponent | undefined>)[commandId];

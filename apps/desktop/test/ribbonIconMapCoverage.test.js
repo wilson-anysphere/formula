@@ -1,0 +1,213 @@
+import fs from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function readDesktopSource(...segments) {
+  return fs.readFileSync(path.join(__dirname, "..", "src", ...segments), "utf8");
+}
+
+function collectRibbonIconMapKeys(source) {
+  const keys = new Set();
+  const re = /"([^"]+)"\s*:/g;
+  let match;
+  while ((match = re.exec(source))) {
+    keys.add(match[1]);
+  }
+  return keys;
+}
+
+function collectSchemaButtonIdsWithSize(source, sizeValue) {
+  const ids = new Set();
+  const re = new RegExp(`\\bsize\\s*:\\s*\\"${sizeValue}\\"`, "g");
+  let match;
+  while ((match = re.exec(source))) {
+    const objectStart = findEnclosingObjectStart(source, match.index);
+    const objectEnd = findEnclosingObjectEnd(source, objectStart);
+    const objectSource = source.slice(objectStart, objectEnd + 1);
+    const id = readTopLevelStringProp(objectSource, "id");
+    const size = readTopLevelStringProp(objectSource, "size");
+    assert.equal(size, sizeValue, `Expected size '${sizeValue}' for button ${id}`);
+    ids.add(id);
+  }
+  return [...ids].sort((a, b) => a.localeCompare(b));
+}
+
+function findEnclosingObjectStart(source, fromIndex) {
+  let depth = 0;
+  let inString = false;
+  let quote = "";
+
+  for (let i = fromIndex; i >= 0; i--) {
+    const ch = source[i];
+    if (inString) {
+      if (ch === quote && source[i - 1] !== "\\") {
+        inString = false;
+        quote = "";
+      }
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      quote = ch;
+      continue;
+    }
+
+    if (ch === "}") {
+      depth++;
+      continue;
+    }
+
+    if (ch === "{") {
+      if (depth === 0) return i;
+      depth--;
+    }
+  }
+
+  throw new Error(`Could not find enclosing object start for index ${fromIndex}`);
+}
+
+function findEnclosingObjectEnd(source, objectStartIndex) {
+  let depth = 0;
+  let inString = false;
+  let quote = "";
+
+  for (let i = objectStartIndex; i < source.length; i++) {
+    const ch = source[i];
+    if (inString) {
+      if (ch === quote && source[i - 1] !== "\\") {
+        inString = false;
+        quote = "";
+      }
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      quote = ch;
+      continue;
+    }
+
+    if (ch === "{") {
+      depth++;
+      continue;
+    }
+
+    if (ch === "}") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+
+  throw new Error(`Could not find enclosing object end for start index ${objectStartIndex}`);
+}
+
+function readTopLevelStringProp(objectSource, propName) {
+  let depth = 0;
+  let inString = false;
+  let quote = "";
+
+  for (let i = 0; i < objectSource.length; i++) {
+    const ch = objectSource[i];
+    if (inString) {
+      if (ch === quote && objectSource[i - 1] !== "\\") {
+        inString = false;
+        quote = "";
+      }
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      quote = ch;
+      continue;
+    }
+
+    if (ch === "{") {
+      depth++;
+      continue;
+    }
+
+    if (ch === "}") {
+      depth--;
+      continue;
+    }
+
+    if (depth !== 1) continue;
+    if (!isIdentifierAt(objectSource, i, propName)) continue;
+
+    let cursor = i + propName.length;
+    cursor = skipWhitespace(objectSource, cursor);
+    if (objectSource[cursor] !== ":") continue;
+    cursor++;
+    cursor = skipWhitespace(objectSource, cursor);
+
+    const valueQuote = objectSource[cursor];
+    if (valueQuote !== '"' && valueQuote !== "'") continue;
+    cursor++;
+
+    let value = "";
+    for (; cursor < objectSource.length; cursor++) {
+      const c = objectSource[cursor];
+      if (c === valueQuote && objectSource[cursor - 1] !== "\\") break;
+      value += c;
+    }
+    return value;
+  }
+
+  throw new Error(`Missing top-level '${propName}' string property in object:\n${objectSource.slice(0, 200)}…`);
+}
+
+function isIdentifierAt(source, index, ident) {
+  if (!source.startsWith(ident, index)) return false;
+  const before = source[index - 1];
+  const after = source[index + ident.length];
+  if (before && /[a-zA-Z0-9_$]/.test(before)) return false;
+  if (after && /[a-zA-Z0-9_$]/.test(after)) return false;
+  return true;
+}
+
+function skipWhitespace(source, index) {
+  let i = index;
+  while (i < source.length && /\s/.test(source[i])) i++;
+  return i;
+}
+
+test('ribbonIconMap covers schema buttons with size: "icon"', () => {
+  const schemaSource = readDesktopSource("ribbon", "ribbonSchema.ts");
+  const iconMapSource = readDesktopSource("ui", "icons", "ribbonIconMap.ts");
+
+  const iconButtonIds = collectSchemaButtonIdsWithSize(schemaSource, "icon");
+  assert.ok(iconButtonIds.includes("home.font.bold"), "Sanity-check: expected an icon-sized button id");
+
+  const iconMapKeys = collectRibbonIconMapKeys(iconMapSource);
+  const missing = iconButtonIds.filter((id) => !iconMapKeys.has(id));
+
+  assert.deepEqual(
+    missing,
+    [],
+    `Missing ribbonIconMap entries for schema size:\"icon\" buttons:\n${missing.map((id) => `- ${id}`).join("\n")}`,
+  );
+});
+
+test('ribbonIconMap covers schema buttons with size: "large"', () => {
+  const schemaSource = readDesktopSource("ribbon", "ribbonSchema.ts");
+  const iconMapSource = readDesktopSource("ui", "icons", "ribbonIconMap.ts");
+
+  const largeButtonIds = collectSchemaButtonIdsWithSize(schemaSource, "large");
+  assert.ok(largeButtonIds.includes("file.save.save"), "Sanity-check: expected a large-sized button id");
+
+  const iconMapKeys = collectRibbonIconMapKeys(iconMapSource);
+  const missing = largeButtonIds.filter((id) => !iconMapKeys.has(id));
+
+  assert.deepEqual(
+    missing,
+    [],
+    `Missing ribbonIconMap entries for schema size:\"large\" buttons:\n${missing.map((id) => `- ${id}`).join("\n")}`,
+  );
+});
+
