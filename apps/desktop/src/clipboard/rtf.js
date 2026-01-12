@@ -580,19 +580,21 @@ export function extractPlainTextFromRtf(rtf) {
       }
 
       if (word === "tab") {
-        // Treat \tab inside RTF tables as a literal tab/indentation, not as a TSV delimiter.
+        // Treat \tab inside RTF tables as indentation, not as a TSV delimiter.
         // Cell boundaries are represented by \cell in table-mode.
         out += inTable ? " " : "\t";
       } else if (word === "cell") {
         out += "\t";
-      } else if (word === "par" || word === "line" || word === "row") {
-        if (word === "row") {
-          // RTF tables end each cell with \cell, including the last cell in the row.
-          // Trim the trailing tab so we don't create a phantom empty column in TSV.
-          if (out.endsWith("\t")) out = out.slice(0, -1);
-          inTable = false;
-        }
+      } else if (word === "row") {
+        // RTF tables usually emit a trailing `\cell` for the last column and then `\row`.
+        // Drop the trailing tab so TSV parsing doesn't add a spurious empty column.
+        if (out.endsWith("\t")) out = out.slice(0, -1);
+        inTable = false;
         out += "\n";
+      } else if (word === "par" || word === "line") {
+        // Line breaks inside tables are cell-internal. TSV parsing cannot represent embedded
+        // newlines, so preserve table structure by treating them as spaces.
+        out += inTable ? " " : "\n";
       } else if (word === "u" && typeof param === "number") {
         // `\uN` is a signed 16-bit integer; map negatives back into [0, 65535].
         let code = param;

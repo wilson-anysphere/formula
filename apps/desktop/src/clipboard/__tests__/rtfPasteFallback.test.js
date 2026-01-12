@@ -39,3 +39,16 @@ test("clipboard falls back to RTF tables (\\\\cell/\\\\row) when HTML/plain text
   assert.equal(grid[1][0].value, "C");
   assert.equal(grid[1][1].value, "D");
 });
+
+test("clipboard RTF table fallback treats \\tab/\\line inside cells as whitespace (no phantom columns/rows)", () => {
+  const rtf = serializeCellGridToRtf([[{ value: "A\tB\nC" }, { value: "D" }]]);
+
+  const grid = parseClipboardContentToCellGrid({ rtf });
+  assert.ok(grid);
+  assert.equal(grid.length, 1);
+  assert.equal(grid[0].length, 2);
+
+  // `\tab`/`\line` inside table cells are treated as whitespace during TSV fallback parsing.
+  assert.equal(grid[0][0].value, "A B C");
+  assert.equal(grid[0][1].value, "D");
+});
