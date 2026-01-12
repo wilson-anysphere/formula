@@ -171,6 +171,10 @@ fn imports_defined_names_with_external_workbook_3d_refs() {
         .expect("ExtSpan missing");
     assert_eq!(ext_span.refers_to, "'[Book1.xlsx]SheetA:SheetC'!$A$1");
     assert_parseable_refers_to(&ext_span.refers_to);
+
+    for name in &result.workbook.defined_names {
+        assert_parseable_refers_to(&name.refers_to);
+    }
 }
 
 #[test]
