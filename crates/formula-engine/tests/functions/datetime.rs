@@ -340,8 +340,32 @@ fn yearfrac_matches_basis_conventions() {
         365.0 / 366.0,
     );
     assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,2,29),DATE(2019,3,1),1)"),
+        -(365.0 / 366.0),
+    );
+    assert_number(
         &sheet.eval("=YEARFRAC(DATE(2020,3,1),DATE(2021,2,28),1)"),
         364.0 / 365.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2021,2,28),DATE(2020,3,1),1)"),
+        -(364.0 / 365.0),
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,2,29),DATE(2020,3,1),1)"),
+        1.0 / 365.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,3,1),DATE(2020,2,29),1)"),
+        -(1.0 / 365.0),
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,2,28),DATE(2020,2,29),1)"),
+        1.0 / 366.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,2,29),DATE(2020,2,28),1)"),
+        -(1.0 / 366.0),
     );
 
     // Excel-style integer coercion: basis is truncated toward zero before validation.

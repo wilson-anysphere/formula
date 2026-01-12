@@ -206,6 +206,21 @@ fn yearfrac_respects_basis_conventions() {
     assert!((hi - expected_hi).abs() < 1e-12);
     assert!((hi + date_time::yearfrac(i, h, 1, system).unwrap()).abs() < 1e-12);
 
+    // Short spans around leap day should use the correct anniversary denominator.
+    let j = ymd_to_serial(ExcelDate::new(2020, 2, 29), system).unwrap();
+    let k = ymd_to_serial(ExcelDate::new(2020, 3, 1), system).unwrap();
+    let jk = date_time::yearfrac(j, k, 1, system).unwrap();
+    let expected_jk = 1.0 / 365.0;
+    assert!((jk - expected_jk).abs() < 1e-12);
+    assert!((jk + date_time::yearfrac(k, j, 1, system).unwrap()).abs() < 1e-12);
+
+    let l = ymd_to_serial(ExcelDate::new(2020, 2, 28), system).unwrap();
+    let m = ymd_to_serial(ExcelDate::new(2020, 2, 29), system).unwrap();
+    let lm = date_time::yearfrac(l, m, 1, system).unwrap();
+    let expected_lm = 1.0 / 366.0;
+    assert!((lm - expected_lm).abs() < 1e-12);
+    assert!((lm + date_time::yearfrac(m, l, 1, system).unwrap()).abs() < 1e-12);
+
     assert_eq!(date_time::yearfrac(start, end, 9, system).unwrap_err(), ExcelError::Num);
 }
 
