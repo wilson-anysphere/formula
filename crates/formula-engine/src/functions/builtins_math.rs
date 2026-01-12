@@ -1348,19 +1348,60 @@ fn maxifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     let mut best: Option<f64> = None;
-    for row in 0..rows {
-        'col: for col in 0..cols {
-            for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
-                let v = range.get(ctx, row, col);
-                if !crit.matches(&v) {
-                    continue 'col;
+    match &max_range {
+        Range2D::Reference(max_ref) => {
+            // `iter_reference_cells` may return cells in arbitrary order for sparse backends, but
+            // MAXIFS error propagation is order-dependent. Sort to preserve row-major semantics.
+            let mut addrs: Vec<CellAddr> = ctx.iter_reference_cells(max_ref).collect();
+            addrs.sort_by_key(|addr| (addr.row, addr.col));
+
+            'cell: for addr in addrs {
+                let value = ctx.get_cell_value(&max_ref.sheet_id, addr);
+                let (row, col) = match value {
+                    // Only numeric values contribute; errors propagate only when the row is included.
+                    Value::Number(_) | Value::Error(_) => (
+                        (addr.row - max_ref.start.row) as usize,
+                        (addr.col - max_ref.start.col) as usize,
+                    ),
+                    _ => continue,
+                };
+
+                for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
+                    let v = range.get(ctx, row, col);
+                    if !crit.matches(&v) {
+                        continue 'cell;
+                    }
+                }
+
+                match value {
+                    Value::Number(n) => best = Some(best.map_or(n, |b| b.max(n))),
+                    Value::Error(e) => return Value::Error(e),
+                    _ => unreachable!("filtered above"),
                 }
             }
+        }
+        Range2D::Array(_) => {
+            for row in 0..rows {
+                'col: for col in 0..cols {
+                    let value = max_range.get(ctx, row, col);
+                    match value {
+                        Value::Number(_) | Value::Error(_) => {}
+                        _ => continue,
+                    }
 
-            match max_range.get(ctx, row, col) {
-                Value::Number(n) => best = Some(best.map_or(n, |b| b.max(n))),
-                Value::Error(e) => return Value::Error(e),
-                _ => {}
+                    for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
+                        let v = range.get(ctx, row, col);
+                        if !crit.matches(&v) {
+                            continue 'col;
+                        }
+                    }
+
+                    match value {
+                        Value::Number(n) => best = Some(best.map_or(n, |b| b.max(n))),
+                        Value::Error(e) => return Value::Error(e),
+                        _ => unreachable!("filtered above"),
+                    }
+                }
             }
         }
     }
@@ -1430,19 +1471,58 @@ fn minifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     let mut best: Option<f64> = None;
-    for row in 0..rows {
-        'col: for col in 0..cols {
-            for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
-                let v = range.get(ctx, row, col);
-                if !crit.matches(&v) {
-                    continue 'col;
+    match &min_range {
+        Range2D::Reference(min_ref) => {
+            // See MAXIFS for why we sort here (stable row-major error propagation).
+            let mut addrs: Vec<CellAddr> = ctx.iter_reference_cells(min_ref).collect();
+            addrs.sort_by_key(|addr| (addr.row, addr.col));
+
+            'cell: for addr in addrs {
+                let value = ctx.get_cell_value(&min_ref.sheet_id, addr);
+                let (row, col) = match value {
+                    Value::Number(_) | Value::Error(_) => (
+                        (addr.row - min_ref.start.row) as usize,
+                        (addr.col - min_ref.start.col) as usize,
+                    ),
+                    _ => continue,
+                };
+
+                for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
+                    let v = range.get(ctx, row, col);
+                    if !crit.matches(&v) {
+                        continue 'cell;
+                    }
+                }
+
+                match value {
+                    Value::Number(n) => best = Some(best.map_or(n, |b| b.min(n))),
+                    Value::Error(e) => return Value::Error(e),
+                    _ => unreachable!("filtered above"),
                 }
             }
+        }
+        Range2D::Array(_) => {
+            for row in 0..rows {
+                'col: for col in 0..cols {
+                    let value = min_range.get(ctx, row, col);
+                    match value {
+                        Value::Number(_) | Value::Error(_) => {}
+                        _ => continue,
+                    }
 
-            match min_range.get(ctx, row, col) {
-                Value::Number(n) => best = Some(best.map_or(n, |b| b.min(n))),
-                Value::Error(e) => return Value::Error(e),
-                _ => {}
+                    for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
+                        let v = range.get(ctx, row, col);
+                        if !crit.matches(&v) {
+                            continue 'col;
+                        }
+                    }
+
+                    match value {
+                        Value::Number(n) => best = Some(best.map_or(n, |b| b.min(n))),
+                        Value::Error(e) => return Value::Error(e),
+                        _ => unreachable!("filtered above"),
+                    }
+                }
             }
         }
     }
