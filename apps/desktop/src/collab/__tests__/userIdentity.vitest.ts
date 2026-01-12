@@ -91,4 +91,35 @@ describe("collab user identity", () => {
     expect(a.name).toBe("User abc1");
     expect(a.color).toMatch(/^#[0-9a-f]{6}$/);
   });
+
+  it("falls back to an in-memory identity when storage throws", () => {
+    const throwingStorage = {
+      getItem: () => {
+        throw new Error("storage disabled");
+      },
+      setItem: () => {
+        throw new Error("storage disabled");
+      },
+      removeItem: () => {},
+      clear: () => {},
+      key: () => null,
+      length: 0,
+    } as unknown as Storage;
+
+    const identityA = getCollabUserIdentity({
+      storage: throwingStorage,
+      search: "",
+      crypto: { randomUUID: () => "uuid-throw" } as any,
+    });
+    const identityB = getCollabUserIdentity({
+      storage: throwingStorage,
+      search: "",
+      // Prove we don't re-generate a new id on the second call even if crypto differs.
+      crypto: { randomUUID: () => "uuid-other" } as any,
+    });
+
+    expect(identityA).toEqual({ id: "uuid-throw", name: "User uuid", color: identityA.color });
+    expect(identityA.color).toMatch(/^#[0-9a-f]{6}$/);
+    expect(identityB).toEqual(identityA);
+  });
 });
