@@ -592,6 +592,60 @@ mod tests {
         assert!(module.code.contains("Sub Hello"));
     }
 
+    #[test]
+    fn parses_module_without_text_offset_skipping_invalid_container_candidate() {
+        // Regression test for `guess_text_offset()`: some module stream header bytes can resemble an
+        // MS-OVBA CompressedContainer signature (0x01 + chunk header signature bits 0b011), but still
+        // fail decompression. The heuristic should keep scanning until it finds a *valid*
+        // CompressedContainer.
+        use std::io::{Cursor, Write};
+
+        let module_code = "Sub Hello()\r\nEnd Sub\r\n";
+        let container = compress_container(module_code.as_bytes());
+
+        let dir_decompressed = {
+            let mut out = Vec::new();
+            push_record(&mut out, 0x0004, b"VBAProject");
+            push_record(&mut out, 0x0019, b"Module1");
+            let mut stream_name = Vec::new();
+            stream_name.extend_from_slice(b"Module1");
+            stream_name.extend_from_slice(&0u16.to_le_bytes());
+            push_record(&mut out, 0x001A, &stream_name);
+            push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+            // Intentionally omit MODULETEXTOFFSET (0x0031) so we exercise the signature scan.
+            out
+        };
+        let dir_container = compress_container(&dir_decompressed);
+
+        // Fake CompressedContainer signature at the start:
+        // 0x01 + chunk header 0x3FFF (uncompressed, size_field=0xFFF => expects 4096 bytes of data),
+        // but we don't include enough bytes for that chunk, so decompression should fail.
+        let mut module_stream = vec![0x01, 0xFF, 0x3F, 0xAA, 0xAA, 0xAA, 0xAA];
+        module_stream.extend_from_slice(&container);
+
+        let cursor = Cursor::new(Vec::new());
+        let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+        {
+            let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+            s.write_all(b"Name=\"VBAProject\"\r\nModule=Module1\r\n")
+                .expect("write PROJECT");
+        }
+        ole.create_storage("VBA").expect("VBA storage");
+        {
+            let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+            s.write_all(&dir_container).expect("write dir");
+        }
+        {
+            let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+            s.write_all(&module_stream).expect("write module");
+        }
+
+        let vba_bin = ole.into_inner().into_inner();
+        let project = VBAProject::parse(&vba_bin).expect("parse");
+        let module = project.modules.iter().find(|m| m.name == "Module1").unwrap();
+        assert!(module.code.contains("Sub Hello"));
+    }
+
     fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
         out.extend_from_slice(&id.to_le_bytes());
         out.extend_from_slice(&(data.len() as u32).to_le_bytes());
