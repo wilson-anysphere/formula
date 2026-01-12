@@ -73,7 +73,7 @@ fn oddfyield_rejects_settlement_equal_maturity() {
 }
 
 #[test]
-fn oddfprice_rejects_settlement_equal_maturity() {
+fn oddfprice_rejects_settlement_equal_maturity_long_term() {
     let v = eval_formula(
         "=ODDFPRICE(DATE(2025,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2025,1,1),0.05,0.04,100,2,0)",
     );
@@ -81,7 +81,7 @@ fn oddfprice_rejects_settlement_equal_maturity() {
 }
 
 #[test]
-fn oddfyield_rejects_settlement_equal_maturity() {
+fn oddfyield_rejects_settlement_equal_maturity_long_term() {
     let v = eval_formula(
         "=ODDFYIELD(DATE(2025,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2025,1,1),0.05,99,100,2,0)",
     );
