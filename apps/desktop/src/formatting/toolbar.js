@@ -1,13 +1,18 @@
-import { parseRangeA1 } from "../document/coords.js";
+import { normalizeRange, parseRangeA1 } from "../document/coords.js";
 
 function normalizeRanges(rangeOrRanges) {
   if (Array.isArray(rangeOrRanges)) return rangeOrRanges;
   return [rangeOrRanges];
 }
 
+function normalizeCellRange(range) {
+  const parsed = typeof range === "string" ? parseRangeA1(range) : range;
+  return normalizeRange(parsed);
+}
+
 function allCellsMatch(doc, sheetId, rangeOrRanges, predicate) {
   for (const range of normalizeRanges(rangeOrRanges)) {
-    const r = typeof range === "string" ? parseRangeA1(range) : range;
+    const r = normalizeCellRange(range);
     for (let row = r.start.row; row <= r.end.row; row++) {
       for (let col = r.start.col; col <= r.end.col; col++) {
         const style = doc.getCellFormat(sheetId, { row, col });

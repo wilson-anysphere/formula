@@ -1092,8 +1092,16 @@ export class SpreadsheetApp {
     this.root.focus();
   }
 
+  isCellEditorOpen(): boolean {
+    return this.editor.isOpen();
+  }
+
+  isFormulaBarEditing(): boolean {
+    return Boolean(this.formulaBar?.isEditing() || this.formulaEditCell);
+  }
+
   isEditing(): boolean {
-    return this.editor.isOpen() || Boolean(this.formulaBar?.isEditing());
+    return this.isCellEditorOpen() || this.isFormulaBarEditing();
   }
 
   onEditStateChange(listener: (isEditing: boolean) => void): () => void {
@@ -1183,6 +1191,7 @@ export class SpreadsheetApp {
     this.refresh();
     this.focus();
   }
+
   async whenIdle(): Promise<void> {
     // `wasmSyncPromise` and `auditingIdlePromise` are growing promise chains (see `enqueueWasmSync`
     // and `scheduleAuditingUpdate`). While awaiting them, additional work can be appended

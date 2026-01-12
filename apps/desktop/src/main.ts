@@ -40,6 +40,7 @@ import { fireWorkbookBeforeCloseBestEffort, installVbaEventMacros } from "./macr
 import { mountScriptEditorPanel } from "./panels/script-editor/index.js";
 import { installUnsavedChangesPrompt } from "./document/index.js";
 import { DocumentControllerWorkbookAdapter } from "./scripting/documentControllerWorkbookAdapter.js";
+import { applyNumberFormatPreset, toggleBold, toggleItalic, toggleUnderline } from "./formatting/toolbar.js";
 import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/find-replace/index.js";
 import { t } from "./i18n/index.js";
 import { getOpenFileFilters } from "./file_dialog_filters.js";
@@ -481,6 +482,90 @@ app.subscribeSelection(() => scheduleRibbonSelectionFormatStateUpdate());
 app.getDocument().on("change", () => scheduleRibbonSelectionFormatStateUpdate());
 window.addEventListener("formula:view-changed", () => scheduleRibbonSelectionFormatStateUpdate());
 scheduleRibbonSelectionFormatStateUpdate();
+
+function isTextInputTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+}
+
+function canRunGridFormattingShortcuts(event: KeyboardEvent): boolean {
+  if (event.defaultPrevented) return false;
+  if (app.isEditing()) return false;
+  if (isTextInputTarget(event.target)) return false;
+  return true;
+}
+
+window.addEventListener("keydown", (e) => {
+  if (!canRunGridFormattingShortcuts(e)) return;
+  if (e.repeat) return;
+
+  const primary = e.ctrlKey || e.metaKey;
+  if (!primary) return;
+  if (e.altKey) return;
+
+  const key = e.key ?? "";
+  const keyLower = key.toLowerCase();
+  const sheetId = app.getCurrentSheetId();
+  const doc = app.getDocument();
+  const ranges = selectionRangesForFormatting();
+
+  const runWithOptionalBatch = (label: string, action: () => void): void => {
+    const useBatch = ranges.length > 1;
+    if (useBatch) doc.beginBatch({ label });
+    let committed = false;
+    try {
+      action();
+      committed = true;
+    } finally {
+      if (!useBatch) return;
+      if (committed) doc.endBatch();
+      else doc.cancelBatch();
+    }
+  };
+
+  // --- Core formatting (Excel shortcuts) ---------------------------------------
+  if (!e.shiftKey) {
+    if (keyLower === "b") {
+      e.preventDefault();
+      runWithOptionalBatch("Bold", () => toggleBold(doc, sheetId, ranges));
+      app.focus();
+      return;
+    }
+    if (keyLower === "i") {
+      e.preventDefault();
+      runWithOptionalBatch("Italic", () => toggleItalic(doc, sheetId, ranges));
+      app.focus();
+      return;
+    }
+    if (keyLower === "u") {
+      e.preventDefault();
+      runWithOptionalBatch("Underline", () => toggleUnderline(doc, sheetId, ranges));
+      app.focus();
+      return;
+    }
+  }
+
+  if (e.shiftKey) {
+    const preset =
+      key === "$" || e.code === "Digit4"
+        ? "currency"
+        : key === "%" || e.code === "Digit5"
+          ? "percent"
+          : key === "#" || e.code === "Digit3"
+            ? "date"
+            : null;
+
+    if (preset) {
+      e.preventDefault();
+      const label =
+        preset === "currency" ? "Currency format" : preset === "percent" ? "Percentage format" : "Date format";
+      runWithOptionalBatch(label, () => applyNumberFormatPreset(doc, sheetId, ranges, preset));
+      app.focus();
+    }
+  }
+});
 
 openComments.addEventListener("click", () => app.toggleCommentsPanel());
 auditPrecedents.addEventListener("click", () => {
