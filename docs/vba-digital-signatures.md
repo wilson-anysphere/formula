@@ -483,7 +483,7 @@ If you need to update or extend signature handling, start with:
   - signature stream discovery (`\x05DigitalSignature*`)
   - CMS verification and the `VbaDigitalSignature::binding` decision
 - `crates/formula-vba/src/offcrypto.rs`
-  - MS-OSHARED `DigSigBlob` parsing + the length-prefixed DigSigInfoSerialized-like wrapper
+  - `DigSigBlob` parsing (MS-OSHARED) + parsing for the length-prefixed DigSigInfoSerialized-like wrapper
     (deterministic CMS offset/length)
 - `crates/formula-vba/src/authenticode.rs`
   - `SignedData.encapContentInfo.eContent` parsing and `SpcIndirectDataContent` → `DigestInfo`
