@@ -163,12 +163,21 @@ describe("builtin keybinding catalog", () => {
   it("formats expected display strings per platform", () => {
     const otherIndex = buildCommandKeybindingDisplayIndex({ platform: "other", contributed: [], builtin: builtinKeybindings });
     expect(getPrimaryCommandKeybindingDisplay("workbench.newWorkbook", otherIndex)).toBe("Ctrl+N");
+    expect(otherIndex.get("workbench.newWorkbook")).toEqual(expect.arrayContaining(["Ctrl+N", "Ctrl+Meta+N"]));
     expect(getPrimaryCommandKeybindingDisplay("workbench.openWorkbook", otherIndex)).toBe("Ctrl+O");
+    expect(otherIndex.get("workbench.openWorkbook")).toEqual(expect.arrayContaining(["Ctrl+O", "Ctrl+Meta+O"]));
     expect(getPrimaryCommandKeybindingDisplay("workbench.saveWorkbook", otherIndex)).toBe("Ctrl+S");
+    expect(otherIndex.get("workbench.saveWorkbook")).toEqual(expect.arrayContaining(["Ctrl+S", "Ctrl+Meta+S"]));
     expect(getPrimaryCommandKeybindingDisplay("workbench.saveWorkbookAs", otherIndex)).toBe("Ctrl+Shift+S");
+    expect(otherIndex.get("workbench.saveWorkbookAs")).toEqual(
+      expect.arrayContaining(["Ctrl+Shift+S", "Ctrl+Shift+Meta+S"]),
+    );
     expect(getPrimaryCommandKeybindingDisplay("workbench.print", otherIndex)).toBe("Ctrl+P");
+    expect(otherIndex.get("workbench.print")).toEqual(expect.arrayContaining(["Ctrl+P", "Ctrl+Meta+P"]));
     expect(getPrimaryCommandKeybindingDisplay("workbench.closeWorkbook", otherIndex)).toBe("Ctrl+W");
+    expect(otherIndex.get("workbench.closeWorkbook")).toEqual(expect.arrayContaining(["Ctrl+W", "Ctrl+Meta+W"]));
     expect(getPrimaryCommandKeybindingDisplay("workbench.quit", otherIndex)).toBe("Ctrl+Q");
+    expect(otherIndex.get("workbench.quit")).toEqual(expect.arrayContaining(["Ctrl+Q", "Ctrl+Meta+Q"]));
     expect(getPrimaryCommandKeybindingDisplay("workbench.showCommandPalette", otherIndex)).toBe("Ctrl+Shift+P");
     expect(getPrimaryCommandKeybindingDisplay("clipboard.copy", otherIndex)).toBe("Ctrl+C");
     expect(getPrimaryCommandKeybindingDisplay("clipboard.cut", otherIndex)).toBe("Ctrl+X");
@@ -203,12 +212,19 @@ describe("builtin keybinding catalog", () => {
 
     const macIndex = buildCommandKeybindingDisplayIndex({ platform: "mac", contributed: [], builtin: builtinKeybindings });
     expect(getPrimaryCommandKeybindingDisplay("workbench.newWorkbook", macIndex)).toBe("⌘N");
+    expect(macIndex.get("workbench.newWorkbook")).toEqual(expect.arrayContaining(["⌘N", "⌃⌘N"]));
     expect(getPrimaryCommandKeybindingDisplay("workbench.openWorkbook", macIndex)).toBe("⌘O");
+    expect(macIndex.get("workbench.openWorkbook")).toEqual(expect.arrayContaining(["⌘O", "⌃⌘O"]));
     expect(getPrimaryCommandKeybindingDisplay("workbench.saveWorkbook", macIndex)).toBe("⌘S");
+    expect(macIndex.get("workbench.saveWorkbook")).toEqual(expect.arrayContaining(["⌘S", "⌃⌘S"]));
     expect(getPrimaryCommandKeybindingDisplay("workbench.saveWorkbookAs", macIndex)).toBe("⇧⌘S");
+    expect(macIndex.get("workbench.saveWorkbookAs")).toEqual(expect.arrayContaining(["⇧⌘S", "⌃⇧⌘S"]));
     expect(getPrimaryCommandKeybindingDisplay("workbench.print", macIndex)).toBe("⌘P");
+    expect(macIndex.get("workbench.print")).toEqual(expect.arrayContaining(["⌘P", "⌃⌘P"]));
     expect(getPrimaryCommandKeybindingDisplay("workbench.closeWorkbook", macIndex)).toBe("⌘W");
+    expect(macIndex.get("workbench.closeWorkbook")).toEqual(expect.arrayContaining(["⌘W", "⌃⌘W"]));
     expect(getPrimaryCommandKeybindingDisplay("workbench.quit", macIndex)).toBe("⌘Q");
+    expect(macIndex.get("workbench.quit")).toEqual(expect.arrayContaining(["⌘Q", "⌃⌘Q"]));
     expect(getPrimaryCommandKeybindingDisplay("workbench.showCommandPalette", macIndex)).toBe("⇧⌘P");
     expect(getPrimaryCommandKeybindingDisplay("clipboard.copy", macIndex)).toBe("⌘C");
     expect(getPrimaryCommandKeybindingDisplay("clipboard.cut", macIndex)).toBe("⌘X");
