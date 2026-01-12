@@ -11,6 +11,29 @@ fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
     out.extend_from_slice(data);
 }
 
+fn push_module_stream_name_record(
+    out: &mut Vec<u8>,
+    stream_name_mbcs: &[u8],
+    stream_name_unicode: &[u8],
+) {
+    // MS-OVBA MODULESTREAMNAME (0x001A):
+    //   Id (u16)
+    //   SizeOfStreamName (u32) -- bytes
+    //   StreamName (MBCS)
+    //   Reserved (u16) = 0x0032
+    //   SizeOfStreamNameUnicode (u32) -- bytes (even)
+    //   StreamNameUnicode (UTF-16LE)
+    //
+    // Note: this record is not representable with `push_record(id, data)` because the u32 size
+    // field is `SizeOfStreamName`, not the length of all subsequent bytes.
+    out.extend_from_slice(&0x001Au16.to_le_bytes());
+    out.extend_from_slice(&(stream_name_mbcs.len() as u32).to_le_bytes());
+    out.extend_from_slice(stream_name_mbcs);
+    out.extend_from_slice(&0x0032u16.to_le_bytes());
+    out.extend_from_slice(&(stream_name_unicode.len() as u32).to_le_bytes());
+    out.extend_from_slice(stream_name_unicode);
+}
+
 fn utf16le_bytes(s: &str) -> Vec<u8> {
     s.encode_utf16()
         .flat_map(|u| u.to_le_bytes())
@@ -412,6 +435,80 @@ fn v3_content_normalized_data_includes_module_metadata_even_without_designers() 
         "v3 transcript includes module metadata and should differ from ContentNormalizedData"
     );
     assert_eq!(v3, expected);
+}
+
+#[test]
+fn v3_content_normalized_data_uses_unicode_module_and_stream_names_when_present() {
+    // Build an in-memory vbaProject.bin with a Unicode module stream name supplied via
+    // MODULESTREAMNAME (0x001A) with Reserved=0x0032.
+    //
+    // The real OLE stream name is Unicode-only. If the implementation ignores StreamNameUnicode
+    // (or mishandles Reserved=0x0032), it will fail to open the module stream.
+    let module_stream_name_unicode = "МодульПоток"; // non-ASCII
+    let module_stream_name_unicode_bytes = utf16le_bytes(module_stream_name_unicode);
+
+    let module_name_ansi = "AnsiModuleName";
+    let module_name_unicode = "ИмяМодуля"; // non-ASCII
+    let module_name_unicode_bytes = utf16le_bytes(module_name_unicode);
+
+    // Module source must set HashModuleNameFlag=true so the module name is appended.
+    let module_source = concat!(
+        "Attribute VB_Name = \"IgnoredByV3\"\r\n",
+        "Sub Hello()\r\n",
+        "End Sub\r\n",
+    );
+    let module_container = compress_container(module_source.as_bytes());
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0019, module_name_ansi.as_bytes()); // MODULENAME
+        push_record(&mut out, 0x0047, &module_name_unicode_bytes); // MODULENAMEUNICODE
+
+        // MODULESTREAMNAME with both MBCS + Unicode names, Reserved=0x0032.
+        // The MBCS name is deliberately wrong/nonexistent to ensure Unicode is used.
+        push_module_stream_name_record(
+            &mut out,
+            b"WrongStreamName",
+            &module_stream_name_unicode_bytes,
+        );
+
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE (standard)
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // MODULETEXTOFFSET (0)
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let stream_path = format!("VBA/{module_stream_name_unicode}");
+        let mut s = ole.create_stream(&stream_path).expect("module stream");
+        s.write_all(&module_container).expect("write module source");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+
+    let normalized = v3_content_normalized_data(&vba_project_bin)
+        .expect("v3_content_normalized_data should succeed (module stream must be found)");
+
+    let mut expected_unicode_suffix = module_name_unicode_bytes.clone();
+    expected_unicode_suffix.push(b'\n');
+    assert!(
+        contains_subslice(&normalized, &expected_unicode_suffix),
+        "expected V3ContentNormalizedData to contain UTF-16LE MODULENAMEUNICODE bytes + LF"
+    );
+
+    let mut unexpected_ansi_suffix = module_name_ansi.as_bytes().to_vec();
+    unexpected_ansi_suffix.push(b'\n');
+    assert!(
+        !contains_subslice(&normalized, &unexpected_ansi_suffix),
+        "expected V3ContentNormalizedData NOT to contain ANSI MODULENAME bytes + LF"
+    );
 }
 
 #[test]

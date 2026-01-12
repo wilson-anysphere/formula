@@ -1156,6 +1156,26 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
             continue;
         }
 
+        // MODULESTREAMNAME (0x001A) record layout is also special: the u32 after Id is
+        // `SizeOfStreamName`, and a spec-compliant record may include a Reserved=0x0032 marker plus
+        // a UTF-16LE `StreamNameUnicode` field *after* the MBCS stream name bytes.
+        //
+        // If we treat the u32 as the total record length, we'll mis-align parsing when the Unicode
+        // stream name is present. Parse the full record and advance `offset` correctly.
+        if id == 0x001A {
+            let mut cur = DirCursor::new(&dir_decompressed[offset..]);
+            let stream_name =
+                parse_module_stream_name(&mut cur, encoding).ok_or(DirParseError::Truncated)?;
+            offset += cur.offset;
+            expect_reference_name_unicode = false;
+
+            if let Some(m) = current_module.as_mut() {
+                m.stream_name = stream_name;
+                m.seen_non_name_record = true;
+            }
+            continue;
+        }
+
         if offset + 6 > dir_decompressed.len() {
             return Err(DirParseError::Truncated.into());
         }
@@ -1376,15 +1396,6 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                     if !m.seen_non_name_record {
                         m.stream_name = decode_dir_unicode_string(data);
                     }
-                }
-            }
-
-            // MODULESTREAMNAME. Some files include a reserved u16 at the end.
-            0x001A => {
-                if let Some(m) = current_module.as_mut() {
-                    let trimmed = trim_reserved_u16(data);
-                    m.stream_name = decode_dir_string(trimmed, encoding);
-                    m.seen_non_name_record = true;
                 }
             }
 
