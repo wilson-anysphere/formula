@@ -3555,8 +3555,8 @@ export class SpreadsheetApp {
       return;
     }
     this.sharedHoverCellRect = cellRect;
-    const headerRows = this.sharedHeaderRows();
-    const headerCols = this.sharedHeaderCols();
+    const headerRows = 1;
+    const headerCols = 1;
     if (picked.row < headerRows || picked.col < headerCols) {
       this.sharedHoverCellKey = null;
       this.sharedHoverCellHasComment = false;
