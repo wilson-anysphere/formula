@@ -570,6 +570,82 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     expect(versionResult.notificationsCount > 0 || versionResult.invoked).toBe(true);
   });
 
+  test("clicking Download clears any stored dismissal (even when the updater API is unavailable)", async ({ page }) => {
+    await page.addInitScript(() => {
+      const listeners: Record<string, Array<(event: any) => void>> = {};
+      const emitted: Array<{ event: string; payload: any }> = [];
+
+      (window as any).__tauriListeners = listeners;
+      (window as any).__tauriEmittedEvents = emitted;
+
+      const windowHandle = { show: async () => {}, setFocus: async () => {} };
+
+      // Intentionally omit `__TAURI__.updater` so the UI takes the "unavailable" path.
+      (window as any).__TAURI__ = {
+        core: {
+          invoke: async (_cmd: string, _args: any) => null,
+        },
+        event: {
+          listen: async (name: string, handler: any) => {
+            if (!Array.isArray(listeners[name])) listeners[name] = [];
+            listeners[name].push(handler);
+            return () => {
+              const arr = listeners[name];
+              if (!Array.isArray(arr)) return;
+              const idx = arr.indexOf(handler);
+              if (idx >= 0) arr.splice(idx, 1);
+            };
+          },
+          emit: async (event: string, payload?: any) => {
+            emitted.push({ event, payload: payload ?? null });
+          },
+        },
+        window: {
+          getCurrentWebviewWindow: () => windowHandle,
+          getCurrentWindow: () => windowHandle,
+          getCurrent: () => windowHandle,
+          appWindow: windowHandle,
+        },
+      };
+    });
+
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() =>
+      Boolean((window as any).__tauriEmittedEvents?.some((entry: any) => entry?.event === "updater-ui-ready")),
+    );
+
+    await waitForTauriListeners(page, "update-available");
+
+    // Seed a stored dismissal for this version.
+    await page.evaluate(() => {
+      localStorage.setItem("formula.updater.dismissedVersion", "9.9.9");
+      localStorage.setItem("formula.updater.dismissedAt", String(Date.now()));
+    });
+
+    await dispatchTauriEvent(page, "update-available", { source: "manual", version: "9.9.9", body: "Notes" });
+    const dialog = page.getByTestId("updater-dialog");
+    await expect(dialog).toBeVisible();
+
+    const before = await page.evaluate(() => ({
+      version: localStorage.getItem("formula.updater.dismissedVersion"),
+      dismissedAt: localStorage.getItem("formula.updater.dismissedAt"),
+    }));
+    expect(before.version).toBe("9.9.9");
+    expect(Number(before.dismissedAt)).toBeGreaterThan(0);
+
+    // User initiates an update download; this should clear the persisted suppression even if
+    // the download cannot start in this environment.
+    await page.getByTestId("updater-download").click();
+
+    await page.waitForFunction(() => localStorage.getItem("formula.updater.dismissedVersion") === null);
+    await page.waitForFunction(() => localStorage.getItem("formula.updater.dismissedAt") === null);
+
+    await expect(dialog).toBeVisible();
+    await expect(lastToast(page)).toHaveText("Auto-updater is unavailable in this build.");
+    await expect(page.getByTestId("updater-view-versions")).toHaveText("Download manually");
+  });
+
   test("menu-check-updates triggers a fallback check_for_updates invoke (and suppresses duplicates)", async ({ page }) => {
     await page.addInitScript(() => {
       const listeners: Record<string, Array<(event: any) => void>> = {};
