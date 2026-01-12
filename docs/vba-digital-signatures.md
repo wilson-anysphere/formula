@@ -103,7 +103,14 @@ In the wild, the signature stream bytes are not always “just a PKCS#7 blob”.
    - Some producers wrap the PKCS#7 bytes in a `DigSigBlob` (MS-OSHARED §2.3.2.2).
    - The blob contains a `DigSigInfoSerialized` structure (MS-OSHARED §2.3.2.1) that points at the
      embedded signature buffer via `signatureOffset`/`cbSignature`.
-3. **Length-prefixed `DigSigInfoSerialized`-like wrapper/prefix**
+3. **MS-OSHARED `WordSigBlob` wrapper (offset-based, Unicode length prefix)**
+   - Some producers wrap the PKCS#7 bytes in a `WordSigBlob` (MS-OSHARED §2.3.2.3).
+   - `WordSigBlob` is similar to `DigSigBlob` but starts with `cch: u16` (a UTF-16 character count /
+     half the byte count of the remainder of the structure).
+   - The embedded `DigSigInfoSerialized` still provides offsets to the signature buffer, but the
+     offsets are **relative to the start of the `cbSigInfo` field** (byte offset 2), not the start
+     of the structure.
+4. **Length-prefixed `DigSigInfoSerialized`-like wrapper/prefix**
    - Many real-world Excel `\x05DigitalSignature*` streams start with a shorter, *length-prefixed*
      header that does **not** match the MS-OSHARED `DigSigInfoSerialized` layout.
    - The structure is little-endian and length-prefixed; parsing it lets us locate the embedded CMS
@@ -111,7 +118,7 @@ In the wild, the signature stream bytes are not always “just a PKCS#7 blob”.
    - ⚠️ The wrapper's `cbSigningCertStore` region may itself contain a PKCS#7/CMS structure (often
      beginning with `0x30`). When scanning heuristically, prefer the **last** plausible `SignedData`
      candidate in the stream and validate the inner `SignedData` structure.
-4. **Detached `content || pkcs7`**
+5. **Detached `content || pkcs7`**
    - The stream contains `signed_content_bytes` followed by a detached CMS signature (`pkcs7_der`).
    - Verification must pass the prefix bytes as the detached content when verifying the CMS blob.
 
@@ -124,8 +131,8 @@ High-level extraction steps:
 
 1. **Obtain the CMS `ContentInfo` bytes**
    - If the stream is raw CMS DER, use it directly.
-   - If the stream uses an Office DigSig wrapper, unwrap it (MS-OSHARED `DigSigBlob` or the
-     length-prefixed DigSigInfoSerialized-like prefix).
+   - If the stream uses an Office DigSig wrapper, unwrap it (MS-OSHARED `DigSigBlob` / `WordSigBlob`,
+     or the length-prefixed DigSigInfoSerialized-like prefix).
    - If the stream is `content || pkcs7`, split it (find the CMS DER start); the `content` prefix is
      the detached signed content.
 2. **Parse CMS and locate `SignedData.encapContentInfo`**
@@ -431,6 +438,9 @@ and binding behavior:
   - cover v3 transcript construction and `\x05DigitalSignatureExt` binding behavior.
 - `crates/formula-vba/tests/digsig_blob.rs`
   - verifies that MS-OSHARED `DigSigBlob`-wrapped signatures are parsed deterministically (without
+    relying on DER scanning heuristics).
+- `crates/formula-vba/tests/wordsig_blob.rs`
+  - verifies that MS-OSHARED `WordSigBlob`-wrapped signatures are parsed deterministically (without
     relying on DER scanning heuristics).
 
 ## Specs / references
