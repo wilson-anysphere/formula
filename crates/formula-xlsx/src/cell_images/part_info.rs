@@ -214,6 +214,7 @@ fn parse_cell_images_image_relationships(
         {
             continue;
         }
+<<<<<<<< HEAD:crates/formula-xlsx/src/cell_images/part_info.rs
         if !rel.type_uri.eq_ignore_ascii_case(IMAGE_REL_TYPE) {
             continue;
         }
@@ -226,11 +227,22 @@ fn parse_cell_images_image_relationships(
             target_part = format!("xl/{target_part}");
         }
         out.insert(rel.id, target_part);
+========
+
+        // Be conservative: only resolve image relationships.
+        if rel.type_uri != IMAGE_REL_TYPE {
+            continue;
+        }
+
+        let resolved = resolve_target(cell_images_part, &rel.target);
+        out.insert(rel.id, resolved);
+>>>>>>>> 9b91f5a4 (feat(formula-xls): parse BIFF8 EXTERNSHEET in workbook globals):crates/formula-xlsx/src/cell_images/package_info.rs
     }
 
     Ok(out)
 }
 
+<<<<<<<< HEAD:crates/formula-xlsx/src/cell_images/part_info.rs
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,3 +284,5 @@ mod tests {
         assert_eq!(map.get("rId2").map(String::as_str), Some("xl/media/image2.png"));
     }
 }
+========
+>>>>>>>> 9b91f5a4 (feat(formula-xls): parse BIFF8 EXTERNSHEET in workbook globals):crates/formula-xlsx/src/cell_images/package_info.rs

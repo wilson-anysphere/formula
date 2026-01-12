@@ -48,11 +48,13 @@ const RECORD_PALETTE: u16 = 0x0092;
 const RECORD_FONT: u16 = 0x0031;
 const RECORD_XF: u16 = 0x00E0;
 const RECORD_SAVERECALC: u16 = 0x005F;
+// EXTERNSHEET [MS-XLS 2.4.102] stores the mapping table for ixti -> sheet indices.
+//
+// This record can be large in workbooks with many 3D references and may be split across one or
+// more `CONTINUE` records.
+const RECORD_EXTERNSHEET: u16 = 0x0017;
 // SHEETEXT [MS-XLS 2.4.269] (BIFF8 only) stores extended sheet metadata such as sheet tab color.
 const RECORD_SHEETEXT: u16 = 0x0862;
-// EXTERNSHEET [MS-XLS 2.4.102] can be large in workbooks with many 3D references and may be split
-// across one or more `CONTINUE` records.
-const RECORD_EXTERNSHEET: u16 = 0x0017;
 // NAME [MS-XLS 2.4.150] (defined names / named ranges) may contain large formulas or description
 // strings and may be split across one or more `CONTINUE` records.
 const RECORD_NAME: u16 = 0x0018;
@@ -159,6 +161,8 @@ pub(crate) struct BiffWorkbookGlobals {
     pub(crate) workbook_protection: WorkbookProtection,
     pub(crate) active_tab_index: Option<u16>,
     pub(crate) workbook_window: Option<WorkbookWindow>,
+    /// BIFF8 `EXTERNSHEET` entries (XTI), used for resolving 3D references (`ixti`) in formulas.
+    pub(crate) extern_sheets: Vec<BiffExternSheetEntry>,
     formats: HashMap<u16, String>,
     palette: Vec<u32>,
     fonts: Vec<BiffFont>,
@@ -186,6 +190,7 @@ impl Default for BiffWorkbookGlobals {
             workbook_protection: WorkbookProtection::default(),
             active_tab_index: None,
             workbook_window: None,
+            extern_sheets: Vec::new(),
             formats: HashMap::new(),
             palette: Vec::new(),
             fonts: Vec::new(),
@@ -205,6 +210,13 @@ struct BiffFont {
     underline: bool,
     strike: bool,
     color_idx: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BiffExternSheetEntry {
+    pub(crate) i_sup_book: u16,
+    pub(crate) itab_first: u16,
+    pub(crate) itab_last: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -743,6 +755,7 @@ pub(crate) fn parse_biff_workbook_globals(
 
     let mut saw_eof = false;
     let mut continuation_parse_failed = false;
+    let mut saw_external_supbook = false;
 
     let allows_continuation: fn(u16) -> bool = match biff {
         BiffVersion::Biff5 => workbook_globals_allows_continuation_biff5,
@@ -1032,6 +1045,46 @@ pub(crate) fn parse_biff_workbook_globals(
                 let flag = u16::from_le_bytes([data[0], data[1]]);
                 out.calculate_before_save = Some(flag != 0);
             }
+            // EXTERNSHEET [MS-XLS 2.4.102]
+            //
+            // BIFF8 payload:
+            //   [cXTI: u16]
+            //   repeated cXTI times:
+            //     [iSupBook: u16][itabFirst: u16][itabLast: u16]
+            RECORD_EXTERNSHEET if biff == BiffVersion::Biff8 => {
+                if data.len() < 2 {
+                    out.warnings.push(format!(
+                        "truncated EXTERNSHEET record at offset {}",
+                        record.offset
+                    ));
+                    continue;
+                }
+                let cxti = u16::from_le_bytes([data[0], data[1]]) as usize;
+                let mut pos = 2usize;
+                for idx in 0..cxti {
+                    if data.len().saturating_sub(pos) < 6 {
+                        out.warnings.push(format!(
+                            "truncated EXTERNSHEET record at offset {} (expected {cxti} XTI entries, got {idx})",
+                            record.offset
+                        ));
+                        break;
+                    }
+                    let i_sup_book = u16::from_le_bytes([data[pos], data[pos + 1]]);
+                    let itab_first = u16::from_le_bytes([data[pos + 2], data[pos + 3]]);
+                    let itab_last = u16::from_le_bytes([data[pos + 4], data[pos + 5]]);
+                    pos += 6;
+
+                    if i_sup_book != 0 {
+                        saw_external_supbook = true;
+                    }
+
+                    out.extern_sheets.push(BiffExternSheetEntry {
+                        i_sup_book,
+                        itab_first,
+                        itab_last,
+                    });
+                }
+            }
             // SHEETEXT [MS-XLS 2.4.269]
             //
             // This is a BIFF8-only Future Record that may include sheet tab color metadata.
@@ -1056,6 +1109,13 @@ pub(crate) fn parse_biff_workbook_globals(
             }
             _ => {}
         }
+    }
+
+    if saw_external_supbook {
+        out.warnings.push(
+            "workbook contains external SupBook references (EXTERNSHEET); external workbook refs are not yet supported"
+                .to_string(),
+        );
     }
 
     if continuation_parse_failed {
