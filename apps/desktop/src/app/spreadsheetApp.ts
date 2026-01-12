@@ -1305,7 +1305,11 @@ export class SpreadsheetApp {
       const source = typeof payload?.source === "string" ? payload.source : "";
       const isExternalSource = source === "collab" || source === "backend" || source === "python" || source === "macro";
       if (!isExternalSource) return;
-      this.refresh("scroll");
+      // Shared-grid mode repaints via CanvasGridRenderer/provider invalidations; avoid scheduling
+      // redundant SpreadsheetApp refreshes (which mainly exist for the legacy renderer).
+      if (!this.sharedGrid) {
+        this.refresh("scroll");
+      }
       // External edits can affect the active cell's computed value even when the active cell itself
       // wasn't directly edited (e.g. a dependency cell changes). Ensure the status bar + formula bar
       // stay in sync without forcing a full re-render.
