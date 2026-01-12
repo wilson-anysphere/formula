@@ -1816,7 +1816,8 @@ window.addEventListener("keydown", (e) => {
       applyFormattingToSelection("Bold", (doc, sheetId, ranges) => toggleBold(doc, sheetId, ranges));
       return;
     }
-    if (keyLower === "i") {
+    // Cmd+I is reserved for toggling the AI Chat sidebar. Only bind italic to Ctrl+I.
+    if (keyLower === "i" && e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       applyFormattingToSelection("Italic", (doc, sheetId, ranges) => toggleItalic(doc, sheetId, ranges));
       return;

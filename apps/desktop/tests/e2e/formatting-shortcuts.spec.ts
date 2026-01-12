@@ -96,6 +96,18 @@ test.describe("formatting shortcuts", () => {
     await expect(page.getByTestId("panel-aiChat")).toBeVisible();
 
     expect(await getA1FontProp(page, "italic")).toBe(italicAfterToggles);
+
+    if (process.platform !== "darwin") {
+      // Playwright runs on Linux in CI, but we still want to validate that the macOS
+      // binding (Cmd+I / Meta+I) is reserved for AI Chat and does NOT trigger Italic.
+      await page.evaluate(() => {
+        const gridEl = document.getElementById("grid");
+        if (!gridEl) throw new Error("Missing #grid");
+        gridEl.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "I", code: "KeyI", metaKey: true }));
+      });
+      await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
+      expect(await getA1FontProp(page, "italic")).toBe(italicAfterToggles);
+    }
   });
 
   test("Ctrl/Cmd+U toggles underline on the selection", async ({ page }) => {
