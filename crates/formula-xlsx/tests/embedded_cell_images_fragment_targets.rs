@@ -58,7 +58,6 @@ fn embedded_cell_images_strip_uri_fragments_in_relationship_targets() {
     assert_eq!(image.image_part, "xl/media/image1.png");
     assert_eq!(image.image_bytes, png_bytes);
 }
-
 fn rewrite_zip_part(
     bytes: &[u8],
     part_name: &str,
