@@ -19,7 +19,6 @@ import {
   type CellPlaintext,
 } from "@formula/collab-encryption";
 import type { CollabPersistence, CollabPersistenceBinding } from "@formula/collab-persistence";
-import { IndexedDbCollabPersistence } from "@formula/collab-persistence/indexeddb";
 
 import { assertValidRole, getCellPermissions, maskCellValue } from "../../permissions/index.js";
 import {
@@ -1026,6 +1025,7 @@ export class CollabSession {
     offline: NonNullable<CollabSessionOptions["offline"]>
   ): Promise<CollabPersistence> {
     if (offline.mode === "indexeddb") {
+      const { IndexedDbCollabPersistence } = await import("@formula/collab-persistence/indexeddb");
       return new IndexedDbCollabPersistence();
     }
     if (offline.mode === "file") {
