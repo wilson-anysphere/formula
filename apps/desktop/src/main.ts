@@ -2211,7 +2211,7 @@ window.addEventListener(
     if (e.defaultPrevented) return;
     const primary = e.ctrlKey || e.metaKey;
     if (!primary) return;
-    if (e.altKey) return;
+    if (e.shiftKey || e.altKey) return;
     if (e.key !== "PageUp" && e.key !== "PageDown") return;
 
     const target = e.target as EventTarget | null;
