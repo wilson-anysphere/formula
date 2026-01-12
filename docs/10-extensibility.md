@@ -266,8 +266,11 @@ the `:` key on layouts where that shares the same physical key.
   have been loaded in the current session (e.g. after opening the Extensions panel or triggering an extension UI surface).
 - Built-in keybindings always win over extension keybindings (extensions cannot override core shortcuts).
 - When an extension keybinding matches, the desktop host calls `preventDefault()` and executes the extension command.
-- Some shortcuts are reserved and extensions can never claim them (safety net):
+- Some shortcuts are reserved and extensions can never claim them (safety net).
+  The source of truth is `DEFAULT_RESERVED_EXTENSION_SHORTCUTS` in
+  `apps/desktop/src/extensions/keybindingService.ts`, but the current reserved set includes:
   - `Escape` (core cancellation key; closing dialogs/menus, canceling interactions, etc)
+  - `Enter` (core activation/navigation key; dialog default actions, spreadsheet commit/navigation, etc)
   - `Ctrl+C`, `Cmd+C`, `Ctrl+Cmd+C` (copy; some keyboards emit both Ctrl+Meta for the same chord)
   - `Ctrl+X`, `Cmd+X`, `Ctrl+Cmd+X` (cut; some keyboards emit both Ctrl+Meta for the same chord)
   - `Ctrl+V`, `Cmd+V`, `Ctrl+Cmd+V` (paste; some keyboards emit both Ctrl+Meta for the same chord)
@@ -277,12 +280,16 @@ the `:` key on layouts where that shares the same physical key.
   - `Ctrl+K`, `Cmd+K`, `Ctrl+Cmd+K` (inline AI edit)
   - `F2` (edit cell)
   - `Shift+F2` (add comment)
+  - `Shift+F10`, `ContextMenu` (open context menu)
+  - `Ctrl+PgUp`, `Cmd+PgUp`, `Ctrl+Cmd+PgUp` (previous sheet)
+  - `Ctrl+PgDn`, `Cmd+PgDn`, `Ctrl+Cmd+PgDn` (next sheet)
   - `Ctrl+Shift+A` (AI Chat toggle on Windows/Linux)
   - `Cmd+I`, `Ctrl+Cmd+I` (AI Chat toggle on macOS; some keyboards emit both Ctrl+Meta for the same chord)
   - `Ctrl+Shift+M`, `Cmd+Shift+M`, `Ctrl+Cmd+Shift+M` (comments panel toggle)
   - `Cmd+H` (macOS: Hide app, system shortcut)
   - `Ctrl+Cmd+H` (some keyboards emit both Ctrl+Meta for the same chord)
-  - `Ctrl/Cmd+N`, `Ctrl/Cmd+O`, `Ctrl/Cmd+S`, `Ctrl/Cmd+Shift+S`, `Ctrl/Cmd+W`, `Ctrl/Cmd+Q` (core file/app shortcuts)
+  - `Ctrl/Cmd+N`, `Ctrl/Cmd+O`, `Ctrl/Cmd+S`, `Ctrl/Cmd+Shift+S`, `Ctrl/Cmd+P`, `Ctrl/Cmd+W`, `Ctrl/Cmd+Q`
+    (core file/app shortcuts; `Ctrl+Cmd+...` variants are also reserved for remote/VM keyboard setups)
 
 ---
 
