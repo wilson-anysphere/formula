@@ -3763,7 +3763,8 @@ mod tests {
         use std::fs::{create_dir, File};
         use std::os::unix::fs::symlink;
 
-        // Ensure temp dirs are created under an allowed filesystem scope root (the user's home dir).
+        // Create temp dirs inside the allowed filesystem scope (home dir) so `list_dir_blocking`
+        // can traverse them during tests.
         let base_dirs = directories::BaseDirs::new().expect("base dirs");
         let root = tempfile::Builder::new()
             .prefix("formula-list-dir-symlink-root")

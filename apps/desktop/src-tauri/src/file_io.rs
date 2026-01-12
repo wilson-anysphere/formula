@@ -701,6 +701,19 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_lowercase());
 
+    // Sniff the workbook content so we can open valid workbooks even when the extension is
+    // missing or incorrect (e.g. a `.xlsx` saved as `.bin` or a legacy `.xls` with a `.xlsx`
+    // suffix).
+    if !matches!(extension.as_deref(), Some("csv")) {
+        if let Some(format) = sniff_workbook_format(path) {
+            match format {
+                SniffedWorkbookFormat::Xls => return read_xls_blocking(path),
+                SniffedWorkbookFormat::Xlsx => return read_xlsx_or_xlsm_blocking(path),
+                SniffedWorkbookFormat::Xlsb => return read_xlsb_blocking(path),
+            }
+        }
+    }
+
     if matches!(extension.as_deref(), Some("xlsb")) {
         return read_xlsb_blocking(path);
     }
@@ -711,18 +724,6 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
 
     if matches!(extension.as_deref(), Some("xls")) {
         return read_xls_blocking(path);
-    }
-
-    // For unknown extensions (or missing extensions), sniff the file signature/ZIP contents
-    // to route to the appropriate reader.
-    if !matches!(extension.as_deref(), Some("csv")) {
-        if let Some(format) = sniff_workbook_format(path) {
-            match format {
-                SniffedWorkbookFormat::Xls => return read_xls_blocking(path),
-                SniffedWorkbookFormat::Xlsx => return read_xlsx_or_xlsm_blocking(path),
-                SniffedWorkbookFormat::Xlsb => return read_xlsb_blocking(path),
-            }
-        }
     }
 
     let mut workbook =
@@ -2308,6 +2309,86 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
         assert_eq!(
             second.get_cell(0, 0).computed_value,
             CellScalar::Text("Second sheet".to_string())
+        );
+    }
+
+    #[test]
+    fn reads_xlsx_fixture_with_xls_extension() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/basic.xlsx"
+        ));
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let renamed_path = tmp.path().join("basic.xls");
+        std::fs::copy(fixture_path, &renamed_path).expect("copy fixture");
+
+        let workbook =
+            read_xlsx_blocking(&renamed_path).expect("read xlsx workbook with wrong .xls extension");
+        assert!(
+            workbook.origin_xlsx_bytes.is_some(),
+            "expected XLSX/XLSM reader path"
+        );
+
+        assert!(!workbook.sheets.is_empty(), "expected at least one sheet");
+        let sheet = &workbook.sheets[0];
+        assert_eq!(sheet.name, "Sheet1");
+        assert_eq!(sheet.get_cell(0, 0).computed_value, CellScalar::Number(1.0));
+        assert_eq!(
+            sheet.get_cell(0, 1).computed_value,
+            CellScalar::Text("Hello".to_string())
+        );
+    }
+
+    #[test]
+    fn reads_xls_fixture_with_xlsx_extension() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xls/tests/fixtures/basic.xls"
+        ));
+        let expected_date_system = formula_xls::import_xls_path(fixture_path)
+            .expect("import xls")
+            .workbook
+            .date_system;
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let renamed_path = tmp.path().join("basic.xlsx");
+        std::fs::copy(fixture_path, &renamed_path).expect("copy fixture");
+
+        let workbook =
+            read_xlsx_blocking(&renamed_path).expect("read xls workbook with wrong .xlsx extension");
+        assert!(workbook.origin_xlsx_bytes.is_none());
+        assert_eq!(workbook.date_system, expected_date_system);
+        let sheet1 = workbook
+            .sheets
+            .iter()
+            .find(|s| s.name == "Sheet1")
+            .expect("Sheet1 exists");
+        assert_eq!(
+            sheet1.get_cell(0, 0).computed_value,
+            CellScalar::Text("Hello".to_string())
+        );
+    }
+
+    #[test]
+    fn reads_xlsb_fixture_with_xlsx_extension() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsb/tests/fixtures/simple.xlsb"
+        ));
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let renamed_path = tmp.path().join("simple.xlsx");
+        std::fs::copy(fixture_path, &renamed_path).expect("copy fixture");
+
+        let workbook =
+            read_xlsx_blocking(&renamed_path).expect("read xlsb workbook with wrong .xlsx extension");
+        let renamed_str = renamed_path.to_string_lossy().to_string();
+        assert_eq!(workbook.origin_xlsb_path.as_deref(), Some(renamed_str.as_str()));
+        assert_eq!(workbook.sheets.len(), 1);
+        let sheet = &workbook.sheets[0];
+        assert_eq!(sheet.name, "Sheet1");
+        assert_eq!(
+            sheet.get_cell(0, 0).computed_value,
+            CellScalar::Text("Hello".to_string())
         );
     }
 
