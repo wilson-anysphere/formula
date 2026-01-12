@@ -4384,6 +4384,66 @@ mod tests {
     }
 
     #[test]
+    fn add_sheet_inserts_after_sheet_id_and_persists_order() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let db_path = tmp.path().join("autosave.sqlite");
+        let location = WorkbookPersistenceLocation::OnDisk(db_path);
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        workbook.add_sheet("Sheet3".to_string());
+
+        let mut state = AppState::new();
+        state
+            .load_workbook_persistent(workbook, location)
+            .expect("load persistent workbook");
+
+        state
+            .add_sheet(
+                "Inserted".to_string(),
+                None,
+                Some("sHeEt2".to_string()),
+                None,
+            )
+            .expect("add sheet");
+
+        let info = state.workbook_info().expect("workbook info");
+        let sheet_names = info
+            .sheets
+            .iter()
+            .map(|s| s.name.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            sheet_names,
+            vec![
+                "Sheet1".to_string(),
+                "Sheet2".to_string(),
+                "Inserted".to_string(),
+                "Sheet3".to_string()
+            ]
+        );
+
+        let storage = state.persistent_storage().expect("storage");
+        let workbook_id = state.persistent_workbook_id().expect("workbook id");
+        let meta_names = storage
+            .list_sheets(workbook_id)
+            .expect("list sheets")
+            .into_iter()
+            .map(|s| s.name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            meta_names,
+            vec![
+                "Sheet1".to_string(),
+                "Sheet2".to_string(),
+                "Inserted".to_string(),
+                "Sheet3".to_string()
+            ]
+        );
+    }
+
+    #[test]
     fn set_cell_recalculates_dependents() {
         let mut workbook = Workbook::new_empty(Some("fixture.xlsx".to_string()));
         workbook.add_sheet("Sheet1".to_string());

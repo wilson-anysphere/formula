@@ -131,7 +131,7 @@ fn add_sheet_disambiguates_unicode_case_insensitive_duplicate() {
     // Excel compares sheet names case-insensitively across Unicode; adding "É" should be treated
     // as a duplicate of "é" and disambiguated with a suffix.
     let added = state
-        .add_sheet("É".to_string(), None, None)
+        .add_sheet("É".to_string(), None, None, None)
         .expect("expected add_sheet to disambiguate unicode duplicate");
     assert_eq!(added.name, "É 2");
 }
@@ -148,7 +148,7 @@ fn add_sheet_disambiguates_unicode_nfkc_equivalent_duplicate() {
     // The "fi" ligature (U+FB01) NFKC-normalizes to "fi". Adding it should be treated as a
     // duplicate and disambiguated with a suffix.
     let added = state
-        .add_sheet("\u{FB01}".to_string(), None, None)
+        .add_sheet("\u{FB01}".to_string(), None, None, None)
         .expect("expected add_sheet to disambiguate NFKC-equivalent duplicate");
     assert_eq!(added.name, "\u{FB01} 2");
 }
