@@ -191,32 +191,14 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
         .and_then(|part| pkg.part(part).map(|bytes| (part, bytes)))
     {
         Some((part, bytes)) => {
-            let primary =
-                parse_value_metadata_vm_to_rich_value_index_map(bytes).map_err(|err| match err {
-                    crate::xml::XmlDomError::Utf8(source) => XlsxError::Invalid(format!(
-                        "xml part {part} is not valid UTF-8: {source}"
-                    )),
-                    crate::xml::XmlDomError::Parse(source) => {
-                        XlsxError::Invalid(format!("xml parse error in {part}: {source}"))
-                    }
-                })?;
-
-            // Excel's `vm` appears in the wild as both 0-based and 1-based. To be tolerant, insert
-            // both the original key and its 0-based equivalent.
-            //
-            // Note: `primary` is a `HashMap`, so iteration order is not deterministic. Insert in two
-            // passes so the canonical (1-based) `vm` keys always win when the shifted `vm-1` entries
-            // collide.
-            let mut out = HashMap::new();
-            for (&vm, &rv) in primary.iter() {
-                out.entry(vm).or_insert(rv);
-            }
-            for (vm, rv) in primary {
-                if vm > 0 {
-                    out.entry(vm - 1).or_insert(rv);
+            parse_value_metadata_vm_to_rich_value_index_map(bytes).map_err(|err| match err {
+                crate::xml::XmlDomError::Utf8(source) => {
+                    XlsxError::Invalid(format!("xml part {part} is not valid UTF-8: {source}"))
                 }
-            }
-            out
+                crate::xml::XmlDomError::Parse(source) => {
+                    XlsxError::Invalid(format!("xml parse error in {part}: {source}"))
+                }
+            })?
         }
         None => HashMap::new(),
     };
@@ -314,9 +296,28 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
         // Most worksheets contain very few `vm`-annotated cells (only those that actually reference
         // rich values). By streaming-scan filtering first, we avoid parsing `CellRef` for every
         // plain cell in large sheets.
+        //
+        // Excel has been observed to encode worksheet `c/@vm` as both:
+        // - 1-based indices into `xl/metadata.xml` `<valueMetadata>` `<bk>` records (typical), and
+        // - 0-based indices (seen in some workbooks/fixtures).
+        //
+        // We keep the metadata mapping in its canonical 1-based form and infer whether a sheet is
+        // 0-based by checking for any `vm="0"` cells. This avoids ambiguous key collisions that
+        // occur if we try to store both 0- and 1-based mappings in the same map when multiple
+        // images/records exist.
+        let vm_offset: u32 =
+            if !vm_to_rich_value_index.is_empty()
+                && cells_with_metadata.iter().any(|(_, vm, _)| *vm == Some(0))
+            {
+                1
+            } else {
+                0
+            };
+
         for (cell, vm, _cm) in cells_with_metadata {
             let Some(vm) = vm else { continue };
 
+            let vm = vm.saturating_add(vm_offset);
             let Some(rich_value_index) = vm_to_rich_value_index.get(&vm).copied() else {
                 continue;
             };
