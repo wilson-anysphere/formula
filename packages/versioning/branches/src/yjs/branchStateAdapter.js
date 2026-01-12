@@ -358,27 +358,50 @@ export function branchStateFromYjsDoc(doc) {
 
     // Per-sheet view state (e.g. frozen panes) can be stored either under a
     // dedicated `view` object or (legacy/experimental) as top-level fields.
+    //
+    // Layered formatting defaults (sheet/row/col) and range-run formatting are
+    // stored on sheet metadata as top-level keys (`defaultFormat`, `rowFormats`,
+    // `colFormats`, `formatRunsByCol`), but some BranchService-style snapshots may
+    // still embed them inside `view`. Prefer the top-level keys when present.
     const rawView = readYMapOrObject(entry, "view");
-    if (rawView !== undefined) {
-      meta.view = yjsValueToJson(rawView);
-    } else {
+    const rawDefaultFormat = readYMapOrObject(entry, "defaultFormat");
+    const rawRowFormats = readYMapOrObject(entry, "rowFormats");
+    const rawColFormats = readYMapOrObject(entry, "colFormats");
+    const rawFormatRunsByCol = readYMapOrObject(entry, "formatRunsByCol");
+
+    /** @type {any} */
+    let view = rawView !== undefined ? yjsValueToJson(rawView) : null;
+
+    if (view == null && rawView === undefined) {
       const frozenRows = readYMapOrObject(entry, "frozenRows");
       const frozenCols = readYMapOrObject(entry, "frozenCols");
       const colWidths = readYMapOrObject(entry, "colWidths");
       const rowHeights = readYMapOrObject(entry, "rowHeights");
-      if (
-        frozenRows !== undefined ||
-        frozenCols !== undefined ||
-        colWidths !== undefined ||
-        rowHeights !== undefined
-      ) {
-        meta.view = {
+      if (frozenRows !== undefined || frozenCols !== undefined || colWidths !== undefined || rowHeights !== undefined) {
+        view = {
           frozenRows: yjsValueToJson(frozenRows) ?? 0,
           frozenCols: yjsValueToJson(frozenCols) ?? 0,
           ...(colWidths !== undefined ? { colWidths: yjsValueToJson(colWidths) } : {}),
           ...(rowHeights !== undefined ? { rowHeights: yjsValueToJson(rowHeights) } : {}),
         };
       }
+    }
+
+    const hasTopLevelFormats =
+      rawDefaultFormat !== undefined ||
+      rawRowFormats !== undefined ||
+      rawColFormats !== undefined ||
+      rawFormatRunsByCol !== undefined;
+    if (hasTopLevelFormats) {
+      if (!isRecord(view)) view = {};
+      if (rawDefaultFormat !== undefined) view.defaultFormat = yjsValueToJson(rawDefaultFormat);
+      if (rawRowFormats !== undefined) view.rowFormats = yjsValueToJson(rawRowFormats);
+      if (rawColFormats !== undefined) view.colFormats = yjsValueToJson(rawColFormats);
+      if (rawFormatRunsByCol !== undefined) view.formatRunsByCol = yjsValueToJson(rawFormatRunsByCol);
+    }
+
+    if (isRecord(view)) {
+      meta.view = view;
     }
 
     metaById[id] = meta;
@@ -664,11 +687,11 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
 
         /** @type {Y.Map<any>[]} */
         const desiredEntries = [];
-        for (const sheetId of normalized.sheets.order) {
-          const meta = normalized.sheets.metaById[sheetId];
-          const existing = existingById.get(sheetId);
-          const entry = new Y.Map();
-          if (existing) {
+      for (const sheetId of normalized.sheets.order) {
+        const meta = normalized.sheets.metaById[sheetId];
+        const existing = existingById.get(sheetId);
+        const entry = new Y.Map();
+        if (existing) {
             for (const key of Array.from(existing.keys()).sort()) {
               if (
                 key === "id" ||
@@ -687,6 +710,76 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
           entry.set("id", sheetId);
           entry.set("name", meta?.name ?? null);
           if (meta?.view !== undefined) entry.set("view", structuredClone(meta.view));
+          // Normalize layered formatting + range-run metadata onto the top-level sheet entry.
+          //
+          // Collab schema prefers storing these fields as top-level keys so the binder and
+          // versioning diffs can observe them without needing to parse `view`.
+          //
+          // BranchService `DocumentState` stores them inside `meta.view`, so extract them here.
+          const view = meta?.view ?? null;
+          if (view && typeof view === "object") {
+            if (Object.prototype.hasOwnProperty.call(view, "defaultFormat")) {
+              entry.set("defaultFormat", structuredClone(view.defaultFormat));
+            } else {
+              entry.delete("defaultFormat");
+            }
+
+            if (Object.prototype.hasOwnProperty.call(view, "rowFormats")) {
+              const raw = view.rowFormats;
+              if (raw && typeof raw === "object") {
+                const map = new Y.Map();
+                for (const key of Object.keys(raw).sort()) {
+                  map.set(key, structuredClone(raw[key]));
+                }
+                entry.set("rowFormats", map);
+              } else {
+                entry.delete("rowFormats");
+              }
+            } else {
+              entry.delete("rowFormats");
+            }
+
+            if (Object.prototype.hasOwnProperty.call(view, "colFormats")) {
+              const raw = view.colFormats;
+              if (raw && typeof raw === "object") {
+                const map = new Y.Map();
+                for (const key of Object.keys(raw).sort()) {
+                  map.set(key, structuredClone(raw[key]));
+                }
+                entry.set("colFormats", map);
+              } else {
+                entry.delete("colFormats");
+              }
+            } else {
+              entry.delete("colFormats");
+            }
+
+            if (Object.prototype.hasOwnProperty.call(view, "formatRunsByCol")) {
+              const raw = view.formatRunsByCol;
+              const map = new Y.Map();
+              if (Array.isArray(raw)) {
+                for (const item of raw) {
+                  const col = Number(item?.col);
+                  if (!Number.isInteger(col) || col < 0) continue;
+                  const runs = Array.isArray(item?.runs) ? item.runs : [];
+                  map.set(String(col), structuredClone(runs));
+                }
+              } else if (raw && typeof raw === "object") {
+                // Be forgiving: accept legacy object encodings keyed by column.
+                for (const key of Object.keys(raw).sort()) {
+                  map.set(key, structuredClone(raw[key]));
+                }
+              }
+              entry.set("formatRunsByCol", map);
+            } else {
+              entry.delete("formatRunsByCol");
+            }
+          } else {
+            entry.delete("defaultFormat");
+            entry.delete("rowFormats");
+            entry.delete("colFormats");
+            entry.delete("formatRunsByCol");
+          }
           if (meta && "visibility" in meta) {
             if (meta.visibility === "visible" || meta.visibility === "hidden" || meta.visibility === "veryHidden") {
               entry.set("visibility", meta.visibility);

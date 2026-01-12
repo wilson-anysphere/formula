@@ -293,6 +293,98 @@ test("applyBranchStateToYjsDoc: drops legacy top-level axis sizes when applying 
   assert.equal(sheet1.get("rowHeights"), undefined);
 });
 
+test("branchStateFromYjsDoc: reads layered format defaults from top-level sheet metadata (defaultFormat/rowFormats/colFormats/formatRunsByCol)", () => {
+  const doc = new Y.Doc();
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+
+    sheet.set("defaultFormat", { font: { bold: true } });
+
+    const rowFormats = new Y.Map();
+    rowFormats.set("0", { font: { italic: true } });
+    sheet.set("rowFormats", rowFormats);
+
+    const colFormats = new Y.Map();
+    colFormats.set("0", { fill: { fgColor: "red" } });
+    sheet.set("colFormats", colFormats);
+
+    const runsByCol = new Y.Map();
+    runsByCol.set("0", [{ startRow: 0, endRowExclusive: 1, format: { numberFormat: "0%" } }]);
+    sheet.set("formatRunsByCol", runsByCol);
+
+    sheets.push([sheet]);
+  });
+
+  const state = branchStateFromYjsDoc(doc);
+  assert.deepEqual(state.sheets.metaById.Sheet1?.view?.defaultFormat, { font: { bold: true } });
+  assert.deepEqual(state.sheets.metaById.Sheet1?.view?.rowFormats, { "0": { font: { italic: true } } });
+  assert.deepEqual(state.sheets.metaById.Sheet1?.view?.colFormats, { "0": { fill: { fgColor: "red" } } });
+  assert.deepEqual(state.sheets.metaById.Sheet1?.view?.formatRunsByCol, [
+    { col: 0, runs: [{ startRow: 0, endRowExclusive: 1, format: { numberFormat: "0%" } }] },
+  ]);
+});
+
+test("applyBranchStateToYjsDoc: writes layered format defaults to top-level sheet metadata", () => {
+  const doc = new Y.Doc();
+
+  // Seed an entry with stale formatting so the apply path must overwrite/clear it.
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheet.set("defaultFormat", { font: { bold: false } });
+    const rowFormats = new Y.Map();
+    rowFormats.set("0", { font: { italic: false } });
+    sheet.set("rowFormats", rowFormats);
+    sheets.push([sheet]);
+  });
+
+  applyBranchStateToYjsDoc(doc, {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: {
+        Sheet1: {
+          id: "Sheet1",
+          name: "Sheet1",
+          view: {
+            frozenRows: 0,
+            frozenCols: 0,
+            defaultFormat: { font: { bold: true } },
+            rowFormats: { "0": { font: { italic: true } } },
+            colFormats: { "0": { fill: { fgColor: "red" } } },
+            formatRunsByCol: [{ col: 0, runs: [{ startRow: 0, endRowExclusive: 1, format: { numberFormat: "0%" } }] }],
+          },
+        },
+      },
+    },
+    cells: { Sheet1: {} },
+    namedRanges: {},
+    comments: {},
+  });
+
+  const sheet1 = doc.getArray("sheets").get(0);
+  assert.ok(sheet1 instanceof Y.Map);
+
+  assert.deepEqual(sheet1.get("defaultFormat"), { font: { bold: true } });
+
+  const rowFormats = sheet1.get("rowFormats");
+  assert.ok(rowFormats instanceof Y.Map);
+  assert.deepEqual(rowFormats.get("0"), { font: { italic: true } });
+
+  const colFormats = sheet1.get("colFormats");
+  assert.ok(colFormats instanceof Y.Map);
+  assert.deepEqual(colFormats.get("0"), { fill: { fgColor: "red" } });
+
+  const runsByCol = sheet1.get("formatRunsByCol");
+  assert.ok(runsByCol instanceof Y.Map);
+  assert.deepEqual(runsByCol.get("0"), [{ startRow: 0, endRowExclusive: 1, format: { numberFormat: "0%" } }]);
+});
+
 test("branchStateFromYjsDoc: prefers encrypted payloads over plaintext duplicates across legacy cell keys", () => {
   const enc = {
     v: 1,
