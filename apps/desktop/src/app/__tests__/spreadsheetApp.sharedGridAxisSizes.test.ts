@@ -162,4 +162,49 @@ describe("SpreadsheetApp shared-grid axis size sync", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("does not rebuild/apply sheet-view axis overrides on zoom changes", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div")
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect(app.getGridMode()).toBe("shared");
+
+      const sharedGrid = (app as any).sharedGrid;
+      expect(sharedGrid).toBeTruthy();
+      const renderer = sharedGrid.renderer;
+
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument() as any;
+      const view = doc.getSheetView(sheetId) ?? {};
+
+      (view as any).rowHeights = { "0": 30, "1": 31 };
+      (view as any).colWidths = { "0": 120, "1": 121 };
+      doc.model.setSheetView(sheetId, view);
+
+      // Apply once at the current zoom so the renderer has persisted overrides.
+      (app as any).syncSharedGridAxisSizesFromDocument();
+
+      const batchSpy = vi.spyOn(renderer, "applyAxisSizeOverrides");
+      batchSpy.mockClear();
+
+      // Zooming should scale the existing overrides; it should not rebuild/apply them via
+      // SpreadsheetApp's document sync path (which can be expensive with many overrides).
+      app.setZoom(2);
+      expect(batchSpy).not.toHaveBeenCalled();
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });
