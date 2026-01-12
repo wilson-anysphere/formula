@@ -265,7 +265,13 @@ To open the built-in Extensions panel (and trigger the lazy extension host boot)
 ### Marketplace base URL (Desktop)
 
 The marketplace base URL is chosen by `getMarketplaceBaseUrl()` (`apps/desktop/src/panels/marketplace/getMarketplaceBaseUrl.ts`).
-In dev, you can override it via `localStorage["formula:marketplace:baseUrl"]` and reload. You can provide either:
+
+You can override it in two ways:
+
+- **Runtime (DevTools)**: `localStorage["formula:marketplace:baseUrl"]` and reload.
+- **Build/runtime config**: set `VITE_FORMULA_MARKETPLACE_BASE_URL` (used by Vite / packaged desktop builds).
+
+For the `localStorage` override, you can provide either:
 
 - an **origin** (`https://marketplace.formula.app`) — it will be normalized to `.../api`, or
 - the explicit API base URL (`https://marketplace.formula.app/api`).
@@ -273,6 +279,12 @@ In dev, you can override it via `localStorage["formula:marketplace:baseUrl"]` an
 ```js
 localStorage.setItem("formula:marketplace:baseUrl", "https://marketplace.formula.app/api");
 location.reload();
+```
+
+Example with an env var (for a local marketplace server):
+
+```bash
+VITE_FORMULA_MARKETPLACE_BASE_URL=http://127.0.0.1:8787 pnpm -C apps/desktop dev
 ```
 
 For running a local marketplace server (and registering a publisher for test publishes), see
