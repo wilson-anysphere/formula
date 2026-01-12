@@ -2812,6 +2812,22 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
         );
     }
 
+    #[cfg(not(feature = "parquet"))]
+    #[test]
+    fn read_workbook_errors_on_parquet_when_feature_disabled() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../packages/data-io/test/fixtures/simple.parquet"
+        ));
+
+        let err = read_workbook_blocking(fixture_path).expect_err("expected parquet import to fail");
+        assert!(
+            err.to_string()
+                .contains("parquet support is not enabled in this build"),
+            "unexpected error: {err}"
+        );
+    }
+
     #[test]
     fn reads_xlsb_populates_defined_names() {
         let fixture_path = Path::new(concat!(

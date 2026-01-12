@@ -53,6 +53,10 @@ pub(crate) fn ensure_xlsm_content_types(
     const WORKBOOK_PART_NAME: &str = "/xl/workbook.xml";
     const WORKBOOK_MACRO_CONTENT_TYPE: &str =
         "application/vnd.ms-excel.sheet.macroEnabled.main+xml";
+    const WORKBOOK_TEMPLATE_CONTENT_TYPE: &str =
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml";
+    const WORKBOOK_MACRO_TEMPLATE_CONTENT_TYPE: &str =
+        "application/vnd.ms-excel.template.macroEnabled.main+xml";
     const VBA_PART_NAME: &str = "/xl/vbaProject.bin";
     const VBA_CONTENT_TYPE: &str = "application/vnd.ms-office.vbaProject";
     const VBA_SIGNATURE_PART_NAME: &str = "/xl/vbaProjectSignature.bin";
@@ -119,11 +123,19 @@ pub(crate) fn ensure_xlsm_content_types(
         let desired_content_type = match part_name.as_deref() {
             Some(part) if part_name_matches(part, WORKBOOK_PART_NAME) => {
                 *has_workbook_override = true;
-                // If the workbook already advertises a macro-enabled content type (for example
-                // `.xltm` templates or `.xlam` add-ins), keep it. Otherwise, upgrade to the default
-                // XLSM workbook type.
+                // Preserve any macro-enabled workbook kind (`.xlsm`, `.xltm`, `.xlam`) rather than
+                // unconditionally forcing `.xlsm`. This allows callers to patch
+                // `[Content_Types].xml` for templates/add-ins and still rely on macro repair to
+                // inject the other required VBA overrides.
                 match content_type.as_deref() {
                     Some(existing) if is_macro_enabled_workbook_content_type(existing) => None,
+                    Some(existing)
+                        if existing
+                            .trim()
+                            .eq_ignore_ascii_case(WORKBOOK_TEMPLATE_CONTENT_TYPE) =>
+                    {
+                        Some(WORKBOOK_MACRO_TEMPLATE_CONTENT_TYPE)
+                    }
                     _ => Some(WORKBOOK_MACRO_CONTENT_TYPE),
                 }
             }
