@@ -4,10 +4,9 @@ use tauri::{App, AppHandle, Emitter, Manager};
 
 use desktop::tray_status::TrayStatusState;
 
-// Keep these tray-menu item ids distinct from the menu bar `ITEM_*` constants in
-// `menu.rs`. The desktop capability tests scan Rust sources and build a naive
-// `const name -> value` map to verify emitted/listened events are allowlisted; reusing
-// the same identifiers across modules can confuse those checks.
+// Note: `menu.rs` uses `ITEM_*` constants for menu-bar events. Keep these tray-only
+// IDs distinct so static analysis (see `eventPermissions.vitest.ts`) doesn't confuse
+// tray menu item ids with emitted event names.
 const TRAY_ITEM_NEW: &str = "new";
 const TRAY_ITEM_OPEN: &str = "open";
 const TRAY_ITEM_CHECK_UPDATES: &str = "check_updates";
