@@ -3176,14 +3176,60 @@ fn odd_coupon_bond_functions_reject_non_finite_numeric_inputs() {
         other => panic!("expected #NUM!, got {other:?}"),
     }
 
+    // Infinity in yld.
+    match sheet.eval("=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,A1,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+
+    // NaN in redemption.
+    match sheet.eval("=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,A2,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+
+    // NaN in frequency.
+    match sheet.eval("=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,A2,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+
+    // NaN in basis.
+    match sheet.eval("=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1,A2)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+
     // NaN in yield.
     match sheet.eval("=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,A2,100,1,0)") {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
 
+    // Infinity in redemption.
+    match sheet.eval("=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,A1,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+
     // Infinity in price.
     match sheet.eval("=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,A1,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+
+    // NaN in price.
+    match sheet.eval("=ODDFYIELD(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,A2,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+
+    // ODDLYIELD should also reject non-finite numeric args.
+    match sheet.eval("=ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,A1,100,1,0)") {
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval("=ODDLYIELD(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,A2,100,1,0)") {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM!, got {other:?}"),
     }
@@ -3199,6 +3245,16 @@ fn odd_coupon_bond_functions_return_value_for_unparseable_date_text() {
     }
 
     match sheet.eval(r#"=ODDLPRICE(DATE(2020,1,1),"nope",DATE(2024,7,1),0.05,0.05,100,2)"#) {
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+
+    match sheet.eval(r#"=ODDFYIELD("nope",DATE(2025,1,1),DATE(2019,1,1),DATE(2020,7,1),0.05,95,100,2)"#) {
+        Value::Error(ErrorKind::Value) => {}
+        other => panic!("expected #VALUE!, got {other:?}"),
+    }
+
+    match sheet.eval(r#"=ODDLYIELD(DATE(2020,1,1),"nope",DATE(2024,7,1),0.05,95,100,2)"#) {
         Value::Error(ErrorKind::Value) => {}
         other => panic!("expected #VALUE!, got {other:?}"),
     }
