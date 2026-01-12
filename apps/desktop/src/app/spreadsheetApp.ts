@@ -8331,8 +8331,20 @@ export class SpreadsheetApp {
     if (this.sheetNameResolver?.getSheetNameById(trimmed)) return trimmed;
 
     // Fallback to sheet ids to keep legacy formulas (and test fixtures) working.
+    // Avoid allocating a fresh array via `getSheetIds()` in hot paths (formula evaluation).
+    const sheets: Map<string, unknown> | undefined = (this.document as any)?.model?.sheets;
+    if (sheets && typeof sheets.keys === "function") {
+      if (sheets.has(trimmed)) return trimmed;
+      const lower = trimmed.toLowerCase();
+      for (const id of sheets.keys()) {
+        if (typeof id === "string" && id.toLowerCase() === lower) return id;
+      }
+      return null;
+    }
+
     const knownSheets = this.document.getSheetIds();
-    return knownSheets.find((id) => id.toLowerCase() === trimmed.toLowerCase()) ?? null;
+    const lower = trimmed.toLowerCase();
+    return knownSheets.find((id) => id.toLowerCase() === lower) ?? null;
   }
 
   private resolveSheetDisplayNameById(sheetId: string): string {
