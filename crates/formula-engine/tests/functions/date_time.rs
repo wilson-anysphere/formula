@@ -96,6 +96,12 @@ fn days360_matches_excel_examples() {
     assert_eq!(date_time::days360(start, end, false, system).unwrap(), 30);
     assert_eq!(date_time::days360(start, end, true, system).unwrap(), 29);
 
+    // In leap years, Feb 28 is not month-end, so both methods treat it as day 28.
+    let start = ymd_to_serial(ExcelDate::new(2020, 1, 31), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2020, 2, 28), system).unwrap();
+    assert_eq!(date_time::days360(start, end, false, system).unwrap(), 28);
+    assert_eq!(date_time::days360(start, end, true, system).unwrap(), 28);
+
     let start = ymd_to_serial(ExcelDate::new(2019, 1, 31), system).unwrap();
     let end = ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap();
     assert_eq!(date_time::days360(start, end, false, system).unwrap(), 30);
@@ -184,6 +190,21 @@ fn yearfrac_respects_basis_conventions() {
     let aa4 = date_time::yearfrac(a, a4, 1, system).unwrap();
     assert!((aa4 - 4.0).abs() < 1e-12);
     assert!((aa4 + date_time::yearfrac(a4, a, 1, system).unwrap()).abs() < 1e-12);
+
+    // Partial-year spans should use the actual year length between anniversaries (365 vs 366).
+    let f = ymd_to_serial(ExcelDate::new(2019, 3, 1), system).unwrap();
+    let g = ymd_to_serial(ExcelDate::new(2020, 2, 29), system).unwrap();
+    let fg = date_time::yearfrac(f, g, 1, system).unwrap();
+    let expected_fg = 365.0 / 366.0;
+    assert!((fg - expected_fg).abs() < 1e-12);
+    assert!((fg + date_time::yearfrac(g, f, 1, system).unwrap()).abs() < 1e-12);
+
+    let h = ymd_to_serial(ExcelDate::new(2020, 3, 1), system).unwrap();
+    let i = ymd_to_serial(ExcelDate::new(2021, 2, 28), system).unwrap();
+    let hi = date_time::yearfrac(h, i, 1, system).unwrap();
+    let expected_hi = 364.0 / 365.0;
+    assert!((hi - expected_hi).abs() < 1e-12);
+    assert!((hi + date_time::yearfrac(i, h, 1, system).unwrap()).abs() < 1e-12);
 
     assert_eq!(date_time::yearfrac(start, end, 9, system).unwrap_err(), ExcelError::Num);
 }
