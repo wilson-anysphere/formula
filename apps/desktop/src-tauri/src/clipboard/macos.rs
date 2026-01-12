@@ -93,6 +93,29 @@ unsafe fn pasteboard_string_for_type(pasteboard: *mut AnyObject, ty: &AnyObject)
     nsstring_to_rust_string(ns_str)
 }
 
+unsafe fn pasteboard_string_for_type_limited(
+    pasteboard: *mut AnyObject,
+    ty: &AnyObject,
+    max_bytes: usize,
+) -> Option<String> {
+    // -[NSPasteboard stringForType:]
+    let ns_str: *mut AnyObject = objc2::msg_send![pasteboard, stringForType: ty];
+    if ns_str.is_null() {
+        return None;
+    }
+
+    // -[NSString lengthOfBytesUsingEncoding:]
+    let len: usize = objc2::msg_send![
+        ns_str,
+        lengthOfBytesUsingEncoding: 4usize /* NSUTF8StringEncoding */
+    ];
+    if len > max_bytes {
+        return None;
+    }
+
+    nsstring_to_rust_string(ns_str)
+}
+
 unsafe fn nsdata_to_vec(data: *mut AnyObject, max_bytes: usize) -> Vec<u8> {
     // -[NSData bytes], -[NSData length]
     let bytes_ptr: *const c_void = objc2::msg_send![data, bytes];
@@ -144,10 +167,11 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
                 .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
         });
 
-        let html = pasteboard_string_for_type(pasteboard, &*ty_html).or_else(|| {
-            pasteboard_data_for_type(pasteboard, &*ty_html, MAX_RICH_TEXT_BYTES)
-                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-        });
+        let html = pasteboard_string_for_type_limited(pasteboard, &*ty_html, MAX_RICH_TEXT_BYTES)
+            .or_else(|| {
+                pasteboard_data_for_type(pasteboard, &*ty_html, MAX_RICH_TEXT_BYTES)
+                    .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            });
 
         let rtf = pasteboard_data_for_type(pasteboard, &*ty_rtf, MAX_RICH_TEXT_BYTES)
             .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
