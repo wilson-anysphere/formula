@@ -45,10 +45,12 @@ function normalizeClipboardHtml(html) {
   // Some producers include null padding/terminators.
   //
   // Important: strip trailing NULs eagerly (so we don't end up with odd characters at the end of
-  // otherwise-valid markup), but avoid stripping *leading* NULs here. Some native clipboard bridges
-  // include those leading bytes in CF_HTML offset calculations; removing them up-front would shift
-  // StartHTML/StartFragment offsets and break extraction. Leading NULs are still removed later via
-  // `stripToMarkup(...)`, which slices from the first HTML tag.
+  // otherwise-valid markup), but keep *leading* NULs for the first CF_HTML slicing attempt. Some
+  // native clipboard bridges include those leading bytes in CF_HTML offset calculations; removing
+  // them up-front would shift StartHTML/StartFragment offsets and break extraction.
+  //
+  // When we do have leading NULs, we also try a secondary slicing attempt with them stripped to
+  // tolerate producers that *don't* include them in offset math.
   const input = html.replace(/\u0000+$/, "");
 
   const findStartOfMarkup = (s) => {
@@ -95,14 +97,6 @@ function normalizeClipboardHtml(html) {
     return null;
   };
 
-  /** @type {Uint8Array | null | undefined} */
-  let cachedUtf8Bytes;
-  const getUtf8Bytes = () => {
-    if (cachedUtf8Bytes !== undefined) return cachedUtf8Bytes;
-    cachedUtf8Bytes = encodeUtf8(input);
-    return cachedUtf8Bytes;
-  };
-
   /** @type {TextDecoder | null | undefined} */
   let cachedUtf8Decoder;
   const getUtf8Decoder = () => {
@@ -129,28 +123,54 @@ function normalizeClipboardHtml(html) {
     return null;
   };
 
-  const safeSliceUtf8 = (start, end) => {
-    if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
-    if (start < 0 || end <= start) return null;
-    const bytes = getUtf8Bytes();
-    if (!bytes || start >= bytes.length) return null;
-    // Some producers include trailing NUL padding in their offset calculations. When we strip those
-    // NULs, EndHTML/EndFragment can end up slightly out-of-bounds. Clamp to the available byte
-    // length so we can still honor an otherwise-correct Start* offset.
-    const clampedEnd = Math.min(end, bytes.length);
-    if (clampedEnd <= start) return null;
-    const decoded = decodeUtf8(bytes.subarray(start, clampedEnd));
-    return typeof decoded === "string" ? decoded : null;
+  /**
+   * Create offset slicers bound to a particular source string.
+   *
+   * @param {string} source
+   */
+  const createSlicers = (source) => {
+    /** @type {Uint8Array | null | undefined} */
+    let cachedUtf8Bytes;
+    const getUtf8Bytes = () => {
+      if (cachedUtf8Bytes !== undefined) return cachedUtf8Bytes;
+      cachedUtf8Bytes = encodeUtf8(source);
+      return cachedUtf8Bytes;
+    };
+
+    return {
+      safeSliceUtf8(start, end) {
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+        if (start < 0 || end <= start) return null;
+
+        const bytes = getUtf8Bytes();
+        if (!bytes || start >= bytes.length) return null;
+
+        // Some producers include trailing NUL padding in their offset calculations. When we strip those
+        // NULs, EndHTML/EndFragment can end up slightly out-of-bounds. Clamp to the available byte
+        // length so we can still honor an otherwise-correct Start* offset.
+        const clampedEnd = Math.min(end, bytes.length);
+        if (clampedEnd <= start) return null;
+
+        const decoded = decodeUtf8(bytes.subarray(start, clampedEnd));
+        return typeof decoded === "string" ? decoded : null;
+      },
+
+      safeSliceCodeUnits(start, end) {
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+        if (start < 0 || end <= start) return null;
+        if (start >= source.length) return null;
+
+        const clampedEnd = Math.min(end, source.length);
+        if (clampedEnd <= start) return null;
+
+        return source.slice(start, clampedEnd);
+      },
+    };
   };
 
-  const safeSliceCodeUnits = (start, end) => {
-    if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
-    if (start < 0 || end <= start) return null;
-    if (start >= input.length) return null;
-    const clampedEnd = Math.min(end, input.length);
-    if (clampedEnd <= start) return null;
-    return input.slice(start, clampedEnd);
-  };
+  const baseSlicers = createSlicers(input);
+  const inputNoLeadingNuls = input.replace(/^\u0000+/, "");
+  const altSlicers = inputNoLeadingNuls !== input ? createSlicers(inputNoLeadingNuls) : null;
 
   const containsCompleteTable = (s) => /<table\b[\s\S]*?<\/table>/i.test(s);
 
@@ -159,12 +179,14 @@ function normalizeClipboardHtml(html) {
     [startFragment, endFragment],
     [startHtml, endHtml],
   ]) {
-    for (const candidate of [safeSliceUtf8(start, end), safeSliceCodeUnits(start, end)]) {
-      if (!candidate) continue;
-      const stripped = stripToMarkup(candidate);
-      // Offsets can be "valid" but still wrong (e.g. truncated). Only accept them when they
-      // contain a full table element so downstream parsing doesn't regress.
-      if (containsCompleteTable(stripped)) return stripped;
+    for (const slicers of altSlicers ? [baseSlicers, altSlicers] : [baseSlicers]) {
+      for (const candidate of [slicers.safeSliceUtf8(start, end), slicers.safeSliceCodeUnits(start, end)]) {
+        if (!candidate) continue;
+        const stripped = stripToMarkup(candidate);
+        // Offsets can be "valid" but still wrong (e.g. truncated). Only accept them when they
+        // contain a full table element so downstream parsing doesn't regress.
+        if (containsCompleteTable(stripped)) return stripped;
+      }
     }
   }
 
