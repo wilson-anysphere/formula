@@ -24,6 +24,57 @@ export interface CellChange {
 }
 
 /**
+ * Structural edit operation applied with Excel-like semantics.
+ *
+ * Notes:
+ * - `row` / `col` are 0-indexed (engine coordinates).
+ * - `address` / `range` use A1 notation (e.g. `A1`, `A1:B2`).
+ */
+export type EditOp =
+  | { type: "InsertRows"; sheet: string; row: number; count: number }
+  | { type: "DeleteRows"; sheet: string; row: number; count: number }
+  | { type: "InsertCols"; sheet: string; col: number; count: number }
+  | { type: "DeleteCols"; sheet: string; col: number; count: number }
+  | { type: "InsertCellsShiftRight"; sheet: string; range: string }
+  | { type: "InsertCellsShiftDown"; sheet: string; range: string }
+  | { type: "DeleteCellsShiftLeft"; sheet: string; range: string }
+  | { type: "DeleteCellsShiftUp"; sheet: string; range: string }
+  | { type: "MoveRange"; sheet: string; src: string; dstTopLeft: string }
+  | { type: "CopyRange"; sheet: string; src: string; dstTopLeft: string }
+  | { type: "Fill"; sheet: string; src: string; dst: string };
+
+export interface EditCellSnapshot {
+  value: CellScalar;
+  formula?: string;
+}
+
+export interface EditCellChange {
+  sheet: string;
+  address: string;
+  before?: EditCellSnapshot;
+  after?: EditCellSnapshot;
+}
+
+export interface EditMovedRange {
+  sheet: string;
+  from: string;
+  to: string;
+}
+
+export interface EditFormulaRewrite {
+  sheet: string;
+  address: string;
+  before: string;
+  after: string;
+}
+
+export interface EditResult {
+  changedCells: EditCellChange[];
+  movedRanges: EditMovedRange[];
+  formulaRewrites: EditFormulaRewrite[];
+}
+
+/**
  * Span in a formula string.
  *
  * Offsets are expressed as **UTF-16 code unit** indices (the same indexing used

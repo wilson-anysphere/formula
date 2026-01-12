@@ -17,6 +17,7 @@ type WasmWorkbookInstance = {
   getRange(range: string, sheet?: string): unknown;
   setRange(range: string, values: CellScalar[][], sheet?: string): void;
   recalculate(sheet?: string): unknown;
+  applyOperation?: (op: unknown) => unknown;
   setSheetDimensions?: (sheet: string, rows: number, cols: number) => void;
   getSheetDimensions?: (sheet: string) => { rows: number; cols: number };
   toJson(): string;
@@ -371,6 +372,13 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               break;
             case "recalculate":
               result = normalizeCellChanges(wb.recalculate(params.sheet));
+              break;
+            case "applyOperation":
+              if (typeof (wb as any).applyOperation === "function") {
+                result = cloneToPlainData((wb as any).applyOperation(params.op));
+              } else {
+                throw new Error("applyOperation: WasmWorkbook.applyOperation is not available in this WASM build");
+              }
               break;
             default:
               throw new Error(`unknown method: ${req.method}`);

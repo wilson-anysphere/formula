@@ -2,6 +2,8 @@ import type {
   CellChange,
   CellData,
   CellScalar,
+  EditOp,
+  EditResult,
   FormulaPartialParseResult,
   FormulaToken,
   RpcOptions,
@@ -71,6 +73,14 @@ export interface EngineClient {
    */
   setSheetDimensions(sheet: string, rows: number, cols: number, options?: RpcOptions): Promise<void>;
   getSheetDimensions(sheet: string, options?: RpcOptions): Promise<{ rows: number; cols: number }>;
+
+  /**
+   * Apply an Excel-like structural edit operation (insert/delete rows/cols, move/copy/fill).
+   *
+   * Note: does **not** implicitly recalculate. Call `recalculate()` explicitly to
+   * update cached formula results.
+   */
+  applyOperation(op: EditOp, options?: RpcOptions): Promise<EditResult>;
 
   /**
    * Tokenize a formula string for editor tooling (syntax highlighting, etc).
@@ -186,6 +196,7 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => connected.setSheetDimensions(sheet, rows, cols, rpcOptions)),
     getSheetDimensions: async (sheet, rpcOptions) =>
       await withEngine((connected) => connected.getSheetDimensions(sheet, rpcOptions)),
+    applyOperation: async (op, rpcOptions) => await withEngine((connected) => connected.applyOperation(op, rpcOptions)),
     lexFormula: async (formula, options, rpcOptions) =>
       await withEngine((connected) => connected.lexFormula(formula, options, rpcOptions)),
     parseFormulaPartial: async (formula, cursor, options, rpcOptions) =>

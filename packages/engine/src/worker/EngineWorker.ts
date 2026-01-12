@@ -2,6 +2,8 @@ import type {
   CellChange,
   CellData,
   CellScalar,
+  EditOp,
+  EditResult,
   FormulaPartialParseResult,
   FormulaToken,
   InitMessage,
@@ -209,6 +211,11 @@ export class EngineWorker {
   async recalculate(sheet?: string, options?: RpcOptions): Promise<CellChange[]> {
     await this.flush();
     return (await this.invoke("recalculate", { sheet }, options)) as CellChange[];
+  }
+
+  async applyOperation(op: EditOp, options?: RpcOptions): Promise<EditResult> {
+    await this.flush();
+    return (await this.invoke("applyOperation", { op }, options)) as EditResult;
   }
 
   /**

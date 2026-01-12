@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use formula_engine::{
+    lex, EditError as EngineEditError, Engine, EditOp as EngineEditOp,
+    EditResult as EngineEditResult, ErrorKind, NameDefinition, NameScope, ParseOptions, TokenKind,
+    Value as EngineValue,
+};
 use formula_engine::locale::{
     canonicalize_formula, get_locale, FormulaLocale, ValueLocaleConfig, EN_US,
-};
-use formula_engine::{
-    lex, Engine, ErrorKind, NameDefinition, NameScope, ParseOptions, TokenKind, Value as EngineValue,
 };
 use formula_model::{
     display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range, EXCEL_MAX_COLS,
@@ -151,6 +153,15 @@ fn parse_options_from_js(options: Option<JsValue>) -> Result<ParseOptions, JsVal
     serde_wasm_bindgen::from_value(value).map_err(|err| js_err(err.to_string()))
 }
 
+fn edit_error_to_string(err: EngineEditError) -> String {
+    match err {
+        EngineEditError::SheetNotFound(sheet) => format!("sheet not found: {sheet}"),
+        EngineEditError::InvalidCount => "invalid count".to_string(),
+        EngineEditError::InvalidRange => "invalid range".to_string(),
+        EngineEditError::OverlappingMove => "overlapping move".to_string(),
+        EngineEditError::Engine(message) => message,
+    }
+}
 #[cfg(target_arch = "wasm32")]
 fn ensure_rust_constructors_run() {
     use std::sync::Once;
@@ -327,6 +338,108 @@ struct WorkbookState {
     /// also blank, so we keep the previous value here and explicitly diff it against the post-recalc
     /// value.
     pending_formula_baselines: BTreeMap<FormulaCellKey, JsonValue>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type")]
+enum EditOpDto {
+    InsertRows {
+        sheet: String,
+        row: u32,
+        count: u32,
+    },
+    DeleteRows {
+        sheet: String,
+        row: u32,
+        count: u32,
+    },
+    InsertCols {
+        sheet: String,
+        col: u32,
+        count: u32,
+    },
+    DeleteCols {
+        sheet: String,
+        col: u32,
+        count: u32,
+    },
+    InsertCellsShiftRight {
+        sheet: String,
+        range: String,
+    },
+    InsertCellsShiftDown {
+        sheet: String,
+        range: String,
+    },
+    DeleteCellsShiftLeft {
+        sheet: String,
+        range: String,
+    },
+    DeleteCellsShiftUp {
+        sheet: String,
+        range: String,
+    },
+    MoveRange {
+        sheet: String,
+        src: String,
+        #[serde(rename = "dstTopLeft")]
+        dst_top_left: String,
+    },
+    CopyRange {
+        sheet: String,
+        src: String,
+        #[serde(rename = "dstTopLeft")]
+        dst_top_left: String,
+    },
+    Fill {
+        sheet: String,
+        src: String,
+        dst: String,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct EditResultDto {
+    changed_cells: Vec<EditCellChangeDto>,
+    moved_ranges: Vec<EditMovedRangeDto>,
+    formula_rewrites: Vec<EditFormulaRewriteDto>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct EditCellChangeDto {
+    sheet: String,
+    address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    before: Option<EditCellSnapshotDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    after: Option<EditCellSnapshotDto>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct EditCellSnapshotDto {
+    value: JsonValue,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    formula: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct EditMovedRangeDto {
+    sheet: String,
+    from: String,
+    to: String,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct EditFormulaRewriteDto {
+    sheet: String,
+    address: String,
+    before: String,
+    after: String,
 }
 
 impl WorkbookState {
@@ -597,6 +710,388 @@ impl WorkbookState {
             .collect();
 
         Ok(changes)
+    }
+
+    fn edit_op_from_dto(&mut self, dto: EditOpDto) -> Result<EngineEditOp, JsValue> {
+        match dto {
+            EditOpDto::InsertRows { sheet, row, count } => {
+                let sheet = self.ensure_sheet(&sheet);
+                Ok(EngineEditOp::InsertRows { sheet, row, count })
+            }
+            EditOpDto::DeleteRows { sheet, row, count } => {
+                let sheet = self.ensure_sheet(&sheet);
+                Ok(EngineEditOp::DeleteRows { sheet, row, count })
+            }
+            EditOpDto::InsertCols { sheet, col, count } => {
+                let sheet = self.ensure_sheet(&sheet);
+                Ok(EngineEditOp::InsertCols { sheet, col, count })
+            }
+            EditOpDto::DeleteCols { sheet, col, count } => {
+                let sheet = self.ensure_sheet(&sheet);
+                Ok(EngineEditOp::DeleteCols { sheet, col, count })
+            }
+            EditOpDto::InsertCellsShiftRight { sheet, range } => {
+                let sheet = self.ensure_sheet(&sheet);
+                let range = Self::parse_range(&range)?;
+                Ok(EngineEditOp::InsertCellsShiftRight { sheet, range })
+            }
+            EditOpDto::InsertCellsShiftDown { sheet, range } => {
+                let sheet = self.ensure_sheet(&sheet);
+                let range = Self::parse_range(&range)?;
+                Ok(EngineEditOp::InsertCellsShiftDown { sheet, range })
+            }
+            EditOpDto::DeleteCellsShiftLeft { sheet, range } => {
+                let sheet = self.ensure_sheet(&sheet);
+                let range = Self::parse_range(&range)?;
+                Ok(EngineEditOp::DeleteCellsShiftLeft { sheet, range })
+            }
+            EditOpDto::DeleteCellsShiftUp { sheet, range } => {
+                let sheet = self.ensure_sheet(&sheet);
+                let range = Self::parse_range(&range)?;
+                Ok(EngineEditOp::DeleteCellsShiftUp { sheet, range })
+            }
+            EditOpDto::MoveRange {
+                sheet,
+                src,
+                dst_top_left,
+            } => {
+                let sheet = self.ensure_sheet(&sheet);
+                let src = Self::parse_range(&src)?;
+                let dst_top_left = Self::parse_address(&dst_top_left)?;
+                Ok(EngineEditOp::MoveRange {
+                    sheet,
+                    src,
+                    dst_top_left,
+                })
+            }
+            EditOpDto::CopyRange {
+                sheet,
+                src,
+                dst_top_left,
+            } => {
+                let sheet = self.ensure_sheet(&sheet);
+                let src = Self::parse_range(&src)?;
+                let dst_top_left = Self::parse_address(&dst_top_left)?;
+                Ok(EngineEditOp::CopyRange {
+                    sheet,
+                    src,
+                    dst_top_left,
+                })
+            }
+            EditOpDto::Fill { sheet, src, dst } => {
+                let sheet = self.ensure_sheet(&sheet);
+                let src = Self::parse_range(&src)?;
+                let dst = Self::parse_range(&dst)?;
+                Ok(EngineEditOp::Fill { sheet, src, dst })
+            }
+        }
+    }
+
+    fn remap_pending_keys_for_edit(&mut self, op: &EngineEditOp) {
+        fn remap_key(key: &FormulaCellKey, op: &EngineEditOp) -> Option<FormulaCellKey> {
+            match op {
+                EngineEditOp::InsertRows { sheet, row, count } if &key.sheet == sheet => {
+                    if key.row >= *row {
+                        Some(FormulaCellKey {
+                            sheet: key.sheet.clone(),
+                            row: key.row + *count,
+                            col: key.col,
+                        })
+                    } else {
+                        Some(key.clone())
+                    }
+                }
+                EngineEditOp::DeleteRows { sheet, row, count } if &key.sheet == sheet => {
+                    let start = *row;
+                    let end_exclusive = row.saturating_add(*count);
+                    if key.row >= start && key.row < end_exclusive {
+                        None
+                    } else if key.row >= end_exclusive {
+                        Some(FormulaCellKey {
+                            sheet: key.sheet.clone(),
+                            row: key.row - *count,
+                            col: key.col,
+                        })
+                    } else {
+                        Some(key.clone())
+                    }
+                }
+                EngineEditOp::InsertCols { sheet, col, count } if &key.sheet == sheet => {
+                    if key.col >= *col {
+                        Some(FormulaCellKey {
+                            sheet: key.sheet.clone(),
+                            row: key.row,
+                            col: key.col + *count,
+                        })
+                    } else {
+                        Some(key.clone())
+                    }
+                }
+                EngineEditOp::DeleteCols { sheet, col, count } if &key.sheet == sheet => {
+                    let start = *col;
+                    let end_exclusive = col.saturating_add(*count);
+                    if key.col >= start && key.col < end_exclusive {
+                        None
+                    } else if key.col >= end_exclusive {
+                        Some(FormulaCellKey {
+                            sheet: key.sheet.clone(),
+                            row: key.row,
+                            col: key.col - *count,
+                        })
+                    } else {
+                        Some(key.clone())
+                    }
+                }
+                EngineEditOp::InsertCellsShiftRight { sheet, range } if &key.sheet == sheet => {
+                    let width = range.width();
+                    if key.row >= range.start.row
+                        && key.row <= range.end.row
+                        && key.col >= range.start.col
+                    {
+                        Some(FormulaCellKey {
+                            sheet: key.sheet.clone(),
+                            row: key.row,
+                            col: key.col + width,
+                        })
+                    } else {
+                        Some(key.clone())
+                    }
+                }
+                EngineEditOp::InsertCellsShiftDown { sheet, range } if &key.sheet == sheet => {
+                    let height = range.height();
+                    if key.col >= range.start.col
+                        && key.col <= range.end.col
+                        && key.row >= range.start.row
+                    {
+                        Some(FormulaCellKey {
+                            sheet: key.sheet.clone(),
+                            row: key.row + height,
+                            col: key.col,
+                        })
+                    } else {
+                        Some(key.clone())
+                    }
+                }
+                EngineEditOp::DeleteCellsShiftLeft { sheet, range } if &key.sheet == sheet => {
+                    let width = range.width();
+                    if key.row >= range.start.row && key.row <= range.end.row {
+                        if key.col >= range.start.col && key.col <= range.end.col {
+                            None
+                        } else if key.col > range.end.col {
+                            Some(FormulaCellKey {
+                                sheet: key.sheet.clone(),
+                                row: key.row,
+                                col: key.col - width,
+                            })
+                        } else {
+                            Some(key.clone())
+                        }
+                    } else {
+                        Some(key.clone())
+                    }
+                }
+                EngineEditOp::DeleteCellsShiftUp { sheet, range } if &key.sheet == sheet => {
+                    let height = range.height();
+                    if key.col >= range.start.col && key.col <= range.end.col {
+                        if key.row >= range.start.row && key.row <= range.end.row {
+                            None
+                        } else if key.row > range.end.row {
+                            Some(FormulaCellKey {
+                                sheet: key.sheet.clone(),
+                                row: key.row - height,
+                                col: key.col,
+                            })
+                        } else {
+                            Some(key.clone())
+                        }
+                    } else {
+                        Some(key.clone())
+                    }
+                }
+                EngineEditOp::MoveRange {
+                    sheet,
+                    src,
+                    dst_top_left,
+                } if &key.sheet == sheet => {
+                    let delta_row = dst_top_left.row as i64 - src.start.row as i64;
+                    let delta_col = dst_top_left.col as i64 - src.start.col as i64;
+
+                    let dst_end = CellRef::new(
+                        dst_top_left.row + src.height().saturating_sub(1),
+                        dst_top_left.col + src.width().saturating_sub(1),
+                    );
+                    let dst = Range::new(*dst_top_left, dst_end);
+
+                    let in_src = key.row >= src.start.row
+                        && key.row <= src.end.row
+                        && key.col >= src.start.col
+                        && key.col <= src.end.col;
+                    if in_src {
+                        let row = (key.row as i64 + delta_row).max(0) as u32;
+                        let col = (key.col as i64 + delta_col).max(0) as u32;
+                        return Some(FormulaCellKey {
+                            sheet: key.sheet.clone(),
+                            row,
+                            col,
+                        });
+                    }
+
+                    // Destination range contents are overwritten by the move.
+                    let in_dst =
+                        key.row >= dst.start.row && key.row <= dst.end.row && key.col >= dst.start.col && key.col <= dst.end.col;
+                    if in_dst {
+                        return None;
+                    }
+
+                    Some(key.clone())
+                }
+                _ => Some(key.clone()),
+            }
+        }
+
+        let mut next_spills = BTreeSet::new();
+        for key in std::mem::take(&mut self.pending_spill_clears) {
+            if let Some(remapped) = remap_key(&key, op) {
+                next_spills.insert(remapped);
+            }
+        }
+        self.pending_spill_clears = next_spills;
+
+        let mut next_formulas = BTreeMap::new();
+        for (key, baseline) in std::mem::take(&mut self.pending_formula_baselines) {
+            if let Some(remapped) = remap_key(&key, op) {
+                // If multiple keys map to the same cell, keep the earliest baseline.
+                next_formulas.entry(remapped).or_insert(baseline);
+            }
+        }
+        self.pending_formula_baselines = next_formulas;
+    }
+
+    fn apply_operation_internal(&mut self, dto: EditOpDto) -> Result<EditResultDto, JsValue> {
+        let op = self.edit_op_from_dto(dto)?;
+        self.remap_pending_keys_for_edit(&op);
+
+        let result: EngineEditResult = self
+            .engine
+            .apply_operation(op)
+            .map_err(|err| js_err(edit_error_to_string(err)))?;
+
+        // Update the persisted input map used by `toJson` and `getCell.input`.
+        for change in &result.changed_cells {
+            let sheet = self.ensure_sheet(&change.sheet);
+            let address = change.cell.to_a1();
+            let sheet_cells = self
+                .sheets
+                .get_mut(&sheet)
+                .expect("sheet just ensured must exist");
+
+            match &change.after {
+                None => {
+                    sheet_cells.remove(&address);
+                }
+                Some(after) => {
+                    if let Some(formula) = after.formula.as_deref() {
+                        sheet_cells.insert(address.clone(), JsonValue::String(formula.to_string()));
+                    } else {
+                        let value = engine_value_to_json(after.value.clone());
+                        if value.is_null() {
+                            sheet_cells.remove(&address);
+                        } else {
+                            sheet_cells.insert(address.clone(), value);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Preserve the WASM worker semantics where formula cells return blank values until the next
+        // explicit `recalculate()` call.
+        for change in &result.changed_cells {
+            let Some(after) = &change.after else {
+                let sheet = self.ensure_sheet(&change.sheet);
+                self.pending_spill_clears.remove(&FormulaCellKey::new(sheet.clone(), change.cell));
+                self.pending_formula_baselines
+                    .remove(&FormulaCellKey::new(sheet.clone(), change.cell));
+                continue;
+            };
+
+            let sheet = self.ensure_sheet(&change.sheet);
+            let address = change.cell.to_a1();
+            let key = FormulaCellKey::new(sheet.clone(), change.cell);
+
+            if let Some(formula) = after.formula.as_deref() {
+                self.pending_formula_baselines.entry(key).or_insert_with(|| {
+                    engine_value_to_json(self.engine.get_cell_value(&sheet, &address))
+                });
+
+                // Reset stored value to blank while preserving the formula. This matches the
+                // `setCell` behavior where formula results are treated as unknown until recalc.
+                self.engine
+                    .set_cell_value(&sheet, &address, EngineValue::Blank)
+                    .map_err(|err| js_err(err.to_string()))?;
+                self.engine
+                    .set_cell_formula(&sheet, &address, formula)
+                    .map_err(|err| js_err(err.to_string()))?;
+            } else {
+                // This cell is now a literal (or empty) value; remove any stale baseline.
+                self.pending_formula_baselines.remove(&key);
+            }
+        }
+
+        // Convert to JS-friendly DTO.
+        let mut changed_cells = Vec::with_capacity(result.changed_cells.len());
+        for change in &result.changed_cells {
+            let address = change.cell.to_a1();
+            let before = change.before.as_ref().map(|snap| EditCellSnapshotDto {
+                value: engine_value_to_json(snap.value.clone()),
+                formula: snap.formula.clone(),
+            });
+            let after = change.after.as_ref().map(|snap| {
+                let is_formula = snap.formula.is_some();
+                EditCellSnapshotDto {
+                    value: if is_formula {
+                        JsonValue::Null
+                    } else {
+                        engine_value_to_json(snap.value.clone())
+                    },
+                    formula: snap.formula.clone(),
+                }
+            });
+
+            changed_cells.push(EditCellChangeDto {
+                sheet: change.sheet.clone(),
+                address,
+                before,
+                after,
+            });
+        }
+
+        let moved_ranges = result
+            .moved_ranges
+            .iter()
+            .map(|m| EditMovedRangeDto {
+                sheet: m.sheet.clone(),
+                from: m.from.to_string(),
+                to: m.to.to_string(),
+            })
+            .collect();
+
+        let formula_rewrites = result
+            .formula_rewrites
+            .iter()
+            .map(|r| EditFormulaRewriteDto {
+                sheet: r.sheet.clone(),
+                address: r.cell.to_a1(),
+                before: r.before.clone(),
+                after: r.after.clone(),
+            })
+            .collect();
+
+        Ok(EditResultDto {
+            changed_cells,
+            moved_ranges,
+            formula_rewrites,
+        })
     }
 
     fn set_locale_id(&mut self, locale_id: &str) -> bool {
@@ -1536,6 +2031,14 @@ impl WasmWorkbook {
         Ok(out.into())
     }
 
+    #[wasm_bindgen(js_name = "applyOperation")]
+    pub fn apply_operation(&mut self, op: JsValue) -> Result<JsValue, JsValue> {
+        let op: EditOpDto =
+            serde_wasm_bindgen::from_value(op).map_err(|err| js_err(err.to_string()))?;
+        let result = self.inner.apply_operation_internal(op)?;
+        serde_wasm_bindgen::to_value(&result).map_err(|err| js_err(err.to_string()))
+    }
+
     #[wasm_bindgen(js_name = "defaultSheetName")]
     pub fn default_sheet_name() -> String {
         DEFAULT_SHEET.to_string()
@@ -1899,5 +2402,104 @@ mod tests {
             wb.inner.engine.get_cell_value(DEFAULT_SHEET, "B1"),
             EngineValue::Number(5.0)
         );
+    }
+
+    #[test]
+    fn apply_operation_insert_rows_updates_literal_cells_and_formulas() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1")).unwrap();
+
+        let result = wb
+            .apply_operation_internal(EditOpDto::InsertRows {
+                sheet: DEFAULT_SHEET.to_string(),
+                row: 0,
+                count: 1,
+            })
+            .unwrap();
+
+        assert_eq!(
+            wb.engine.get_cell_value(DEFAULT_SHEET, "A2"),
+            EngineValue::Number(1.0)
+        );
+        assert_eq!(
+            wb.engine.get_cell_formula(DEFAULT_SHEET, "B2"),
+            Some("=A2")
+        );
+
+        let sheet_cells = wb.sheets.get(DEFAULT_SHEET).unwrap();
+        assert_eq!(sheet_cells.get("A2"), Some(&json!(1.0)));
+        assert_eq!(sheet_cells.get("B2"), Some(&json!("=A2")));
+        assert!(!sheet_cells.contains_key("A1"));
+        assert!(!sheet_cells.contains_key("B1"));
+
+        assert!(
+            result.formula_rewrites.contains(&EditFormulaRewriteDto {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "B2".to_string(),
+                before: "=A1".to_string(),
+                after: "=A2".to_string(),
+            }),
+            "expected formula rewrite for moved formula cell"
+        );
+
+        // Workbook JSON should reflect the updated sparse input map.
+        let wb = WasmWorkbook { inner: wb };
+        let exported = wb.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&exported).unwrap();
+        assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A2"], json!(1.0));
+        assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["B2"], json!("=A2"));
+        assert!(parsed["sheets"]["Sheet1"]["cells"].get("A1").is_none());
+        assert!(parsed["sheets"]["Sheet1"]["cells"].get("B1").is_none());
+    }
+
+    #[test]
+    fn apply_operation_delete_cols_updates_inputs_and_formulas() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!(2.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "C1", json!("=A1+B1"))
+            .unwrap();
+
+        let result = wb
+            .apply_operation_internal(EditOpDto::DeleteCols {
+                sheet: DEFAULT_SHEET.to_string(),
+                col: 0,
+                count: 1,
+            })
+            .unwrap();
+
+        // B1 shifts left to A1.
+        assert_eq!(
+            wb.engine.get_cell_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Number(2.0)
+        );
+        // Formula cell shifts left to B1 and its A1 reference becomes #REF!.
+        assert_eq!(
+            wb.engine.get_cell_formula(DEFAULT_SHEET, "B1"),
+            Some("=#REF!+A1")
+        );
+
+        let sheet_cells = wb.sheets.get(DEFAULT_SHEET).unwrap();
+        assert_eq!(sheet_cells.get("A1"), Some(&json!(2.0)));
+        assert_eq!(sheet_cells.get("B1"), Some(&json!("=#REF!+A1")));
+        assert!(!sheet_cells.contains_key("C1"));
+
+        assert!(
+            result.formula_rewrites.contains(&EditFormulaRewriteDto {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "B1".to_string(),
+                before: "=A1+B1".to_string(),
+                after: "=#REF!+A1".to_string(),
+            }),
+            "expected formula rewrite for shifted formula cell"
+        );
+
+        let wb = WasmWorkbook { inner: wb };
+        let exported = wb.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&exported).unwrap();
+        assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A1"], json!(2.0));
+        assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["B1"], json!("=#REF!+A1"));
+        assert!(parsed["sheets"]["Sheet1"]["cells"].get("C1").is_none());
     }
 }

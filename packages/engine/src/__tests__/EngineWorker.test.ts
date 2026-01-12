@@ -319,4 +319,22 @@ describe("EngineWorker RPC", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0].params).toEqual({ localeId: "de-DE" });
   });
+
+  it("forwards applyOperation calls with the correct RPC method name", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    const op = { type: "InsertRows", sheet: "Sheet1", row: 0, count: 1 } as const;
+    await engine.applyOperation(op);
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "applyOperation"
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({ op });
+  });
 });
