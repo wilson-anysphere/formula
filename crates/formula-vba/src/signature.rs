@@ -4,7 +4,6 @@ use crate::{
     authenticode::extract_vba_signature_signed_digest,
     contents_hash::content_normalized_data,
     normalized_data::forms_normalized_data,
-    DigestAlg,
     OleError,
     OleFile,
 };
