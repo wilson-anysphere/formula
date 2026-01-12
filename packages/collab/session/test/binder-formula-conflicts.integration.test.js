@@ -56,6 +56,8 @@ class DocumentControllerStub {
     this._events = new EventEmitter();
     /** @type {Map<string, { value: any, formula: string | null, styleId: number }>} */
     this._cells = new Map();
+    /** @type {Map<string, any>} */
+    this._sheetViews = new Map();
     this.styleTable = {
       intern: (_format) => 0,
       get: (_styleId) => null,
@@ -92,6 +94,44 @@ class DocumentControllerStub {
         styleId: Number.isInteger(delta.after?.styleId) ? delta.after.styleId : 0,
       });
     }
+  }
+
+  /**
+   * @param {string} sheetId
+   */
+  getSheetView(sheetId) {
+    return this._sheetViews.get(sheetId) ?? { frozenRows: 0, frozenCols: 0 };
+  }
+
+  /**
+   * @param {any[]} deltas
+   */
+  applyExternalSheetViewDeltas(deltas) {
+    for (const delta of deltas ?? []) {
+      if (!delta?.sheetId) continue;
+      this._sheetViews.set(delta.sheetId, delta.after ?? { frozenRows: 0, frozenCols: 0 });
+    }
+  }
+
+  /**
+   * Older binder fallback methods (should not be used in this test, but implemented
+   * to keep the stub compatible if binder behavior changes).
+   */
+  setFrozen(sheetId, frozenRows, frozenCols) {
+    const prev = this.getSheetView(sheetId);
+    this._sheetViews.set(sheetId, { ...prev, frozenRows, frozenCols });
+  }
+  setColWidth(sheetId, col, width) {
+    const prev = this.getSheetView(sheetId);
+    const colWidths = { ...(prev.colWidths ?? {}) };
+    colWidths[String(col)] = width;
+    this._sheetViews.set(sheetId, { ...prev, colWidths });
+  }
+  setRowHeight(sheetId, row, height) {
+    const prev = this.getSheetView(sheetId);
+    const rowHeights = { ...(prev.rowHeights ?? {}) };
+    rowHeights[String(row)] = height;
+    this._sheetViews.set(sheetId, { ...prev, rowHeights });
   }
 
   /**
@@ -180,4 +220,3 @@ test("CollabSession↔DocumentController binder edits are treated as local by Fo
   docA.destroy();
   docB.destroy();
 });
-
