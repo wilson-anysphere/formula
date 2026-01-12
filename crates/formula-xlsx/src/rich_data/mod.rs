@@ -10,6 +10,7 @@
 
 mod discovery;
 pub mod metadata;
+pub mod linked_data_types;
 pub mod rich_value;
 pub mod rich_value_parts;
 pub mod rich_value_rel;
@@ -22,6 +23,7 @@ mod worksheet_scan;
 
 pub use discovery::discover_rich_data_part_names;
 pub use images::resolve_rich_value_image_targets;
+pub use linked_data_types::{extract_linked_data_types, ExtractedLinkedDataType};
 pub use rich_value::parse_rich_values_xml;
 pub use rich_value::{RichValueFieldValue, RichValueInstance, RichValues};
 pub use rich_value_images::{
