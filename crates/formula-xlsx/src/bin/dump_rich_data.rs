@@ -1100,7 +1100,7 @@ fn dump_vm_cell_mappings(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn dump_rich_cell_images_by_cell(pkg: &XlsxPackage, out_dir: Option<&Path>) {
-    let images_by_cell = match pkg.extract_rich_cell_images_by_cell() {
+    let images_by_cell = match pkg.extract_embedded_cell_images() {
         Ok(v) => v,
         Err(err) => {
             println!();
@@ -1122,8 +1122,24 @@ fn dump_rich_cell_images_by_cell(pkg: &XlsxPackage, out_dir: Option<&Path>) {
     );
 
     let mut counts_by_sheet: BTreeMap<&str, usize> = BTreeMap::new();
-    for ((sheet, _cell), _bytes) in &images_by_cell {
-        *counts_by_sheet.entry(sheet.as_str()).or_insert(0) += 1;
+    let worksheet_parts = match pkg.worksheet_parts() {
+        Ok(v) => v,
+        Err(err) => {
+            println!("  (failed to resolve sheet names: {err})");
+            return;
+        }
+    };
+    let sheet_name_by_part: HashMap<String, String> = worksheet_parts
+        .into_iter()
+        .map(|sheet| (sheet.worksheet_part, sheet.name))
+        .collect();
+
+    for ((worksheet_part, _cell), _image) in &images_by_cell {
+        let sheet_name = sheet_name_by_part
+            .get(worksheet_part)
+            .map(String::as_str)
+            .unwrap_or(worksheet_part.as_str());
+        *counts_by_sheet.entry(sheet_name).or_insert(0) += 1;
     }
     if !counts_by_sheet.is_empty() {
         println!("  sheets:");
@@ -1132,23 +1148,29 @@ fn dump_rich_cell_images_by_cell(pkg: &XlsxPackage, out_dir: Option<&Path>) {
         }
     }
 
-    let mut entries: Vec<(&(String, formula_model::CellRef), &Vec<u8>)> =
-        images_by_cell.iter().collect();
-    entries.sort_by(|(a_key, _), (b_key, _)| {
-        a_key
-            .0
-            .cmp(&b_key.0)
-            .then_with(|| (a_key.1.row, a_key.1.col).cmp(&(b_key.1.row, b_key.1.col)))
+    let mut entries: Vec<(String, formula_model::CellRef, &formula_xlsx::EmbeddedCellImage)> =
+        Vec::with_capacity(images_by_cell.len());
+    for ((worksheet_part, cell), image) in &images_by_cell {
+        let sheet_name = sheet_name_by_part
+            .get(worksheet_part)
+            .cloned()
+            .unwrap_or_else(|| worksheet_part.clone());
+        entries.push((sheet_name, *cell, image));
+    }
+    entries.sort_by(|(a_sheet, a_cell, _), (b_sheet, b_cell, _)| {
+        a_sheet
+            .cmp(b_sheet)
+            .then_with(|| (a_cell.row, a_cell.col).cmp(&(b_cell.row, b_cell.col)))
     });
 
     println!("  examples:");
     let max = 20usize;
-    for (idx, ((sheet, cell), bytes)) in entries.into_iter().enumerate() {
+    for (idx, (sheet, cell, image)) in entries.iter().enumerate() {
         if idx >= max {
             println!("    ... ({} more)", images_by_cell.len().saturating_sub(max));
             break;
         }
-        println!("    {sheet}!{cell}: {} bytes", bytes.len());
+        println!("    {sheet}!{cell}: {} bytes", image.image_bytes.len());
     }
 
     if let Some(out_dir) = out_dir {
@@ -1162,16 +1184,17 @@ fn dump_rich_cell_images_by_cell(pkg: &XlsxPackage, out_dir: Option<&Path>) {
         }
 
         let mut manifest: Vec<String> = Vec::with_capacity(images_by_cell.len() + 1);
-        manifest.push("sheet\tcell\tbytes\tfile".to_string());
+        manifest.push("sheet\tcell\tbytes\tfile\timage_part\tcalc_origin\talt_text\thyperlink".to_string());
 
         let mut written = 0usize;
         let mut failed = 0usize;
         let mut printed_failures = 0usize;
         let max_printed_failures = 10usize;
 
-        for ((sheet, cell), bytes) in &images_by_cell {
+        for (sheet, cell, image) in &entries {
             let sheet_sanitized = sanitize_filename_component(sheet);
             let cell_a1 = cell.to_string();
+            let bytes = &image.image_bytes;
             let ext = guess_image_extension(bytes).unwrap_or("bin");
 
             let mut file_name = format!("{sheet_sanitized}_{cell_a1}.{ext}");
@@ -1190,12 +1213,21 @@ fn dump_rich_cell_images_by_cell(pkg: &XlsxPackage, out_dir: Option<&Path>) {
             match fs::write(&path, bytes) {
                 Ok(()) => {
                     written += 1;
+                    let hyperlink = image
+                        .hyperlink_target
+                        .as_ref()
+                        .map(format_hyperlink_target)
+                        .unwrap_or_else(|| "-".to_string());
                     manifest.push(format!(
-                        "{}\t{}\t{}\t{}",
+                        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                         tsv_escape(sheet),
                         cell_a1,
                         bytes.len(),
-                        file_name
+                        file_name,
+                        tsv_escape(&image.image_part),
+                        image.calc_origin,
+                        tsv_escape(image.alt_text.as_deref().unwrap_or("-")),
+                        tsv_escape(&hyperlink),
                     ));
                 }
                 Err(err) => {
@@ -1594,6 +1626,16 @@ fn guess_image_extension(bytes: &[u8]) -> Option<&'static str> {
         }
     }
     None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn format_hyperlink_target(target: &formula_model::HyperlinkTarget) -> String {
+    use formula_model::HyperlinkTarget;
+    match target {
+        HyperlinkTarget::ExternalUrl { uri } => uri.clone(),
+        HyperlinkTarget::Email { uri } => uri.clone(),
+        HyperlinkTarget::Internal { sheet, cell } => format!("{sheet}!{cell}"),
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
