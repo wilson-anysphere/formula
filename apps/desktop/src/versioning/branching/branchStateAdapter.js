@@ -360,6 +360,68 @@ export function documentControllerToBranchState(doc) {
       delete view.colFormats;
     }
 
+    // --- Range-run formatting (compressed rectangular formatting) ---
+    //
+    // DocumentController stores large-rectangle formatting as per-column row runs
+    // (`sheet.formatRunsByCol`) referencing style ids. Convert these to self-contained
+    // style objects so BranchService snapshots can round-trip without needing the
+    // DocumentController style table.
+    const formatRunsByCol = (() => {
+      const rawRunsByCol = sheet?.formatRunsByCol;
+      if (!rawRunsByCol) return null;
+
+      /** @type {Array<{ col: number, runs: Array<{ startRow: number, endRowExclusive: number, format: Record<string, any> }> }>} */
+      const out = [];
+
+      /**
+       * @param {any} colKey
+       * @param {any} rawRuns
+       */
+      const addColRuns = (colKey, rawRuns) => {
+        const col = Number(colKey);
+        if (!Number.isInteger(col) || col < 0) return;
+        if (!Array.isArray(rawRuns) || rawRuns.length === 0) return;
+
+        /** @type {Array<{ startRow: number, endRowExclusive: number, format: Record<string, any> }>} */
+        const runs = [];
+
+        for (const entry of rawRuns) {
+          const startRow = Number(entry?.startRow);
+          const endRowExclusive = Number(entry?.endRowExclusive);
+          if (!Number.isInteger(startRow) || startRow < 0) continue;
+          if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow) continue;
+
+          const format = branchFormatFromDocFormat(doc, entry?.styleId);
+          if (!format) continue;
+          runs.push({ startRow, endRowExclusive, format });
+        }
+
+        runs.sort((a, b) => a.startRow - b.startRow);
+        if (runs.length === 0) return;
+        out.push({ col, runs });
+      };
+
+      if (rawRunsByCol instanceof Map) {
+        for (const [col, runs] of rawRunsByCol.entries()) addColRuns(col, runs);
+      } else if (Array.isArray(rawRunsByCol)) {
+        for (const entry of rawRunsByCol) {
+          if (Array.isArray(entry)) addColRuns(entry[0], entry[1]);
+          else if (isPlainObject(entry)) addColRuns(entry.col ?? entry.index, entry.runs);
+        }
+      } else if (isPlainObject(rawRunsByCol)) {
+        for (const [col, runs] of Object.entries(rawRunsByCol)) addColRuns(col, runs);
+      }
+
+      out.sort((a, b) => a.col - b.col);
+      return out.length > 0 ? out : null;
+    })();
+
+    if (formatRunsByCol) {
+      view.formatRunsByCol = formatRunsByCol;
+    } else {
+      delete view.formatRunsByCol;
+    }
+
     /** @type {Record<string, any>} */
     const metaOut = { id: sheetId, name, view };
 
@@ -506,6 +568,12 @@ export function applyBranchStateToDocumentController(doc, state) {
 
     if (isNonEmptyPlainObject(view.colFormats)) {
       outSheet.colFormats = cloneJsonish(view.colFormats);
+    }
+
+    // --- Range-run formatting (compressed rectangular formatting) ---
+    // DocumentController expects this at the sheet top-level (not nested under `view`).
+    if (Array.isArray(view.formatRunsByCol) && view.formatRunsByCol.length > 0) {
+      outSheet.formatRunsByCol = cloneJsonish(view.formatRunsByCol);
     }
 
     return outSheet;

@@ -77,6 +77,15 @@
  *    * Values are style objects (not style ids).
  *    *\/
  *   colFormats?: Record<string, JsonObject>,
+ *   /**
+ *    * Range-run formatting overrides (compressed rectangular formatting).
+ *    *
+ *    * Stored per column as non-overlapping row runs, covering the half-open interval
+ *    * `[startRow, endRowExclusive)`.
+ *    *
+ *    * Values are style objects (not style ids) so BranchService snapshots are self-contained.
+ *    *\/
+ *   formatRunsByCol?: Array<{ col: number, runs: Array<{ startRow: number, endRowExclusive: number, format: JsonObject }> }>,
  * }} SheetViewState
  *
  * @typedef {"visible" | "hidden" | "veryHidden"} SheetVisibility
