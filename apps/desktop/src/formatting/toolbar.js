@@ -277,7 +277,47 @@ function allCellsMatchRange(doc, sheetId, range, predicate) {
       storedBounds.endCol >= range.start.col &&
       storedBounds.startCol <= range.end.col);
 
-  if (selectionIntersectsStoredBounds && sheet.cells && sheet.cells.size > 0) {
+  const styledKeys = sheet.styledCells;
+
+  if (selectionIntersectsStoredBounds && styledKeys && styledKeys.size > 0) {
+    for (const key of styledKeys) {
+      const cell = sheet.cells.get(key);
+      if (!cell || cell.styleId === 0) continue;
+      const coord = parseRowColKey(key);
+      if (!coord) continue;
+      const { row, col } = coord;
+      if (row < range.start.row || row > range.end.row) continue;
+      if (col < range.start.col || col > range.end.col) continue;
+
+      const rowStyleId = rowStyleIds.get(row) ?? 0;
+      const colStyleId = colStyleIds.get(col) ?? 0;
+      const runStyleId = styleIdForRowInRuns(formatRunsByCol.get(col), row);
+
+      if (runColSet.has(col)) {
+        let rows = cellOverrideRowsByRunCol.get(col);
+        if (!rows) {
+          rows = [];
+          cellOverrideRowsByRunCol.set(col, rows);
+        }
+        rows.push(row);
+      } else {
+        const regionKey = `${colStyleId}|${rowStyleId}`;
+        overriddenCellCountByNoRunRegion.set(regionKey, (overriddenCellCountByNoRunRegion.get(regionKey) ?? 0) + 1);
+      }
+
+      const cellKey = `${colStyleId}|${rowStyleId}|${runStyleId}|${cell.styleId}`;
+      const cachedMatch = cellPredicateCache.get(cellKey);
+      if (cachedMatch === false) return false;
+      if (cachedMatch === true) continue;
+
+      const merged = applyStylePatch(baseStyle(colStyleId, rowStyleId, runStyleId), styleTable.get(cell.styleId));
+      const matches = Boolean(predicate(merged));
+      cellPredicateCache.set(cellKey, matches);
+      if (!matches) return false;
+    }
+  }
+  // Backward-compatible fallback (older sheet encodings without `styledCells`).
+  else if (selectionIntersectsStoredBounds && sheet.cells && sheet.cells.size > 0) {
     for (const [key, cell] of sheet.cells.entries()) {
       if (!cell || cell.styleId === 0) continue;
       const coord = parseRowColKey(key);

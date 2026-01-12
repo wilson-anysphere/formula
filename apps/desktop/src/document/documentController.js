@@ -1004,6 +1004,16 @@ class SheetModel {
   constructor() {
     /** @type {Map<string, CellState>} */
     this.cells = new Map();
+    /**
+     * Keys of cells with an explicit cell-level style override (`styleId !== 0`).
+     *
+     * This is a derived index used to keep formatting operations O(#formatted cells)
+     * instead of O(#stored cells). (Stored cells can be large due to value/formula
+     * entries with `styleId === 0`.)
+     *
+     * @type {Set<string>}
+     */
+    this.styledCells = new Set();
     /** @type {SheetViewState} */
     this.view = emptySheetViewState();
 
@@ -1117,17 +1127,25 @@ class SheetModel {
     const before = this.cells.get(key) ?? null;
     const beforeHasContent = Boolean(before && (before.value != null || before.formula != null));
     const beforeHasFormat = Boolean(before);
+    const beforeHasStyle = Boolean(before && before.styleId !== 0);
 
     const after = cloneCellState(cell);
     const afterIsEmpty = after.value == null && after.formula == null && after.styleId === 0;
     const afterHasContent = Boolean(after.value != null || after.formula != null);
     const afterHasFormat = !afterIsEmpty;
+    const afterHasStyle = !afterIsEmpty && after.styleId !== 0;
 
     // Update the canonical cell map first.
     if (afterIsEmpty) {
       this.cells.delete(key);
     } else {
       this.cells.set(key, after);
+    }
+
+    // Maintain the derived set of styled cells.
+    if (beforeHasStyle !== afterHasStyle) {
+      if (afterHasStyle) this.styledCells.add(key);
+      else this.styledCells.delete(key);
     }
 
     // Maintain content-cell count.
@@ -2657,6 +2675,26 @@ export class DocumentController {
       return afterStyleId;
     };
 
+    const forEachStyledCell = (visitor) => {
+      const styledKeys = sheet.styledCells;
+      // Prefer the derived styled-cell index (styleId != 0) so full-row/col/sheet formatting
+      // doesn't need to scan potentially huge value/formula grids where styleId==0.
+      if (styledKeys && styledKeys.size >= 0) {
+        for (const key of styledKeys) {
+          const cell = sheet.cells.get(key);
+          if (!cell || cell.styleId === 0) continue;
+          visitor(key, cell);
+        }
+        return;
+      }
+
+      // Extremely defensive fallback for older model encodings.
+      for (const [key, cell] of sheet.cells.entries()) {
+        if (!cell || cell.styleId === 0) continue;
+        visitor(key, cell);
+      }
+    };
+
     if (isFullSheet) {
       if (this.canEditCell && !this.canEditCell({ sheetId, row: 0, col: 0 })) return false;
 
@@ -2680,15 +2718,14 @@ export class DocumentController {
       }
 
       // Patch existing cell overrides so the new formatting wins over explicit values.
-      for (const [key, cell] of sheet.cells.entries()) {
-        if (!cell || cell.styleId === 0) continue;
+      forEachStyledCell((key) => {
         const { row, col } = parseRowColKey(key);
         const before = this.model.getCell(sheetId, row, col);
         const cellAfterStyleId = patchStyleId(before.styleId);
         const after = { value: before.value, formula: before.formula, styleId: cellAfterStyleId };
-        if (cellStateEquals(before, after)) continue;
+        if (cellStateEquals(before, after)) return;
         cellDeltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
-      }
+      });
 
       // Patch existing range-run formatting so the patch applies everywhere.
       for (const [col, beforeRuns] of sheet.formatRunsByCol.entries()) {
@@ -2719,16 +2756,15 @@ export class DocumentController {
       }
 
       // Ensure the patch overrides explicit cell formatting (sparse overrides only).
-      for (const [key, cell] of sheet.cells.entries()) {
-        if (!cell || cell.styleId === 0) continue;
+      forEachStyledCell((key) => {
         const { row, col } = parseRowColKey(key);
-        if (col < r.start.col || col > r.end.col) continue;
+        if (col < r.start.col || col > r.end.col) return;
         const before = this.model.getCell(sheetId, row, col);
         const cellAfterStyleId = patchStyleId(before.styleId);
         const after = { value: before.value, formula: before.formula, styleId: cellAfterStyleId };
-        if (cellStateEquals(before, after)) continue;
+        if (cellStateEquals(before, after)) return;
         cellDeltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
-      }
+      });
 
       // Patch any existing range-run formatting in the selected columns so the patch applies everywhere.
       for (let col = r.start.col; col <= r.end.col; col++) {
@@ -2770,16 +2806,15 @@ export class DocumentController {
       }
 
       // Ensure the patch overrides explicit cell formatting (sparse overrides only).
-      for (const [key, cell] of sheet.cells.entries()) {
-        if (!cell || cell.styleId === 0) continue;
+      forEachStyledCell((key) => {
         const { row, col } = parseRowColKey(key);
-        if (row < r.start.row || row > r.end.row) continue;
+        if (row < r.start.row || row > r.end.row) return;
         const before = this.model.getCell(sheetId, row, col);
         const cellAfterStyleId = patchStyleId(before.styleId);
         const after = { value: before.value, formula: before.formula, styleId: cellAfterStyleId };
-        if (cellStateEquals(before, after)) continue;
+        if (cellStateEquals(before, after)) return;
         cellDeltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
-      }
+      });
 
       // Patch any existing range-run formatting that overlaps the selected rows so the patch applies everywhere.
       const startRow = r.start.row;
@@ -2826,18 +2861,17 @@ export class DocumentController {
 
       // Ensure patches apply to cells that already have explicit per-cell styles inside the
       // rectangle (cell formatting is higher precedence than range runs).
-      for (const [key, cell] of sheet.cells.entries()) {
-        if (!cell) continue;
-        if (!cell.styleId || cell.styleId === 0) continue;
+      forEachStyledCell((key, cell) => {
+        if (!cell || !cell.styleId || cell.styleId === 0) return;
         const { row, col } = parseRowColKey(key);
-        if (row < r.start.row || row > r.end.row) continue;
-        if (col < r.start.col || col > r.end.col) continue;
+        if (row < r.start.row || row > r.end.row) return;
+        if (col < r.start.col || col > r.end.col) return;
         const before = this.model.getCell(sheetId, row, col);
         const cellAfterStyleId = patchStyleId(before.styleId);
         const after = { value: before.value, formula: before.formula, styleId: cellAfterStyleId };
-        if (cellStateEquals(before, after)) continue;
+        if (cellStateEquals(before, after)) return;
         cellDeltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
-      }
+      });
 
       // No-op: patch did not change any existing runs or explicit cell styles.
       // This is not a "skipped due to safety caps" case, so return true.
