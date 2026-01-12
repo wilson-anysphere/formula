@@ -190,3 +190,39 @@ test("DocumentWorkbookAdapter does not create phantom sheets after a rename (sta
   // Workbook sheet listing should also reflect the updated display name.
   assert.deepEqual(workbook.sheets.map((s) => s.name), ["Budget2026"]);
 });
+
+test("DocumentWorkbookAdapter resolves display names for unmaterialized sheets without creating them", () => {
+  const doc = new DocumentController();
+
+  // DocumentController starts with no sheets until they're referenced by cell operations
+  // or added via sheet metadata operations.
+  assert.deepEqual(doc.getSheetIds(), []);
+
+  // Simulate a sheet that exists in external metadata (e.g. sheet tabs) but hasn't been
+  // materialized in the DocumentController yet.
+  const namesById = new Map([["sheet-1", "Budget"]]);
+  const workbook = new DocumentWorkbookAdapter({
+    document: doc,
+    sheetNameResolver: {
+      getSheetNameById: (id) => namesById.get(String(id)) ?? null,
+      getSheetIdByName: (name) => {
+        const needle = String(name ?? "").trim().toLowerCase();
+        if (!needle) return null;
+        for (const [id, sheetName] of namesById.entries()) {
+          if (sheetName.toLowerCase() === needle) return id;
+        }
+        return null;
+      },
+    },
+  });
+
+  const sheet = workbook.getSheet("Budget");
+  assert.equal(sheet.sheetId, "sheet-1");
+
+  // `getSheet` should not create a sheet in the DocumentController; it only resolves names.
+  assert.deepEqual(doc.getSheetIds(), []);
+
+  // Accessors that are used by search (usedRange iteration) should also avoid materializing.
+  assert.equal(sheet.getUsedRange(), null);
+  assert.deepEqual(doc.getSheetIds(), []);
+});
