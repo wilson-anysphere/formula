@@ -266,7 +266,7 @@ export class ContextManager {
     ].filter((s) => s.text);
 
     throwIfAborted(signal);
-    const packed = packSectionsToTokenBudget(sections, this.tokenBudgetTokens, this.estimator);
+    const packed = packSectionsToTokenBudget(sections, this.tokenBudgetTokens, this.estimator, { signal });
     throwIfAborted(signal);
 
     if (dlp) {
@@ -748,7 +748,7 @@ export class ContextManager {
       ].filter((s) => s.text);
 
       throwIfAborted(signal);
-      const packed = packSectionsToTokenBudget(sections, this.tokenBudgetTokens, this.estimator);
+      const packed = packSectionsToTokenBudget(sections, this.tokenBudgetTokens, this.estimator, { signal });
       promptContext = packed.map((s) => `## ${s.key}\n${s.text}`).join("\n\n");
     }
 

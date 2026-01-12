@@ -19,10 +19,16 @@ export function estimateMessagesTokens(messages: any[], estimator?: TokenEstimat
 
 export function estimateToolDefinitionTokens(tools: any[] | null | undefined, estimator?: TokenEstimator): number;
 
-export function trimToTokenBudget(text: string, maxTokens: number, estimator?: TokenEstimator): string;
+export function trimToTokenBudget(
+  text: string,
+  maxTokens: number,
+  estimator?: TokenEstimator,
+  options?: { signal?: AbortSignal },
+): string;
 
 export function packSectionsToTokenBudget(
   sections: Array<{ key: string; text: string; priority: number }>,
   maxTokens: number,
   estimator?: TokenEstimator,
+  options?: { signal?: AbortSignal },
 ): Array<{ key: string; text: string }>;

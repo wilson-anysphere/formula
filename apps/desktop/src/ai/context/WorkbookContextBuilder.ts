@@ -1315,7 +1315,7 @@ export class WorkbookContextBuilder {
 
     // Packing + token budgeting can be expensive for large workbooks; respect aborts.
     throwIfAborted(signal);
-    const packed = packSectionsToTokenBudget(sections as any, Math.max(0, params.maxTokens), this.estimator);
+    const packed = packSectionsToTokenBudget(sections as any, Math.max(0, params.maxTokens), this.estimator, { signal });
     return packed.map((s) => `## ${s.key}\n${s.text}`).join("\n\n");
   }
 

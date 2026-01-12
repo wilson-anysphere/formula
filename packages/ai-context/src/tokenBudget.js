@@ -10,6 +10,16 @@ export function estimateTokens(text, estimator = DEFAULT_TOKEN_ESTIMATOR) {
   return estimator.estimateTextTokens(text);
 }
 
+function createAbortError(message = "Aborted") {
+  const err = new Error(message);
+  err.name = "AbortError";
+  return err;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError();
+}
+
 /**
  * @typedef {{
  *   /**
@@ -171,8 +181,11 @@ export function estimateToolDefinitionTokens(tools, estimator = DEFAULT_TOKEN_ES
  * @param {string} text
  * @param {number} maxTokens
  * @param {TokenEstimator} [estimator]
+ * @param {{ signal?: AbortSignal }} [options]
  */
-export function trimToTokenBudget(text, maxTokens, estimator = DEFAULT_TOKEN_ESTIMATOR) {
+export function trimToTokenBudget(text, maxTokens, estimator = DEFAULT_TOKEN_ESTIMATOR, options = {}) {
+  const signal = options.signal;
+  throwIfAborted(signal);
   if (maxTokens <= 0) return "";
   const estimate = estimateTokens(text, estimator);
   if (estimate <= maxTokens) return text;
@@ -185,6 +198,7 @@ export function trimToTokenBudget(text, maxTokens, estimator = DEFAULT_TOKEN_EST
     let lo = 0;
     let hi = suffix.length;
     while (lo < hi) {
+      throwIfAborted(signal);
       const mid = Math.ceil((lo + hi) / 2);
       const candidate = suffix.slice(0, mid);
       const tokens = estimateTokens(candidate, estimator);
@@ -198,6 +212,7 @@ export function trimToTokenBudget(text, maxTokens, estimator = DEFAULT_TOKEN_EST
   let lo = 0;
   let hi = text.length;
   while (lo < hi) {
+    throwIfAborted(signal);
     const mid = Math.ceil((lo + hi) / 2);
     const candidate = text.slice(0, mid) + suffix;
     const tokens = estimateTokens(candidate, estimator);
@@ -212,20 +227,25 @@ export function trimToTokenBudget(text, maxTokens, estimator = DEFAULT_TOKEN_EST
  * @param {{ key: string, text: string, priority: number }[]} sections
  * @param {number} maxTokens
  * @param {TokenEstimator} [estimator]
+ * @param {{ signal?: AbortSignal }} [options]
  */
-export function packSectionsToTokenBudget(sections, maxTokens, estimator = DEFAULT_TOKEN_ESTIMATOR) {
+export function packSectionsToTokenBudget(sections, maxTokens, estimator = DEFAULT_TOKEN_ESTIMATOR, options = {}) {
+  const signal = options.signal;
+  throwIfAborted(signal);
   const ordered = sections.slice().sort((a, b) => b.priority - a.priority);
   let remaining = maxTokens;
   /** @type {{ key: string, text: string }[]} */
   const packed = [];
 
   for (const section of ordered) {
+    throwIfAborted(signal);
     if (remaining <= 0) break;
-    const trimmed = trimToTokenBudget(section.text, remaining, estimator);
+    const trimmed = trimToTokenBudget(section.text, remaining, estimator, { signal });
     const used = estimateTokens(trimmed, estimator);
     remaining -= used;
     packed.push({ key: section.key, text: trimmed });
   }
 
+  throwIfAborted(signal);
   return packed;
 }

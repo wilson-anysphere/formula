@@ -36,5 +36,20 @@ describe("tokenBudget", () => {
     // The default-packed context would exceed the strict budget.
     expect(charEstimator.estimateTextTokens(packedDefault[0].text)).toBeGreaterThan(maxTokens);
   });
-});
 
+  it("packSectionsToTokenBudget respects AbortSignal", () => {
+    const abortController = new AbortController();
+    abortController.abort();
+
+    let error: unknown = null;
+    try {
+      packSectionsToTokenBudget([{ key: "a", priority: 1, text: "hello" }], 10, undefined, {
+        signal: abortController.signal,
+      });
+    } catch (err) {
+      error = err;
+    }
+
+    expect(error).toMatchObject({ name: "AbortError" });
+  });
+});
