@@ -1,9 +1,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 
-use super::harness::TestSheet;
 use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::functions::date_time::edate;
-use formula_engine::{ErrorKind, Value};
+use formula_engine::functions::financial::{oddfprice, oddfyield, oddlprice, oddlyield};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
 
@@ -120,53 +119,8 @@ fn arb_oddl_case() -> impl Strategy<Value = OddLastCase> {
     })
 }
 
-fn oddf_available(sheet: &mut TestSheet) -> bool {
-    // Use a fixed, valid-ish input set; if the function isn't registered yet, Excel semantics are
-    // to return #NAME?.
-    let issue = ymd_to_serial(ExcelDate::new(2020, 1, 1), SYSTEM).unwrap();
-    let settlement = ymd_to_serial(ExcelDate::new(2020, 2, 1), SYSTEM).unwrap();
-    let first_coupon = ymd_to_serial(ExcelDate::new(2020, 7, 15), SYSTEM).unwrap();
-    let maturity = ymd_to_serial(ExcelDate::new(2022, 7, 15), SYSTEM).unwrap();
-
-    let formula = format!(
-        "=ODDFPRICE({settlement},{maturity},{issue},{first_coupon},0.05,0.05,{REDEMPTION},2,{BASIS})"
-    );
-    match sheet.eval(&formula) {
-        Value::Error(ErrorKind::Name) => false,
-        _ => true,
-    }
-}
-
-fn oddl_available(sheet: &mut TestSheet) -> bool {
-    let last_interest = ymd_to_serial(ExcelDate::new(2020, 1, 15), SYSTEM).unwrap();
-    let settlement = ymd_to_serial(ExcelDate::new(2020, 2, 15), SYSTEM).unwrap();
-    let maturity = ymd_to_serial(ExcelDate::new(2020, 3, 15), SYSTEM).unwrap();
-
-    let formula = format!(
-        "=ODDLPRICE({settlement},{maturity},{last_interest},0.05,0.05,{REDEMPTION},2,{BASIS})"
-    );
-    match sheet.eval(&formula) {
-        Value::Error(ErrorKind::Name) => false,
-        _ => true,
-    }
-}
-
-fn unwrap_number(v: &Value) -> Option<f64> {
-    match v {
-        Value::Number(n) => Some(*n),
-        _ => None,
-    }
-}
-
 #[test]
 fn prop_oddf_yield_price_roundtrip_basis0() {
-    let mut sheet = TestSheet::new();
-    sheet.set_date_system(SYSTEM);
-    if !oddf_available(&mut sheet) {
-        return;
-    }
-    let sheet = std::cell::RefCell::new(sheet);
-
     let mut runner = TestRunner::new_with_rng(
         Config {
             cases: CASES,
@@ -177,51 +131,41 @@ fn prop_oddf_yield_price_roundtrip_basis0() {
 
     runner
         .run(&arb_oddf_case(), |case| {
-            let mut sheet = sheet.borrow_mut();
-            let rate = format!("{:.6}", case.rate);
-            let yld = format!("{:.6}", case.yld);
-
-            let price_formula = format!(
-                "=ODDFPRICE({s},{m},{i},{fc},{rate},{yld},{red},{freq},{basis})",
-                s = case.settlement,
-                m = case.maturity,
-                i = case.issue,
-                fc = case.first_coupon,
-                red = REDEMPTION,
-                freq = case.frequency,
-                basis = BASIS
-            );
-
-            let price_val = sheet.eval(&price_formula);
-            let Some(price) = unwrap_number(&price_val) else {
-                prop_assert!(
-                    false,
-                    "expected ODDFPRICE to return a number, got {price_val:?} (case={case:?})"
-                );
-                return Ok(());
-            };
+            let price = oddfprice(
+                case.settlement,
+                case.maturity,
+                case.issue,
+                case.first_coupon,
+                case.rate,
+                case.yld,
+                REDEMPTION,
+                case.frequency,
+                BASIS,
+                SYSTEM,
+            )
+            .map_err(|e| {
+                TestCaseError::fail(format!("ODDFPRICE errored: {e:?} case={case:?}"))
+            })?;
             prop_assert!(price.is_finite(), "non-finite ODDFPRICE {price} (case={case:?})");
 
-            sheet.set("A1", price);
-            let yield_formula = format!(
-                "=ODDFYIELD({s},{m},{i},{fc},{rate},A1,{red},{freq},{basis})",
-                s = case.settlement,
-                m = case.maturity,
-                i = case.issue,
-                fc = case.first_coupon,
-                red = REDEMPTION,
-                freq = case.frequency,
-                basis = BASIS,
-            );
-
-            let yld_val = sheet.eval(&yield_formula);
-            let Some(yld_out) = unwrap_number(&yld_val) else {
-                prop_assert!(
-                    false,
-                    "expected ODDFYIELD to return a number, got {yld_val:?} (case={case:?})"
-                );
-                return Ok(());
-            };
+            let yld_out = oddfyield(
+                case.settlement,
+                case.maturity,
+                case.issue,
+                case.first_coupon,
+                case.rate,
+                price,
+                REDEMPTION,
+                case.frequency,
+                BASIS,
+                SYSTEM,
+            )
+            .map_err(|e| {
+                TestCaseError::fail(format!(
+                    "ODDFYIELD errored: {e:?} yld_in={} price={price} case={case:?}",
+                    case.yld
+                ))
+            })?;
 
             prop_assert!(yld_out.is_finite(), "non-finite ODDFYIELD {yld_out} (case={case:?})");
             prop_assert!(
@@ -236,13 +180,6 @@ fn prop_oddf_yield_price_roundtrip_basis0() {
 
 #[test]
 fn prop_oddl_yield_price_roundtrip_basis0() {
-    let mut sheet = TestSheet::new();
-    sheet.set_date_system(SYSTEM);
-    if !oddl_available(&mut sheet) {
-        return;
-    }
-    let sheet = std::cell::RefCell::new(sheet);
-
     let mut runner = TestRunner::new_with_rng(
         Config {
             cases: CASES,
@@ -253,49 +190,39 @@ fn prop_oddl_yield_price_roundtrip_basis0() {
 
     runner
         .run(&arb_oddl_case(), |case| {
-            let mut sheet = sheet.borrow_mut();
-            let rate = format!("{:.6}", case.rate);
-            let yld = format!("{:.6}", case.yld);
-
-            let price_formula = format!(
-                "=ODDLPRICE({s},{m},{li},{rate},{yld},{red},{freq},{basis})",
-                s = case.settlement,
-                m = case.maturity,
-                li = case.last_interest,
-                red = REDEMPTION,
-                freq = case.frequency,
-                basis = BASIS
-            );
-
-            let price_val = sheet.eval(&price_formula);
-            let Some(price) = unwrap_number(&price_val) else {
-                prop_assert!(
-                    false,
-                    "expected ODDLPRICE to return a number, got {price_val:?} (case={case:?})"
-                );
-                return Ok(());
-            };
+            let price = oddlprice(
+                case.settlement,
+                case.maturity,
+                case.last_interest,
+                case.rate,
+                case.yld,
+                REDEMPTION,
+                case.frequency,
+                BASIS,
+                SYSTEM,
+            )
+            .map_err(|e| {
+                TestCaseError::fail(format!("ODDLPRICE errored: {e:?} case={case:?}"))
+            })?;
             prop_assert!(price.is_finite(), "non-finite ODDLPRICE {price} (case={case:?})");
 
-            sheet.set("A1", price);
-            let yield_formula = format!(
-                "=ODDLYIELD({s},{m},{li},{rate},A1,{red},{freq},{basis})",
-                s = case.settlement,
-                m = case.maturity,
-                li = case.last_interest,
-                red = REDEMPTION,
-                freq = case.frequency,
-                basis = BASIS,
-            );
-
-            let yld_val = sheet.eval(&yield_formula);
-            let Some(yld_out) = unwrap_number(&yld_val) else {
-                prop_assert!(
-                    false,
-                    "expected ODDLYIELD to return a number, got {yld_val:?} (case={case:?})"
-                );
-                return Ok(());
-            };
+            let yld_out = oddlyield(
+                case.settlement,
+                case.maturity,
+                case.last_interest,
+                case.rate,
+                price,
+                REDEMPTION,
+                case.frequency,
+                BASIS,
+                SYSTEM,
+            )
+            .map_err(|e| {
+                TestCaseError::fail(format!(
+                    "ODDLYIELD errored: {e:?} yld_in={} price={price} case={case:?}",
+                    case.yld
+                ))
+            })?;
 
             prop_assert!(yld_out.is_finite(), "non-finite ODDLYIELD {yld_out} (case={case:?})");
             prop_assert!(
