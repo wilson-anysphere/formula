@@ -39,6 +39,18 @@ fn open_workbook_model_xlsx() {
 }
 
 #[test]
+fn open_workbook_model_xlsx_reads_formulas() {
+    let path = fixture_path("xlsx/formulas/formulas.xlsx");
+    let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
+
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "Sheet1");
+
+    let sheet = workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(sheet.formula(CellRef::from_a1("C1").unwrap()), Some("A1+B1"));
+}
+
+#[test]
 fn open_workbook_model_sniffs_extensionless_xlsx() {
     let path = fixture_path("xlsx/basic/basic.xlsx");
     let bytes = std::fs::read(&path).expect("read fixture");
