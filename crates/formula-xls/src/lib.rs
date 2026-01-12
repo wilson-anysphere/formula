@@ -173,6 +173,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
     let mut xf_style_ids: Option<Vec<Option<u32>>> = None;
     let mut xf_has_number_format: Option<Vec<bool>> = None;
     let mut sheet_tab_colors: Option<Vec<Option<TabColor>>> = None;
+    let mut workbook_active_tab: Option<u16> = None;
     let mut biff_sheets: Option<Vec<biff::BoundSheetInfo>> = None;
     let mut row_col_props: Option<Vec<biff::SheetRowColProperties>> = None;
     let mut cell_xf_indices: Option<Vec<HashMap<CellRef, u16>>> = None;
@@ -205,6 +206,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 if let Some(full_precision) = globals.full_precision {
                     out.calc_settings.full_precision = full_precision;
                 }
+                workbook_active_tab = globals.active_tab_index;
                 warnings.extend(globals.warnings.drain(..).map(ImportWarning::new));
                 sheet_tab_colors = Some(std::mem::take(&mut globals.sheet_tab_colors));
 
@@ -439,6 +441,49 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 "sheet `{sheet_name}` has unsupported type {:?}; importing as worksheet",
                 sheet_meta.typ
             )));
+        }
+
+        if let (Some(workbook_stream), Some(biff_idx)) = (workbook_stream.as_deref(), biff_idx) {
+            if let Some(sheet_info) = biff_sheets.as_ref().and_then(|v| v.get(biff_idx)) {
+                if sheet_info.offset >= workbook_stream.len() {
+                    warnings.push(ImportWarning::new(format!(
+                        "failed to import `.xls` view state for BIFF sheet index {} (`{}`): out-of-bounds stream offset {}",
+                        biff_idx, sheet_name, sheet_info.offset
+                    )));
+                } else {
+                    match biff::parse_biff_sheet_view_state(workbook_stream, sheet_info.offset) {
+                        Ok(mut view_state) => {
+                            warnings.extend(view_state.warnings.drain(..).map(ImportWarning::new));
+
+                            if let Some(show) = view_state.show_grid_lines {
+                                sheet.view.show_grid_lines = show;
+                            }
+                            if let Some(show) = view_state.show_headings {
+                                sheet.view.show_headings = show;
+                            }
+                            if let Some(show) = view_state.show_zeros {
+                                sheet.view.show_zeros = show;
+                            }
+                            if let Some(zoom) = view_state.zoom {
+                                sheet.zoom = zoom;
+                                sheet.view.zoom = zoom;
+                            }
+                            if let Some(pane) = view_state.pane {
+                                sheet.frozen_rows = pane.frozen_rows;
+                                sheet.frozen_cols = pane.frozen_cols;
+                                sheet.view.pane = pane;
+                            }
+                            if let Some(selection) = view_state.selection {
+                                sheet.view.selection = Some(selection);
+                            }
+                        }
+                        Err(err) => warnings.push(ImportWarning::new(format!(
+                            "failed to import `.xls` view state for BIFF sheet index {} (`{}`): {err}",
+                            biff_idx, sheet_name
+                        ))),
+                    }
+                }
+            }
         }
 
         if let Some(biff_idx) = biff_idx {
@@ -765,8 +810,29 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                     if let Some(resolved) = resolved_sheet_names.get(&key) {
                         *sheet = resolved.clone();
                     }
-                }
             }
+        }
+        }
+    }
+
+    if let Some(i_tab_cur) = workbook_active_tab {
+        let biff_tab_idx = i_tab_cur as usize;
+
+        // `WINDOW1.iTabCur` is a BIFF sheet index (BoundSheet order). Prefer mapping it back to the
+        // imported sheet order (calamine metadata order) using the same reconciliation mapping we
+        // apply for other per-sheet BIFF metadata.
+        let imported_idx = sheet_mapping
+            .iter()
+            .position(|mapped| mapped.is_some_and(|biff_idx| biff_idx == biff_tab_idx))
+            .unwrap_or(biff_tab_idx);
+
+        if let Some(sheet) = out.sheets.get(imported_idx) {
+            out.view.active_sheet_id = Some(sheet.id);
+        } else {
+            warnings.push(ImportWarning::new(format!(
+                "skipping `.xls` active tab index {i_tab_cur}: workbook contains {} imported sheets",
+                out.sheets.len()
+            )));
         }
     }
 

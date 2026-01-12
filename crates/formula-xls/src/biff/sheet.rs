@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, HashMap};
 
-use formula_model::{CellRef, Hyperlink, HyperlinkTarget, OutlinePr, Range, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
+use formula_model::{
+    CellRef, Hyperlink, HyperlinkTarget, OutlinePr, Range, SheetPane, SheetSelection, EXCEL_MAX_COLS,
+    EXCEL_MAX_ROWS,
+};
 
 use super::records;
 use super::strings;
@@ -30,6 +33,16 @@ const RECORD_MULRK: u16 = 0x00BD;
 const RECORD_MULBLANK: u16 = 0x00BE;
 /// HLINK [MS-XLS 2.4.110]
 const RECORD_HLINK: u16 = 0x01B8;
+
+// View/UX records (worksheet substream).
+// - WINDOW2: [MS-XLS 2.4.354]
+// - SCL: [MS-XLS 2.4.244]
+// - PANE: [MS-XLS 2.4.174]
+// - SELECTION: [MS-XLS 2.4.239]
+const RECORD_WINDOW2: u16 = 0x023E;
+const RECORD_SCL: u16 = 0x00A0;
+const RECORD_PANE: u16 = 0x0041;
+const RECORD_SELECTION: u16 = 0x001D;
 
 const ROW_HEIGHT_TWIPS_MASK: u16 = 0x7FFF;
 const ROW_HEIGHT_DEFAULT_FLAG: u16 = 0x8000;
@@ -69,12 +82,317 @@ pub(crate) struct SheetColProperties {
     pub(crate) collapsed: bool,
 }
 
+// WINDOW2 grbit flags.
+const WINDOW2_FLAG_DSP_GRID: u16 = 0x0002;
+const WINDOW2_FLAG_DSP_RW_COL: u16 = 0x0004;
+const WINDOW2_FLAG_FROZEN: u16 = 0x0008;
+const WINDOW2_FLAG_DSP_ZEROS: u16 = 0x0010;
+const WINDOW2_FLAG_FROZEN_NO_SPLIT: u16 = 0x0100;
+
 #[derive(Debug, Default)]
 pub(crate) struct SheetRowColProperties {
     pub(crate) rows: BTreeMap<u32, SheetRowProperties>,
     pub(crate) cols: BTreeMap<u32, SheetColProperties>,
     pub(crate) outline_pr: OutlinePr,
     pub(crate) warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SheetViewState {
+    pub(crate) show_grid_lines: Option<bool>,
+    pub(crate) show_headings: Option<bool>,
+    pub(crate) show_zeros: Option<bool>,
+    pub(crate) zoom: Option<f32>,
+    pub(crate) pane: Option<SheetPane>,
+    pub(crate) selection: Option<SheetSelection>,
+    pub(crate) warnings: Vec<String>,
+}
+
+/// Best-effort parse of worksheet view/UI state (frozen panes, zoom, selection, display flags).
+///
+/// This scan is resilient to malformed records: payload-level parse failures are surfaced as
+/// warnings and otherwise ignored.
+pub(crate) fn parse_biff_sheet_view_state(
+    workbook_stream: &[u8],
+    start: usize,
+) -> Result<SheetViewState, String> {
+    let mut out = SheetViewState::default();
+
+    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
+
+    let mut window2_frozen: Option<bool> = None;
+    let mut active_pane: Option<u16> = None;
+    let mut selections: Vec<(u16, SheetSelection)> = Vec::new();
+
+    while let Some(next) = iter.next() {
+        let record = match next {
+            Ok(r) => r,
+            Err(err) => {
+                out.warnings.push(format!("malformed BIFF record: {err}"));
+                break;
+            }
+        };
+
+        if record.offset != start && records::is_bof_record(record.record_id) {
+            break;
+        }
+
+        let data = record.data;
+        match record.record_id {
+            RECORD_WINDOW2 => match parse_window2_flags(data) {
+                Ok(window2) => {
+                    out.show_grid_lines = Some(window2.show_grid_lines);
+                    out.show_headings = Some(window2.show_headings);
+                    out.show_zeros = Some(window2.show_zeros);
+                    window2_frozen = Some(window2.frozen_panes);
+                }
+                Err(err) => out
+                    .warnings
+                    .push(format!("failed to parse WINDOW2 record: {err}")),
+            },
+            RECORD_SCL => match parse_scl_zoom(data) {
+                Ok(zoom) => out.zoom = Some(zoom),
+                Err(err) => out.warnings.push(format!("failed to parse SCL record: {err}")),
+            },
+            RECORD_PANE => match parse_pane_record(data, window2_frozen) {
+                Ok((pane, pnn_act)) => {
+                    out.pane = Some(pane);
+                    active_pane = Some(pnn_act);
+                }
+                Err(err) => out.warnings.push(format!("failed to parse PANE record: {err}")),
+            },
+            RECORD_SELECTION => match parse_selection_record_best_effort(data) {
+                Ok((pane, selection)) => selections.push((pane, selection)),
+                Err(err) => out
+                    .warnings
+                    .push(format!("failed to parse SELECTION record: {err}")),
+            },
+            records::RECORD_EOF => break,
+            _ => {}
+        }
+    }
+
+    // Prefer the SELECTION record for the active pane, if known; otherwise take the first.
+    if let Some(sel) = select_active_selection(active_pane, selections) {
+        out.selection = Some(sel);
+    }
+
+    Ok(out)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Window2Flags {
+    show_grid_lines: bool,
+    show_headings: bool,
+    show_zeros: bool,
+    frozen_panes: bool,
+}
+
+fn parse_window2_flags(data: &[u8]) -> Result<Window2Flags, String> {
+    if data.len() < 2 {
+        return Err("WINDOW2 record too short".to_string());
+    }
+    let grbit = u16::from_le_bytes([data[0], data[1]]);
+    Ok(Window2Flags {
+        show_grid_lines: (grbit & WINDOW2_FLAG_DSP_GRID) != 0,
+        show_headings: (grbit & WINDOW2_FLAG_DSP_RW_COL) != 0,
+        show_zeros: (grbit & WINDOW2_FLAG_DSP_ZEROS) != 0,
+        frozen_panes: (grbit & WINDOW2_FLAG_FROZEN) != 0 || (grbit & WINDOW2_FLAG_FROZEN_NO_SPLIT) != 0,
+    })
+}
+
+fn parse_scl_zoom(data: &[u8]) -> Result<f32, String> {
+    if data.len() < 4 {
+        return Err("SCL record too short".to_string());
+    }
+    let num = u16::from_le_bytes([data[0], data[1]]);
+    let denom = u16::from_le_bytes([data[2], data[3]]);
+    if denom == 0 {
+        return Err("SCL denominator is zero".to_string());
+    }
+    let zoom = num as f32 / denom as f32;
+    if !zoom.is_finite() || zoom <= 0.0 {
+        return Err(format!("invalid zoom scale {num}/{denom}"));
+    }
+    Ok(zoom)
+}
+
+fn parse_pane_record(data: &[u8], frozen_from_window2: Option<bool>) -> Result<(SheetPane, u16), String> {
+    // PANE record payload (BIFF8): [x:u16][y:u16][rwTop:u16][colLeft:u16][pnnAct:u16]
+    if data.len() < 10 {
+        return Err("PANE record too short".to_string());
+    }
+    let x = u16::from_le_bytes([data[0], data[1]]);
+    let y = u16::from_le_bytes([data[2], data[3]]);
+    let rw_top = u16::from_le_bytes([data[4], data[5]]);
+    let col_left = u16::from_le_bytes([data[6], data[7]]);
+    let pnn_act = u16::from_le_bytes([data[8], data[9]]);
+
+    let guessed_frozen = (x == col_left && y == rw_top) && (x != 0 || y != 0);
+    let frozen = frozen_from_window2.unwrap_or(guessed_frozen);
+
+    let mut pane = SheetPane::default();
+    if frozen {
+        pane.frozen_rows = y as u32;
+        pane.frozen_cols = x as u32;
+    } else {
+        pane.x_split = (x != 0).then_some(x as f32);
+        pane.y_split = (y != 0).then_some(y as f32);
+    }
+
+    // Top-left cell for the bottom-right pane.
+    let rw_top_u32 = rw_top as u32;
+    let col_left_u32 = col_left as u32;
+    if rw_top_u32 < EXCEL_MAX_ROWS && col_left_u32 < EXCEL_MAX_COLS {
+        pane.top_left_cell = Some(CellRef::new(rw_top_u32, col_left_u32));
+    }
+
+    Ok((pane, pnn_act))
+}
+
+fn select_active_selection(
+    active_pane: Option<u16>,
+    mut selections: Vec<(u16, SheetSelection)>,
+) -> Option<SheetSelection> {
+    if selections.is_empty() {
+        return None;
+    }
+    if let Some(active) = active_pane {
+        if let Some(idx) = selections.iter().position(|(pane, _)| *pane == active) {
+            return Some(selections.swap_remove(idx).1);
+        }
+    }
+    selections.into_iter().next().map(|(_, sel)| sel)
+}
+
+fn parse_selection_record_best_effort(data: &[u8]) -> Result<(u16, SheetSelection), String> {
+    // Try a small set of plausible BIFF8 layouts.
+    let mut last_err: Option<String> = None;
+
+    // Layout A: pnn:u8 (1 byte), no padding, refs are RefU (6 bytes).
+    if let Ok(v) = parse_selection_record(data, SelectionLayout::PnnU8NoPadRefU) {
+        return Ok(v);
+    }
+    // Layout B: pnn:u8 (1 byte) + 1 byte padding, refs are RefU (6 bytes).
+    if let Ok(v) = parse_selection_record(data, SelectionLayout::PnnU8PadRefU) {
+        return Ok(v);
+    }
+    // Layout C: pnn:u16, refs are Ref8 (8 bytes).
+    if let Ok(v) = parse_selection_record(data, SelectionLayout::PnnU16Ref8) {
+        return Ok(v);
+    }
+
+    last_err.get_or_insert_with(|| "unrecognized SELECTION record layout".to_string());
+    Err(last_err.unwrap())
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SelectionLayout {
+    PnnU8NoPadRefU,
+    PnnU8PadRefU,
+    PnnU16Ref8,
+}
+
+fn parse_selection_record(data: &[u8], layout: SelectionLayout) -> Result<(u16, SheetSelection), String> {
+    let (pane, rw_active, col_active, cref, refs_start, ref_len) = match layout {
+        SelectionLayout::PnnU8NoPadRefU => {
+            if data.len() < 9 {
+                return Err("SELECTION record too short".to_string());
+            }
+            let pane = data[0] as u16;
+            let rw_active = u16::from_le_bytes([data[1], data[2]]);
+            let col_active = u16::from_le_bytes([data[3], data[4]]);
+            // irefActive at [5..7] ignored.
+            let cref = u16::from_le_bytes([data[7], data[8]]);
+            (pane, rw_active, col_active, cref, 9usize, 6usize)
+        }
+        SelectionLayout::PnnU8PadRefU => {
+            if data.len() < 10 {
+                return Err("SELECTION record too short".to_string());
+            }
+            let pane = data[0] as u16;
+            let rw_active = u16::from_le_bytes([data[2], data[3]]);
+            let col_active = u16::from_le_bytes([data[4], data[5]]);
+            let cref = u16::from_le_bytes([data[8], data[9]]);
+            (pane, rw_active, col_active, cref, 10usize, 6usize)
+        }
+        SelectionLayout::PnnU16Ref8 => {
+            if data.len() < 10 {
+                return Err("SELECTION record too short".to_string());
+            }
+            let pane = u16::from_le_bytes([data[0], data[1]]);
+            let rw_active = u16::from_le_bytes([data[2], data[3]]);
+            let col_active = u16::from_le_bytes([data[4], data[5]]);
+            let cref = u16::from_le_bytes([data[8], data[9]]);
+            (pane, rw_active, col_active, cref, 10usize, 8usize)
+        }
+    };
+
+    let cref_usize = cref as usize;
+    let needed = refs_start
+        .checked_add(cref_usize.checked_mul(ref_len).ok_or("cref overflow")?)
+        .ok_or("SELECTION refs length overflow")?;
+    if data.len() < needed {
+        return Err(format!(
+            "SELECTION record too short for {cref} refs (need {needed} bytes, got {})",
+            data.len()
+        ));
+    }
+
+    let active_row_u32 = rw_active as u32;
+    let active_col_u32 = col_active as u32;
+    if active_row_u32 >= EXCEL_MAX_ROWS || active_col_u32 >= EXCEL_MAX_COLS {
+        return Err(format!(
+            "active cell out of bounds: row={active_row_u32} col={active_col_u32}"
+        ));
+    }
+    let active_cell = CellRef::new(active_row_u32, active_col_u32);
+
+    let mut ranges = Vec::with_capacity(cref_usize);
+    let mut off = refs_start;
+    for _ in 0..cref_usize {
+        let range = match layout {
+            SelectionLayout::PnnU16Ref8 => {
+                let rw_first = u16::from_le_bytes([data[off], data[off + 1]]) as u32;
+                let rw_last = u16::from_le_bytes([data[off + 2], data[off + 3]]) as u32;
+                let col_first = u16::from_le_bytes([data[off + 4], data[off + 5]]) as u32;
+                let col_last = u16::from_le_bytes([data[off + 6], data[off + 7]]) as u32;
+                off += 8;
+                make_range(rw_first, rw_last, col_first, col_last)?
+            }
+            SelectionLayout::PnnU8NoPadRefU | SelectionLayout::PnnU8PadRefU => {
+                let rw_first = u16::from_le_bytes([data[off], data[off + 1]]) as u32;
+                let rw_last = u16::from_le_bytes([data[off + 2], data[off + 3]]) as u32;
+                let col_first = data[off + 4] as u32;
+                let col_last = data[off + 5] as u32;
+                off += 6;
+                make_range(rw_first, rw_last, col_first, col_last)?
+            }
+        };
+        ranges.push(range);
+    }
+
+    Ok((pane, SheetSelection::new(active_cell, ranges)))
+}
+
+fn make_range(
+    rw_first: u32,
+    rw_last: u32,
+    col_first: u32,
+    col_last: u32,
+) -> Result<Range, String> {
+    if rw_first >= EXCEL_MAX_ROWS
+        || rw_last >= EXCEL_MAX_ROWS
+        || col_first >= EXCEL_MAX_COLS
+        || col_last >= EXCEL_MAX_COLS
+    {
+        return Err(format!(
+            "range out of bounds: rows {rw_first}..={rw_last}, cols {col_first}..={col_last}"
+        ));
+    }
+    let start = CellRef::new(rw_first.min(rw_last), col_first.min(col_last));
+    let end = CellRef::new(rw_first.max(rw_last), col_first.max(col_last));
+    Ok(Range::new(start, end))
 }
 
 pub(crate) fn parse_biff_sheet_row_col_properties(

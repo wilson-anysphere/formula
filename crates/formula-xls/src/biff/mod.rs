@@ -20,6 +20,7 @@ pub(crate) use globals::{
 pub(crate) use sheet::{
     parse_biff_sheet_cell_xf_indices_filtered, parse_biff_sheet_hyperlinks,
     parse_biff_sheet_merged_cells, parse_biff_sheet_row_col_properties, SheetRowColProperties,
+    parse_biff_sheet_view_state,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

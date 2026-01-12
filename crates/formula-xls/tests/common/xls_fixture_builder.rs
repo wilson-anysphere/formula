@@ -22,6 +22,9 @@ const RECORD_BOUNDSHEET: u16 = 0x0085;
 const RECORD_SAVERECALC: u16 = 0x005F;
 const RECORD_SHEETEXT: u16 = 0x0862;
 const RECORD_WINDOW2: u16 = 0x023E;
+const RECORD_SCL: u16 = 0x00A0;
+const RECORD_PANE: u16 = 0x0041;
+const RECORD_SELECTION: u16 = 0x001D;
 const RECORD_DIMENSIONS: u16 = 0x0200;
 const RECORD_MERGEDCELLS: u16 = 0x00E5;
 const RECORD_BLANK: u16 = 0x0201;
@@ -253,6 +256,24 @@ pub fn build_calc_settings_fixture_xls() -> Vec<u8> {
 /// Build a BIFF8 `.xls` fixture with a custom sheet tab color.
 pub fn build_tab_color_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_tab_color_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture that exercises workbook/worksheet view state import:
+///
+/// - Workbook WINDOW1 selects the second sheet tab.
+/// - Second worksheet contains SCL (zoom), PANE (frozen first row/col), and SELECTION (active cell).
+pub fn build_view_state_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_view_state_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -1528,9 +1549,149 @@ fn window1() -> [u8; 18] {
     out
 }
 
+fn window2_with_grbit(grbit: u16) -> [u8; 18] {
+    let mut out = [0u8; 18];
+    out[0..2].copy_from_slice(&grbit.to_le_bytes());
+    out
+}
+
+fn window1_with_active_tab(active_tab: u16) -> [u8; 18] {
+    let mut out = window1();
+    // iTabCur at offset 10.
+    out[10..12].copy_from_slice(&active_tab.to_le_bytes());
+    out
+}
+
+fn scl(num: u16, denom: u16) -> [u8; 4] {
+    let mut out = [0u8; 4];
+    out[0..2].copy_from_slice(&num.to_le_bytes());
+    out[2..4].copy_from_slice(&denom.to_le_bytes());
+    out
+}
+
+fn pane(x: u16, y: u16, rw_top: u16, col_left: u16, pnn_act: u16) -> [u8; 10] {
+    let mut out = [0u8; 10];
+    out[0..2].copy_from_slice(&x.to_le_bytes());
+    out[2..4].copy_from_slice(&y.to_le_bytes());
+    out[4..6].copy_from_slice(&rw_top.to_le_bytes());
+    out[6..8].copy_from_slice(&col_left.to_le_bytes());
+    out[8..10].copy_from_slice(&pnn_act.to_le_bytes());
+    out
+}
+
+fn selection_single_cell(pane: u8, row: u16, col: u16) -> Vec<u8> {
+    // SELECTION record payload (best-effort BIFF8 layout):
+    // [pnn:u8][rwActive:u16][colActive:u16][irefActive:u16][cref:u16][RefU]
+    // RefU: [rwFirst:u16][rwLast:u16][colFirst:u8][colLast:u8]
+    let mut out = Vec::<u8>::new();
+    out.push(pane);
+    out.extend_from_slice(&row.to_le_bytes());
+    out.extend_from_slice(&col.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes()); // irefActive
+    out.extend_from_slice(&1u16.to_le_bytes()); // cref
+    out.extend_from_slice(&row.to_le_bytes()); // rwFirst
+    out.extend_from_slice(&row.to_le_bytes()); // rwLast
+    out.push(col as u8); // colFirst
+    out.push(col as u8); // colLast
+    out
+}
+
+fn build_view_state_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1_with_active_tab(1)); // activeTab = 1 (second sheet)
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table (style XFs only).
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // Two worksheets.
+    let boundsheet1_start = globals.len();
+    let mut boundsheet1 = Vec::<u8>::new();
+    boundsheet1.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet1.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet1, "Sheet1");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet1);
+    let boundsheet1_offset_pos = boundsheet1_start + 4;
+
+    let boundsheet2_start = globals.len();
+    let mut boundsheet2 = Vec::<u8>::new();
+    boundsheet2.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet2.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet2, "Sheet2");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet2);
+    let boundsheet2_offset_pos = boundsheet2_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // Sheet1: minimal.
+    let sheet1_offset = globals.len();
+    let sheet1 = {
+        let mut sheet = Vec::<u8>::new();
+        push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+        let mut dims = Vec::<u8>::new();
+        dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+        dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+        dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+        dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+        dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+        push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+        push_record(&mut sheet, RECORD_WINDOW2, &window2());
+        push_record(&mut sheet, RECORD_EOF, &[]);
+        sheet
+    };
+    globals[boundsheet1_offset_pos..boundsheet1_offset_pos + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet1);
+
+    // Sheet2: view state records (zoom/freeze/selection).
+    let sheet2_offset = globals.len();
+    let sheet2 = {
+        let mut sheet = Vec::<u8>::new();
+        push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+        // DIMENSIONS: rows [0, 3) cols [0, 3) so C3 exists.
+        let mut dims = Vec::<u8>::new();
+        dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+        dims.extend_from_slice(&3u32.to_le_bytes()); // last row + 1
+        dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+        dims.extend_from_slice(&3u16.to_le_bytes()); // last col + 1
+        dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+        push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+        // WINDOW2: frozen panes flag set; hide gridlines/headings/zeros to exercise flags parsing.
+        let grbit: u16 = 0x0008; // fFrozen
+        push_record(&mut sheet, RECORD_WINDOW2, &window2_with_grbit(grbit));
+
+        // 200% zoom.
+        push_record(&mut sheet, RECORD_SCL, &scl(200, 100));
+
+        // Freeze first row and first column (top-left cell for bottom-right pane is B2).
+        push_record(&mut sheet, RECORD_PANE, &pane(1, 1, 1, 1, 0));
+
+        // Active cell C3 (row=2, col=2) in the bottom-right pane.
+        push_record(&mut sheet, RECORD_SELECTION, &selection_single_cell(0, 2, 2));
+
+        push_record(&mut sheet, RECORD_EOF, &[]);
+        sheet
+    };
+    globals[boundsheet2_offset_pos..boundsheet2_offset_pos + 4]
+        .copy_from_slice(&(sheet2_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet2);
+
+    globals
+}
+
 fn window2() -> [u8; 18] {
     // WINDOW2 record payload (BIFF8). Most fields can be zero for our fixtures.
-    [0u8; 18]
+    let mut out = [0u8; 18];
+    let grbit: u16 = 0x02B6;
+    out[0..2].copy_from_slice(&grbit.to_le_bytes());
+    out
 }
 
 fn font(name: &str) -> Vec<u8> {

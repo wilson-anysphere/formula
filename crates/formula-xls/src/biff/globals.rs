@@ -17,6 +17,7 @@ pub(crate) struct BoundSheetInfo {
 // - 1904: 2.4.169
 // - FORMAT / FORMAT2: 2.4.90
 // - XF: 2.4.353
+// - WINDOW1: 2.4.346
 const RECORD_CODEPAGE: u16 = 0x0042;
 const RECORD_BOUNDSHEET: u16 = 0x0085;
 const RECORD_1904: u16 = 0x0022;
@@ -25,6 +26,7 @@ const RECORD_CALCMODE: u16 = 0x000D;
 const RECORD_PRECISION: u16 = 0x000E;
 const RECORD_DELTA: u16 = 0x0010;
 const RECORD_ITERATION: u16 = 0x0011;
+const RECORD_WINDOW1: u16 = 0x003D;
 const RECORD_FORMAT_BIFF8: u16 = 0x041E;
 const RECORD_FORMAT2_BIFF5: u16 = 0x001E;
 const RECORD_XF: u16 = 0x00E0;
@@ -123,6 +125,7 @@ pub(crate) struct BiffWorkbookGlobals {
     pub(crate) iterative_max_change: Option<f64>,
     pub(crate) full_precision: Option<bool>,
     pub(crate) calculate_before_save: Option<bool>,
+    pub(crate) active_tab_index: Option<u16>,
     formats: HashMap<u16, String>,
     xfs: Vec<BiffXf>,
     /// Sheet tab colors parsed from BIFF8 `SHEETEXT` records, in stream order.
@@ -144,6 +147,7 @@ impl Default for BiffWorkbookGlobals {
             iterative_max_change: None,
             full_precision: None,
             calculate_before_save: None,
+            active_tab_index: None,
             formats: HashMap::new(),
             xfs: Vec::new(),
             sheet_tab_colors: Vec::new(),
@@ -236,6 +240,18 @@ pub(crate) fn parse_biff_workbook_globals(
         }
 
         match record_id {
+            // WINDOW1 [MS-XLS 2.4.346]
+            RECORD_WINDOW1 => {
+                // iTabCur is a 0-based active sheet tab index stored at offset 10.
+                // Payload layout (BIFF8): xWn, yWn, dxWn, dyWn, grbit, iTabCur, ...
+                if data.len() < 12 {
+                    out.warnings
+                        .push("WINDOW1 record too short to read active tab index".to_string());
+                } else if out.active_tab_index.is_none() {
+                    let tab = u16::from_le_bytes([data[10], data[11]]);
+                    out.active_tab_index = Some(tab);
+                }
+            }
             // 1904 [MS-XLS 2.4.169]
             RECORD_1904 => {
                 if data.len() >= 2 {
