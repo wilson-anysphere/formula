@@ -204,6 +204,13 @@ const CONTENT_SUBSTRING_RULES = [
   },
 ];
 
+const OPENAI_IN_TEST_RULE = {
+  id: "openai-in-test",
+  needleLower: "openai",
+  message:
+    "Forbidden: OpenAI references are not allowed in unit tests (Cursor-only AI). Use generic placeholders or test fixtures that avoid provider names.",
+};
+
 const OPENAI_IMPORT_REGEXES = [
   {
     id: "openai-import-from",
@@ -338,6 +345,19 @@ export async function checkCursorAiPolicy(options = {}) {
     if (allowForbiddenInThisTest) return;
 
     const contentLower = content.toLowerCase();
+
+    // Unit tests should not mention provider names at all (unless they are tests for
+    // this guard). This is stricter than the import-specifier check and helps
+    // prevent regressions via "stringly-typed" provider selection.
+    if (isTest) {
+      const idx = contentLower.indexOf(OPENAI_IN_TEST_RULE.needleLower);
+      if (idx !== -1) {
+        const { line, column } = computeLineColumn(content, idx);
+        record({ file: rel, ruleId: OPENAI_IN_TEST_RULE.id, message: OPENAI_IN_TEST_RULE.message, line, column });
+        return;
+      }
+    }
+
     for (const rule of CONTENT_SUBSTRING_RULES) {
       const idx = contentLower.indexOf(rule.needleLower);
       if (idx === -1) continue;

@@ -59,6 +59,19 @@ test("cursor AI policy guard fails when forbidden strings appear in unrelated un
   }
 });
 
+test("cursor AI policy guard fails when OpenAI appears in unrelated unit tests (even without imports)", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-openai-test-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "packages/example/src/something.test.js", 'const x = "OpenAI";\n');
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("cursor AI policy guard allows forbidden strings in the guard's own tests", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-test-pass-"));
   try {
@@ -75,4 +88,3 @@ test("cursor AI policy guard allows forbidden strings in the guard's own tests",
     await fs.rm(tmpRoot, { recursive: true, force: true });
   }
 });
-

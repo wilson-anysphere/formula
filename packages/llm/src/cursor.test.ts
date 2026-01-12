@@ -7,7 +7,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("CursorLLMClient.chat (OpenAI-compatible tool calling)", () => {
+describe("CursorLLMClient.chat (chat completions tool calling)", () => {
   it("serializes `role: tool` messages with `tool_call_id`", async () => {
     const fetchMock = vi.fn(async (_url: string, init: any) => {
       const body = JSON.parse(init.body as string);
@@ -33,7 +33,7 @@ describe("CursorLLMClient.chat (OpenAI-compatible tool calling)", () => {
     });
   });
 
-  it("serializes assistant `toolCalls` as OpenAI `tool_calls`", async () => {
+  it("serializes assistant `toolCalls` as `tool_calls`", async () => {
     const fetchMock = vi.fn(async (_url: string, init: any) => {
       const body = JSON.parse(init.body as string);
       expect(body.messages).toEqual([
