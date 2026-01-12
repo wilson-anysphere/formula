@@ -19,12 +19,19 @@ function isPlainObject(value: unknown): value is Record<string, any> {
  * Normalize a hex color to a CSS color string.
  *
  * This intentionally matches the clipboard’s permissive behavior:
+ * - accepts `#RGB` / `RGB`
  * - accepts `#RRGGBB` / `RRGGBB`
  * - accepts Excel/OOXML ARGB `#AARRGGBB` / `AARRGGBB` (converts to `#RRGGBB` or `rgba(r,g,b,a)`)
  */
 function normalizeHexToCssColor(hex: string): string | null {
   const normalized = hex.trim().replace(/^#/, "");
   if (!/^[0-9a-fA-F]+$/.test(normalized)) return null;
+
+  // #RGB
+  if (normalized.length === 3) {
+    const [r, g, b] = normalized.split("");
+    return `#${r}${r}${g}${g}${b}${b}`;
+  }
 
   // #RRGGBB
   if (normalized.length === 6) return `#${normalized}`;
