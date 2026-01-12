@@ -16,6 +16,21 @@ function extractTestIdsFromIndexHtml(html) {
   return ids;
 }
 
+function findDuplicateTestIdsInIndexHtml(html) {
+  const dataTestIdRegex = /\bdata-testid\s*=\s*(["'])(.*?)\1/g;
+  /** @type {Map<string, number>} */
+  const counts = new Map();
+  for (const match of html.matchAll(dataTestIdRegex)) {
+    const testId = match[2];
+    counts.set(testId, (counts.get(testId) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([testId, count]) => `${testId} (${count})`)
+    .sort((a, b) => a.localeCompare(b));
+}
+
 function extractTestIdsFromRibbonSchema(schema) {
   const testIdRegex = /\btestId\s*:\s*(["'])(.*?)\1/g;
   /** @type {string[]} */
@@ -29,6 +44,15 @@ function extractTestIdsFromRibbonSchema(schema) {
 test("desktop index.html does not hardcode ribbon action testids (avoid Playwright strict locator collisions)", () => {
   const htmlPath = path.join(__dirname, "..", "index.html");
   const html = fs.readFileSync(htmlPath, "utf8");
+
+  const indexDuplicates = findDuplicateTestIdsInIndexHtml(html);
+  assert.deepEqual(
+    indexDuplicates,
+    [],
+    `apps/desktop/index.html contains duplicate data-testid values (Playwright strict locators would fail):\\n${indexDuplicates
+      .map((id) => `- ${id}`)
+      .join("\\n")}`,
+  );
 
   const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
   const schema = fs.readFileSync(schemaPath, "utf8");
