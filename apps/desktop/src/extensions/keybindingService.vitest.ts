@@ -506,6 +506,29 @@ describe("KeybindingService", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it("matches AutoSum on macOS layouts where '=' requires Shift (Option+Shift+Equal)", async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const run = vi.fn();
+    commandRegistry.registerBuiltinCommand("edit.autoSum", "AutoSum", run);
+
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "mac" });
+    service.setBuiltinKeybindings(builtinKeybindings.filter((kb) => kb.command === "edit.autoSum"));
+
+    // Builtin spreadsheet shortcuts are gated by context keys and should fail closed.
+    contextKeys.batch({ "spreadsheet.isEditing": false, "focus.inTextInput": false });
+
+    // On macOS, Option is reported as `altKey`. Simulate a layout where the physical Equal key
+    // needs Shift to reach "=".
+    const event = makeKeydownEvent({ key: "+", code: "Equal", altKey: true, shiftKey: true });
+    const handled = await service.dispatchKeydown(event);
+
+    expect(handled).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
   it("supports mac-specific builtins while still allowing the base keybinding as a fallback", async () => {
     const contextKeys = new ContextKeyService();
     const commandRegistry = new CommandRegistry();
