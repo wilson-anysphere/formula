@@ -421,9 +421,11 @@ pub fn verify_vba_digital_signature_bound(
 /// `SpcIndirectDataContent`) and comparing it to a freshly computed digest over the project's OLE
 /// streams (excluding any signature streams).
 ///
-/// If multiple signature streams are present, we return the first one (by Excel's preferred stream
-/// name ordering; see `signature_path_rank`) that verifies successfully, falling back to the first
-/// candidate if none verify.
+/// If multiple signature streams are present, we prefer:
+/// 1) The first signature stream (by Excel/MS-OVBA preference ordering; see `signature_path_rank`)
+///    that is both cryptographically verified *and* bound to this project (`binding == Bound`).
+/// 2) Otherwise, the first cryptographically verified signature stream (even if not bound).
+/// 3) Otherwise, the first signature stream candidate (even if invalid/unparseable).
 pub fn verify_vba_digital_signature(
     vba_project_bin: &[u8],
 ) -> Result<Option<VbaDigitalSignature>, SignatureError> {
@@ -442,6 +444,7 @@ pub fn verify_vba_digital_signature(
     candidates.sort_by(|a, b| signature_path_rank(a).cmp(&signature_path_rank(b)).then(a.cmp(b)));
 
     let mut first: Option<VbaDigitalSignature> = None;
+    let mut first_verified: Option<VbaDigitalSignature> = None;
     for path in candidates {
         let signature = ole.read_stream_opt(&path)?.unwrap_or_default();
         let signer_subject = extract_first_certificate_subject(&signature);
@@ -459,15 +462,21 @@ pub fn verify_vba_digital_signature(
             verification,
             binding,
         };
+
         if sig.verification == VbaSignatureVerification::SignedVerified {
-            return Ok(Some(sig));
+            if sig.binding == VbaSignatureBinding::Bound {
+                return Ok(Some(sig));
+            }
+            if first_verified.is_none() {
+                first_verified = Some(sig.clone());
+            }
         }
         if first.is_none() {
             first = Some(sig);
         }
     }
 
-    Ok(first)
+    Ok(first_verified.or(first))
 }
 
 /// Parse and verify a VBA digital signature, optionally evaluating publisher trust.
@@ -499,6 +508,7 @@ pub fn verify_vba_digital_signature_with_trust(
     candidates.sort_by(|a, b| signature_path_rank(a).cmp(&signature_path_rank(b)).then(a.cmp(b)));
 
     let mut first: Option<VbaDigitalSignatureTrusted> = None;
+    let mut first_verified: Option<VbaDigitalSignatureTrusted> = None;
     for path in candidates {
         let signature_bytes = ole.read_stream_opt(&path)?.unwrap_or_default();
         let signer_subject = extract_first_certificate_subject(&signature_bytes);
@@ -533,14 +543,19 @@ pub fn verify_vba_digital_signature_with_trust(
         };
 
         if sig.signature.verification == VbaSignatureVerification::SignedVerified {
-            return Ok(Some(sig));
+            if sig.signature.binding == VbaSignatureBinding::Bound {
+                return Ok(Some(sig));
+            }
+            if first_verified.is_none() {
+                first_verified = Some(sig.clone());
+            }
         }
         if first.is_none() {
             first = Some(sig);
         }
     }
 
-    Ok(first)
+    Ok(first_verified.or(first))
 }
 
 fn verify_signature_binding(vba_project_bin: &[u8], signature: &[u8]) -> VbaSignatureBinding {
