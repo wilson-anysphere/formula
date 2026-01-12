@@ -2608,17 +2608,7 @@ fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
 }
 
 fn error_code(e: ErrorKind) -> &'static str {
-    match e {
-        ErrorKind::Null => "#NULL!",
-        ErrorKind::Div0 => "#DIV/0!",
-        ErrorKind::Ref => "#REF!",
-        ErrorKind::Value => "#VALUE!",
-        ErrorKind::Name => "#NAME?",
-        ErrorKind::Num => "#NUM!",
-        ErrorKind::NA => "#N/A",
-        ErrorKind::Spill => "#SPILL!",
-        ErrorKind::Calc => "#CALC!",
-    }
+    e.as_code()
 }
 
 fn excel_le(a: &Value, b: &Value) -> Option<bool> {

@@ -627,25 +627,20 @@ impl<'a> Lexer<'a> {
 
     fn lex_error(&mut self) -> Result<TokenKind, FormulaParseError> {
         let start = self.pos;
+        debug_assert_eq!(self.peek_char(), Some('#'));
+        self.pos += 1; // '#'
         while let Some(ch) = self.peek_char() {
-            if ch.is_ascii_alphanumeric() || ch == '#' || ch == '/' || ch == '!' || ch == '?' {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '/' | '.') {
                 self.pos += ch.len_utf8();
             } else {
                 break;
             }
         }
+        if matches!(self.peek_char(), Some('!' | '?')) {
+            self.pos += 1;
+        }
         let s = &self.input[start..self.pos];
-        let kind = match s.to_ascii_uppercase().as_str() {
-            "#DIV/0!" => ErrorKind::Div0,
-            "#VALUE!" => ErrorKind::Value,
-            "#REF!" => ErrorKind::Ref,
-            "#NAME?" => ErrorKind::Name,
-            "#N/A" => ErrorKind::NA,
-            "#NULL!" => ErrorKind::Null,
-            "#SPILL!" => ErrorKind::Spill,
-            "#CALC!" => ErrorKind::Calc,
-            _ => ErrorKind::Value,
-        };
+        let kind = ErrorKind::from_code(s).unwrap_or(ErrorKind::Value);
         Ok(TokenKind::Error(kind))
     }
 
