@@ -64,7 +64,7 @@ fn randarray_handles_large_min_max_without_overflowing_span() {
     };
     assert!(n.is_finite(), "expected result to be finite, got {n}");
     assert!(
-        (-1e308..=1e308).contains(&n),
+        (-1e308..1e308).contains(&n),
         "expected result to be within [-1e308, 1e308], got {n}"
     );
 }

@@ -1051,7 +1051,20 @@ fn randarray_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
         for _ in 0..total {
             let r = ctx.volatile_rand();
-            values.push(Value::Number((1.0 - r) * min + r * max));
+            // Generate a uniform float in [min, max) while avoiding potential overflow in
+            // `(max - min)` for very large finite bounds.
+            //
+            // `r` is guaranteed to be in [0,1), so the convex combination should be < max in exact
+            // arithmetic; clamp defensively to preserve the half-open interval under floating-point
+            // rounding.
+            let mut value = (1.0 - r) * min + r * max;
+            if value < min {
+                value = min;
+            }
+            if value >= max {
+                value = max.next_down();
+            }
+            values.push(Value::Number(value));
         }
     }
 
