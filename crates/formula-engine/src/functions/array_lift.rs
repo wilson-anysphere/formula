@@ -12,10 +12,6 @@ impl Shape {
     pub(crate) fn is_1x1(self) -> bool {
         self.rows == 1 && self.cols == 1
     }
-
-    pub(crate) fn len(self) -> usize {
-        self.rows.saturating_mul(self.cols)
-    }
 }
 
 pub(crate) fn value_shape(value: &Value) -> Option<Shape> {
@@ -100,7 +96,17 @@ fn reference_to_value(ctx: &dyn FunctionContext, reference: Reference) -> Value 
 
     let rows = (reference.end.row - reference.start.row + 1) as usize;
     let cols = (reference.end.col - reference.start.col + 1) as usize;
-    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    let total = match rows.checked_mul(cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Spill),
+    };
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+    let mut values = Vec::new();
+    if values.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
     for addr in reference.iter_cells() {
         values.push(ctx.get_cell_value(&reference.sheet_id, addr));
     }
@@ -122,8 +128,18 @@ pub(crate) fn lift1(value: Value, f: impl Fn(&Value) -> Result<Value, ErrorKind>
         return Value::Error(ErrorKind::Value);
     }
 
-    let mut out = Vec::with_capacity(shape.len());
-    for idx in 0..shape.len() {
+    let total = match shape.rows.checked_mul(shape.cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Spill),
+    };
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+    let mut out = Vec::new();
+    if out.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
+    for idx in 0..total {
         let v = element_at(&value, shape, idx);
         out.push(match f(v) {
             Ok(v) => v,
@@ -152,8 +168,18 @@ pub(crate) fn lift2(
         return Value::Error(ErrorKind::Value);
     }
 
-    let mut out = Vec::with_capacity(shape.len());
-    for idx in 0..shape.len() {
+    let total = match shape.rows.checked_mul(shape.cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Spill),
+    };
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+    let mut out = Vec::new();
+    if out.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
+    for idx in 0..total {
         let av = element_at(&a, shape, idx);
         let bv = element_at(&b, shape, idx);
         out.push(match f(av, bv) {
@@ -188,8 +214,18 @@ pub(crate) fn lift3(
         return Value::Error(ErrorKind::Value);
     }
 
-    let mut out = Vec::with_capacity(shape.len());
-    for idx in 0..shape.len() {
+    let total = match shape.rows.checked_mul(shape.cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Spill),
+    };
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+    let mut out = Vec::new();
+    if out.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
+    for idx in 0..total {
         let av = element_at(&a, shape, idx);
         let bv = element_at(&b, shape, idx);
         let cv = element_at(&c, shape, idx);
@@ -227,8 +263,18 @@ pub(crate) fn lift4(
         return Value::Error(ErrorKind::Value);
     }
 
-    let mut out = Vec::with_capacity(shape.len());
-    for idx in 0..shape.len() {
+    let total = match shape.rows.checked_mul(shape.cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Spill),
+    };
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+    let mut out = Vec::new();
+    if out.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
+    for idx in 0..total {
         let av = element_at(&a, shape, idx);
         let bv = element_at(&b, shape, idx);
         let cv = element_at(&c, shape, idx);
@@ -269,8 +315,18 @@ pub(crate) fn lift5(
         return Value::Error(ErrorKind::Value);
     }
 
-    let mut out = Vec::with_capacity(shape.len());
-    for idx in 0..shape.len() {
+    let total = match shape.rows.checked_mul(shape.cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Spill),
+    };
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+    let mut out = Vec::new();
+    if out.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
+    for idx in 0..total {
         let av = element_at(&a, shape, idx);
         let bv = element_at(&b, shape, idx);
         let cv = element_at(&c, shape, idx);

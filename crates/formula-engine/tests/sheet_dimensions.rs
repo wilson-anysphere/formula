@@ -76,6 +76,33 @@ fn row_and_column_handle_row_and_column_refs_with_custom_dimensions() {
 }
 
 #[test]
+fn row_and_array_lift_return_spill_for_huge_whole_column_outputs() {
+    // The engine supports sheets larger than Excel's default row count, but array-producing
+    // functions should not attempt to materialize arbitrarily large arrays based solely on the
+    // sheet's configured dimensions.
+    //
+    // Use a sheet height that exceeds the engine's materialization cap so functions like ROW(A:A)
+    // and ABS(A:A) fail fast with `#SPILL!` instead of trying to allocate gigabytes.
+    let mut engine = Engine::new();
+    engine
+        .set_sheet_dimensions("Sheet1", 5_000_001, EXCEL_MAX_COLS)
+        .unwrap();
+
+    engine.set_cell_formula("Sheet1", "B1", "=ROW(A:A)").unwrap();
+    engine.set_cell_formula("Sheet1", "B2", "=ABS(A:A)").unwrap();
+
+    engine.recalculate();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Error(ErrorKind::Spill)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B2"),
+        Value::Error(ErrorKind::Spill)
+    );
+}
+
+#[test]
 fn defined_name_whole_column_tracks_sheet_dimensions() {
     let mut engine = Engine::new();
     engine.set_sheet_dimensions("Sheet1", 10, 10).unwrap();

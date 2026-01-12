@@ -136,7 +136,13 @@ fn row_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         reference.start.row == 0 && reference.end.row == sheet_rows.saturating_sub(1);
 
     if spans_all_cols || spans_all_rows {
-        let mut values = Vec::with_capacity(rows);
+        if rows > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+            return Value::Error(ErrorKind::Spill);
+        }
+        let mut values = Vec::new();
+        if values.try_reserve_exact(rows).is_err() {
+            return Value::Error(ErrorKind::Num);
+        }
         for row in reference.start.row..=reference.end.row {
             values.push(Value::Number((u64::from(row) + 1) as f64));
         }
@@ -146,7 +152,17 @@ fn row_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Array(Array::new(rows, 1, values));
     }
 
-    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    let total = match rows.checked_mul(cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Spill),
+    };
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+    let mut values = Vec::new();
+    if values.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
     for row in reference.start.row..=reference.end.row {
         let n = Value::Number((u64::from(row) + 1) as f64);
         for _ in reference.start.col..=reference.end.col {
@@ -195,7 +211,13 @@ fn column_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         reference.start.row == 0 && reference.end.row == sheet_rows.saturating_sub(1);
 
     if spans_all_cols || spans_all_rows {
-        let mut values = Vec::with_capacity(cols);
+        if cols > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+            return Value::Error(ErrorKind::Spill);
+        }
+        let mut values = Vec::new();
+        if values.try_reserve_exact(cols).is_err() {
+            return Value::Error(ErrorKind::Num);
+        }
         for col in reference.start.col..=reference.end.col {
             values.push(Value::Number((u64::from(col) + 1) as f64));
         }
@@ -205,7 +227,17 @@ fn column_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Array(Array::new(1, cols, values));
     }
 
-    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    let total = match rows.checked_mul(cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Spill),
+    };
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+    let mut values = Vec::new();
+    if values.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
     let mut row_values = Vec::with_capacity(cols);
     for col in reference.start.col..=reference.end.col {
         row_values.push(Value::Number((u64::from(col) + 1) as f64));

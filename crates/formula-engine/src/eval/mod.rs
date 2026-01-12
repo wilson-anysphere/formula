@@ -19,4 +19,5 @@ pub(crate) use evaluator::is_valid_external_sheet_key;
 pub use evaluator::{
     DependencyTrace, EvalContext, Evaluator, RecalcContext, ResolvedName, ValueResolver,
 };
+pub(crate) use evaluator::MAX_MATERIALIZED_ARRAY_CELLS;
 pub use parser::{FormulaParseError, Parser};

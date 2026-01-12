@@ -34,7 +34,17 @@ where
             } else {
                 let rows = (r.end.row - r.start.row + 1) as usize;
                 let cols = (r.end.col - r.start.col + 1) as usize;
-                let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+                let total = match rows.checked_mul(cols) {
+                    Some(v) => v,
+                    None => return Value::Error(ErrorKind::Spill),
+                };
+                if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+                    return Value::Error(ErrorKind::Spill);
+                }
+                let mut values = Vec::new();
+                if values.try_reserve_exact(total).is_err() {
+                    return Value::Error(ErrorKind::Num);
+                }
                 for row in r.start.row..=r.end.row {
                     for col in r.start.col..=r.end.col {
                         let v = ctx.get_cell_value(&r.sheet_id, CellAddr { row, col });
