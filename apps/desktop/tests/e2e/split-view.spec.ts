@@ -1273,6 +1273,55 @@ test.describe("split view", () => {
 
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C2"))).toBe("hello");
   });
+
+  test("Ctrl/Cmd+S commits an in-progress secondary-pane edit", async ({ page }) => {
+    // The Ctrl/Cmd+S handler is wired via the desktop/Tauri integration layer in `main.ts`.
+    // Stub the minimal `__TAURI__` surface so the handler is registered in the browser-based
+    // Playwright harness.
+    await page.addInitScript(() => {
+      const listeners: Record<string, any> = {};
+      (window as any).__tauriListeners = listeners;
+      (window as any).__TAURI__ = {
+        core: {
+          invoke: async () => null,
+        },
+        event: {
+          listen: async (name: string, handler: any) => {
+            listeners[name] = handler;
+            return () => {
+              delete listeners[name];
+            };
+          },
+          emit: async () => {},
+        },
+      };
+    });
+
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+
+    // Start editing C2 in the secondary pane but do NOT press Enter/Tab.
+    await secondary.click({ position: { x: 48 + 2 * 100 + 12, y: 24 + 1 * 24 + 12 } });
+    await page.keyboard.press("h");
+    const editor = secondary.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await page.keyboard.type("ello");
+
+    // Trigger Save (which calls `commitAllPendingEditsForCommand()` in `main.ts`) while the
+    // secondary editor is still active.
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await page.keyboard.press(`${modifier}+S`);
+    await waitForIdle(page);
+
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C2"))).toBe("hello");
+  });
 });
 
 test.describe("split view / shared grid zoom", () => {
