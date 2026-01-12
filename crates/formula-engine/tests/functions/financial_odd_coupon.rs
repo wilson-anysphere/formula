@@ -508,8 +508,8 @@ fn oddfyield_extreme_prices_roundtrip() {
 
         assert!(yld.is_finite(), "yield should be finite, got {yld}");
         assert!(
-            yld > -(frequency as f64),
-            "yield should be > -frequency, got {yld}"
+            yld > -1.0,
+            "yield should be > -1.0, got {yld}"
         );
 
         let price = oddfprice(
@@ -544,7 +544,10 @@ fn oddlyield_extreme_prices_roundtrip() {
     let frequency = 2;
     let basis = 0;
 
-    for pr in [50.0, 200.0] {
+    // NOTE: yields are restricted to > -1.0 (matching `PRICE`/`YIELD`). For this short odd-last
+    // case, very large prices can require yields below -1.0, which should return #NUM!. Keep the
+    // "high price" test case within the allowed domain.
+    for pr in [50.0, 120.0] {
         let yld = oddlyield(
             settlement,
             maturity,
@@ -560,8 +563,8 @@ fn oddlyield_extreme_prices_roundtrip() {
 
         assert!(yld.is_finite(), "yield should be finite, got {yld}");
         assert!(
-            yld > -(frequency as f64),
-            "yield should be > -frequency, got {yld}"
+            yld > -1.0,
+            "yield should be > -1.0, got {yld}"
         );
 
         let price = oddlprice(
@@ -1621,13 +1624,12 @@ fn odd_last_coupon_roundtrips_yield_with_quarterly_frequency_and_non_100_redempt
 }
 
 #[test]
-fn oddfprice_returns_num_error_for_non_finite_price_near_negative_frequency_boundary() {
+fn oddfprice_rejects_yield_at_or_below_negative_one() {
     let system = ExcelDateSystem::EXCEL_1900;
 
     let issue = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
     let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 15), system).unwrap();
     let first_coupon = ymd_to_serial(ExcelDate::new(2020, 7, 15), system).unwrap();
-    // Long maturity to ensure the discount factor underflows and PV overflows for yields near -frequency.
     let maturity = ymd_to_serial(ExcelDate::new(2033, 1, 15), system).unwrap();
 
     let rate = 0.05;
@@ -1635,28 +1637,29 @@ fn oddfprice_returns_num_error_for_non_finite_price_near_negative_frequency_boun
     let frequency = 2;
     let basis = 0;
 
-    let yld = -(frequency as f64) + 1e-12;
-    let result = oddfprice(
-        settlement,
-        maturity,
-        issue,
-        first_coupon,
-        rate,
-        yld,
-        redemption,
-        frequency,
-        basis,
-        system,
-    );
+    for yld in [-1.0, -1.5] {
+        let result = oddfprice(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            rate,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        );
 
-    assert!(
-        matches!(result, Err(ExcelError::Num)),
-        "expected #NUM!, got {result:?}"
-    );
+        assert!(
+            matches!(result, Err(ExcelError::Num)),
+            "expected #NUM! for yld={yld}, got {result:?}"
+        );
+    }
 }
 
 #[test]
-fn oddlprice_returns_num_error_for_non_finite_price_near_negative_frequency_boundary() {
+fn oddlprice_rejects_yield_at_or_below_negative_one() {
     let system = ExcelDateSystem::EXCEL_1900;
 
     let last_interest = ymd_to_serial(ExcelDate::new(2020, 1, 15), system).unwrap();
@@ -1668,10 +1671,98 @@ fn oddlprice_returns_num_error_for_non_finite_price_near_negative_frequency_boun
     let frequency = 2;
     let basis = 0;
 
-    let yld = -(frequency as f64) + 1e-12;
-    let result = oddlprice(
+    for yld in [-1.0, -1.5] {
+        let result = oddlprice(
+            settlement,
+            maturity,
+            last_interest,
+            rate,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        );
+
+        assert!(
+            matches!(result, Err(ExcelError::Num)),
+            "expected #NUM! for yld={yld}, got {result:?}"
+        );
+    }
+}
+
+#[test]
+fn odd_coupon_bond_price_allows_negative_yield() {
+    let mut sheet = TestSheet::new();
+
+    let oddf = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-0.5,100,2,0)";
+    let oddl = "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-0.5,100,2,0)";
+
+    let oddf_price = match eval_number_or_skip(&mut sheet, oddf) {
+        Some(v) => v,
+        None => return,
+    };
+    let oddl_price = eval_number_or_skip(&mut sheet, oddl)
+        .expect("ODDLPRICE should return a number for negative yld within (-1, ∞)");
+
+    assert!(oddf_price.is_finite(), "expected finite price, got {oddf_price}");
+    assert!(oddl_price.is_finite(), "expected finite price, got {oddl_price}");
+}
+
+#[test]
+fn odd_coupon_yield_roundtrips_negative_yield() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // ODDF* (use a zero-coupon case for numerical stability).
+    let issue = ymd_to_serial(ExcelDate::new(2019, 10, 1), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let first_coupon = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2021, 7, 1), system).unwrap();
+
+    let rate = 0.0;
+    let yld = -0.5;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 0;
+
+    let price = oddfprice(
         settlement,
         maturity,
+        issue,
+        first_coupon,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .unwrap();
+    assert!(price.is_finite(), "expected finite ODDFPRICE, got {price}");
+
+    let solved = oddfyield(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        price,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .unwrap();
+    assert_close(solved, yld, 1e-7);
+
+    // ODDL*
+    let last_interest = ymd_to_serial(ExcelDate::new(2021, 1, 1), system).unwrap();
+    let settlement2 = ymd_to_serial(ExcelDate::new(2021, 2, 1), system).unwrap();
+    let maturity2 = ymd_to_serial(ExcelDate::new(2021, 5, 1), system).unwrap();
+
+    let price2 = oddlprice(
+        settlement2,
+        maturity2,
         last_interest,
         rate,
         yld,
@@ -1679,36 +1770,23 @@ fn oddlprice_returns_num_error_for_non_finite_price_near_negative_frequency_boun
         frequency,
         basis,
         system,
-    );
+    )
+    .unwrap();
+    assert!(price2.is_finite(), "expected finite ODDLPRICE, got {price2}");
 
-    assert!(
-        matches!(result, Err(ExcelError::Num)),
-        "expected #NUM!, got {result:?}"
-    );
-}
-
-#[test]
-fn odd_coupon_bond_price_allows_negative_yield() {
-    let mut sheet = TestSheet::new();
-
-    let oddf = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-0.01,100,2,0)";
-    let oddl = "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-0.01,100,2,0)";
-
-    let oddf_price = match eval_number_or_skip(&mut sheet, oddf) {
-        Some(v) => v,
-        None => return,
-    };
-    let oddl_price = eval_number_or_skip(&mut sheet, oddl)
-        .expect("ODDLPRICE should return a number for negative yld within (-frequency, ∞)");
-
-    assert!(
-        oddf_price.is_finite(),
-        "expected finite price, got {oddf_price}"
-    );
-    assert!(
-        oddl_price.is_finite(),
-        "expected finite price, got {oddl_price}"
-    );
+    let solved2 = oddlyield(
+        settlement2,
+        maturity2,
+        last_interest,
+        rate,
+        price2,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .unwrap();
+    assert_close(solved2, yld, 1e-7);
 }
 
 #[test]
@@ -1875,10 +1953,13 @@ fn odd_coupon_bond_yield_can_be_negative() {
     let mut sheet = TestSheet::new();
 
     // A price above the undiscounted cashflows implies a negative yield when yields are allowed
-    // below 0. Excel's behavior here is historically ambiguous; this test locks in the current
-    // engine semantics (negative yields are supported down to `-frequency`).
+    // below 0. We align the domain with Excel's other bond functions (`PRICE`, `YIELD`): yields
+    // must be > -1.0.
     let oddf = "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,300,100,2,0)";
-    let oddl = "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,300,100,2,0)";
+    // `ODDLYIELD` has a short remaining term in this example, so extremely high prices can imply
+    // yields below -1.0. Use a moderately high price that still yields a negative result in
+    // (-1, 0).
+    let oddl = "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,120,100,2,0)";
 
     let oddf_yld = match eval_number_or_skip(&mut sheet, oddf) {
         Some(v) => v,
@@ -1887,12 +1968,12 @@ fn odd_coupon_bond_yield_can_be_negative() {
     let oddl_yld = eval_number_or_skip(&mut sheet, oddl).expect("ODDLYIELD should return a number");
 
     assert!(
-        oddf_yld < 0.0 && oddf_yld > -2.0,
-        "expected ODDFYIELD to return a negative yield in (-2, 0), got {oddf_yld}"
+        oddf_yld < 0.0 && oddf_yld > -1.0,
+        "expected ODDFYIELD to return a negative yield in (-1, 0), got {oddf_yld}"
     );
     assert!(
-        oddl_yld < 0.0 && oddl_yld > -2.0,
-        "expected ODDLYIELD to return a negative yield in (-2, 0), got {oddl_yld}"
+        oddl_yld < 0.0 && oddl_yld > -1.0,
+        "expected ODDLYIELD to return a negative yield in (-1, 0), got {oddl_yld}"
     );
 }
 

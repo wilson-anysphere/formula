@@ -49,10 +49,16 @@ impl BondEquation {
             return Err(ExcelError::Num);
         }
 
-        if yld == -self.freq {
-            return Err(ExcelError::Div0);
-        }
-        if yld < -self.freq {
+        // Domain check:
+        //
+        // Excel's bond functions treat `yld` as an *annual* yield and reject values <= -1.0 with
+        // `#NUM!`, regardless of coupon frequency (see `PRICE` / `YIELD` in `bonds.rs`).  The
+        // odd-coupon bond functions (`ODDF*` / `ODDL*`) should follow the same rule for parity.
+        //
+        // Note: the pure math domain for the per-period discount base `1 + yld/freq` would allow
+        // much lower yields when `freq > 1` (down to `-freq`), but Excel does not accept yields at
+        // or below -100%.
+        if yld <= -1.0 {
             return Err(ExcelError::Num);
         }
 
@@ -470,7 +476,7 @@ fn solve_odd_yield(pr: f64, equation: &BondEquation) -> ExcelResult<f64> {
     let df = |y: f64| equation.df(y);
 
     if let Some(y) = newton_raphson(0.1, MAX_ITER_ODD_YIELD_NEWTON, f, df) {
-        if y.is_finite() && y > -equation.freq {
+        if y.is_finite() && y > -1.0 {
             if let Some(residual) = equation.f(y, pr) {
                 if residual.abs() <= PRICE_RESIDUAL_TOLERANCE {
                     return Ok(y);
@@ -481,14 +487,15 @@ fn solve_odd_yield(pr: f64, equation: &BondEquation) -> ExcelResult<f64> {
 
     // Deterministic fallback: monotonic bracketing + bisection.
     // For typical bond cashflows (positive redemption, non-negative coupon), price decreases with yield.
-    let mut lo = -equation.freq + 1e-8;
-    if !lo.is_finite() || lo <= -equation.freq {
+    let mut lo = -0.999999999_f64; // yld must be > -1.0
+    if !lo.is_finite() || lo <= -1.0 {
         return Err(ExcelError::Num);
     }
 
     // Ensure the low end of the bracket has a positive residual. If the residual is negative at our
-    // initial `lo`, move closer to the `-frequency` boundary (where price → +∞) until the residual
-    // becomes positive or the evaluation overflows (treated as positive).
+    // initial `lo`, move closer to the `-1.0` boundary (minimum allowed yield) until the residual
+    // becomes positive or the evaluation overflows (treated as positive). If the residual remains
+    // negative all the way to the boundary, then there is no solution in the allowed yield domain.
     let mut expansions = 0usize;
     loop {
         match equation.f(lo, pr) {
@@ -508,13 +515,13 @@ fn solve_odd_yield(pr: f64, equation: &BondEquation) -> ExcelResult<f64> {
             return Err(ExcelError::Num);
         }
 
-        let eps = lo + equation.freq;
+        let eps = lo + 1.0;
         let next_eps = eps / 2.0;
         if next_eps <= 0.0 || !next_eps.is_finite() {
             return Err(ExcelError::Num);
         }
-        lo = -equation.freq + next_eps;
-        if lo <= -equation.freq {
+        lo = -1.0 + next_eps;
+        if lo <= -1.0 {
             return Err(ExcelError::Num);
         }
     }
@@ -580,15 +587,15 @@ fn solve_odd_yield(pr: f64, equation: &BondEquation) -> ExcelResult<f64> {
                 }
             }
             None => {
-                // A non-finite price implies we're too close to the `-frequency` boundary; treat it
-                // as a positive residual and move the lower bracket upward.
+                // A non-finite price implies we're too close to the `-1.0` yield boundary (or have
+                // overflowed); treat it as a positive residual and move the lower bracket upward.
                 lo = mid;
             }
         }
     }
 
     let y = 0.5 * (lo + hi);
-    if y.is_finite() && y > -equation.freq {
+    if y.is_finite() && y > -1.0 {
         Ok(y)
     } else {
         Err(ExcelError::Num)
