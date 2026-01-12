@@ -71,6 +71,10 @@ fn der_null() -> Vec<u8> {
     vec![0x05, 0x00]
 }
 
+fn der_oid(oid_content: &[u8]) -> Vec<u8> {
+    der_tlv(0x06, oid_content)
+}
+
 fn build_sig_data_v1_serialized_with_source_hash(source_hash: &[u8]) -> Vec<u8> {
     // Minimal binary SigDataV1Serialized-ish blob:
     // [version u32 LE] [cbSourceHash u32 LE] [sourceHash bytes]
@@ -185,6 +189,28 @@ fn extracts_signed_digest_from_spc_indirect_data_content_v2_sigdata_as_octet_wra
         build_spc_indirect_data_content_v2_with_sigdata_element(der_octet_string(&sigdata_asn1));
 
     let pkcs7 = make_pkcs7_signed_message(&spc_v2);
+    let got = extract_vba_signature_signed_digest(&pkcs7)
+        .expect("extract digest")
+        .expect("digest present");
+    assert_eq!(got.digest_algorithm_oid, "1.2.840.113549.2.5");
+    assert_eq!(got.digest, source_hash);
+}
+
+#[test]
+fn extracts_signed_digest_from_spc_indirect_data_content_v2_sigdata_as_algorithm_id_first_asn1() {
+    // Some producers encode SigDataV1Serialized as an ASN.1 SEQUENCE beginning with an
+    // AlgorithmIdentifier instead of a version INTEGER. Ensure we can still locate `sourceHash`.
+    let source_hash = (0u8..16).collect::<Vec<_>>();
+
+    // AlgorithmIdentifier ::= SEQUENCE { algorithm OBJECT IDENTIFIER, parameters NULL }
+    let sha256_oid = der_oid(&[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01]);
+    let alg_id = der_sequence(&[sha256_oid, der_null()]);
+    let sigdata = der_sequence(&[alg_id, der_octet_string(&source_hash)]);
+
+    // Wrap SigData in an OCTET STRING to ensure we exercise the V2 parser path.
+    let spc_v2 = build_spc_indirect_data_content_v2_with_sigdata_element(der_octet_string(&sigdata));
+    let pkcs7 = make_pkcs7_signed_message(&spc_v2);
+
     let got = extract_vba_signature_signed_digest(&pkcs7)
         .expect("extract digest")
         .expect("digest present");
