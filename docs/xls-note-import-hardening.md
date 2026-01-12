@@ -36,9 +36,6 @@ Implementation note:
   - falls back to BIFF8 `XLUnicodeString` when payload layout suggests it
   - strips embedded `\0` characters from the decoded author string
 
-### Task 140 — Strip embedded NULs in NOTE author
+Merged/closed tasks:
 
-**Status: closed (duplicate/subset of Task 135).**
-
-Rationale: embedded NUL stripping is explicitly part of Task 135. Keeping a separate task (140)
-caused duplicated work / confusion when hardening NOTE author parsing.
+- Task 140 — Strip embedded NULs in NOTE author: **closed** (duplicate/subset of Task 135)
