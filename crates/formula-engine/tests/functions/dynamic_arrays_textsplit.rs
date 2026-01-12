@@ -75,6 +75,27 @@ fn textsplit_pad_with() {
 }
 
 #[test]
+fn textsplit_blank_pad_with_defaults_to_na() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=TEXTSPLIT(\"a,b;c\",\",\",\";\",FALSE,0,)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("B2").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::from("a"));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::from("b"));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::from("c"));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B2"),
+        Value::Error(formula_engine::ErrorKind::NA)
+    );
+}
+
+#[test]
 fn textsplit_match_mode_case_insensitive() {
     let mut engine = Engine::new();
     engine

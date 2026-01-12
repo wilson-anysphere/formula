@@ -1,4 +1,5 @@
 use crate::eval::CompiledExpr;
+use crate::eval::Expr;
 use crate::functions::{eval_scalar_arg, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{Array, ErrorKind, Value};
@@ -74,10 +75,14 @@ fn textsplit_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let pad_with = if args.len() >= 6 {
+        if matches!(args[5], Expr::Blank) {
+            Value::Error(ErrorKind::NA)
+        } else {
         let v = ctx.eval_scalar(&args[5]);
         match v {
             Value::Array(_) | Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             other => other,
+        }
         }
     } else {
         Value::Error(ErrorKind::NA)
