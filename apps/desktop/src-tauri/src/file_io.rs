@@ -438,6 +438,29 @@ fn is_encrypted_ooxml_workbook(path: &Path) -> std::io::Result<bool> {
         && cfb_stream_exists(&mut ole, "EncryptedPackage"))
 }
 
+fn is_xls_ole_workbook(path: &Path) -> std::io::Result<bool> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut file = std::fs::File::open(path)?;
+    let mut magic = [0u8; 8];
+    match file.read_exact(&mut magic) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(false),
+        Err(err) => return Err(err),
+    }
+    if magic != OLE_MAGIC {
+        return Ok(false);
+    }
+    file.seek(SeekFrom::Start(0))?;
+
+    let mut ole = match cfb::CompoundFile::open(file) {
+        Ok(ole) => ole,
+        Err(_) => return Ok(false),
+    };
+
+    Ok(cfb_stream_exists(&mut ole, "Workbook") || cfb_stream_exists(&mut ole, "Book"))
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum SniffedWorkbookFormat {
     Xls,
@@ -459,7 +482,14 @@ fn sniff_workbook_format(path: &Path) -> Option<SniffedWorkbookFormat> {
     let read = file.read(&mut header).ok()?;
 
     if read >= OLE_MAGIC.len() && header == OLE_MAGIC {
-        return Some(SniffedWorkbookFormat::Xls);
+        // Many file formats share the OLE header, so avoid blindly classifying everything as an
+        // `.xls`. Confirm this looks like either:
+        // - a legacy BIFF workbook (Workbook/Book stream), or
+        // - an encrypted OOXML container (EncryptionInfo + EncryptedPackage streams).
+        if is_encrypted_ooxml_workbook(path).ok()? || is_xls_ole_workbook(path).ok()? {
+            return Some(SniffedWorkbookFormat::Xls);
+        }
+        return None;
     }
 
     let is_zip = read >= 4
