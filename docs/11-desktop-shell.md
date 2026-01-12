@@ -58,7 +58,9 @@ Top-level keys in `tauri.conf.json` define the packaged app identity:
 
 - `productName`: human-readable app name
 - `identifier`: reverse-DNS bundle identifier (`app.formula.desktop`)
-- `version`: desktop app version used by the updater / release tooling (see `docs/release.md`)
+- `version`: desktop app version used by the updater / release tooling. Tagged releases (`vX.Y.Z`)
+  must match this value (CI enforces this via `scripts/check-desktop-version.mjs`; see
+  `docs/release.md`).
 - `mainBinaryName`: the Rust binary name Tauri expects to launch (matches `[[bin]].name` in `apps/desktop/src-tauri/Cargo.toml`)
 
 ### `build.*` (frontend dev/build + Cargo feature flags)
@@ -140,6 +142,9 @@ Auto-update is configured under `plugins.updater` (Tauri v2 plugin config). In t
 - `plugins.updater.pubkey` → set this for real releases (see `docs/release.md`)
 - `plugins.updater.endpoints` → update JSON endpoint(s)
 - `plugins.updater.dialog: false` → the Rust host emits an event instead of showing a built-in dialog
+
+Release CI note: when `plugins.updater.active=true`, tagged releases will fail if `pubkey`/`endpoints`
+are still placeholders. You can validate locally with `node scripts/check-updater-config.mjs`.
 
 Minimal excerpt (not copy/pasteable; see the full file for everything):
 

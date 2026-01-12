@@ -4,11 +4,28 @@ This repository ships the desktop app via GitHub Releases and Tauri's built-in u
 Tagged pushes (`vX.Y.Z`) trigger a GitHub Actions workflow that builds installers/bundles for
 macOS/Windows/Linux and uploads them to a **draft** GitHub Release.
 
+## Preflight validations (CI enforced)
+
+The release workflow runs a couple of lightweight preflight scripts before it spends time building
+bundles. These checks will fail the release workflow on a tagged push if the repo is not in a
+releasable state.
+
+Run them locally from the repo root:
+
+```bash
+# Ensures the tag version matches apps/desktop/src-tauri/tauri.conf.json "version".
+node scripts/check-desktop-version.mjs vX.Y.Z
+
+# Ensures plugins.updater.pubkey/endpoints are not placeholders when the updater is active.
+node scripts/check-updater-config.mjs
+```
+
 ## 1) Versioning + tagging
 
 1. Update the desktop app version in `apps/desktop/src-tauri/tauri.conf.json` (`version`).
 2. Merge the version bump to `main`.
-3. Create and push a tag:
+3. Create and push a tag **with the same version** (CI enforces that the git tag matches
+   `tauri.conf.json`):
 
    ```bash
    git tag vX.Y.Z
@@ -46,6 +63,15 @@ Update `apps/desktop/src-tauri/tauri.conf.json`:
 
 - `plugins.updater.pubkey` → paste the public key (base64 string)
 - `plugins.updater.endpoints` → point at your update JSON endpoint(s)
+
+CI note: tagged releases will fail if `plugins.updater.pubkey` is still set to the placeholder
+value (`REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY`) or if `plugins.updater.endpoints` contain placeholder
+URLs (for example `example.com`, `localhost`, or the documented
+`https://releases.formula.app/{{target}}/{{current_version}}`). Run the preflight locally with:
+
+```bash
+node scripts/check-updater-config.mjs
+```
 
 Note: the desktop Rust binary is built with the Cargo feature `desktop` (configured in
 `build.features` inside `tauri.conf.json`) so that unit tests can run without the system WebView
@@ -88,6 +114,14 @@ Secrets:
 
 ```
 https://releases.formula.app/{{target}}/{{current_version}}
+```
+
+Tagged releases will fail while this is still a placeholder (or if the endpoint list contains other
+obvious placeholders). Update `plugins.updater.endpoints` to real, reachable update JSON URL(s)
+before tagging a release and verify locally:
+
+```bash
+node scripts/check-updater-config.mjs
 ```
 
 Tauri expects each endpoint to return an `update.json`-style payload (see Tauri updater docs)
