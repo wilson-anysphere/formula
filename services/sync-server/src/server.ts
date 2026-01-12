@@ -1163,8 +1163,8 @@ export function createSyncServer(
 
   wss.on("connection", (ws, req) => {
     const ip = pickIp(req, config.trustProxy);
-    const url = new URL(req.url ?? "/", "http://localhost");
-    const docName = url.pathname.replace(/^\//, "");
+    // Match y-websocket docName extraction (no normalization/decoding).
+    const docName = (req.url ?? "/").slice(1).split("?")[0];
     const persistedName = persistedDocNameForLeveldb(docName);
     const active = activeSocketsByDoc.get(docName) ?? new Set<WebSocket>();
     active.add(ws);
@@ -1351,8 +1351,8 @@ export function createSyncServer(
           return;
         }
 
-        const url = new URL(req.url, "http://localhost");
-        const docName = url.pathname.replace(/^\//, "");
+        // Match y-websocket docName extraction (no normalization/decoding).
+        const docName = req.url.slice(1).split("?")[0];
         if (!docName) {
           sendUpgradeRejection(socket, 400, "Missing document id");
           return;
@@ -1361,6 +1361,8 @@ export function createSyncServer(
           sendUpgradeRejection(socket, 414, "Document id too long");
           return;
         }
+        // Parse the query string for token extraction.
+        const url = new URL(req.url, "http://localhost");
 
         const persistedName = persistedDocNameForLeveldb(docName);
 
