@@ -192,6 +192,21 @@ async function deleteExtensionDb() {
   });
 }
 
+function requestToPromise<T = unknown>(req: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error ?? new Error("IndexedDB request failed"));
+  });
+}
+
+function txDone(tx: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
+    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted"));
+  });
+}
+
 beforeEach(async () => {
   // Provide browser primitives.
   // eslint-disable-next-line no-global-assign
@@ -664,7 +679,7 @@ test("uninstall clears persisted permission + extension storage state (localStor
     permissionPrompt: async () => true
   });
 
-  const manager = new WebExtensionManager({ marketplaceClient, host });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
 
   await manager.install("formula.sample-hello");
 
@@ -710,6 +725,68 @@ test("uninstall clears persisted permission + extension storage state (localStor
   const seedAfter = JSON.parse(String(seedAfterRaw));
   expect(seedAfter["sampleHello.panel"]).toBeUndefined();
   expect(seedAfter["other.panel"]).toMatchObject({ extensionId: "other.extension", title: "Other Panel" });
+
+  await manager.dispose();
+  await host.dispose();
+});
+
+test("detects IndexedDB corruption on load and supports repair()", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const spreadsheet = new TestSpreadsheetApi();
+  spreadsheet.setSelection({ startRow: 0, startCol: 0, endRow: 1, endCol: 1 });
+  await spreadsheet.setCell(0, 0, 1);
+  await spreadsheet.setCell(0, 1, 2);
+  await spreadsheet.setCell(1, 0, 3);
+  await spreadsheet.setCell(1, 1, 4);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: spreadsheet,
+    permissionPrompt: async () => true
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  await manager.install("formula.sample-hello");
+
+  // Tamper the stored bytes in IndexedDB.
+  const db = await requestToPromise(indexedDB.open("formula.webExtensions"));
+  try {
+    const tx = db.transaction(["packages"], "readwrite");
+    const store = tx.objectStore("packages");
+    const record: any = await requestToPromise(store.get("formula.sample-hello@1.0.0"));
+    expect(record).toBeTruthy();
+
+    const bytes = new Uint8Array(record.bytes as ArrayBuffer);
+    bytes[0] ^= 0xff;
+    store.put(record);
+    await txDone(tx);
+  } finally {
+    db.close();
+  }
+
+  await expect(manager.loadInstalled("formula.sample-hello")).rejects.toThrow(/integrity|sha256/i);
+
+  const corrupted = await manager.getInstalled("formula.sample-hello");
+  expect(corrupted).toMatchObject({ id: "formula.sample-hello", version: "1.0.0", corrupted: true });
+  expect(corrupted?.corruptedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  expect(corrupted?.corruptedReason).toMatch(/sha256|checksum|integrity/i);
+
+  await manager.repair("formula.sample-hello");
+  const repaired = await manager.getInstalled("formula.sample-hello");
+  expect(repaired?.corrupted).not.toBe(true);
+
+  await manager.loadInstalled("formula.sample-hello");
+  expect(await host.executeCommand("sampleHello.sumSelection")).toBe(10);
 
   await manager.dispose();
   await host.dispose();

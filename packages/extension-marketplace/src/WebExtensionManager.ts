@@ -25,6 +25,15 @@ export interface InstalledExtensionRecord {
   id: string;
   version: string;
   installedAt: string;
+  /**
+   * When set, the installed record has been quarantined due to an integrity
+   * verification failure (e.g. IndexedDB corruption / partial write).
+   *
+   * Call `repair(id)` to re-download the package and clear this flag.
+   */
+  corrupted?: boolean;
+  corruptedAt?: string;
+  corruptedReason?: string;
 }
 
 export interface BrowserExtensionHostLike {
@@ -51,6 +60,11 @@ interface StoredPackageRecord {
   version: string;
   bytes: ArrayBuffer;
   verified: VerifiedExtensionPackageV2;
+  /**
+   * SHA-256 hex digest of the full package bytes as installed, used to detect
+   * post-install IndexedDB corruption.
+   */
+  packageSha256?: string;
 }
 
 const DB_NAME = "formula.webExtensions";
@@ -549,6 +563,17 @@ export class WebExtensionManager {
       }
     }
 
+    // Persist the full package sha256 so we can detect IndexedDB corruption on subsequent loads.
+    //
+    // The marketplace client (when used) already validates `download.sha256` against the bytes,
+    // but compute our own digest here so custom marketplace implementations cannot accidentally
+    // store a bad hash.
+    const computedPackageSha256 = await sha256Hex(download.bytes);
+    const headerPackageSha256 = download.sha256 ? String(download.sha256).trim().toLowerCase() : null;
+    if (headerPackageSha256 && isSha256Hex(headerPackageSha256) && headerPackageSha256 !== computedPackageSha256) {
+      throw new Error("Marketplace package sha256 header does not match downloaded bytes");
+    }
+
     const installedAt = new Date().toISOString();
     const db = await openDb();
     try {
@@ -564,7 +589,8 @@ export class WebExtensionManager {
         id,
         version: resolvedVersion,
         bytes: download.bytes.buffer.slice(download.bytes.byteOffset, download.bytes.byteOffset + download.bytes.byteLength),
-        verified
+        verified,
+        packageSha256: computedPackageSha256
       };
 
       packagesStore.put(pkgRecord);
@@ -684,6 +710,17 @@ export class WebExtensionManager {
     return next;
   }
 
+  async repair(id: string): Promise<InstalledExtensionRecord> {
+    const installed = await this.getInstalled(id);
+    if (!installed) throw new Error(`Not installed: ${id}`);
+    if (this.isLoaded(id)) {
+      await this.unload(id);
+    }
+    // Repair always re-downloads the currently-installed version, replacing the stored bytes and
+    // clearing any corruption markers.
+    return this.install(id, installed.version);
+  }
+
   isLoaded(id: string): boolean {
     return this._loadedMainUrls.has(String(id));
   }
@@ -692,11 +729,20 @@ export class WebExtensionManager {
     if (!this.host) throw new Error("WebExtensionManager requires a BrowserExtensionHost to load extensions");
     const installed = await this.getInstalled(id);
     if (!installed) throw new Error(`Not installed: ${id}`);
+    if (installed.corrupted) {
+      const reason = installed.corruptedReason ? `: ${installed.corruptedReason}` : "";
+      throw new Error(
+        `Extension ${installed.id}@${installed.version} is corrupted${reason}. ` +
+          "Call WebExtensionManager.repair(id) to re-download the package."
+      );
+    }
 
     const pkg = await this._getPackage(installed.id, installed.version);
     if (!pkg) {
       throw new Error(`Missing stored package for ${installed.id}@${installed.version}`);
     }
+
+    await this._verifyStoredPackageIntegrity(installed, pkg);
 
     const manifest = this._validateManifest(pkg.verified.manifest, { id: installed.id, version: installed.version });
     const bundleId = `${manifest.publisher}.${manifest.name}`;
@@ -770,6 +816,101 @@ export class WebExtensionManager {
       const record = (await requestToPromise(store.get(key))) as StoredPackageRecord | undefined;
       await txDone(tx);
       return record ?? null;
+    } finally {
+      db.close();
+    }
+  }
+
+  private async _verifyStoredPackageIntegrity(
+    installed: InstalledExtensionRecord,
+    pkg: StoredPackageRecord
+  ): Promise<void> {
+    const bytes = new Uint8Array(pkg.bytes);
+    const computedSha = await sha256Hex(bytes);
+    const expectedSha =
+      typeof pkg.packageSha256 === "string" && isSha256Hex(pkg.packageSha256) ? pkg.packageSha256.trim().toLowerCase() : null;
+
+    if (expectedSha) {
+      if (computedSha !== expectedSha) {
+        const reason = `package sha256 mismatch (expected ${expectedSha} but got ${computedSha})`;
+        await this._quarantineCorruptedInstall(installed, reason);
+        throw new Error(`Extension package integrity check failed for ${installed.id}@${installed.version}: ${reason}`);
+      }
+      return;
+    }
+
+    // Legacy install: before we had `packageSha256`, we can still verify integrity by re-checking
+    // the stored file digests we computed at install time. If that passes, persist the package
+    // sha256 for faster checks going forward.
+    try {
+      const expectedFiles = new Map<string, { sha256: string; size: number }>();
+      const storedFiles = Array.isArray(pkg.verified?.files) ? pkg.verified.files : [];
+      for (const f of storedFiles) {
+        if (!f || typeof (f as any).path !== "string") continue;
+        const sha = typeof (f as any).sha256 === "string" ? String((f as any).sha256).trim().toLowerCase() : "";
+        const size = (f as any).size;
+        if (!isSha256Hex(sha) || typeof size !== "number" || !Number.isFinite(size) || size < 0) continue;
+        expectedFiles.set(String((f as any).path), { sha256: sha, size });
+      }
+
+      if (expectedFiles.size === 0) {
+        throw new Error("missing integrity metadata (no packageSha256 and no verified file list)");
+      }
+
+      const parsed: ReadExtensionPackageV2Result = readExtensionPackageV2(bytes);
+      for (const [relPath, fileBytes] of parsed.files.entries()) {
+        const expected = expectedFiles.get(relPath);
+        if (!expected) {
+          throw new Error(`unexpected file in archive: ${relPath}`);
+        }
+        // eslint-disable-next-line no-await-in-loop
+        const fileSha = await sha256Hex(fileBytes);
+        if (fileSha !== expected.sha256) {
+          throw new Error(`checksum mismatch for ${relPath}`);
+        }
+        if (fileBytes.length !== expected.size) {
+          throw new Error(`size mismatch for ${relPath}`);
+        }
+        expectedFiles.delete(relPath);
+      }
+
+      if (expectedFiles.size > 0) {
+        throw new Error(`archive missing expected files: ${[...expectedFiles.keys()].join(", ")}`);
+      }
+
+      await this._persistPackageSha256(pkg, computedSha);
+    } catch (error) {
+      const reason = String((error as Error)?.message ?? error);
+      await this._quarantineCorruptedInstall(installed, reason);
+      throw new Error(`Extension package integrity check failed for ${installed.id}@${installed.version}: ${reason}`);
+    }
+  }
+
+  private async _persistPackageSha256(pkg: StoredPackageRecord, packageSha256: string): Promise<void> {
+    if (!isSha256Hex(packageSha256)) return;
+    if (pkg.packageSha256 && pkg.packageSha256.trim().toLowerCase() === packageSha256.trim().toLowerCase()) return;
+    const db = await openDb();
+    try {
+      const tx = db.transaction([STORE_PACKAGES], "readwrite");
+      tx.objectStore(STORE_PACKAGES).put({ ...pkg, packageSha256: packageSha256.trim().toLowerCase() });
+      await txDone(tx);
+    } finally {
+      db.close();
+    }
+  }
+
+  private async _quarantineCorruptedInstall(installed: InstalledExtensionRecord, reason: string): Promise<void> {
+    const db = await openDb();
+    try {
+      const tx = db.transaction([STORE_INSTALLED], "readwrite");
+      const store = tx.objectStore(STORE_INSTALLED);
+      store.put({
+        ...installed,
+        corrupted: true,
+        corruptedAt: new Date().toISOString(),
+        corruptedReason: String(reason || "unknown error")
+      });
+      await txDone(tx);
     } finally {
       db.close();
     }
