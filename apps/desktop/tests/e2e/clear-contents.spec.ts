@@ -12,15 +12,18 @@ test.describe("Clear Contents context menu", () => {
     await gotoDesktop(page);
     await waitForIdle(page);
 
-    await page.evaluate(() => {
+    const styleIdBefore = await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const app: any = (window as any).__formulaApp;
       if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
       const doc = app.getDocument();
       const sheetId = app.getCurrentSheetId();
       doc.setCellValue(sheetId, { row: 0, col: 0 }, "Hello");
+      doc.setRangeFormat(sheetId, "A1", { font: { bold: true } });
+      return (doc.getCell(sheetId, { row: 0, col: 0 }) as any)?.styleId ?? 0;
     });
     await waitForIdle(page);
+    expect(styleIdBefore).not.toBe(0);
 
     const grid = page.locator("#grid");
     const a1Rect = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"));
@@ -39,8 +42,17 @@ test.describe("Clear Contents context menu", () => {
     await item.click();
 
     await waitForIdle(page);
-    const value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    const { value, styleIdAfter } = await page.evaluate(async () => {
+      const app: any = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument();
+      return {
+        value: await app.getCellValueA1("A1"),
+        styleIdAfter: (doc.getCell(sheetId, { row: 0, col: 0 }) as any)?.styleId ?? 0,
+      };
+    });
     expect(value).toBe("");
+    expect(styleIdAfter).toBe(styleIdBefore);
   });
 
   test("clears a single cell via the command palette", async ({ page }) => {
