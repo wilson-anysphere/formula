@@ -10,7 +10,13 @@ import { createCommandPalette } from "../createCommandPalette.js";
 describe("createCommandPalette shortcut search mode", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
-    localStorage.clear();
+    // Node 22+ exposes an experimental global `localStorage` that can throw unless
+    // started with `--localstorage-file`. Use the jsdom window storage explicitly.
+    try {
+      window.localStorage?.clear();
+    } catch {
+      // ignore
+    }
   });
 
   it("enters shortcut mode when query starts with '/' (trimmed) and filters/sorts by shortcut", () => {
