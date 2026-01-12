@@ -3625,6 +3625,13 @@ export class SpreadsheetApp {
   }
 
   private hideCommentTooltip(): void {
+    if (
+      this.lastHoveredCommentCellKey == null &&
+      !this.commentTooltip.classList.contains("comment-tooltip--visible")
+    ) {
+      return;
+    }
+
     this.lastHoveredCommentCellKey = null;
     this.commentTooltip.classList.remove("comment-tooltip--visible");
   }
