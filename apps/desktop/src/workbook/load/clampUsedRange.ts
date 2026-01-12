@@ -53,10 +53,22 @@ export function resolveWorkbookLoadLimits(
   let maxCols = defaults.maxCols;
 
   const env = options.env ?? {};
-  const envMaxRows = parsePositiveInt(env.DESKTOP_LOAD_MAX_ROWS ?? env.VITE_DESKTOP_LOAD_MAX_ROWS);
-  const envMaxCols = parsePositiveInt(env.DESKTOP_LOAD_MAX_COLS ?? env.VITE_DESKTOP_LOAD_MAX_COLS);
-  if (envMaxRows != null) maxRows = envMaxRows;
-  if (envMaxCols != null) maxCols = envMaxCols;
+  // Prefer the `DESKTOP_LOAD_*` variables, but fall back to `VITE_DESKTOP_LOAD_*` if the
+  // preferred keys are missing or invalid.
+  for (const candidate of [env.DESKTOP_LOAD_MAX_ROWS, env.VITE_DESKTOP_LOAD_MAX_ROWS]) {
+    const parsed = parsePositiveInt(candidate);
+    if (parsed != null) {
+      maxRows = parsed;
+      break;
+    }
+  }
+  for (const candidate of [env.DESKTOP_LOAD_MAX_COLS, env.VITE_DESKTOP_LOAD_MAX_COLS]) {
+    const parsed = parsePositiveInt(candidate);
+    if (parsed != null) {
+      maxCols = parsed;
+      break;
+    }
+  }
 
   const queryString = options.queryString ?? "";
   if (queryString) {
@@ -70,9 +82,9 @@ export function resolveWorkbookLoadLimits(
   return { maxRows, maxCols };
 }
 
-function clampNumber(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min;
-  return Math.max(min, Math.min(value, max));
+function normalizeIndex(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.floor(value);
 }
 
 export type ClampedUsedRangeResult = Readonly<{
@@ -99,11 +111,13 @@ export function clampUsedRange(usedRange: SheetUsedRange, limits: WorkbookLoadLi
   const maxRowIndex = maxRows - 1;
   const maxColIndex = maxCols - 1;
 
-  const startRow = clampNumber(usedRange.start_row, 0, maxRowIndex);
-  const endRow = clampNumber(usedRange.end_row, 0, maxRowIndex);
-  const startCol = clampNumber(usedRange.start_col, 0, maxColIndex);
-  const endCol = clampNumber(usedRange.end_col, 0, maxColIndex);
+  // Clamp using an intersection against the [0, maxIndex] window. This preserves empty
+  // intersections (e.g. when `usedRange.start_row` is already beyond `maxRows`), which
+  // allows callers to skip range fetches entirely.
+  const startRow = Math.max(0, normalizeIndex(usedRange.start_row));
+  const endRow = Math.min(normalizeIndex(usedRange.end_row), maxRowIndex);
+  const startCol = Math.max(0, normalizeIndex(usedRange.start_col));
+  const endCol = Math.min(normalizeIndex(usedRange.end_col), maxColIndex);
 
   return { startRow, endRow, startCol, endCol, truncatedRows, truncatedCols };
 }
-

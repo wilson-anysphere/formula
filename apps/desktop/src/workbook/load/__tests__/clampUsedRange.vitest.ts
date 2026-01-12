@@ -24,6 +24,23 @@ describe("clampUsedRange", () => {
     });
   });
 
+  it("returns an empty intersection when used range starts beyond the cap", () => {
+    const result = clampUsedRange(
+      { start_row: 150, end_row: 160, start_col: 0, end_col: 9 },
+      { maxRows: 100, maxCols: 10 },
+    );
+
+    expect(result).toMatchObject({
+      // No rows in common with [0..99].
+      startRow: 150,
+      endRow: 99,
+      startCol: 0,
+      endCol: 9,
+      truncatedRows: true,
+      truncatedCols: false,
+    });
+  });
+
   it("detects and clamps row truncation", () => {
     const result = clampUsedRange(
       { start_row: 0, end_row: 100, start_col: 0, end_col: 9 },
@@ -89,6 +106,19 @@ describe("resolveWorkbookLoadLimits", () => {
     });
 
     expect(limits).toEqual({ maxRows: 111, maxCols: 222 });
+  });
+
+  it("falls back to VITE_* env vars when DESKTOP_* values are invalid", () => {
+    const limits = resolveWorkbookLoadLimits({
+      env: {
+        DESKTOP_LOAD_MAX_ROWS: "not-a-number",
+        DESKTOP_LOAD_MAX_COLS: "-1",
+        VITE_DESKTOP_LOAD_MAX_ROWS: "321",
+        VITE_DESKTOP_LOAD_MAX_COLS: "654",
+      },
+    });
+
+    expect(limits).toEqual({ maxRows: 321, maxCols: 654 });
   });
 
   it("falls back per-field when some config values are invalid", () => {
