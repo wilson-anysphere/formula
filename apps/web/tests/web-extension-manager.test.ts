@@ -572,6 +572,66 @@ test("loadInstalled can call host.startup() even if the manager already consider
   }
 });
 
+test("loadAllInstalled can call host.startup() even if startup already ran with zero extensions (no startupExtension)", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-startup-all-fallback-repeat-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const manifest = {
+    name: "startup-all-fallback-repeat-ext",
+    publisher: "test",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    browser: "./dist/extension.js",
+    engines: { formula: "^1.0.0" },
+    activationEvents: ["onStartupFinished"],
+    contributes: {}
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+  await fs.writeFile(path.join(extDir, "dist", "extension.js"), `export async function activate() {}\n`);
+
+  const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "test.startup-all-fallback-repeat-ext",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const loaded: Array<{ id: string }> = [];
+  let startupCalls = 0;
+  const host = {
+    loadExtension: async ({ extensionId }: { extensionId: string }) => {
+      loaded.push({ id: extensionId });
+      return extensionId;
+    },
+    listExtensions: () => loaded,
+    startup: async () => {
+      startupCalls++;
+    }
+  };
+
+  const manager = new WebExtensionManager({ marketplaceClient, host: host as any, engineVersion: "1.0.0" });
+
+  try {
+    // Simulate boot calling the helper before any extensions are installed.
+    await manager.loadAllInstalled();
+    expect(startupCalls).toBe(1);
+
+    // After installing an extension, loadAllInstalled should still run startup again so the new
+    // extension receives onStartupFinished + workbookOpened (even if the manager considers startup
+    // complete).
+    await manager.install("test.startup-all-fallback-repeat-ext");
+    await manager.loadAllInstalled();
+    expect(startupCalls).toBe(2);
+  } finally {
+    await manager.dispose();
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("loadInstalled does not call host.startup() when startupExtension is unavailable and other extensions exist", async () => {
   const keys = generateEd25519KeyPair();
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-startup-fallback-existing-"));

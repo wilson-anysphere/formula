@@ -1225,6 +1225,7 @@ export class WebExtensionManager {
     onExtensionError?: (info: { id: string; version: string; error: unknown }) => void;
   } = {}): Promise<string[]> {
     if (!this.host) throw new Error("WebExtensionManager requires a BrowserExtensionHost to load extensions");
+    const initialHostExtensionCount = this.host.listExtensions().length;
     const installed = await this.listInstalled();
 
     const newlyLoaded: string[] = [];
@@ -1255,7 +1256,7 @@ export class WebExtensionManager {
 
     // Preferred behavior: call host.startup() exactly once so existing extensions don't receive
     // duplicate startup events.
-    if (this.host.startup && !this._didHostStartup) {
+    if (this.host.startup && (!this._didHostStartup || (initialHostExtensionCount === 0 && newlyLoaded.length > 0))) {
       await this.host.startup();
       this._didHostStartup = true;
     }
