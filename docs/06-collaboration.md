@@ -721,12 +721,30 @@ By default, `createCollabVersioning` uses `YjsVersionStore`, which stores all ve
 - `versions` (records)
 - `versionsMeta` (ordering + metadata)
 
-Important detail: when the store is `YjsVersionStore`, `CollabVersioning` excludes `versions` and `versionsMeta` from snapshots/restores to avoid:
+### Snapshot/restore isolation (excluded roots)
+
+`CollabVersioning` snapshots/restores are intended to affect **user workbook state**, not internal collaboration metadata stored in the same `Y.Doc`.
+
+Implementation: see `excludeRoots` in [`packages/collab/versioning/src/index.ts`](../packages/collab/versioning/src/index.ts).
+
+CollabVersioning excludes:
+
+- **Always excluded** internal collaboration roots:
+  - `cellStructuralOps` (structural conflict op log)
+  - default branching graph roots (only when `rootName` is the default `"branching"`):
+    - `branching:branches`
+    - `branching:commits`
+    - `branching:meta`
+- **Excluded only when the store is in-doc** (`YjsVersionStore`):
+  - `versions`
+  - `versionsMeta`
+
+Important detail: when the store is `YjsVersionStore`, excluding `versions` and `versionsMeta` prevents:
 
 - recursive snapshots (history containing itself)
 - restores rolling back version history
 
-See the `excludeRoots` logic in [`packages/collab/versioning/src/index.ts`](../packages/collab/versioning/src/index.ts).
+Note: `CollabBranchingWorkflow` supports customizing the branch graph `rootName`; `CollabVersioning` only excludes the default `"branching:*"` roots today.
 
 ---
 
