@@ -6,6 +6,7 @@ use crate::{
     contents_hash::content_normalized_data,
     DigestAlg,
     normalized_data::forms_normalized_data,
+    DigestAlg,
     OleError,
     OleFile,
 };

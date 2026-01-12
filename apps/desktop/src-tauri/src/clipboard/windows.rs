@@ -193,22 +193,43 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
     let format_png = register_format("PNG")?;
     // Some producers use a MIME-like name for PNG. Treat this as best-effort fallback.
     let format_image_png = register_format("image/png").ok();
+    // MIME-like aliases used by some cross-platform apps.
+    let format_text_html = register_format("text/html").ok();
+    let format_text_rtf = register_format("text/rtf").ok();
 
     let _guard = open_clipboard_with_retry()?;
 
     let text = try_get_unicode_text()?;
 
-    let html = try_get_clipboard_bytes(format_html, MAX_RICH_TEXT_BYTES)?
+    let mut html = try_get_clipboard_bytes(format_html, MAX_RICH_TEXT_BYTES)?
         .map(|bytes| extract_cf_html_fragment_best_effort(&bytes))
         .filter(|s| !s.is_empty());
+    if html.is_none() {
+        if let Some(format) = format_text_html {
+            html = try_get_clipboard_bytes(format, MAX_RICH_TEXT_BYTES)?
+                .map(|bytes| extract_cf_html_fragment_best_effort(&bytes))
+                .filter(|s| !s.is_empty());
+        }
+    }
 
-    let rtf = try_get_clipboard_bytes(format_rtf, MAX_RICH_TEXT_BYTES)?
+    let mut rtf = try_get_clipboard_bytes(format_rtf, MAX_RICH_TEXT_BYTES)?
         .map(|bytes| {
             String::from_utf8_lossy(&bytes)
                 .trim_end_matches('\0')
                 .to_string()
         })
         .filter(|s| !s.is_empty());
+    if rtf.is_none() {
+        if let Some(format) = format_text_rtf {
+            rtf = try_get_clipboard_bytes(format, MAX_RICH_TEXT_BYTES)?
+                .map(|bytes| {
+                    String::from_utf8_lossy(&bytes)
+                        .trim_end_matches('\0')
+                        .to_string()
+                })
+                .filter(|s| !s.is_empty());
+        }
+    }
 
     const MAX_DIB_BYTES: usize = 4 * MAX_IMAGE_BYTES; // allow larger uncompressed DIBs before converting to PNG
 
@@ -252,6 +273,11 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
                 .map_err(|e| ClipboardError::InvalidPayload(format!("invalid html: {e}")))
         })
         .transpose()?;
+    let html_plain_bytes = payload
+        .html
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.as_bytes().to_vec());
     let rtf_bytes = payload
         .rtf
         .as_deref()
@@ -278,10 +304,18 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
         .as_ref()
         .map(|_| register_format("HTML Format"))
         .transpose()?;
+    let format_text_html = html_plain_bytes
+        .as_ref()
+        .map(|_| register_format("text/html").ok())
+        .flatten();
     let format_rtf = rtf_bytes
         .as_ref()
         .map(|_| register_format("Rich Text Format"))
         .transpose()?;
+    let format_text_rtf = rtf_bytes
+        .as_ref()
+        .map(|_| register_format("text/rtf").ok())
+        .flatten();
     let format_png = png_bytes
         .as_ref()
         .map(|_| register_format("PNG"))
@@ -302,11 +336,21 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
         nul_terminated.push(0);
         set_clipboard_bytes(format, &nul_terminated)?;
     }
+    if let (Some(format), Some(bytes)) = (format_text_html, html_plain_bytes.as_deref()) {
+        let mut nul_terminated = bytes.to_vec();
+        nul_terminated.push(0);
+        let _ = set_clipboard_bytes(format, &nul_terminated);
+    }
 
     if let (Some(format), Some(bytes)) = (format_rtf, rtf_bytes.as_deref()) {
         let mut nul_terminated = bytes.to_vec();
         nul_terminated.push(0);
         set_clipboard_bytes(format, &nul_terminated)?;
+    }
+    if let (Some(format), Some(bytes)) = (format_text_rtf, rtf_bytes.as_deref()) {
+        let mut nul_terminated = bytes.to_vec();
+        nul_terminated.push(0);
+        let _ = set_clipboard_bytes(format, &nul_terminated);
     }
 
     if let (Some(format), Some(bytes)) = (format_png, png_bytes.as_deref()) {
