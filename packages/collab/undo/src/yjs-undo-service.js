@@ -2,12 +2,25 @@ import * as Y from "yjs";
 
 const patchedItemConstructors = new WeakSet();
 
+function isYjsItemStruct(value) {
+  if (!value || typeof value !== "object") return false;
+  const maybe = value;
+  // Yjs internal `Item` structs have these fields (see yjs/src/structs/Item).
+  if (!("id" in maybe)) return false;
+  if (typeof maybe.length !== "number") return false;
+  if (!("content" in maybe)) return false;
+  if (!("parent" in maybe)) return false;
+  if (!("parentSub" in maybe)) return false;
+  if (typeof maybe.content?.getContent !== "function") return false;
+  return true;
+}
+
 function patchForeignItemConstructor(item) {
   if (!item || typeof item !== "object") return;
+  if (!isYjsItemStruct(item)) return;
   if (item instanceof Y.Item) return;
   const ctor = item.constructor;
   if (!ctor || ctor === Y.Item) return;
-  if (ctor.name !== "Item") return;
   if (patchedItemConstructors.has(ctor)) return;
   patchedItemConstructors.add(ctor);
 

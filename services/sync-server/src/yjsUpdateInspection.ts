@@ -92,9 +92,8 @@ function isItemStructLike(value: unknown): value is ItemStructLike {
 }
 
 function isGcStruct(value: unknown): boolean {
-  if (!isRecord(value)) return false;
-  const ctor = (value as any).constructor;
-  return Boolean(ctor && typeof ctor.name === "string" && ctor.name === "GC");
+  // Avoid relying on constructor names (bundlers can rename `GC`).
+  return value instanceof (Y as any).GC;
 }
 
 function safeStructLen(struct: unknown): number | null {
