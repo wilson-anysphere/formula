@@ -155,6 +155,19 @@ describe("keybindings", () => {
     expect(matchesKeybinding(binding!, eventForKey("!", { ctrlKey: true, shiftKey: true, code: "Digit1" }))).toBe(true);
   });
 
+  it("matches Ctrl+Shift+8 when the key is '*' (Excel Ctrl+Shift+*)", () => {
+    const binding = parseKeybinding("cmd", "ctrl+shift+8");
+    expect(binding).not.toBeNull();
+    // On US layouts, Shift+8 produces "*" while the physical key remains Digit8.
+    expect(matchesKeybinding(binding!, eventForKey("*", { ctrlKey: true, shiftKey: true, code: "Digit8" }))).toBe(true);
+  });
+
+  it("matches Ctrl+Shift+* when the key is '*'", () => {
+    const binding = parseKeybinding("cmd", "ctrl+shift+*");
+    expect(binding).not.toBeNull();
+    expect(matchesKeybinding(binding!, eventForKey("*", { ctrlKey: true, shiftKey: true, code: "Digit8" }))).toBe(true);
+  });
+
   it("matches digit keys via KeyboardEvent.code fallback when event.key differs by layout (ctrl+1)", () => {
     const binding = parseKeybinding("cmd", "ctrl+1");
     expect(binding).not.toBeNull();
