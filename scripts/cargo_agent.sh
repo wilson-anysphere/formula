@@ -19,7 +19,8 @@ set -euo pipefail
 #   FORMULA_CARGO_JOBS       cargo build jobs (default: 4)
 #   FORMULA_CARGO_TEST_JOBS  cargo build jobs for `cargo test` (default: 1 unless FORMULA_CARGO_JOBS is set)
 #   FORMULA_CARGO_LIMIT_AS   Address-space cap (default: 14G)
-#   FORMULA_RUST_TEST_THREADS  Default RUST_TEST_THREADS for cargo test (default: min(nproc, 16))
+#   FORMULA_RUST_TEST_THREADS  Default RUST_TEST_THREADS for cargo test
+#                             (default: min(nproc, 16, jobs * 4))
 #   FORMULA_RAYON_NUM_THREADS  Default RAYON_NUM_THREADS (default: FORMULA_CARGO_JOBS)
 #   FORMULA_OPENSSL_VENDOR   Set to 1 to disable auto-setting OPENSSL_NO_VENDOR (allow vendored OpenSSL)
 #   FORMULA_CARGO_RETRY_ATTEMPTS  Retry count for transient rustc EAGAIN panics (default: 5)
@@ -42,7 +43,7 @@ Environment:
   FORMULA_CARGO_JOBS         cargo -j value (default: 4)
   FORMULA_CARGO_TEST_JOBS    cargo -j value for `cargo test` (default: 1 unless FORMULA_CARGO_JOBS is set)
   FORMULA_CARGO_LIMIT_AS     Address-space cap (default: 14G)
-  FORMULA_RUST_TEST_THREADS  RUST_TEST_THREADS for cargo test (default: min(nproc, 16))
+  FORMULA_RUST_TEST_THREADS  RUST_TEST_THREADS for cargo test (default: min(nproc, 16, jobs * 4))
   FORMULA_RAYON_NUM_THREADS  RAYON_NUM_THREADS (default: FORMULA_CARGO_JOBS)
   FORMULA_OPENSSL_VENDOR     Set to 1 to disable auto-setting OPENSSL_NO_VENDOR (allow vendored OpenSSL)
   FORMULA_CARGO_RETRY_ATTEMPTS  Retry count for transient rustc EAGAIN panics (default: 5)
