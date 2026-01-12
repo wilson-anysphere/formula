@@ -64,14 +64,13 @@ describe("purgeLegacyDesktopLLMSettings", () => {
     const llmPrefix = "formula:" + "llm:";
     const llmProviderKey = llmPrefix + "provider";
     const completionPrefix = "formula:" + "aiCompletion:";
-
-    window.localStorage.setItem(legacyKey, "sk-legacy-test");
-    window.localStorage.setItem(llmProviderKey, "open" + "ai");
-
     // Avoid hardcoding provider names in source (Cursor-only AI policy guard).
     const provider0 = "open" + "ai";
     const providerA = "an" + "thropic";
     const providerB = "ol" + "lama";
+
+    window.localStorage.setItem(legacyKey, "sk-legacy-test");
+    window.localStorage.setItem(llmProviderKey, provider0);
 
     window.localStorage.setItem(llmPrefix + provider0 + ":apiKey", "sk-test");
     window.localStorage.setItem(llmPrefix + providerA + ":model", "claude-test");
