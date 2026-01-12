@@ -2594,6 +2594,11 @@ if (
 
     const sheetId = app.getCurrentSheetId();
 
+    // Split-view secondary pane always uses a shared-grid renderer with a 1x1 frozen
+    // header row/col (row/column labels), even when the primary pane is in legacy mode.
+    const headerRows = 1;
+    const headerCols = 1;
+
     const gridHighlights = highlights
       .filter((h: any) => {
         const sheet = h?.range?.sheet;
@@ -2610,10 +2615,10 @@ if (
         const endCol = Math.max(range.startCol, range.endCol);
 
         const gridRange: GridCellRange = {
-          startRow: startRow + SPLIT_HEADER_ROWS,
-          endRow: endRow + SPLIT_HEADER_ROWS + 1,
-          startCol: startCol + SPLIT_HEADER_COLS,
-          endCol: endCol + SPLIT_HEADER_COLS + 1,
+          startRow: startRow + headerRows,
+          endRow: endRow + headerRows + 1,
+          startCol: startCol + headerCols,
+          endCol: endCol + headerCols + 1,
         };
 
         return { range: gridRange, color: String(h.color), active: Boolean(h.active) };
