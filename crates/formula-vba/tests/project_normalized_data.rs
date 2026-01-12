@@ -661,6 +661,12 @@ fn project_normalized_data_v3_dir_records_skips_projectcompatversion_record() {
             .any(|w| w == compat_version),
         "ProjectNormalizedDataV3 must skip PROJECTCOMPATVERSION payload bytes"
     );
+    assert!(
+        !normalized_with
+            .windows(compat_version.len())
+            .any(|w| w == compat_version),
+        "ProjectNormalizedDataV3 must skip PROJECTCOMPATVERSION payload bytes"
+    );
 }
 
 #[test]
