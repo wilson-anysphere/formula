@@ -39,6 +39,13 @@ test("panelBodyRenderer.tsx avoids inline style assignments for dock panel mount
     "CollabVersionHistoryPanel should not use React inline styles; use CSS classes in workspace.css instead",
   );
 
+  const branchManagerSection = extractSection(source, "function CollabBranchManagerPanel", "export interface PanelBodyRendererOptions");
+  assert.equal(
+    /\bstyle=\{\{/.test(branchManagerSection),
+    false,
+    "CollabBranchManagerPanel should not use React inline styles; use CSS classes in workspace.css instead",
+  );
+
   const reactMountSection = extractSection(source, "function renderReactPanel", "function renderDomPanel");
   assert.equal(
     /\.style\./.test(reactMountSection),
