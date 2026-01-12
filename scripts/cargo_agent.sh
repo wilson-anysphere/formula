@@ -314,6 +314,7 @@ fi
 # - rustc panic: "failed to spawn work/helper thread: Resource temporarily unavailable"
 # - linker (rust-lld/lld) abort: "std::system_error ... Resource temporarily unavailable"
 # - test execution failure: "could not execute process ... Resource temporarily unavailable (os error 11)"
+# - rustc execution failure: "could not execute process `rustc ...` (never executed)"
 #
 # Retrying after a short backoff usually succeeds once other agents finish their compile/test bursts.
 max_attempts="${FORMULA_CARGO_RETRY_ATTEMPTS:-5}"
@@ -332,7 +333,7 @@ while true; do
   fi
 
   retryable=false
-  if grep -q "Resource temporarily unavailable" "${tmp_log}"; then
+  if grep -Eq "(Resource temporarily unavailable|os error 11)" "${tmp_log}"; then
     retryable=true
   elif grep -Eq "(rust-lld|ld\\.lld)" "${tmp_log}" \
     && { grep -q "__throw_system_error" "${tmp_log}" || grep -q "ThreadPoolExecutor" "${tmp_log}"; }; then
