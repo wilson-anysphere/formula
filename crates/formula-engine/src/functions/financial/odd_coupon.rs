@@ -131,6 +131,49 @@ fn validate_basis(basis: i32) -> ExcelResult<i32> {
     }
 }
 
+fn validate_finite(n: f64) -> ExcelResult<f64> {
+    if n.is_finite() {
+        Ok(n)
+    } else {
+        Err(ExcelError::Num)
+    }
+}
+
+fn days_between(start: i32, end: i32, basis: i32, system: ExcelDateSystem) -> ExcelResult<f64> {
+    match basis {
+        // 30/360 day count (basis 0 and 4).
+        0 => Ok(date_time::days360(start, end, false, system)? as f64),
+        4 => Ok(date_time::days360(start, end, true, system)? as f64),
+        // Actual day count (basis 1/2/3).
+        1 | 2 | 3 => Ok((end - start) as f64),
+        _ => Err(ExcelError::Num),
+    }
+}
+
+/// Coupon-period length `E` in days, following the same basis conventions as the regular bond
+/// functions (`COUP*`, `PRICE`, `YIELD`).
+fn coupon_period_e(
+    pcd: i32,
+    ncd: i32,
+    basis: i32,
+    freq: f64,
+    _system: ExcelDateSystem,
+) -> ExcelResult<f64> {
+    let e = match basis {
+        // US 30/360, Actual/360, European 30/360: fixed 360-day year.
+        0 | 2 | 4 => 360.0 / freq,
+        // Actual/365: fixed 365-day year.
+        3 => 365.0 / freq,
+        // Actual/Actual: actual days in the period.
+        1 => (ncd - pcd) as f64,
+        _ => return Err(ExcelError::Num),
+    };
+    if e == 0.0 {
+        return Err(ExcelError::Div0);
+    }
+    validate_finite(e)
+}
+
 fn oddf_equation(
     settlement: i32,
     maturity: i32,
@@ -155,13 +198,11 @@ fn oddf_equation(
         return Err(ExcelError::Num);
     }
 
-    if !(issue < maturity) || !(settlement < maturity) {
+    // Excel-style chronology (common case): I < S < F <= M.
+    if !(issue < settlement && settlement < first_coupon && first_coupon <= maturity) {
         return Err(ExcelError::Num);
     }
-    if settlement <= issue {
-        return Err(ExcelError::Num);
-    }
-    if !(issue < first_coupon && first_coupon <= maturity) {
+    if !(issue < maturity && settlement < maturity) {
         return Err(ExcelError::Num);
     }
 
@@ -185,45 +226,56 @@ fn oddf_equation(
         d = date_time::edate(d, months_per_period, system)?;
     }
 
-    let mut accrual_start = issue;
-    for date in &coupon_dates {
-        if *date <= settlement {
-            accrual_start = *date;
-        } else {
-            break;
-        }
-    }
+    // Compute day-count quantities:
+    // - A: accrued days from issue to settlement
+    // - DFC: days in the (odd) first accrual period (issue -> first_coupon)
+    // - DSC: days from settlement to first_coupon
+    let a = days_between(issue, settlement, basis, system)?;
+    let dfc = days_between(issue, first_coupon, basis, system)?;
+    let dsc = days_between(settlement, first_coupon, basis, system)?;
 
-    let accrued_years = date_time::yearfrac(accrual_start, settlement, basis, system)?;
-    if accrued_years < 0.0 || !accrued_years.is_finite() {
+    if a < 0.0 || dfc <= 0.0 || dsc <= 0.0 {
         return Err(ExcelError::Num);
     }
-    let accrued_interest = rate * redemption * accrued_years;
 
-    let mut payments = Vec::new();
-    let mut period_start = issue;
-    for date in &coupon_dates {
-        let coupon_years = date_time::yearfrac(period_start, *date, basis, system)?;
-        if coupon_years < 0.0 || !coupon_years.is_finite() {
-            return Err(ExcelError::Num);
-        }
-        let coupon_amt = rate * redemption * coupon_years;
+    // Regular coupon period length `E` (days).
+    let prev_coupon = date_time::edate(first_coupon, -months_per_period, system)?;
+    let e = coupon_period_e(prev_coupon, first_coupon, basis, freq, system)?;
 
-        let mut amount = coupon_amt;
-        if *date == maturity {
-            amount += redemption;
-        }
+    // Regular coupon payment per period.
+    let c = redemption * rate / freq;
+    validate_finite(c)?;
 
-        if *date > settlement {
-            let years_to_payment = date_time::yearfrac(settlement, *date, basis, system)?;
-            if years_to_payment < 0.0 || !years_to_payment.is_finite() {
-                return Err(ExcelError::Num);
+    let accrued_interest = c * (a / e);
+    validate_finite(accrued_interest)?;
+
+    // Fractional periods to first coupon.
+    let t0 = dsc / e;
+    validate_finite(t0)?;
+
+    // Cashflows (see docs/financial-odd-coupon-bonds.md and `bonds_odd.rs`).
+    let odd_first_coupon = c * (dfc / e);
+    validate_finite(odd_first_coupon)?;
+
+    let mut payments = Vec::with_capacity(coupon_dates.len());
+    for (idx, date) in coupon_dates.iter().copied().enumerate() {
+        let t = t0 + idx as f64;
+        validate_finite(t)?;
+
+        let amount = if date == maturity {
+            if idx == 0 {
+                // first_coupon == maturity: single odd coupon + redemption.
+                redemption + odd_first_coupon
+            } else {
+                redemption + c
             }
-            let t = freq * years_to_payment;
-            payments.push((t, amount));
-        }
-
-        period_start = *date;
+        } else if idx == 0 {
+            odd_first_coupon
+        } else {
+            c
+        };
+        validate_finite(amount)?;
+        payments.push((t, amount));
     }
 
     BondEquation::new(freq, accrued_interest, payments)
@@ -252,10 +304,10 @@ fn oddl_equation(
         return Err(ExcelError::Num);
     }
 
-    if !(last_interest < maturity) || !(settlement < maturity) {
+    if !(last_interest < settlement && settlement < maturity) {
         return Err(ExcelError::Num);
     }
-    if settlement <= last_interest {
+    if !(last_interest < maturity) {
         return Err(ExcelError::Num);
     }
 
@@ -264,24 +316,36 @@ fn oddl_equation(
     let _ = crate::date::serial_to_ymd(settlement, system)?;
     let _ = crate::date::serial_to_ymd(maturity, system)?;
 
-    let accrued_years = date_time::yearfrac(last_interest, settlement, basis, system)?;
-    if accrued_years < 0.0 || !accrued_years.is_finite() {
-        return Err(ExcelError::Num);
-    }
-    let accrued_interest = rate * redemption * accrued_years;
+    let months_per_period = 12 / frequency;
 
-    let coupon_years = date_time::yearfrac(last_interest, maturity, basis, system)?;
-    if coupon_years < 0.0 || !coupon_years.is_finite() {
+    // Day-count quantities.
+    let a = days_between(last_interest, settlement, basis, system)?;
+    let dlm = days_between(last_interest, maturity, basis, system)?;
+    let dsm = days_between(settlement, maturity, basis, system)?;
+    if a < 0.0 || dlm <= 0.0 || dsm <= 0.0 {
         return Err(ExcelError::Num);
     }
-    let coupon_amt = rate * redemption * coupon_years;
-    let amount = coupon_amt + redemption;
 
-    let years_to_payment = date_time::yearfrac(settlement, maturity, basis, system)?;
-    if years_to_payment < 0.0 || !years_to_payment.is_finite() {
-        return Err(ExcelError::Num);
-    }
-    let t = freq * years_to_payment;
+    // Regular coupon period length `E` (days).
+    let prev_coupon = date_time::edate(last_interest, -months_per_period, system)?;
+    let e = coupon_period_e(prev_coupon, last_interest, basis, freq, system)?;
+
+    // Regular coupon payment.
+    let c = redemption * rate / freq;
+    validate_finite(c)?;
+
+    let accrued_interest = c * (a / e);
+    validate_finite(accrued_interest)?;
+
+    // Odd last coupon at maturity, prorated by DLM/E.
+    let odd_last_coupon = c * (dlm / e);
+    validate_finite(odd_last_coupon)?;
+    let amount = redemption + odd_last_coupon;
+    validate_finite(amount)?;
+
+    // Fractional periods from settlement to maturity.
+    let t = dsm / e;
+    validate_finite(t)?;
 
     BondEquation::new(freq, accrued_interest, vec![(t, amount)])
 }
