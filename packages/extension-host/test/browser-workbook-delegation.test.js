@@ -291,6 +291,80 @@ test("BrowserExtensionHost: workbook.saveAs rejects whitespace-only paths", asyn
   assert.equal(apiError?.message, "Workbook path must be a non-empty string");
 });
 
+test("BrowserExtensionHost: workbook.saveAs rejects empty paths", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let promptCalls = 0;
+
+  /** @type {any} */
+  let apiError;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "api_error" && msg.id === "req1") {
+          apiError = msg.error;
+          resolveDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => {
+      promptCalls += 1;
+      return true;
+    },
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.workbook-saveas-empty";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-saveas-empty/",
+    mainUrl: "memory://workbook-saveas-empty/main.mjs",
+    manifest: {
+      name: "workbook-saveas-empty",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+  extension.active = true;
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "saveAs",
+    args: [""],
+  });
+
+  await done;
+
+  assert.equal(promptCalls, 0);
+  assert.equal(apiError?.message, "Workbook path must be a non-empty string");
+});
+
 test("BrowserExtensionHost: workbook.saveAs rejects non-string paths", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
@@ -476,6 +550,106 @@ test("BrowserExtensionHost: workbook.openWorkbook delegates to spreadsheetApi an
       activeSheet,
     },
   });
+});
+
+test("BrowserExtensionHost: workbook.openWorkbook cancellation does not emit workbookOpened", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let openCalls = 0;
+  let active = { name: "Initial", path: "/tmp/initial.xlsx" };
+  const sheets = [{ id: "sheet1", name: "Sheet1" }];
+  const activeSheet = sheets[0];
+
+  /** @type {any} */
+  let apiError;
+  /** @type {any} */
+  let workbookOpened;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "event" && msg.event === "workbookOpened") {
+          workbookOpened = msg.data;
+          return;
+        }
+        if (msg?.type === "api_error" && msg.id === "req1") {
+          apiError = msg.error;
+          resolveDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      listSheets() {
+        return sheets;
+      },
+      getActiveSheet() {
+        return activeSheet;
+      },
+      async getActiveWorkbook() {
+        return active;
+      },
+      async openWorkbook() {
+        openCalls += 1;
+        throw { name: "AbortError", message: "Open workbook cancelled" };
+      },
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  // Ensure host has a stable baseline to restore to if open fails.
+  await host._getActiveWorkbook();
+
+  const extensionId = "test.workbook-open-cancel";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-open-cancel/",
+    mainUrl: "memory://workbook-open-cancel/main.mjs",
+    manifest: {
+      name: "workbook-open-cancel",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+  extension.active = true;
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "openWorkbook",
+    args: ["/tmp/opened.xlsx"],
+  });
+
+  await done;
+
+  assert.equal(openCalls, 1);
+  assert.equal(apiError?.name, "AbortError");
+  assert.equal(apiError?.message, "Open workbook cancelled");
+  assert.equal(workbookOpened, undefined);
+  assert.equal(host._workbook.path, "/tmp/initial.xlsx");
 });
 
 test("BrowserExtensionHost: workbook.openWorkbook rejects empty paths", async (t) => {
