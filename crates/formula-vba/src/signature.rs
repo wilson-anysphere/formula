@@ -655,7 +655,7 @@ pub fn verify_vba_signature_binding(
                 // to our deterministic "project digest" over OLE streams. This keeps binding checks
                 // useful for synthetically-constructed fixtures while preserving the spec-ish path
                 // for real-world projects.
-                let digest = match crate::compute_vba_project_digest(vba_project_bin, DigestAlg::Md5) {
+                let digest = match compute_vba_project_digest(vba_project_bin, DigestAlg::Md5) {
                     Ok(v) => v,
                     Err(_) => return VbaSignatureBinding::Unknown,
                 };
@@ -738,7 +738,6 @@ fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
         DigestAlg::Sha256 => "SHA-256",
     })
 }
-
 fn is_signature_component(component: &str) -> bool {
     let trimmed = component.trim_start_matches(|c: char| c <= '\u{001F}');
     matches!(
