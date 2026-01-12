@@ -150,6 +150,14 @@ def main() -> int:
             cwd=repo_root,
             env=env,
         )
+        # Keep convenience subset corpora (under tools/excel-oracle/) aligned with the canonical
+        # cases.json corpus so Windows+Excel runs can target a small case set and still merge
+        # results back into the pinned dataset by canonical caseId.
+        _run(
+            cmd=(sys.executable, "tools/excel-oracle/regenerate_subset_corpora.py"),
+            cwd=repo_root,
+            env=env,
+        )
 
     if not args.skip_pinned:
         with tempfile.TemporaryDirectory(prefix="excel-oracle-") as tmp:
