@@ -68,7 +68,10 @@ pub fn resolve_target(base_part: &str, target: &str) -> String {
         .unwrap_or(target);
     if target.is_empty() {
         // A target of just `#fragment` refers to the source part itself.
-        return base_part.to_string();
+        return base_part
+            .strip_prefix('/')
+            .unwrap_or(base_part)
+            .to_string();
     }
 
     // Relationship targets can be relative to the source part's folder (e.g. `worksheets/sheet1.xml`)
@@ -87,10 +90,12 @@ pub fn resolve_target(base_part: &str, target: &str) -> String {
             .unwrap_or("")
     };
 
+    // `base_part` is typically an OPC part name without a leading slash, but be resilient and
+    // ignore any empty segments so callers can pass `/xl/...` and still get normalized output.
     let mut components: Vec<&str> = if base_dir.is_empty() {
         Vec::new()
     } else {
-        base_dir.split('/').collect()
+        base_dir.split('/').filter(|s| !s.is_empty()).collect()
     };
 
     for segment in target.split('/') {
@@ -234,5 +239,10 @@ mod tests {
             resolve_target("xl/_rels/workbook.xml.rels", "/xl/media/image1.png#frag"),
             "xl/media/image1.png"
         );
+        assert_eq!(
+            resolve_target("/xl/metadata.xml", "richData/rd1.xml#frag"),
+            "xl/richData/rd1.xml"
+        );
+        assert_eq!(resolve_target("/xl/metadata.xml", "#frag"), "xl/metadata.xml");
     }
 }
