@@ -280,6 +280,14 @@ preserve its `ContentType` value byte-for-byte (do not hardcode a single MIME ty
 Content types for `xl/metadata.xml` and `xl/richData/*` still need confirmation from a real Excel-exported
 workbook (and corresponding fixture + tests).
 
+Likely patterns seen in the ecosystem (unverified; do not hardcode without a real Excel fixture in
+`fixtures/xlsx/**`):
+
+- `application/vnd.ms-excel.richvalue+xml` (for `/xl/richData/richValue.xml`)
+- `application/vnd.ms-excel.richvaluerel+xml` (for `/xl/richData/richValueRel.xml`)
+- `application/vnd.ms-excel.richvaluetypes+xml` (for `/xl/richData/richValueTypes.xml`)
+- `application/vnd.ms-excel.richvaluestructure+xml` (for `/xl/richData/richValueStructure.xml`)
+
 ```xml
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <!-- ... -->
@@ -315,6 +323,10 @@ Partially known (fixture-driven details still recommended):
   - Excel uses a Microsoft-extension relationship `Type` URI that has been observed to vary.
   - **Round-trip / detection rule:** identify the relationship by resolved `Target` (`/xl/cellimages.xml`)
     rather than hardcoding a single `Type`.
+- RichData relationship indirection (images referenced via `richValueRel.xml`):
+  - `xl/richData/_rels/richValueRel.xml.rels` is expected to contain standard image relationships:
+    - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
+  - (Exact `richValueRel` schemas and relationship discovery still need a real Excel fixture.)
 
 TODO (confirm via real Excel fixture, then harden parsers/writers):
 
