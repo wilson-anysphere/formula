@@ -201,7 +201,7 @@ export function startSheetStoreDocumentSync(
               : "visible";
           if (storeMeta.visibility !== desiredVisibility) {
             try {
-              store.setVisibility(sheetId, desiredVisibility);
+              store.setVisibility(sheetId, desiredVisibility, { allowHideLastVisible: true });
             } catch {
               // ignore
             }

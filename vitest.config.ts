@@ -43,6 +43,11 @@ export default defineConfig({
     // shared/contended runners.
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // Keep parallelism bounded in high-core agent sandboxes to avoid exhausting
+    // per-user process/thread limits (Node can abort if it fails to spawn its
+    // worker threads).
+    maxWorkers: 4,
+    minWorkers: 1,
     include: [
       "packages/**/*.test.ts",
       "packages/**/*.test.tsx",

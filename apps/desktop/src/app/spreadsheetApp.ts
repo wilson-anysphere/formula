@@ -1044,7 +1044,10 @@ export class SpreadsheetApp {
         const value = state?.value ?? null;
         return isRichTextValue(value) ? value.text : value;
       },
-      onChange: () => this.renderCharts(true)
+      // Creating/removing charts shouldn't force a full rerender of every existing chart's SVG.
+      // Only new charts (no host yet) will render content; existing charts keep their current DOM
+      // until a full refresh / data change triggers a content rerender.
+      onChange: () => this.renderCharts(false)
     });
 
     this.outlineLayer = document.createElement("div");

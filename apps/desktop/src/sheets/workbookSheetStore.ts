@@ -281,7 +281,7 @@ export class WorkbookSheetStore {
    * Unlike `hide()` / `unhide()`, this supports transitioning between "hidden" and "veryHidden"
    * while still enforcing the "cannot hide the last visible sheet" invariant.
    */
-  setVisibility(id: string, visibility: SheetVisibility): void {
+  setVisibility(id: string, visibility: SheetVisibility, opts?: { allowHideLastVisible?: boolean }): void {
     const idx = this.sheets.findIndex((s) => s.id === id);
     if (idx === -1) throw new Error("Sheet not found");
     const sheet = this.sheets[idx]!;
@@ -292,7 +292,7 @@ export class WorkbookSheetStore {
     // Mirror Excel behavior: prevent hiding the last visible sheet.
     if (sheet.visibility === "visible" && nextVisibility !== "visible") {
       const visibleCount = this.sheets.reduce((count, s) => count + (s.visibility === "visible" ? 1 : 0), 0);
-      if (visibleCount <= 1) throw new Error("Cannot hide the last visible sheet");
+      if (visibleCount <= 1 && !opts?.allowHideLastVisible) throw new Error("Cannot hide the last visible sheet");
     }
 
     const next = this.sheets.slice();
