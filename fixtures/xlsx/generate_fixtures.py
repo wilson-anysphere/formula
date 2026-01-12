@@ -681,6 +681,91 @@ def rich_values_metadata_xml() -> str:
 """
 
 
+def sheet_richdata_minimal_xml() -> str:
+    # Minimal sheet with `vm`/`cm` attributes (Excel uses these to bind a cell/value to records
+    # in `xl/metadata.xml`). The RichData tables themselves live under `xl/richData/*`.
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData>
+    <row r="1">
+      <c r="A1" vm="1" cm="1"><v>1</v></c>
+    </row>
+  </sheetData>
+</worksheet>
+"""
+
+
+def metadata_richdata_rels_xml() -> str:
+    # Relationships from `xl/metadata.xml` to the workbook-global RichData tables.
+    # Relationship Type URIs are Excel-version dependent; for preservation tests they only need
+    # to be well-formed and stable.
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2017/relationships/richValueTypes" Target="richData/richValueTypes.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.microsoft.com/office/2017/relationships/richValueStructure" Target="richData/richValueStructure.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.microsoft.com/office/2017/relationships/richValueRel" Target="richData/richValueRel.xml"/>
+  <Relationship Id="rId4" Type="http://schemas.microsoft.com/office/2017/relationships/richValue" Target="richData/richValue.xml"/>
+</Relationships>
+"""
+
+
+def richdata_rich_value_types_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvTypes xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <types>
+    <type id="0" name="com.microsoft.excel.image" structure="s_image"/>
+  </types>
+</rvTypes>
+"""
+
+
+def richdata_rich_value_structure_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvStruct xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <structures>
+    <structure id="s_image">
+      <member name="imageRel" kind="rel"/>
+      <member name="altText" kind="string"/>
+    </structure>
+  </structures>
+</rvStruct>
+"""
+
+
+def richdata_rich_value_rel_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvRel xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"
+       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rels>
+    <rel r:id="rId1"/>
+  </rels>
+</rvRel>
+"""
+
+
+def richdata_rich_value_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <!-- Relationship index 0 => richValueRel.xml entry 0 => r:id => image1.png -->
+    <rv type="0">
+      <v kind="rel">0</v>
+      <v kind="string">Alt text</v>
+    </rv>
+  </values>
+</rvData>
+"""
+
+
+def richdata_rich_value_rel_rels_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>
+"""
+
+
 def sheet_row_col_properties_xml() -> str:
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -1816,6 +1901,37 @@ def main() -> None:
         ],
         extra_parts={
             "xl/metadata.xml": rich_values_metadata_xml(),
+        },
+        sheet_names=["Sheet1"],
+    )
+    write_xlsx(
+        ROOT / "rich-data" / "richdata-minimal.xlsx",
+        [sheet_richdata_minimal_xml()],
+        styles_minimal_xml(),
+        workbook_xml_override=workbook_xml_with_extra(
+            ["Sheet1"],
+            """  <metadata r:id="rId3"/>""",
+        ),
+        workbook_rels_extra=[
+            '  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"/>'
+        ],
+        content_types_extra_overrides=[
+            '  <Default Extension="png" ContentType="image/png"/>',
+            '  <Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>',
+            '  <Override PartName="/xl/richData/richValue.xml" ContentType="application/vnd.ms-excel.richvalue+xml"/>',
+            '  <Override PartName="/xl/richData/richValueRel.xml" ContentType="application/vnd.ms-excel.richvaluerel+xml"/>',
+            '  <Override PartName="/xl/richData/richValueTypes.xml" ContentType="application/vnd.ms-excel.richvaluetypes+xml"/>',
+            '  <Override PartName="/xl/richData/richValueStructure.xml" ContentType="application/vnd.ms-excel.richvaluestructure+xml"/>',
+        ],
+        extra_parts={
+            "xl/metadata.xml": rich_values_metadata_xml(),
+            "xl/_rels/metadata.xml.rels": metadata_richdata_rels_xml(),
+            "xl/richData/richValue.xml": richdata_rich_value_xml(),
+            "xl/richData/richValueRel.xml": richdata_rich_value_rel_xml(),
+            "xl/richData/richValueTypes.xml": richdata_rich_value_types_xml(),
+            "xl/richData/richValueStructure.xml": richdata_rich_value_structure_xml(),
+            "xl/richData/_rels/richValueRel.xml.rels": richdata_rich_value_rel_rels_xml(),
+            "xl/media/image1.png": one_by_one_png_bytes(),
         },
         sheet_names=["Sheet1"],
     )
