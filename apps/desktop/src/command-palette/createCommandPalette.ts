@@ -4,6 +4,7 @@ import type { ContextKeyService } from "../extensions/contextKeys.js";
 import { debounce } from "./debounce.js";
 import { compileFuzzyQuery, fuzzyMatchCommandPrepared, prepareCommandForFuzzy, type MatchRange, type PreparedCommandForFuzzy } from "./fuzzy.js";
 import { readCommandPaletteRecents, recordCommandPaletteRecent } from "./recents.js";
+import { searchShortcutCommands } from "./shortcutSearch.js";
 
 type RenderableCommand = PreparedCommandForFuzzy<CommandContribution> & {
   score: number;
@@ -172,6 +173,21 @@ function buildGroupsForQuery(
   return groupOrder.map((label) => ({ label, commands: groupsByLabel.get(label) ?? [] }));
 }
 
+function buildGroupsForShortcutMode(matches: Array<PreparedCommandForFuzzy<CommandContribution> & { shortcut: string }>): CommandGroup[] {
+  const groupsByLabel = new Map<string, RenderableCommand[]>();
+  const order: string[] = [];
+
+  for (const cmd of matches) {
+    const label = groupLabel(cmd.category);
+    if (!groupsByLabel.has(label)) order.push(label);
+    const list = groupsByLabel.get(label) ?? [];
+    list.push({ ...cmd, score: 0, titleRanges: [] });
+    groupsByLabel.set(label, list);
+  }
+
+  return order.map((label) => ({ label, commands: groupsByLabel.get(label) ?? [] }));
+}
+
 function renderHighlightedText(text: string, ranges: MatchRange[]): DocumentFragment {
   const fragment = document.createDocumentFragment();
   if (!ranges.length) {
@@ -228,11 +244,17 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   input.dataset.testid = "command-palette-input";
   input.placeholder = placeholder;
 
+  const hint = document.createElement("div");
+  hint.className = "command-palette__hint";
+  hint.textContent = "Shortcut search";
+  hint.hidden = true;
+
   const list = document.createElement("ul");
   list.className = "command-palette__list";
   list.dataset.testid = "command-palette-list";
 
   palette.appendChild(input);
+  palette.appendChild(hint);
   palette.appendChild(list);
   overlay.appendChild(palette);
   document.body.appendChild(overlay);
@@ -322,8 +344,20 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   function renderResults(): void {
     ensureCommandsCache();
 
-    const groups =
-      query.trim() === ""
+    const trimmed = query.trim();
+    const shortcutMode = trimmed.startsWith("/");
+    hint.hidden = !shortcutMode;
+
+    const shortcutQuery = shortcutMode ? trimmed.slice(1).trim() : "";
+    const groups = shortcutMode
+      ? buildGroupsForShortcutMode(
+          searchShortcutCommands({
+            commands: cachedCommands,
+            keybindingIndex,
+            query: shortcutQuery,
+          }),
+        )
+      : trimmed === ""
         ? buildGroupsForEmptyQuery(cachedCommands, getRecentsForDisplay(cachedCommands), limits)
         : buildGroupsForQuery(cachedCommands, query, limits);
 
@@ -336,7 +370,11 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     if (groups.length === 0 || visibleCommands.length === 0) {
       const empty = document.createElement("li");
       empty.className = "command-palette__empty";
-      empty.textContent = query.trim() ? "No matching commands" : "No commands";
+      if (shortcutMode) {
+        empty.textContent = shortcutQuery ? "No matching shortcuts" : "No shortcuts";
+      } else {
+        empty.textContent = trimmed ? "No matching commands" : "No commands";
+      }
       list.appendChild(empty);
       return;
     }

@@ -445,6 +445,12 @@
   outline: none;
 }
 
+.command-palette__hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .command-palette__list {
   margin: 10px 0 0;
   padding: 0;
