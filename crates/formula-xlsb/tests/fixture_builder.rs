@@ -17,6 +17,7 @@ pub struct XlsbFixtureBuilder {
     // row -> (col -> cell)
     cells: BTreeMap<u32, BTreeMap<u32, CellSpec>>,
     row_record_trailing_bytes: Vec<u8>,
+    extra_zip_parts: Vec<(String, Vec<u8>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +55,7 @@ impl XlsbFixtureBuilder {
             shared_strings: Vec::new(),
             cells: BTreeMap::new(),
             row_record_trailing_bytes: Vec::new(),
+            extra_zip_parts: Vec::new(),
         }
     }
 
@@ -69,6 +71,13 @@ impl XlsbFixtureBuilder {
 
     pub fn set_row_record_trailing_bytes(&mut self, bytes: Vec<u8>) {
         self.row_record_trailing_bytes = bytes;
+    }
+
+    /// Add an arbitrary extra part to the generated XLSB ZIP package.
+    ///
+    /// This is useful for testing consumers that read auxiliary XML parts (e.g. table definitions).
+    pub fn add_extra_zip_part(&mut self, name: impl Into<String>, bytes: Vec<u8>) {
+        self.extra_zip_parts.push((name.into(), bytes));
     }
 
     pub fn set_cell_number(&mut self, row: u32, col: u32, v: f64) {
@@ -212,6 +221,11 @@ impl XlsbFixtureBuilder {
                 .expect("start xl/sharedStrings.bin");
             zip.write_all(&shared_strings_bin)
                 .expect("write xl/sharedStrings.bin");
+        }
+
+        for (name, bytes) in &self.extra_zip_parts {
+            zip.start_file(name, options).unwrap_or_else(|_| panic!("start {name}"));
+            zip.write_all(bytes).unwrap_or_else(|_| panic!("write {name}"));
         }
 
         zip.finish().expect("finish xlsb zip").into_inner()

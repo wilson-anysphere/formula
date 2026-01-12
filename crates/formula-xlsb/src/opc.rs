@@ -183,6 +183,9 @@ impl XlsbWorkbook {
 
         let (mut sheets, workbook_context, workbook_properties, defined_names) =
             parse_workbook(&mut Cursor::new(&workbook_bin), &workbook_rels)?;
+        let mut workbook_context = workbook_context;
+
+        load_table_definitions(&mut zip, &mut workbook_context)?;
 
         // `workbook.bin.rels` targets are compared case-insensitively by Excel on Windows/macOS,
         // but ZIP entry names are case-sensitive. Normalize sheet part paths to the exact entry
@@ -1456,6 +1459,123 @@ fn preserve_part<R: Read + Seek>(
         preserved.insert(name.to_string(), bytes);
     }
     Ok(())
+}
+
+fn load_table_definitions<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    ctx: &mut WorkbookContext,
+) -> Result<(), ParseError> {
+    // Best-effort: tables are not required for basic parsing, but we use them to reconstruct
+    // structured reference (Excel table) formulas with the correct display names.
+    let table_parts: Vec<String> = zip
+        .file_names()
+        .filter(|name| {
+            let name = name.to_ascii_lowercase();
+            name.starts_with("xl/tables/") && name.ends_with(".xml")
+        })
+        .map(str::to_string)
+        .collect();
+
+    for part in table_parts {
+        let Some(bytes) = read_zip_entry(zip, &part)? else {
+            continue;
+        };
+        let Some(info) = parse_table_xml_best_effort(&bytes) else {
+            continue;
+        };
+        ctx.add_table(info.id, info.name);
+        for (col_id, col_name) in info.columns {
+            ctx.add_table_column(info.id, col_id, col_name);
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Debug)]
+struct ParsedTableXml {
+    id: u32,
+    name: String,
+    columns: Vec<(u32, String)>,
+}
+
+fn parse_table_xml_best_effort(xml_bytes: &[u8]) -> Option<ParsedTableXml> {
+    let mut reader = XmlReader::from_reader(std::io::BufReader::new(Cursor::new(xml_bytes)));
+    reader.trim_text(true);
+    let mut buf = Vec::new();
+
+    fn attr_value<B: std::io::BufRead>(
+        e: &quick_xml::events::BytesStart<'_>,
+        reader: &XmlReader<B>,
+        key: &[u8],
+    ) -> Option<String> {
+        for attr in e.attributes().flatten() {
+            if attr.key.as_ref() == key {
+                return attr
+                    .decode_and_unescape_value(reader)
+                    .ok()
+                    .map(|v| v.into_owned());
+            }
+        }
+        None
+    }
+
+    let mut table_id: Option<u32> = None;
+    let mut table_name: Option<String> = None;
+    let mut columns: Vec<(u32, String)> = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) if e.name().as_ref().ends_with(b"table") => {
+                if table_id.is_some() {
+                    // Already parsed a table root.
+                    buf.clear();
+                    continue;
+                }
+
+                let id = attr_value(&e, &reader, b"id").or_else(|| attr_value(&e, &reader, b"Id"))?;
+                table_id = id.parse::<u32>().ok();
+
+                // Excel stores both `name` and `displayName`. Formulas typically use displayName.
+                let display = attr_value(&e, &reader, b"displayName")
+                    .or_else(|| attr_value(&e, &reader, b"DisplayName"));
+                let name =
+                    attr_value(&e, &reader, b"name").or_else(|| attr_value(&e, &reader, b"Name"));
+                table_name = display.or(name);
+            }
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if e.name().as_ref().ends_with(b"tableColumn") =>
+            {
+                if table_id.is_none() {
+                    buf.clear();
+                    continue;
+                };
+
+                let Some(id) = attr_value(&e, &reader, b"id")
+                    .or_else(|| attr_value(&e, &reader, b"Id"))
+                    .and_then(|s| s.parse::<u32>().ok())
+                else {
+                    buf.clear();
+                    continue;
+                };
+                let Some(name) = attr_value(&e, &reader, b"name").or_else(|| attr_value(&e, &reader, b"Name")) else {
+                    buf.clear();
+                    continue;
+                };
+                columns.push((id, name));
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => return None,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Some(ParsedTableXml {
+        id: table_id?,
+        name: table_name?,
+        columns,
+    })
 }
 
 #[derive(Debug)]
