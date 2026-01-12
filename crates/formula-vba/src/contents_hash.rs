@@ -298,9 +298,18 @@ fn project_properties_normalized_bytes(
 
     let mut out = Vec::new();
     for raw_line in split_nwln_lines(project_stream_bytes) {
-        let line = trim_ascii_whitespace(raw_line);
+        let mut line = trim_ascii_whitespace(raw_line);
         if line.is_empty() {
             continue;
+        }
+
+        // Some producers may include a UTF-8 BOM at the start of the stream. Strip it for key
+        // matching and output stability.
+        if line.starts_with(&[0xEF, 0xBB, 0xBF]) {
+            line = trim_ascii_whitespace(&line[3..]);
+            if line.is_empty() {
+                continue;
+            }
         }
 
         // Section headers are bracketed, e.g. `[Host Extender Info]` or `[Workspace]`.

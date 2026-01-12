@@ -288,6 +288,44 @@ fn project_normalized_data_project_properties_excludes_project_id_property_entir
 }
 
 #[test]
+fn project_normalized_data_project_properties_strips_utf8_bom_for_key_matching() {
+    // Some producers may include a UTF-8 BOM at the start of the PROJECT stream. Ensure we strip
+    // it so excluded properties like `ID=` are still excluded and the BOM does not contaminate the
+    // transcript.
+
+    let project_stream = b"\xEF\xBB\xBFID=\"{11111111-2222-3333-4444-555555555555}\"\r\nName=\"VBAProject\"\r\n";
+
+    // `project_normalized_data()` requires `VBA/dir` to exist, but the contents can be empty.
+    let dir_container = compress_container(&[]);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(project_stream).expect("write PROJECT");
+    }
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized =
+        project_normalized_data(&vba_project_bin).expect("compute ProjectNormalizedData");
+
+    assert_eq!(
+        normalized,
+        b"NameVBAProject",
+        "expected BOM-stripping to allow ID exclusion and stable Name token parsing"
+    );
+    assert!(
+        !normalized.contains(&0xEF) && !normalized.contains(&0xBB) && !normalized.contains(&0xBF),
+        "expected BOM bytes to not appear in transcript"
+    );
+}
+
+#[test]
 fn project_normalized_data_project_properties_excludes_document_property_entirely() {
     // MS-OVBA §2.4.2.6 excludes ProjectDocModule (`Document=...`) from ProjectNormalizedData.
 
