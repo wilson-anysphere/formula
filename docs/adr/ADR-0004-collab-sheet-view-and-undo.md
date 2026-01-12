@@ -150,25 +150,29 @@ In collaborative mode:
 3. Ensure DocumentController-origin edits are captured by Yjs UndoManager:
    - Pass an `undoService` (from `@formula/collab-undo`) into `bindYjsToDocumentController`.
 
-`bindYjsToDocumentController` uses Yjs origin tokens to prevent “echo” updates:
+`bindYjsToDocumentController` prevents feedback loops between the two reactive
+systems using internal guards (not by blanket-filtering `transaction.origin`):
 
-- It ignores Yjs transactions whose `transaction.origin` is considered “local”
-  (the binder builds a `localOrigins` set from its own binder origin + any origins
-  in `undoService.localOrigins`) to avoid re-applying edits that already
-  originated from the local `DocumentController`.
-- It intentionally **does not ignore** the `Y.UndoManager` instance origin, so
-  calling `session.undo.undo()` still propagates into `DocumentController`.
+- While applying a **DocumentController → Yjs** write it sets `applyingLocal`.
+  The Yjs `observeDeep` handlers early-return when this flag is set, so the
+  deep observer event that immediately follows the binder’s own write is ignored.
+- While applying a **Yjs → DocumentController** update it sets `applyingRemote`.
+  The DocumentController `"change"` handler ignores events while this flag is set,
+  so remote-applied deltas are not written back into Yjs.
 
-**Important integration rule:**
+This is intentionally not implemented as “ignore all local origins”, because the
+stack reuses local origins for programmatic operations (branch checkout/merge
+apply, version restore, direct `session.setCell*`) that must still update the
+desktop projection.
 
-When the UI uses `DocumentController` as the write path (typical in desktop),
-avoid mixing direct `session.setCell*` calls with the binder unless you
-deliberately handle origin/echo semantics.
+Origins still matter for **undo/conflict semantics**:
 
-Reason: if `bindYjsToDocumentController` is configured to treat `session.origin`
-as “local”, then direct `session.setCellValue` writes (which use `session.origin`)
-will be ignored by the Yjs→DocumentController observer and won’t be reflected in
-the `DocumentController` projection.
+- If you pass `undoService: session.undo` (or use `bindCollabSessionToDocumentController`,
+  which defaults to `session.transactLocal(...)`), DocumentController edits use
+  `session.origin`, participate in collaborative undo, and are treated as local by
+  conflict monitors.
+- If you do not, the binder uses its own origin token and those edits will not be
+  undoable by collaborative undo tracking.
 
 Practical guidance:
 

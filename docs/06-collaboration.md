@@ -512,7 +512,7 @@ const binder = await bindCollabSessionToDocumentController({
 });
 ```
 
-### Echo suppression (origins) + UndoManager exception
+### Echo suppression (feedback-loop prevention)
 
 When you bind two reactive systems, you must avoid doing this:
 
@@ -520,33 +520,27 @@ When you bind two reactive systems, you must avoid doing this:
 2. Yjs observer fires (because the doc changed)
 3. Binder applies the same change back into DocumentController (wasted work + can cause feedback loops)
 
-The binder prevents this using **Yjs transaction origins**:
+The binder prevents feedback loops using two internal guards (not by filtering `transaction.origin`):
 
-- Local DocumentController→Yjs writes run inside a Yjs transaction with a stable `origin` token:
-  - when `undoService.transact(...)` is provided, the binder uses it (the origin is whatever the undo service uses for local edits; in `@formula/collab-session` this is `session.origin`)
-  - otherwise the binder uses its own `binderOrigin` token
-- The binder maintains a `localOrigins` set (used for echo suppression) containing:
-  - `binderOrigin`
-  - any origins from `undoService.localOrigins` (when provided), excluding the `Y.UndoManager` instance
-- The Yjs→DocumentController observer checks `transaction.origin` and **ignores** transactions whose origin is in `localOrigins`.
+- While applying a local **DocumentController → Yjs** write, the binder sets an internal `applyingLocal` flag.
+  The Yjs `observeDeep` handlers early-return when `applyingLocal` is true, so the deep observer event that
+  immediately follows the binder’s own write is ignored.
+- While applying a **Yjs → DocumentController** update (via `applyExternalDeltas` / `applyExternalSheetViewDeltas`
+  / `applyExternalFormatDeltas` / `applyExternalRangeRunDeltas`), the binder sets `applyingRemote`.
+  The DocumentController `"change"` handler ignores changes while `applyingRemote` is true, so remote-applied
+  deltas are not written back into Yjs.
 
-However, when collaborative undo/redo is enabled, Yjs uses a `Y.UndoManager` instance as an origin for undo/redo application. If we treated the UndoManager itself as “local” for echo suppression, then:
+This is intentionally **not** implemented as “ignore all local origins”, because other parts of the stack
+often reuse the same origin token for programmatic mutations (e.g. branch checkout/merge apply, version
+restore, or direct `session.setCell*` calls) that *must* update the desktop projection.
 
-- Undo/redo would mutate Yjs
-- …but the binder would ignore it
-- …and the desktop UI would not update
+Origins still matter for **undo/conflict semantics**, not echo suppression:
 
-So the binder intentionally:
-
-- ignores **origin tokens** used for local writes
-- but **does not** ignore the UndoManager instance origin
-
-This is implemented by filtering `undoService.localOrigins` and excluding any value that looks like an UndoManager (see `isUndoManager(...)` in the binder).
-
-Practical rule of thumb:
-
-- When the binder is active, treat `DocumentController` as the “source of truth” for local edits.
-- If you also call `session.setCellValue` / `session.setCellFormula` directly, be aware those are local-origin writes (`session.origin`). When the binder is configured to treat `session.origin` as “local” (the default for `bindCollabSessionToDocumentController`, and typical when passing `undoService.localOrigins`), those direct session writes will be **echo-suppressed** from applying back into `DocumentController`.
+- If you pass `undoService: session.undo` (or use `bindCollabSessionToDocumentController`, which defaults to
+  `session.transactLocal(...)`), DocumentController-driven writes use `session.origin` and participate in
+  collaborative undo + conflict monitoring.
+- If you pass `undoService: null`, the binder uses its own `binderOrigin` for DocumentController-driven writes,
+  so those edits will generally be treated as **non-local** by collaborative undo/conflict monitors.
 
 ### Undo/redo semantics in collaborative mode
 
