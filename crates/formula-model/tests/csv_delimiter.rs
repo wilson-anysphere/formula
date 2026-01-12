@@ -1,0 +1,57 @@
+use formula_model::import::{import_csv_to_worksheet, CsvOptions};
+use formula_model::{CellRef, CellValue};
+use std::io::Cursor;
+
+#[test]
+fn csv_auto_detects_semicolon_delimiter() {
+    let csv = "a;b;c\n1;2;3\n4;5;6\n";
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
+        .unwrap();
+
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.0));
+    assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Number(2.0));
+    assert_eq!(sheet.value(CellRef::new(0, 2)), CellValue::Number(3.0));
+}
+
+#[test]
+fn csv_auto_detects_tab_delimiter() {
+    let csv = "a\tb\tc\n1\t2\t3\n";
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
+        .unwrap();
+
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.0));
+    assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Number(2.0));
+    assert_eq!(sheet.value(CellRef::new(0, 2)), CellValue::Number(3.0));
+}
+
+#[test]
+fn csv_auto_detects_pipe_delimiter() {
+    let csv = "a|b|c\n1|2|3\n";
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
+        .unwrap();
+
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.0));
+    assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Number(2.0));
+    assert_eq!(sheet.value(CellRef::new(0, 2)), CellValue::Number(3.0));
+}
+
+#[test]
+fn csv_auto_detect_ignores_commas_inside_quoted_strings() {
+    // If delimiter detection naively counts commas inside quotes, it may incorrectly pick `,`
+    // over the real `;` delimiter.
+    let csv = "id;text\n1;\"a,b\"\n2;\"c,d\"\n";
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
+        .unwrap();
+
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value(CellRef::new(0, 1)),
+        CellValue::String("a,b".to_string())
+    );
+    assert_eq!(sheet.value(CellRef::new(1, 0)), CellValue::Number(2.0));
+    assert_eq!(
+        sheet.value(CellRef::new(1, 1)),
+        CellValue::String("c,d".to_string())
+    );
+}
+

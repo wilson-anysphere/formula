@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::io::BufRead;
+use std::io::{BufRead, Cursor, Read};
 use std::sync::Arc;
 
 use csv::ByteRecord;
@@ -15,6 +15,10 @@ use crate::{CellRef, SheetNameError, Workbook, Worksheet, WorksheetId};
 
 #[derive(Clone, Debug)]
 pub struct CsvOptions {
+    /// Field delimiter byte (`,`/`;`/tab/`|`).
+    ///
+    /// Use [`CSV_DELIMITER_AUTO`] to automatically detect the delimiter from the first few records
+    /// (Excel-like behavior).
     pub delimiter: u8,
     pub has_header: bool,
     pub sample_rows: usize,
@@ -37,7 +41,7 @@ pub struct CsvOptions {
 impl Default for CsvOptions {
     fn default() -> Self {
         Self {
-            delimiter: b',',
+            delimiter: CSV_DELIMITER_AUTO,
             has_header: true,
             sample_rows: 100,
             page_size_rows: 65_536,
@@ -50,6 +54,12 @@ impl Default for CsvOptions {
         }
     }
 }
+
+/// Sentinel value for [`CsvOptions::delimiter`] indicating that the delimiter should be
+/// auto-detected.
+///
+/// Auto-detection considers (in priority order) `,`, `;`, tab, and `|`.
+pub const CSV_DELIMITER_AUTO: u8 = 0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CsvTextEncoding {
@@ -109,11 +119,20 @@ pub enum CsvImportError {
 
 /// Import a CSV stream into a [`ColumnarTable`] without materializing a full grid.
 pub fn import_csv_to_columnar_table<R: BufRead>(
-    reader: R,
+    mut reader: R,
     options: CsvOptions,
 ) -> Result<ColumnarTable, CsvImportError> {
+    let (sniff_prefix, delimiter) = if options.delimiter == CSV_DELIMITER_AUTO {
+        sniff_csv_delimiter_prefix(&mut reader).map_err(CsvImportError::Io)?
+    } else {
+        (Vec::new(), options.delimiter)
+    };
+
+    // If we sniffed, re-play the bytes we consumed so the CSV reader sees the full stream.
+    let reader = Cursor::new(sniff_prefix).chain(reader);
+
     let mut csv_reader = csv::ReaderBuilder::new()
-        .delimiter(options.delimiter)
+        .delimiter(delimiter)
         // We'll treat headers manually so we can report consistent row/column locations.
         .has_headers(false)
         // Match prior behavior: accept rows with varying column counts.
@@ -231,6 +250,180 @@ pub fn import_csv_to_columnar_table<R: BufRead>(
     }
 
     Ok(builder.finalize())
+}
+
+const CSV_SNIFF_DELIMITERS: [u8; 4] = [b',', b';', b'\t', b'|'];
+const CSV_SNIFF_MAX_RECORDS: usize = 20;
+const CSV_SNIFF_MAX_BYTES: usize = 64 * 1024;
+
+fn sniff_csv_delimiter_prefix<R: Read>(reader: &mut R) -> Result<(Vec<u8>, u8), std::io::Error> {
+    let mut prefix: Vec<u8> = Vec::new();
+    let mut hists: Vec<HashMap<usize, usize>> =
+        CSV_SNIFF_DELIMITERS.iter().map(|_| HashMap::new()).collect();
+    let mut delim_counts: [usize; CSV_SNIFF_DELIMITERS.len()] =
+        [0; CSV_SNIFF_DELIMITERS.len()];
+
+    let mut in_quotes = false;
+    let mut pending_quote = false;
+    let mut pending_cr = false;
+    let mut record_len: usize = 0;
+    let mut sampled_records: usize = 0;
+    let mut hit_eof = false;
+
+    let mut buf = [0u8; 8 * 1024];
+
+    'read: while prefix.len() < CSV_SNIFF_MAX_BYTES && sampled_records < CSV_SNIFF_MAX_RECORDS {
+        let to_read = (CSV_SNIFF_MAX_BYTES - prefix.len()).min(buf.len());
+        let n = reader.read(&mut buf[..to_read])?;
+        if n == 0 {
+            hit_eof = true;
+            break;
+        }
+
+        prefix.extend_from_slice(&buf[..n]);
+
+        for &byte in &buf[..n] {
+            if sampled_records >= CSV_SNIFF_MAX_RECORDS {
+                break 'read;
+            }
+
+            // Process one byte at a time, with simple state to handle `""` escapes and CRLF.
+            let b = byte;
+            loop {
+                if pending_cr && !in_quotes {
+                    pending_cr = false;
+                    if b == b'\n' {
+                        // Swallow the `\n` in a `\r\n` record terminator.
+                        break;
+                    }
+                    // Otherwise, re-process `b` as the start of the next record.
+                    continue;
+                }
+
+                if pending_quote {
+                    if b == b'"' {
+                        // Escaped quote (`""`) inside a quoted field.
+                        pending_quote = false;
+                        record_len += 1;
+                        break;
+                    }
+
+                    // Closing quote. Re-process this byte outside quotes.
+                    pending_quote = false;
+                    in_quotes = false;
+                    continue;
+                }
+
+                if in_quotes {
+                    record_len += 1;
+                    if b == b'"' {
+                        pending_quote = true;
+                    }
+                    break;
+                }
+
+                match b {
+                    b'"' => {
+                        in_quotes = true;
+                        record_len += 1;
+                        break;
+                    }
+                    b'\r' => {
+                        commit_csv_sniff_record(
+                            record_len,
+                            &mut delim_counts,
+                            &mut hists,
+                            &mut sampled_records,
+                        );
+                        record_len = 0;
+                        delim_counts.fill(0);
+                        pending_cr = true;
+                        break;
+                    }
+                    b'\n' => {
+                        commit_csv_sniff_record(
+                            record_len,
+                            &mut delim_counts,
+                            &mut hists,
+                            &mut sampled_records,
+                        );
+                        record_len = 0;
+                        delim_counts.fill(0);
+                        break;
+                    }
+                    _ => {
+                        record_len += 1;
+                        for (idx, delim) in CSV_SNIFF_DELIMITERS.iter().enumerate() {
+                            if b == *delim {
+                                delim_counts[idx] += 1;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // EOF can terminate the last record without a newline.
+    if hit_eof && sampled_records < CSV_SNIFF_MAX_RECORDS {
+        if pending_quote {
+            // Treat a trailing quote at EOF as a closing quote.
+            in_quotes = false;
+        }
+        if record_len > 0 && !in_quotes {
+            commit_csv_sniff_record(record_len, &mut delim_counts, &mut hists, &mut sampled_records);
+        }
+    }
+
+    let delimiter = select_sniffed_csv_delimiter(&hists);
+    Ok((prefix, delimiter))
+}
+
+fn commit_csv_sniff_record(
+    record_len: usize,
+    delim_counts: &mut [usize; CSV_SNIFF_DELIMITERS.len()],
+    hists: &mut [HashMap<usize, usize>],
+    sampled_records: &mut usize,
+) {
+    if record_len == 0 {
+        return;
+    }
+
+    for (idx, count) in delim_counts.iter().enumerate() {
+        let fields = *count + 1;
+        *hists[idx].entry(fields).or_insert(0) += 1;
+    }
+    *sampled_records += 1;
+}
+
+fn select_sniffed_csv_delimiter(hists: &[HashMap<usize, usize>]) -> u8 {
+    // Pick the delimiter whose sampled records most frequently share the same column count (>1).
+    //
+    // Tie-break deterministically in `CSV_SNIFF_DELIMITERS` order: `,` > `;` > tab > `|`.
+    let mut best_delim = b',';
+    let mut best_mode_count: usize = 0;
+
+    for (idx, hist) in hists.iter().enumerate() {
+        let mode_count = hist
+            .iter()
+            .filter(|(fields, _)| **fields > 1)
+            .map(|(_, count)| *count)
+            .max()
+            .unwrap_or(0);
+
+        if mode_count > best_mode_count {
+            best_mode_count = mode_count;
+            best_delim = CSV_SNIFF_DELIMITERS[idx];
+        }
+    }
+
+    // Fall back to comma if we couldn't find a delimiter that produces >1 columns.
+    if best_mode_count == 0 {
+        b','
+    } else {
+        best_delim
+    }
 }
 
 /// Import a CSV stream into a new [`Worksheet`] backed by a columnar table.
