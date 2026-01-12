@@ -733,6 +733,99 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 #[test]
+fn project_normalized_data_multiple_baseclass_entries_preserve_order_and_precede_tokens() {
+    // Regression test for MS-OVBA §2.4.2.6 `NormalizeProjectStream` ordering:
+    // - Multiple `BaseClass=` (`ProjectDesignerModule`) properties MUST be processed in PROJECT
+    //   stream order (not sorted, not deduped, not "first only").
+    // - For each BaseClass property, `NormalizeDesignerStorage()` bytes MUST appear before the
+    //   property name/value token bytes for that property.
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+
+    // PROJECT stream: deliberate non-lexicographic order.
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"BaseClass=FormB\r\nBaseClass=FormA\r\n")
+            .expect("write PROJECT");
+    }
+
+    // Minimal VBA/dir mapping so FormsNormalizedData can resolve the designer module identifiers
+    // to storage names (MODULENAME -> MODULESTREAMNAME).
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let dir_decompressed = {
+            let mut out = Vec::new();
+            // PROJECTCODEPAGE (u16 LE): Windows-1252.
+            push_record(&mut out, 0x0003, &1252u16.to_le_bytes());
+
+            for module in [b"FormB".as_slice(), b"FormA".as_slice()] {
+                push_record(&mut out, 0x0019, module); // MODULENAME
+                let mut stream_name = Vec::new();
+                stream_name.extend_from_slice(module);
+                stream_name.extend_from_slice(&0u16.to_le_bytes());
+                push_record(&mut out, 0x001A, &stream_name); // MODULESTREAMNAME (+ reserved u16)
+                push_record(&mut out, 0x0021, &3u16.to_le_bytes()); // MODULETYPE (UserForm)
+            }
+            out
+        };
+        let dir_container = compress_container(&dir_decompressed);
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    // Root-level designer storages and distinct stream bytes.
+    ole.create_storage("FormA").expect("FormA storage");
+    {
+        let mut s = ole.create_stream("FormA/Payload").expect("FormA stream");
+        s.write_all(b"A").expect("write FormA bytes");
+    }
+    ole.create_storage("FormB").expect("FormB storage");
+    {
+        let mut s = ole.create_stream("FormB/Payload").expect("FormB stream");
+        s.write_all(b"B").expect("write FormB bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized = project_normalized_data(&vba_project_bin).expect("ProjectNormalizedData");
+
+    let mut formb_padded = Vec::new();
+    formb_padded.extend_from_slice(b"B");
+    formb_padded.extend(std::iter::repeat(0u8).take(1022));
+
+    let mut forma_padded = Vec::new();
+    forma_padded.extend_from_slice(b"A");
+    forma_padded.extend(std::iter::repeat(0u8).take(1022));
+
+    let idx_formb = find_subslice(&normalized, &formb_padded).expect("FormB designer bytes");
+    let idx_forma = find_subslice(&normalized, &forma_padded).expect("FormA designer bytes");
+    assert!(idx_formb < idx_forma, "expected FormB before FormA (PROJECT order)");
+
+    let idx_base_1 = find_subslice(&normalized, b"BaseClass").expect("BaseClass token 1");
+    let idx_base_2 = find_subslice(&normalized[idx_base_1 + 1..], b"BaseClass")
+        .map(|idx| idx + idx_base_1 + 1)
+        .expect("BaseClass token 2");
+
+    assert!(
+        idx_formb < idx_base_1,
+        "expected FormB designer bytes before BaseClass token for FormB"
+    );
+    assert!(
+        idx_forma < idx_base_2,
+        "expected FormA designer bytes before BaseClass token for FormA"
+    );
+
+    assert!(
+        find_subslice(&normalized, b"FormB").is_some(),
+        "expected FormB value token"
+    );
+    assert!(
+        find_subslice(&normalized, b"FormA").is_some(),
+        "expected FormA value token"
+    );
+}
+
+#[test]
 fn project_normalized_data_preserves_designer_storage_element_traversal_order() {
     // Regression test for MS-OVBA `NormalizeDesignerStorage` / `NormalizeStorage` traversal order as
     // used by `ProjectNormalizedData` (MS-OVBA §2.4.2.2 + §2.4.2.6).
@@ -805,19 +898,15 @@ fn project_normalized_data_preserves_designer_storage_element_traversal_order() 
     let normalized =
         project_normalized_data(&vba_project_bin).expect("compute ProjectNormalizedData");
 
-    // Extract the FormsNormalizedData suffix (two 1023-byte padded blocks).
-    let forms_len = 1023 * 2;
-    assert!(
-        normalized.len() >= forms_len,
-        "expected output to include FormsNormalizedData suffix"
-    );
-    let forms = &normalized[normalized.len() - forms_len..];
-
     let mut expected = Vec::new();
     expected.extend_from_slice(b"Y");
     expected.extend(std::iter::repeat(0u8).take(1022));
     expected.extend_from_slice(b"X");
     expected.extend(std::iter::repeat(0u8).take(1022));
+
+    let pos = find_subslice(&normalized, &expected)
+        .expect("expected normalized output to contain padded designer stream bytes");
+    let forms = &normalized[pos..pos + expected.len()];
 
     assert_eq!(
         forms, expected,

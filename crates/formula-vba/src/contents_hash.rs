@@ -144,14 +144,21 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
     //
     // Keep this best-effort: if the project stream or designer storages are missing, we still
     // return the dir-record-derived prefix above (useful for unit tests and partial inputs).
+    let mut project_properties = Vec::new();
+    let mut host_extender_info = Vec::new();
     if let Some(project_stream_bytes) = ole.read_stream_opt("PROJECT")? {
-        out.extend_from_slice(&project_properties_normalized_bytes(&project_stream_bytes));
-        out.extend_from_slice(&host_extender_info_normalized_bytes(&project_stream_bytes));
+        project_properties = project_properties_normalized_bytes(&project_stream_bytes);
+        host_extender_info = host_extender_info_normalized_bytes(&project_stream_bytes);
     }
 
+    // MS-OVBA §2.4.2.6 appends `NormalizeDesignerStorage` output before appending the BaseClass
+    // property name/value tokens. We model that ordering by emitting the designer storage bytes
+    // (`FormsNormalizedData`) before the BaseClass tokens derived from the PROJECT stream.
     if let Ok(forms) = forms_normalized_data(vba_project_bin) {
         out.extend_from_slice(&forms);
     }
+    out.extend_from_slice(&project_properties);
+    out.extend_from_slice(&host_extender_info);
 
     Ok(out)
 }

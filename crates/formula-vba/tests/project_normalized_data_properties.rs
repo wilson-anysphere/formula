@@ -84,20 +84,23 @@ fn project_normalized_data_project_properties_parse_name_and_value_tokens_withou
 
     // Expected transcript:
     // - selected `VBA/dir` record payload bytes (here: PROJECTCODEPAGE / 1252)
-    // - ProjectProperties as name token bytes + value token bytes (no separators, no quotes, no NWLN)
     // - FormsNormalizedData (designer storage bytes padded to 1023-byte blocks)
+    // - ProjectProperties as name token bytes + value token bytes (no separators, no quotes, no NWLN)
+    //
+    // MS-OVBA §2.4.2.6 appends `NormalizeDesignerStorage` output for `BaseClass=` before the
+    // property name/value tokens for that property; we model this by emitting designer bytes before
+    // ProjectProperties token bytes.
+    let mut expected_designer_storage = Vec::new();
+    expected_designer_storage.extend_from_slice(b"DESIGNER");
+    expected_designer_storage.extend(std::iter::repeat(0u8).take(1023 - b"DESIGNER".len()));
+
     let mut expected = Vec::new();
     expected.extend_from_slice(&1252u16.to_le_bytes());
+    expected.extend_from_slice(&expected_designer_storage);
     expected.extend_from_slice(b"NameVBAProject");
     expected.extend_from_slice(b"BaseClassUserForm1");
     expected.extend_from_slice(b"HelpFilec:\\example path\\example.hlp");
     expected.extend_from_slice(b"HelpContextID1");
-
-    // `BaseClass` must also contribute the normalized designer storage bytes (1023-byte padded).
-    let mut expected_designer_storage = Vec::new();
-    expected_designer_storage.extend_from_slice(b"DESIGNER");
-    expected_designer_storage.extend(std::iter::repeat(0u8).take(1023 - b"DESIGNER".len()));
-    expected.extend_from_slice(&expected_designer_storage);
 
     assert_eq!(normalized, expected);
 }
