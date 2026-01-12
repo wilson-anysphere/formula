@@ -24,6 +24,7 @@ pub mod calc_settings;
 pub mod cell_images;
 pub mod charts;
 pub mod comments;
+pub mod embedded_images;
 mod compare;
 mod content_types;
 pub mod conditional_formatting;
@@ -74,6 +75,7 @@ pub use calc_settings::CalcSettingsError;
 pub use compare::*;
 pub use conditional_formatting::*;
 pub use embedded_cell_images::EmbeddedCellImage;
+pub use embedded_images::{extract_embedded_images, EmbeddedImageCell};
 pub use hyperlinks::{
     parse_worksheet_hyperlinks, update_worksheet_relationships, update_worksheet_xml,
 };
