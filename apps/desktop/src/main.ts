@@ -56,6 +56,7 @@ import type { WorkbookInfo } from "@formula/workbook-backend";
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
 import { parseA1Range, splitSheetQualifier } from "../../../packages/search/index.js";
 import { refreshDefinedNameSignaturesFromBackend, refreshTableSignaturesFromBackend } from "./power-query/tableSignatures";
+import { oauthBroker } from "./power-query/oauthBroker.js";
 import {
   DesktopPowerQueryService,
   loadQueriesFromStorage,
@@ -3560,6 +3561,18 @@ try {
       // will never resolve in the success path.
       await invoke("quit_app");
     },
+  });
+
+  // OAuth PKCE redirect capture:
+  // The Rust host emits `oauth-redirect` when a deep-link/protocol handler is invoked
+  // (e.g. `formula://oauth/callback?...`). Resolve the pending broker redirect without
+  // requiring a manual copy/paste step.
+  void listen("oauth-redirect", (event) => {
+    const redirectUrl = (event as any)?.payload;
+    if (typeof redirectUrl !== "string" || redirectUrl.trim() === "") return;
+    const expectedRedirectUri = oauthBroker.findPendingRedirectUri(redirectUrl);
+    if (!expectedRedirectUri) return;
+    oauthBroker.resolveRedirect(expectedRedirectUri, redirectUrl);
   });
 
   // When the Rust host receives a close request, it asks the frontend to flush any pending

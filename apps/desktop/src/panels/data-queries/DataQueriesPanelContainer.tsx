@@ -52,6 +52,22 @@ function hasTauri(): boolean {
   return Boolean((globalThis as any).__TAURI__);
 }
 
+function hasTauriEventApi(): boolean {
+  return typeof (globalThis as any).__TAURI__?.event?.listen === "function";
+}
+
+function supportsDesktopOAuthRedirectCapture(redirectUri: string): boolean {
+  if (!hasTauri() || !hasTauriEventApi()) return false;
+  if (typeof redirectUri !== "string" || redirectUri.trim() === "") return false;
+  try {
+    // Currently we only support custom-scheme deep links (e.g. `formula://oauth/callback`).
+    // Loopback redirect capture can be added later.
+    return new URL(redirectUri).protocol === "formula:";
+  } catch {
+    return false;
+  }
+}
+
 function dispatchOpenPanel(detail: Record<string, unknown>) {
   try {
     if (typeof window === "undefined") return;
@@ -729,6 +745,7 @@ export function DataQueriesPanelContainer(props: Props) {
 
   const resolvePkceRedirect = useCallback(() => {
     if (!pendingPkce) return;
+    if (supportsDesktopOAuthRedirectCapture(pendingPkce.redirectUri)) return;
     if (typeof window === "undefined" || typeof window.prompt !== "function") return;
     const redirectUrl = window.prompt(`Paste the full redirect URL (starts with ${pendingPkce.redirectUri})`, "");
     if (!redirectUrl) return;
@@ -864,13 +881,24 @@ export function DataQueriesPanelContainer(props: Props) {
 
       {pendingPkce ? (
         <div style={{ padding: 12, borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>OAuth redirect required</div>
-          <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 8 }}>
-            After authenticating, copy the full redirect URL and paste it to complete sign-in.
-          </div>
-          <button type="button" onClick={resolvePkceRedirect}>
-            Paste redirect URL…
-          </button>
+          {supportsDesktopOAuthRedirectCapture(pendingPkce.redirectUri) ? (
+            <>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Awaiting OAuth redirect…</div>
+              <div style={{ fontSize: 12, opacity: 0.85 }}>
+                Complete sign-in in your browser. Formula will continue automatically after the redirect.
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>OAuth redirect required</div>
+              <div style={{ fontSize: 12, opacity: 0.85, marginBottom: 8 }}>
+                After authenticating, copy the full redirect URL and paste it to complete sign-in.
+              </div>
+              <button type="button" onClick={resolvePkceRedirect}>
+                Paste redirect URL…
+              </button>
+            </>
+          )}
         </div>
       ) : null}
 

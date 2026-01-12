@@ -241,6 +241,20 @@ fn main() {
         // See `asset_protocol.rs` for details.
         .register_uri_scheme_protocol("asset", asset_protocol::handler)
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            // OAuth PKCE deep-link redirect capture (e.g. `formula://oauth/callback?...`).
+            //
+            // When an OAuth provider redirects to our custom URI scheme, the OS may attempt to
+            // launch a second instance of the application. The single-instance plugin forwards
+            // the argv to the running instance; emit the URL to the frontend so it can resolve
+            // any pending `DesktopOAuthBroker.waitForRedirect(...)` promises.
+            for arg in &argv {
+                let url = arg.trim().trim_matches('"');
+                if url.starts_with("formula://") {
+                    let _ = app.emit("oauth-redirect", url.to_string());
+                }
+            }
+
+            // File association / open-with handling.
             let cwd = cwd_from_single_instance_callback(cwd);
             let paths = extract_open_file_paths(&argv, cwd.as_deref());
             handle_open_file_request(app, paths);
@@ -550,6 +564,18 @@ fn main() {
             // in release builds; users can also trigger checks from the tray menu.
             #[cfg(not(debug_assertions))]
             updater::spawn_update_check(app.handle(), updater::UpdateCheckSource::Startup);
+
+            // Best-effort: if the app was launched via a deep-link URL (e.g. the first
+            // instance after an OAuth redirect), forward it to the frontend.
+            //
+            // When the app is already running, `tauri_plugin_single_instance` forwards URLs
+            // to this process via its callback above.
+            for arg in std::env::args() {
+                let url = arg.trim().trim_matches('"');
+                if url.starts_with("formula://") {
+                    let _ = app.emit("oauth-redirect", url.to_string());
+                }
+            }
 
             // Queue `open-file` requests until the frontend has installed its event listeners.
             if let Some(window) = app.get_webview_window("main") {

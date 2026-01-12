@@ -85,6 +85,10 @@
     "windows": {
       "certificateThumbprint": null,
       "timestampUrl": "http://timestamp.digicert.com"
+    },
+    "protocols": {
+      "name": "formula",
+      "schemes": ["formula"]
     }
   },
   "plugins": {
