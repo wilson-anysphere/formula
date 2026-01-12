@@ -131,18 +131,38 @@ test.describe("updater UI wiring", () => {
     await expect(dialog).toBeHidden();
   });
 
-  test("manual update events show + focus the window when hidden-to-tray", async ({ page }) => {
+  test("startup updater events are surfaced after a manual 'already running' follow-up", async ({ page }) => {
     await gotoDesktop(page);
 
     await page.evaluate(() => {
       (window as any).__tauriWindowHidden = true;
     });
 
-    await fireTauriEvent(page, "update-check-started", { source: "manual" });
+    await fireTauriEvent(page, "update-check-already-running", { source: "manual" });
+    await expect(page.getByTestId("toast").filter({ hasText: /already checking/i })).toBeVisible();
 
     await page.waitForFunction(
       () => (window as any).__tauriWindowShowCalls > 0 && (window as any).__tauriWindowFocusCalls > 0,
     );
+
+    const initialShowFocusCounts = await page.evaluate(() => {
+      return {
+        show: (window as any).__tauriWindowShowCalls,
+        focus: (window as any).__tauriWindowFocusCalls,
+      };
+    });
+
+    await fireTauriEvent(page, "update-available", { source: "startup", version: "9.9.9", body: "Notes" });
+    await expect(page.getByTestId("updater-dialog")).toBeVisible();
+
+    const finalShowFocusCounts = await page.evaluate(() => {
+      return {
+        show: (window as any).__tauriWindowShowCalls,
+        focus: (window as any).__tauriWindowFocusCalls,
+      };
+    });
+
+    expect(finalShowFocusCounts).toEqual(initialShowFocusCounts);
   });
 
   test("update-downloaded shows a ready-to-restart toast when dialog is closed", async ({ page }) => {
