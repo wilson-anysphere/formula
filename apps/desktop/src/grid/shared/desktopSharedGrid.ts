@@ -152,6 +152,10 @@ export class DesktopSharedGrid {
   private readonly hTrack: HTMLDivElement;
   private readonly hThumb: HTMLDivElement;
 
+  private lastScrollbarLayout:
+    | { showV: boolean; showH: boolean; frozenWidth: number; frozenHeight: number }
+    | null = null;
+
   private readonly frozenRows: number;
   private readonly frozenCols: number;
   private readonly headerRows: number;
@@ -1910,18 +1914,42 @@ export class DesktopSharedGrid {
     const padding = 2;
     const thickness = 10;
 
-    this.vTrack.style.display = showV ? "block" : "none";
-    this.hTrack.style.display = showH ? "block" : "none";
-
     const frozenWidth = Math.min(viewport.frozenWidth, viewport.width);
     const frozenHeight = Math.min(viewport.frozenHeight, viewport.height);
 
-    if (showV) {
-      this.vTrack.style.right = `${padding}px`;
-      this.vTrack.style.top = `${frozenHeight + padding}px`;
-      this.vTrack.style.bottom = `${(showH ? thickness : 0) + padding}px`;
-      this.vTrack.style.width = `${thickness}px`;
+    const layout = { showV, showH, frozenWidth, frozenHeight };
+    const prev = this.lastScrollbarLayout;
+    const layoutChanged =
+      prev === null ||
+      prev.showV !== layout.showV ||
+      prev.showH !== layout.showH ||
+      prev.frozenWidth !== layout.frozenWidth ||
+      prev.frozenHeight !== layout.frozenHeight;
 
+    if (layoutChanged) {
+      // Track layout (positioning/visibility) is a function of viewport/frozen sizes and whether
+      // each axis is scrollable. Avoid rewriting these styles on every scroll event.
+      this.vTrack.style.display = showV ? "block" : "none";
+      this.hTrack.style.display = showH ? "block" : "none";
+
+      if (showV) {
+        this.vTrack.style.right = `${padding}px`;
+        this.vTrack.style.top = `${frozenHeight + padding}px`;
+        this.vTrack.style.bottom = `${(showH ? thickness : 0) + padding}px`;
+        this.vTrack.style.width = `${thickness}px`;
+      }
+
+      if (showH) {
+        this.hTrack.style.left = `${frozenWidth + padding}px`;
+        this.hTrack.style.right = `${(showV ? thickness : 0) + padding}px`;
+        this.hTrack.style.bottom = `${padding}px`;
+        this.hTrack.style.height = `${thickness}px`;
+      }
+
+      this.lastScrollbarLayout = layout;
+    }
+
+    if (showV) {
       // Avoid layout reads during scroll; the track size is deterministic from the
       // viewport + the same top/bottom offsets applied above.
       const trackSize = Math.max(0, viewport.height - frozenHeight - (showH ? thickness : 0) - 2 * padding);
@@ -1937,11 +1965,6 @@ export class DesktopSharedGrid {
     }
 
     if (showH) {
-      this.hTrack.style.left = `${frozenWidth + padding}px`;
-      this.hTrack.style.right = `${(showV ? thickness : 0) + padding}px`;
-      this.hTrack.style.bottom = `${padding}px`;
-      this.hTrack.style.height = `${thickness}px`;
-
       // Avoid layout reads during scroll; the track size is deterministic from the
       // viewport + the same left/right offsets applied above.
       const trackSize = Math.max(0, viewport.width - frozenWidth - (showV ? thickness : 0) - 2 * padding);
