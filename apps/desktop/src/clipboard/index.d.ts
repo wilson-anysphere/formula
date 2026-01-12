@@ -43,7 +43,9 @@ export function parseClipboardContentToCellGrid(content: ClipboardContent): any[
 
 export function clipboardFormatToDocStyle(format: any): any | null;
 
-export function getCellGridFromRange(doc: any, sheetId: string, range: any): any[][];
+export const DEFAULT_MAX_CELL_GRID_CELLS: number;
+
+export function getCellGridFromRange(doc: any, sheetId: string, range: any, options?: { maxCells?: number }): any[][];
 
 export function serializeCellGridToClipboardPayload(grid: any[][]): ClipboardWritePayload;
 
@@ -63,5 +65,5 @@ export function copyRangeToClipboardPayload(
   doc: any,
   sheetId: string,
   range: any,
-  options?: { dlp?: { documentId: string; classificationStore: any; policy: any } }
+  options?: { dlp?: { documentId: string; classificationStore: any; policy: any }; maxCells?: number }
 ): ClipboardWritePayload;

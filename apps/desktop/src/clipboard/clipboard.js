@@ -418,10 +418,23 @@ export function parseClipboardContentToCellGrid(content) {
  * @param {DocumentController} doc
  * @param {string} sheetId
  * @param {CellRange | string} range
+ * @param {{ maxCells?: number }} [options]
  * @returns {CellGrid}
  */
-export function getCellGridFromRange(doc, sheetId, range) {
+export const DEFAULT_MAX_CELL_GRID_CELLS = 200_000;
+
+export function getCellGridFromRange(doc, sheetId, range, options = {}) {
   const r = typeof range === "string" ? parseRangeA1(range) : normalizeRange(range);
+  const maxCells = options.maxCells ?? DEFAULT_MAX_CELL_GRID_CELLS;
+  const rowCount = Math.max(0, r.end.row - r.start.row + 1);
+  const colCount = Math.max(0, r.end.col - r.start.col + 1);
+  const cellCount = rowCount * colCount;
+  if (cellCount > maxCells) {
+    throw new Error(
+      `Range too large to materialize (${rowCount}x${colCount}=${cellCount} cells). ` +
+        `Limit is ${maxCells} cells.`
+    );
+  }
 
   /** @type {CellGrid} */
   const grid = [];
@@ -704,7 +717,7 @@ export function getCellGridFromRange(doc, sheetId, range) {
  * @param {DocumentController} doc
  * @param {string} sheetId
  * @param {CellRange | string} range
- * @param {{ dlp?: { documentId: string, classificationStore: any, policy: any } }} [options]
+ * @param {{ dlp?: { documentId: string, classificationStore: any, policy: any }, maxCells?: number }} [options]
  * @returns {ClipboardWritePayload}
  */
 export function copyRangeToClipboardPayload(doc, sheetId, range, options = {}) {
@@ -721,7 +734,7 @@ export function copyRangeToClipboardPayload(doc, sheetId, range, options = {}) {
     });
   }
 
-  const grid = getCellGridFromRange(doc, sheetId, r);
+  const grid = getCellGridFromRange(doc, sheetId, r, { maxCells: options.maxCells });
   return serializeCellGridToClipboardPayload(grid);
 }
 
