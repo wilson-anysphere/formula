@@ -17,6 +17,7 @@ import { getPanelPlacement } from "./layout/layoutState.js";
 import { getPanelTitle, panelRegistry, PanelIds } from "./panels/panelRegistry.js";
 import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
 import { MacroRecorder, generatePythonMacro, generateTypeScriptMacro } from "./macro-recorder/index.js";
+import { mountTitlebar } from "./titlebar/mountTitlebar.js";
 import {
   renderMacroRunner,
   TauriMacroBackend,
@@ -177,6 +178,12 @@ if (!gridRoot) {
   throw new Error("Missing #grid container");
 }
 
+const titlebarRoot = document.getElementById("titlebar");
+if (!titlebarRoot) {
+  throw new Error("Missing #titlebar container");
+}
+const titlebarRootEl = titlebarRoot;
+
 const ribbonRoot = document.getElementById("ribbon");
 if (!ribbonRoot) {
   throw new Error("Missing #ribbon container");
@@ -192,8 +199,6 @@ const selectionRange = document.querySelector<HTMLElement>('[data-testid="select
 const activeValue = document.querySelector<HTMLElement>('[data-testid="active-value"]');
 const statusMode = document.querySelector<HTMLElement>('[data-testid="status-mode"]');
 const sheetSwitcher = document.querySelector<HTMLSelectElement>('[data-testid="sheet-switcher"]');
-const undoButton = document.querySelector<HTMLButtonElement>('[data-testid="undo"]');
-const redoButton = document.querySelector<HTMLButtonElement>('[data-testid="redo"]');
 const openComments = document.querySelector<HTMLButtonElement>('[data-testid="open-comments-panel"]');
 const auditPrecedents = document.querySelector<HTMLButtonElement>('[data-testid="audit-precedents"]');
 const auditDependents = document.querySelector<HTMLButtonElement>('[data-testid="audit-dependents"]');
@@ -208,9 +213,6 @@ if (!openComments) {
 }
 if (!auditPrecedents || !auditDependents || !auditTransitive) {
   throw new Error("Missing auditing toolbar buttons");
-}
-if (!undoButton || !redoButton) {
-  throw new Error("Missing undo/redo buttons");
 }
 
 const workbookId = "local-workbook";
@@ -303,28 +305,46 @@ app.onEditStateChange((isEditing) => {
 });
 
 app.focus();
-const syncUndoRedoButtons = () => {
-  const state = app.getUndoRedoState();
-  const undoTitle = state.undoLabel ? `Undo ${state.undoLabel}` : "Undo";
-  const redoTitle = state.redoLabel ? `Redo ${state.redoLabel}` : "Redo";
-  undoButton.title = undoTitle;
-  redoButton.title = redoTitle;
-  undoButton.setAttribute("aria-label", undoTitle);
-  redoButton.setAttribute("aria-label", redoTitle);
-  undoButton.disabled = !state.canUndo;
-  redoButton.disabled = !state.canRedo;
-};
-syncUndoRedoButtons();
-app.getDocument().on("history", () => syncUndoRedoButtons());
 
-undoButton.addEventListener("click", () => {
-  app.undo();
-  app.focus();
+const titlebar = mountTitlebar(titlebarRootEl, {
+  actions: [],
+  undoRedo: {
+    ...app.getUndoRedoState(),
+    onUndo: () => {
+      app.undo();
+      app.focus();
+    },
+    onRedo: () => {
+      app.redo();
+      app.focus();
+    },
+  },
 });
-redoButton.addEventListener("click", () => {
-  app.redo();
-  app.focus();
+
+const syncTitlebarUndoRedo = () => {
+  titlebar.update({
+    actions: [],
+    undoRedo: {
+      ...app.getUndoRedoState(),
+      onUndo: () => {
+        app.undo();
+        app.focus();
+      },
+      onRedo: () => {
+        app.redo();
+        app.focus();
+      },
+    },
+  });
+};
+
+syncTitlebarUndoRedo();
+const unsubscribeTitlebarHistory = app.getDocument().on("history", () => syncTitlebarUndoRedo());
+window.addEventListener("unload", () => {
+  unsubscribeTitlebarHistory();
+  titlebar.dispose();
 });
+
 openComments.addEventListener("click", () => app.toggleCommentsPanel());
 auditPrecedents.addEventListener("click", () => {
   app.toggleAuditingPrecedents();

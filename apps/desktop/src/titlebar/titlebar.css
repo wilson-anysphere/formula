@@ -27,6 +27,52 @@
   gap: 6px;
 }
 
+.formula-titlebar__quick-access {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.formula-titlebar__quick-access-button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease);
+}
+
+.formula-titlebar__quick-access-button:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+}
+
+.formula-titlebar__quick-access-button:focus-visible {
+  outline: 2px solid var(--selection-border);
+  outline-offset: 2px;
+}
+
+.formula-titlebar__quick-access-button:disabled {
+  color: var(--text-secondary);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.formula-titlebar__quick-access-button svg {
+  width: 16px;
+  height: 16px;
+}
+
 .formula-titlebar__window-button {
   width: 11px;
   height: 11px;
