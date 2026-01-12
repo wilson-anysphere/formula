@@ -1333,6 +1333,193 @@ function applyFormattingToSelection(
   app.focus();
 }
 
+// --- Format Painter -----------------------------------------------------------
+//
+// Excel-style one-shot Format Painter:
+// 1) Capture effective formatting from the active cell.
+// 2) Arm the painter and wait for the next selection change.
+// 3) Apply the captured style patch to the destination selection once.
+// 4) Automatically disarm, or allow Escape/workbook/sheet changes to cancel.
+
+type FormatPainterState = {
+  doc: DocumentController;
+  sourceWorkbookId: string;
+  sourceSheetId: string;
+  sourceSelectionKey: string;
+  capturedFormat: Record<string, any>;
+  applyTimeoutId: number | null;
+  pendingSelectionKey: string | null;
+};
+
+const FORMAT_PAINTER_APPLY_DEBOUNCE_MS = 100;
+let formatPainterState: FormatPainterState | null = null;
+
+function cloneStylePatch(value: unknown): Record<string, any> {
+  if (!value || typeof value !== "object") return {};
+  try {
+    if (typeof (globalThis as any).structuredClone === "function") {
+      return (globalThis as any).structuredClone(value);
+    }
+  } catch {
+    // Fall back below.
+  }
+  try {
+    return JSON.parse(JSON.stringify(value)) as Record<string, any>;
+  } catch {
+    return {};
+  }
+}
+
+function formatPainterSelectionKey(selection?: SelectionState): string {
+  const sheetId = app.getCurrentSheetId();
+  const active = selection?.active ?? app.getActiveCell();
+  const ranges = selection?.ranges ?? app.getSelectionRanges();
+  const parts: string[] = [`sheet=${sheetId}`, `active=${active.row},${active.col}`];
+  for (const raw of ranges) {
+    const r = normalizeSelectionRange(raw);
+    parts.push(`range=${r.startRow},${r.startCol},${r.endRow},${r.endCol}`);
+  }
+  return parts.join("|");
+}
+
+function disarmFormatPainter(): void {
+  const state = formatPainterState;
+  if (!state) return;
+  if (state.applyTimeoutId != null) {
+    try {
+      window.clearTimeout(state.applyTimeoutId);
+    } catch {
+      // ignore
+    }
+  }
+  formatPainterState = null;
+  scheduleRibbonSelectionFormatStateUpdate();
+}
+
+function armFormatPainter(): void {
+  if (formatPainterState) {
+    // Toggle off (Excel uses double-click to lock; we only support one-shot).
+    disarmFormatPainter();
+    try {
+      showToast("Format Painter cancelled");
+    } catch {
+      // ignore (toast root missing in non-UI test environments)
+    }
+    return;
+  }
+
+  if (isSpreadsheetEditing()) {
+    try {
+      showToast("Finish editing to use Format Painter");
+    } catch {
+      // ignore
+    }
+    return;
+  }
+
+  const doc = app.getDocument();
+  const sheetId = app.getCurrentSheetId();
+  const activeCell = app.getActiveCell();
+
+  let captured: unknown = {};
+  try {
+    captured = doc.getCellFormat(sheetId, activeCell);
+  } catch {
+    captured = {};
+  }
+
+  formatPainterState = {
+    doc,
+    sourceWorkbookId: activePanelWorkbookId,
+    sourceSheetId: sheetId,
+    sourceSelectionKey: formatPainterSelectionKey(),
+    capturedFormat: cloneStylePatch(captured),
+    applyTimeoutId: null,
+    pendingSelectionKey: null,
+  };
+
+  scheduleRibbonSelectionFormatStateUpdate();
+  try {
+    showToast("Format Painter: select destination cells");
+  } catch {
+    // ignore
+  }
+
+  // Restore grid focus so keyboard selection continues to work after clicking the ribbon.
+  queueMicrotask(() => app.focus());
+}
+
+function handleFormatPainterSelectionChange(selection: SelectionState): void {
+  const state = formatPainterState;
+  if (!state) return;
+
+  // Cancel if the active workbook changed (workbook open/version restore).
+  if (activePanelWorkbookId !== state.sourceWorkbookId) {
+    disarmFormatPainter();
+    return;
+  }
+
+  const sheetId = app.getCurrentSheetId();
+  if (sheetId !== state.sourceSheetId) {
+    disarmFormatPainter();
+    return;
+  }
+
+  // Defensive: SpreadsheetApp.restoreDocumentState can swap the underlying DocumentController.
+  if (app.getDocument() !== state.doc) {
+    disarmFormatPainter();
+    return;
+  }
+
+  if (isSpreadsheetEditing()) {
+    // Keep armed, but never apply while editing.
+    return;
+  }
+
+  const key = formatPainterSelectionKey(selection);
+  if (key === state.sourceSelectionKey) return;
+
+  state.pendingSelectionKey = key;
+  if (state.applyTimeoutId != null) {
+    window.clearTimeout(state.applyTimeoutId);
+  }
+
+  state.applyTimeoutId = window.setTimeout(() => {
+    const liveState = formatPainterState;
+    if (!liveState) return;
+    liveState.applyTimeoutId = null;
+
+    if (isSpreadsheetEditing()) return;
+    if (activePanelWorkbookId !== liveState.sourceWorkbookId) {
+      disarmFormatPainter();
+      return;
+    }
+    if (app.getCurrentSheetId() !== liveState.sourceSheetId) {
+      disarmFormatPainter();
+      return;
+    }
+    if (app.getDocument() !== liveState.doc) {
+      disarmFormatPainter();
+      return;
+    }
+
+    const currentKey = formatPainterSelectionKey();
+    if (currentKey !== liveState.pendingSelectionKey) return;
+
+    const format = liveState.capturedFormat;
+    applyFormattingToSelection("Format Painter", (doc, sheetId, ranges) => {
+      let applied = true;
+      for (const range of ranges) {
+        const ok = doc.setRangeFormat(sheetId, range, format, { label: "Format Painter" });
+        if (ok === false) applied = false;
+      }
+      return applied;
+    });
+
+    disarmFormatPainter();
+  }, FORMAT_PAINTER_APPLY_DEBOUNCE_MS);
+}
+
 function createHiddenColorInput(): HTMLInputElement {
   const input = document.createElement("input");
   input.type = "color";
@@ -1900,6 +2087,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
         ribbonLayoutController != null &&
         getPanelPlacement(ribbonLayoutController.layout, PanelIds.DATA_QUERIES).kind !== "closed",
       "review.comments.showComments": app.isCommentsPanelVisible(),
+      "home.clipboard.formatPainter": Boolean(formatPainterState),
     };
 
     const numberFormatLabel = (() => {
@@ -1979,14 +2167,15 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "home.font.fontSize": true,
             "home.font.increaseFont": true,
             "home.font.decreaseFont": true,
-            "home.font.fontColor": true,
-            "home.font.fillColor": true,
-            "home.font.borders": true,
-            "home.font.clearFormatting": true,
-            "home.alignment.wrapText": true,
-            "home.alignment.topAlign": true,
-            "home.alignment.middleAlign": true,
-            "home.alignment.bottomAlign": true,
+             "home.font.fontColor": true,
+             "home.font.fillColor": true,
+             "home.font.borders": true,
+             "home.font.clearFormatting": true,
+             "home.clipboard.formatPainter": true,
+             "home.alignment.wrapText": true,
+             "home.alignment.topAlign": true,
+             "home.alignment.middleAlign": true,
+             "home.alignment.bottomAlign": true,
             "home.alignment.alignLeft": true,
             "home.alignment.center": true,
             "home.alignment.alignRight": true,
@@ -2042,14 +2231,22 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
   });
 }
 
-app.subscribeSelection(() => {
+app.subscribeSelection((selection) => {
   renderStatusMode();
   scheduleRibbonSelectionFormatStateUpdate();
+  handleFormatPainterSelectionChange(selection);
 });
 app.getDocument().on("change", () => scheduleRibbonSelectionFormatStateUpdate());
 app.onEditStateChange(() => scheduleRibbonSelectionFormatStateUpdate());
 window.addEventListener("formula:view-changed", () => scheduleRibbonSelectionFormatStateUpdate());
 scheduleRibbonSelectionFormatStateUpdate();
+
+window.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!formatPainterState) return;
+  if (isSpreadsheetEditing()) return;
+  disarmFormatPainter();
+});
 
 // --- Focus cycling (Excel-style F6) --------------------------------------------
 //
@@ -3232,6 +3429,9 @@ window.addEventListener(
 // Keep the sheet metadata store in sync so tabs/switcher reflect the restored workbook.
 const originalRestoreDocumentState = app.restoreDocumentState.bind(app);
 app.restoreDocumentState = async (...args: Parameters<SpreadsheetApp["restoreDocumentState"]>): Promise<void> => {
+  // `restoreDocumentState` is used by workbook open + version restore. Never carry
+  // Format Painter mode across workbook boundaries.
+  disarmFormatPainter();
   await originalRestoreDocumentState(...args);
 
   // `restoreDocumentState()` is used by version restore and workbook open. Ensure the doc->store sync
@@ -3247,7 +3447,10 @@ app.activateSheet = (sheetId: string): void => {
   originalActivateSheet(sheetId);
   syncSheetUi();
   const nextSheet = app.getCurrentSheetId();
-  if (nextSheet !== prevSheet) emitSheetActivated(nextSheet);
+  if (nextSheet !== prevSheet) {
+    disarmFormatPainter();
+    emitSheetActivated(nextSheet);
+  }
 };
 
 const originalActivateCell = app.activateCell.bind(app);
@@ -3256,6 +3459,7 @@ app.activateCell = (...args: Parameters<SpreadsheetApp["activateCell"]>): void =
   originalActivateCell(...args);
   const nextSheet = app.getCurrentSheetId();
   if (nextSheet !== prevSheet) {
+    disarmFormatPainter();
     syncSheetUi();
     emitSheetActivated(nextSheet);
   }
@@ -3267,6 +3471,7 @@ app.selectRange = (...args: Parameters<SpreadsheetApp["selectRange"]>): void => 
   originalSelectRange(...args);
   const nextSheet = app.getCurrentSheetId();
   if (nextSheet !== prevSheet) {
+    disarmFormatPainter();
     syncSheetUi();
     emitSheetActivated(nextSheet);
   }
@@ -8577,6 +8782,9 @@ mountRibbon(ribbonReactRoot, {
       case "home.clipboard.copy":
         void app.clipboardCopy();
         app.focus();
+        return;
+      case "home.clipboard.formatPainter":
+        armFormatPainter();
         return;
       case "home.clipboard.paste":
       case "home.clipboard.paste.default":
