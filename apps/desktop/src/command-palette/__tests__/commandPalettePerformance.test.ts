@@ -181,6 +181,53 @@ describe("command palette performance safeguards", () => {
     palette.dispose();
   });
 
+  it("scrolls the selected row into view when scrollIntoView is available", async () => {
+    const registry = new CommandRegistry();
+    for (let i = 0; i < 3; i += 1) {
+      registry.registerBuiltinCommand(`test.cmd.${i}`, `Command ${i}`, () => {}, { category: "Test" });
+    }
+
+    const palette = createCommandPalette({
+      commandRegistry: registry,
+      contextKeys: {} as any,
+      keybindingIndex: new Map(),
+      ensureExtensionsLoaded: async () => {},
+      onCloseFocus: () => {},
+      maxResults: 20,
+      maxResultsPerGroup: 20,
+      inputDebounceMs: 0,
+      extensionLoadDelayMs: 60_000,
+    });
+
+    palette.open();
+
+    const input = document.querySelector<HTMLInputElement>('[data-testid="command-palette-input"]')!;
+    const list = document.querySelector<HTMLElement>('[data-testid="command-palette-list"]')!;
+
+    const selectedBefore = list.querySelector<HTMLElement>('.command-palette__item[aria-selected="true"]');
+    expect(selectedBefore?.id).toBe("command-palette-option-0");
+
+    const scrollFirst = vi.fn();
+    (selectedBefore as any).scrollIntoView = scrollFirst;
+
+    // Flush the queued microtask that keeps the selected row in view after rendering.
+    await Promise.resolve();
+
+    expect(scrollFirst).toHaveBeenCalledTimes(1);
+    expect(scrollFirst).toHaveBeenLastCalledWith({ block: "nearest" });
+
+    const second = list.querySelector<HTMLElement>("#command-palette-option-1");
+    const scrollSecond = vi.fn();
+    (second as any).scrollIntoView = scrollSecond;
+
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+
+    expect(scrollSecond).toHaveBeenCalledTimes(1);
+    expect(scrollSecond).toHaveBeenLastCalledWith({ block: "nearest" });
+
+    palette.dispose();
+  });
+
   it("shows a searching placeholder during chunked search until the scan completes", async () => {
     vi.useFakeTimers();
 
