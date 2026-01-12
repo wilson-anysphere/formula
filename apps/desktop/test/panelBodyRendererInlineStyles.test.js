@@ -16,7 +16,7 @@ function extractSection(source, startMarker, endMarker) {
   return source.slice(startIdx, endIdx);
 }
 
-test("panelBodyRenderer.tsx avoids inline style assignments for dock panel mounts", () => {
+test("panelBodyRenderer.tsx avoids inline styles (class-driven panel mounts)", () => {
   const filePath = path.join(__dirname, "..", "src", "panels", "panelBodyRenderer.tsx");
   const source = fs.readFileSync(filePath, "utf8");
 
