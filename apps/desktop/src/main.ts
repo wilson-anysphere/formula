@@ -3735,14 +3735,6 @@ if (
   let lastSelectionEventSheetId = app.getCurrentSheetId();
   let selectionSubscriptionInitialized = false;
 
-  const recordLastExtensionSelection = (
-    _sheetId: string,
-    _range: { startRow: number; startCol: number; endRow: number; endCol: number },
-  ): void => {
-    void _sheetId;
-    void _range;
-  };
-
   function ensureSelectionSubscription(): void {
     if (selectionSubscription) return;
     selectionSubscription = app.subscribeSelection(() => {
