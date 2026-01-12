@@ -1,4 +1,5 @@
 use crate::eval::CompiledExpr;
+use crate::coercion::number::parse_number_strict;
 use crate::functions::lookup;
 use crate::functions::wildcard::WildcardPattern;
 use crate::functions::{
@@ -1662,6 +1663,12 @@ fn excel_eq(a: &Value, b: &Value) -> bool {
         (Value::Bool(x), Value::Bool(y)) => x == y,
         (Value::Blank, Value::Blank) => true,
         (Value::Error(x), Value::Error(y)) => x == y,
+        (Value::Number(num), Value::Text(text)) | (Value::Text(text), Value::Number(num)) => {
+            parse_number_strict(text, '.', Some(',')).is_ok_and(|parsed| parsed == *num)
+        }
+        (Value::Bool(b), Value::Number(n)) | (Value::Number(n), Value::Bool(b)) => {
+            (*n == 0.0 && !b) || (*n == 1.0 && *b)
+        }
         _ => false,
     }
 }

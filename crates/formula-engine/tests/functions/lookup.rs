@@ -80,6 +80,19 @@ fn match_and_vlookup_support_wildcard_exact_matching() {
 }
 
 #[test]
+fn match_and_vlookup_coerce_numeric_text_via_value() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "1,234.5");
+    sheet.set("B1", 42.0);
+
+    assert_eq!(sheet.eval("=MATCH(1234.5, A1:A1, 0)"), Value::Number(1.0));
+    assert_eq!(
+        sheet.eval("=VLOOKUP(1234.5, A1:B1, 2, FALSE)"),
+        Value::Number(42.0)
+    );
+}
+
+#[test]
 fn xlookup_returns_if_not_found_when_provided() {
     let lookup_array = vec![Value::from("A"), Value::from("B")];
     let return_array = vec![Value::Number(10.0), Value::Number(20.0)];
