@@ -254,6 +254,25 @@ mod tests {
     }
 
     #[test]
+    fn build_cf_html_payload_offsets_work_with_utf8_fragments() {
+        // Include multi-byte UTF-8 codepoints to ensure offsets are byte offsets (CF_HTML spec),
+        // and that our computed offsets land on valid UTF-8 boundaries.
+        let fragment = "<p>héllö π 😀</p>";
+        let payload = build_cf_html_payload(fragment).expect("payload");
+        let s = String::from_utf8(payload.clone()).expect("utf8");
+
+        let start_fragment = parse_offset(&s, "StartFragment");
+        let end_fragment = parse_offset(&s, "EndFragment");
+        assert_eq!(&s[start_fragment..end_fragment], fragment);
+
+        // Also ensure our decoder path still extracts the fragment.
+        let mut nul_terminated = payload;
+        nul_terminated.push(0);
+        let decoded = decode_cf_html_bytes(&nul_terminated).expect("decoded");
+        assert_eq!(decoded, fragment);
+    }
+
+    #[test]
     fn decode_cf_html_extracts_fragment_from_offsets() {
         let fragment = "<b>Hello</b>";
         let payload = build_cf_html_payload(fragment).expect("payload");
