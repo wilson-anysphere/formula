@@ -16907,7 +16907,7 @@
     },
     {
       "formula": "=COUNTIF(C1:C7,TRUE)",
-      "outputCell": "C1",
+      "outputCell": "D1",
       "inputs": [
         {
           "cell": "C1",
@@ -16944,11 +16944,11 @@
         "COUNTIF",
         "booleans"
       ],
-      "id": "criteria_countif_5bcd560a0b3d"
+      "id": "criteria_countif_d1c1c73d1462"
     },
     {
       "formula": "=COUNTIF(C1:C7,FALSE)",
-      "outputCell": "C1",
+      "outputCell": "D1",
       "inputs": [
         {
           "cell": "C1",
@@ -16985,11 +16985,11 @@
         "COUNTIF",
         "booleans"
       ],
-      "id": "criteria_countif_b3ec4cbcc6f3"
+      "id": "criteria_countif_a134fb108f98"
     },
     {
       "formula": "=COUNTIF(C1:C7,\"TRUE\")",
-      "outputCell": "C1",
+      "outputCell": "D1",
       "inputs": [
         {
           "cell": "C1",
@@ -17026,11 +17026,11 @@
         "COUNTIF",
         "booleans"
       ],
-      "id": "criteria_countif_8a80e8457c7f"
+      "id": "criteria_countif_40e76c6d72e9"
     },
     {
       "formula": "=COUNTIF(C1:C7,\"FALSE\")",
-      "outputCell": "C1",
+      "outputCell": "D1",
       "inputs": [
         {
           "cell": "C1",
@@ -17067,7 +17067,7 @@
         "COUNTIF",
         "booleans"
       ],
-      "id": "criteria_countif_96f4359c5d5d"
+      "id": "criteria_countif_8f567c383730"
     },
     {
       "formula": "=COUNTIF(D1:D4,\">1/1/2020\")",
@@ -20131,6 +20131,163 @@
         "XOR"
       ],
       "id": "xor_5a4c6b2b9658"
+    },
+    {
+      "formula": "=1+\"\"",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "coercion",
+        "implicit",
+        "add"
+      ],
+      "id": "coercion_d67d1e27d557"
+    },
+    {
+      "formula": "=--\"\"",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "coercion",
+        "implicit"
+      ],
+      "id": "coercion_1b8130a53d6d"
+    },
+    {
+      "formula": "=NOT(\"\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "coercion",
+        "implicit",
+        "NOT"
+      ],
+      "id": "coercion_b117f3bb4e77"
+    },
+    {
+      "formula": "=IF(\"\",10,20)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "coercion",
+        "implicit",
+        "IF"
+      ],
+      "id": "coercion_b7d29dcf4329"
+    },
+    {
+      "formula": "=\"1,234\"+1",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "coercion",
+        "implicit",
+        "add"
+      ],
+      "id": "coercion_ec1205d0e51a"
+    },
+    {
+      "formula": "=\"(1,000)\"+0",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "coercion",
+        "implicit",
+        "add"
+      ],
+      "id": "coercion_a5d95a114368"
+    },
+    {
+      "formula": "=\"10%\"*100",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "coercion",
+        "implicit",
+        "mul"
+      ],
+      "id": "coercion_d725764559e6"
+    },
+    {
+      "formula": "=\"$1,234.50\"+0",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "coercion",
+        "implicit",
+        "add"
+      ],
+      "id": "coercion_07824d6e0929"
+    },
+    {
+      "formula": "=VALUE(\"1,234.5\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "coercion",
+        "VALUE"
+      ],
+      "id": "value_be16b6778a10"
+    },
+    {
+      "formula": "=VALUE(\"2020-01-01\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "coercion",
+        "VALUE"
+      ],
+      "id": "value_77f4907b2420"
+    },
+    {
+      "formula": "=VALUE(\"2020-01-01 1:30 PM\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "coercion",
+        "VALUE"
+      ],
+      "id": "value_efcac2b241e9"
+    },
+    {
+      "formula": "=NUMBERVALUE(\"1.234,5\", \",\", \".\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "coercion",
+        "NUMBERVALUE"
+      ],
+      "id": "numbervalue_9ef7bfba80b2"
+    },
+    {
+      "formula": "=DATEVALUE(\"2020-01-01\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "coercion",
+        "DATEVALUE"
+      ],
+      "id": "datevalue_401759d91a05"
+    },
+    {
+      "formula": "=TIMEVALUE(\"1:30 PM\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "coercion",
+        "TIMEVALUE"
+      ],
+      "id": "timevalue_2af2a5b3935f"
+    },
+    {
+      "formula": "=TIMEVALUE(\"1 PM\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "coercion",
+        "TIMEVALUE"
+      ],
+      "id": "timevalue_6fcedd519d50"
     },
     {
       "formula": "=LEN(A1)",

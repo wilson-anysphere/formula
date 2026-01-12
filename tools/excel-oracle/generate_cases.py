@@ -864,6 +864,32 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="xor", tags=["logical", "XOR"], formula="=XOR(TRUE,FALSE,TRUE)")
 
     # ------------------------------------------------------------------
+    # Value coercion / conversion
+    # ------------------------------------------------------------------
+    # These cases are explicitly chosen to validate the coercion rules we
+    # implement (text -> number/date/time), so we can diff against real Excel
+    # later. Keep the set small to avoid bloating the corpus.
+
+    # Implicit coercion (text used in arithmetic/logical contexts).
+    _add_case(cases, prefix="coercion", tags=["coercion", "implicit", "add"], formula='=1+""')
+    _add_case(cases, prefix="coercion", tags=["coercion", "implicit"], formula='=--""')
+    _add_case(cases, prefix="coercion", tags=["coercion", "implicit", "NOT"], formula='=NOT("")')
+    _add_case(cases, prefix="coercion", tags=["coercion", "implicit", "IF"], formula='=IF("",10,20)')
+    _add_case(cases, prefix="coercion", tags=["coercion", "implicit", "add"], formula='="1,234"+1')
+    _add_case(cases, prefix="coercion", tags=["coercion", "implicit", "add"], formula='="(1,000)"+0')
+    _add_case(cases, prefix="coercion", tags=["coercion", "implicit", "mul"], formula='="10%"*100')
+    _add_case(cases, prefix="coercion", tags=["coercion", "implicit", "add"], formula='="$1,234.50"+0')
+
+    # Explicit conversion functions.
+    _add_case(cases, prefix="value", tags=["coercion", "VALUE"], formula='=VALUE("1,234.5")')
+    _add_case(cases, prefix="value", tags=["coercion", "VALUE"], formula='=VALUE("2020-01-01")')
+    _add_case(cases, prefix="value", tags=["coercion", "VALUE"], formula='=VALUE("2020-01-01 1:30 PM")')
+    _add_case(cases, prefix="numbervalue", tags=["coercion", "NUMBERVALUE"], formula='=NUMBERVALUE("1.234,5", ",", ".")')
+    _add_case(cases, prefix="datevalue", tags=["coercion", "DATEVALUE"], formula='=DATEVALUE("2020-01-01")')
+    _add_case(cases, prefix="timevalue", tags=["coercion", "TIMEVALUE"], formula='=TIMEVALUE("1:30 PM")')
+    _add_case(cases, prefix="timevalue", tags=["coercion", "TIMEVALUE"], formula='=TIMEVALUE("1 PM")')
+
+    # ------------------------------------------------------------------
     # Text functions (keep cases deterministic; avoid locale-dependent parsing where possible)
     # ------------------------------------------------------------------
     strings = ["", "a", "foo", "Hello", "12345", "a b c", "This is a test", "こんにちは"]
