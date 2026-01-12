@@ -12,7 +12,12 @@ The desktop app wires `@formula/extension-host` contribution points into the UI 
 devtools:
 
 - **Extensions panel**: open via the ribbon (**Home → Panels → Extensions**). It lists installed extensions, their
-  contributed commands, and contributed panels. (Opening the panel triggers the lazy extension host boot.)
+  contributed commands, contributed panels, and permission state. (Opening the panel triggers the lazy extension host boot.)
+  - The panel also exposes **permission management** controls:
+    - view declared vs currently granted permissions
+    - revoke a single permission (including `network`)
+    - reset all permissions for a single extension
+    - reset all extension permissions globally
 - **Marketplace panel**: installs and updates marketplace extensions via `WebExtensionManager` (IndexedDB-backed).
   - Panel id: `"marketplace"` (`PanelIds.MARKETPLACE`)
   - Open via the ribbon (**View → Panels → Marketplace**) or via DevTools:
@@ -1221,6 +1226,7 @@ Both the Node and browser hosts expose permission management helpers:
 ```ts
 await host.getGrantedPermissions("publisher.name");
 await host.revokePermissions("publisher.name", ["network"]); // omit list to revoke all
+await host.resetPermissions("publisher.name"); // clears all grants for one extension
 await host.resetAllPermissions(); // clears all extensions
 ```
 
