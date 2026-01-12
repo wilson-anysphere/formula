@@ -213,3 +213,91 @@ fn collect_deps_inner(expr: &Expr, base: CellCoord, out: &mut AHashSet<(i32, i32
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn assert_recalc_sets_eval_context_for_vms() {
+        let origin = CellCoord::new(0, 0);
+        let expr = crate::bytecode::parse_formula("=\"1.234,56\"+0", origin).expect("parse");
+
+        let cache = BytecodeCache::new();
+        let program = cache.get_or_compile(&expr);
+        let empty_grid = crate::bytecode::ColumnarGrid::new(1, 1);
+        let now_utc = chrono::Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
+
+        // Set a non-default locale on this thread so we can verify `RecalcEngine::recalc` uses its
+        // own deterministic eval context rather than inheriting ambient thread-local state.
+        let _outer_guard = crate::bytecode::runtime::set_thread_eval_context(
+            ExcelDateSystem::EXCEL_1900,
+            ValueLocaleConfig::de_de(),
+            now_utc.clone(),
+        );
+
+        let mut vm = Vm::with_capacity(32);
+        let de_de_value = vm.eval(&program, &empty_grid, origin);
+        let en_us_value = vm.eval_with_coercion_context(
+            &program,
+            &empty_grid,
+            origin,
+            ExcelDateSystem::EXCEL_1900,
+            ValueLocaleConfig::en_us(),
+            now_utc.clone(),
+        );
+        assert_ne!(
+            de_de_value, en_us_value,
+            "expected locale-dependent coercion to differ for the chosen input"
+        );
+
+        let engine = RecalcEngine::new();
+        let graph = engine.build_graph(vec![FormulaCell {
+            coord: origin,
+            expr: expr.clone(),
+        }]);
+        let mut grid = crate::bytecode::ColumnarGrid::new(1, 1);
+
+        engine.recalc(&graph, &mut grid);
+        let recalc_value = grid.get_value(origin);
+        assert_eq!(
+            recalc_value, en_us_value,
+            "recalc should evaluate using the engine's deterministic context"
+        );
+
+        // Ensure `recalc` restores the thread-local context after it finishes.
+        let after_value = vm.eval(&program, &empty_grid, origin);
+        assert_eq!(
+            after_value, de_de_value,
+            "recalc should restore any prior thread-local eval context"
+        );
+    }
+
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[test]
+    fn recalc_sets_eval_context_for_rayon_workers() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .expect("build thread pool");
+        let (tx, rx) = mpsc::channel::<std::thread::Result<()>>();
+        pool.spawn(move || {
+            let result = std::panic::catch_unwind(assert_recalc_sets_eval_context_for_vms);
+            tx.send(result).ok();
+        });
+
+        match rx.recv_timeout(Duration::from_secs(5)).expect("recalc task") {
+            Ok(()) => {}
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
+    }
+
+    #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
+    #[test]
+    fn recalc_sets_eval_context_serial() {
+        assert_recalc_sets_eval_context_for_vms();
+    }
+}
