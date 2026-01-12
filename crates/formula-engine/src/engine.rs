@@ -5977,11 +5977,27 @@ impl BytecodeColumnCache {
                         continue;
                     }
                     let resolved = area.range.resolve(base);
+                    let (sheet_rows, sheet_cols) = snapshot
+                        .sheet_dimensions
+                        .get(area.sheet)
+                        .copied()
+                        .unwrap_or((0, 0));
+                    let sheet_rows = i32::try_from(sheet_rows).unwrap_or(i32::MAX);
+                    let sheet_cols = i32::try_from(sheet_cols).unwrap_or(i32::MAX);
                     if resolved.row_start < 0
                         || resolved.col_start < 0
-                        || resolved.row_end >= EXCEL_MAX_ROWS_I32
-                        || resolved.col_end >= EXCEL_MAX_COLS_I32
+                        || resolved.row_end >= sheet_rows
+                        || resolved.col_end >= sheet_cols
                     {
+                        // Out-of-bounds ranges must evaluate via per-cell access so `#REF!` can be
+                        // surfaced. Don't build a cache that would otherwise treat them as empty/NaN.
+                        continue;
+                    }
+                    if resolved.rows() > crate::bytecode::runtime::BYTECODE_SPARSE_RANGE_ROW_THRESHOLD
+                    {
+                        // Avoid allocating huge columnar buffers for sparse ranges like `A:A`. The
+                        // bytecode runtime can compute aggregates over these ranges by iterating the
+                        // stored (non-implicit-blank) cells instead.
                         continue;
                     }
                     for col in resolved.col_start..=resolved.col_end {
@@ -8649,6 +8665,107 @@ mod tests {
         // Sanity check expected values.
         assert_eq!(bc_counta, Value::Number(4.0));
         assert_eq!(bc_countblank, Value::Number(1_048_573.0));
+    }
+
+    #[test]
+    fn bytecode_sparse_iteration_matches_ast_for_huge_sparse_3d_ranges() {
+        fn setup(engine: &mut Engine) {
+            for (sheet, values) in [
+                ("Sheet1", [1.0, 2.0, 3.0]),
+                ("Sheet2", [4.0, 5.0, 6.0]),
+                ("Sheet3", [7.0, 8.0, 9.0]),
+            ] {
+                engine.set_cell_value(sheet, "A1", values[0]).unwrap();
+                engine
+                    .set_cell_value(sheet, "A500000", values[1])
+                    .unwrap();
+                engine
+                    .set_cell_value(sheet, "A1048576", values[2])
+                    .unwrap();
+            }
+
+            engine
+                .set_cell_formula("Sheet1", "B1", "=SUM(Sheet1:Sheet3!A:A)")
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B2", "=COUNTIF(Sheet1:Sheet3!A:A, 0)")
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B3", "=MIN(Sheet1:Sheet3!A:A)")
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B4", "=MAX(Sheet1:Sheet3!A:A)")
+                .unwrap();
+        }
+
+        let mut bytecode_engine = Engine::new();
+        setup(&mut bytecode_engine);
+
+        // Ensure the SUM formula is actually bytecode-compiled.
+        let sheet1_id = bytecode_engine.workbook.sheet_id("Sheet1").unwrap();
+        let b1 = parse_a1("B1").unwrap();
+        let cell_b1 = bytecode_engine.workbook.sheets[sheet1_id]
+            .cells
+            .get(&b1)
+            .and_then(|c| c.compiled.as_ref())
+            .expect("compiled formula");
+        assert!(
+            matches!(cell_b1, CompiledFormula::Bytecode(_)),
+            "expected SUM(Sheet1:Sheet3!A:A) to compile to bytecode"
+        );
+
+        // Column caches should *not* allocate full-column buffers for 3D spans over `A:A`.
+        let snapshot = Snapshot::from_workbook(
+            &bytecode_engine.workbook,
+            &bytecode_engine.spills,
+            bytecode_engine.external_value_provider.clone(),
+            bytecode_engine.external_data_provider.clone(),
+        );
+        let key_b1 = CellKey {
+            sheet: sheet1_id,
+            addr: b1,
+        };
+        let tasks = vec![(key_b1, cell_b1.clone())];
+        let column_cache =
+            BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
+
+        for sheet_name in ["Sheet1", "Sheet2", "Sheet3"] {
+            let sheet_id = bytecode_engine.workbook.sheet_id(sheet_name).unwrap();
+            assert!(
+                !column_cache
+                    .by_sheet
+                    .get(sheet_id)
+                    .map(|cols| cols.contains_key(&0))
+                    .unwrap_or(false),
+                "expected full-column 3D span to skip column-slice cache allocation for {sheet_name}"
+            );
+        }
+
+        bytecode_engine.recalculate_single_threaded();
+        let bc_sum = bytecode_engine.get_cell_value("Sheet1", "B1");
+        let bc_countif = bytecode_engine.get_cell_value("Sheet1", "B2");
+        let bc_min = bytecode_engine.get_cell_value("Sheet1", "B3");
+        let bc_max = bytecode_engine.get_cell_value("Sheet1", "B4");
+
+        let mut ast_engine = Engine::new();
+        ast_engine.set_bytecode_enabled(false);
+        setup(&mut ast_engine);
+        ast_engine.recalculate_single_threaded();
+        let ast_sum = ast_engine.get_cell_value("Sheet1", "B1");
+        let ast_countif = ast_engine.get_cell_value("Sheet1", "B2");
+        let ast_min = ast_engine.get_cell_value("Sheet1", "B3");
+        let ast_max = ast_engine.get_cell_value("Sheet1", "B4");
+
+        assert_eq!(bc_sum, ast_sum, "SUM mismatch");
+        assert_eq!(bc_countif, ast_countif, "COUNTIF mismatch");
+        assert_eq!(bc_min, ast_min, "MIN mismatch");
+        assert_eq!(bc_max, ast_max, "MAX mismatch");
+
+        // Sanity check expected values.
+        assert_eq!(bc_sum, Value::Number(45.0));
+        assert_eq!(bc_countif, Value::Number(3_145_719.0));
+        assert_eq!(bc_min, Value::Number(1.0));
+        assert_eq!(bc_max, Value::Number(9.0));
     }
 
     #[test]

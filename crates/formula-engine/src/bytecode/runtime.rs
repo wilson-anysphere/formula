@@ -3766,6 +3766,31 @@ fn count_if_range_criteria_on_sheet(
         return Err(ErrorKind::Ref);
     }
 
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
+            let mut count = 0usize;
+            let mut seen = 0usize;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                seen += 1;
+                let engine_value = bytecode_value_to_engine(v);
+                if criteria.matches(&engine_value) {
+                    count += 1;
+                }
+            }
+
+            if criteria.matches(&EngineValue::Blank) {
+                let total_cells = (range.rows() as i64) * (range.cols() as i64);
+                let implicit_blanks = total_cells.saturating_sub(seen as i64);
+                count = count.saturating_add(implicit_blanks as usize);
+            }
+
+            return Ok(count);
+        }
+    }
+
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
         for row in range.row_start..=range.row_end {
@@ -4371,6 +4396,33 @@ fn min_range_on_sheet(
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Err(ErrorKind::Ref);
     }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
+            let mut out: Option<f64> = None;
+            let mut best_error: Option<(i32, i32, ErrorKind)> = None;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                match v {
+                    Value::Number(n) => out = Some(out.map_or(n, |prev| prev.min(n))),
+                    Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+            if let Some((_, _, err)) = best_error {
+                return Err(err);
+            }
+            return Ok(out);
+        }
+    }
+
     let mut out: Option<f64> = None;
     for col in range.col_start..=range.col_end {
         let col_min =
@@ -4466,6 +4518,33 @@ fn max_range_on_sheet(
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Err(ErrorKind::Ref);
     }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
+            let mut out: Option<f64> = None;
+            let mut best_error: Option<(i32, i32, ErrorKind)> = None;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                match v {
+                    Value::Number(n) => out = Some(out.map_or(n, |prev| prev.max(n))),
+                    Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+            if let Some((_, _, err)) = best_error {
+                return Err(err);
+            }
+            return Ok(out);
+        }
+    }
+
     let mut out: Option<f64> = None;
     for col in range.col_start..=range.col_end {
         let col_max =
@@ -4559,6 +4638,34 @@ fn count_if_range_on_sheet(
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Err(ErrorKind::Ref);
     }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
+            let mut count = 0usize;
+            let mut seen = 0usize;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                seen += 1;
+                if let Some(n) = coerce_countif_value_to_number(v) {
+                    if matches_numeric_criteria(n, criteria) {
+                        count += 1;
+                    }
+                }
+            }
+
+            // COUNTIF treats implicit blanks as zero for numeric criteria.
+            if matches_numeric_criteria(0.0, criteria) {
+                let total_cells = (range.rows() as i64) * (range.cols() as i64);
+                let implicit_blanks = total_cells.saturating_sub(seen as i64);
+                count = count.saturating_add(implicit_blanks as usize);
+            }
+
+            return Ok(count);
+        }
+    }
+
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
         if let Some(slice) =
