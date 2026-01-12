@@ -119,4 +119,21 @@ test.describe("updater UI wiring", () => {
       () => (window as any).__tauriWindowShowCalls > 0 && (window as any).__tauriWindowFocusCalls > 0,
     );
   });
+
+  test("download progress events update the dialog and show a ready-to-restart toast", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await fireTauriEvent(page, "update-available", { source: "manual", version: "9.9.9", body: "Notes" });
+    await expect(page.getByTestId("updater-dialog")).toBeVisible();
+
+    await fireTauriEvent(page, "update-download-started", { source: "startup", version: "9.9.9" });
+    await expect(page.getByTestId("updater-progress-wrap")).toBeVisible();
+
+    await fireTauriEvent(page, "update-download-progress", { source: "startup", version: "9.9.9", percent: 42 });
+    await expect(page.getByTestId("updater-progress-text")).toContainText("42%");
+
+    await fireTauriEvent(page, "update-downloaded", { source: "startup", version: "9.9.9" });
+    await expect(page.getByTestId("update-ready-toast")).toBeVisible();
+    await expect(page.getByTestId("update-ready-toast")).toContainText(/download/i);
+  });
 });
