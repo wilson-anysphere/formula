@@ -9922,6 +9922,11 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_if_missing_false_defaults_to_false() {
+        assert_bytecode_matches_ast("=IF(FALSE, 7)", Value::Bool(false));
+    }
+
+    #[test]
     fn bytecode_iferror_is_lazy_in_fallback() {
         assert_bytecode_matches_ast("=IFERROR(1, 1/0)", Value::Number(1.0));
     }
@@ -9932,13 +9937,28 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_iferror_evaluates_fallback_on_na() {
+        assert_bytecode_matches_ast("=IFERROR(NA(), 7)", Value::Number(7.0));
+    }
+
+    #[test]
     fn bytecode_ifna_is_lazy_in_fallback() {
         assert_bytecode_matches_ast("=IFNA(1, 1/0)", Value::Number(1.0));
     }
 
     #[test]
+    fn bytecode_ifna_does_not_use_fallback_for_non_na_errors() {
+        assert_bytecode_matches_ast("=IFNA(1/0, 7)", Value::Error(ErrorKind::Div0));
+    }
+
+    #[test]
     fn bytecode_ifna_evaluates_fallback_on_na() {
         assert_bytecode_matches_ast("=IFNA(NA(), 7)", Value::Number(7.0));
+    }
+
+    #[test]
+    fn bytecode_if_text_condition_is_coerced_to_bool() {
+        assert_bytecode_matches_ast("=IF(\"FALSE\", 1/0, 7)", Value::Number(7.0));
     }
 
     #[test]
