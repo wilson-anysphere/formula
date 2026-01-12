@@ -1,7 +1,6 @@
 pub(crate) mod atomic_write;
 pub mod commands;
 pub mod ed25519_verifier;
-mod fs_scope;
 #[cfg(any(feature = "desktop", test))]
 pub mod clipboard;
 // Clipboard fallback helpers are only used by the Linux clipboard backend, which itself is behind
@@ -10,6 +9,7 @@ pub mod clipboard;
 #[cfg(all(target_os = "linux", any(feature = "desktop", test)))]
 mod clipboard_fallback;
 pub mod file_io;
+mod fs_scope;
 #[cfg(any(feature = "desktop", test))]
 mod ipc_file_limits;
 pub mod ipc_origin;

@@ -86,8 +86,8 @@ const SQLITE_SCOPE_DENIED_ERROR: &str =
 
 fn validate_sqlite_db_path(path: &str) -> Result<PathBuf> {
     let raw = Path::new(path);
-    let allowed_roots = crate::fs_scope::desktop_allowed_roots()
-        .context("determine allowed filesystem scope roots")?;
+    let allowed_roots =
+        crate::fs_scope::desktop_allowed_roots().context("determine allowed filesystem scope roots")?;
 
     match crate::fs_scope::canonicalize_in_allowed_roots_with_error(raw, &allowed_roots) {
         Ok(canonical) => Ok(canonical),
