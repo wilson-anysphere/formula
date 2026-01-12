@@ -88,15 +88,6 @@ function estimateBase64Bytes(base64: string): number {
   return bytes > 0 ? bytes : 0;
 }
 
-function normalizeBase64String(base64: string): string {
-  if (!base64) return "";
-  if (base64.startsWith("data:")) {
-    const commaIndex = base64.indexOf(",");
-    if (commaIndex >= 0) return base64.slice(commaIndex + 1).trim();
-  }
-  return base64.trim();
-}
-
 function decodeBase64ToBytes(val: string): Uint8Array | undefined {
   if (!val) return undefined;
   if (estimateBase64Bytes(val) > MAX_IMAGE_BYTES) return undefined;
