@@ -63,7 +63,7 @@ import { evaluateFormula, type SpreadsheetValue } from "../spreadsheet/evaluateF
 import { AiCellFunctionEngine } from "../spreadsheet/AiCellFunctionEngine.js";
 import { DocumentWorkbookAdapter } from "../search/documentWorkbookAdapter.js";
 import type { SheetNameResolver } from "../sheet/sheetNameResolver";
-import { parseGoTo } from "../../../../packages/search/index.js";
+import { parseGoTo, splitSheetQualifier } from "../../../../packages/search/index.js";
 import type { CreateChartResult, CreateChartSpec } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 import { colToName as colToNameA1, fromA1 as fromA1A1 } from "@formula/spreadsheet-frontend/a1";
 import { shiftA1References } from "@formula/spreadsheet-frontend";
@@ -3447,11 +3447,16 @@ export class SpreadsheetApp {
   goTo(reference: string): void {
     try {
       const currentSheetName = this.resolveSheetDisplayNameById(this.sheetId);
+      const { sheetName: qualifiedSheetName } = splitSheetQualifier(reference);
       const parsed = parseGoTo(reference, { workbook: this.searchWorkbook, currentSheetName });
       if (parsed.type !== "range") return;
 
       const { range } = parsed;
-      const targetSheetId = this.resolveSheetIdByName(parsed.sheetName);
+      // For unqualified A1 references (e.g. "A1" or "A1:B2"), always treat navigation as relative
+      // to the *current* stable sheet id (not the display name), even if the sheet metadata
+      // resolver is temporarily unavailable/out-of-date.
+      const targetSheetId =
+        parsed.source === "a1" && !qualifiedSheetName ? this.sheetId : this.resolveSheetIdByName(parsed.sheetName);
       if (!targetSheetId) return;
       if (range.startRow === range.endRow && range.startCol === range.endCol) {
         this.activateCell({ sheetId: targetSheetId, row: range.startRow, col: range.startCol });

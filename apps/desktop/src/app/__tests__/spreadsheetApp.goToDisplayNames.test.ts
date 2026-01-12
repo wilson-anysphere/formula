@@ -288,4 +288,36 @@ describe("SpreadsheetApp goTo", () => {
     app.destroy();
     root.remove();
   });
+
+  it("treats unqualified A1 references as relative to the current sheet id (even if display->id lookup fails)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, {
+      sheetNameResolver: {
+        // Resolver can format the sheet name, but cannot map it back to an id (simulating missing metadata).
+        getSheetNameById: (sheetId) => (String(sheetId).trim() === "Sheet2" ? "Budget" : null),
+        getSheetIdByName: (_sheetName) => null,
+      },
+    });
+
+    const doc = app.getDocument();
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "BudgetCell");
+
+    app.activateCell({ sheetId: "Sheet2", row: 5, col: 5 });
+    expect(app.getCurrentSheetId()).toBe("Sheet2");
+
+    app.goTo("A1");
+
+    expect(app.getCurrentSheetId()).toBe("Sheet2");
+    expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
+    expect(doc.getSheetIds()).not.toContain("Budget");
+
+    app.destroy();
+    root.remove();
+  });
 });
