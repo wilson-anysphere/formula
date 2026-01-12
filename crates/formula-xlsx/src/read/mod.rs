@@ -1395,8 +1395,8 @@ fn parse_worksheet_into_model(
     let mut current_ref: Option<CellRef> = None;
     let mut current_t: Option<String> = None;
     let mut current_style: u32 = 0;
-    let mut current_cm: Option<u32> = None;
-    let mut current_vm: Option<u32> = None;
+    let mut current_cm: Option<String> = None;
+    let mut current_vm: Option<String> = None;
     let mut current_formula: Option<FormulaMeta> = None;
     let mut current_value_text: Option<String> = None;
     let mut current_inline_text: Option<String> = None;
@@ -1603,12 +1603,8 @@ fn parse_worksheet_into_model(
                             let xf_index = attr.unescape_value()?.into_owned().parse().unwrap_or(0);
                             current_style = styles_part.style_id_for_xf(xf_index);
                         }
-                        b"cm" => {
-                            current_cm = attr.unescape_value()?.into_owned().parse::<u32>().ok();
-                        }
-                        b"vm" => {
-                            current_vm = attr.unescape_value()?.into_owned().parse::<u32>().ok();
-                        }
+                        b"cm" => current_cm = Some(attr.unescape_value()?.into_owned()),
+                        b"vm" => current_vm = Some(attr.unescape_value()?.into_owned()),
                         _ => {}
                     }
                 }
@@ -1616,8 +1612,8 @@ fn parse_worksheet_into_model(
             Event::Empty(e) if in_sheet_data && e.local_name().as_ref() == b"c" => {
                 let mut cell_ref = None;
                 let mut style_id = 0u32;
-                let mut cm: Option<u32> = None;
-                let mut vm: Option<u32> = None;
+                let mut cm: Option<String> = None;
+                let mut vm: Option<String> = None;
                 for attr in e.attributes() {
                     let attr = attr?;
                     match attr.key.as_ref() {
@@ -1631,12 +1627,8 @@ fn parse_worksheet_into_model(
                             let xf_index = attr.unescape_value()?.into_owned().parse().unwrap_or(0);
                             style_id = styles_part.style_id_for_xf(xf_index);
                         }
-                        b"cm" => {
-                            cm = attr.unescape_value()?.into_owned().parse::<u32>().ok();
-                        }
-                        b"vm" => {
-                            vm = attr.unescape_value()?.into_owned().parse::<u32>().ok();
-                        }
+                        b"cm" => cm = Some(attr.unescape_value()?.into_owned()),
+                        b"vm" => vm = Some(attr.unescape_value()?.into_owned()),
                         _ => {}
                     }
                 }
@@ -1645,10 +1637,12 @@ fn parse_worksheet_into_model(
                     // (and typically formatting) on the top-left cell only.
                     if worksheet.merged_regions.resolve_cell(cell_ref) == cell_ref {
                         if let (Some(vm), Some(metadata_part), Some(rich_value_cells)) =
-                            (vm, metadata_part, rich_value_cells.as_mut())
+                            (vm.as_deref(), metadata_part, rich_value_cells.as_mut())
                         {
-                            if let Some(idx) = metadata_part.vm_to_rich_value_index(vm) {
-                                rich_value_cells.insert((worksheet_id, cell_ref), idx);
+                            if let Ok(vm_idx) = vm.parse::<u32>() {
+                                if let Some(idx) = metadata_part.vm_to_rich_value_index(vm_idx) {
+                                    rich_value_cells.insert((worksheet_id, cell_ref), idx);
+                                }
                             }
                         }
 
@@ -1661,14 +1655,10 @@ fn parse_worksheet_into_model(
 
                     if let Some(cell_meta_map) = cell_meta_map.as_mut() {
                         if cm.is_some() || vm.is_some() {
-                            cell_meta_map.insert(
-                                (worksheet_id, cell_ref),
-                                CellMeta {
-                                    cm,
-                                    vm,
-                                    ..Default::default()
-                                },
-                            );
+                            let mut meta = CellMeta::default();
+                            meta.cm = cm;
+                            meta.vm = vm;
+                            cell_meta_map.insert((worksheet_id, cell_ref), meta);
                         }
                     }
                 }
@@ -1743,10 +1733,12 @@ fn parse_worksheet_into_model(
                         cell.style_id = current_style;
 
                         if let (Some(vm), Some(metadata_part), Some(rich_value_cells)) =
-                            (current_vm, metadata_part, rich_value_cells.as_mut())
+                            (current_vm.as_deref(), metadata_part, rich_value_cells.as_mut())
                         {
-                            if let Some(idx) = metadata_part.vm_to_rich_value_index(vm) {
-                                rich_value_cells.insert((worksheet_id, cell_ref), idx);
+                            if let Ok(vm_idx) = vm.parse::<u32>() {
+                                if let Some(idx) = metadata_part.vm_to_rich_value_index(vm_idx) {
+                                    rich_value_cells.insert((worksheet_id, cell_ref), idx);
+                                }
                             }
                         }
 
@@ -1759,8 +1751,8 @@ fn parse_worksheet_into_model(
                             meta.value_kind = value_kind;
                             meta.raw_value = raw_value;
                             meta.formula = current_formula.take();
-                            meta.cm = current_cm;
-                            meta.vm = current_vm;
+                            meta.cm = current_cm.take();
+                            meta.vm = current_vm.take();
 
                             if meta.value_kind.is_some()
                                 || meta.raw_value.is_some()
@@ -2275,8 +2267,8 @@ mod tests {
             .cell_meta
             .get(&(sheet_id, cell_ref))
             .expect("expected cell meta entry for A1");
-        assert_eq!(meta.cm, Some(7));
-        assert_eq!(meta.vm, Some(9));
+        assert_eq!(meta.cm.as_deref(), Some("7"));
+        assert_eq!(meta.vm.as_deref(), Some("9"));
 
         // Ensure the higher-level editing API doesn't accidentally discard the metadata-only entry.
         doc.set_cell_value(sheet_id, cell_ref, CellValue::Empty);
@@ -2285,8 +2277,8 @@ mod tests {
             .cell_meta
             .get(&(sheet_id, cell_ref))
             .expect("expected cell meta entry for A1 after set_cell_value(empty)");
-        assert_eq!(meta.cm, Some(7));
-        assert_eq!(meta.vm, Some(9));
+        assert_eq!(meta.cm.as_deref(), Some("7"));
+        assert_eq!(meta.vm.as_deref(), Some("9"));
 
         doc.set_cell_formula(sheet_id, cell_ref, None);
         let meta = doc
@@ -2294,7 +2286,7 @@ mod tests {
             .cell_meta
             .get(&(sheet_id, cell_ref))
             .expect("expected cell meta entry for A1 after set_cell_formula(None)");
-        assert_eq!(meta.cm, Some(7));
-        assert_eq!(meta.vm, Some(9));
+        assert_eq!(meta.cm.as_deref(), Some("7"));
+        assert_eq!(meta.vm.as_deref(), Some("9"));
     }
 }

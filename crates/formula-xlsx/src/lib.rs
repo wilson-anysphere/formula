@@ -213,17 +213,16 @@ pub enum CellValueKind {
 pub struct CellMeta {
     pub value_kind: Option<CellValueKind>,
     pub raw_value: Option<String>,
+    /// SpreadsheetML cell metadata indices (`c/@vm` and `c/@cm`).
+    ///
+    /// Excel emits `vm`/`cm` attributes on `<c>` elements to reference value metadata and cell
+    /// metadata records (used for modern features like linked data types / rich values).
+    ///
+    /// These are typically integer indices into `xl/metadata.xml`, but we keep the raw attribute
+    /// text so we can round-trip the file without normalizing the formatting (e.g. leading zeros).
+    pub vm: Option<String>,
+    pub cm: Option<String>,
     pub formula: Option<FormulaMeta>,
-    /// SpreadsheetML cell metadata index (`c/@cm`).
-    ///
-    /// This is a raw integer value that can be used to map the cell to entries in
-    /// `xl/metadata.xml` for rich-data / image-in-cell support.
-    pub cm: Option<u32>,
-    /// SpreadsheetML value metadata index (`c/@vm`).
-    ///
-    /// This is a raw integer value that can be used to map the cell to entries in
-    /// `xl/metadata.xml` for rich-data / image-in-cell support.
-    pub vm: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -402,9 +401,9 @@ impl XlsxDocument {
 
         if meta.value_kind.is_none()
             && meta.raw_value.is_none()
+            && meta.formula.is_none()
             && meta.vm.is_none()
             && meta.cm.is_none()
-            && meta.formula.is_none()
         {
             self.meta.cell_meta.remove(&(sheet_id, cell));
         }
@@ -606,7 +605,12 @@ impl XlsxDocument {
     ) -> Result<Option<u32>, XlsxError> {
         // Only report rich values for cells that still have stored `vm` metadata.
         // (e.g. a cell cleared after load may retain a stale `rich_value_cells` entry.)
-        let Some(_vm) = self.meta.cell_meta.get(&(sheet_id, cell)).and_then(|m| m.vm) else {
+        let has_vm = self
+            .meta
+            .cell_meta
+            .get(&(sheet_id, cell))
+            .is_some_and(|m| m.vm.is_some());
+        if !has_vm {
             return Ok(None);
         };
 
@@ -624,8 +628,7 @@ impl XlsxDocument {
                 .meta
                 .cell_meta
                 .get(&(worksheet_id, cell_ref))
-                .and_then(|m| m.vm)
-                .is_some();
+                .is_some_and(|m| m.vm.is_some());
             if !has_vm {
                 continue;
             };

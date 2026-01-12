@@ -886,8 +886,12 @@ fn write_updated_cell<W: Write>(
 
     let a1 = cell_ref.to_a1();
     let meta = super::lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
-    let meta_vm = meta.and_then(|m| m.vm).map(|vm| vm.to_string());
-    let meta_cm = meta.and_then(|m| m.cm).map(|cm| cm.to_string());
+    let meta_vm = meta
+        .and_then(|m| m.vm.as_deref())
+        .map(|vm| vm.to_string());
+    let meta_cm = meta
+        .and_then(|m| m.cm.as_deref())
+        .map(|cm| cm.to_string());
     // If the file already had `vm`/`cm` attributes, they were captured in `preserved_attrs`.
     // Avoid emitting duplicate attributes, and prefer meta-provided values so callers can
     // intentionally update the metadata indices.

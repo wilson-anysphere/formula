@@ -144,8 +144,8 @@ fn sheetdata_patch_emits_vm_cm_for_inserted_cells() {
     doc.meta.cell_meta.insert(
         (sheet_id, b1),
         crate::CellMeta {
-            vm: Some(1),
-            cm: Some(2),
+            vm: Some("1".to_string()),
+            cm: Some("2".to_string()),
             ..Default::default()
         },
     );
@@ -163,7 +163,6 @@ fn sheetdata_patch_emits_vm_cm_for_inserted_cells() {
     let mut reader = Reader::from_str(&xml);
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
-
     let mut found = false;
     let mut found_vm: Option<String> = None;
     let mut found_cm: Option<String> = None;
@@ -202,6 +201,70 @@ fn sheetdata_patch_emits_vm_cm_for_inserted_cells() {
     assert!(found, "expected to find <c r=\"B1\"> in patched worksheet");
     assert_eq!(found_vm.as_deref(), Some("1"), "missing/incorrect vm= on B1");
     assert_eq!(found_cm.as_deref(), Some("2"), "missing/incorrect cm= on B1");
+}
+
+#[test]
+fn writes_cell_vm_cm_attributes_from_cell_meta_when_rendering_sheet_data() {
+    let mut workbook = formula_model::Workbook::new();
+    let sheet_id = workbook.add_sheet("Sheet1".to_string()).unwrap();
+    let sheet = workbook.sheet_mut(sheet_id).expect("sheet exists");
+    let a1 = formula_model::CellRef::from_a1("A1").unwrap();
+    sheet.set_value(a1, formula_model::CellValue::Number(1.0));
+
+    let mut doc = crate::XlsxDocument::new(workbook);
+    doc.meta.cell_meta.insert(
+        (sheet_id, a1),
+        crate::CellMeta {
+            vm: Some("1".to_string()),
+            cm: Some("2".to_string()),
+            ..Default::default()
+        },
+    );
+
+    let bytes = write_to_vec(&doc).expect("write doc");
+    let cursor = std::io::Cursor::new(&bytes);
+    let mut archive = ZipArchive::new(cursor).expect("open zip");
+    let mut file = archive
+        .by_name("xl/worksheets/sheet1.xml")
+        .expect("worksheet part missing");
+    let mut xml = String::new();
+    file.read_to_string(&mut xml).expect("read worksheet xml");
+
+    let mut reader = Reader::from_str(&xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut found = false;
+
+    loop {
+        match reader.read_event_into(&mut buf).expect("xml parse") {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"c" => {
+                let mut r = None;
+                let mut vm = None;
+                let mut cm = None;
+                for attr in e.attributes() {
+                    let attr = attr.expect("attr");
+                    match attr.key.as_ref() {
+                        b"r" => r = Some(attr.unescape_value().expect("unescape").into_owned()),
+                        b"vm" => vm = Some(attr.unescape_value().expect("unescape").into_owned()),
+                        b"cm" => cm = Some(attr.unescape_value().expect("unescape").into_owned()),
+                        _ => {}
+                    }
+                }
+
+                if r.as_deref() == Some("A1") {
+                    assert_eq!(vm.as_deref(), Some("1"));
+                    assert_eq!(cm.as_deref(), Some("2"));
+                    found = true;
+                    break;
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    assert!(found, "expected to find <c r=\"A1\"> in worksheet xml");
 }
 
 #[test]
@@ -432,3 +495,7 @@ fn patch_content_types_for_sheet_edits_preserves_prefix_only_content_types() {
     }
 }
 
+=======
+    assert!(found, "expected to find <c r=\"A1\"> in worksheet xml");
+}
+>>>>>>> 94345d9c (feat(formula-xlsx): preserve SpreadsheetML cell vm/cm metadata)
