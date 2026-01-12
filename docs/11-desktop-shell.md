@@ -553,6 +553,12 @@ Tauri command contract:
 - Read: `invoke("clipboard_read")` → `{ text?: string, html?: string, rtf?: string, pngBase64?: string }`
 - Write: `invoke("clipboard_write", { payload: { text?, html?, rtf?, pngBase64? } })` → `void`
 
+Provider return shape:
+
+- `createClipboardProvider().read()` returns a merged `ClipboardContent` that may include either/both:
+  - `pngBase64: string` (native/Rust clipboard path), and/or
+  - `imagePng: Uint8Array` (Web Clipboard API `image/png` path)
+
 Image wire format:
 
 - PNG bytes are transported over IPC as `pngBase64` (**raw base64**, no `data:image/png;base64,` prefix).
