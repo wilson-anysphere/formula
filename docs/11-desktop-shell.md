@@ -16,6 +16,7 @@ This document is a “what’s real in the repo” reference for contributors.
     - Updater dialog + event handling: `apps/desktop/src/tauri/updaterUi.ts`
     - Notifications wrapper: `apps/desktop/src/tauri/notifications.ts`
     - Startup timings listeners: `apps/desktop/src/tauri/startupMetrics.ts`
+    - Open-file IPC helper (`open-file` / `open-file-ready`): `apps/desktop/src/tauri/openFileIpc.ts`
   - Clipboard provider + serialization helpers: `apps/desktop/src/clipboard/`
 - **Tauri (Rust):** `apps/desktop/src-tauri/`
   - Tauri config: `apps/desktop/src-tauri/tauri.conf.json`
@@ -24,6 +25,7 @@ This document is a “what’s real in the repo” reference for contributors.
   - IPC commands: `apps/desktop/src-tauri/src/commands.rs`
   - Clipboard commands + platform implementations: `apps/desktop/src-tauri/src/clipboard/`
   - “Open file” path normalization: `apps/desktop/src-tauri/src/open_file.rs`
+  - “Open file” IPC queue/handshake state machine: `apps/desktop/src-tauri/src/open_file_ipc.rs`
   - Filesystem scope helpers: `apps/desktop/src-tauri/src/fs_scope.rs`
   - Custom `asset:` protocol handler (COEP/CORP): `apps/desktop/src-tauri/src/asset_protocol.rs`
   - Tray: `apps/desktop/src-tauri/src/tray.rs`
@@ -356,7 +358,7 @@ Implementation notes:
 - `apps/desktop/src-tauri/src/open_file.rs` extracts supported spreadsheet paths from argv-style inputs (and also supports `file://...` URLs used by macOS open-document events).
   - Extension-based support is case-insensitive: `xlsx`, `xls`, `xlsm`, `xltx`, `xltm`, `xlam`, `xlsb`, `csv` (+ `parquet` when compiled with the `parquet` feature).
   - If the extension is missing or unsupported, it falls back to a lightweight content sniff (`file_io::looks_like_workbook`) so “downloaded/renamed” workbooks can still be opened from OS open-file events.
-- `main.rs` uses a small in-memory queue (`OpenFileState`) so open-file requests received *before* the frontend installs its listeners aren’t lost.
+- `main.rs` uses a small in-memory queue (`OpenFileState`, implemented in `apps/desktop/src-tauri/src/open_file_ipc.rs`) so open-file requests received *before* the frontend installs its listeners aren’t lost.
   - Backend emits: `open-file` (payload: `string[]` paths)
   - Frontend emits: `open-file-ready` once its `listen("open-file", ...)` handler is installed, which flushes any queued paths.
 - When an open-file request is handled, `main.rs` **shows + focuses** the main window before emitting `open-file` so the request is visible to the user.
@@ -410,7 +412,7 @@ Desktop-specific listeners are set up near the bottom of `apps/desktop/src/main.
 - `oauth-redirect` → route deep-link redirects into the OAuth broker (buffers early redirects to avoid a rare PKCE race where the redirect arrives before `waitForRedirect` is registered); emits `oauth-redirect-ready` once the handler is installed (flushes queued redirects on the Rust side)
 - `close-prep` → flush pending workbook sync + call `set_macro_ui_context` → emit `close-prep-done`
 - `close-requested` → run `handleCloseRequest(...)` (unsaved changes prompt + hide vs quit) → emit `close-handled`
-- `open-file` → queue workbook opens; then emits `open-file-ready` once the handler is installed (flushes any queued open-file requests on the Rust side)
+- `open-file` → queue workbook opens; then emits `open-file-ready` once the handler is installed (flushes any queued open-file requests on the Rust side; helper: `installOpenFileIpc` in `apps/desktop/src/tauri/openFileIpc.ts`)
 - `file-dropped` → open the first dropped path
 - `tray-open` / `tray-new` / `tray-quit` → open dialog/new workbook/quit flow
 - menu events (e.g. `menu-open`, `menu-save`, `menu-quit`) → routed to the same “open/save/close” logic used by keyboard shortcuts and tray menu items
