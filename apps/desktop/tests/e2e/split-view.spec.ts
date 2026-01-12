@@ -114,12 +114,14 @@ test.describe("split view", () => {
     // Scroll the primary pane so A1 is offscreen.
     const primary = page.locator("#grid");
     await primary.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(100 * 100, 0);
+    await expect.poll(async () => await page.evaluate(() => (window as any).__formulaApp.getScroll().x)).toBeGreaterThan(0);
     await page.mouse.wheel(0, 200 * 24);
     await expect
       .poll(async () => await page.evaluate(() => (window as any).__formulaApp.getScroll().y))
       .toBeGreaterThan(0);
 
-    const scrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    const scrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll());
 
     // Click B2 in the secondary pane (account for headers: row header ~48px, col header ~24px).
     await secondary.click({ position: { x: 48 + 100 + 12, y: 24 + 24 + 12 } });
@@ -128,8 +130,9 @@ test.describe("split view", () => {
     await expect(page.getByTestId("formula-address")).toHaveValue("B2");
     // The primary pane should also mirror the selection state (even if the cell is offscreen).
     await expect(page.locator("#grid").getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell B2");
-    const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
-    expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThan(0.1);
+    const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll());
+    expect(Math.abs(scrollAfter.x - scrollBefore.x)).toBeLessThan(0.1);
+    expect(Math.abs(scrollAfter.y - scrollBefore.y)).toBeLessThan(0.1);
   });
 
   test("primary selection sync does not scroll the secondary pane", async ({ page }) => {
