@@ -31,7 +31,7 @@ workbook.xlsx (ZIP archive)
 │   ├── cellImages.xml           # (optional) workbook-level cell image store (alternate mechanism; name/casing varies; not observed in inspected Excel 365 “Place in Cell” fixtures)
 │   ├── calcChain.xml            # Calculation order hints
 │   ├── metadata.xml             # Cell/value metadata (Excel "Rich Data")
-│   ├── richData/                # Excel 365+ rich values (data types, in-cell images)
+│   ├── richData/                # Excel 365+ rich values (data types, in-cell images; naming varies: richValue* vs rdrichvalue*)
 │   │   ├── rdrichvalue.xml
 │   │   ├── rdrichvaluestructure.xml
 │   │   ├── rdrichvaluetypes.xml
