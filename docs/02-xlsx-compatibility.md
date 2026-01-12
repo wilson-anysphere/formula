@@ -1054,13 +1054,13 @@ validate load → save → diff round-trips:
 Run a diff locally:
 
 ```bash
-cargo run -p xlsx-diff --bin xlsx_diff -- original.xlsx roundtripped.xlsx
+bash scripts/cargo_agent.sh run -p xlsx-diff --bin xlsx_diff -- original.xlsx roundtripped.xlsx
 ```
 
 Run the fixture harness (used by CI):
 
 ```bash
-cargo test -p xlsx-diff --test roundtrip_fixtures
+bash scripts/cargo_agent.sh test -p xlsx-diff --test roundtrip_fixtures
 ```
 
 The harness performs a real load → save using `formula-xlsx::XlsxPackage` (OPC-level

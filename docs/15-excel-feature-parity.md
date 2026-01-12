@@ -54,7 +54,7 @@ pnpm -w run generate:function-catalog
 Validate that the committed catalog matches the Rust registry:
 
 ```bash
-cargo test -p formula-engine function_catalog_sync
+bash scripts/cargo_agent.sh test -p formula-engine function_catalog_sync
 ```
 
 Generate a parity report between `shared/functionCatalog.json` and the BIFF FTAB name table:
