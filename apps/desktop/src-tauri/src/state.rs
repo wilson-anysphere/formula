@@ -417,8 +417,9 @@ impl AppState {
         after_sheet_id: Option<String>,
         index: Option<usize>,
     ) -> Result<SheetInfoData, AppStateError> {
-        let (candidate_id, candidate_name, insert_index) = {
+        let (candidate_id, candidate_name, insert_index, sheet_count_before) = {
             let workbook = self.get_workbook()?;
+            let sheet_count_before = workbook.sheets.len();
             let base = name.trim();
             formula_model::validate_sheet_name(base)
                 .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
@@ -433,8 +434,8 @@ impl AppState {
                         .position(|sheet| sheet.id.eq_ignore_ascii_case(after_id))
                         .map(|idx| idx.saturating_add(1))
                 })
-                .unwrap_or_else(|| index.unwrap_or(workbook.sheets.len()))
-                .min(workbook.sheets.len());
+                .unwrap_or_else(|| index.unwrap_or(sheet_count_before))
+                .min(sheet_count_before);
 
             if let Some(sheet_id) = sheet_id {
                 let trimmed_id = sheet_id.trim();
@@ -462,7 +463,12 @@ impl AppState {
                     ));
                 }
 
-                (trimmed_id.to_string(), base.to_string(), insert_index)
+                (
+                    trimmed_id.to_string(),
+                    base.to_string(),
+                    insert_index,
+                    sheet_count_before,
+                )
             } else {
                 let mut candidate_name = base.to_string();
                 let mut counter = 1usize;
@@ -503,7 +509,7 @@ impl AppState {
                     candidate_id = format!("{base_id}-{id_counter}");
                 }
 
-                (candidate_id, candidate_name, insert_index)
+                (candidate_id, candidate_name, insert_index, sheet_count_before)
             }
         };
 
@@ -534,7 +540,17 @@ impl AppState {
             workbook.origin_xlsb_path = None;
         }
 
-        self.engine.ensure_sheet(&candidate_name);
+        // The formula engine indexes sheets by insertion order. When we insert a new sheet into
+        // the middle of the workbook, we need to rebuild the engine so:
+        // - sheet indices match the workbook order (important for 3D references)
+        // - dependency graphs are updated to include the newly inserted sheet
+        if insert_index < sheet_count_before {
+            self.rebuild_engine_from_workbook()?;
+            let recalc_changes = self.engine.recalculate_with_value_changes_multi_threaded();
+            let _ = self.refresh_computed_values_from_recalc_changes(&recalc_changes)?;
+        } else {
+            self.engine.ensure_sheet(&candidate_name);
+        }
 
         self.dirty = true;
         self.redo_stack.clear();
@@ -4291,6 +4307,64 @@ mod tests {
                 inserted_id
             ]
         );
+    }
+
+    #[test]
+    fn add_sheet_rebuilds_engine_order_for_3d_references() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        workbook.add_sheet("Sheet3".to_string());
+
+        let sheet1_id = workbook.sheets[0].id.clone();
+        let sheet2_id = workbook.sheets[1].id.clone();
+        let sheet3_id = workbook.sheets[2].id.clone();
+
+        workbook
+            .sheet_mut(&sheet1_id)
+            .unwrap()
+            .set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(1.0))));
+        workbook
+            .sheet_mut(&sheet2_id)
+            .unwrap()
+            .set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(2.0))));
+        workbook
+            .sheet_mut(&sheet3_id)
+            .unwrap()
+            .set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(3.0))));
+
+        // A 3D reference should include any sheets inserted between the two endpoints.
+        workbook
+            .sheet_mut(&sheet1_id)
+            .unwrap()
+            .set_cell(
+                0,
+                1,
+                Cell::from_formula("=SUM(Sheet1:Sheet3!A1)".to_string()),
+            );
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let b1_before = state.get_cell(&sheet1_id, 0, 1).expect("read Sheet1!B1");
+        assert_eq!(b1_before.value, CellScalar::Number(6.0));
+
+        let inserted = state
+            .add_sheet(
+                "Inserted".to_string(),
+                None,
+                Some(sheet1_id.clone()),
+                None,
+            )
+            .expect("add sheet succeeds");
+        let inserted_id = inserted.id;
+
+        state
+            .set_cell(&inserted_id, 0, 0, Some(JsonValue::from(10)), None)
+            .expect("set inserted A1");
+
+        let b1_after = state.get_cell(&sheet1_id, 0, 1).expect("read Sheet1!B1 after insert");
+        assert_eq!(b1_after.value, CellScalar::Number(16.0));
     }
 
     #[test]
