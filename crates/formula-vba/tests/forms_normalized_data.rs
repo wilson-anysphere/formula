@@ -629,3 +629,60 @@ fn forms_normalized_data_falls_back_to_dir_codepage_when_project_lacks_codepage_
     assert_eq!(normalized.len(), 1023);
     assert_eq!(normalized, expected);
 }
+
+#[test]
+fn forms_normalized_data_matches_baseclass_case_insensitively_for_non_ascii() {
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
+
+    // Mixed-case Cyrillic module name. VBA identifiers are case-insensitive.
+    let module_name_dir = "Форма";
+    let module_name_project = "форма";
+    let project_text = format!("CodePage=1251\r\nBaseClass={module_name_project}\r\n");
+    let (project_bytes, _, _) = WINDOWS_1251.encode(&project_text);
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(&project_bytes).expect("write PROJECT");
+    }
+
+    ole.create_storage("VBA").expect("create VBA storage");
+    {
+        let mut dir_decompressed = Vec::new();
+        push_record(&mut dir_decompressed, 0x0003, &1251u16.to_le_bytes());
+        push_record(
+            &mut dir_decompressed,
+            0x0047,
+            &utf16le_bytes(module_name_dir),
+        );
+
+        let mut stream_name_record = Vec::new();
+        stream_name_record.extend_from_slice(b"UserForm1");
+        stream_name_record.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut dir_decompressed, 0x001A, &stream_name_record);
+        push_record(&mut dir_decompressed, 0x0021, &3u16.to_le_bytes());
+        push_record(&mut dir_decompressed, 0x0031, &0u32.to_le_bytes());
+
+        let dir_container = compress_container(&dir_decompressed);
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    ole.create_storage("UserForm1")
+        .expect("create designer storage");
+    {
+        let mut s = ole
+            .create_stream("UserForm1/Payload")
+            .expect("create stream");
+        s.write_all(b"ABC").expect("write stream bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized = forms_normalized_data(&vba_project_bin).expect("compute FormsNormalizedData");
+
+    let mut expected = Vec::new();
+    expected.extend_from_slice(b"ABC");
+    expected.extend(std::iter::repeat(0u8).take(1020));
+
+    assert_eq!(normalized.len(), 1023);
+    assert_eq!(normalized, expected);
+}

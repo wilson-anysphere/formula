@@ -139,9 +139,21 @@ fn match_designer_module_stream_name<'a>(
     if let Some(m) = modules.iter().find(|m| m.name == module_identifier) {
         return Some(m.stream_name.as_str());
     }
-    let needle = module_identifier.to_ascii_lowercase();
+
+    // VB(A) module identifiers are case-insensitive. The MS-OVBA pseudocode does not specify the
+    // comparison algorithm, but in practice we need to match regardless of ASCII case differences
+    // (common) and also for non-ASCII module names that appear in some projects (e.g. Windows-1251
+    // Cyrillic). Prefer cheap ASCII-only matching first, then fall back to full Unicode lowercasing.
+    if let Some(m) = modules
+        .iter()
+        .find(|m| m.name.eq_ignore_ascii_case(module_identifier))
+    {
+        return Some(m.stream_name.as_str());
+    }
+
+    let needle = module_identifier.to_lowercase();
     modules
         .iter()
-        .find(|m| m.name.to_ascii_lowercase() == needle)
+        .find(|m| m.name.to_lowercase() == needle)
         .map(|m| m.stream_name.as_str())
 }
