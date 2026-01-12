@@ -89,14 +89,13 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
     const connectSrc = getCspDirectiveSources(String(cspHeader), "connect-src");
-    expect(connectSrc, "CSP `connect-src` should be locked down in desktop builds").toContain("'self'");
+    expect(connectSrc, "CSP `connect-src` should allow remote APIs + collab endpoints").toContain("'self'");
+    expect(connectSrc).toContain("https:");
+    expect(connectSrc).toContain("wss:");
+    // Allow fetching the in-memory `blob:`/`data:` URLs used by the extension system.
     expect(connectSrc).toContain("blob:");
-    expect(connectSrc).not.toContain("https:");
-    expect(connectSrc).not.toContain("wss:");
-    expect(connectSrc).not.toContain("http://localhost:*");
-    expect(connectSrc).not.toContain("http://127.0.0.1:*");
-    expect(connectSrc).not.toContain("ws://localhost:*");
-    expect(connectSrc).not.toContain("ws://127.0.0.1:*");
+    expect(connectSrc).toContain("data:");
+    expect(connectSrc).not.toContain("ws:");
 
     // The CSP smoke test doesn't need the full UI to render; it only needs the
     // document to load so we can validate WASM + Worker execution under the
@@ -868,7 +867,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
           });
 
           try {
-            const manager = new WebExtensionManager({ host, engineVersion: "1.0.0" });
+            const manager = new WebExtensionManager({ host, engineVersion: "1.0.0", scanPolicy: "allow" });
             await manager.install("formula.sample-hello");
             const contributedPanelsSeedRaw =
               globalThis.localStorage?.getItem("formula.extensions.contributedPanels.v1") ?? null;
@@ -1027,11 +1026,6 @@ test.describe("Content Security Policy (Tauri parity)", () => {
   test("extension panels are sandboxed with connect-src 'none' (no network bypass) under CSP", async ({
     page
   }) => {
-    await page.addInitScript(() => {
-      // Avoid permission modal flakiness here; this test only cares about CSP sandboxing.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (globalThis as any).__formulaPermissionPrompt = async () => true;
-    });
     const cspViolations: string[] = [];
 
     page.on("console", (msg) => {

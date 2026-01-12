@@ -6,7 +6,12 @@ import { defineConfig } from "vite";
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 const extensionApiEntry = fileURLToPath(new URL("../../packages/extension-api/index.mjs", import.meta.url));
+const extensionMarketplaceEntry = fileURLToPath(
+  new URL("../../packages/extension-marketplace/src/index.ts", import.meta.url),
+);
 const collabUndoEntry = fileURLToPath(new URL("../../packages/collab/undo/index.js", import.meta.url));
+const collabSessionEntry = fileURLToPath(new URL("../../packages/collab/session/src/index.ts", import.meta.url));
+const collabVersioningEntry = fileURLToPath(new URL("../../packages/collab/versioning/src/index.ts", import.meta.url));
 const collabPersistenceEntry = fileURLToPath(new URL("../../packages/collab/persistence/src/index.ts", import.meta.url));
 const collabPersistenceIndexedDbEntry = fileURLToPath(
   new URL("../../packages/collab/persistence/src/indexeddb.ts", import.meta.url),
@@ -74,7 +79,10 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: "@formula/extension-api", replacement: extensionApiEntry },
+      { find: "@formula/extension-marketplace", replacement: extensionMarketplaceEntry },
       { find: "@formula/collab-undo", replacement: collabUndoEntry },
+      { find: "@formula/collab-session", replacement: collabSessionEntry },
+      { find: "@formula/collab-versioning", replacement: collabVersioningEntry },
       // Workspace packages are linked via pnpm's node_modules symlinks. Some CI/dev environments
       // can run with stale node_modules (e.g. cached installs), which causes Vite to fail to
       // resolve new workspace dependencies. Alias the persistence entrypoints directly to keep
