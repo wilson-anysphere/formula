@@ -853,8 +853,26 @@ impl MetadataPart {
         if let Ok(parsed) = crate::rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map(xml)
         {
             if !parsed.is_empty() {
+                // Excel's `vm` appears in the wild as both 0-based and 1-based. To be tolerant,
+                // insert both the original key and its 0-based equivalent.
+                let mut vm_to_rich_value: HashMap<u32, u32> =
+                    HashMap::with_capacity(parsed.len().saturating_mul(2));
+
+                // The input map is a `HashMap`, so iteration order is non-deterministic. Insert
+                // canonical (1-based) keys first so they always take precedence over the fallback
+                // `vm-1` entries (otherwise `vm=2` could claim the `vm=1` slot before we insert the
+                // real mapping for `vm=1`).
+                for (&vm, &idx) in &parsed {
+                    vm_to_rich_value.insert(vm, idx);
+                }
+                for (&vm, &idx) in &parsed {
+                    if vm > 0 {
+                        vm_to_rich_value.entry(vm - 1).or_insert(idx);
+                    }
+                }
+
                 return Ok(Self {
-                    vm_to_rich_value: parsed,
+                    vm_to_rich_value,
                     ..Default::default()
                 });
             }
