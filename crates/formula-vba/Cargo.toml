@@ -10,7 +10,6 @@ sha1 = "0.10"
 sha2 = "0.10"
 thiserror = "1"
 x509-parser = "0.17"
-yasna = "0.5"
 
 [target.'cfg(all(not(target_arch = "wasm32"), windows))'.dependencies]
 # Use a vendored OpenSSL build on Windows/macOS to avoid requiring developers/CI to have

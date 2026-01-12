@@ -1,6 +1,11 @@
 use thiserror::Error;
 
-use crate::{project_digest::compute_vba_project_digest, project_digest::DigestAlg, OleError, OleFile};
+use crate::{
+    authenticode::extract_vba_signature_signed_digest,
+    project_digest::compute_vba_project_digest,
+    project_digest::DigestAlg,
+    OleError, OleFile,
+};
 
 /// Metadata extracted from the signer certificate embedded in a VBA digital signature.
 ///
@@ -222,7 +227,12 @@ fn verify_signature_binding(vba_project_bin: &[u8], signature: &[u8]) -> VbaSign
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let Some((alg, signed_digest)) = extract_signed_project_digest(signature) else {
+        let signed = match extract_vba_signature_signed_digest(signature) {
+            Ok(Some(v)) => v,
+            _ => return VbaSignatureBinding::Unknown,
+        };
+
+        let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) else {
             return VbaSignatureBinding::Unknown;
         };
 
@@ -230,7 +240,7 @@ fn verify_signature_binding(vba_project_bin: &[u8], signature: &[u8]) -> VbaSign
             return VbaSignatureBinding::Unknown;
         };
 
-        if computed == signed_digest {
+        if computed == signed.digest {
             VbaSignatureBinding::Bound
         } else {
             VbaSignatureBinding::NotBound
@@ -238,96 +248,12 @@ fn verify_signature_binding(vba_project_bin: &[u8], signature: &[u8]) -> VbaSign
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn extract_signed_project_digest(signature: &[u8]) -> Option<(DigestAlg, Vec<u8>)> {
-    use openssl::pkcs7::Pkcs7Flags;
-    use openssl::stack::Stack;
-    use openssl::x509::store::X509StoreBuilder;
-    use openssl::x509::X509;
-
-    let (pkcs7, pkcs7_offset) = parse_pkcs7_with_offset(signature)?;
-
-    // Create a store for signature verification (chain validation skipped below).
-    let store = X509StoreBuilder::new().ok()?.build();
-    let empty_certs = Stack::<X509>::new().ok()?;
-    let certs = pkcs7
-        .signed()
-        .and_then(|s| s.certificates())
-        .unwrap_or(&empty_certs);
-
-    // Prefer embedded content if present by asking OpenSSL to write the verified content.
-    let flags = Pkcs7Flags::NOVERIFY | Pkcs7Flags::BINARY;
-    let mut embedded = Vec::new();
-    let signed_content = if pkcs7
-        .verify(certs, &store, None, Some(&mut embedded), flags)
-        .is_ok()
-    {
-        embedded
-    } else if pkcs7_offset > 0 {
-        signature[..pkcs7_offset].to_vec()
-    } else {
-        return None;
-    };
-
-    parse_spc_indirect_data_content(&signed_content)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn parse_spc_indirect_data_content(content: &[u8]) -> Option<(DigestAlg, Vec<u8>)> {
-    // SpcIndirectDataContent ::= SEQUENCE {
-    //   data          ANY,
-    //   messageDigest DigestInfo
-    // }
-    //
-    // DigestInfo ::= SEQUENCE {
-    //   digestAlgorithm AlgorithmIdentifier,
-    //   digest          OCTET STRING
-    // }
-    //
-    // AlgorithmIdentifier ::= SEQUENCE {
-    //   algorithm   OBJECT IDENTIFIER,
-    //   parameters  ANY OPTIONAL
-    // }
-    let parsed = yasna::parse_der(content, |reader| {
-        reader.read_sequence(|reader| {
-            // Ignore `data`.
-            let _ = reader.next().read_der()?;
-            // DigestInfo
-            reader.next().read_sequence(|reader| {
-                // AlgorithmIdentifier
-                let oid = reader.next().read_sequence(|reader| {
-                    let oid = reader.next().read_oid()?;
-                    // Optional parameters, usually NULL.
-                    let _ = reader.read_optional(|reader| reader.read_der())?;
-                    Ok(oid)
-                })?;
-                let digest = reader.next().read_bytes()?;
-                Ok((oid, digest))
-            })
-        })
-    })
-    .ok()?;
-
-    let (oid, digest) = parsed;
-    let alg = digest_alg_from_oid(&oid)?;
-    Some((alg, digest))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn digest_alg_from_oid(oid: &yasna::models::ObjectIdentifier) -> Option<DigestAlg> {
-    // SHA-1: 1.3.14.3.2.26
-    if oid == &yasna::models::ObjectIdentifier::from_slice(&[1, 3, 14, 3, 2, 26]) {
-        return Some(DigestAlg::Sha1);
+fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
+    match oid {
+        "1.3.14.3.2.26" => Some(DigestAlg::Sha1),
+        "2.16.840.1.101.3.4.2.1" => Some(DigestAlg::Sha256),
+        _ => None,
     }
-
-    // SHA-256: 2.16.840.1.101.3.4.2.1
-    if oid == &yasna::models::ObjectIdentifier::from_slice(&[
-        2, 16, 840, 1, 101, 3, 4, 2, 1,
-    ]) {
-        return Some(DigestAlg::Sha256);
-    }
-
-    None
 }
 
 fn is_signature_component(component: &str) -> bool {
