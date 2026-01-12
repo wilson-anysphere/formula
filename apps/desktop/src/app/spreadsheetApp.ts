@@ -3468,12 +3468,21 @@ export class SpreadsheetApp {
     // Reuse a single coord object while scanning selection cells to avoid allocating
     // `{row,col}` objects for every visited coordinate.
     const coordScratch = { row: 0, col: 0 };
-    // In multi-sheet mode we evaluate formulas in-process (engine cache is disabled). Sharing a
-    // memo/stack across formula cells lets dependency formulas be reused across the selection
-    // summary calculation (rather than rebuilding the memo for every root cell).
+    // When the engine cache is disabled (multi-sheet) *or* when computed values are missing,
+    // we fall back to the in-process evaluator. Sharing a memo/stack across formula cells lets
+    // dependency formulas be reused across the selection summary calculation (rather than
+    // rebuilding the memo for every root cell).
     let formulaMemo: Map<string, Map<number, SpreadsheetValue>> | null = null;
     let formulaStack: Map<string, Set<number>> | null = null;
-    const inProcessEvalOptions = { useEngineCache: false } as const;
+    const evalOptions = { useEngineCache };
+    const engineSheetCache = useEngineCache ? this.getComputedValuesByCoordForSheet(sheetId) : null;
+    const getFormulaValue = (): SpreadsheetValue => {
+      if (!formulaMemo) {
+        formulaMemo = new Map();
+        formulaStack = new Map();
+      }
+      return this.computeCellValue(sheetId, coordScratch, formulaMemo, formulaStack!, evalOptions);
+    };
 
     if (!useSparseIteration) {
       const visited = ranges.length > 1 ? new Set<number>() : null;
@@ -3501,15 +3510,13 @@ export class SpreadsheetApp {
             // Sum/average operate on numeric values only (computed values for formulas).
             if (cell.formula != null) {
               selectionHasFormula = true;
-              let computed: SpreadsheetValue;
-              if (useEngineCache) {
-                computed = this.getCellComputedValue(coordScratch);
-              } else {
-                if (!formulaMemo) {
-                  formulaMemo = new Map();
-                  formulaStack = new Map();
-                }
-                computed = this.computeCellValue(sheetId, coordScratch, formulaMemo, formulaStack!, inProcessEvalOptions);
+              let computed: SpreadsheetValue | undefined;
+              if (engineSheetCache && coordScratch.col >= 0 && coordScratch.col < COMPUTED_COORD_COL_STRIDE && coordScratch.row >= 0) {
+                const key = coordScratch.row * COMPUTED_COORD_COL_STRIDE + coordScratch.col;
+                computed = engineSheetCache.get(key);
+              }
+              if (computed === undefined) {
+                computed = getFormulaValue();
               }
               if (typeof computed === "number" && Number.isFinite(computed)) {
                 numericCount += 1;
@@ -3538,15 +3545,13 @@ export class SpreadsheetApp {
           selectionHasFormula = true;
           coordScratch.row = row;
           coordScratch.col = col;
-          let computed: SpreadsheetValue;
-          if (useEngineCache) {
-            computed = this.getCellComputedValue(coordScratch);
-          } else {
-            if (!formulaMemo) {
-              formulaMemo = new Map();
-              formulaStack = new Map();
-            }
-            computed = this.computeCellValue(sheetId, coordScratch, formulaMemo, formulaStack!, inProcessEvalOptions);
+          let computed: SpreadsheetValue | undefined;
+          if (engineSheetCache && coordScratch.col >= 0 && coordScratch.col < COMPUTED_COORD_COL_STRIDE && coordScratch.row >= 0) {
+            const key = coordScratch.row * COMPUTED_COORD_COL_STRIDE + coordScratch.col;
+            computed = engineSheetCache.get(key);
+          }
+          if (computed === undefined) {
+            computed = getFormulaValue();
           }
           if (typeof computed === "number" && Number.isFinite(computed)) {
             numericCount += 1;
