@@ -240,4 +240,30 @@ describe("DocumentCellProvider (shared grid)", () => {
       { row: 0, col: 1 },
     ]);
   });
+
+  it("skips resolved format cache lookups for default style tuples (no per-cell key strings)", () => {
+    const sheetId = "sheet-1";
+    const doc = {
+      getCell: vi.fn(() => ({ value: "hello", formula: null, styleId: 0 })),
+      getCellFormatStyleIds: vi.fn(() => [0, 0, 0, 0, 0]),
+    };
+
+    const provider = new DocumentCellProvider({
+      document: doc as any,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+    });
+
+    const cacheGetSpy = vi.spyOn((provider as any).resolvedFormatCache, "get");
+
+    const cell = provider.getCell(1, 1);
+    expect(cell?.value).toBe("hello");
+    expect(doc.getCellFormatStyleIds).toHaveBeenCalledTimes(1);
+    expect(cacheGetSpy).not.toHaveBeenCalled();
+  });
 });

@@ -15,6 +15,10 @@ const SHEET_CACHE_MAX_SIZE = 50_000;
 // Excel stores alignment indent as an integer "level" (Increase Indent).
 // We approximate each indent level as an 8px text indent at zoom=1.
 const INDENT_STEP_PX = 8;
+const DEFAULT_RESOLVED_FORMAT: { style: CellStyle | undefined; numberFormat: string | null } = {
+  style: undefined,
+  numberFormat: null,
+};
 
 function isPlainObject(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -159,6 +163,10 @@ export class DocumentCellProvider implements CellProvider {
         const colStyleId = normalizeId(ids[2]);
         const cellStyleId = normalizeId(ids[3]);
         const rangeRunStyleId = normalizeId(ids[4]);
+
+        if (sheetDefaultStyleId === 0 && colStyleId === 0 && rowStyleId === 0 && rangeRunStyleId === 0 && cellStyleId === 0) {
+          return DEFAULT_RESOLVED_FORMAT;
+        }
 
         // Key order matches merge precedence `sheet < col < row < range-run < cell`.
         const key = `${sheetDefaultStyleId},${colStyleId},${rowStyleId},${rangeRunStyleId},${cellStyleId}`;
