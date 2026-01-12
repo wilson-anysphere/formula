@@ -176,7 +176,16 @@ fn coup_schedule_roundtrips_when_settlement_is_coupon_date() {
             for k in 1..=6 {
                 let months_back = k * months_per_period;
                 let settlement = format!("EDATE({maturity},-{months_back})");
-                let expected_ncd = format!("EDATE({settlement},{months_per_period})");
+                // When settlement is a coupon date constructed from the maturity anchor, the next
+                // coupon date should be the corresponding (k-1)-period offset from maturity.
+                //
+                // This avoids relying on `EDATE(settlement, +m)`, which is not always equivalent
+                // to `EDATE(maturity, -(k-1)*m)` due to end-of-month clamping.
+                let expected_ncd = if k == 1 {
+                    maturity.to_string()
+                } else {
+                    format!("EDATE({maturity},-{})", (k - 1) * months_per_period)
+                };
 
                 for &basis in &bases {
                     let pcd = eval_number(
