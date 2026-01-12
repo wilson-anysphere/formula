@@ -217,9 +217,58 @@ fn parse_cell_images_image_relationships(
         if !rel.type_uri.eq_ignore_ascii_case(IMAGE_REL_TYPE) {
             continue;
         }
-        let target_part = resolve_target(cell_images_part, &rel.target);
+        let mut target_part = resolve_target(cell_images_part, &rel.target);
+        // Some producers emit targets like `../media/image1.png` for workbook-level parts such as
+        // `xl/cellimages.xml`, which resolves to `media/image1.png` with strict URI resolution.
+        // In XLSX packages, worksheet media lives under `xl/media/*`, so normalize these to an
+        // `xl/`-prefixed path.
+        if target_part.starts_with("media/") {
+            target_part = format!("xl/{target_part}");
+        }
         out.insert(rel.id, target_part);
     }
 
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_cell_images_embeds_extracts_blip_embeds() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cx:cellImages xmlns:cx="http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages"
+               xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+               xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <cx:cellImage>
+    <xdr:pic>
+      <xdr:blipFill><a:blip r:embed="rId1"/></xdr:blipFill>
+    </xdr:pic>
+  </cx:cellImage>
+  <cx:cellImage>
+    <xdr:pic>
+      <xdr:blipFill><a:blip r:embed="rId2"/></xdr:blipFill>
+    </xdr:pic>
+  </cx:cellImage>
+</cx:cellImages>"#;
+
+        let embeds = parse_cell_images_embeds(xml).expect("parse embeds");
+        assert_eq!(embeds, vec!["rId1".to_string(), "rId2".to_string()]);
+    }
+
+    #[test]
+    fn parse_cell_images_image_relationships_normalizes_parent_media_targets() {
+        let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image2.png"/>
+</Relationships>"#;
+
+        let map =
+            parse_cell_images_image_relationships("xl/cellImages.xml", rels).expect("rels parse");
+        assert_eq!(map.get("rId1").map(String::as_str), Some("xl/media/image1.png"));
+        assert_eq!(map.get("rId2").map(String::as_str), Some("xl/media/image2.png"));
+    }
 }
