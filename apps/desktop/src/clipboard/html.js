@@ -404,9 +404,8 @@ export function serializeCellGridToHtml(grid) {
  * @returns {CellGrid | null}
  */
 export function parseHtmlToCellGrid(html) {
-  const normalized = normalizeClipboardHtml(html);
-  if (typeof DOMParser !== "undefined") return parseHtmlToCellGridDom(normalized);
-  return parseHtmlToCellGridFallback(normalized);
+  if (typeof DOMParser !== "undefined") return parseHtmlToCellGridDom(html);
+  return parseHtmlToCellGridFallback(html);
 }
 
 /**
@@ -415,6 +414,7 @@ export function parseHtmlToCellGrid(html) {
  * @returns {CellGrid | null}
  */
 function parseHtmlToCellGridDom(html) {
+  html = normalizeClipboardHtml(html);
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
   const table = doc.querySelector("table");
@@ -480,6 +480,7 @@ function parseHtmlToCellGridDom(html) {
  * @returns {CellGrid | null}
  */
 function parseHtmlToCellGridFallback(html) {
+  html = normalizeClipboardHtml(html);
   const tableMatch = /<table\b[\s\S]*?<\/table>/i.exec(html);
   if (!tableMatch) return null;
 
