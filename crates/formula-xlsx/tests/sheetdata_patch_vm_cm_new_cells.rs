@@ -1,6 +1,6 @@
 use std::io::{Cursor, Read, Write};
 
-use formula_model::{CellRef, CellValue};
+use formula_model::{CellRef, CellValue, ErrorValue};
 use formula_xlsx::load_from_bytes;
 use zip::{ZipArchive, ZipWriter};
 
@@ -61,7 +61,11 @@ fn sheetdata_patch_emits_vm_cm_for_new_cells_from_meta() -> Result<(), Box<dyn s
     doc.set_cell_value(
         sheet_id,
         cell_ref,
-        CellValue::String("MSFT".to_string()),
+        // Rich-data cells (images-in-cell, linked data types, etc.) are typically represented in
+        // sheet XML as an `#VALUE!` cached value placeholder plus a `vm="..."` pointer into
+        // `xl/metadata.xml`. The writer only emits `vm` metadata pointers for this placeholder
+        // error value.
+        CellValue::Error(ErrorValue::Value),
     );
     let meta = doc.meta.cell_meta.entry((sheet_id, cell_ref)).or_default();
     meta.vm = Some("1".to_string());
