@@ -695,8 +695,18 @@ def main() -> int:
                     tags_str = ",".join(str(t) for t in tags)
                 else:
                     tags_str = "<none>"
+                expected_display = m.get("expectedDisplayText")
+                if not isinstance(expected_display, str) or not expected_display:
+                    expected_display = m.get("expected")
+                actual_display = m.get("actualDisplayText")
+                if not isinstance(actual_display, str) or not actual_display:
+                    actual_display = m.get("actual")
                 lines.append(
-                    f"* `{m.get('caseId')}` `{m.get('reason')}` `tags={tags_str}` `{m.get('formula')}`"
+                    f"* `{m.get('caseId')}` `{m.get('reason')}` "
+                    f"`tags={tags_str}` "
+                    f"`expected={expected_display}` "
+                    f"`actual={actual_display}` "
+                    f"`{m.get('formula')}`"
                 )
             lines.append("")
 
