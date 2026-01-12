@@ -25,12 +25,12 @@ fn build_two_module_project(module_order: [&str; 2]) -> Vec<u8> {
     let module_a_container = compress_container(module_a_code);
     let module_b_container = compress_container(module_b_code);
 
-    // Build a minimal, spec-compliant decompressed `VBA/dir` stream that lists the modules in the
+    // Build a minimal decompressed `VBA/dir` stream that lists the modules in the
     // desired order. The critical part for this test is the order of module records:
     // MODULENAME (0x0019) starts each module record group.
     let dir_decompressed = {
         let mut out = Vec::new();
-        // PROJECTNAME (required by some producers; harmless here).
+        // PROJECTNAME (harmless here).
         push_record(&mut out, 0x0004, b"VBAProject");
 
         for name in module_order {
@@ -54,14 +54,14 @@ fn build_two_module_project(module_order: [&str; 2]) -> Vec<u8> {
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
-
-    // Minimal OLE layout: `VBA/dir` + the module streams. Create the module streams in alphabetical
-    // order (A then B) to ensure the tested ordering comes from `VBA/dir`, not OLE insertion order.
     ole.create_storage("VBA").expect("VBA storage");
     {
         let mut s = ole.create_stream("VBA/dir").expect("dir stream");
         s.write_all(&dir_container).expect("write dir");
     }
+
+    // Minimal OLE layout: `VBA/dir` + the module streams. Create the module streams in alphabetical
+    // order (A then B) to ensure the tested ordering comes from `VBA/dir`, not OLE insertion order.
     {
         let mut s = ole.create_stream("VBA/ModuleA").expect("module A stream");
         s.write_all(&module_a_container).expect("write module A");
@@ -108,5 +108,129 @@ fn content_normalized_data_uses_module_record_order_from_dir_stream() {
         pos_a2 < pos_b2,
         "expected ModuleA bytes to appear before ModuleB bytes when dir order is A then B"
     );
+}
+
+#[test]
+fn content_normalized_data_reference_records_registered_and_project() {
+    // Build a decompressed `VBA/dir` stream that contains two REFERENCE records:
+    // - 0x000D (REFERENCEREGISTERED)
+    // - 0x000E (REFERENCEPROJECT)
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // 0x000D (REFERENCEREGISTERED): use a libid that begins with '{' (0x7B).
+        push_record(&mut out, 0x000D, b"{REG}");
+
+        // 0x000E (REFERENCEPROJECT): two u32-len-prefixed strings + major(u32) + minor(u16).
+        //
+        // Choose version numbers so the little-endian representation contains a NUL byte early:
+        // major=1 => 0x01 0x00 0x00 0x00
+        // The MS-OVBA pseudocode copies bytes from a TempBuffer until the first NUL byte, so this
+        // should stop immediately after copying the low byte (0x01) of `major`.
+        let libid_absolute = b"ProjLib";
+        let libid_relative = b"";
+        let major: u32 = 1;
+        let minor: u16 = 0;
+
+        let mut reference_project = Vec::new();
+        reference_project.extend_from_slice(&(libid_absolute.len() as u32).to_le_bytes());
+        reference_project.extend_from_slice(libid_absolute);
+        reference_project.extend_from_slice(&(libid_relative.len() as u32).to_le_bytes());
+        reference_project.extend_from_slice(libid_relative);
+        reference_project.extend_from_slice(&major.to_le_bytes());
+        reference_project.extend_from_slice(&minor.to_le_bytes());
+        push_record(&mut out, 0x000E, &reference_project);
+
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+
+    // 0x000D case: ensure the libid bytes are included (starts with '{' = 0x7B).
+    assert!(
+        normalized.contains(&0x7B),
+        "expected ContentNormalizedData to contain 0x7B ('{{') from REFERENCEREGISTERED"
+    );
+
+    // 0x000E case: manually-constructed expected byte vector based on MS-OVBA pseudocode:
+    // TempBuffer = LibidAbsolute || LibidRelative || MajorVersion(u32le) || MinorVersion(u16le)
+    // then copy bytes until the first 0x00 byte.
+    //
+    // With major=1 (01 00 00 00) and minor=0 (00 00), this yields:
+    // LibidAbsolute + 0x01
+    let expected_project = b"ProjLib\x01".to_vec();
+    let expected_full = [b"{REG}".as_slice(), expected_project.as_slice()].concat();
+
+    assert_eq!(normalized, expected_full);
+}
+
+#[test]
+fn content_normalized_data_module_newlines_and_attribute_stripping() {
+    // Module source includes:
+    // - Attribute lines (mixed case) that must be stripped (case-insensitive match)
+    // - CRLF, CR-only, and lone-LF line endings
+    // - A non-attribute line containing the word "Attribute" (must be preserved)
+    let module_code = concat!(
+        "aTtRiBuTe VB_Name = \"Module1\"\r\n",
+        "Option Explicit\r",
+        "Print \"Attribute\"\n",
+        "AtTrIbUtE VB_Base = \"0{00000000-0000-0000-0000-000000000000}\"\r\n",
+        "Sub Foo()\r\n",
+        "End Sub\r\n",
+    );
+
+    let module_container = compress_container(module_code.as_bytes());
+
+    // Minimal `dir` stream describing a single module at offset 0.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0019, b"Module1");
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        // MODULETEXTOFFSET is 0, so the stream starts with a compressed container.
+        s.write_all(&module_container).expect("write module");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+
+    // Only the non-Attribute lines should remain, each terminated with CRLF.
+    let expected = concat!(
+        "Option Explicit\r\n",
+        "Print \"Attribute\"\r\n",
+        "Sub Foo()\r\n",
+        "End Sub\r\n",
+    )
+    .as_bytes()
+    .to_vec();
+
+    assert_eq!(normalized, expected);
 }
 
