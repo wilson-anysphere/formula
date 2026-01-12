@@ -223,6 +223,17 @@ python tools/excel-oracle/pin_dataset.py \
   --versioned-dir tests/compatibility/excel-oracle/datasets/versioned
 ```
 
+### Patch the pinned dataset with real Excel results (subset, merge-friendly)
+
+If you only need real Excel results for a targeted slice (e.g. odd-coupon bonds), prefer patching
+the existing pinned dataset instead of regenerating the full corpus. This overwrites only the
+matching `caseId`s and keeps diffs smaller / merges friendlier:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset-with-excel.ps1 `
+  -SubsetCasesPath tools/excel-oracle/odd_coupon_boundary_cases.json
+```
+
 To validate the dataset and preview the output paths without writing files, use:
 
 ```bash
