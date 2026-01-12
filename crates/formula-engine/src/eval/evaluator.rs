@@ -103,6 +103,12 @@ impl DependencyTrace {
 
 pub trait ValueResolver {
     fn sheet_exists(&self, sheet_id: usize) -> bool;
+    /// Return the number of worksheets available in the workbook.
+    ///
+    /// This is used by worksheet information functions like `INFO("numfile")`.
+    fn sheet_count(&self) -> usize {
+        1
+    }
     /// Returns the current (row_count, col_count) dimensions for a sheet.
     ///
     /// Coordinates are in-bounds iff:
@@ -1556,6 +1562,10 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
     fn sheet_name(&self, sheet_id: usize) -> Option<&str> {
         self.resolver.sheet_name(sheet_id)
+    }
+
+    fn sheet_count(&self) -> usize {
+        self.resolver.sheet_count()
     }
 
     fn get_cell_formula(&self, sheet_id: &FnSheetId, addr: CellAddr) -> Option<&str> {

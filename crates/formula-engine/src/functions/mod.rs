@@ -177,6 +177,12 @@ pub trait FunctionContext {
     fn sheet_name(&self, _sheet_id: usize) -> Option<&str> {
         None
     }
+    /// Return the number of worksheets in the workbook.
+    ///
+    /// This is used by worksheet information functions like `INFO("numfile")`.
+    fn sheet_count(&self) -> usize {
+        1
+    }
     /// Convenience wrapper around [`FunctionContext::sheet_name`] for the current sheet.
     fn current_sheet_name(&self) -> Option<&str> {
         self.sheet_name(self.current_sheet_id())

@@ -33,7 +33,7 @@ fn parse_info_type(key: &str) -> Option<InfoType> {
 }
 
 /// Excel INFO(type_text) worksheet information function.
-pub fn info(_ctx: &dyn FunctionContext, type_text: &str) -> Value {
+pub fn info(ctx: &dyn FunctionContext, type_text: &str) -> Value {
     let Some(info_type) = parse_info_type(type_text) else {
         // Unrecognized type_text.
         return Value::Error(ErrorKind::Value);
@@ -43,9 +43,9 @@ pub fn info(_ctx: &dyn FunctionContext, type_text: &str) -> Value {
         // Deterministic & commonly used values.
         InfoType::Recalc => Value::Text("Automatic".to_string()),
         InfoType::System => Value::Text("pcdos".to_string()),
+        InfoType::NumFile => Value::Number(ctx.sheet_count() as f64),
         // Known Excel keys that this engine does not currently expose.
         InfoType::Directory
-        | InfoType::NumFile
         | InfoType::Origin
         | InfoType::OSVersion
         | InfoType::Release

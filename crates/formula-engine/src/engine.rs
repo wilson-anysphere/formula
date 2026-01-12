@@ -5396,6 +5396,10 @@ impl crate::eval::ValueResolver for Snapshot {
         self.sheets.contains(&sheet_id)
     }
 
+    fn sheet_count(&self) -> usize {
+        self.sheet_names_by_id.len()
+    }
+
     fn sheet_name(&self, sheet_id: usize) -> Option<&str> {
         self.sheet_names_by_id.get(sheet_id).map(|s| s.as_str())
     }

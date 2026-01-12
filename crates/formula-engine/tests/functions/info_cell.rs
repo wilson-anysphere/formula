@@ -57,6 +57,21 @@ fn info_recalc_and_unknown_keys() {
 }
 
 #[test]
+fn info_numfile_counts_sheets() {
+    use formula_engine::Engine;
+
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 1.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=INFO(\"numfile\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_number(&engine.get_cell_value("Sheet1", "B1"), 2.0);
+}
+
+#[test]
 fn cell_errors_for_unknown_info_types() {
     let mut sheet = TestSheet::new();
 

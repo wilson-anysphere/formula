@@ -288,9 +288,7 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
             let display_value_type = display_value.get("type")?.as_str()?;
             match display_value_type {
                 "number" => Some(CellValue::Number(display_value.get("value")?.as_f64()?)),
-                "string" => Some(CellValue::Text(
-                    display_value.get("value")?.as_str()?.to_string(),
-                )),
+                "string" => Some(CellValue::Text(display_value.get("value")?.as_str()?.to_string())),
                 "boolean" => Some(CellValue::Bool(display_value.get("value")?.as_bool()?)),
                 "error" => {
                     let err_str = display_value.get("value")?.as_str()?;
