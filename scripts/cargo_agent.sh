@@ -117,22 +117,6 @@ limit_as="${FORMULA_CARGO_LIMIT_AS:-14G}"
 orig_rayon_num_threads="${RAYON_NUM_THREADS:-}"
 orig_formula_rayon_num_threads="${FORMULA_RAYON_NUM_THREADS:-}"
 
-# lld can also spawn a large internal thread pool during linking. On heavily loaded multi-agent
-# hosts this may hit OS thread limits and fail with errors like:
-#   "std::system_error: Resource temporarily unavailable"
-#
-# Keep lld's thread count proportional to our chosen Cargo job parallelism.
-lld_threads="${FORMULA_LLD_THREADS:-${jobs}}"
-if [[ "${lld_threads}" =~ ^[0-9]+$ ]] && [[ "${lld_threads}" -ge 1 ]]; then
-  if [[ "${RUSTFLAGS:-}" != *"--threads="* ]]; then
-    if [[ -z "${RUSTFLAGS:-}" ]]; then
-      export RUSTFLAGS="-C link-arg=-Wl,--threads=${lld_threads}"
-    else
-      export RUSTFLAGS="${RUSTFLAGS} -C link-arg=-Wl,--threads=${lld_threads}"
-    fi
-  fi
-fi
-
 # Cargo also supports configuring the default parallelism via `CARGO_BUILD_JOBS`.
 # Export it so commands that *don't* accept `-j` (e.g. `cargo fmt`, `cargo clean`)
 # still inherit our safe default.
