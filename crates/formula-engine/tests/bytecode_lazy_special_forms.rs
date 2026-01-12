@@ -49,6 +49,27 @@ fn bytecode_choose_is_lazy() {
 }
 
 #[test]
+fn bytecode_eval_ast_choose_is_lazy() {
+    // `bytecode::eval_ast` should match VM semantics and avoid evaluating unused CHOOSE branches.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=CHOOSE(2, A2, 7)", origin).expect("parse");
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let value = bytecode::eval_ast(
+        &expr,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(7.0));
+}
+
+#[test]
 fn bytecode_ifs_is_lazy() {
     // IFS(TRUE, 7, <unused_cond>, 8) must not evaluate the second condition/value pair.
     let origin = CellCoord::new(0, 0);
