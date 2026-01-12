@@ -5087,14 +5087,52 @@ export class CanvasGridRenderer {
         const lastRow = endRow - 1;
         const lastCol = endCol - 1;
 
-        for (let row = startRow; row < endRow; row++) {
-          addMerge(provider.getMergedRangeAt(row, startCol));
-          addMerge(provider.getMergedRangeAt(row, lastCol));
-        }
-        for (let col = startCol; col < endCol; col++) {
-          addMerge(provider.getMergedRangeAt(startRow, col));
-          addMerge(provider.getMergedRangeAt(lastRow, col));
-        }
+        // Scan the range perimeter (not the interior), but avoid O(range height/width) work
+        // for extremely tall/wide merged ranges by skipping over spans when we detect a merge.
+        //
+        // We only need to consider merges that *cross* the current range boundary (and therefore
+        // touch its perimeter). Merges fully contained in `expanded` do not affect the resulting
+        // expanded bounds.
+        const normalizeMerge = (candidate: CellRange | null): CellRange | null => {
+          const normalized = candidate ? this.normalizeSelectionRange(candidate) : null;
+          if (!normalized) return null;
+          if (normalized.endRow - normalized.startRow <= 1 && normalized.endCol - normalized.startCol <= 1) return null;
+          return normalized;
+        };
+
+        const scanVerticalEdge = (col: number) => {
+          for (let row = startRow; row < endRow; ) {
+            const normalized = normalizeMerge(provider.getMergedRangeAt(row, col));
+            if (normalized) {
+              addMerge(normalized);
+              // Jump to the first row after this merged region.
+              row = Math.max(row + 1, normalized.endRow);
+              continue;
+            }
+            row++;
+          }
+        };
+
+        const scanHorizontalEdge = (row: number) => {
+          for (let col = startCol; col < endCol; ) {
+            const normalized = normalizeMerge(provider.getMergedRangeAt(row, col));
+            if (normalized) {
+              addMerge(normalized);
+              // Jump to the first column after this merged region.
+              col = Math.max(col + 1, normalized.endCol);
+              continue;
+            }
+            col++;
+          }
+        };
+
+        // Left and right edges.
+        scanVerticalEdge(startCol);
+        if (lastCol !== startCol) scanVerticalEdge(lastCol);
+
+        // Top and bottom edges.
+        scanHorizontalEdge(startRow);
+        if (lastRow !== startRow) scanHorizontalEdge(lastRow);
       }
 
       for (const merge of merges.values()) {
