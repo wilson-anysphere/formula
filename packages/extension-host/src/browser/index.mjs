@@ -1621,13 +1621,30 @@ class BrowserExtensionHost {
         const sheetId = await this._resolveActiveSheetId();
         const result = await this._spreadsheet.getSelection();
         if (result && typeof result === "object") {
-          this._taintExtensionRange(extension, {
+          const direct = normalizeTaintedRange({
             sheetId,
             startRow: result.startRow,
             startCol: result.startCol,
             endRow: result.endRow,
             endCol: result.endCol
           });
+          if (direct) {
+            this._taintExtensionRange(extension, direct);
+          } else {
+            // Best-effort: if the host returns a canonical A1 `address` but omits numeric coords,
+            // fall back to parsing it so clipboard DLP still reflects what the extension read.
+            try {
+              const addr = typeof result.address === "string" ? result.address : null;
+              if (addr) {
+                const { sheetName: addrSheetName, ref: addrRef } = this._splitSheetQualifier(addr);
+                const parsed = this._parseA1RangeRef(addrRef);
+                const rangeSheetId = addrSheetName != null ? await this._resolveSheetId(addrSheetName) : sheetId;
+                this._taintExtensionRange(extension, { sheetId: rangeSheetId, ...parsed });
+              }
+            } catch {
+              // ignore
+            }
+          }
         }
         return result;
       }

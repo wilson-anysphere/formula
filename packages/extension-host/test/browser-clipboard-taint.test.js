@@ -187,6 +187,58 @@ test("BrowserExtensionHost: cells.getRange taints using result.address when ref 
   ]);
 });
 
+test("BrowserExtensionHost: cells.getSelection taints using result.address when coords are missing", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      getActiveSheet() {
+        return { id: "sheet1", name: "Sheet1" };
+      },
+      async getSelection() {
+        return { address: "A1:B2", values: [[1, 2], [3, 4]] };
+      },
+      async getCell() {
+        return null;
+      },
+      async setCell() {},
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.selection-address-fallback";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "selection-address-fallback",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["cells.read"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+
+  await host._executeApi("cells", "getSelection", [], extension);
+
+  assert.deepEqual(sortRanges(extension.taintedRanges), [
+    { sheetId: "sheet1", startRow: 0, startCol: 0, endRow: 1, endCol: 1 },
+  ]);
+});
+
 test("BrowserExtensionHost: records taint for selectionChanged events (and passes it to clipboard guard)", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
