@@ -152,7 +152,7 @@ pub(crate) fn parse_biff_defined_names(
     };
 
     for raw in raw_names {
-        let decoded = rgce::decode_biff8_rgce(&raw.rgce, &ctx);
+        let decoded = rgce::decode_defined_name_rgce_with_context(&raw.rgce, codepage, &ctx);
         for warning in decoded.warnings {
             out.warnings.push(format!("defined name `{}`: {warning}", raw.name));
         }

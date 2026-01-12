@@ -68,6 +68,51 @@ impl CellCoord {
     }
 }
 
+/// Legacy/compat alias used by earlier BIFF defined-name decoding codepaths.
+///
+/// `DecodedRgce` intentionally matches `DecodeRgceResult` so callers can access `.text` and
+/// `.warnings` directly.
+pub(crate) type DecodedRgce = DecodeRgceResult;
+
+/// Decode a BIFF8 `rgce` token stream used in a defined-name (`NAME`) record.
+///
+/// This is a convenience wrapper around [`decode_biff8_rgce`] that builds an empty decode context.
+/// The returned text does **not** include a leading `=`.
+#[allow(dead_code)]
+pub(crate) fn decode_defined_name_rgce(rgce: &[u8], codepage: u16) -> DecodedRgce {
+    let sheet_names: &[String] = &[];
+    let externsheet: &[ExternSheetRef] = &[];
+    let defined_names: &[DefinedNameMeta] = &[];
+    let ctx = RgceDecodeContext {
+        codepage,
+        sheet_names,
+        externsheet,
+        defined_names,
+    };
+    decode_defined_name_rgce_with_context(rgce, codepage, &ctx)
+}
+
+/// Decode a BIFF8 `rgce` token stream used in a defined-name (`NAME`) record using workbook
+/// context (sheet names, `EXTERNSHEET`, and defined-name metadata).
+///
+/// This is a thin wrapper around [`decode_biff8_rgce`]. The `codepage` parameter overrides any
+/// `ctx.codepage` value so callers can pass a shared context and vary string decoding if needed.
+///
+/// The returned text does **not** include a leading `=`.
+pub(crate) fn decode_defined_name_rgce_with_context(
+    rgce: &[u8],
+    codepage: u16,
+    ctx: &RgceDecodeContext<'_>,
+) -> DecodedRgce {
+    let ctx = RgceDecodeContext {
+        codepage,
+        sheet_names: ctx.sheet_names,
+        externsheet: ctx.externsheet,
+        defined_names: ctx.defined_names,
+    };
+    decode_biff8_rgce(rgce, &ctx)
+}
+
 #[derive(Clone, Debug)]
 struct ExprFragment {
     text: String,
