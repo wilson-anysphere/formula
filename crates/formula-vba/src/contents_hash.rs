@@ -134,6 +134,35 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
     Ok(out)
 }
 
+/// Compute the MS-OVBA §2.4.2.3 **Content Hash** (v1) for a VBA project.
+///
+/// Per MS-OSHARED §4.3, the digest bytes used for VBA signature binding are **MD5 (16 bytes)** even
+/// when the PKCS#7/CMS signature uses SHA-1/SHA-256 and even when the Authenticode `DigestInfo`
+/// algorithm OID indicates SHA-256.
+pub fn content_hash_md5(vba_project_bin: &[u8]) -> Result<[u8; 16], ParseError> {
+    let normalized = content_normalized_data(vba_project_bin)?;
+    Ok(Md5::digest(&normalized).into())
+}
+
+/// Compute the MS-OVBA §2.4.2.4 **Agile Content Hash** (v2) for a VBA project, if possible.
+///
+/// The Agile hash extends the legacy Content Hash by incorporating `FormsNormalizedData`
+/// (designer/UserForm storages).
+///
+/// Returns `Ok(None)` when `FormsNormalizedData` cannot be computed (missing/unparseable data).
+pub fn agile_content_hash_md5(vba_project_bin: &[u8]) -> Result<Option<[u8; 16]>, ParseError> {
+    let content = content_normalized_data(vba_project_bin)?;
+    let forms = match crate::forms_normalized_data(vba_project_bin) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+
+    let mut h = Md5::new();
+    h.update(&content);
+    h.update(&forms);
+    Ok(Some(h.finalize().into()))
+}
+
 fn detect_project_codepage(project_stream_bytes: &[u8]) -> Option<&'static Encoding> {
     // The `PROJECT` stream is plain text; we can find the codepage by scanning
     // the raw bytes for the ASCII `CodePage=` line.

@@ -1,7 +1,10 @@
 use std::io::{Cursor, Write};
 
 use encoding_rs::{WINDOWS_1251, WINDOWS_1252};
-use formula_vba::{compress_container, content_normalized_data};
+use formula_vba::{
+    agile_content_hash_md5, compress_container, content_hash_md5, content_normalized_data,
+};
+use md5::{Digest as _, Md5};
 
 fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
     out.extend_from_slice(&id.to_le_bytes());
@@ -373,4 +376,59 @@ fn content_normalized_data_finds_module_source_without_text_offset_using_signatu
 
     let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
     assert_eq!(normalized, module_code.as_bytes());
+}
+
+#[test]
+fn content_hash_md5_matches_md5_of_content_normalized_data() {
+    let vba_bin = build_two_module_project(["ModuleA", "ModuleB"]);
+    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+    let expected: [u8; 16] = Md5::digest(&normalized).into();
+
+    let got = content_hash_md5(&vba_bin).expect("Content Hash (MD5)");
+    assert_eq!(got, expected);
+}
+
+#[test]
+fn agile_content_hash_md5_matches_content_hash_when_no_designers_present() {
+    // Build a minimal project that includes a PROJECT stream (required for FormsNormalizedData) but
+    // no `BaseClass=` lines, so `FormsNormalizedData` is the empty byte sequence.
+    let module_code = "Option Explicit\r\n";
+    let module_container = compress_container(module_code.as_bytes());
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0019, b"Module1");
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"Name=\"VBAProject\"\r\nModule=Module1\r\n")
+            .expect("write PROJECT");
+    }
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let content_hash = content_hash_md5(&vba_bin).expect("Content Hash");
+    let agile_hash = agile_content_hash_md5(&vba_bin)
+        .expect("Agile Content Hash computation")
+        .expect("FormsNormalizedData should be available");
+    assert_eq!(agile_hash, content_hash);
 }

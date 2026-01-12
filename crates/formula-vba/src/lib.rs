@@ -22,7 +22,8 @@ pub use authenticode::{
 };
 pub use compression::{compress_container, decompress_container, CompressionError};
 pub use contents_hash::{
-    content_normalized_data, contents_hash_v3, project_normalized_data_v3, v3_content_normalized_data,
+    agile_content_hash_md5, content_hash_md5, content_normalized_data, contents_hash_v3,
+    project_normalized_data_v3, v3_content_normalized_data,
 };
 pub use dir::{DirParseError, DirStream, ModuleRecord, ModuleType};
 pub use normalized_data::forms_normalized_data;
