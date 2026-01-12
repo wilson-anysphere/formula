@@ -179,9 +179,15 @@ fn coerce_value_to_number(value: &Value) -> Option<f64> {
         Value::Text(s) => s.trim().parse::<f64>().ok(),
         // Solver only supports numeric values (variables/constraints/objectives are `f64`).
         //
-        // Any non-scalar / rich values (e.g. Entity/Record) should degrade safely to "not a
-        // number" rather than crashing or panicking.
-        _ => None,
+        // For rich scalar values (e.g. Entity/Record) we follow the same behavior as text:
+        // attempt to parse the *display string* as a number. If the display string isn't a
+        // valid number, treat the value as non-numeric.
+        //
+        // NOTE: Arrays are explicitly treated as non-numeric even though their `Display`
+        // implementation shows the top-left element. Solver decision variables must be
+        // scalar cells.
+        Value::Array(_) => None,
+        other => other.to_string().trim().parse::<f64>().ok(),
     }
 }
 
