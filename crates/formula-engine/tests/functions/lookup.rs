@@ -235,6 +235,14 @@ fn xmatch_approximate_modes_handle_duplicates_like_sorted_insertion_points() {
     assert_eq!(sheet.eval("=XMATCH(2.5, A1:A5, -1)"), Value::Number(4.0));
     assert_eq!(sheet.eval("=XMATCH(2.5, A1:A5, -1, 2)"), Value::Number(4.0));
 
+    // Exact match should follow the same insertion-point semantics for duplicates:
+    // - match_mode=-1 chooses the last occurrence (after duplicates)
+    // - match_mode=1 chooses the first occurrence (before duplicates)
+    assert_eq!(sheet.eval("=XMATCH(2, A1:A5, -1)"), Value::Number(4.0));
+    assert_eq!(sheet.eval("=XMATCH(2, A1:A5, -1, 2)"), Value::Number(4.0));
+    assert_eq!(sheet.eval("=XMATCH(2, A1:A5, 1)"), Value::Number(2.0));
+    assert_eq!(sheet.eval("=XMATCH(2, A1:A5, 1, 2)"), Value::Number(2.0));
+
     // Next larger: insertion point for 1.5 is before the first 2.
     assert_eq!(sheet.eval("=XMATCH(1.5, A1:A5, 1)"), Value::Number(2.0));
     assert_eq!(sheet.eval("=XMATCH(1.5, A1:A5, 1, 2)"), Value::Number(2.0));

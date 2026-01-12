@@ -31,6 +31,14 @@ fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
     }
 }
 
+fn lookup_cmp_with_equality(a: &Value, b: &Value) -> Ordering {
+    if values_equal_for_lookup(a, b) {
+        Ordering::Equal
+    } else {
+        lookup_cmp(a, b)
+    }
+}
+
 fn cmp_ascii_case_insensitive(a: &str, b: &str) -> Ordering {
     let mut a_iter = a.as_bytes().iter();
     let mut b_iter = b.as_bytes().iter();
@@ -282,16 +290,13 @@ fn xmatch_linear(
         MatchMode::ExactOrNextSmaller => {
             let mut best: Option<usize> = None;
             for (idx, candidate) in iter {
-                if values_equal_for_lookup(lookup_value, candidate) {
-                    return Ok(idx);
-                }
-                let ord = lookup_cmp(candidate, lookup_value);
+                let ord = lookup_cmp_with_equality(candidate, lookup_value);
                 if ord == Ordering::Less || ord == Ordering::Equal {
                     best = match best {
                         None => Some(idx),
                         Some(best_idx) => {
                             let best_val = &lookup_array[best_idx];
-                            match lookup_cmp(candidate, best_val) {
+                            match lookup_cmp_with_equality(candidate, best_val) {
                                 Ordering::Greater => Some(idx),
                                 Ordering::Equal => {
                                     // For "next smaller", choose the last occurrence of the winning
@@ -309,16 +314,13 @@ fn xmatch_linear(
         MatchMode::ExactOrNextLarger => {
             let mut best: Option<usize> = None;
             for (idx, candidate) in iter {
-                if values_equal_for_lookup(lookup_value, candidate) {
-                    return Ok(idx);
-                }
-                let ord = lookup_cmp(candidate, lookup_value);
+                let ord = lookup_cmp_with_equality(candidate, lookup_value);
                 if ord == Ordering::Greater || ord == Ordering::Equal {
                     best = match best {
                         None => Some(idx),
                         Some(best_idx) => {
                             let best_val = &lookup_array[best_idx];
-                            match lookup_cmp(candidate, best_val) {
+                            match lookup_cmp_with_equality(candidate, best_val) {
                                 Ordering::Less => Some(idx),
                                 Ordering::Equal => {
                                     // For "next larger", choose the first occurrence of the winning
@@ -385,14 +387,11 @@ fn xmatch_linear_accessor(
             let mut best: Option<(usize, Value)> = None;
             for idx in iter {
                 let candidate = value_at(idx);
-                if values_equal_for_lookup(lookup_value, &candidate) {
-                    return Ok(idx);
-                }
-                let ord = lookup_cmp(&candidate, lookup_value);
+                let ord = lookup_cmp_with_equality(&candidate, lookup_value);
                 if ord == Ordering::Less || ord == Ordering::Equal {
                     best = match best {
                         None => Some((idx, candidate)),
-                        Some((best_idx, best_val)) => match lookup_cmp(&candidate, &best_val) {
+                        Some((best_idx, best_val)) => match lookup_cmp_with_equality(&candidate, &best_val) {
                             Ordering::Greater => Some((idx, candidate)),
                             Ordering::Equal => {
                                 if idx > best_idx {
@@ -412,14 +411,11 @@ fn xmatch_linear_accessor(
             let mut best: Option<(usize, Value)> = None;
             for idx in iter {
                 let candidate = value_at(idx);
-                if values_equal_for_lookup(lookup_value, &candidate) {
-                    return Ok(idx);
-                }
-                let ord = lookup_cmp(&candidate, lookup_value);
+                let ord = lookup_cmp_with_equality(&candidate, lookup_value);
                 if ord == Ordering::Greater || ord == Ordering::Equal {
                     best = match best {
                         None => Some((idx, candidate)),
-                        Some((best_idx, best_val)) => match lookup_cmp(&candidate, &best_val) {
+                        Some((best_idx, best_val)) => match lookup_cmp_with_equality(&candidate, &best_val) {
                             Ordering::Less => Some((idx, candidate)),
                             Ordering::Equal => {
                                 if idx < best_idx {
@@ -488,9 +484,6 @@ fn xmatch_binary(
             Err(ErrorKind::NA)
         }
         MatchMode::ExactOrNextSmaller => {
-            if lb < lookup_array.len() && values_equal_for_lookup(lookup_value, &lookup_array[lb]) {
-                return Ok(lb);
-            }
             let ub = upper_bound_by(lookup_array, lookup_value, cmp);
             if ub == 0 {
                 return Err(ErrorKind::NA);
@@ -594,13 +587,6 @@ fn xmatch_binary_accessor(
             Err(ErrorKind::NA)
         }
         MatchMode::ExactOrNextSmaller => {
-            if lb < len {
-                let candidate = value_at(lb);
-                if values_equal_for_lookup(lookup_value, &candidate) {
-                    return Ok(lb);
-                }
-            }
-
             let ub = upper_bound_by_accessor(len, lookup_value, cmp, value_at);
             if ub == 0 {
                 return Err(ErrorKind::NA);
