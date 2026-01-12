@@ -10,6 +10,16 @@ function ensureSingleCell(range) {
   }
 }
 
+function normalizeSheetNameForCaseInsensitiveCompare(name) {
+  // Excel compares sheet names case-insensitively with Unicode NFKC normalization.
+  // Match the semantics used by the desktop sheet store / workbook backend.
+  try {
+    return String(name ?? "").normalize("NFKC").toUpperCase();
+  } catch {
+    return String(name ?? "").toUpperCase();
+  }
+}
+
 /**
  * Adapter that exposes an `apps/desktop` `DocumentController` as the RPC surface
  * expected by the Python `formula` API.
@@ -24,8 +34,9 @@ export class DocumentControllerBridge {
    */
   constructor(doc, options = {}) {
     this.doc = doc;
-    this.activeSheetId = options.activeSheetId ?? "Sheet1";
-    this.sheetIds = new Set([this.activeSheetId]);
+    const initialSheetIds = typeof doc?.getSheetIds === "function" ? doc.getSheetIds() : [];
+    this.activeSheetId = options.activeSheetId ?? initialSheetIds[0] ?? "Sheet1";
+    this.sheetIds = new Set(initialSheetIds.length > 0 ? initialSheetIds : [this.activeSheetId]);
     this.selection = {
       sheet_id: this.activeSheetId,
       start_row: 0,
@@ -40,30 +51,93 @@ export class DocumentControllerBridge {
   }
 
   get_sheet_id({ name }) {
-    return this.sheetIds.has(name) ? name : null;
+    const desired = normalizeSheetNameForCaseInsensitiveCompare(name);
+    const docIds = typeof this.doc?.getSheetIds === "function" ? this.doc.getSheetIds() : null;
+    const ids = docIds && docIds.length > 0 ? docIds : Array.from(this.sheetIds);
+
+    // Back-compat: some callers may still pass a sheet id directly.
+    if (ids.includes(name)) return name;
+
+    for (const sheetId of ids) {
+      const meta = typeof this.doc?.getSheetMeta === "function" ? this.doc.getSheetMeta(sheetId) : null;
+      const sheetName = meta?.name ?? sheetId;
+      if (normalizeSheetNameForCaseInsensitiveCompare(sheetName) === desired) return sheetId;
+    }
+    return null;
   }
 
   create_sheet({ name, index }) {
-    const ordered = Array.from(this.sheetIds);
+    if (typeof this.doc?.addSheet !== "function") {
+      // Legacy fallback: treat sheet id and name as the same string.
+      const ordered = Array.from(this.sheetIds);
 
-    let insertIndex;
-    if (typeof index === "number" && Number.isInteger(index) && index >= 0) {
-      insertIndex = Math.min(index, ordered.length);
-    } else {
-      const activeIdx = ordered.indexOf(this.activeSheetId);
-      insertIndex = activeIdx >= 0 ? activeIdx + 1 : ordered.length;
+      let insertIndex;
+      if (typeof index === "number" && Number.isInteger(index) && index >= 0) {
+        insertIndex = Math.min(index, ordered.length);
+      } else {
+        const activeIdx = ordered.indexOf(this.activeSheetId);
+        insertIndex = activeIdx >= 0 ? activeIdx + 1 : ordered.length;
+      }
+
+      ordered.splice(insertIndex, 0, name);
+      this.sheetIds = new Set(ordered);
+      return name;
     }
 
-    ordered.splice(insertIndex, 0, name);
-    this.sheetIds = new Set(ordered);
-    return name;
+    const beforeOrder = typeof this.doc?.getSheetIds === "function" ? this.doc.getSheetIds() : Array.from(this.sheetIds);
+
+    const hasExplicitIndex = typeof index === "number" && Number.isInteger(index) && index >= 0;
+
+    if (!hasExplicitIndex) {
+      const insertAfterId = beforeOrder.includes(this.activeSheetId) ? this.activeSheetId : null;
+      const newId = this.doc.addSheet({ name, insertAfterId });
+      this.sheetIds = new Set(this.doc.getSheetIds?.() ?? [...this.sheetIds, newId]);
+      return newId;
+    }
+
+    const clampedIndex = Math.min(index, beforeOrder.length);
+
+    // DocumentController only supports "insert after" semantics. For index=0, we create
+    // the sheet and then reorder to the desired absolute position.
+    if (clampedIndex === 0 && beforeOrder.length > 0 && typeof this.doc?.reorderSheets === "function") {
+      const canBatch = typeof this.doc?.beginBatch === "function" && typeof this.doc?.endBatch === "function";
+      if (canBatch) this.doc.beginBatch({ label: "Add Sheet" });
+      try {
+        const newId = this.doc.addSheet({ name, insertAfterId: null });
+        this.doc.reorderSheets([newId, ...beforeOrder]);
+        if (canBatch) this.doc.endBatch();
+        this.sheetIds = new Set(this.doc.getSheetIds?.() ?? [...this.sheetIds, newId]);
+        return newId;
+      } catch (err) {
+        if (canBatch && typeof this.doc?.cancelBatch === "function") {
+          try {
+            this.doc.cancelBatch();
+          } catch {
+            // ignore
+          }
+        }
+        throw err;
+      }
+    }
+
+    const insertAfterId = clampedIndex > 0 ? beforeOrder[clampedIndex - 1] ?? null : null;
+    const newId = this.doc.addSheet({ name, insertAfterId });
+    this.sheetIds = new Set(this.doc.getSheetIds?.() ?? [...this.sheetIds, newId]);
+    return newId;
   }
 
   get_sheet_name({ sheet_id }) {
-    return sheet_id;
+    const meta = typeof this.doc?.getSheetMeta === "function" ? this.doc.getSheetMeta(sheet_id) : null;
+    return meta?.name ?? sheet_id;
   }
 
   rename_sheet({ sheet_id, name }) {
+    if (typeof this.doc?.renameSheet === "function") {
+      this.doc.renameSheet(sheet_id, name);
+      return null;
+    }
+
+    // Legacy fallback where sheet id and name are treated as the same string.
     if (!this.sheetIds.has(sheet_id)) return null;
     this.sheetIds.delete(sheet_id);
     this.sheetIds.add(name);
