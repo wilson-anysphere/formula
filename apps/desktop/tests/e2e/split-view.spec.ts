@@ -723,7 +723,7 @@ test.describe("split view", () => {
       await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
       await waitForIdle(page);
 
-      await page.getByTestId("split-vertical").click();
+      await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
       const secondary = page.locator("#grid-secondary");
       await expect(secondary).toBeVisible();
       await waitForGridCanvasesToBeSized(page, "#grid-secondary");

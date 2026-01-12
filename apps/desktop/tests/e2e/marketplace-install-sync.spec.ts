@@ -240,7 +240,7 @@ export async function activate(context) {
       // Verify the install triggers panel contribution sync too: open the Extensions panel and
       // open the contributed view (panel) without reloading.
       await page.getByRole("tab", { name: "Home", exact: true }).click();
-      await page.getByTestId("open-extensions-panel").click();
+      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       await page.getByTestId("panel-extensions").getByTestId(`open-panel-${panelId}`).click();
