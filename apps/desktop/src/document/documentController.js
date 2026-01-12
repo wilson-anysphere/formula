@@ -532,10 +532,12 @@ function cloneRangeRunDelta(delta) {
 function cloneTabColor(color) {
   if (!color) return undefined;
   if (typeof color === "string") {
-    return { rgb: color };
+    return { rgb: color.toUpperCase() };
   }
   if (typeof color === "object") {
-    return { ...color };
+    const out = { ...color };
+    if (typeof out.rgb === "string") out.rgb = out.rgb.toUpperCase();
+    return out;
   }
   return undefined;
 }
@@ -2145,7 +2147,7 @@ export class DocumentController {
 
   /**
    * @param {string} sheetId
-   * @param {TabColor | undefined | null} tabColor
+   * @param {TabColor | string | undefined | null} tabColor
    * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
    */
   setSheetTabColor(sheetId, tabColor, options = {}) {
