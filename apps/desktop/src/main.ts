@@ -6457,6 +6457,7 @@ if (
     const initialRatio = layoutController.layout.splitView.ratio;
     let latestClientX = event.clientX;
     let latestClientY = event.clientY;
+    let didMove = false;
     let lastRatio: number | null = null;
     let rafHandle: number | null = null;
 
@@ -6483,12 +6484,10 @@ if (
       });
     };
 
-    // Apply the initial click point immediately (no need to wait for rAF).
-    applyRatio(false);
-
     const onMove = (move: PointerEvent) => {
       if (move.pointerId !== pointerId) return;
       move.preventDefault();
+      didMove = true;
       latestClientX = move.clientX;
       latestClientY = move.clientY;
       scheduleDragApply();
@@ -6506,11 +6505,13 @@ if (
       try {
         gridSplitterEl.releasePointerCapture(pointerId);
       } catch {
-      // Ignore capture release errors.
+        // Ignore capture release errors.
       }
 
       latestClientX = up.clientX;
       latestClientY = up.clientY;
+      if (!didMove) return;
+
       // Flush any pending silent updates so `lastRatio` reflects the final pointer position.
       applyRatio(false);
 

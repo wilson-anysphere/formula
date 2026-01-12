@@ -236,6 +236,9 @@ test.describe("split view", () => {
       }, LAYOUT_KEY);
     };
 
+    // Ensure the split view layout is persisted before we start asserting on localStorage.
+    await expect.poll(getPersistedRatio).toBeGreaterThanOrEqual(0.1);
+
     const splitBox = await gridSplit.boundingBox();
     if (!splitBox) throw new Error("Missing #grid-split bounding box");
 
@@ -244,6 +247,18 @@ test.describe("split view", () => {
     if (!splitterBox) throw new Error("Missing #grid-splitter bounding box");
 
     const splitterCenter = { x: splitterBox.x + splitterBox.width / 2, y: splitterBox.y + splitterBox.height / 2 };
+
+    // Clicking the splitter without dragging should not change the ratio (avoid accidental drift).
+    const ratioBeforeClick = await getInMemoryRatio();
+    const persistedBeforeClick = await getPersistedRatio();
+    const changeCountBeforeClick = await getChangeCount();
+    await page.mouse.move(splitterCenter.x, splitterCenter.y);
+    await page.mouse.down();
+    await page.mouse.up();
+    expect(await getInMemoryRatio()).toBeCloseTo(ratioBeforeClick, 6);
+    expect(await getPersistedRatio()).toBeCloseTo(persistedBeforeClick, 6);
+    expect(await getChangeCount()).toBe(changeCountBeforeClick);
+
     await dragFromTo(page, splitterCenter, { x: splitterCenter.x, y: splitBox.y + Math.max(1, splitBox.height * 0.01) });
 
     await expect.poll(getInMemoryRatio).toBeCloseTo(0.1, 3);
