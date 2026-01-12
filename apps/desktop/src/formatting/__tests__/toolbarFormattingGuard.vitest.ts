@@ -15,7 +15,7 @@ describe("toolbar formatting safety cap", () => {
     document.body.appendChild(toastRoot);
   });
 
-  it("refuses to apply formatting when the (non-band) selection exceeds the cap", () => {
+  it("refuses to apply formatting when per-cell enumeration across a multi-range selection exceeds the cap", () => {
     const doc = new DocumentController();
     const spy = vi.spyOn(doc, "setRangeFormat");
 
@@ -34,7 +34,7 @@ describe("toolbar formatting safety cap", () => {
     expect(toast?.textContent).toMatch(/Selection too large to apply formatting/i);
   });
 
-  it("refuses to apply formatting to an enormous rectangular selection", () => {
+  it("still applies formatting for enormous rectangular selections (range-run fast path)", () => {
     const doc = new DocumentController();
     const spy = vi.spyOn(doc, "setRangeFormat");
 
@@ -48,6 +48,10 @@ describe("toolbar formatting safety cap", () => {
     expect(applied).toBe(true);
     expect(spy).toHaveBeenCalled();
     expect(document.querySelector('[data-testid="toast"]')).toBeNull();
+
+    // Spot-check that the fill is visible via the effective style accessor (range-run layer).
+    const style = doc.getCellFormat("Sheet1", { row: 0, col: 0 }) as any;
+    expect(style?.fill?.fgColor).toBe("#FFFF0000");
   });
 
   it("refuses to apply formatting to extremely large full-row selections (row band cap)", () => {
