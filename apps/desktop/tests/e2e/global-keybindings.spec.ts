@@ -19,6 +19,19 @@ test.describe("global keybindings", () => {
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("find-dialog")).not.toBeVisible();
 
+    // Ctrl/Cmd+G opens Go To.
+    await page.keyboard.press(`${primary}+G`);
+    await expect(page.getByTestId("goto-dialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("goto-dialog")).not.toBeVisible();
+
+    // Ctrl+H (Win/Linux) / Cmd+Option+F (macOS) opens Replace.
+    const replaceShortcut = process.platform === "darwin" ? "Meta+Alt+F" : "Control+H";
+    await page.keyboard.press(replaceShortcut);
+    await expect(page.getByTestId("replace-dialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("replace-dialog")).not.toBeVisible();
+
     // Ctrl/Cmd+Shift+P opens the command palette.
     await page.keyboard.press(`${primary}+Shift+P`);
     await expect(page.getByTestId("command-palette")).toBeVisible();
@@ -63,6 +76,16 @@ test.describe("global keybindings", () => {
     await page.keyboard.press(`${primary}+F`);
     await page.waitForTimeout(100);
     await expect(page.getByTestId("find-dialog")).not.toBeVisible();
+
+    // Ctrl/Cmd+G should not open Go To while typing in an input.
+    await page.keyboard.press(`${primary}+G`);
+    await page.waitForTimeout(100);
+    await expect(page.getByTestId("goto-dialog")).not.toBeVisible();
+
+    // Replace shortcut should not open Replace while typing in an input.
+    await page.keyboard.press(replaceShortcut);
+    await page.waitForTimeout(100);
+    await expect(page.getByTestId("replace-dialog")).not.toBeVisible();
 
     // Ctrl/Cmd+Shift+P should not open our command palette while typing in an input.
     await page.keyboard.press(`${primary}+Shift+P`);
