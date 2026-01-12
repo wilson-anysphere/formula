@@ -241,10 +241,10 @@ pub struct PivotTableSummary {
     pub destination: PivotDestination,
 }
 
-#[cfg(feature = "desktop")]
-use crate::file_io::{read_csv, read_xlsx};
 #[cfg(all(feature = "desktop", feature = "parquet"))]
 use crate::file_io::read_parquet;
+#[cfg(feature = "desktop")]
+use crate::file_io::{read_csv, read_xlsx};
 #[cfg(feature = "desktop")]
 use crate::persistence::{
     autosave_db_path_for_new_workbook, autosave_db_path_for_workbook, WorkbookPersistenceLocation,
@@ -346,7 +346,9 @@ pub async fn open_workbook(
         "parquet" => {
             #[cfg(feature = "parquet")]
             {
-                read_parquet(path.clone()).await.map_err(|e| e.to_string())?
+                read_parquet(path.clone())
+                    .await
+                    .map_err(|e| e.to_string())?
             }
             #[cfg(not(feature = "parquet"))]
             {
@@ -437,6 +439,26 @@ pub async fn add_sheet(
     .map_err(|e| e.to_string())?
 }
 
+#[cfg(any(feature = "desktop", test))]
+fn read_text_file_blocking(path: &std::path::Path) -> Result<String, String> {
+    use std::io::Read;
+
+    let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+    if !metadata.is_file() {
+        return Err("Path is not a regular file".to_string());
+    }
+    crate::ipc_file_limits::validate_full_read_size(metadata.len()).map_err(|e| e.to_string())?;
+
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut buf = Vec::new();
+    file.take(crate::ipc_file_limits::MAX_READ_FULL_BYTES + 1)
+        .read_to_end(&mut buf)
+        .map_err(|e| e.to_string())?;
+    crate::ipc_file_limits::validate_full_read_size(buf.len() as u64).map_err(|e| e.to_string())?;
+
+    String::from_utf8(buf).map_err(|e| e.to_string())
+}
+
 /// Read a local text file on behalf of the frontend.
 ///
 /// This exists so the desktop webview can power-query local sources (CSV/JSON) without
@@ -445,8 +467,6 @@ pub async fn add_sheet(
 #[tauri::command]
 pub async fn read_text_file(path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        use std::io::Read;
-
         let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
         let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
             std::path::Path::new(&path),
@@ -454,23 +474,10 @@ pub async fn read_text_file(path: String) -> Result<String, String> {
         )
         .map_err(|e| e.to_string())?;
 
-        let mut file = std::fs::File::open(&resolved).map_err(|e| e.to_string())?;
-        let metadata = file.metadata().map_err(|e| e.to_string())?;
-        if !metadata.is_file() {
-            return Err("Path is not a regular file".to_string());
-        }
-        crate::ipc_file_limits::validate_full_read_size(metadata.len()).map_err(|e| e.to_string())?;
-
-        let mut buf = Vec::new();
-        file.take(crate::ipc_file_limits::MAX_READ_FULL_BYTES + 1)
-            .read_to_end(&mut buf)
-            .map_err(|e| e.to_string())?;
-        crate::ipc_file_limits::validate_full_read_size(buf.len() as u64).map_err(|e| e.to_string())?;
-
-        String::from_utf8(buf).map_err(|e| e.to_string())
+        read_text_file_blocking(&resolved)
     })
-    .await
-    .map_err(|e| e.to_string())?
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -520,8 +527,6 @@ pub async fn read_binary_file(path: String) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
 
     let bytes = tauri::async_runtime::spawn_blocking(move || {
-        use std::io::Read;
-
         let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
         let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
             std::path::Path::new(&path),
@@ -529,25 +534,57 @@ pub async fn read_binary_file(path: String) -> Result<String, String> {
         )
         .map_err(|e| e.to_string())?;
 
-        let mut file = std::fs::File::open(&resolved).map_err(|e| e.to_string())?;
-        let metadata = file.metadata().map_err(|e| e.to_string())?;
-        if !metadata.is_file() {
-            return Err("Path is not a regular file".to_string());
-        }
-        crate::ipc_file_limits::validate_full_read_size(metadata.len()).map_err(|e| e.to_string())?;
-
-        let mut buf = Vec::new();
-        file.take(crate::ipc_file_limits::MAX_READ_FULL_BYTES + 1)
-            .read_to_end(&mut buf)
-            .map_err(|e| e.to_string())?;
-        crate::ipc_file_limits::validate_full_read_size(buf.len() as u64).map_err(|e| e.to_string())?;
-
-        Ok::<_, String>(buf)
+        read_binary_file_blocking(&resolved)
     })
     .await
     .map_err(|e| e.to_string())??;
 
     Ok(STANDARD.encode(bytes))
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn read_binary_file_blocking(path: &std::path::Path) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+
+    let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+    if !metadata.is_file() {
+        return Err("Path is not a regular file".to_string());
+    }
+    crate::ipc_file_limits::validate_full_read_size(metadata.len()).map_err(|e| e.to_string())?;
+
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut buf = Vec::new();
+    file.take(crate::ipc_file_limits::MAX_READ_FULL_BYTES + 1)
+        .read_to_end(&mut buf)
+        .map_err(|e| e.to_string())?;
+    crate::ipc_file_limits::validate_full_read_size(buf.len() as u64).map_err(|e| e.to_string())?;
+
+    Ok(buf)
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn read_binary_file_range_blocking(
+    path: &std::path::Path,
+    offset: u64,
+    len: usize,
+) -> Result<Vec<u8>, String> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+    if !metadata.is_file() {
+        return Err("Path is not a regular file".to_string());
+    }
+
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    file.seek(SeekFrom::Start(offset))
+        .map_err(|e| e.to_string())?;
+
+    let mut buf = Vec::with_capacity(len);
+    file.take(len as u64)
+        .read_to_end(&mut buf)
+        .map_err(|e| e.to_string())?;
+
+    Ok(buf)
 }
 
 /// Read a byte range from a local file and return the contents as base64.
@@ -562,7 +599,6 @@ pub async fn read_binary_file_range(
     length: u64,
 ) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
-    use std::io::{Read, Seek, SeekFrom};
 
     let len =
         crate::ipc_file_limits::validate_read_range_length(length).map_err(|e| e.to_string())?;
@@ -570,7 +606,7 @@ pub async fn read_binary_file_range(
         return Ok(String::new());
     }
 
-    tauri::async_runtime::spawn_blocking(move || {
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
         let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
         let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
             std::path::Path::new(&path),
@@ -578,22 +614,12 @@ pub async fn read_binary_file_range(
         )
         .map_err(|e| e.to_string())?;
 
-        let mut file = std::fs::File::open(&resolved).map_err(|e| e.to_string())?;
-        let metadata = file.metadata().map_err(|e| e.to_string())?;
-        if !metadata.is_file() {
-            return Err("Path is not a regular file".to_string());
-        }
-        file.seek(SeekFrom::Start(offset))
-            .map_err(|e| e.to_string())?;
-
-        let mut buf = vec![0u8; len];
-        let read = file.read(&mut buf).map_err(|e| e.to_string())?;
-        buf.truncate(read);
-
-        Ok::<_, String>(STANDARD.encode(buf))
+        read_binary_file_range_blocking(&resolved, offset, len)
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())??;
+
+    Ok(STANDARD.encode(bytes))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -659,11 +685,7 @@ fn list_dir_blocking(path: &str, recursive: bool) -> Result<Vec<ListDirEntry>, S
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|e| e.to_string())?;
 
-            let name = entry
-                .file_name()
-                .to_str()
-                .unwrap_or_default()
-                .to_string();
+            let name = entry.file_name().to_str().unwrap_or_default().to_string();
 
             // Enforce a hard cap on output size to prevent unbounded memory usage.
             //
@@ -1512,8 +1534,8 @@ pub fn export_sheet_range_pdf(
     row_heights_points: Option<Vec<f64>>,
     state: State<'_, SharedAppState>,
 ) -> Result<String, String> {
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
     use crate::resource_limits::{MAX_PDF_BYTES, MAX_PDF_CELLS_PER_CALL, MAX_RANGE_DIM};
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
 
     let state_guard = state.inner().lock().unwrap();
     let workbook = state_guard.get_workbook().map_err(app_error)?;
@@ -1541,10 +1563,8 @@ pub fn export_sheet_range_pdf(
         return Err("invalid print range: rows/cols must be 1-based".to_string());
     }
 
-    let row_count =
-        (print_area.end_row as u64).saturating_sub(print_area.start_row as u64) + 1;
-    let col_count =
-        (print_area.end_col as u64).saturating_sub(print_area.start_col as u64) + 1;
+    let row_count = (print_area.end_row as u64).saturating_sub(print_area.start_row as u64) + 1;
+    let col_count = (print_area.end_col as u64).saturating_sub(print_area.start_col as u64) + 1;
 
     // Fail fast before PDF generation to avoid CPU/memory DoS from untrusted webview input.
     let row_count_usize = row_count as usize;
@@ -3678,9 +3698,10 @@ mod tests {
         );
 
         // Now add one more file and ensure we get a clear error.
-        let extra_path = dir
-            .path()
-            .join(format!("file_{}.txt", crate::resource_limits::MAX_LIST_DIR_ENTRIES));
+        let extra_path = dir.path().join(format!(
+            "file_{}.txt",
+            crate::resource_limits::MAX_LIST_DIR_ENTRIES
+        ));
         File::create(extra_path).expect("create extra temp file");
 
         let err = list_dir_blocking(dir.path().to_str().unwrap(), false)
@@ -3752,6 +3773,30 @@ mod tests {
         assert!(
             out.iter().all(|entry| !entry.path.ends_with("outside.txt")),
             "expected not to traverse symlinked dir, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn file_read_helpers_reject_non_regular_files() {
+        let dir = TempDir::new().expect("create temp dir");
+        let path = dir.path();
+
+        let err = read_text_file_blocking(path).expect_err("expected directory read to fail");
+        assert!(
+            err.contains("Path is not a regular file"),
+            "unexpected error: {err}"
+        );
+
+        let err = read_binary_file_blocking(path).expect_err("expected directory read to fail");
+        assert!(
+            err.contains("Path is not a regular file"),
+            "unexpected error: {err}"
+        );
+
+        let err = read_binary_file_range_blocking(path, 0, 1).expect_err("expected directory read to fail");
+        assert!(
+            err.contains("Path is not a regular file"),
+            "unexpected error: {err}"
         );
     }
 
