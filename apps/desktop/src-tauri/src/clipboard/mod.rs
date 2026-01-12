@@ -101,7 +101,13 @@ impl ClipboardWritePayload {
         max_rich_text_bytes: usize,
         max_image_bytes: usize,
     ) -> Result<(), ClipboardError> {
-        if self.text.is_none() && self.html.is_none() && self.rtf.is_none() && self.png_base64.is_none() {
+        let has_png = self
+            .png_base64
+            .as_deref()
+            .map(normalize_base64_str)
+            .is_some_and(|s| !s.is_empty());
+
+        if self.text.is_none() && self.html.is_none() && self.rtf.is_none() && !has_png {
             return Err(ClipboardError::InvalidPayload(
                 "must include at least one of text, html, rtf, pngBase64".to_string(),
             ));
@@ -125,8 +131,9 @@ impl ClipboardWritePayload {
             }
         }
 
-        if let Some(png_base64) = self.png_base64.as_deref() {
-            let decoded_len = estimate_base64_decoded_len(png_base64).unwrap_or(usize::MAX);
+        if has_png {
+            let decoded_len = estimate_base64_decoded_len(self.png_base64.as_deref().unwrap_or(""))
+                .unwrap_or(usize::MAX);
             if decoded_len > max_image_bytes {
                 return Err(ClipboardError::InvalidPayload(format!(
                     "pngBase64 exceeds maximum size ({decoded_len} > {max_image_bytes} bytes)"
@@ -338,6 +345,24 @@ mod tests {
             .expect_err("expected size check to fail");
         match err {
             ClipboardError::InvalidPayload(msg) => assert!(msg.contains("pngBase64 exceeds maximum size")),
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_rejects_empty_png_base64_after_normalization() {
+        let payload = ClipboardWritePayload {
+            text: None,
+            html: None,
+            rtf: None,
+            png_base64: Some("data:image/png;base64,".to_string()),
+        };
+
+        let err = payload.validate().expect_err("expected validation to fail");
+        match err {
+            ClipboardError::InvalidPayload(msg) => {
+                assert!(msg.contains("must include at least one of text"));
+            }
             other => panic!("unexpected error: {other:?}"),
         }
     }
