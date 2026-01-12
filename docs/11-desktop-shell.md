@@ -353,6 +353,8 @@ The command list is large; below are the “core” ones most contributors will 
   - `get_cell`, `set_cell`, `get_range`, `set_range`, `recalculate`, `undo`, `redo`
   - Dependency inspection: `get_precedents`, `get_dependents`
   - Sheet bounds: `get_sheet_used_range`
+- **Clipboard**
+  - `clipboard_read`, `clipboard_write` (multi-format read/write: `text/plain`, `text/html`, `text/rtf`, `image/png`)
 - **Workbook metadata (used by UI + Power Query + AI tooling)**
   - `get_workbook_theme_palette`, `list_defined_names`, `list_tables`
 - **Pivot tables**
@@ -418,6 +420,45 @@ Related frontend → backend events used as acknowledgements during close:
 - `close-handled` (token)
 - `open-file-ready` (signals that the frontend’s `open-file` listener is installed; causes the Rust host to flush queued open requests)
 - `updater-ui-ready` (signals the updater UI listeners are installed; triggers the startup update check)
+
+---
+
+## Clipboard
+
+Clipboard read/write is implemented as a **platform provider** so the same copy/paste code paths
+work on both desktop (Tauri) and web.
+
+Frontend entry point:
+
+- `apps/desktop/src/clipboard/platform/provider.js`
+
+Desktop vs web behavior:
+
+- **Desktop (Tauri)**: prefers custom Rust commands `clipboard_read` / `clipboard_write` for
+  **rich, multi-format** clipboard access. If those commands are unavailable (older builds), it
+  falls back to the Web Clipboard API (`navigator.clipboard`) and finally to the legacy
+  `globalThis.__TAURI__.clipboard.readText` / `writeText` helpers (plain text).
+- **Web**: uses the browser Clipboard API only (permission + user-gesture gated).
+
+Supported formats:
+
+- `text/plain`
+- `text/html`
+- `text/rtf`
+- `image/png`
+
+Image encoding:
+
+- PNG bytes are transported over IPC as `pngBase64` (**raw base64**, no `data:image/png;base64,` prefix).
+
+### Manual QA matrix (recommended)
+
+| Platform | Copy from Formula | Paste target | What to verify |
+|----------|-------------------|--------------|----------------|
+| Windows | A range with formatting / an HTML table | Excel, Word | Table structure preserved (HTML), values align, formatting is reasonable |
+| Windows | A copied chart/screenshot (PNG) | PowerPoint, Slack | Image pastes as an image (not a file path / empty paste) |
+| macOS | A range with formatting / an HTML table | Notes, Pages | Table pastes with expected structure and styling |
+| Linux | A range with formatting / an HTML table | LibreOffice + browser | HTML/table paste where supported; plain text fallback otherwise |
 
 ---
 
@@ -497,7 +538,8 @@ Capabilities are assigned to windows by **label**.
 - `window:allow-hide`, `window:allow-show`, `window:allow-close`
   - Enables the hide-to-tray close flow (the Rust host prevents default close; the UI hides/shows/closes based on user intent).
 - `clipboard:allow-read-text`, `clipboard:allow-write-text`
-  - Enables basic clipboard text integration for copy/paste.
+  - Enables the legacy plain-text clipboard helpers (`globalThis.__TAURI__.clipboard.readText` / `writeText`) used as a fallback path.
+  - Rich clipboard (HTML/RTF/PNG) is handled via custom commands (`clipboard_read` / `clipboard_write`).
 - `shell:allow-open`
   - Allows opening external URLs in the user’s default browser (e.g. help/docs links).
 
