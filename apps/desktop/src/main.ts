@@ -2166,7 +2166,21 @@ function installSheetStoreSubscription(): void {
     // visible sheet (not just the dropdown value). This keeps the sheet switcher + grid
     // consistent even when sheet visibility changes are initiated outside `syncSheetUi()`.
     if (!sheets.some((sheet) => sheet.id === activeId)) {
-      const fallback = sheets[0]?.id ?? null;
+      const fallback = (() => {
+        const all = workbookSheetStore.listAll();
+        const idx = all.findIndex((sheet) => sheet.id === activeId);
+        if (idx >= 0) {
+          for (let i = idx + 1; i < all.length; i += 1) {
+            const sheet = all[i]!;
+            if (sheet.visibility === "visible") return sheet.id;
+          }
+          for (let i = idx - 1; i >= 0; i -= 1) {
+            const sheet = all[i]!;
+            if (sheet.visibility === "visible") return sheet.id;
+          }
+        }
+        return sheets[0]?.id ?? null;
+      })();
       if (fallback) {
         app.activateSheet(fallback);
         restoreFocusAfterSheetNavigation();
