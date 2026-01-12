@@ -77,6 +77,7 @@ import { bindCollabSessionToDocumentController, createCollabSession, type Collab
 
 import { PresenceRenderer } from "../grid/presence-renderer/presenceRenderer.js";
 import { ConflictUiController } from "../collab/conflicts-ui/conflict-ui-controller.js";
+import { StructuralConflictUiController } from "../collab/conflicts-ui/structural-conflict-ui-controller.js";
 
 type EngineCellRef = { sheetId?: string; sheet?: string; row?: number; col?: number; address?: string; value?: unknown };
 type AuditingCacheEntry = {
@@ -579,6 +580,7 @@ export class SpreadsheetApp {
   private collabPresenceUnsubscribe: (() => void) | null = null;
   private conflictUi: ConflictUiController | null = null;
   private conflictUiContainer: HTMLDivElement | null = null;
+  private structuralConflictUi: StructuralConflictUiController | null = null;
 
   private readonly chartStore: ChartStore;
   private chartTheme: ChartTheme = FALLBACK_CHART_THEME;
@@ -648,6 +650,12 @@ export class SpreadsheetApp {
       this.collabSession = createCollabSession({
         connection: { wsUrl: collab.wsUrl, docId: collab.docId, token: collab.token },
         presence: { user: collab.user, activeSheet: this.sheetId },
+        // Enable collaborative undo so conflict monitors treat UndoManager-origin
+        // transactions as local (important for correctly classifying local edits).
+        //
+        // Note: the desktop UI still uses DocumentController's undo stack; this is
+        // currently for origin tracking + conflict detection fidelity.
+        undo: {},
         formulaConflicts: {
           localUserId: collab.user.id,
           mode: "formula+value",
@@ -655,6 +663,13 @@ export class SpreadsheetApp {
             // Note: conflicts are surfaced via a minimal DOM UI (ConflictUiController).
             // To exercise manually, edit the same formula concurrently in two clients.
             this.conflictUi?.addConflict(conflict);
+          },
+        },
+        cellConflicts: {
+          localUserId: collab.user.id,
+          onConflict: (conflict) => {
+            // Structural move/delete-vs-edit/content/format conflicts.
+            this.structuralConflictUi?.addConflict(conflict);
           },
         },
       });
@@ -1329,6 +1344,44 @@ export class SpreadsheetApp {
         dialogRoot.style.boxShadow = "var(--dialog-shadow)";
       }
 
+      this.structuralConflictUi = new StructuralConflictUiController({
+        container: this.conflictUiContainer,
+        monitor: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          resolveConflict: (id: string, resolution: any) => {
+            const monitor = this.collabSession?.cellConflictMonitor;
+            return monitor ? monitor.resolveConflict(id, resolution) : false;
+          },
+        },
+      });
+
+      const structuralToastRoot = this.conflictUiContainer.querySelector<HTMLElement>(
+        '[data-testid="structural-conflict-toast-root"]',
+      );
+      if (structuralToastRoot) {
+        structuralToastRoot.style.pointerEvents = "auto";
+        structuralToastRoot.style.position = "absolute";
+        structuralToastRoot.style.right = "16px";
+        structuralToastRoot.style.bottom = "16px";
+      }
+      const structuralDialogRoot = this.conflictUiContainer.querySelector<HTMLElement>(
+        '[data-testid="structural-conflict-dialog-root"]',
+      );
+      if (structuralDialogRoot) {
+        structuralDialogRoot.style.pointerEvents = "auto";
+        structuralDialogRoot.style.position = "absolute";
+        structuralDialogRoot.style.right = "16px";
+        structuralDialogRoot.style.top = "16px";
+        structuralDialogRoot.style.maxWidth = "min(720px, 92vw)";
+        structuralDialogRoot.style.maxHeight = "min(560px, 92vh)";
+        structuralDialogRoot.style.overflow = "auto";
+        structuralDialogRoot.style.background = "var(--dialog-bg)";
+        structuralDialogRoot.style.border = "1px solid var(--dialog-border)";
+        structuralDialogRoot.style.borderRadius = "10px";
+        structuralDialogRoot.style.padding = "12px";
+        structuralDialogRoot.style.boxShadow = "0 6px 24px rgba(0,0,0,0.18)";
+      }
+
       const presence = this.collabSession.presence;
       if (presence) {
         // Publish local selection state.
@@ -1428,6 +1481,10 @@ export class SpreadsheetApp {
       this.commentsDoc.off("update", this.commentsDocUpdateListener);
       this.commentsDocUpdateListener = null;
     }
+
+    this.structuralConflictUi?.destroy();
+    this.structuralConflictUi = null;
+
     this.formulaBarCompletion?.destroy();
     this.sharedGrid?.destroy();
     this.sharedGrid = null;
