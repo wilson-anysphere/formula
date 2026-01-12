@@ -2117,29 +2117,35 @@ fn split_print_name_sheet_ref(input: &str) -> Result<(Option<String>, &str), Str
 
     let bytes = input.as_bytes();
     if bytes.first() == Some(&b'\'') {
+        // Quoted sheet names may contain escaped quotes (`''` represents a literal `'`).
+        //
+        // Avoid interpreting raw bytes as chars here: sheet names can contain non-ASCII UTF-8.
+        // Stitch together UTF-8 slices instead.
         let mut sheet = String::new();
         let mut i = 1usize;
+        let mut seg_start = i;
+
         while i < bytes.len() {
-            match bytes[i] {
-                b'\'' => {
-                    if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
-                        sheet.push('\'');
-                        i += 2;
-                        continue;
-                    }
-
-                    // End of quoted sheet name.
-                    if i + 1 >= bytes.len() || bytes[i + 1] != b'!' {
-                        return Err(format!(
-                            "expected ! after quoted sheet name in {input:?}"
-                        ));
-                    }
-
-                    let rest = &input[(i + 2)..];
-                    return Ok((Some(sheet), rest));
+            if bytes[i] == b'\'' {
+                if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                    // Escaped quote in a sheet name.
+                    sheet.push_str(&input[seg_start..i]);
+                    sheet.push('\'');
+                    i += 2;
+                    seg_start = i;
+                    continue;
                 }
-                _ => sheet.push(bytes[i] as char),
+
+                // End of quoted sheet name.
+                sheet.push_str(&input[seg_start..i]);
+                if i + 1 >= bytes.len() || bytes[i + 1] != b'!' {
+                    return Err(format!("expected ! after quoted sheet name in {input:?}"));
+                }
+
+                let rest = &input[(i + 2)..];
+                return Ok((Some(sheet), rest));
             }
+
             i += 1;
         }
 

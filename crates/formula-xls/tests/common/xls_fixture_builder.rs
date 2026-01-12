@@ -470,6 +470,25 @@ pub fn build_sanitized_sheet_name_defined_name_collision_fixture_xls() -> Vec<u8
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a sheet-scoped built-in `_xlnm.Print_Area` defined name
+/// whose `refers_to` string uses a **quoted** sheet name containing non-ASCII characters.
+///
+/// This validates that print settings parsing handles quoted UTF-8 sheet names (e.g.
+/// `'Ünicode Name'!$A$1:$A$2`) correctly.
+pub fn build_print_settings_unicode_sheet_name_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_print_settings_unicode_sheet_name_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a minimal BIFF8 `.xls` fixture containing a single sheet named `Notes`
 /// with a NOTE/OBJ/TXO comment anchored to `A1`.
 pub fn build_note_comment_fixture_xls() -> Vec<u8> {
@@ -2652,6 +2671,64 @@ fn build_sanitized_sheet_name_defined_name_workbook_stream() -> Vec<u8> {
     globals.extend_from_slice(&sheet);
     globals
 }
+
+fn build_print_settings_unicode_sheet_name_workbook_stream() -> Vec<u8> {
+    let sheet_name = "Ünicode Name";
+
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table (style XFs only).
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF (required by some readers).
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, sheet_name);
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // Minimal EXTERNSHEET table with one internal sheet entry so we can encode 3D references.
+    push_record(&mut globals, RECORD_EXTERNSHEET, &externsheet_record(&[(0, 0)]));
+
+    // Print_Area on the sheet: 'Ünicode Name'!$A$1:$A$2,'Ünicode Name'!$C$1:$C$2 (hidden).
+    let print_area_rgce = [
+        ptg_area3d(0, 0, 1, 0, 0),
+        ptg_area3d(0, 0, 1, 2, 2),
+        vec![0x10], // PtgUnion
+    ]
+    .concat();
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &builtin_name_record(true, 1, 0x06, &print_area_rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_empty_sheet_stream(xf_general);
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet);
+
+    globals
+}
+
 fn build_empty_sheet_stream(xf_general: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
@@ -5391,26 +5468,41 @@ fn colinfo_record(
 
 fn write_short_unicode_string(out: &mut Vec<u8>, s: &str) {
     // BIFF8 ShortXLUnicodeString: [cch: u8][flags: u8][chars]
-    let bytes = s.as_bytes();
-    let len: u8 = bytes
+    // `cch` counts UTF-16 code units (not UTF-8 bytes).
+    let utf16: Vec<u16> = s.encode_utf16().collect();
+    let len: u8 = utf16
         .len()
         .try_into()
         .expect("string too long for u8 length");
     out.push(len);
-    out.push(0); // compressed (8-bit)
-    out.extend_from_slice(bytes);
+    if utf16.iter().all(|&ch| ch <= 0x00FF) {
+        out.push(0); // compressed (8-bit)
+        out.extend(utf16.into_iter().map(|ch| ch as u8));
+    } else {
+        out.push(1); // uncompressed (16-bit)
+        for ch in utf16 {
+            out.extend_from_slice(&ch.to_le_bytes());
+        }
+    }
 }
 
 fn write_unicode_string(out: &mut Vec<u8>, s: &str) {
     // BIFF8 XLUnicodeString: [cch: u16][flags: u8][chars]
-    let bytes = s.as_bytes();
-    let len: u16 = bytes
+    let utf16: Vec<u16> = s.encode_utf16().collect();
+    let len: u16 = utf16
         .len()
         .try_into()
         .expect("string too long for u16 length");
     out.extend_from_slice(&len.to_le_bytes());
-    out.push(0); // compressed (8-bit)
-    out.extend_from_slice(bytes);
+    if utf16.iter().all(|&ch| ch <= 0x00FF) {
+        out.push(0); // compressed (8-bit)
+        out.extend(utf16.into_iter().map(|ch| ch as u8));
+    } else {
+        out.push(1); // uncompressed (16-bit)
+        for ch in utf16 {
+            out.extend_from_slice(&ch.to_le_bytes());
+        }
+    }
 }
 
 fn supbook_internal(sheet_count: u16) -> Vec<u8> {

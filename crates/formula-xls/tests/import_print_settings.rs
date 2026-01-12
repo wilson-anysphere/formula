@@ -63,3 +63,19 @@ fn imports_print_settings_via_calamine_defined_name_fallback_when_biff_unavailab
     assert_eq!(titles.repeat_rows, Some(RowRange { start: 0, end: 0 }));
     assert_eq!(titles.repeat_cols, None);
 }
+
+#[test]
+fn imports_print_area_from_builtin_defined_name_with_unicode_quoted_sheet_name() {
+    let bytes = xls_fixture_builder::build_print_settings_unicode_sheet_name_fixture_xls();
+    let result = import_fixture(&bytes);
+    let workbook = result.workbook;
+
+    let settings = workbook.sheet_print_settings_by_name("Ünicode Name");
+    assert_eq!(
+        settings.print_area,
+        Some(vec![
+            Range::from_a1("A1:A2").unwrap(),
+            Range::from_a1("C1:C2").unwrap()
+        ])
+    );
+}
