@@ -85,6 +85,30 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     expect(style.wrapMode).toBe("word");
   });
 
+  it("converts semi-transparent Excel ARGB fill colors into rgba() for canvas rendering", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    doc.setCellValue(sheetId, "A1", "Alpha");
+    // #AARRGGBB with alpha < 0xFF should be converted to rgba(..., a).
+    setFillColor(doc, sheetId, "A1", "#80FF0000");
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell).not.toBeNull();
+    expect((cell as any).style?.fill).toBe("rgba(255,0,0,0.502)");
+  });
+
   it("prefers camelCase overrides when both snake_case + camelCase fields exist (imported style then user edits)", () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";
@@ -121,6 +145,48 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     expect(style.fontSize).toBeCloseTo((20 * 96) / 72, 5);
     // wrapText:false should override imported wrap_text:true.
     expect(style.wrapMode).toBeUndefined();
+  });
+
+  it("maps a variety of Excel border styles into grid border primitives", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    doc.setCellValue(sheetId, "A1", "Borders");
+    doc.setRangeFormat(sheetId, "A1", {
+      border: {
+        left: { style: "medium", color: "#FF112233" },
+        right: { style: "thick", color: "#FF112233" },
+        top: { style: "dashed", color: "#FF112233" },
+        bottom: { style: "double", color: "#FF112233" },
+        diagonal: { style: "dotted", color: "#FF112233" },
+        diagonalUp: true
+      }
+    });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell).not.toBeNull();
+
+    const style = (cell as any).style as any;
+    expect(style?.borders).toEqual({
+      left: { width: 2, style: "solid", color: "#112233" },
+      right: { width: 3, style: "solid", color: "#112233" },
+      top: { width: 1, style: "dashed", color: "#112233" },
+      bottom: { width: 3, style: "double", color: "#112233" }
+    });
+    expect(style?.diagonalBorders).toEqual({
+      up: { width: 1, style: "dotted", color: "rgba(17,34,51,1)" }
+    });
   });
 
   it("allows UI patches to clear an imported snake_case number_format", () => {
