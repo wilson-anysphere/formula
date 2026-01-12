@@ -53,7 +53,7 @@ function registry) typically live under:
 Primary targeted tests (and some boundary validations) live at:
 
 - `crates/formula-engine/tests/functions/financial_odd_coupon.rs`
-- `crates/formula-engine/tests/functions/financial_odd_coupon_prop.rs` (deterministic property tests; yield/price roundtrips)
+- `crates/formula-engine/tests/functions/financial_odd_coupon_prop.rs` (deterministic property tests; yield/price roundtrips; host-only)
 
 Date-ordering equality edge cases and other boundary validations are locked via:
 
