@@ -1,3 +1,5 @@
+//! Helpers for working with `xl/richData/richValue*.xml` rich value parts.
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Cursor;
 
@@ -200,23 +202,13 @@ fn parse_rich_value_part(part_name: &str, bytes: &[u8]) -> Result<Vec<ParsedRv>,
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) if e.local_name().as_ref() == b"rv" => {
-                let explicit_index = parse_rv_index_attr(&e)?;
-                let embed_rel_id = parse_first_embed_rel_id_within_rv(&mut reader)?;
+                let explicit_index = parse_rv_explicit_index(&e)?;
+                let embed_rel_id = parse_rv_embed_rel_id(&mut reader)?;
                 out.push(ParsedRv {
                     explicit_index,
                     entry: RichValueEntry {
                         source_part: part_name.to_string(),
                         embed_rel_id,
-                    },
-                });
-            }
-            Event::Empty(e) if e.local_name().as_ref() == b"rv" => {
-                let explicit_index = parse_rv_index_attr(&e)?;
-                out.push(ParsedRv {
-                    explicit_index,
-                    entry: RichValueEntry {
-                        source_part: part_name.to_string(),
-                        embed_rel_id: None,
                     },
                 });
             }
@@ -229,103 +221,96 @@ fn parse_rich_value_part(part_name: &str, bytes: &[u8]) -> Result<Vec<ParsedRv>,
     Ok(out)
 }
 
-fn parse_rv_index_attr(e: &quick_xml::events::BytesStart<'_>) -> Result<Option<u32>, XlsxError> {
+fn parse_rv_explicit_index(e: &quick_xml::events::BytesStart<'_>) -> Result<Option<u32>, XlsxError> {
     for attr in e.attributes() {
         let attr = attr?;
-        let key = openxml::local_name(attr.key.as_ref());
-        if key.eq_ignore_ascii_case(b"i")
-            || key.eq_ignore_ascii_case(b"id")
-            || key.eq_ignore_ascii_case(b"idx")
-        {
-            let value = attr.unescape_value()?.into_owned();
-            let idx = value.parse::<u32>().map_err(|e| {
-                XlsxError::Invalid(format!(
-                    "invalid rich value <rv> global index {value:?}: {e}"
-                ))
-            })?;
-            return Ok(Some(idx));
+        let key = attr.key.as_ref();
+        if key != b"i" && key != b"id" && key != b"idx" {
+            continue;
+        }
+        let Ok(idx) = attr.unescape_value()?.into_owned().trim().parse::<u32>() else {
+            return Ok(None);
+        };
+        return Ok(Some(idx));
+    }
+    Ok(None)
+}
+
+fn parse_rv_embed_rel_id(reader: &mut Reader<Cursor<&[u8]>>) -> Result<Option<String>, XlsxError> {
+    let mut buf = Vec::new();
+    let mut depth = 0usize;
+
+    // We enter after `<rv ...>`. Scan until we leave that subtree.
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) => {
+                depth += 1;
+                if e.local_name().as_ref() == b"blip" {
+                    if let Some(rid) = parse_blip_embed(&e)? {
+                        return Ok(Some(rid));
+                    }
+                }
+            }
+            Event::Empty(e) => {
+                if e.local_name().as_ref() == b"blip" {
+                    if let Some(rid) = parse_blip_embed(&e)? {
+                        return Ok(Some(rid));
+                    }
+                }
+            }
+            Event::End(_) => {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(None)
+}
+
+fn parse_blip_embed(e: &quick_xml::events::BytesStart<'_>) -> Result<Option<String>, XlsxError> {
+    for attr in e.attributes() {
+        let attr = attr?;
+        let key = attr.key.as_ref();
+        if key == b"r:embed" || key == b"embed" {
+            return Ok(Some(attr.unescape_value()?.into_owned()));
         }
     }
     Ok(None)
 }
 
-fn parse_first_embed_rel_id_within_rv<R: std::io::BufRead>(
-    reader: &mut Reader<R>,
-) -> Result<Option<String>, XlsxError> {
-    let mut buf = Vec::new();
-    let mut embed_rel_id: Option<String> = None;
-
-    // Track nesting depth of `<rv>` tags so we don't get confused if the subtree contains nested
-    // `<rv>` elements (unlikely but defensive).
-    let mut rv_depth: usize = 0;
-
-    loop {
-        match reader.read_event_into(&mut buf)? {
-            Event::Start(e) if e.local_name().as_ref() == b"rv" => {
-                rv_depth += 1;
-            }
-            Event::End(e) if e.local_name().as_ref() == b"rv" => {
-                if rv_depth == 0 {
-                    break;
-                }
-                rv_depth -= 1;
-            }
-            Event::Start(e) | Event::Empty(e) => {
-                if embed_rel_id.is_none()
-                    && openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"blip")
-                {
-                    for attr in e.attributes() {
-                        let attr = attr?;
-                        if openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"embed") {
-                            embed_rel_id = Some(attr.unescape_value()?.into_owned());
-                            break;
-                        }
-                    }
-                }
-            }
-            Event::Eof => {
-                return Err(XlsxError::Invalid(
-                    "unexpected EOF while parsing <rv> subtree".to_string(),
-                ))
-            }
-            _ => {}
-        }
-
-        buf.clear();
-    }
-
-    Ok(embed_rel_id)
-}
-
-fn parse_metadata_rich_value_indices(metadata: &[u8]) -> Result<Vec<u32>, XlsxError> {
-    let mut reader = Reader::from_reader(Cursor::new(metadata));
+fn parse_metadata_rich_value_indices(bytes: &[u8]) -> Result<Vec<u32>, XlsxError> {
+    let mut reader = Reader::from_reader(Cursor::new(bytes));
     reader.config_mut().trim_text(true);
 
     let mut buf = Vec::new();
+    let mut seen = HashSet::new();
     let mut out = Vec::new();
-    let mut seen: HashSet<u32> = HashSet::new();
 
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) | Event::Empty(e)
-                if openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"rvb") =>
-            {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"rvb" => {
                 for attr in e.attributes() {
                     let attr = attr?;
-                    if openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"i") {
-                        let value = attr.unescape_value()?.into_owned();
-                        if let Ok(idx) = value.parse::<u32>() {
-                            if seen.insert(idx) {
-                                out.push(idx);
-                            }
-                        }
+                    if attr.key.as_ref() != b"i" {
+                        continue;
+                    }
+                    let Ok(idx) = attr.unescape_value()?.into_owned().trim().parse::<u32>() else {
+                        continue;
+                    };
+                    if seen.insert(idx) {
+                        out.push(idx);
                     }
                 }
             }
             Event::Eof => break,
             _ => {}
         }
-
         buf.clear();
     }
 
