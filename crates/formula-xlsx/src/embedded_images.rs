@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 
-use formula_model::CellRef;
+use formula_model::{CellRef, HyperlinkTarget};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
@@ -44,6 +44,8 @@ pub struct EmbeddedImageCell {
     pub image_target: String,
     pub bytes: Vec<u8>,
     pub alt_text: Option<String>,
+    /// Optional hyperlink target attached to the same worksheet cell.
+    pub hyperlink_target: Option<HyperlinkTarget>,
     /// Whether the image appears to be marked as decorative.
     ///
     /// This is derived from the rich value `CalcOrigin` field using observed workbook behavior
@@ -472,6 +474,17 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
             Some(bytes) => bytes,
             None => continue,
         };
+        let sheet_xml = std::str::from_utf8(sheet_bytes)
+            .map_err(|e| XlsxError::Invalid(format!("{worksheet_part} not utf-8: {e}")))?;
+
+        let sheet_rels_part = path::rels_for_part(&worksheet_part);
+        let sheet_rels_xml = pkg
+            .part(&sheet_rels_part)
+            .and_then(|bytes| std::str::from_utf8(bytes).ok());
+
+        // Best-effort: if hyperlink parsing fails (malformed file), still extract images.
+        let hyperlinks =
+            crate::parse_worksheet_hyperlinks(sheet_xml, sheet_rels_xml).unwrap_or_default();
 
         let cells_with_metadata =
             scan_cells_with_metadata_indices(sheet_bytes).map_err(|err| match err {
@@ -598,12 +611,18 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
                 None => continue,
             };
 
+            let hyperlink_target = hyperlinks
+                .iter()
+                .find(|link| link.range.contains(cell))
+                .map(|link| link.target.clone());
+
             out.push(EmbeddedImageCell {
                 sheet_part: worksheet_part.clone(),
                 cell,
                 image_target: target.clone(),
                 bytes,
                 alt_text,
+                hyperlink_target,
                 decorative,
             });
         }
