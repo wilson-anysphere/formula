@@ -61,24 +61,48 @@ pub(crate) fn apply_recalc_policy_to_parts(
         return Ok(());
     }
 
+    fn part_key_variants(parts: &BTreeMap<String, Vec<u8>>, canonical: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        if parts.contains_key(canonical) {
+            out.push(canonical.to_string());
+        }
+        let mut with_slash = String::with_capacity(canonical.len() + 1);
+        with_slash.push('/');
+        with_slash.push_str(canonical);
+        if parts.contains_key(with_slash.as_str()) {
+            out.push(with_slash);
+        }
+        out
+    }
+
     if policy.force_full_calc_on_formula_change {
-        if let Some(workbook_xml) = parts.get("xl/workbook.xml").cloned() {
-            let updated = workbook_xml_force_full_calc_on_load(&workbook_xml)?;
-            parts.insert("xl/workbook.xml".to_string(), updated);
+        // ZIP entry names should not start with `/`, but tolerate producers that include it by
+        // patching both the canonical and `/`-prefixed variants when present.
+        for key in part_key_variants(parts, "xl/workbook.xml") {
+            if let Some(workbook_xml) = parts.get(&key).cloned() {
+                let updated = workbook_xml_force_full_calc_on_load(&workbook_xml)?;
+                parts.insert(key, updated);
+            }
         }
     }
 
     if policy.drop_calc_chain_on_formula_change {
-        parts.remove("xl/calcChain.xml");
-
-        if let Some(rels_xml) = parts.get("xl/_rels/workbook.xml.rels").cloned() {
-            let updated = workbook_rels_remove_calc_chain(&rels_xml)?;
-            parts.insert("xl/_rels/workbook.xml.rels".to_string(), updated);
+        for key in part_key_variants(parts, "xl/calcChain.xml") {
+            parts.remove(&key);
         }
 
-        if let Some(content_types_xml) = parts.get("[Content_Types].xml").cloned() {
-            let updated = content_types_remove_calc_chain(&content_types_xml)?;
-            parts.insert("[Content_Types].xml".to_string(), updated);
+        for key in part_key_variants(parts, "xl/_rels/workbook.xml.rels") {
+            if let Some(rels_xml) = parts.get(&key).cloned() {
+                let updated = workbook_rels_remove_calc_chain(&rels_xml)?;
+                parts.insert(key, updated);
+            }
+        }
+
+        for key in part_key_variants(parts, "[Content_Types].xml") {
+            if let Some(content_types_xml) = parts.get(&key).cloned() {
+                let updated = content_types_remove_calc_chain(&content_types_xml)?;
+                parts.insert(key, updated);
+            }
         }
     }
 
@@ -309,7 +333,7 @@ fn override_part_name_is_calc_chain(e: &BytesStart<'_>) -> Result<bool, RecalcPo
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
 
     use super::*;
 
@@ -349,6 +373,97 @@ mod tests {
         }
 
         parts
+    }
+
+    #[test]
+    fn apply_recalc_policy_to_parts_tolerates_slash_prefixed_part_names() {
+        // ZIP entry names in valid XLSX packages should not start with `/`, but some producers
+        // may include it. Recalc policy should still patch workbook / rels / content types and
+        // remove calcChain in that case.
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <calcPr fullCalcOnLoad="0" calcId="171027"/>
+</workbook>
+"#;
+
+        let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>
+  <Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"/>
+</Relationships>
+"#;
+
+        let content_types_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/calcChain.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml"/>
+  <Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
+</Types>
+"#;
+
+        let mut parts = BTreeMap::new();
+        parts.insert("/xl/workbook.xml".to_string(), workbook_xml.to_vec());
+        parts.insert("/xl/_rels/workbook.xml.rels".to_string(), rels_xml.to_vec());
+        parts.insert("/[Content_Types].xml".to_string(), content_types_xml.to_vec());
+        parts.insert("/xl/calcChain.xml".to_string(), b"<calcChain/>".to_vec());
+
+        apply_recalc_policy_to_parts(&mut parts, RecalcPolicy::default())
+            .expect("apply recalc policy to slashed parts");
+
+        assert!(
+            !parts.contains_key("/xl/calcChain.xml"),
+            "calcChain part should be removed"
+        );
+        assert!(
+            !parts.contains_key("xl/calcChain.xml"),
+            "should not create canonical calcChain key while removing"
+        );
+
+        assert!(
+            !parts.contains_key("xl/workbook.xml"),
+            "expected workbook to be patched in-place (not duplicated without slash)"
+        );
+        let updated_workbook =
+            std::str::from_utf8(parts.get("/xl/workbook.xml").expect("workbook present"))
+                .expect("utf8 workbook");
+        assert!(
+            updated_workbook.contains(r#"fullCalcOnLoad="1""#),
+            "expected workbook calcPr fullCalcOnLoad=1, got: {updated_workbook}"
+        );
+
+        assert!(
+            !parts.contains_key("xl/_rels/workbook.xml.rels"),
+            "expected rels to be patched in-place (not duplicated without slash)"
+        );
+        let updated_rels = std::str::from_utf8(
+            parts
+                .get("/xl/_rels/workbook.xml.rels")
+                .expect("workbook rels present"),
+        )
+        .expect("utf8 rels");
+        assert!(
+            !updated_rels.contains("calcChain.xml"),
+            "expected calcChain relationship to be removed, got: {updated_rels}"
+        );
+        assert!(
+            updated_rels.contains("metadata.xml"),
+            "expected metadata relationship to be preserved, got: {updated_rels}"
+        );
+
+        assert!(
+            !parts.contains_key("[Content_Types].xml"),
+            "expected content types to be patched in-place (not duplicated without slash)"
+        );
+        let updated_ct =
+            std::str::from_utf8(parts.get("/[Content_Types].xml").expect("ct present"))
+                .expect("utf8 content types");
+        assert!(
+            !updated_ct.contains("calcChain.xml"),
+            "expected calcChain override to be removed, got: {updated_ct}"
+        );
+        assert!(
+            updated_ct.contains("/xl/metadata.xml"),
+            "expected metadata override to be preserved, got: {updated_ct}"
+        );
     }
 
     #[test]
