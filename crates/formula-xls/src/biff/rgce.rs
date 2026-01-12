@@ -1510,6 +1510,15 @@ fn format_namex_ref(
         SupBookKind::Internal => {
             if sheet_ref_available {
                 if let Ok(prefix) = format_sheet_ref(ixti, ctx) {
+                    if extern_name.eq_ignore_ascii_case("TRUE")
+                        || extern_name.eq_ignore_ascii_case("FALSE")
+                        || extern_name.starts_with('#')
+                        || extern_name.starts_with('\'')
+                    {
+                        return Err(format!(
+                            "PtgNameX external name `{extern_name}` cannot be rendered parseably after a sheet prefix (ixti={ixti}, iname={iname})"
+                        ));
+                    }
                     return Ok(format!("{prefix}{extern_name}"));
                 }
             }
@@ -1521,6 +1530,15 @@ fn format_namex_ref(
             // `'[Book.xlsx]Sheet1'!MyName`. Otherwise fall back to workbook-scoped `'[Book.xlsx]MyName'`.
             if sheet_ref_available {
                 if let Ok(prefix) = format_sheet_ref(ixti, ctx) {
+                    if extern_name.eq_ignore_ascii_case("TRUE")
+                        || extern_name.eq_ignore_ascii_case("FALSE")
+                        || extern_name.starts_with('#')
+                        || extern_name.starts_with('\'')
+                    {
+                        return Err(format!(
+                            "PtgNameX external name `{extern_name}` cannot be rendered parseably after a sheet prefix (ixti={ixti}, iname={iname})"
+                        ));
+                    }
                     return Ok(format!("{prefix}{extern_name}"));
                 }
             }
@@ -3444,6 +3462,48 @@ mod tests {
         assert_eq!(decoded.text, "Sheet1!MyName");
         assert!(
             decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn ptg_namex_internal_sheet_scoped_reserved_boolean_name_falls_back_to_ref() {
+        // Like PtgName, PtgNameX can refer to external (or internal) names. If the external name is
+        // `TRUE`/`FALSE`, it cannot be rendered as `Sheet1!TRUE` because the parser will lex `TRUE`
+        // as a boolean literal after a sheet prefix. Ensure we fall back to a parseable placeholder.
+        let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+
+        let supbooks = vec![SupBookInfo {
+            ctab: 0,
+            virt_path: "\u{0001}".to_string(),
+            kind: SupBookKind::Internal,
+            workbook_name: None,
+            sheet_names: Vec::new(),
+            extern_names: vec!["TRUE".to_string()],
+        }];
+
+        let ctx = RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &sheet_names,
+            externsheet: &externsheet,
+            supbooks: &supbooks,
+            defined_names: &defined_names,
+        };
+
+        // PtgNameX (ixti=0, iname=1).
+        let rgce = [0x39, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#REF!");
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("cannot be rendered parseably")),
             "warnings={:?}",
             decoded.warnings
         );
