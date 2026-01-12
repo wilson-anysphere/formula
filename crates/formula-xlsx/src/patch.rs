@@ -625,7 +625,13 @@ fn resolve_shared_strings_part_name(pkg: &XlsxPackage) -> Result<Option<String>,
     let rels = parse_relationships(rels_bytes)?;
     Ok(rels
         .into_iter()
-        .find(|rel| rel.type_uri == REL_TYPE_SHARED_STRINGS)
+        .find(|rel| {
+            rel.type_uri == REL_TYPE_SHARED_STRINGS
+                && !rel
+                    .target_mode
+                    .as_deref()
+                    .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        })
         .map(|rel| resolve_target(WORKBOOK_PART, &rel.target)))
 }
 
@@ -654,7 +660,13 @@ fn resolve_styles_part(pkg: &XlsxPackage) -> Result<String, XlsxError> {
     };
     let rels = parse_relationships(rels_bytes)?;
 
-    if let Some(rel) = rels.iter().find(|rel| rel.type_uri == REL_TYPE_STYLES) {
+    if let Some(rel) = rels.iter().find(|rel| {
+        rel.type_uri == REL_TYPE_STYLES
+            && !rel
+                .target_mode
+                .as_deref()
+                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+    }) {
         return Ok(resolve_target(WORKBOOK_PART, &rel.target));
     }
 
@@ -2989,6 +3001,7 @@ fn format_dimension(min_r: u32, min_c: u32, max_r: u32, max_c: u32) -> String {
 mod tests {
     use super::*;
     use crate::XlsxPackage;
+    use formula_model::{Style, StyleTable};
     use std::io::{Cursor, Write};
 
     fn build_dimension_fixture() -> Vec<u8> {
@@ -3029,6 +3042,126 @@ mod tests {
         zip.write_all(worksheet_xml.as_bytes()).unwrap();
 
         zip.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn apply_cell_patches_with_styles_ignores_external_workbook_styles_relationship() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        // External styles relationship is listed first and must be ignored. Otherwise we'd resolve
+        // it as an internal part name and fail to load `xl/styles.xml`.
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="https://example.com/styles.xml" TargetMode="External"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>"#;
+
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData/>
+</worksheet>"#;
+
+        let styles_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/styles.xml", options).unwrap();
+        zip.write_all(styles_xml.as_bytes()).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+        let mut style_table = StyleTable::default();
+        let style_id = style_table.intern(Style {
+            number_format: Some("0".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(style_id, 1);
+
+        let mut patches = WorkbookCellPatches::default();
+        patches.set_cell(
+            "Sheet1",
+            CellRef::from_a1("A1").unwrap(),
+            CellPatch::set_value_with_style_id(CellValue::Number(1.0), style_id),
+        );
+
+        pkg.apply_cell_patches_with_styles(&patches, &style_table)
+            .expect("apply_cell_patches_with_styles");
+    }
+
+    #[test]
+    fn resolve_shared_strings_part_name_ignores_external_relationship() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="https://example.com/sharedStrings.xml" TargetMode="External"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
+</Relationships>"#;
+
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData/>
+</worksheet>"#;
+
+        let shared_strings_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0" uniqueCount="0"/>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/sharedStrings.xml", options).unwrap();
+        zip.write_all(shared_strings_xml.as_bytes()).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+        assert_eq!(
+            resolve_shared_strings_part_name(&pkg).expect("resolve shared strings"),
+            Some("xl/sharedStrings.xml".to_string())
+        );
     }
 
     #[test]
