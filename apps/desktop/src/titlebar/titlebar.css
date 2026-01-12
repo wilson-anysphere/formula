@@ -170,7 +170,7 @@
     filter var(--motion-duration-fast) var(--motion-ease);
 }
 
-.formula-titlebar.formula-titlebar--component .formula-titlebar__action-button:hover {
+.formula-titlebar.formula-titlebar--component .formula-titlebar__action-button:hover:not(:disabled) {
   background: var(--bg-tertiary);
   color: var(--text-primary);
 }
@@ -178,6 +178,12 @@
 .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button:focus-visible {
   outline: 2px solid var(--selection-border);
   outline-offset: 2px;
+}
+
+.formula-titlebar.formula-titlebar--component .formula-titlebar__action-button:disabled {
+  color: var(--text-secondary);
+  cursor: default;
+  opacity: 0.6;
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button--primary {

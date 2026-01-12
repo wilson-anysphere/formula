@@ -62,6 +62,7 @@ describe("mountTitlebar", () => {
 
     // Actions exist with aria labels.
     const actionsToolbar = container.querySelector<HTMLElement>(".formula-titlebar__actions");
+    expect(actionsToolbar).toBeTruthy();
     expect(actionsToolbar?.getAttribute("role")).toBe("toolbar");
     expect(actionsToolbar?.getAttribute("aria-label")).toBe("Titlebar actions");
     const shareButton = container.querySelector<HTMLButtonElement>('[aria-label="Share document"]');

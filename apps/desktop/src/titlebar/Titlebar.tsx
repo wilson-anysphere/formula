@@ -78,6 +78,17 @@ const defaultActions: TitlebarAction[] = [
   { label: "Share", ariaLabel: "Share document", variant: "primary" },
 ];
 
+function stripLeadingDocSeparator(documentName: string): string {
+  // The titlebar visually separates app name and document name with an em dash.
+  // Some callers may already include a leading dash in `documentName` (e.g. from
+  // mockups). Strip it so we don't render a doubled separator.
+  let result = documentName.trimStart();
+  // Remove any leading separator characters and following whitespace.
+  // (em dash, en dash, hyphen-minus)
+  result = result.replace(/^[—–-]+\s*/, "");
+  return result;
+}
+
 export function Titlebar({
   appName = "Formula",
   documentName = "Untitled.xlsx",
@@ -88,6 +99,7 @@ export function Titlebar({
 }: TitlebarProps) {
   const undoTitle = undoRedo?.undoLabel ? `Undo ${undoRedo.undoLabel}` : "Undo";
   const redoTitle = undoRedo?.redoLabel ? `Redo ${undoRedo.redoLabel}` : "Redo";
+  const normalizedDocumentName = stripLeadingDocSeparator(documentName);
 
   return (
     <div
@@ -153,31 +165,35 @@ export function Titlebar({
       <div className="formula-titlebar__drag-region" data-tauri-drag-region>
         <div className="formula-titlebar__titles">
           <span className="formula-titlebar__app-name">{appName}</span>
-          <span className="formula-titlebar__document-name" title={documentName}>
-            {documentName}
-          </span>
+          {normalizedDocumentName.trim().length > 0 ? (
+            <span className="formula-titlebar__document-name" title={documentName}>
+              {normalizedDocumentName}
+            </span>
+          ) : null}
         </div>
       </div>
 
-      <div className="formula-titlebar__actions" role="toolbar" aria-label="Titlebar actions">
-        {actions.map((action) => {
-          const variantClass =
-            action.variant === "primary" ? "formula-titlebar__action-button--primary" : "";
-          return (
-            <button
-              key={`${action.ariaLabel}:${action.label}`}
-              type="button"
-              className={["formula-titlebar__action-button", variantClass].filter(Boolean).join(" ")}
-              aria-label={action.ariaLabel}
-              title={action.ariaLabel}
-              onClick={action.onClick}
-              disabled={action.disabled}
-            >
-              {action.label}
-            </button>
-          );
-        })}
-      </div>
+      {actions.length > 0 ? (
+        <div className="formula-titlebar__actions" role="toolbar" aria-label="Titlebar actions">
+          {actions.map((action) => {
+            const variantClass =
+              action.variant === "primary" ? "formula-titlebar__action-button--primary" : "";
+            return (
+              <button
+                key={`${action.ariaLabel}:${action.label}`}
+                type="button"
+                className={["formula-titlebar__action-button", variantClass].filter(Boolean).join(" ")}
+                aria-label={action.ariaLabel}
+                title={action.ariaLabel}
+                onClick={action.onClick}
+                disabled={action.disabled}
+              >
+                {action.label}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }
