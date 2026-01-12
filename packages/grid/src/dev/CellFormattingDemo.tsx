@@ -6,6 +6,7 @@ import type {
   CellBorders,
   CellData,
   CellProvider,
+  CellRange,
   CellStyle
 } from "../model/CellProvider";
 import { CanvasGrid, type GridApi } from "../react/CanvasGrid";
@@ -327,6 +328,19 @@ export function CellFormattingDemo(): React.ReactElement {
   const provider = useMemo(() => new CellFormattingDemoProvider({ rowCount, colCount }), [rowCount, colCount]);
   const apiRef = useRef<GridApi | null>(null);
   const [zoom, setZoom] = useState(1);
+  const [selection, setSelection] = useState<{ row: number; col: number } | null>(null);
+  const [selectionRange, setSelectionRange] = useState<CellRange | null>(null);
+
+  const selectionCell = selection ? provider.getCell(selection.row, selection.col) : null;
+  const selectionAddress = (() => {
+    if (!selection) return "None";
+    const headerRows = 1;
+    const headerCols = 1;
+    const row0 = selection.row - headerRows;
+    const col0 = selection.col - headerCols;
+    if (row0 >= 0 && col0 >= 0) return `${toColumnName(col0)}${row0 + 1}`;
+    return `R${selection.row + 1}C${selection.col + 1}`;
+  })();
 
   useEffect(() => {
     apiRef.current?.setZoom(zoom);
@@ -431,6 +445,49 @@ export function CellFormattingDemo(): React.ReactElement {
               />
               <span style={{ width: 44, textAlign: "right" }}>{Math.round(zoom * 100)}%</span>
             </label>
+
+            <details style={{ marginTop: 10, opacity: 0.95 }}>
+              <summary style={{ cursor: "pointer", userSelect: "none" }}>Selection inspector</summary>
+              <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.4 }}>
+                <div>
+                  <strong>Active:</strong> {selectionAddress}
+                </div>
+                {selectionCell ? (
+                  <pre
+                    style={{
+                      marginTop: 6,
+                      marginBottom: 0,
+                      padding: 8,
+                      borderRadius: 6,
+                      border: "1px solid var(--formula-grid-line, #e5e7eb)",
+                      background: "rgba(148, 163, 184, 0.08)",
+                      overflow: "auto",
+                      maxHeight: 160
+                    }}
+                  >
+                    {JSON.stringify(
+                      {
+                        value: selectionCell.value,
+                        style: selectionCell.style,
+                        richText: selectionCell.richText
+                      },
+                      null,
+                      2
+                    )}
+                  </pre>
+                ) : (
+                  <div style={{ marginTop: 6, opacity: 0.8 }}>Select a cell to see its value/style payload.</div>
+                )}
+                {selectionRange ? (
+                  <div style={{ marginTop: 6 }}>
+                    <strong>Range:</strong>{" "}
+                    <code>
+                      {selectionRange.startRow},{selectionRange.startCol} → {selectionRange.endRow - 1},{selectionRange.endCol - 1}
+                    </code>
+                  </div>
+                ) : null}
+              </div>
+            </details>
           </div>
         </div>
       </div>
@@ -447,6 +504,8 @@ export function CellFormattingDemo(): React.ReactElement {
           defaultRowHeight={24}
           defaultColWidth={120}
           onZoomChange={setZoom}
+          onSelectionChange={setSelection}
+          onSelectionRangeChange={setSelectionRange}
           apiRef={apiRef}
         />
       </div>
