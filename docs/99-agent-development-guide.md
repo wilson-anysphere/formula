@@ -211,7 +211,8 @@ Use this helper to pick parallelism based on current system load:
 
 ```bash
 # Usage: ./scripts/smart-jobs.sh
-# Returns a reasonable -j value based on current memory pressure
+# Returns a reasonable -j value based on current memory pressure.
+# On our multi-agent hosts this intentionally caps at -j8 to avoid stampedes.
 
 #!/bin/bash
 # See scripts/smart-jobs.sh for full implementation
