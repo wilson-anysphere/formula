@@ -45,6 +45,8 @@ describe("tauri capability event permissions", () => {
         expect(scope).toBeTruthy();
         expect(typeof scope.event).toBe("string");
         expect(scope.event.trim()).not.toBe("");
+        // Disallow wildcard/pattern scopes; we want explicit event names only.
+        expect(scope.event).not.toContain("*");
       }
     }
   });
