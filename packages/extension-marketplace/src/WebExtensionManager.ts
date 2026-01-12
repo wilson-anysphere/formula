@@ -45,7 +45,17 @@ export interface BrowserExtensionHostLike {
     mainUrl: string;
   }): Promise<string>;
   unloadExtension?(extensionId: string): Promise<void | boolean> | void | boolean;
+  /**
+   * Preferred single-call API for uninstall flows (clears permissions + storage).
+   */
+  resetExtensionState?(extensionId: string): Promise<void> | void;
+  /**
+   * Back-compat: clear persisted permission grants.
+   */
   revokePermissions?(extensionId: string, permissions?: string[]): Promise<void> | void;
+  /**
+   * Back-compat: clear persisted extension storage/config state.
+   */
   clearExtensionStorage?(extensionId: string): Promise<void> | void;
   listExtensions(): Array<{ id: string }>;
 }
@@ -778,6 +788,17 @@ export class WebExtensionManager {
     if (!existing) return;
 
     await this.unload(id).catch(() => {});
+    try {
+      const host = this.host;
+      if (host && typeof host.resetExtensionState === "function") {
+        await host.resetExtensionState(String(id));
+      } else {
+        await host?.revokePermissions?.(String(id));
+        await host?.clearExtensionStorage?.(String(id));
+      }
+    } catch {
+      // ignore (host/storage might be unavailable)
+    }
 
     const db = await openDb();
     try {
@@ -789,47 +810,27 @@ export class WebExtensionManager {
       db.close();
     }
 
-    // Best-effort cleanup of persisted browser-host state.
+    // Best-effort cleanup of persisted state owned by the uninstalled extension so a reinstall
+    // behaves like a clean install.
     //
-    // - permissions: PermissionManager persists grants in localStorage under
-    //   `formula.extensionHost.permissions`. Clear the uninstalled extension's entry so a
-    //   reinstall prompts again.
-    // - storage/config: LocalStorageExtensionStorage persists per-extension blobs under
-    //   `formula.extensionHost.storage.<extensionId>`. Remove it so reinstall starts fresh.
-    try {
-      await this.host?.revokePermissions?.(String(id));
-    } catch {
-      // ignore (host might not support permissions, or storage might be unavailable)
-    }
-
-    // Fallback: if the host is unavailable (or does not implement revokePermissions), ensure we still
-    // remove persisted permission grants from localStorage so a reinstall prompts again.
-    const permissionStorage = getLocalStorage();
-    if (permissionStorage) {
+    // Note: We prefer clearing state via the host (resetExtensionState/revokePermissions/clearExtensionStorage),
+    // but we also clear known default localStorage keys as a fallback when the host is not available.
+    const localStorage = getLocalStorage();
+    if (localStorage) {
       try {
-        removePermissionGrantsForExtension(permissionStorage, String(id));
+        removePermissionGrantsForExtension(localStorage, String(id));
       } catch {
         // ignore
       }
-    }
 
-    try {
-      await this.host?.clearExtensionStorage?.(String(id));
-    } catch {
-      // ignore
-    }
-
-    try {
-      globalThis.localStorage?.removeItem(`formula.extensionHost.storage.${String(id)}`);
-    } catch {
-      // ignore (localStorage may be disabled/unavailable)
-    }
-
-    // Keep the synchronous contributed panel seed store in sync with installed extensions.
-    const seedStorage = getLocalStorage();
-    if (seedStorage) {
       try {
-        removeContributedPanelSeedsForExtension(seedStorage, String(id));
+        localStorage.removeItem(`formula.extensionHost.storage.${String(id)}`);
+      } catch {
+        // ignore
+      }
+
+      try {
+        removeContributedPanelSeedsForExtension(localStorage, String(id));
       } catch {
         // ignore
       }

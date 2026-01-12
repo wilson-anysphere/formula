@@ -73,20 +73,31 @@ export async function setupExtensionTestHarness(): Promise<void> {
   if (!params.has("extTest")) return;
 
   const spreadsheet = new TestSpreadsheetApi();
+  const permissionPrompts: any[] = [];
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",
     spreadsheetApi: spreadsheet,
-    permissionPrompt: async () => true
+    permissionPrompt: async (req: any) => {
+      permissionPrompts.push(req);
+      return true;
+    }
   });
 
   const marketplaceClient = new MarketplaceClient({ baseUrl: "/api" });
   const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
 
   const api = {
-    async installSampleHello() {
-      const id = "formula.sample-hello";
+    async installExtension(id: string) {
       await manager.install(id);
       await manager.loadInstalled(id);
+      return id;
+    },
+    async uninstallExtension(id: string) {
+      await manager.uninstall(id);
+    },
+    async installSampleHello() {
+      const id = "formula.sample-hello";
+      await api.installExtension(id);
       return id;
     },
     async executeCommand(commandId: string, ...args: any[]) {
@@ -103,6 +114,12 @@ export async function setupExtensionTestHarness(): Promise<void> {
     },
     getMessages() {
       return host.getMessages();
+    },
+    getPermissionPrompts() {
+      return [...permissionPrompts];
+    },
+    clearPermissionPrompts() {
+      permissionPrompts.length = 0;
     },
     async dispose() {
       await manager.dispose();

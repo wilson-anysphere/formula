@@ -721,6 +721,35 @@ class ExtensionHost {
     this._extensions.delete(id);
   }
 
+  /**
+   * Clears persisted state owned by a given extension id (permissions + storage).
+   *
+   * This is intended to be called by installers/uninstall flows so a reinstall behaves
+   * like a clean install.
+   *
+   * @param {string} extensionId
+   */
+  async resetExtensionState(extensionId) {
+    const id = String(extensionId);
+
+    // Best-effort: do not fail uninstall flows because persistence is unavailable.
+    try {
+      await this._permissionManager.revokePermissions(id);
+    } catch {
+      // ignore
+    }
+
+    try {
+      const store = await this._loadExtensionStorage();
+      if (!store || typeof store !== "object" || Array.isArray(store)) return;
+      if (!Object.prototype.hasOwnProperty.call(store, id)) return;
+      delete store[id];
+      await this._saveExtensionStorage(store);
+    } catch {
+      // ignore
+    }
+  }
+
   _getWorkerResourceLimits() {
     if (!this._memoryMb) return undefined;
     const oldGeneration = Math.floor(this._memoryMb);

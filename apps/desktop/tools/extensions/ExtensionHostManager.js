@@ -587,4 +587,17 @@ export class ExtensionHostManager {
       this._emitContributionsChanged();
     });
   }
+
+  /**
+   * Clears persisted state for an extension id (permissions + extension storage).
+   *
+   * Useful for uninstall flows so a reinstall behaves like a clean install.
+   *
+   * @param {string} extensionId
+   */
+  async resetExtensionState(extensionId) {
+    return this._runHostOperation(async () => {
+      await this._host.resetExtensionState?.(String(extensionId));
+    });
+  }
 }

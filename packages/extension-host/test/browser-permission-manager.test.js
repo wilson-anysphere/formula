@@ -107,3 +107,63 @@ test("browser PermissionManager: migrates legacy string-array grants to v2 permi
     }
   });
 });
+
+test("browser PermissionManager: revokePermissions removes persisted grants for a single extension", async () => {
+  const { PermissionManager } = await importBrowserPermissionManager();
+
+  const storage = createMemoryStorage();
+  const storageKey = "formula.test.permissions.revoke";
+
+  const pm = new PermissionManager({
+    storage,
+    storageKey,
+    prompt: async () => true
+  });
+
+  await pm.ensurePermissions(
+    {
+      extensionId: "pub.ext",
+      displayName: "Ext",
+      declaredPermissions: ["network"]
+    },
+    ["network"]
+  );
+
+  await pm.ensurePermissions(
+    {
+      extensionId: "pub.other",
+      displayName: "Other",
+      declaredPermissions: ["clipboard"]
+    },
+    ["clipboard"]
+  );
+
+  await pm.revokePermissions("pub.ext");
+
+  const stored = JSON.parse(storage.getItem(storageKey));
+  assert.ok(!stored["pub.ext"], "Expected revoked extension id to be removed from permission store");
+  assert.deepEqual(stored["pub.other"], { clipboard: true });
+
+  let promptCalls = 0;
+  const pm2 = new PermissionManager({
+    storage,
+    storageKey,
+    prompt: async ({ permissions }) => {
+      promptCalls += 1;
+      assert.deepEqual(permissions, ["network"]);
+      return true;
+    }
+  });
+
+  // Should prompt again because the persisted grant was removed.
+  await pm2.ensurePermissions(
+    {
+      extensionId: "pub.ext",
+      displayName: "Ext",
+      declaredPermissions: ["network"]
+    },
+    ["network"]
+  );
+
+  assert.equal(promptCalls, 1);
+});

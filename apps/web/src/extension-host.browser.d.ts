@@ -11,6 +11,8 @@ declare module "@formula/extension-host/browser" {
 
     unloadExtension(extensionId: string): Promise<boolean>;
 
+    resetExtensionState(extensionId: string): Promise<void>;
+
     updateExtension(args: {
       extensionId: string;
       extensionPath: string;
@@ -34,4 +36,3 @@ declare module "@formula/extension-host/browser" {
 
   export const API_PERMISSIONS: Record<string, string[]>;
 }
-

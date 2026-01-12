@@ -160,6 +160,7 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
             try {
               if (extensionHostManager) {
                 await extensionHostManager.unloadExtension(item.id);
+                await extensionHostManager.resetExtensionState?.(item.id);
               }
               await extensionManager.uninstall(item.id);
               if (extensionHostManager?.syncInstalledExtensions) {
@@ -220,7 +221,12 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
   container.append(list);
 }
 
-export function createMarketplacePanel({ container, marketplaceClient, extensionManager, extensionHostManager }) {
+export function createMarketplacePanel({
+  container,
+  marketplaceClient,
+  extensionManager,
+  extensionHostManager,
+}) {
   const queryInput = el("input", { type: "search", placeholder: "Search extensions…" });
   const resultsContainer = el("div", { className: "results" });
 

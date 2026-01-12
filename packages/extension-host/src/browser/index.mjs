@@ -161,8 +161,9 @@ class InMemoryExtensionStorage {
    * @param {string} extensionId
    */
   getExtensionStore(extensionId) {
-    if (!this._data[extensionId]) this._data[extensionId] = {};
-    return this._data[extensionId];
+    const id = String(extensionId);
+    if (!this._data[id]) this._data[id] = {};
+    return this._data[id];
   }
 
   /**
@@ -571,6 +572,50 @@ class BrowserExtensionHost {
     this._extensions.delete(id);
     this._terminateWorker(extension, { reason: "unload", cause: new Error("Extension unloaded") });
     return true;
+  }
+
+  /**
+   * Clears all persisted state owned by an extension (permission grants + extension storage).
+   *
+   * Intended to be called by install/uninstall managers so a reinstall behaves like a clean
+   * install.
+   *
+   * @param {string} extensionId
+   */
+  async resetExtensionState(extensionId) {
+    const id = String(extensionId);
+
+    // Best-effort: these should never throw for the default localStorage-backed implementations,
+    // but we intentionally do not let failures prevent uninstall flows from completing.
+    try {
+      await this._permissionManager.revokePermissions(id);
+    } catch {
+      // ignore
+    }
+
+    try {
+      const storageApi = this._storageApi;
+      if (storageApi && typeof storageApi.clearExtensionStore === "function") {
+        await storageApi.clearExtensionStore(id);
+        return;
+      }
+
+      // Fallback: clear all keys from the per-extension store.
+      if (storageApi && typeof storageApi.getExtensionStore === "function") {
+        const store = storageApi.getExtensionStore(id);
+        if (store && typeof store === "object") {
+          for (const key of Object.keys(store)) {
+            try {
+              delete store[key];
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 
   async updateExtension({ extensionId, extensionPath, manifest, mainUrl }) {
