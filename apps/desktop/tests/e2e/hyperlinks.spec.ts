@@ -183,6 +183,42 @@ test.describe("external hyperlink opening", () => {
     expect(urlAfter).toBe(urlBefore);
   });
 
+  test("blocked protocols (data:) are never opened via shell", async ({ page }) => {
+    await gotoDesktop(page);
+    await waitForIdle(page);
+
+    await page.evaluate(() => {
+      (window as any).__shellOpenCalls = [];
+      (window as any).__TAURI__ = {
+        plugin: {
+          shell: {
+            open: (url: string) => {
+              (window as any).__shellOpenCalls.push(url);
+              return Promise.resolve();
+            },
+          },
+        },
+      };
+
+      const a = document.createElement("a");
+      a.id = "e2e-external-anchor-data";
+      a.href = "data:text/plain,hello";
+      a.textContent = "bad link";
+      document.body.appendChild(a);
+    });
+
+    const urlBefore = page.url();
+    await page.click("#e2e-external-anchor-data");
+
+    const [shellCalls, urlAfter] = await Promise.all([
+      page.evaluate(() => (window as any).__shellOpenCalls),
+      page.url(),
+    ]);
+
+    expect(shellCalls).toEqual([]);
+    expect(urlAfter).toBe(urlBefore);
+  });
+
   test("untrusted protocols prompt and can be canceled", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);

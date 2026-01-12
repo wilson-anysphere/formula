@@ -44,6 +44,14 @@ describe("shellOpen", () => {
     expect(tauriOpen).not.toHaveBeenCalled();
   });
 
+  it("blocks data: URLs even when the shell API is available", async () => {
+    const tauriOpen = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { plugin: { shell: { open: tauriOpen } } };
+
+    await expect(shellOpen("data:text/plain,hello")).rejects.toThrow(/blocked protocol/i);
+    expect(tauriOpen).not.toHaveBeenCalled();
+  });
+
   it("does not fall back to window.open when __TAURI__ is present but the shell plugin is missing", async () => {
     (globalThis as any).__TAURI__ = { core: { invoke: vi.fn() } };
     const winOpen = vi.fn();
