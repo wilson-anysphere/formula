@@ -409,17 +409,6 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                     .and_then(|v| v.get("text"))
                                     .and_then(|v| v.as_str())
                                     .map(|s| CellValue::Text(s.to_string())),
-                                "image" => {
-                                    let alt_text = display_value
-                                        .get("value")
-                                        .and_then(|v| {
-                                            v.get("altText")
-                                                .or_else(|| v.get("alt_text"))
-                                                .and_then(|v| v.as_str())
-                                    });
-                                    let display = alt_text.filter(|s| !s.is_empty()).unwrap_or("[Image]");
-                                    Some(CellValue::Text(display.to_string()))
-                                }
                                 // Degrade nested rich values (e.g. records whose display field is
                                 // an entity/record) using the same logic as the main conversion.
                                 //
@@ -431,11 +420,11 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                         .map(|v: ModelCellValue| model_cell_value_to_sort_value(&v))
                                 }
                                 _ => None,
-                            };
+                             };
 
-                            if parsed.is_some() {
-                                return parsed;
-                            }
+                             if parsed.is_some() {
+                                 return parsed;
+                             }
                         }
                     }
                 }
