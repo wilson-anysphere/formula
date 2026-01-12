@@ -1,0 +1,199 @@
+export type CollabUserIdentity = { id: string; name: string; color: string };
+
+export const COLLAB_USER_STORAGE_KEY = "formula:collab:user";
+
+const COLOR_PALETTE: ReadonlyArray<string> = [
+  "#4c8bf5", // blue (Formula default)
+  "#ff2d55", // pink/red
+  "#34c759", // green
+  "#ff9500", // orange
+  "#af52de", // purple
+  "#5ac8fa", // light blue
+  "#ffcc00", // yellow
+  "#5856d6", // indigo
+  "#ff3b30", // red
+  "#00c7be", // teal
+  "#32ade6", // cyan
+  "#ff6482", // rose
+];
+
+let inMemoryIdentity: CollabUserIdentity | null = null;
+
+function tryGetDefaultStorage(): Storage | null {
+  try {
+    const storage = (globalThis as any)?.localStorage as Storage | undefined;
+    if (!storage) return null;
+    if (typeof storage.getItem !== "function") return null;
+    if (typeof storage.setItem !== "function") return null;
+    return storage;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeHexColor(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const match = /^#?([0-9a-f]{6})$/i.exec(trimmed);
+  if (!match) return null;
+  return `#${match[1].toLowerCase()}`;
+}
+
+function hashStringToUInt32(value: string): number {
+  // FNV-1a 32-bit
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+function colorFromId(id: string): string {
+  if (COLOR_PALETTE.length === 0) return "#4c8bf5";
+  const idx = hashStringToUInt32(id) % COLOR_PALETTE.length;
+  return COLOR_PALETTE[idx]!;
+}
+
+function defaultNameFromId(id: string): string {
+  const suffix = id.slice(0, 4);
+  return suffix ? `User ${suffix}` : "User";
+}
+
+function generateId(cryptoObj: Crypto | null): string {
+  const randomUUID = (cryptoObj as any)?.randomUUID;
+  if (typeof randomUUID === "function") {
+    try {
+      return String(randomUUID.call(cryptoObj));
+    } catch {
+      // fall through
+    }
+  }
+  return `${Date.now()}-${Math.random()}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object";
+}
+
+function coerceIdentity(value: unknown): CollabUserIdentity | null {
+  if (!isRecord(value)) return null;
+  const id = typeof value.id === "string" ? value.id.trim() : "";
+  if (!id) return null;
+
+  const name = typeof value.name === "string" ? value.name.trim() : "";
+  const colorRaw = typeof value.color === "string" ? value.color : "";
+  const color = colorRaw ? normalizeHexColor(colorRaw) : null;
+
+  const normalized: CollabUserIdentity = {
+    id,
+    name: name || defaultNameFromId(id),
+    color: color ?? colorFromId(id),
+  };
+
+  return normalized;
+}
+
+function readStoredIdentity(storage: Storage): CollabUserIdentity | null {
+  const raw = storage.getItem(COLLAB_USER_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    return coerceIdentity(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredIdentity(storage: Storage, identity: CollabUserIdentity): void {
+  storage.setItem(COLLAB_USER_STORAGE_KEY, JSON.stringify(identity));
+}
+
+function parseUrlOverrides(search: string): Partial<CollabUserIdentity> {
+  if (!search) return {};
+  try {
+    const params = new URLSearchParams(search.startsWith("?") ? search : `?${search}`);
+
+    const read = (key: string): string => params.get(key)?.trim() ?? "";
+
+    // Prefer the explicit `collabUser*` params (recommended), but also accept
+    // legacy/simple `user*` params for backwards compatibility.
+    const id = read("collabUserId") || read("userId");
+    const name = read("collabUserName") || read("userName");
+    const colorRaw = read("collabUserColor") || read("userColor");
+    const color = colorRaw ? normalizeHexColor(colorRaw) : null;
+
+    const out: Partial<CollabUserIdentity> = {};
+    if (id) out.id = id;
+    if (name) out.name = name;
+    if (color) out.color = color;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export function getCollabUserIdentity(options?: {
+  storage?: Storage | null;
+  /** `window.location.search` (e.g. `?collabUserName=Alice`). */
+  search?: string;
+  crypto?: Crypto | null;
+}): CollabUserIdentity {
+  const storage = options?.storage ?? tryGetDefaultStorage();
+  const search =
+    options?.search ??
+    (typeof window !== "undefined" && typeof window.location?.search === "string" ? window.location.search : "");
+  const cryptoObj = options?.crypto ?? (globalThis.crypto ?? null);
+
+  const overrides = parseUrlOverrides(search);
+
+  // 1) Load from storage (best-effort).
+  let base: CollabUserIdentity | null = null;
+  if (storage) {
+    try {
+      base = readStoredIdentity(storage);
+    } catch {
+      base = null;
+    }
+  }
+
+  // 2) If storage is empty/corrupt/unavailable, fall back to an in-memory identity
+  // (and attempt to persist when possible).
+  if (!base) {
+    base =
+      inMemoryIdentity ??
+      (() => {
+        const id = generateId(cryptoObj);
+        return { id, name: defaultNameFromId(id), color: colorFromId(id) };
+      })();
+
+    if (!inMemoryIdentity) inMemoryIdentity = base;
+
+    if (storage) {
+      try {
+        writeStoredIdentity(storage, base);
+      } catch {
+        // Ignore persistence failures (e.g. storage disabled/quota).
+      }
+    }
+  } else if (storage) {
+    // If the stored value is missing derived fields, update it.
+    // (E.g. `color` palette updates or legacy/malformed data.)
+    try {
+      writeStoredIdentity(storage, base);
+    } catch {
+      // Ignore.
+    }
+  }
+
+  // 3) Apply URL overrides for this run (do not overwrite stored identity).
+  const id = overrides.id ?? base.id;
+  const name = overrides.name ?? (overrides.id ? defaultNameFromId(id) : base.name);
+  const color = overrides.color ?? (overrides.id ? colorFromId(id) : base.color);
+
+  return { id, name: name || defaultNameFromId(id), color };
+}
+
+/** @internal (tests) */
+export function __resetCollabUserIdentityForTests(): void {
+  inMemoryIdentity = null;
+}

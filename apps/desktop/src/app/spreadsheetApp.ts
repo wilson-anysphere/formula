@@ -65,8 +65,7 @@ import { shiftA1References } from "@formula/spreadsheet-frontend";
 import { createSchemaProviderFromSearchWorkbook } from "../ai/context/searchWorkbookSchemaProvider.js";
 import { InlineEditController, type InlineEditLLMClient } from "../ai/inline-edit/inlineEditController";
 import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
-import type { CellRange as GridCellRange, GridAxisSizeChange, GridViewportState } from "@formula/grid";
-import type { GridPresence } from "@formula/grid";
+import type { CellRange as GridCellRange, GridAxisSizeChange, GridPresence, GridViewportState } from "@formula/grid";
 import { resolveDesktopGridMode, type DesktopGridMode } from "../grid/shared/desktopGridMode.js";
 import { DocumentCellProvider } from "../grid/shared/documentCellProvider.js";
 import { DesktopSharedGrid } from "../grid/shared/desktopSharedGrid.js";
@@ -81,6 +80,7 @@ import * as Y from "yjs";
 import { CommentManager, bindDocToStorage, getCommentsRoot } from "@formula/collab-comments";
 import type { Comment, CommentAuthor } from "@formula/collab-comments";
 import { bindCollabSessionToDocumentController, createCollabSession, type CollabSession } from "@formula/collab-session";
+import { getCollabUserIdentity, type CollabUserIdentity } from "../collab/userIdentity";
 
 import { PresenceRenderer } from "../grid/presence-renderer/presenceRenderer.js";
 import { ConflictUiController } from "../collab/conflicts-ui/conflict-ui-controller.js";
@@ -354,7 +354,7 @@ export type SpreadsheetAppCollabOptions = {
   wsUrl: string;
   docId: string;
   token?: string;
-  user: { id: string; name: string; color: string };
+  user: CollabUserIdentity;
 };
 
 function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
@@ -364,26 +364,17 @@ function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
     const enabled = params.get("collab");
     if (enabled !== "1" && enabled !== "true") return null;
 
-    const docId = params.get("docId") ?? "";
-    const wsUrl = params.get("wsUrl") ?? "";
+    const docId = params.get("collabDocId") ?? params.get("docId") ?? "";
+    const wsUrl = params.get("collabWsUrl") ?? params.get("wsUrl") ?? "";
     if (!docId || !wsUrl) return null;
 
-    const token = params.get("token") ?? undefined;
-    const userId = params.get("userId") ?? `user_${Math.random().toString(16).slice(2)}`;
-    const userName = params.get("userName") ?? t("presence.anonymous");
-    const defaultUserColor = resolveCssVar("--formula-grid-remote-presence-default", {
-      fallback: resolveCssVar("--accent", { fallback: resolveCssVar("--text-primary", { fallback: "CanvasText" }) }),
-    });
-    const userColor = params.get("userColor") || defaultUserColor;
+    const token = params.get("collabToken") ?? params.get("token") ?? undefined;
+    const identity = getCollabUserIdentity({ search: window.location.search });
     return {
       wsUrl,
       docId,
       token,
-      user: {
-        id: userId,
-        name: userName,
-        color: userColor,
-      },
+      user: identity,
     };
   } catch {
     return null;
@@ -2282,6 +2273,88 @@ export class SpreadsheetApp {
 
   getCollabSession(): CollabSession | null {
     return this.collabSession;
+  }
+
+  /**
+   * Collaboration-only: update remote presence overlays.
+   *
+   * Expects cursor/selection coordinates in *document* coordinates (0-based, excluding
+   * the shared-grid header row/col). This method offsets them as needed before
+   * passing them to the shared grid renderer.
+   */
+  setRemotePresences(presences: Array<any> | null): void {
+    if (!this.sharedGrid) return;
+
+    const headerRows = this.sharedHeaderRows();
+    const headerCols = this.sharedHeaderCols();
+
+    const normalizeRange = (
+      range: any
+    ): { startRow: number; startCol: number; endRow: number; endCol: number } | null => {
+      if (!range || typeof range !== "object") return null;
+
+      if (
+        typeof range.startRow === "number" &&
+        typeof range.startCol === "number" &&
+        typeof range.endRow === "number" &&
+        typeof range.endCol === "number"
+      ) {
+        return {
+          startRow: Math.trunc(range.startRow),
+          startCol: Math.trunc(range.startCol),
+          endRow: Math.trunc(range.endRow),
+          endCol: Math.trunc(range.endCol),
+        };
+      }
+
+      if (
+        range.start &&
+        range.end &&
+        typeof range.start.row === "number" &&
+        typeof range.start.col === "number" &&
+        typeof range.end.row === "number" &&
+        typeof range.end.col === "number"
+      ) {
+        return {
+          startRow: Math.trunc(range.start.row),
+          startCol: Math.trunc(range.start.col),
+          endRow: Math.trunc(range.end.row),
+          endCol: Math.trunc(range.end.col),
+        };
+      }
+
+      return null;
+    };
+
+    const mapped: GridPresence[] = (presences ?? [])
+      .map((presence: any): GridPresence | null => {
+        const id = typeof presence?.id === "string" ? presence.id : "";
+        const name = typeof presence?.name === "string" ? presence.name : "";
+        const color = typeof presence?.color === "string" ? presence.color : "";
+        if (!id || !name || !color) return null;
+
+        const cursorRaw = presence.cursor;
+        const cursor =
+          cursorRaw && typeof cursorRaw.row === "number" && typeof cursorRaw.col === "number"
+            ? { row: Math.trunc(cursorRaw.row) + headerRows, col: Math.trunc(cursorRaw.col) + headerCols }
+            : null;
+
+        const selectionsRaw = Array.isArray(presence.selections) ? presence.selections : [];
+        const selections = selectionsRaw
+          .map((r: any) => normalizeRange(r))
+          .filter((r): r is { startRow: number; startCol: number; endRow: number; endCol: number } => r != null)
+          .map((r) => ({
+            startRow: r.startRow + headerRows,
+            startCol: r.startCol + headerCols,
+            endRow: r.endRow + headerRows,
+            endCol: r.endCol + headerCols,
+          }));
+
+        return { id, name, color, cursor, selections };
+      })
+      .filter((p): p is GridPresence => p != null);
+
+    this.sharedGrid.renderer.setRemotePresences(mapped);
   }
 
   /**
