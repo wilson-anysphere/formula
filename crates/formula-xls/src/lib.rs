@@ -1480,7 +1480,14 @@ fn import_xls_path_with_biff_reader(
     //
     // Best-effort: if calamine surfaced (and we skipped) any invalid defined names, attempt to
     // recover the AutoFilter range directly from the workbook stream via our BIFF parser.
-    if autofilters.is_empty() && skipped_count > 0 {
+    // Try to recover the AutoFilter range directly from the workbook stream when:
+    // - BIFF parsing was unavailable (`workbook_stream=None`), or
+    // - calamine surfaced invalid/duplicate names (a strong signal that built-in names like
+    //   `_FilterDatabase` were not imported correctly).
+    //
+    // This keeps `.xls` AutoFilter import resilient to future calamine behavior changes (e.g. if it
+    // stops returning malformed built-in names and instead omits them entirely).
+    if autofilters.is_empty() && (skipped_count > 0 || workbook_stream.is_none()) {
         let workbook_stream_fallback = if workbook_stream.is_none() {
             match biff::read_workbook_stream_from_xls(path) {
                 Ok(bytes) => Some(bytes),
