@@ -731,12 +731,13 @@ def main() -> int:
                     diff_str = f" absDiff={abs_diff} relDiff={rel_diff}"
                 if detail_str:
                     diff_str += f" detail={detail_str}"
+                diff_part = f"`{diff_str.strip()}` " if diff_str.strip() else ""
                 lines.append(
                     f"* `{m.get('caseId')}` `{m.get('reason')}` "
                     f"`tags={tags_str}` "
                     f"`expected={expected_display}` "
                     f"`actual={actual_display}` "
-                    f"`{diff_str.strip()}` "
+                    f"{diff_part}"
                     f"`{m.get('formula')}`"
                 )
             lines.append("")
