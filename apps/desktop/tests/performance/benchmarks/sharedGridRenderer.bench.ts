@@ -149,6 +149,39 @@ export function createSharedGridRendererBenchmarks(): BenchmarkDef[] {
 
   const deltaY = 21 * 5; // 5 rows per "wheel" step at default 21px row height.
 
+  // Separate renderer for axis override benchmarking so we don't perturb the scroll benchmark.
+  const axisRenderer = new CanvasGridRenderer({ provider, rowCount, colCount });
+  axisRenderer.setPerfStatsEnabled(false);
+  axisRenderer.attach({
+    grid: document.createElement('canvas'),
+    content: document.createElement('canvas'),
+    selection: document.createElement('canvas'),
+  });
+  axisRenderer.setFrozen(frozenRows, frozenCols);
+  axisRenderer.resize(viewportWidth, viewportHeight, devicePixelRatio);
+  axisRenderer.renderImmediately();
+
+  const overrideRows = 10_000;
+  const overrideCols = 5_000;
+
+  const axisRowOverridesA = new Map<number, number>();
+  const axisRowOverridesB = new Map<number, number>();
+  for (let i = 0; i < overrideRows; i++) {
+    const row = i * 3;
+    axisRowOverridesA.set(row, 30);
+    axisRowOverridesB.set(row, 31);
+  }
+
+  const axisColOverridesA = new Map<number, number>();
+  const axisColOverridesB = new Map<number, number>();
+  for (let i = 0; i < overrideCols; i++) {
+    const col = i * 2;
+    axisColOverridesA.set(col, 120);
+    axisColOverridesB.set(col, 121);
+  }
+
+  let axisOverrideToggle = false;
+
   return [
     {
       name: 'gridRenderer.firstFrame.p95',
@@ -177,6 +210,27 @@ export function createSharedGridRendererBenchmarks(): BenchmarkDef[] {
         scrollRenderer.renderImmediately();
       },
       targetMs: 16,
+    },
+    {
+      name: 'gridRenderer.applyAxisSizeOverrides.10k.p95',
+      fn: () => {
+        // Toggle between two override maps so every iteration performs a real update (vs the
+        // renderer short-circuiting when the override set is unchanged).
+        axisOverrideToggle = !axisOverrideToggle;
+
+        axisRenderer.applyAxisSizeOverrides(
+          {
+            rows: axisOverrideToggle ? axisRowOverridesA : axisRowOverridesB,
+            cols: axisOverrideToggle ? axisColOverridesA : axisColOverridesB,
+          },
+          { resetUnspecified: true },
+        );
+      },
+      // Keep targets conservative: GitHub Actions runners vary, but this should still catch
+      // pathological regressions (e.g. reintroducing O(n^2) axis updates).
+      targetMs: 50,
+      iterations: 25,
+      warmup: 5,
     },
   ];
 }
