@@ -11,7 +11,8 @@ import {
   MergedCellIndex,
   isInteriorHorizontalGridline,
   isInteriorVerticalGridline,
-  rangesIntersect
+  rangesIntersect,
+  type IndexedRowRange
 } from "./mergedCells.ts";
 import {
   TextLayoutEngine,
@@ -4730,6 +4731,25 @@ export class CanvasGridRenderer {
       return this.mergedIndex;
     }
 
+    // Only materialize row->span entries for rows that are actually visible in the current viewport.
+    // This prevents O(merge height) work for extremely tall merged regions.
+    const indexedRowRanges: IndexedRowRange[] = [];
+    if (viewport.width > 0 && viewport.height > 0) {
+      const frozenHeight = Math.min(viewport.height, viewport.frozenHeight);
+      const frozenRowsRange =
+        viewport.frozenRows === 0 || frozenHeight === 0
+          ? { start: 0, end: 0 }
+          : this.scroll.rows.visibleRange(0, frozenHeight, { min: 0, maxExclusive: viewport.frozenRows });
+      if (frozenRowsRange.end > frozenRowsRange.start) {
+        indexedRowRanges.push({ startRow: frozenRowsRange.start, endRow: frozenRowsRange.end });
+      }
+
+      const mainRows = viewport.main.rows;
+      if (mainRows.end > mainRows.start) {
+        indexedRowRanges.push({ startRow: mainRows.start, endRow: mainRows.end });
+      }
+    }
+
     const merges = new Map<string, CellRange>();
     const addMerge = (candidate: CellRange | null) => {
       const normalized = candidate ? this.normalizeSelectionRange(candidate) : null;
@@ -4762,7 +4782,7 @@ export class CanvasGridRenderer {
       }
     }
 
-    this.mergedIndex = new MergedCellIndex([...merges.values()]);
+    this.mergedIndex = new MergedCellIndex([...merges.values()], indexedRowRanges);
     this.mergedIndexKey = key;
     this.mergedIndexDirty = false;
     return this.mergedIndex;

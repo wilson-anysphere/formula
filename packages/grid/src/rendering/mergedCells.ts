@@ -5,6 +5,8 @@ export interface CellRef {
   col: number;
 }
 
+export type IndexedRowRange = Pick<CellRange, "startRow" | "endRow">;
+
 function normalizeRange(range: CellRange): CellRange | null {
   const startRow = Math.min(range.startRow, range.endRow);
   const endRow = Math.max(range.startRow, range.endRow);
@@ -24,17 +26,27 @@ export class MergedCellIndex {
   private readonly ranges: CellRange[];
   private readonly rowIndex: Map<number, Array<{ colStart: number; colEnd: number; rangeIndex: number }>>;
 
-  constructor(ranges: CellRange[]) {
+  constructor(ranges: CellRange[], indexedRowRanges?: IndexedRowRange[]) {
     this.ranges = [];
     for (const range of ranges) {
       const normalized = normalizeRange(range);
       if (normalized) this.ranges.push(normalized);
     }
-    this.rowIndex = buildRowIndex(this.ranges);
+    this.rowIndex = buildRowIndex(this.ranges, indexedRowRanges);
   }
 
   getRanges(): readonly CellRange[] {
     return this.ranges;
+  }
+
+  /**
+   * Number of distinct row keys currently indexed.
+   *
+   * Primarily used for tests + instrumentation to ensure we don't materialize
+   * O(merge height) rows for extremely tall merged ranges.
+   */
+  getIndexedRowCount(): number {
+    return this.rowIndex.size;
   }
 
   /**
@@ -109,13 +121,67 @@ export function rangesIntersect(a: CellRange, b: CellRange): boolean {
   return a.startRow < b.endRow && a.endRow > b.startRow && a.startCol < b.endCol && a.endCol > b.startCol;
 }
 
-function buildRowIndex(ranges: CellRange[]): Map<number, Array<{ colStart: number; colEnd: number; rangeIndex: number }>> {
+function normalizeIndexedRowRanges(ranges: IndexedRowRange[] | undefined): Array<{ startRow: number; endRow: number }> | null {
+  // `undefined` means "no viewport restriction" (index all rows in each merge),
+  // while an empty array means "index nothing" (e.g. zero-sized viewport).
+  if (!ranges) return null;
+  if (ranges.length === 0) return [];
+
+  const normalized: Array<{ startRow: number; endRow: number }> = [];
+  for (const range of ranges) {
+    if (!Number.isFinite(range.startRow) || !Number.isFinite(range.endRow)) continue;
+    let startRow = Math.trunc(Math.min(range.startRow, range.endRow));
+    let endRow = Math.trunc(Math.max(range.startRow, range.endRow));
+    if (startRow === endRow) continue;
+    normalized.push({ startRow, endRow });
+  }
+
+  if (normalized.length === 0) return [];
+
+  normalized.sort((a, b) => a.startRow - b.startRow || a.endRow - b.endRow);
+
+  // Merge overlapping/adjacent ranges so we don't double-index rows.
+  const merged: Array<{ startRow: number; endRow: number }> = [];
+  for (const range of normalized) {
+    const last = merged[merged.length - 1];
+    if (!last) {
+      merged.push({ ...range });
+      continue;
+    }
+    if (range.startRow <= last.endRow) {
+      last.endRow = Math.max(last.endRow, range.endRow);
+      continue;
+    }
+    merged.push({ ...range });
+  }
+
+  return merged;
+}
+
+function buildRowIndex(
+  ranges: CellRange[],
+  indexedRowRanges?: IndexedRowRange[]
+): Map<number, Array<{ colStart: number; colEnd: number; rangeIndex: number }>> {
   const index = new Map<number, Array<{ colStart: number; colEnd: number; rangeIndex: number }>>();
+  const normalizedIndexed = normalizeIndexedRowRanges(indexedRowRanges);
   ranges.forEach((range, rangeIndex) => {
-    for (let row = range.startRow; row < range.endRow; row++) {
-      const spans = index.get(row) ?? [];
-      spans.push({ colStart: range.startCol, colEnd: range.endCol, rangeIndex });
-      index.set(row, spans);
+    if (!normalizedIndexed) {
+      for (let row = range.startRow; row < range.endRow; row++) {
+        const spans = index.get(row) ?? [];
+        spans.push({ colStart: range.startCol, colEnd: range.endCol, rangeIndex });
+        index.set(row, spans);
+      }
+      return;
+    }
+
+    for (const rowRange of normalizedIndexed) {
+      const startRow = Math.max(range.startRow, rowRange.startRow);
+      const endRow = Math.min(range.endRow, rowRange.endRow);
+      for (let row = startRow; row < endRow; row++) {
+        const spans = index.get(row) ?? [];
+        spans.push({ colStart: range.startCol, colEnd: range.endCol, rangeIndex });
+        index.set(row, spans);
+      }
     }
   });
   return index;
