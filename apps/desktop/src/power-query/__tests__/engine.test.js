@@ -27,6 +27,12 @@ test("createDesktopQueryEngine uses Tauri invoke file commands when FS plugin is
           // Base64 for bytes [1, 2, 3].
           return "AQID";
         }
+        if (cmd === "list_dir") {
+          return [
+            { path: "/tmp/folder/a.csv", name: "a.csv", size: 4, mtimeMs: 1000 },
+            { path: "/tmp/folder/sub/b.json", name: "b.json", size: 2, mtimeMs: 1100 },
+          ];
+        }
         throw new Error(`Unexpected invoke: ${cmd}`);
       },
     },
@@ -48,9 +54,20 @@ test("createDesktopQueryEngine uses Tauri invoke file commands when FS plugin is
     const bytes = await engine.fileAdapter.readBinary("/tmp/test.bin");
     assert.deepEqual(Array.from(bytes), [1, 2, 3]);
 
+    const folderQuery = {
+      id: "q_folder",
+      name: "Folder",
+      source: { type: "folder", path: "/tmp/folder", options: { recursive: true } },
+      steps: [],
+    };
+    const folderTable = await engine.executeQuery(folderQuery, {}, {});
+    assert.equal(folderTable.rowCount, 2);
+    assert.deepEqual(folderTable.columns.map((c) => c.name), ["Name", "Extension", "Folder Path", "Date modified", "Size"]);
+
     assert.ok(calls.some((c) => c.cmd === "read_text_file"));
     assert.ok(calls.some((c) => c.cmd === "read_binary_file"));
     assert.ok(calls.some((c) => c.cmd === "stat_file"));
+    assert.ok(calls.some((c) => c.cmd === "list_dir"));
   } finally {
     globalThis.__TAURI__ = originalTauri;
   }

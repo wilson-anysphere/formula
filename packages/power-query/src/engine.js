@@ -15,7 +15,7 @@ import { QueryFoldingEngine } from "./folding/sql.js";
 import { normalizePostgresPlaceholders, normalizeSqlServerPlaceholders } from "./folding/placeholders.js";
 import { computeParquetProjectionColumns, computeParquetRowLimit } from "./parquetProjection.js";
 import { collectSourcePrivacy, distinctPrivacyLevels, shouldBlockCombination } from "./privacy/firewall.js";
-import { getSourceIdForProvenance, getSourceIdForQuerySource, getSqlSourceId } from "./privacy/sourceId.js";
+import { getSourceIdForProvenance, getSourceIdForQuerySource, getSqlSourceId, normalizeFilePath } from "./privacy/sourceId.js";
 import { getPrivacyLevel } from "./privacy/levels.js";
 
 /**
@@ -213,7 +213,11 @@ function isModuleNotFoundError(err) {
   *   readBinaryStream?: (path: string, options?: { signal?: AbortSignal }) => AsyncIterable<Uint8Array>;
   *   openFile?: (path: string, options?: { signal?: AbortSignal }) => Promise<Blob>;
   *   readParquetTable?: (path: string, options?: { signal?: AbortSignal }) => Promise<DataTable>;
-  *   stat?: (path: string) => Promise<{ mtimeMs: number }>;
+  *   stat?: (path: string) => Promise<{ mtimeMs: number; size?: number }>;
+  *   listDir?: (
+  *     path: string,
+  *     options?: { recursive?: boolean; signal?: AbortSignal },
+  *   ) => Promise<Array<{ path: string; name?: string; size?: number; mtimeMs?: number; isDir?: boolean }>>;
   * } | undefined} [fileAdapter]
  *   Backwards-compatible adapter from the prototype. Prefer supplying a `FileConnector`.
  * @property {Partial<{ file: FileConnector; http: HttpConnector; odata: ODataConnector; sharepoint: SharePointConnector; sql: SqlConnector } & Record<string, any>> | undefined} [connectors]
@@ -549,6 +553,7 @@ export class QueryEngine {
         openFile: options.fileAdapter?.openFile,
         readParquetTable: options.fileAdapter?.readParquetTable,
         stat: options.fileAdapter?.stat,
+        listDir: options.fileAdapter?.listDir,
       });
     const httpConnector = options.connectors?.http ?? new HttpConnector({ fetchTable: options.apiAdapter?.fetchTable });
     const odataConnector = options.connectors?.odata ?? new ODataConnector();
@@ -1482,6 +1487,19 @@ export class QueryEngine {
       return;
     }
 
+    if (source.type === "folder") {
+      const connector = this.connectors.get("file");
+      if (!connector || typeof connector.getSourceState !== "function") return;
+      const recursive = source.options?.recursive ?? false;
+      const includeContent = source.options?.includeContent ?? false;
+      const request = { format: "folder", path: source.path, folder: { recursive, includeContent } };
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      const credentials = await this.getCredentials("file", request, state);
+      const sourceKey = `folder:${hashValue({ path: normalizeFilePath(source.path), recursive, includeContent })}`;
+      if (!out.has(sourceKey)) out.set(sourceKey, { connector, request, credentials });
+      return;
+    }
+
     if (source.type === "api") {
       const connector = this.connectors.get("http");
       if (!connector || typeof connector.getSourceState !== "function") return;
@@ -1705,6 +1723,87 @@ export class QueryEngine {
       }
 
       return signature;
+    }
+
+    if (source.type === "folder") {
+      const connector = this.connectors.get("file");
+      if (!connector) return { type: "folder", missingConnector: "file" };
+      const sourceId = getSourceIdForQuerySource(source);
+      const recursive = source.options?.recursive ?? false;
+      const includeContent = source.options?.includeContent ?? false;
+      const request = { format: "folder", path: source.path, folder: { recursive, includeContent } };
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      const credentials = await this.getCredentials("file", request, state);
+      const credentialId = extractCredentialId(credentials);
+      let cacheable = credentials == null || credentialId != null;
+
+      if (typeof connector.listDir !== "function") {
+        return {
+          type: "folder",
+          sourceId,
+          privacyLevel: getPrivacyLevel(context.privacy?.levelsBySourceId, sourceId),
+          request,
+          credentialsHash: credentialId ? hashValue(credentialId) : null,
+          missingListDir: true,
+          $cacheable: false,
+        };
+      }
+
+      /** @type {Array<{ relativePath: string; mtimeMs: number; size: number }>} */
+      const signature = [];
+      let hasStats = true;
+      const root = normalizeFilePath(source.path);
+      const rootPrefix = root.endsWith("/") ? root : `${root}/`;
+
+      let entries = [];
+      try {
+        entries = await connector.listDir(source.path, { recursive });
+      } catch {
+        hasStats = false;
+      }
+
+      if (!Array.isArray(entries)) hasStats = false;
+
+      if (hasStats) {
+        for (const entry of entries) {
+          if (!entry || typeof entry !== "object") {
+            hasStats = false;
+            continue;
+          }
+          // @ts-ignore - runtime indexing
+          if (entry.isDir === true) continue;
+          // @ts-ignore - runtime indexing
+          const path = entry.path;
+          if (typeof path !== "string" || path.length === 0) {
+            hasStats = false;
+            continue;
+          }
+          const normalizedPath = normalizeFilePath(path);
+          const relativePath = normalizedPath.startsWith(rootPrefix) ? normalizedPath.slice(rootPrefix.length) : normalizedPath;
+          // @ts-ignore - runtime indexing
+          const mtimeMs = entry.mtimeMs;
+          // @ts-ignore - runtime indexing
+          const size = entry.size;
+          if (typeof mtimeMs !== "number" || !Number.isFinite(mtimeMs) || typeof size !== "number" || !Number.isFinite(size)) {
+            hasStats = false;
+            continue;
+          }
+          signature.push({ relativePath, mtimeMs, size });
+        }
+      }
+
+      signature.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+      if (!hasStats) cacheable = false;
+
+      return {
+        type: "folder",
+        sourceId,
+        privacyLevel: getPrivacyLevel(context.privacy?.levelsBySourceId, sourceId),
+        request,
+        signature,
+        credentialsHash: credentialId ? hashValue(credentialId) : null,
+        $cacheable: cacheable,
+      };
     }
 
     if (source.type === "api") {
@@ -2192,6 +2291,117 @@ export class QueryEngine {
       return { table: result.table, meta, sources: [meta] };
     }
 
+    if (source.type === "folder") {
+      const connector = this.connectors.get("file");
+      if (!connector) throw new Error("Folder source requires a FileConnector");
+
+      const recursive = source.options?.recursive ?? false;
+      const includeContent = source.options?.includeContent ?? false;
+      const request = { format: "folder", path: source.path, folder: { recursive, includeContent } };
+
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      await this.getCredentials("file", request, state);
+
+      if (typeof connector.listDir !== "function") {
+        throw new Error("Folder source requires a FileConnector listDir adapter");
+      }
+
+      /** @type {any[]} */
+      const rawEntries = await connector.listDir(source.path, { recursive, signal: options.signal });
+      throwIfAborted(options.signal);
+      if (!Array.isArray(rawEntries)) {
+        throw new Error("Folder source listDir adapter returned a non-array result");
+      }
+
+      const entries = rawEntries.filter((entry) => entry && typeof entry === "object" && entry.isDir !== true && typeof entry.path === "string");
+
+      // Deterministic ordering (helps caching, tests, and previews).
+      entries.sort((a, b) => normalizeFilePath(a.path).localeCompare(normalizeFilePath(b.path)));
+
+      const readBinary =
+        includeContent && (typeof connector.readBinary === "function" ? connector.readBinary : typeof this.fileAdapter?.readBinary === "function" ? this.fileAdapter.readBinary : null);
+      if (includeContent && !readBinary) {
+        throw new Error("Folder includeContent requires a FileConnector/readBinary adapter");
+      }
+
+      const contents = includeContent ? await Promise.all(entries.map((entry) => readBinary(entry.path))) : null;
+      throwIfAborted(options.signal);
+
+      /** @type {unknown[][]} */
+      const rows = [];
+      /** @type {Array<{ relativePath: string; mtimeMs: number; size: number }>} */
+      const listingSignature = [];
+      let listingHasStats = true;
+
+      const root = normalizeFilePath(source.path);
+      const rootPrefix = root.endsWith("/") ? root : `${root}/`;
+
+      let maxMtimeMs = -Infinity;
+
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const normalizedPath = normalizeFilePath(entry.path);
+        const slashIdx = normalizedPath.lastIndexOf("/");
+        const name =
+          typeof entry.name === "string" && entry.name.length > 0 ? entry.name : slashIdx >= 0 ? normalizedPath.slice(slashIdx + 1) : normalizedPath;
+        const dotIdx = name.lastIndexOf(".");
+        const extension = dotIdx > 0 ? name.slice(dotIdx) : "";
+        const folderPath = slashIdx >= 0 ? normalizedPath.slice(0, slashIdx + 1) : "";
+
+        const mtimeMs = entry.mtimeMs;
+        const dateModified = typeof mtimeMs === "number" && Number.isFinite(mtimeMs) ? new Date(mtimeMs) : null;
+        if (typeof mtimeMs === "number" && Number.isFinite(mtimeMs)) {
+          maxMtimeMs = Math.max(maxMtimeMs, mtimeMs);
+        }
+
+        const size = typeof entry.size === "number" && Number.isFinite(entry.size) ? entry.size : null;
+
+        if (typeof mtimeMs !== "number" || !Number.isFinite(mtimeMs) || typeof entry.size !== "number" || !Number.isFinite(entry.size)) {
+          listingHasStats = false;
+        } else {
+          const relativePath = normalizedPath.startsWith(rootPrefix) ? normalizedPath.slice(rootPrefix.length) : normalizedPath;
+          listingSignature.push({ relativePath, mtimeMs, size: entry.size });
+        }
+
+        if (includeContent) {
+          rows.push([name, extension, folderPath, dateModified, size, contents?.[i] ?? null]);
+        } else {
+          rows.push([name, extension, folderPath, dateModified, size]);
+        }
+      }
+
+      listingSignature.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+
+      const etag = listingHasStats ? hashValue(listingSignature) : undefined;
+      const sourceTimestamp = maxMtimeMs !== -Infinity ? new Date(maxMtimeMs) : undefined;
+      const sourceKey = `folder:${hashValue({ path: normalizeFilePath(source.path), recursive, includeContent })}`;
+
+      const columns = [
+        { name: "Name", type: "string" },
+        { name: "Extension", type: "string" },
+        { name: "Folder Path", type: "string" },
+        { name: "Date modified", type: "date" },
+        { name: "Size", type: "number" },
+        ...(includeContent ? [{ name: "Content", type: "any" }] : []),
+      ];
+
+      const table = new DataTable(columns, rows);
+      this.setTableSourceIds(table, [getSourceIdForQuerySource(source) ?? `folder:${normalizeFilePath(source.path)}`]);
+      const meta = {
+        refreshedAt: new Date(state.now()),
+        sourceTimestamp,
+        etag,
+        sourceKey,
+        schema: { columns: table.columns, inferred: true },
+        rowCount: table.rowCount,
+        rowCountEstimate: table.rowCount,
+        provenance: { kind: "folder", path: source.path, recursive, includeContent },
+      };
+
+      options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
+      return { table, meta, sources: [meta] };
+    }
+
     if (source.type === "api") {
       const connector = this.connectors.get("http");
       if (!connector) throw new Error("API source requires an HttpConnector");
@@ -2515,9 +2725,9 @@ export class QueryEngine {
             ? "odata"
             : sourceType === "sharepoint"
               ? "sharepoint"
-          : sourceType === "csv" || sourceType === "json" || sourceType === "parquet"
-            ? "file"
-            : null;
+              : sourceType === "csv" || sourceType === "json" || sourceType === "parquet" || sourceType === "folder"
+                ? "file"
+                : null;
     const keyInput = connectorId ? this.buildConnectorRequestCacheKey(connectorId, req) : req ?? details;
     const key = cache ? `${kind}:${hashValue(keyInput)}` : null;
     const allowedPromise = key

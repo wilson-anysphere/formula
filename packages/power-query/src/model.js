@@ -51,6 +51,14 @@
 
 /**
  * @typedef {{
+ *   type: "folder";
+ *   path: string;
+ *   options?: { recursive?: boolean; includeContent?: boolean };
+ * }} FolderQuerySource
+ */
+
+/**
+ * @typedef {{
  *   type: "database";
  *   // Optional stable identifier for the database connection.
  *   //
@@ -141,7 +149,7 @@
  */
 
 /**
- * @typedef {RangeQuerySource | TableQuerySource | CSVQuerySource | JSONQuerySource | ParquetQuerySource | DatabaseQuerySource | APIQuerySource | ODataQuerySource | SharePointQuerySource | QueryRefSource} QuerySource
+ * @typedef {RangeQuerySource | TableQuerySource | CSVQuerySource | JSONQuerySource | ParquetQuerySource | FolderQuerySource | DatabaseQuerySource | APIQuerySource | ODataQuerySource | SharePointQuerySource | QueryRefSource} QuerySource
  */
 
 /**

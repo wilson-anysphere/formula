@@ -82,6 +82,14 @@ export function getFileSourceId(path) {
 }
 
 /**
+ * Stable source id for a folder source.
+ * @param {string} path
+ */
+export function getFolderSourceId(path) {
+  return `folder:${normalizeFilePath(path)}`;
+}
+
+/**
  * Stable source id for an HTTP source. Returns `scheme://host:port` with an
  * explicit port even when the URL uses a default.
  *
@@ -163,6 +171,8 @@ export function getSourceIdForQuerySource(source) {
     case "json":
     case "parquet":
       return getFileSourceId(source.path);
+    case "folder":
+      return getFolderSourceId(source.path);
     case "api":
       return getHttpSourceId(source.url);
     case "odata":
@@ -213,6 +223,11 @@ export function getSourceIdForProvenance(provenance) {
       // @ts-ignore - runtime indexing
       const path = provenance.path;
       return typeof path === "string" ? getFileSourceId(path) : null;
+    }
+    case "folder": {
+      // @ts-ignore - runtime indexing
+      const path = provenance.path;
+      return typeof path === "string" ? getFolderSourceId(path) : null;
     }
     case "http": {
       // @ts-ignore - runtime indexing

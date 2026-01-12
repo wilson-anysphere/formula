@@ -53,7 +53,11 @@ export type DesktopQueryEngineOptions = {
     /**
      * Optional stat adapter used for cache validation (mtime-based).
      */
-    stat?: (path: string) => Promise<{ mtimeMs: number }>;
+    stat?: (path: string) => Promise<{ mtimeMs: number; size?: number }>;
+    listDir?: (
+      path: string,
+      options?: { recursive?: boolean; signal?: AbortSignal },
+    ) => Promise<Array<{ path: string; name?: string; size?: number; mtimeMs?: number; isDir?: boolean }>>;
   };
   /**
    * Overrides for HTTP requests. Defaults to the global `fetch`.
@@ -333,6 +337,7 @@ function createDefaultFileAdapter(): FileAdapter {
   const readTextFile = fs?.readTextFile;
   const readFile = fs?.readFile ?? fs?.readBinaryFile;
   const statFile = fs?.stat ?? fs?.metadata;
+  const readDir = fs?.readDir;
 
   if (typeof readTextFile === "function" && typeof readFile === "function") {
     const openFile = async (path: string): Promise<Blob> => {
@@ -351,8 +356,82 @@ function createDefaultFileAdapter(): FileAdapter {
       openFile,
       stat:
         typeof statFile === "function"
-          ? async (path) => ({ mtimeMs: normalizeMtimeMs(await statFile(path)) })
+          ? async (path) => {
+              const payload = await statFile(path);
+              return {
+                mtimeMs: normalizeMtimeMs(payload),
+                size: (() => {
+                  try {
+                    return normalizeFileSize(payload);
+                  } catch {
+                    return undefined;
+                  }
+                })(),
+              };
+            }
           : undefined,
+      listDir: async (path, options = {}) => {
+        const recursive = options.recursive ?? false;
+        if (typeof readDir !== "function") {
+          const invoke = getTauriInvoke();
+          const payload = await invoke("list_dir", { path, recursive });
+          if (!Array.isArray(payload)) throw new Error("Unexpected list_dir payload returned from filesystem API");
+          return payload.map((entry) => ({
+            path: String((entry as any)?.path ?? ""),
+            name: typeof (entry as any)?.name === "string" ? (entry as any).name : undefined,
+            size: (() => {
+              try {
+                return normalizeFileSize((entry as any)?.size);
+              } catch {
+                return undefined;
+              }
+            })(),
+            mtimeMs: (entry as any)?.mtimeMs != null ? normalizeMtimeMs((entry as any).mtimeMs) : undefined,
+            isDir: Boolean((entry as any)?.isDir),
+          }));
+        }
+
+        // The FS plugin does not include mtime/size, so gather metadata for each entry.
+        const statFn = typeof statFile === "function" ? statFile : null;
+        const raw = await readDir(path, { recursive });
+
+        /** @type {Array<{ path: string; name?: string; size?: number; mtimeMs?: number; isDir?: boolean }>} */
+        const out = [];
+
+        const visit = async (entries: any[]) => {
+          for (const entry of entries) {
+            if (!entry || typeof entry !== "object") continue;
+            const entryPath = typeof (entry as any).path === "string" ? (entry as any).path : null;
+            const name = typeof (entry as any).name === "string" ? (entry as any).name : undefined;
+            const children = Array.isArray((entry as any).children) ? (entry as any).children : null;
+            const isDir = children != null;
+            if (isDir && children) {
+              await visit(children);
+              continue;
+            }
+            if (!entryPath) continue;
+            let mtimeMs: number | undefined;
+            let size: number | undefined;
+            if (statFn) {
+              try {
+                const payload = await statFn(entryPath);
+                mtimeMs = normalizeMtimeMs(payload);
+                try {
+                  size = normalizeFileSize(payload);
+                } catch {
+                  size = undefined;
+                }
+              } catch {
+                // Ignore stat failures; engine will treat missing size/mtime as non-cacheable.
+              }
+            }
+            out.push({ path: entryPath, name, size, mtimeMs, isDir: false });
+          }
+        };
+
+        await visit(Array.isArray(raw) ? raw : []);
+        return out;
+      },
     };
   }
 
@@ -434,6 +513,24 @@ function createDefaultFileAdapter(): FileAdapter {
       return new TauriFileBlob(path, invoke, 0, fileSize) as unknown as Blob;
     },
     stat: async (path) => ({ mtimeMs: normalizeMtimeMs(await invoke("stat_file", { path })) }),
+    listDir: async (path, options = {}) => {
+      const recursive = options.recursive ?? false;
+      const payload = await invoke("list_dir", { path, recursive });
+      if (!Array.isArray(payload)) throw new Error("Unexpected list_dir payload returned from filesystem API");
+      return payload.map((entry) => ({
+        path: String((entry as any)?.path ?? ""),
+        name: typeof (entry as any)?.name === "string" ? (entry as any).name : undefined,
+        size: (() => {
+          try {
+            return normalizeFileSize((entry as any)?.size);
+          } catch {
+            return undefined;
+          }
+        })(),
+        mtimeMs: (entry as any)?.mtimeMs != null ? normalizeMtimeMs((entry as any).mtimeMs) : undefined,
+        isDir: Boolean((entry as any)?.isDir),
+      }));
+    },
   };
 }
 
@@ -1246,6 +1343,7 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
         readBinaryStream: fileAdapter.readBinaryStream,
         openFile: fileAdapter.openFile,
         stat: fileAdapter.stat,
+        listDir: fileAdapter.listDir,
       },
       tableAdapter,
       connectors: { ...(http ? { http } : null), ...(odata ? { odata } : null), ...(sharepoint ? { sharepoint } : null), sql },

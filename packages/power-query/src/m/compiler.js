@@ -312,6 +312,25 @@ function compileSourceFunctionCall(ctx, name, expr) {
       const source = { type: "json", path, jsonPath };
       return { source, steps: [], schema: null };
     }
+    case "Folder.Files":
+    case "Folder.Contents": {
+      const pathExpr = expr.args[0];
+      if (!pathExpr) ctx.error(expr, `${name} requires a folder path`);
+      const path = expectText(ctx, pathExpr);
+      const options = expr.args[1] ? evaluateRecordOptions(ctx, expr.args[1]) : {};
+
+      const defaultRecursive = name === "Folder.Files";
+      const recursive = typeof options.recursive === "boolean" ? options.recursive : defaultRecursive;
+      const includeContent = typeof options.includeContent === "boolean" ? options.includeContent : undefined;
+
+      /** @type {any} */
+      const folderOptions = { recursive };
+      if (includeContent !== undefined) folderOptions.includeContent = includeContent;
+
+      /** @type {QuerySource} */
+      const source = { type: "folder", path, options: folderOptions };
+      return { source, steps: [], schema: null };
+    }
     case "Web.Contents": {
       const urlExpr = expr.args[0];
       if (!urlExpr) ctx.error(expr, "Web.Contents requires a URL");
@@ -2196,7 +2215,18 @@ function evaluateCallConstant(ctx, name, expr) {
  *
  * @param {CompilerContext} ctx
  * @param {MExpression} expr
- * @returns {{ delimiter?: unknown; hasHeaders?: unknown; headers?: unknown; method?: unknown; query?: unknown; auth?: unknown; jsonPath?: unknown; rowsPath?: unknown }}
+ * @returns {{
+ *   delimiter?: unknown;
+ *   hasHeaders?: unknown;
+ *   headers?: unknown;
+ *   method?: unknown;
+ *   query?: unknown;
+ *   auth?: unknown;
+ *   jsonPath?: unknown;
+ *   rowsPath?: unknown;
+ *   recursive?: unknown;
+ *   includeContent?: unknown;
+ * }}
  */
 function evaluateRecordOptions(ctx, expr) {
   const value = evaluateConstant(ctx, expr);
@@ -2216,6 +2246,8 @@ function evaluateRecordOptions(ctx, expr) {
     if (key === "auth") normalized.auth = v;
     if (key === "jsonpath") normalized.jsonPath = v;
     if (key === "rowspath") normalized.rowsPath = v;
+    if (key === "recursive") normalized.recursive = v;
+    if (key === "includecontent") normalized.includeContent = v;
   }
 
   return normalized;

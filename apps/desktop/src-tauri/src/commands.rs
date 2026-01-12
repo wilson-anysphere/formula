@@ -483,6 +483,74 @@ pub async fn read_binary_file_range(
     .map_err(|e| e.to_string())?
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ListDirEntry {
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+    pub mtime_ms: u64,
+}
+
+/// List files in a directory (optionally recursively) and return basic metadata.
+///
+/// This supports Power Query-style `Folder.Files` / `Folder.Contents` sources in the webview
+/// without depending on the optional Tauri FS plugin.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn list_dir(path: String, recursive: Option<bool>) -> Result<Vec<ListDirEntry>, String> {
+    use std::path::{Path, PathBuf};
+    use std::time::UNIX_EPOCH;
+
+    let recursive = recursive.unwrap_or(false);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        fn visit(dir: &Path, recursive: bool, out: &mut Vec<ListDirEntry>) -> Result<(), String> {
+            let entries = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
+            for entry in entries {
+                let entry = entry.map_err(|e| e.to_string())?;
+                let entry_path = entry.path();
+                let metadata = entry.metadata().map_err(|e| e.to_string())?;
+                if metadata.is_dir() {
+                    if recursive {
+                        visit(&entry_path, recursive, out)?;
+                    }
+                    continue;
+                }
+                if !metadata.is_file() {
+                    continue;
+                }
+
+                let modified = metadata.modified().map_err(|e| e.to_string())?;
+                let duration = modified
+                    .duration_since(UNIX_EPOCH)
+                    .map_err(|e| e.to_string())?;
+
+                let name = entry
+                    .file_name()
+                    .to_str()
+                    .unwrap_or_default()
+                    .to_string();
+
+                out.push(ListDirEntry {
+                    path: entry_path.to_string_lossy().to_string(),
+                    name,
+                    size: metadata.len(),
+                    mtime_ms: duration.as_millis() as u64,
+                });
+            }
+            Ok(())
+        }
+
+        let root = PathBuf::from(path);
+        let mut out = Vec::new();
+        visit(&root, recursive, &mut out)?;
+        Ok::<_, String>(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Power Query: retrieve (or create) the AES-256-GCM key used to encrypt cached
 /// query results at rest.
 ///

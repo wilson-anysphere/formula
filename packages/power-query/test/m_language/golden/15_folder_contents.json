@@ -1,0 +1,12 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "folder",
+    "path": "/tmp/data",
+    "options": {
+      "recursive": false
+    }
+  },
+  "steps": []
+}

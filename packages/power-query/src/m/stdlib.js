@@ -47,6 +47,8 @@ export const SOURCE_FUNCTIONS = new Set([
   "Excel.CurrentWorkbook",
   "Csv.Document",
   "Json.Document",
+  "Folder.Files",
+  "Folder.Contents",
   "Web.Contents",
   "OData.Feed",
   "SharePoint.Contents",

@@ -1,4 +1,6 @@
 import { DataTable } from "../table.js";
+import { hashValue } from "../cache/key.js";
+import { normalizeFilePath } from "../privacy/sourceId.js";
 
 /**
  * @typedef {import("./types.js").Connector} Connector
@@ -361,10 +363,11 @@ function tableFromJson(json) {
 
 /**
  * @typedef {{
- *   format: "csv" | "json" | "parquet";
+ *   format: "csv" | "json" | "parquet" | "folder";
  *   path: string;
  *   csv?: { delimiter?: string; hasHeaders?: boolean };
  *   json?: { jsonPath?: string };
+ *   folder?: { recursive?: boolean; includeContent?: boolean };
  * }} FileConnectorRequest
  */
 
@@ -376,7 +379,11 @@ function tableFromJson(json) {
  *   readBinaryStream?: (path: string, options?: { signal?: AbortSignal }) => AsyncIterable<Uint8Array>;
  *   openFile?: (path: string, options?: { signal?: AbortSignal }) => Promise<Blob>;
  *   readParquetTable?: (path: string, options?: { signal?: AbortSignal }) => Promise<DataTable>;
- *   stat?: (path: string) => Promise<{ mtimeMs: number }>;
+ *   stat?: (path: string) => Promise<{ mtimeMs: number; size?: number }>;
+ *   listDir?: (
+ *     path: string,
+ *     options?: { recursive?: boolean; signal?: AbortSignal },
+ *   ) => Promise<Array<{ path: string; name?: string; size?: number; mtimeMs?: number; isDir?: boolean }>>;
  * }} FileConnectorOptions
  */
 
@@ -394,6 +401,7 @@ export class FileConnector {
     this.openFile = options.openFile ?? null;
     this.readParquetTable = options.readParquetTable ?? null;
     this.stat = options.stat ?? null;
+    this.listDir = options.listDir ?? null;
   }
 
   /**
@@ -409,6 +417,57 @@ export class FileConnector {
       const err = new Error("Aborted");
       err.name = "AbortError";
       throw err;
+    }
+
+    if (request.format === "folder") {
+      if (typeof this.listDir !== "function") return {};
+      const recursive = request.folder?.recursive ?? false;
+      const root = normalizeFilePath(request.path);
+      const rootPrefix = root.endsWith("/") ? root : `${root}/`;
+
+      /** @type {Array<{ relativePath: string; mtimeMs: number; size: number }>} */
+      const signature = [];
+      let maxMtimeMs = -Infinity;
+
+      const entries = await this.listDir(request.path, { recursive, signal });
+      if (signal?.aborted) {
+        const err = new Error("Aborted");
+        err.name = "AbortError";
+        throw err;
+      }
+
+      if (!Array.isArray(entries)) return {};
+      for (const entry of entries) {
+        if (!entry || typeof entry !== "object") return {};
+        // @ts-ignore - runtime indexing
+        if (entry.isDir === true) continue;
+        // @ts-ignore - runtime indexing
+        const path = entry.path;
+        // @ts-ignore - runtime indexing
+        const mtimeMs = entry.mtimeMs;
+        // @ts-ignore - runtime indexing
+        const size = entry.size;
+        if (
+          typeof path !== "string" ||
+          typeof mtimeMs !== "number" ||
+          !Number.isFinite(mtimeMs) ||
+          typeof size !== "number" ||
+          !Number.isFinite(size)
+        ) {
+          return {};
+        }
+        maxMtimeMs = Math.max(maxMtimeMs, mtimeMs);
+        const normalizedPath = normalizeFilePath(path);
+        const relativePath = normalizedPath.startsWith(rootPrefix) ? normalizedPath.slice(rootPrefix.length) : normalizedPath;
+        signature.push({ relativePath, mtimeMs, size });
+      }
+
+      signature.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+
+      return {
+        etag: hashValue(signature),
+        sourceTimestamp: maxMtimeMs !== -Infinity ? new Date(maxMtimeMs) : undefined,
+      };
     }
 
     if (!this.stat) return {};
@@ -437,6 +496,9 @@ export class FileConnector {
     }
     if (request.format === "parquet") {
       return { connector: "file", format: "parquet", path: request.path };
+    }
+    if (request.format === "folder") {
+      return { connector: "file", format: "folder", path: request.path, folder: request.folder ?? {} };
     }
     /** @type {never} */
     const exhausted = request.format;

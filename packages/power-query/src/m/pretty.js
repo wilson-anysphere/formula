@@ -156,6 +156,14 @@ function sourceToM(source) {
       const jsonPathArg = source.jsonPath ? `, ${escapeMString(source.jsonPath)}` : "";
       return `Json.Document(${pathArg}${jsonPathArg})`;
     }
+    case "folder": {
+      const recursive = source.options?.recursive ?? false;
+      const fnName = recursive ? "Folder.Files" : "Folder.Contents";
+      const opts = {};
+      if (typeof source.options?.includeContent === "boolean") opts.IncludeContent = source.options.includeContent;
+      const optText = Object.keys(opts).length ? `, ${valueToM(opts)}` : "";
+      return `${fnName}(${escapeMString(source.path)}${optText})`;
+    }
     case "api": {
       const opts = {};
       if (source.method && source.method !== "GET") opts.Method = source.method;
