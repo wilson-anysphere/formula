@@ -36,5 +36,6 @@ test("normalizeExcelColorToCss resolves formula-model/XLSX color reference objec
 
   // DocumentController tabColor metadata uses `{ rgb: "AARRGGBB" }` / `{ rgb: "#AARRGGBB" }`.
   assert.equal(normalizeExcelColorToCss({ rgb: "#80112233" }), "rgba(17,34,51,0.502)");
+  assert.equal(normalizeExcelColorToCss({ rgb: "80112233" }), "rgba(17,34,51,0.502)");
   assert.equal(normalizeExcelColorToCss({ rgb: "FFFF0000" }), "#ff0000");
 });
