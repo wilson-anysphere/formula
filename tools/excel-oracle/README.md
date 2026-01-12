@@ -45,8 +45,12 @@ The generator is deterministic; committing `cases.json` makes CI stable and revi
 
 The generator also validates the corpus against `shared/functionCatalog.json` to ensure:
 
-- every `non_volatile` catalog function is exercised by at least one case
+- every `non_volatile` catalog function is exercised by at least one **case formula** (`case.formula`)
 - `volatile` catalog functions are excluded (so pinned comparisons remain deterministic)
+
+The Rust test suite enforces the same invariants (see
+`crates/formula-engine/tests/excel_oracle_coverage.rs`) so drift is caught even if
+`cases.json` is edited without re-running the generator.
 
 ## Generate oracle dataset from Excel
 
