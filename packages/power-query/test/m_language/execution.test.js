@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { DataTable } from "../../src/table.js";
+import { SharePointConnector } from "../../src/connectors/sharepoint.js";
 import { QueryEngine } from "../../src/engine.js";
 import { ODataConnector } from "../../src/connectors/odata.js";
 import { compileMToQuery } from "../../src/m/compiler.js";
@@ -231,6 +232,49 @@ in
   assert.equal(urls.length, 1);
   assert.equal(urls[0], "https://example.com/odata/Products?$select=Id,Name&$skip=3&$top=7");
   assert.deepEqual(result.toGrid(), [["Id", "Name"]]);
+});
+
+test("m_language execution: SharePoint.Files + Table.SelectColumns", async () => {
+  const script = `
+let
+  Source = SharePoint.Files("https://contoso.sharepoint.com/sites/Finance", [Recursive=false, IncludeContent=false]),
+  #"Selected Columns" = Table.SelectColumns(Source, {"Name"})
+in
+  #"Selected Columns"
+`;
+
+  const query = compileMToQuery(script);
+
+  const siteEndpoint = "https://graph.microsoft.com/v1.0/sites/contoso.sharepoint.com:/sites/Finance?$select=id,lastModifiedDateTime,webUrl";
+  const drivesEndpoint = "https://graph.microsoft.com/v1.0/sites/site-id/drives?$select=id,name,webUrl,driveType";
+  const rootChildrenEndpoint =
+    "https://graph.microsoft.com/v1.0/drives/drive-1/root/children?$select=id,name,webUrl,size,file,folder,parentReference,lastModifiedDateTime,createdDateTime";
+
+  /** @type {typeof fetch} */
+  const fetchFn = async (url) => {
+    if (url === siteEndpoint) {
+      return new Response(
+        JSON.stringify({ id: "site-id", webUrl: "https://contoso.sharepoint.com/sites/Finance", lastModifiedDateTime: "2024-01-01T00:00:00Z" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (url === drivesEndpoint) {
+      return new Response(JSON.stringify({ value: [{ id: "drive-1" }] }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url === rootChildrenEndpoint) {
+      return new Response(JSON.stringify({ value: [{ id: "file-1", name: "a.txt", file: {} }, { id: "file-2", name: "b.csv", file: {} }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  const sharepoint = new SharePointConnector({ fetch: fetchFn });
+  const engine = new QueryEngine({ connectors: { sharepoint } });
+  const result = await engine.executeQuery(query, {}, {});
+
+  assert.deepEqual(result.toGrid(), [["Name"], ["a.txt"], ["b.csv"]]);
 });
 
 test("m_language execution: Odbc.Query + Table.SelectColumns", async () => {

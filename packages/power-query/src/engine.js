@@ -8,6 +8,7 @@ import { deserializeAnyTable, deserializeTable, serializeAnyTable } from "./cach
 import { FileConnector, decodeBinaryText, decodeBinaryTextStream, parseCsvCell, parseCsvStream } from "./connectors/file.js";
 import { HttpConnector } from "./connectors/http.js";
 import { ODataConnector } from "./connectors/odata.js";
+import { SharePointConnector } from "./connectors/sharepoint.js";
 import { SqlConnector } from "./connectors/sql.js";
 import { ODataFoldingEngine, buildODataUrl } from "./folding/odata.js";
 import { QueryFoldingEngine } from "./folding/sql.js";
@@ -215,7 +216,7 @@ function isModuleNotFoundError(err) {
   *   stat?: (path: string) => Promise<{ mtimeMs: number }>;
   * } | undefined} [fileAdapter]
  *   Backwards-compatible adapter from the prototype. Prefer supplying a `FileConnector`.
- * @property {Partial<{ file: FileConnector; http: HttpConnector; odata: ODataConnector; sql: SqlConnector } & Record<string, any>> | undefined} [connectors]
+ * @property {Partial<{ file: FileConnector; http: HttpConnector; odata: ODataConnector; sharepoint: SharePointConnector; sql: SqlConnector } & Record<string, any>> | undefined} [connectors]
  * @property {import("./cache/cache.js").CacheManager | undefined} [cache]
  * @property {number | undefined} [defaultCacheTtlMs]
  * @property {{ enabled?: boolean; dialect?: import("./folding/dialect.js").SqlDialectName | import("./folding/dialect.js").SqlDialect } | undefined} [sqlFolding]
@@ -551,11 +552,13 @@ export class QueryEngine {
       });
     const httpConnector = options.connectors?.http ?? new HttpConnector({ fetchTable: options.apiAdapter?.fetchTable });
     const odataConnector = options.connectors?.odata ?? new ODataConnector();
+    const sharepointConnector = options.connectors?.sharepoint ?? new SharePointConnector();
     const sqlConnector = options.connectors?.sql ?? new SqlConnector({ querySql: options.databaseAdapter?.querySql });
 
     this.connectors.set(fileConnector.id, fileConnector);
     this.connectors.set(httpConnector.id, httpConnector);
     this.connectors.set(odataConnector.id, odataConnector);
+    this.connectors.set(sharepointConnector.id, sharepointConnector);
     this.connectors.set(sqlConnector.id, sqlConnector);
 
     if (options.connectors) {
@@ -1501,6 +1504,24 @@ export class QueryEngine {
       return;
     }
 
+    if (source.type === "sharepoint") {
+      const connector = this.connectors.get("sharepoint");
+      if (!connector || typeof connector.getSourceState !== "function") return;
+      const request = {
+        siteUrl: source.siteUrl,
+        mode: source.mode,
+        options: source.options,
+        // Compatibility with `http:request` permission prompts.
+        url: source.siteUrl,
+        method: "GET",
+      };
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      const credentials = await this.getCredentials("sharepoint", request, state);
+      const sourceKey = buildConnectorSourceKey(connector, request);
+      if (!out.has(sourceKey)) out.set(sourceKey, { connector, request, credentials });
+      return;
+    }
+
     if (source.type === "database") {
       const connector = this.connectors.get("sql");
       if (!connector || typeof connector.getSourceState !== "function") return;
@@ -1727,6 +1748,32 @@ export class QueryEngine {
       const cacheable = credentials == null || credentialId != null;
       return {
         type: "odata",
+        sourceId,
+        privacyLevel: getPrivacyLevel(context.privacy?.levelsBySourceId, sourceId),
+        request: connector.getCacheKey(request),
+        credentialsHash: credentialId ? hashValue(credentialId) : null,
+        $cacheable: cacheable,
+      };
+    }
+
+    if (source.type === "sharepoint") {
+      const connector = this.connectors.get("sharepoint");
+      if (!connector) return { type: "sharepoint", missingConnector: "sharepoint" };
+      const sourceId = getSourceIdForQuerySource(source);
+      const request = {
+        siteUrl: source.siteUrl,
+        mode: source.mode,
+        options: source.options,
+        // Compatibility with `http:request` permission prompts.
+        url: source.siteUrl,
+        method: "GET",
+      };
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      const credentials = await this.getCredentials("sharepoint", request, state);
+      const credentialId = extractCredentialId(credentials);
+      const cacheable = credentials == null || credentialId != null;
+      return {
+        type: "sharepoint",
         sourceId,
         privacyLevel: getPrivacyLevel(context.privacy?.levelsBySourceId, sourceId),
         request: connector.getCacheKey(request),
@@ -2216,6 +2263,46 @@ export class QueryEngine {
       return { table: result.table, meta, sources: [meta] };
     }
 
+    if (source.type === "sharepoint") {
+      const connector = this.connectors.get("sharepoint");
+      if (!connector) throw new Error("SharePoint source requires a SharePointConnector");
+      const request = {
+        siteUrl: source.siteUrl,
+        mode: source.mode,
+        options: source.options,
+        // Compatibility with `http:request` permission prompts.
+        url: source.siteUrl,
+        method: "GET",
+      };
+
+      await this.assertPermission(connector.permissionKind, { source, request }, state);
+      const credentials = await this.getCredentials("sharepoint", request, state);
+      const sourceKey = buildConnectorSourceKey(connector, request);
+
+      const cacheMode = options.cache?.mode ?? "use";
+      const cacheValidation = options.cache?.validation ?? "source-state";
+      /** @type {import("./connectors/types.js").SourceState} */
+      let sourceState = {};
+      if (this.cache && cacheMode !== "bypass" && cacheValidation === "source-state" && typeof connector.getSourceState === "function") {
+        try {
+          sourceState = await connector.getSourceState(request, { signal: options.signal, credentials, now: state.now });
+        } catch {
+          sourceState = {};
+        }
+      }
+
+      const result = await connector.execute(request, { signal: options.signal, credentials, now: state.now });
+      this.setTableSourceIds(result.table, [getSourceIdForQuerySource(source) ?? source.siteUrl]);
+      const meta = {
+        ...result.meta,
+        sourceTimestamp: sourceState.sourceTimestamp ?? result.meta.sourceTimestamp,
+        etag: sourceState.etag ?? result.meta.etag,
+        sourceKey,
+      };
+      options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
+      return { table: result.table, meta, sources: [meta] };
+    }
+
     if (source.type === "database") {
       const connector = this.connectors.get("sql");
       if (!connector) throw new Error("Database source requires a SqlConnector");
@@ -2426,6 +2513,8 @@ export class QueryEngine {
           ? "http"
           : sourceType === "odata"
             ? "odata"
+            : sourceType === "sharepoint"
+              ? "sharepoint"
           : sourceType === "csv" || sourceType === "json" || sourceType === "parquet"
             ? "file"
             : null;

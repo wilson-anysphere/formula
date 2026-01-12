@@ -121,13 +121,27 @@
 
 /**
  * @typedef {{
+ *   type: "sharepoint";
+ *   // Canonical HTTPS site URL (e.g. https://contoso.sharepoint.com/sites/Finance).
+ *   siteUrl: string;
+ *   mode: "contents" | "files";
+ *   options?: {
+ *     auth?: { type: "oauth2"; providerId: string; scopes?: string[] | string } | null;
+ *     includeContent?: boolean;
+ *     recursive?: boolean;
+ *   };
+ * }} SharePointQuerySource
+ */
+
+/**
+ * @typedef {{
  *   type: "query";
  *   queryId: string;
  * }} QueryRefSource
  */
 
 /**
- * @typedef {RangeQuerySource | TableQuerySource | CSVQuerySource | JSONQuerySource | ParquetQuerySource | DatabaseQuerySource | APIQuerySource | ODataQuerySource | QueryRefSource} QuerySource
+ * @typedef {RangeQuerySource | TableQuerySource | CSVQuerySource | JSONQuerySource | ParquetQuerySource | DatabaseQuerySource | APIQuerySource | ODataQuerySource | SharePointQuerySource | QueryRefSource} QuerySource
  */
 
 /**

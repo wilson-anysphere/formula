@@ -1,0 +1,29 @@
+{
+  "id": "m_query",
+  "name": "M Query",
+  "source": {
+    "type": "sharepoint",
+    "siteUrl": "https://contoso.sharepoint.com/sites/Finance",
+    "mode": "files",
+    "options": {
+      "recursive": true,
+      "includeContent": false,
+      "auth": {
+        "type": "oauth2",
+        "providerId": "example",
+        "scopes": ["Sites.Read.All"]
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "s1_selectColumns",
+      "name": "Selected Columns",
+      "operation": {
+        "type": "selectColumns",
+        "columns": ["Name"]
+      }
+    }
+  ]
+}
+

@@ -49,6 +49,8 @@ export const SOURCE_FUNCTIONS = new Set([
   "Json.Document",
   "Web.Contents",
   "OData.Feed",
+  "SharePoint.Contents",
+  "SharePoint.Files",
   "Odbc.Query",
   "PostgreSQL.Database",
   "SQLite.Database",

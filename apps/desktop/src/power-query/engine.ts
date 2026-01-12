@@ -6,6 +6,7 @@ import { MemoryCacheStore } from "../../../../packages/power-query/src/cache/mem
 import { createWebCryptoCacheProvider } from "../../../../packages/power-query/src/cache/webCryptoProvider.js";
 import { HttpConnector } from "../../../../packages/power-query/src/connectors/http.js";
 import { ODataConnector } from "../../../../packages/power-query/src/connectors/odata.js";
+import { SharePointConnector } from "../../../../packages/power-query/src/connectors/sharepoint.js";
 import { SqlConnector } from "../../../../packages/power-query/src/connectors/sql.js";
 import { QueryEngine } from "../../../../packages/power-query/src/engine.js";
 import { DataTable } from "../../../../packages/power-query/src/table.js";
@@ -1078,10 +1079,13 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
     options.fetch || options.oauth2Manager
       ? new HttpConnector({ fetch: options.fetch, oauth2Manager: options.oauth2Manager })
       : undefined;
-
   const odata =
     options.fetch || options.oauth2Manager
       ? new ODataConnector({ fetch: options.fetch, oauth2Manager: options.oauth2Manager })
+      : undefined;
+  const sharepoint =
+    options.fetch || options.oauth2Manager
+      ? new SharePointConnector({ fetch: options.fetch, oauth2Manager: options.oauth2Manager })
       : undefined;
 
   const querySql = async (
@@ -1244,7 +1248,8 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
         stat: fileAdapter.stat,
       },
       tableAdapter,
-      connectors: { ...(http ? { http } : null), ...(odata ? { odata } : null), sql },
+      connectors: { ...(http ? { http } : null), ...(odata ? { odata } : null), ...(sharepoint ? { sharepoint } : null), sql },
+      tableAdapter,
       privacyMode: options.privacyMode,
       onCredentialRequest: options.onCredentialRequest,
       onPermissionRequest: async (kind: string, details: unknown) => {

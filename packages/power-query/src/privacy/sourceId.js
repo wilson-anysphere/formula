@@ -107,6 +107,32 @@ export function getHttpSourceId(url) {
 }
 
 /**
+ * Stable source id for a SharePoint/OneDrive site.
+ *
+ * This is a *site* identity (not a per-request identity) so different SharePoint
+ * calls (e.g. `SharePoint.Contents` vs `SharePoint.Files`) share a single
+ * privacy classification.
+ *
+ * Proposed format:
+ *   `sharepoint:<origin><normalized-site-path>`
+ * Example:
+ *   `sharepoint:https://contoso.sharepoint.com/sites/Finance`
+ *
+ * @param {string} siteUrl
+ */
+export function getSharePointSourceId(siteUrl) {
+  const parsed = new URL(siteUrl);
+  const scheme = "https:";
+  const hostname = parsed.hostname.toLowerCase();
+  const port = parsed.port;
+  const portSuffix = port && port !== "443" ? `:${port}` : "";
+  let path = parsed.pathname || "/";
+  path = path.replace(/\/{2,}/g, "/");
+  if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
+  return `sharepoint:${scheme}//${hostname}${portSuffix}${path}`;
+}
+
+/**
  * Stable source id for a SQL connection. This is intentionally a *connection*
  * identity (not a per-query identity) so multiple SQL queries against the same
  * connection share a single privacy classification.
@@ -141,6 +167,8 @@ export function getSourceIdForQuerySource(source) {
       return getHttpSourceId(source.url);
     case "odata":
       return getHttpSourceId(source.url);
+    case "sharepoint":
+      return getSharePointSourceId(source.siteUrl);
     case "database": {
       const connectionId = source.connectionId;
       if (typeof connectionId === "string" && connectionId.length > 0) return getSqlSourceId(connectionId);
@@ -195,6 +223,11 @@ export function getSourceIdForProvenance(provenance) {
       // @ts-ignore - runtime indexing
       const url = provenance.url;
       return typeof url === "string" ? getHttpSourceId(url) : null;
+    }
+    case "sharepoint": {
+      // @ts-ignore - runtime indexing
+      const siteUrl = provenance.siteUrl;
+      return typeof siteUrl === "string" ? getSharePointSourceId(siteUrl) : null;
     }
     case "sql": {
       // SqlConnector provides `sourceId` (see `getSqlSourceId`).

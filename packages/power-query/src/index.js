@@ -13,6 +13,7 @@ export {
   FileConnector,
   HttpConnector,
   ODataConnector,
+  SharePointConnector,
   SqlConnector,
   decodeBinaryText,
   decodeBinaryTextStream,
@@ -43,6 +44,7 @@ export { getPrivacyLevel, privacyRank } from "./privacy/levels.js";
 export {
   getFileSourceId,
   getHttpSourceId,
+  getSharePointSourceId,
   getSqlSourceId,
   getSourceIdForProvenance,
   getSourceIdForQuerySource,

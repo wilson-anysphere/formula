@@ -6,7 +6,7 @@ import { MemoryCacheStore } from "../../src/cache/memory.js";
 import { SqlConnector } from "../../src/connectors/sql.js";
 import { QueryEngine } from "../../src/engine.js";
 import { QueryFoldingEngine } from "../../src/folding/sql.js";
-import { getFileSourceId, getHttpSourceId, getSqlSourceId } from "../../src/privacy/sourceId.js";
+import { getFileSourceId, getHttpSourceId, getSharePointSourceId, getSqlSourceId } from "../../src/privacy/sourceId.js";
 import { DataTable } from "../../src/table.js";
 
 test("privacy levels: merge folding allowed when both sources are same sourceId + privacy level", async () => {
@@ -465,6 +465,146 @@ test("privacy levels: warn mode allows execution but emits diagnostic", async ()
   ]);
 
   const warnings = events.filter((e) => e.type === "privacy:firewall" && e.action === "warn");
+  assert.ok(warnings.length > 0, "expected a warning firewall diagnostic event");
+});
+
+test("privacy levels: sharepoint sources produce stable source ids", () => {
+  assert.equal(
+    getSharePointSourceId("https://Contoso.SharePoint.com/sites/Finance/"),
+    "sharepoint:https://contoso.sharepoint.com/sites/Finance",
+  );
+});
+
+test("privacy levels: strict mode blocks merge across SharePoint privacy levels", async () => {
+  /** @type {any[]} */
+  const events = [];
+
+  const privateSite = "https://contoso.sharepoint.com/sites/Private";
+  const publicSite = "https://contoso.sharepoint.com/sites/Public";
+
+  const leftSourceId = getSharePointSourceId(privateSite);
+  const rightSourceId = getSharePointSourceId(publicSite);
+
+  const sharepoint = {
+    id: "sharepoint",
+    permissionKind: "http:request",
+    getCacheKey: (request) => ({ connector: "sharepoint", siteUrl: request.siteUrl, mode: request.mode }),
+    execute: async (request, options = {}) => {
+      const now = options.now ?? (() => Date.now());
+      const table =
+        request.siteUrl === privateSite
+          ? DataTable.fromGrid(
+              [
+                ["Id", "Region"],
+                [1, "East"],
+              ],
+              { hasHeaders: true, inferTypes: true },
+            )
+          : DataTable.fromGrid(
+              [
+                ["Id", "Target"],
+                [1, 10],
+              ],
+              { hasHeaders: true, inferTypes: true },
+            );
+      return {
+        table,
+        meta: {
+          refreshedAt: new Date(now()),
+          schema: { columns: table.columns, inferred: true },
+          rowCount: table.rows.length,
+          rowCountEstimate: table.rows.length,
+          provenance: { kind: "sharepoint", siteUrl: request.siteUrl, mode: request.mode },
+        },
+      };
+    },
+  };
+
+  const engine = new QueryEngine({ privacyMode: "enforce", connectors: { sharepoint } });
+
+  const right = { id: "q_right", name: "Public", source: { type: "sharepoint", siteUrl: publicSite, mode: "files" }, steps: [] };
+  const left = {
+    id: "q_left",
+    name: "Private",
+    source: { type: "sharepoint", siteUrl: privateSite, mode: "files" },
+    steps: [{ id: "s_merge", name: "Merge", operation: { type: "merge", rightQuery: "q_right", joinType: "left", leftKey: "Id", rightKey: "Id" } }],
+  };
+
+  await assert.rejects(
+    () =>
+      engine.executeQuery(
+        left,
+        { queries: { q_right: right }, privacy: { levelsBySourceId: { [leftSourceId]: "private", [rightSourceId]: "public" } } },
+        { onProgress: (e) => events.push(e) },
+      ),
+    /Formula\.Firewall/,
+  );
+
+  const blocks = events.filter((e) => e.type === "privacy:firewall" && e.phase === "combine" && e.action === "block");
+  assert.ok(blocks.length > 0, "expected a blocking firewall diagnostic event");
+  assert.deepEqual(
+    blocks[0].sources.map((s) => s.sourceId).sort(),
+    [leftSourceId, rightSourceId].sort(),
+  );
+});
+
+test("privacy levels: warn mode allows append across SharePoint privacy levels but emits diagnostic", async () => {
+  /** @type {any[]} */
+  const events = [];
+
+  const privateSite = "https://contoso.sharepoint.com/sites/Private";
+  const publicSite = "https://contoso.sharepoint.com/sites/Public";
+
+  const leftSourceId = getSharePointSourceId(privateSite);
+  const rightSourceId = getSharePointSourceId(publicSite);
+
+  const sharepoint = {
+    id: "sharepoint",
+    permissionKind: "http:request",
+    getCacheKey: (request) => ({ connector: "sharepoint", siteUrl: request.siteUrl, mode: request.mode }),
+    execute: async (request, options = {}) => {
+      const now = options.now ?? (() => Date.now());
+      const table = DataTable.fromGrid(
+        [
+          ["Id"],
+          [request.siteUrl === privateSite ? 1 : 2],
+        ],
+        { hasHeaders: true, inferTypes: true },
+      );
+      return {
+        table,
+        meta: {
+          refreshedAt: new Date(now()),
+          schema: { columns: table.columns, inferred: true },
+          rowCount: table.rows.length,
+          rowCountEstimate: table.rows.length,
+          provenance: { kind: "sharepoint", siteUrl: request.siteUrl, mode: request.mode },
+        },
+      };
+    },
+  };
+
+  const engine = new QueryEngine({ privacyMode: "warn", connectors: { sharepoint } });
+
+  const other = { id: "q_other", name: "Public", source: { type: "sharepoint", siteUrl: publicSite, mode: "files" }, steps: [] };
+  const base = {
+    id: "q_base",
+    name: "Private",
+    source: { type: "sharepoint", siteUrl: privateSite, mode: "files" },
+    steps: [{ id: "s_append", name: "Append", operation: { type: "append", queries: ["q_other"] } }],
+  };
+
+  const result = await engine.executeQuery(
+    base,
+    { queries: { q_other: other }, privacy: { levelsBySourceId: { [leftSourceId]: "private", [rightSourceId]: "public" } } },
+    { onProgress: (e) => events.push(e) },
+  );
+
+  const rows = result.toGrid().slice(1).map((r) => r[0]);
+  rows.sort((a, b) => a - b);
+  assert.deepEqual(rows, [1, 2]);
+
+  const warnings = events.filter((e) => e.type === "privacy:firewall" && e.phase === "combine" && e.action === "warn" && e.operation === "append");
   assert.ok(warnings.length > 0, "expected a warning firewall diagnostic event");
 });
 

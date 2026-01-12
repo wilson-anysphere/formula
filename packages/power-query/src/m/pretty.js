@@ -172,6 +172,24 @@ function sourceToM(source) {
       const optText = Object.keys(opts).length ? `, ${valueToM(opts)}` : "";
       return `OData.Feed(${escapeMString(source.url)}${optText})`;
     }
+    case "sharepoint": {
+      const opts = {};
+      const options = source.options ?? {};
+      if (options.recursive != null) opts.Recursive = options.recursive;
+      if (options.includeContent != null) opts.IncludeContent = options.includeContent;
+      if (options.auth && options.auth.type === "oauth2") {
+        opts.Auth = {
+          Type: "oauth2",
+          ProviderId: options.auth.providerId,
+          ...(options.auth.scopes != null ? { Scopes: options.auth.scopes } : {}),
+        };
+      } else if (options.auth === null) {
+        opts.Auth = null;
+      }
+      const optText = Object.keys(opts).length ? `, ${valueToM(opts)}` : "";
+      const fn = source.mode === "files" ? "SharePoint.Files" : "SharePoint.Contents";
+      return `${fn}(${escapeMString(source.siteUrl)}${optText})`;
+    }
     case "database": {
       const c = source.connection;
       if (c && typeof c === "object" && c.kind === "odbc") {

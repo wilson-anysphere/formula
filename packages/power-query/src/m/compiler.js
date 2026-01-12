@@ -369,6 +369,81 @@ function compileSourceFunctionCall(ctx, name, expr) {
       };
       return { source, steps: [], schema: null };
     }
+    case "SharePoint.Contents":
+    case "SharePoint.Files": {
+      const urlExpr = expr.args[0];
+      if (!urlExpr) ctx.error(expr, `${name} requires a site URL`);
+      const rawSiteUrl = expectText(ctx, urlExpr);
+      const siteUrl = normalizeSharePointSiteUrl(ctx, urlExpr, rawSiteUrl);
+
+      const rawOptions = expr.args[1] ? evaluateConstant(ctx, expr.args[1]) : undefined;
+      /** @type {any} */
+      const parsedOptions = rawOptions && typeof rawOptions === "object" && !Array.isArray(rawOptions) ? rawOptions : null;
+
+      /** @type {any} */
+      const outOptions = {};
+      /** @type {any} */
+      let authValue = undefined;
+      /** @type {string | null} */
+      let providerId = null;
+      /** @type {string[] | string | undefined} */
+      let scopes = undefined;
+
+      /**
+       * @param {unknown} value
+       * @returns {{ type: "oauth2"; providerId: string; scopes?: string[] | string } | null}
+       */
+      const parseAuth = (value) => {
+        if (value == null) return null;
+        if (typeof value !== "object" || Array.isArray(value)) return null;
+        /** @type {any} */
+        const record = value;
+        /** @type {string | null} */
+        let type = null;
+        /** @type {string | null} */
+        let pid = null;
+        /** @type {string[] | string | undefined} */
+        let sc = undefined;
+        for (const [k, v] of Object.entries(record)) {
+          const key = k.toLowerCase();
+          if (key === "type" && typeof v === "string") type = v.toLowerCase();
+          if (key === "providerid" && typeof v === "string") pid = v;
+          if (key === "scopes") {
+            if (typeof v === "string") sc = v;
+            if (Array.isArray(v)) sc = v.filter((s) => typeof s === "string");
+          }
+        }
+        if (type && type !== "oauth2") return null;
+        if (!pid) return null;
+        return sc ? { type: "oauth2", providerId: pid, scopes: sc } : { type: "oauth2", providerId: pid };
+      };
+
+      if (parsedOptions) {
+        for (const [k, v] of Object.entries(parsedOptions)) {
+          const key = k.toLowerCase();
+          if (key === "recursive" && typeof v === "boolean") outOptions.recursive = v;
+          if (key === "includecontent" && typeof v === "boolean") outOptions.includeContent = v;
+          if (key === "auth") authValue = v;
+          if (key === "providerid" && typeof v === "string") providerId = v;
+          if (key === "scopes") {
+            if (typeof v === "string") scopes = v;
+            if (Array.isArray(v)) scopes = v.filter((s) => typeof s === "string");
+          }
+        }
+      }
+
+      const authParsed = authValue !== undefined ? parseAuth(authValue) : null;
+      if (authValue !== undefined) {
+        outOptions.auth = authParsed;
+      } else if (providerId) {
+        outOptions.auth = scopes ? { type: "oauth2", providerId, scopes } : { type: "oauth2", providerId };
+      }
+
+      const options = Object.keys(outOptions).length > 0 ? outOptions : undefined;
+      /** @type {QuerySource} */
+      const source = { type: "sharepoint", siteUrl, mode: name === "SharePoint.Files" ? "files" : "contents", options };
+      return { source, steps: [], schema: null };
+    }
     case "Odbc.Query": {
       const connExpr = expr.args[0];
       const queryExpr = expr.args[1];
@@ -2155,6 +2230,37 @@ function inferSchemaFromGrid(grid) {
   if (!Array.isArray(header)) return null;
   if (!header.every((c) => typeof c === "string")) return null;
   return /** @type {string[]} */ (header.slice());
+}
+
+/**
+ * Normalize a SharePoint/OneDrive site URL into a canonical HTTPS string.
+ *
+ * - forces `https:`
+ * - strips query/hash
+ * - removes a trailing slash (except for `/`)
+ *
+ * @param {CompilerContext} ctx
+ * @param {MExpression} node
+ * @param {string} input
+ * @returns {string}
+ */
+function normalizeSharePointSiteUrl(ctx, node, input) {
+  let parsed;
+  try {
+    parsed = new URL(String(input));
+  } catch {
+    ctx.error(node, "Expected an absolute SharePoint site URL");
+  }
+  const protocol = parsed.protocol.toLowerCase();
+  if (protocol !== "https:" && protocol !== "http:") {
+    ctx.error(node, "Expected an http(s) SharePoint site URL");
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  const port = parsed.port && parsed.port !== "443" ? `:${parsed.port}` : "";
+  let path = parsed.pathname || "/";
+  path = path.replace(/\/{2,}/g, "/");
+  if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
+  return `https://${hostname}${port}${path}`;
 }
 
 /**
