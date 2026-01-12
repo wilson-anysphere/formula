@@ -837,6 +837,7 @@ pub fn run_python_script(
 mod tests {
     use super::*;
     use crate::ipc_limits::MAX_SCRIPT_CODE_BYTES;
+    use serde_json::json;
 
     #[test]
     fn run_python_script_rejects_oversized_code_without_spawning_python() {
@@ -856,5 +857,57 @@ mod tests {
             err.contains(&MAX_SCRIPT_CODE_BYTES.to_string()),
             "expected error to mention limit: {err}"
         );
+    }
+
+    #[test]
+    fn python_rpc_create_sheet_inserts_after_active_sheet_by_default() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("First".to_string());
+        workbook.add_sheet("Second".to_string());
+        workbook.add_sheet("Third".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let context = PythonRunContext {
+            active_sheet_id: Some("Second".to_string()),
+            selection: None,
+        };
+        let mut host = PythonRpcHost::new(&mut state, Some(context)).expect("host should init");
+
+        let sheet_id = host
+            .handle_rpc("create_sheet", Some(json!({ "name": "Inserted" })))
+            .expect("create_sheet should succeed");
+        assert_eq!(sheet_id, JsonValue::String("Inserted".to_string()));
+
+        let workbook = host.state.get_workbook().expect("workbook should exist");
+        let sheet_names: Vec<_> = workbook.sheets.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(sheet_names, vec!["First", "Second", "Inserted", "Third"]);
+    }
+
+    #[test]
+    fn python_rpc_create_sheet_honors_explicit_index_over_active_sheet() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("First".to_string());
+        workbook.add_sheet("Second".to_string());
+        workbook.add_sheet("Third".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let context = PythonRunContext {
+            active_sheet_id: Some("Second".to_string()),
+            selection: None,
+        };
+        let mut host = PythonRpcHost::new(&mut state, Some(context)).expect("host should init");
+
+        let sheet_id = host
+            .handle_rpc("create_sheet", Some(json!({ "name": "AtStart", "index": 0 })))
+            .expect("create_sheet should succeed");
+        assert_eq!(sheet_id, JsonValue::String("AtStart".to_string()));
+
+        let workbook = host.state.get_workbook().expect("workbook should exist");
+        let sheet_names: Vec<_> = workbook.sheets.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(sheet_names, vec!["AtStart", "First", "Second", "Third"]);
     }
 }
