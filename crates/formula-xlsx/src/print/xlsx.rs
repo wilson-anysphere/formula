@@ -251,7 +251,15 @@ fn parse_sheet_info(reader: &Reader<&[u8]>, e: &BytesStart<'_>) -> Result<SheetI
     let mut r_id: Option<String> = None;
     for attr in e.attributes().with_checks(false) {
         let attr = attr?;
-        match attr.key.as_ref() {
+        // Ignore namespace declarations (`xmlns` / `xmlns:*`). Some producers may use prefixes like
+        // `xmlns:id="..."` which would otherwise look like an `id` attribute when matching by
+        // local-name.
+        let key = attr.key.as_ref();
+        if key.starts_with(b"xmlns") {
+            continue;
+        }
+
+        match key {
             b"name" => name = Some(attr.unescape_value()?.to_string()),
             key if crate::openxml::local_name(key) == b"id" => {
                 r_id = Some(attr.unescape_value()?.to_string())
@@ -333,7 +341,11 @@ fn parse_relationship(e: &BytesStart<'_>) -> Result<Option<(String, String)>, Pr
     let mut target: Option<String> = None;
     for attr in e.attributes().with_checks(false) {
         let attr = attr?;
-        let key = crate::openxml::local_name(attr.key.as_ref());
+        let key_raw = attr.key.as_ref();
+        if key_raw.starts_with(b"xmlns") {
+            continue;
+        }
+        let key = crate::openxml::local_name(key_raw);
         if key.eq_ignore_ascii_case(b"Id") {
             id = Some(attr.unescape_value()?.to_string());
         } else if key.eq_ignore_ascii_case(b"Target") {
