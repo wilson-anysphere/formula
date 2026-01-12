@@ -4,6 +4,7 @@
  * Supported inputs:
  * - `#AARRGGBB` and `AARRGGBB` (Excel/OOXML ARGB)
  * - `#RRGGBB` and `RRGGBB`
+ * - `#RGB` and `RGB` (CSS shorthand hex; expanded to `#RRGGBB`)
  * - Any other non-hex string (e.g. `"red"`, `"rgb(…)"`) is returned as-is.
  *
  * Alpha is rounded to 3 decimal places for deterministic outputs (e.g. `0x80 / 255` -> `0.502`).
