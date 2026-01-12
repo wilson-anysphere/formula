@@ -55,4 +55,41 @@ test.describe("Built-in commands", () => {
     });
     expect(final).toBe("2");
   });
+
+  test("edit.undo/edit.redo execute through the command registry", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() => Boolean((window as any).__formulaCommandRegistry), undefined, { timeout: 10_000 });
+
+    const before = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      doc.setCellValue(sheetId, "A1", "UndoRedoTest", { label: "Set A1" });
+      app.refresh();
+    });
+
+    const edited = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(edited).toBe("UndoRedoTest");
+
+    await page.evaluate(async () => {
+      const registry = (window as any).__formulaCommandRegistry;
+      await registry.executeCommand("edit.undo");
+      await (window as any).__formulaApp.whenIdle();
+    });
+
+    const afterUndo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(afterUndo).toBe(before);
+
+    await page.evaluate(async () => {
+      const registry = (window as any).__formulaCommandRegistry;
+      await registry.executeCommand("edit.redo");
+      await (window as any).__formulaApp.whenIdle();
+    });
+
+    const afterRedo = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(afterRedo).toBe("UndoRedoTest");
+  });
 });
