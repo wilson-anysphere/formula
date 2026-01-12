@@ -2463,3 +2463,181 @@ fn bytecode_backend_matches_ast_for_conditional_aggregates_shape_mismatch_and_ou
     );
     assert_eq!(v, bytecode::Value::Error(bytecode::ErrorKind::Ref));
 }
+
+#[test]
+fn bytecode_backend_matches_ast_for_sumif_error_criteria_and_optional_sum_range() {
+    let mut engine = Engine::new();
+
+    // Criteria range contains a numeric, an error, and another numeric.
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine
+        .set_cell_value("Sheet1", "A2", Value::Error(ErrorKind::Div0))
+        .unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+
+    // Sum range.
+    engine.set_cell_value("Sheet1", "B1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 30.0).unwrap();
+
+    // Error criteria should match the error cell without propagating it.
+    engine
+        .set_cell_formula("Sheet1", "C1", r##"=SUMIF(A1:A3,"#DIV/0!",B1:B3)"##)
+        .unwrap();
+    // Numeric criteria should ignore the error in the criteria range.
+    engine
+        .set_cell_formula("Sheet1", "C2", r#"=SUMIF(A1:A3,">1",B1:B3)"#)
+        .unwrap();
+    // Errors in the criteria argument always propagate.
+    engine
+        .set_cell_formula("Sheet1", "C3", r#"=SUMIF(A1:A3,A2,B1:B3)"#)
+        .unwrap();
+    // Trailing blank sum_range behaves like omitting the argument.
+    engine
+        .set_cell_formula("Sheet1", "C4", r#"=SUMIF(B1:B3,">15",)"#)
+        .unwrap();
+
+    // Ensure these compile to bytecode (no AST fallback).
+    assert_eq!(engine.bytecode_program_count(), 4);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        (r##"=SUMIF(A1:A3,"#DIV/0!",B1:B3)"##, "C1"),
+        (r#"=SUMIF(A1:A3,">1",B1:B3)"#, "C2"),
+        (r#"=SUMIF(A1:A3,A2,B1:B3)"#, "C3"),
+        (r#"=SUMIF(B1:B3,">15",)"#, "C4"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_sumifs_countifs_and_averageifs() {
+    let mut engine = Engine::new();
+
+    for (row, (cat, n, v)) in [
+        (1, ("a", 1.0, 10.0)),
+        (2, ("b", 2.0, 20.0)),
+        (3, ("a", 3.0, 30.0)),
+        (4, ("b", 4.0, 40.0)),
+        (5, ("a", 5.0, 50.0)),
+    ] {
+        engine.set_cell_value("Sheet1", &format!("A{row}"), cat).unwrap();
+        engine.set_cell_value("Sheet1", &format!("B{row}"), n).unwrap();
+        engine.set_cell_value("Sheet1", &format!("C{row}"), v).unwrap();
+    }
+
+    engine
+        .set_cell_formula("Sheet1", "D1", r#"=SUMIFS(C1:C5,A1:A5,"a",B1:B5,">2")"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D2", r#"=COUNTIFS(A1:A5,"a",B1:B5,">2")"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D3", r#"=AVERAGEIFS(C1:C5,A1:A5,"a",B1:B5,">2")"#)
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 3);
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        (r#"=SUMIFS(C1:C5,A1:A5,"a",B1:B5,">2")"#, "D1"),
+        (r#"=COUNTIFS(A1:A5,"a",B1:B5,">2")"#, "D2"),
+        (r#"=AVERAGEIFS(C1:C5,A1:A5,"a",B1:B5,">2")"#, "D3"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_averageif_minifs_and_maxifs() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+
+    // Aggregate ranges include an error that should only propagate when selected.
+    engine
+        .set_cell_value("Sheet1", "B1", Value::Error(ErrorKind::Div0))
+        .unwrap();
+    engine.set_cell_value("Sheet1", "B2", 5.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 1.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "C1", r#"=AVERAGEIF(A1:A3,">1",B1:B3)"#)
+        .unwrap();
+    engine
+        // Error in B1 is excluded by the criteria (A1 is not > 1), so MINIFS should succeed.
+        .set_cell_formula("Sheet1", "C2", r#"=MINIFS(B1:B3,A1:A3,">1")"#)
+        .unwrap();
+    engine
+        // MAXIFS includes the same rows and should return 5.
+        .set_cell_formula("Sheet1", "C3", r#"=MAXIFS(B1:B3,A1:A3,">1")"#)
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 3);
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        (r#"=AVERAGEIF(A1:A3,">1",B1:B3)"#, "C1"),
+        (r#"=MINIFS(B1:B3,A1:A3,">1")"#, "C2"),
+        (r#"=MAXIFS(B1:B3,A1:A3,">1")"#, "C3"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
+fn bytecode_backend_sumifs_date_criteria_respects_engine_value_locale() {
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+
+    let system = engine.date_system();
+    let jan_2 = ymd_to_serial(ExcelDate::new(2020, 1, 2), system).unwrap();
+    let feb_1 = ymd_to_serial(ExcelDate::new(2020, 2, 1), system).unwrap();
+
+    engine.set_cell_value("Sheet1", "A1", jan_2 as f64).unwrap();
+    engine.set_cell_value("Sheet1", "A2", feb_1 as f64).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 2.0).unwrap();
+
+    // In de-DE (DMY), "1/2/2020" is Feb 1, 2020.
+    engine
+        .set_cell_value("Sheet1", "C1", Value::Text(">=1/2/2020".to_string()))
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D1", "=SUMIFS(B1:B2, A1:A2, C1)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(2.0));
+    assert_engine_matches_ast(&engine, "=SUMIFS(B1:B2, A1:A2, C1)", "D1");
+}
+
+#[test]
+fn bytecode_backend_compiles_large_sumifs_to_bytecode() {
+    let mut engine = Engine::new();
+
+    for row in 1..=10_000 {
+        engine
+            .set_cell_value("Sheet1", &format!("A{row}"), row as f64)
+            .unwrap();
+        engine
+            .set_cell_value("Sheet1", &format!("B{row}"), 1.0)
+            .unwrap();
+    }
+
+    engine
+        .set_cell_formula("Sheet1", "C1", r#"=SUMIFS(B1:B10000,A1:A10000,">5000")"#)
+        .unwrap();
+
+    // Ensure bytecode eligibility for a larger range.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, r#"=SUMIFS(B1:B10000,A1:A10000,">5000")"#, "C1");
+}
