@@ -57,8 +57,10 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
     // contains multiple entries (the same `t` number can refer to different types depending on the
     // base). We therefore:
     // - Prefer a single inferred base when possible
-    // - Only accept both bases when we see evidence the file mixes them
-    // - Otherwise fall back to "whichever yields more resolved vm -> richValue links"
+    // - Accept both bases when we see strong evidence the file mixes them
+    // - Otherwise fall back to "whichever yields more resolved vm -> richValue links" (and as a
+    //   last resort, allow a mixed interpretation if it strictly increases how many entries we can
+    //   resolve)
     //
     // Note: Some producers also omit the `<futureMetadata name="XLRICHVALUE">` indirection and store
     // the rich value index directly in `rc/@v`; this helper supports both layouts.
@@ -75,22 +77,34 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
         //
         // Some producers omit `<futureMetadata name="XLRICHVALUE">` entirely and instead store the
         // rich value index directly in `<valueMetadata><bk><rc ... v="..."/>`.
-    let out = match rc_t_indexing {
-        RcTIndexing::ZeroBased => {
-            parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_zero_based])
-        }
-        RcTIndexing::OneBased => {
-            parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_one_based])
-        }
-        RcTIndexing::Mixed => parse_value_metadata_direct_mappings(
-            &doc,
-            &[xlrichvalue_t_zero_based, xlrichvalue_t_one_based],
-        ),
-        RcTIndexing::Ambiguous => {
-            let a = parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_zero_based]);
-            let b = parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_one_based]);
-            if b.len() >= a.len() { b } else { a }
-        }
+        let out = match rc_t_indexing {
+            RcTIndexing::ZeroBased => {
+                parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_zero_based])
+            }
+            RcTIndexing::OneBased => {
+                parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_one_based])
+            }
+            RcTIndexing::Mixed => parse_value_metadata_direct_mappings(
+                &doc,
+                &[xlrichvalue_t_zero_based, xlrichvalue_t_one_based],
+            ),
+            RcTIndexing::Ambiguous => {
+                let a = parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_zero_based]);
+                let b = parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_one_based]);
+                // Mixed mode: accept both candidates, but only if it increases how many entries we
+                // can resolve.
+                let c = parse_value_metadata_direct_mappings(
+                    &doc,
+                    &[xlrichvalue_t_zero_based, xlrichvalue_t_one_based],
+                );
+                if c.len() > a.len().max(b.len()) {
+                    c
+                } else if b.len() >= a.len() {
+                    b
+                } else {
+                    a
+                }
+            }
         };
         return Ok(out);
     }
@@ -110,7 +124,20 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
         RcTIndexing::Ambiguous => {
             let a = parse_value_metadata_mappings(&doc, &[xlrichvalue_t_zero_based], &future_bk_indices);
             let b = parse_value_metadata_mappings(&doc, &[xlrichvalue_t_one_based], &future_bk_indices);
-            if b.len() >= a.len() { b } else { a }
+            // Mixed mode: accept both candidates, but only if it increases how many entries we can
+            // resolve.
+            let c = parse_value_metadata_mappings(
+                &doc,
+                &[xlrichvalue_t_zero_based, xlrichvalue_t_one_based],
+                &future_bk_indices,
+            );
+            if c.len() > a.len().max(b.len()) {
+                c
+            } else if b.len() >= a.len() {
+                b
+            } else {
+                a
+            }
         }
     };
 
