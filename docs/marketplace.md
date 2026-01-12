@@ -2,6 +2,17 @@
 
 The marketplace service is a small HTTP API used by the web + desktop clients and the extension publisher CLI.
 
+## Base URL conventions
+
+All marketplace routes in this document are under the `/api/*` prefix (for example: `/api/search`).
+
+Depending on the caller, the configurable “base URL” differs:
+
+- **Browser/WebView clients** (`MarketplaceClient` / `WebExtensionManager`) use a base URL that *already includes* the API
+  prefix, e.g. `https://marketplace.formula.app/api`.
+- **Publisher tooling** (`tools/extension-publisher`) takes the marketplace **origin** and appends `/api/...` internally,
+  e.g. `https://marketplace.formula.app`. (Passing a URL that ends with `/api` is also accepted and will be normalized.)
+
 ## Content types
 
 - Extension package bytes: `application/vnd.formula.extension-package`
