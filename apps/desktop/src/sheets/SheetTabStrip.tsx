@@ -857,7 +857,7 @@ function SheetTab(props: {
 }) {
   const { sheet, active, editing, draftName, renameError } = props;
   const cancelBlurCommitRef = useRef(false);
-  const tabColorCss = !editing ? (normalizeExcelColorToCss(sheet.tabColor?.rgb) ?? null) : null;
+  const tabColorCss = !editing ? (normalizeExcelColorToCss(sheet.tabColor) ?? null) : null;
   const ariaLabel = sheet.visibility === "visible" ? sheet.name : `${sheet.name} (${sheet.visibility})`;
 
   return (
