@@ -22,10 +22,7 @@ pub fn format_value_for_display(
             Value::Bool(b) => FmtValue::Bool(*b),
             Value::Blank => FmtValue::Blank,
             Value::Error(e) => FmtValue::Error(e.as_code()),
-            Value::Record(_)
-            | Value::Entity(_)
-            | Value::Reference(_)
-            | Value::ReferenceUnion(_) => FmtValue::Error("#VALUE!"),
+            Value::Reference(_) | Value::ReferenceUnion(_) => FmtValue::Error("#VALUE!"),
             Value::Array(arr) => to_fmt_value(arr.get(0, 0).unwrap_or(&Value::Blank)),
             Value::Lambda(_) => FmtValue::Error("#CALC!"),
             Value::Spill { .. } => FmtValue::Error("#SPILL!"),
@@ -51,11 +48,28 @@ mod tests {
     }
 
     #[test]
+    fn formats_record_as_text_using_display_string() {
+        let value = Value::Record(RecordValue::new("Apple Inc."));
+
+        let formatted = format_value_for_display(&value, None, &FormatOptions::default());
+        assert_eq!(formatted.text, "Apple Inc.");
+    }
+
+    #[test]
     fn entity_and_record_to_string_use_display_string() {
         let entity = Value::Entity(EntityValue::new("Apple Inc."));
         assert_eq!(entity.to_string(), "Apple Inc.");
 
         let record = Value::Record(RecordValue::new("Apple Inc."));
         assert_eq!(record.to_string(), "Apple Inc.");
+    }
+
+    #[test]
+    fn coerce_to_string_for_entity_and_record_returns_display_string() {
+        let entity = Value::Entity(EntityValue::new("Apple Inc."));
+        assert_eq!(entity.coerce_to_string().unwrap(), "Apple Inc.");
+
+        let record = Value::Record(RecordValue::new("Apple Inc."));
+        assert_eq!(record.coerce_to_string().unwrap(), "Apple Inc.");
     }
 }
