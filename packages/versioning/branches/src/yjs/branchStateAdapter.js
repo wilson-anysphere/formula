@@ -701,18 +701,36 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
         }
       }
 
-      /** @type {string[]} */
-      const toDelete = [];
-      cellsMap.forEach((_cellData, rawKey) => {
+      // Clear (but do not delete) any existing cell entries that are no longer
+      // part of the desired snapshot, as well as any legacy key encodings.
+      //
+      // Rationale:
+      // - Root `cells.delete(key)` operations do not create new Yjs Items, so
+      //   later overwrites cannot reliably establish causal ordering against a
+      //   delete (important for conflict monitors).
+      // - Deep observers can miss root deletes depending on listener shape.
+      //
+      // Instead, preserve the per-cell Y.Map and represent emptiness via
+      // `value: null`, `formula: null`, and absent format/style.
+      cellsMap.forEach((cellData, rawKey) => {
         if (typeof rawKey !== "string") return;
         const parsed = parseSpreadsheetCellKey(rawKey);
         if (!parsed) return;
         const canonical = `${parsed.sheetId}:${parsed.row}:${parsed.col}`;
-        if (!desiredCells.has(canonical) || rawKey !== canonical) {
-          toDelete.push(rawKey);
+        if (desiredCells.has(canonical) && rawKey === canonical) return;
+
+        let yCell = getYMap(cellData);
+        if (!yCell) {
+          yCell = new Y.Map();
+          cellsMap.set(rawKey, yCell);
         }
+
+        yCell.delete("enc");
+        yCell.set("value", null);
+        yCell.set("formula", null);
+        yCell.delete("format");
+        yCell.delete("style");
       });
-      for (const key of toDelete) cellsMap.delete(key);
 
       for (const [key, normalizedCell] of desiredCells) {
         let yCell = getYMap(cellsMap.get(key));
@@ -742,8 +760,11 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
             // later overwrites from deterministically referencing the clear.
             yCell.set("formula", null);
           } else {
-            yCell.delete("value");
-            yCell.delete("formula");
+            // Format-only / empty cells: represent emptiness with explicit null
+            // markers (instead of deleting keys) so other clients can causally
+            // reference clears via Item.origin.
+            yCell.set("value", null);
+            yCell.set("formula", null);
           }
         }
 

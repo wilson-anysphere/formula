@@ -131,6 +131,41 @@ test("applyBranchStateToYjsDoc: ensures at least one sheet when applying an empt
   assert.equal(sheets.get(0)?.get("id"), "Sheet1");
 });
 
+test("applyBranchStateToYjsDoc: clears removed cells via formula/value null markers (no root deletes)", () => {
+  const doc = new Y.Doc();
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheets.push([sheet]);
+
+    const cells = doc.getMap("cells");
+    const cell = new Y.Map();
+    cell.set("formula", "=1");
+    cell.set("value", null);
+    cells.set("Sheet1:0:0", cell);
+  });
+
+  applyBranchStateToYjsDoc(doc, {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: { Sheet1: { id: "Sheet1", name: "Sheet1" } },
+    },
+    // Snapshot with no cells: should clear (not delete) the existing entry.
+    cells: { Sheet1: {} },
+    namedRanges: {},
+    comments: {},
+  });
+
+  const cell2 = doc.getMap("cells").get("Sheet1:0:0");
+  assert.ok(cell2 instanceof Y.Map);
+  assert.equal(cell2.has("formula"), true);
+  assert.equal(cell2.get("formula"), null);
+  assert.equal(cell2.get("value"), null);
+});
+
 test("branchStateFromYjsDoc/applyBranchStateToYjsDoc: preserves encrypted cell payloads", () => {
   const enc = {
     v: 1,
