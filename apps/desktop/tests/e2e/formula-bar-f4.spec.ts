@@ -32,7 +32,7 @@ test.describe("formula bar F4 toggles absolute/relative references", () => {
           start: (el as HTMLTextAreaElement).selectionStart,
           end: (el as HTMLTextAreaElement).selectionEnd,
         }))
-      ).toEqual({ start: 4, end: 4 });
+      ).toEqual({ start: 1, end: 5 });
 
       await page.keyboard.press("F4");
       await expect(input).toHaveValue("=A$1");
@@ -41,7 +41,7 @@ test.describe("formula bar F4 toggles absolute/relative references", () => {
           start: (el as HTMLTextAreaElement).selectionStart,
           end: (el as HTMLTextAreaElement).selectionEnd,
         }))
-      ).toEqual({ start: 3, end: 3 });
+      ).toEqual({ start: 1, end: 4 });
 
       await page.keyboard.press("F4");
       await expect(input).toHaveValue("=$A1");
@@ -50,7 +50,7 @@ test.describe("formula bar F4 toggles absolute/relative references", () => {
           start: (el as HTMLTextAreaElement).selectionStart,
           end: (el as HTMLTextAreaElement).selectionEnd,
         }))
-      ).toEqual({ start: 3, end: 3 });
+      ).toEqual({ start: 1, end: 4 });
 
       await page.keyboard.press("F4");
       await expect(input).toHaveValue("=A1");
@@ -59,7 +59,7 @@ test.describe("formula bar F4 toggles absolute/relative references", () => {
           start: (el as HTMLTextAreaElement).selectionStart,
           end: (el as HTMLTextAreaElement).selectionEnd,
         }))
-      ).toEqual({ start: 2, end: 2 });
+      ).toEqual({ start: 1, end: 3 });
     });
 
     test(`F4 expands full-token selections to cover the toggled token (${mode})`, async ({ page }) => {

@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { FormulaBarView } from "./FormulaBarView.js";
 
 describe("FormulaBarView F4 absolute reference toggle", () => {
-  it("toggles the active A1 reference and preserves a sane caret position", () => {
+  it("toggles the active A1 reference and selects the toggled token", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
@@ -24,9 +24,10 @@ describe("FormulaBarView F4 absolute reference toggle", () => {
 
     expect(view.textarea.value).toBe("=$A$1");
     expect(view.model.draft).toBe("=$A$1");
-    // Caret should still be within the toggled reference token (between "$" and "1").
-    expect(view.textarea.selectionStart).toBe(4);
-    expect(view.textarea.selectionEnd).toBe(4);
+    // Excel UX: keep the full reference token selected so repeated F4 presses
+    // keep cycling the same token.
+    expect(view.textarea.selectionStart).toBe(1);
+    expect(view.textarea.selectionEnd).toBe(5);
 
     host.remove();
   });
@@ -48,8 +49,8 @@ describe("FormulaBarView F4 absolute reference toggle", () => {
 
     expect(view.textarea.value).toBe("=$A$1");
     expect(view.model.draft).toBe("=$A$1");
-    // Caret remains at the end of the token after expansion.
-    expect(view.textarea.selectionStart).toBe(5);
+    // Excel UX: keep the full reference token selected.
+    expect(view.textarea.selectionStart).toBe(1);
     expect(view.textarea.selectionEnd).toBe(5);
 
     host.remove();
@@ -70,23 +71,23 @@ describe("FormulaBarView F4 absolute reference toggle", () => {
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
     expect(view.textarea.value).toBe("=$A$1");
-    expect(view.textarea.selectionStart).toBe(4);
-    expect(view.textarea.selectionEnd).toBe(4);
+    expect(view.textarea.selectionStart).toBe(1);
+    expect(view.textarea.selectionEnd).toBe(5);
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
     expect(view.textarea.value).toBe("=A$1");
-    expect(view.textarea.selectionStart).toBe(3);
-    expect(view.textarea.selectionEnd).toBe(3);
+    expect(view.textarea.selectionStart).toBe(1);
+    expect(view.textarea.selectionEnd).toBe(4);
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
     expect(view.textarea.value).toBe("=$A1");
-    expect(view.textarea.selectionStart).toBe(3);
-    expect(view.textarea.selectionEnd).toBe(3);
+    expect(view.textarea.selectionStart).toBe(1);
+    expect(view.textarea.selectionEnd).toBe(4);
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
     expect(view.textarea.value).toBe("=A1");
-    expect(view.textarea.selectionStart).toBe(2);
-    expect(view.textarea.selectionEnd).toBe(2);
+    expect(view.textarea.selectionStart).toBe(1);
+    expect(view.textarea.selectionEnd).toBe(3);
 
     host.remove();
   });
