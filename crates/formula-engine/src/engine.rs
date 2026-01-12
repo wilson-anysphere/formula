@@ -6189,18 +6189,47 @@ fn rewrite_defined_name_constants_for_bytecode(
     }
 
     fn value_to_bytecode_literal_expr(value: &Value) -> Option<crate::Expr> {
+        fn scalar_value_to_bytecode_literal_expr(value: &Value) -> Option<crate::Expr> {
+            match value {
+                Value::Number(n) if n.is_finite() => Some(crate::Expr::Number(n.to_string())),
+                Value::Number(_) => None,
+                Value::Text(s) => Some(crate::Expr::String(s.clone())),
+                Value::Bool(b) => Some(crate::Expr::Boolean(*b)),
+                Value::Blank => Some(crate::Expr::Missing),
+                Value::Error(e) => Some(crate::Expr::Error(e.as_code().to_string())),
+                // Treat any other value (including rich types like Entity/Record) as non-literal for
+                // bytecode inlining. This keeps name resolution conservative and avoids having to
+                // serialize opaque payloads into canonical formula strings.
+                Value::Entity(_)
+                | Value::Record(_)
+                | Value::Reference(_)
+                | Value::ReferenceUnion(_)
+                | Value::Array(_)
+                | Value::Lambda(_)
+                | Value::Spill { .. } => None,
+            }
+        }
+
         match value {
-            Value::Number(n) if n.is_finite() => Some(crate::Expr::Number(n.to_string())),
-            Value::Number(_) => None,
-            Value::Text(s) => Some(crate::Expr::String(s.clone())),
-            Value::Entity(_) | Value::Record(_) => None,
-            Value::Bool(b) => Some(crate::Expr::Boolean(*b)),
-            Value::Blank => Some(crate::Expr::Missing),
-            Value::Error(e) => Some(crate::Expr::Error(e.as_code().to_string())),
-            // Treat any other value (including rich types like Entity/Record) as non-literal for
-            // bytecode inlining. This keeps name resolution conservative and avoids having to
-            // serialize opaque payloads into canonical formula strings.
-            _ => None,
+            Value::Array(arr) => {
+                const MAX_INLINE_ARRAY_CELLS: usize = 256;
+                let total = arr.rows.saturating_mul(arr.cols);
+                if total == 0 || total > MAX_INLINE_ARRAY_CELLS {
+                    return None;
+                }
+
+                let mut rows = Vec::with_capacity(arr.rows);
+                for r in 0..arr.rows {
+                    let mut row = Vec::with_capacity(arr.cols);
+                    for c in 0..arr.cols {
+                        let el = arr.get(r, c)?;
+                        row.push(scalar_value_to_bytecode_literal_expr(el)?);
+                    }
+                    rows.push(row);
+                }
+                Some(crate::Expr::Array(crate::ArrayLiteral { rows }))
+            }
+            other => scalar_value_to_bytecode_literal_expr(other),
         }
     }
 

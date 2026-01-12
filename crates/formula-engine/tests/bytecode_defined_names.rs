@@ -1,4 +1,4 @@
-use formula_engine::{Engine, ErrorKind, NameDefinition, NameScope, Value};
+use formula_engine::{value::Array, Engine, ErrorKind, NameDefinition, NameScope, Value};
 
 #[test]
 fn bytecode_inlines_named_range_into_sum() {
@@ -201,4 +201,37 @@ fn bytecode_inlines_defined_name_constants_inside_concat_binary_op() {
         engine.get_cell_value("Sheet1", "A1"),
         Value::Text("1a".to_string())
     );
+}
+
+#[test]
+fn bytecode_inlines_defined_name_constant_arrays_as_array_literals() {
+    let mut engine = Engine::new();
+
+    engine
+        .define_name(
+            "Arr",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Array(Array::new(
+                2,
+                2,
+                vec![
+                    Value::Number(1.0),
+                    Value::Number(2.0),
+                    Value::Number(3.0),
+                    Value::Number(4.0),
+                ],
+            ))),
+        )
+        .unwrap();
+
+    engine.set_cell_formula("Sheet1", "A1", "=Arr").unwrap();
+
+    // Ensure we're exercising the bytecode path (the array constant is inlined into an array literal).
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(4.0));
 }
