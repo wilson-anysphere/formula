@@ -42,6 +42,9 @@ type AttributeMapping = {
 
 const CLOCK_SKEW_MS = 5 * 60 * 1000;
 const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
+// Hard cap for decoded SAMLResponse XML size. The callback route body limit should
+// be configured to allow base64 overhead but still keep the request bounded.
+const MAX_SAML_RESPONSE_BYTES = 1024 * 1024;
 
 type RequestCacheRow = { value: string; created_at: Date };
 
@@ -525,6 +528,11 @@ class SamlValidationError extends Error {
 
 function decodeSamlXml(base64: string): string {
   const trimmed = base64.trim();
+  // Reject overly large inputs before decoding to keep memory usage bounded.
+  const estimatedBytes = Math.floor((trimmed.length * 3) / 4);
+  if (!Number.isFinite(estimatedBytes) || estimatedBytes > MAX_SAML_RESPONSE_BYTES) {
+    throw new SamlValidationError("response_too_large", "SAMLResponse exceeded maximum size");
+  }
   // Note: Buffer.from(..., "base64") is permissive and ignores many invalid
   // characters. Validate the alphabet and ensure a stable round-trip so malformed
   // inputs fail fast.

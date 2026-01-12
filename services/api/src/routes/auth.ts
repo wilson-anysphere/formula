@@ -1013,7 +1013,12 @@ export function registerAuthRoutes(app: FastifyInstance): void {
   });
   app.post(
     "/auth/saml/:orgId/:provider/callback",
-    { preHandler: samlRateLimitByIp("/auth/saml/:orgId/:provider/callback") },
+    {
+      preHandler: samlRateLimitByIp("/auth/saml/:orgId/:provider/callback"),
+      // Allow for base64 overhead in SAMLResponse payloads while still keeping the
+      // request size bounded. The SAML handler enforces an additional decoded-size cap.
+      bodyLimit: 2 * 1024 * 1024
+    },
     async (request, reply) => {
       try {
         const mod = await loadSamlModule();

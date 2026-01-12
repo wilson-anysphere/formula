@@ -89,6 +89,7 @@ Notes:
 - `SAMLResponse` must be base64-encoded SAML XML. The API will normalize common
   encoding issues (such as whitespace/newlines and `+` being decoded to spaces by
   form-urlencoded parsers), but it will reject malformed base64.
+- The decoded XML is size-limited; overly large responses are rejected with `error: "response_too_large"`.
 - As additional defense-in-depth, Formula rejects responses containing
   `<!DOCTYPE` / `<!ENTITY` declarations (XXE) and rejects responses with multiple
   `<Assertion>` elements (signature wrapping).

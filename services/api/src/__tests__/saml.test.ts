@@ -652,6 +652,71 @@ describeSaml("SAML SSO", () => {
   );
 
   it(
+    "rejects overly large SAMLResponse payloads before decoding (bounded memory usage)",
+    async () => {
+      const { db, app } = await createTestApp();
+      try {
+        const ownerRegister = await app.inject({
+          method: "POST",
+          url: "/auth/register",
+          payload: {
+            email: "saml-owner-large@example.com",
+            password: "password1234",
+            name: "Owner",
+            orgName: "SSO Org Large"
+          }
+        });
+        expect(ownerRegister.statusCode).toBe(200);
+        const orgId = (ownerRegister.json() as any).organization.id as string;
+
+        await db.query("UPDATE org_settings SET allowed_auth_methods = $2::jsonb WHERE org_id = $1", [
+          orgId,
+          JSON.stringify(["password", "saml"])
+        ]);
+
+        const cookie = extractCookie(ownerRegister.headers["set-cookie"]);
+        const putProvider = await app.inject({
+          method: "PUT",
+          url: `/orgs/${orgId}/saml-providers/test`,
+          headers: { cookie },
+          payload: {
+            idpEntryPoint: "http://idp.example.test/sso",
+            spEntityId: "http://sp.example.test/metadata",
+            idpIssuer: "https://idp.example.test/metadata",
+            idpCertPem: TEST_CERT_PEM,
+            wantAssertionsSigned: true,
+            wantResponseSigned: false,
+            attributeMapping: { email: "email", name: "name" },
+            enabled: true
+          }
+        });
+        expect(putProvider.statusCode).toBe(200);
+
+        const startRes = await app.inject({ method: "GET", url: `/auth/saml/${orgId}/test/start` });
+        expect(startRes.statusCode).toBe(302);
+        const startUrl = new URL(startRes.headers.location as string);
+        const relayState = startUrl.searchParams.get("RelayState");
+        expect(relayState).toBeTruthy();
+
+        // Exceed the server's decoded XML size limit while still fitting within the route bodyLimit.
+        const hugeResponse = "A".repeat(1_400_000);
+        const callback = await app.inject({
+          method: "POST",
+          url: `/auth/saml/${orgId}/test/callback`,
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          payload: `SAMLResponse=${hugeResponse}&RelayState=${encodeURIComponent(relayState!)}`
+        });
+        expect(callback.statusCode).toBe(401);
+        expect((callback.json() as any).error).toBe("response_too_large");
+      } finally {
+        await app.close();
+        await db.end();
+      }
+    },
+    15_000
+  );
+
+  it(
     "rejects invalid signatures, wrong audience, expired assertions, and replayed assertion IDs",
     async () => {
       const { db, config, app } = await createTestApp();
