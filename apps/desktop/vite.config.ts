@@ -109,6 +109,10 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Avoid spawning extra Node processes during test runs (important for resource-constrained CI
+    // and sandboxed environments). Vitest's thread pool still provides per-file isolation via
+    // worker_threads without relying on `child_process.spawn`.
+    pool: "threads",
     // Desktop unit tests can incur a fair amount of Vite/React compilation overhead on
     // shared runners; keep timeouts generous so we don't flake on cold caches.
     testTimeout: 30_000,
