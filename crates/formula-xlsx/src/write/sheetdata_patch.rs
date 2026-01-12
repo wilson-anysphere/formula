@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
 use formula_model::rich_text::RichText;
@@ -41,6 +41,7 @@ pub(super) fn patch_worksheet_xml(
     shared_lookup: &HashMap<SharedStringKey, u32>,
     style_to_xf: &HashMap<u32, u32>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
 ) -> Result<Vec<u8>, WriteError> {
     let meta_sheet_id = cell_meta_sheet_ids
         .get(&sheet_meta.worksheet_id)
@@ -87,6 +88,7 @@ pub(super) fn patch_worksheet_xml(
                     style_to_xf,
                     &shared_formulas,
                     cell_meta_sheet_ids,
+                    changed_formula_cells,
                     &mut desired_cells,
                     &mut desired_idx,
                     &tags,
@@ -115,6 +117,7 @@ pub(super) fn patch_worksheet_xml(
                         style_to_xf,
                         &shared_formulas,
                         cell_meta_sheet_ids,
+                        changed_formula_cells,
                         &mut desired_cells,
                         &mut desired_idx,
                         &tags,
@@ -141,6 +144,7 @@ pub(super) fn patch_worksheet_xml(
                         style_to_xf,
                         &shared_formulas,
                         cell_meta_sheet_ids,
+                        changed_formula_cells,
                         &mut desired_cells,
                         &mut desired_idx,
                         &tags,
@@ -167,6 +171,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
     style_to_xf: &HashMap<u32, u32>,
     shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
     tags: &SheetMlTags,
@@ -190,6 +195,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                     style_to_xf,
                     shared_formulas,
                     cell_meta_sheet_ids,
+                    changed_formula_cells,
                     desired_cells,
                     desired_idx,
                     tags,
@@ -206,6 +212,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                     style_to_xf,
                     shared_formulas,
                     cell_meta_sheet_ids,
+                    changed_formula_cells,
                     desired_cells,
                     desired_idx,
                     tags,
@@ -233,6 +240,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                     style_to_xf,
                     shared_formulas,
                     cell_meta_sheet_ids,
+                    changed_formula_cells,
                     desired_cells,
                     desired_idx,
                     tags,
@@ -260,6 +268,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                         style_to_xf,
                         shared_formulas,
                         cell_meta_sheet_ids,
+                        changed_formula_cells,
                         desired_cells,
                         desired_idx,
                         tags,
@@ -279,6 +288,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                     style_to_xf,
                     shared_formulas,
                     cell_meta_sheet_ids,
+                    changed_formula_cells,
                     desired_cells,
                     desired_idx,
                     tags,
@@ -303,6 +313,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
     style_to_xf: &HashMap<u32, u32>,
     shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
     tags: &SheetMlTags,
@@ -334,6 +345,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     style_to_xf,
                     shared_formulas,
                     cell_meta_sheet_ids,
+                    changed_formula_cells,
                     desired_cells,
                     desired_idx,
                     tags,
@@ -349,6 +361,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     style_to_xf,
                     shared_formulas,
                     cell_meta_sheet_ids,
+                    changed_formula_cells,
                     desired_cells,
                     desired_idx,
                     tags,
@@ -380,6 +393,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     style_to_xf,
                     shared_formulas,
                     cell_meta_sheet_ids,
+                    changed_formula_cells,
                     desired_cells,
                     desired_idx,
                     tags,
@@ -395,6 +409,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     style_to_xf,
                     shared_formulas,
                     cell_meta_sheet_ids,
+                    changed_formula_cells,
                     desired_cells,
                     desired_idx,
                     tags,
@@ -418,6 +433,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     style_to_xf,
                     shared_formulas,
                     cell_meta_sheet_ids,
+                    changed_formula_cells,
                     desired_cells,
                     desired_idx,
                     tags,
@@ -441,6 +457,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     style_to_xf,
                     shared_formulas,
                     cell_meta_sheet_ids,
+                    changed_formula_cells,
                     desired_cells,
                     desired_idx,
                     tags,
@@ -460,6 +477,7 @@ fn patch_row_contents<R: std::io::BufRead, W: Write>(
                     style_to_xf,
                     shared_formulas,
                     cell_meta_sheet_ids,
+                    changed_formula_cells,
                     desired_cells,
                     desired_idx,
                     tags,
@@ -502,6 +520,7 @@ fn patch_or_copy_cell<W: Write>(
     style_to_xf: &HashMap<u32, u32>,
     shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
     tags: &SheetMlTags,
@@ -556,6 +575,7 @@ fn patch_or_copy_cell<W: Write>(
                     style_to_xf,
                     shared_formulas,
                     cell_meta_sheet_ids,
+                    changed_formula_cells,
                     tags,
                     writer,
                     cell_ref,
@@ -595,6 +615,7 @@ fn write_missing_rows_before<W: Write>(
     style_to_xf: &HashMap<u32, u32>,
     shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
     tags: &SheetMlTags,
@@ -613,6 +634,7 @@ fn write_missing_rows_before<W: Write>(
             style_to_xf,
             shared_formulas,
             cell_meta_sheet_ids,
+            changed_formula_cells,
             desired_cells,
             desired_idx,
             tags,
@@ -631,6 +653,7 @@ fn write_remaining_rows<W: Write>(
     style_to_xf: &HashMap<u32, u32>,
     shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
     tags: &SheetMlTags,
@@ -645,6 +668,7 @@ fn write_remaining_rows<W: Write>(
             style_to_xf,
             shared_formulas,
             cell_meta_sheet_ids,
+            changed_formula_cells,
             desired_cells,
             desired_idx,
             tags,
@@ -663,6 +687,7 @@ fn write_new_row<W: Write>(
     style_to_xf: &HashMap<u32, u32>,
     shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
     tags: &SheetMlTags,
@@ -693,6 +718,7 @@ fn write_new_row<W: Write>(
         style_to_xf,
         shared_formulas,
         cell_meta_sheet_ids,
+        changed_formula_cells,
         desired_cells,
         desired_idx,
         tags,
@@ -710,6 +736,7 @@ fn write_missing_cells_before_col<W: Write>(
     style_to_xf: &HashMap<u32, u32>,
     shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
     tags: &SheetMlTags,
@@ -732,6 +759,7 @@ fn write_missing_cells_before_col<W: Write>(
             style_to_xf,
             shared_formulas,
             cell_meta_sheet_ids,
+            changed_formula_cells,
             tags,
             writer,
             cell_ref,
@@ -751,6 +779,7 @@ fn write_remaining_cells_in_row<W: Write>(
     style_to_xf: &HashMap<u32, u32>,
     shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
     desired_cells: &mut [(CellRef, &formula_model::Cell)],
     desired_idx: &mut usize,
     tags: &SheetMlTags,
@@ -768,6 +797,7 @@ fn write_remaining_cells_in_row<W: Write>(
             style_to_xf,
             shared_formulas,
             cell_meta_sheet_ids,
+            changed_formula_cells,
             tags,
             writer,
             cell_ref,
@@ -787,6 +817,7 @@ fn write_updated_cell<W: Write>(
     style_to_xf: &HashMap<u32, u32>,
     shared_formulas: &HashMap<u32, super::SharedFormulaGroup>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
     tags: &SheetMlTags,
     writer: &mut Writer<W>,
     cell_ref: CellRef,
@@ -842,6 +873,15 @@ fn write_updated_cell<W: Write>(
     let a1 = cell_ref.to_a1();
     let meta = super::lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
     let value_kind = super::effective_value_kind(meta, cell);
+    let meta_sheet_id = cell_meta_sheet_ids
+        .get(&sheet_meta.worksheet_id)
+        .copied()
+        .unwrap_or(sheet_meta.worksheet_id);
+    let clear_cached_value = cell
+        .formula
+        .as_deref()
+        .is_some_and(|f| !super::strip_leading_equals(f).is_empty())
+        && changed_formula_cells.contains(&(meta_sheet_id, cell_ref));
 
     let model_formula = cell.formula.as_deref();
     let mut preserve_textless_shared = false;
@@ -878,7 +918,7 @@ fn write_updated_cell<W: Write>(
         }
     }
 
-    let has_value = !matches!(cell.value, CellValue::Empty);
+    let has_value = !clear_cached_value && !matches!(cell.value, CellValue::Empty);
     let has_children = formula_meta.is_some() || has_value || !preserved_children.is_empty();
 
     let style_xf_str = (cell.style_id != 0)
@@ -943,73 +983,75 @@ fn write_updated_cell<W: Write>(
         }
     }
 
-    match &cell.value {
-        CellValue::Empty => {}
-        CellValue::String(s) if matches!(&value_kind, CellValueKind::Other { .. }) => {
-            writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
-            let v = super::raw_or_other(meta, s);
-            writer.write_event(Event::Text(BytesText::new(&v)))?;
-            writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
-        }
-        CellValue::Number(n) => {
-            writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
-            let v = super::raw_or_number(meta, *n);
-            writer.write_event(Event::Text(BytesText::new(&v)))?;
-            writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
-        }
-        CellValue::Boolean(b) => {
-            writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
-            let v = super::raw_or_bool(meta, *b);
-            writer.write_event(Event::Text(BytesText::new(v)))?;
-            writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
-        }
-        CellValue::Error(err) => {
-            writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
-            let v = super::raw_or_error(meta, *err);
-            writer.write_event(Event::Text(BytesText::new(&v)))?;
-            writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
-        }
-        value @ CellValue::String(s) => match &value_kind {
-            CellValueKind::SharedString { .. } => {
-                let idx = super::shared_string_index(doc, meta, value, shared_lookup);
+    if !clear_cached_value {
+        match &cell.value {
+            CellValue::Empty => {}
+            CellValue::String(s) if matches!(&value_kind, CellValueKind::Other { .. }) => {
                 writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
-                writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
-                writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
-            }
-            CellValueKind::InlineString => {
-                writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
-                let mut t_start = BytesStart::new(t_tag);
-                if super::needs_space_preserve(s) {
-                    t_start.push_attribute(("xml:space", "preserve"));
-                }
-                writer.write_event(Event::Start(t_start))?;
-                writer.write_event(Event::Text(BytesText::new(s)))?;
-                writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
-                writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
-            }
-            CellValueKind::Str => {
-                writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
-                let v = super::raw_or_str(meta, s);
+                let v = super::raw_or_other(meta, s);
                 writer.write_event(Event::Text(BytesText::new(&v)))?;
                 writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
             }
-            _ => {
+            CellValue::Number(n) => {
+                writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
+                let v = super::raw_or_number(meta, *n);
+                writer.write_event(Event::Text(BytesText::new(&v)))?;
+                writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+            }
+            CellValue::Boolean(b) => {
+                writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
+                let v = super::raw_or_bool(meta, *b);
+                writer.write_event(Event::Text(BytesText::new(v)))?;
+                writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+            }
+            CellValue::Error(err) => {
+                writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
+                let v = super::raw_or_error(meta, *err);
+                writer.write_event(Event::Text(BytesText::new(&v)))?;
+                writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+            }
+            value @ CellValue::String(s) => match &value_kind {
+                CellValueKind::SharedString { .. } => {
+                    let idx = super::shared_string_index(doc, meta, value, shared_lookup);
+                    writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
+                    writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
+                    writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+                }
+                CellValueKind::InlineString => {
+                    writer.write_event(Event::Start(BytesStart::new(is_tag)))?;
+                    let mut t_start = BytesStart::new(t_tag);
+                    if super::needs_space_preserve(s) {
+                        t_start.push_attribute(("xml:space", "preserve"));
+                    }
+                    writer.write_event(Event::Start(t_start))?;
+                    writer.write_event(Event::Text(BytesText::new(s)))?;
+                    writer.write_event(Event::End(BytesEnd::new(t_tag)))?;
+                    writer.write_event(Event::End(BytesEnd::new(is_tag)))?;
+                }
+                CellValueKind::Str => {
+                    writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
+                    let v = super::raw_or_str(meta, s);
+                    writer.write_event(Event::Text(BytesText::new(&v)))?;
+                    writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+                }
+                _ => {
+                    let idx = super::shared_string_index(doc, meta, value, shared_lookup);
+                    writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
+                    writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
+                    writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+                }
+            },
+            value @ CellValue::RichText(rich) => {
                 let idx = super::shared_string_index(doc, meta, value, shared_lookup);
-                writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
-                writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
-                writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+                if idx != 0 || !rich.text.is_empty() {
+                    writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
+                    writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
+                    writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+                }
             }
-        },
-        value @ CellValue::RichText(rich) => {
-            let idx = super::shared_string_index(doc, meta, value, shared_lookup);
-            if idx != 0 || !rich.text.is_empty() {
-                writer.write_event(Event::Start(BytesStart::new(v_tag)))?;
-                writer.write_event(Event::Text(BytesText::new(&idx.to_string())))?;
-                writer.write_event(Event::End(BytesEnd::new(v_tag)))?;
+            _ => {
+                // Array/Spill not yet modeled for writing. Preserve as blank.
             }
-        }
-        _ => {
-            // Array/Spill not yet modeled for writing. Preserve as blank.
         }
     }
 

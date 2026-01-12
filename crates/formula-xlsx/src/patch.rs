@@ -424,6 +424,7 @@ fn apply_cell_patches_to_package_inner(
             sheet_patches,
             shared_strings.as_mut(),
             style_id_to_xf,
+            recalc_policy.clear_cached_values_on_formula_change,
         )?;
         any_formula_changed |= formula_changed;
 
@@ -625,9 +626,9 @@ fn scan_worksheet_xml(
                             min_col = min_col.min(col_1);
                             max_row = max_row.max(row_1);
                             max_col = max_col.max(col_1);
-                            if target_cells
-                                .is_some_and(|targets| targets.contains(&(cell_ref.row, cell_ref.col)))
-                            {
+                            if target_cells.is_some_and(|targets| {
+                                targets.contains(&(cell_ref.row, cell_ref.col))
+                            }) {
                                 found_target_cells.insert((cell_ref.row, cell_ref.col));
                             }
                         }
@@ -679,9 +680,9 @@ fn scan_worksheet_xml(
                             min_col = min_col.min(col_1);
                             max_row = max_row.max(row_1);
                             max_col = max_col.max(col_1);
-                            if target_cells
-                                .is_some_and(|targets| targets.contains(&(cell_ref.row, cell_ref.col)))
-                            {
+                            if target_cells.is_some_and(|targets| {
+                                targets.contains(&(cell_ref.row, cell_ref.col))
+                            }) {
                                 found_target_cells.insert((cell_ref.row, cell_ref.col));
                             }
                         }
@@ -710,6 +711,7 @@ fn patch_worksheet_xml(
     patches: &WorksheetCellPatches,
     mut shared_strings: Option<&mut SharedStringsState>,
     style_id_to_xf: Option<&HashMap<u32, u32>>,
+    clear_cached_values_on_formula_change: bool,
 ) -> Result<(Vec<u8>, bool), XlsxError> {
     let mut non_material_targets: HashSet<(u32, u32)> = HashSet::new();
     for (cell_ref, patch) in patches.iter() {
@@ -880,6 +882,7 @@ fn patch_worksheet_xml(
                     &mut shared_strings,
                     style_id_to_xf,
                     sheet_prefix.as_deref(),
+                    clear_cached_values_on_formula_change,
                 )?;
                 formula_changed |= changed;
             }
@@ -905,6 +908,7 @@ fn patch_worksheet_xml(
                             &mut shared_strings,
                             style_id_to_xf,
                             sheet_prefix.as_deref(),
+                            clear_cached_values_on_formula_change,
                         )?;
                     }
                     patch_row_idx = remaining_patch_rows.len();
@@ -932,6 +936,7 @@ fn patch_worksheet_xml(
                             &mut shared_strings,
                             style_id_to_xf,
                             sheet_prefix,
+                            clear_cached_values_on_formula_change,
                         )?;
                     }
                     patch_row_idx = remaining_patch_rows.len();
@@ -958,6 +963,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
     shared_strings: &mut Option<&mut SharedStringsState>,
     style_id_to_xf: Option<&HashMap<u32, u32>>,
     sheet_prefix: Option<&str>,
+    clear_cached_values_on_formula_change: bool,
 ) -> Result<bool, XlsxError> {
     let mut buf = Vec::new();
     let mut formula_changed = false;
@@ -985,6 +991,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                         shared_strings,
                         style_id_to_xf,
                         sheet_prefix,
+                        clear_cached_values_on_formula_change,
                     )?;
                     *patch_row_idx += 1;
                 }
@@ -1015,6 +1022,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                         shared_strings,
                         style_id_to_xf,
                         row_prefix,
+                        clear_cached_values_on_formula_change,
                     )?;
                     formula_changed |= changed;
                     // patch_row writes the row end.
@@ -1043,6 +1051,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                         shared_strings,
                         style_id_to_xf,
                         sheet_prefix,
+                        clear_cached_values_on_formula_change,
                     )?;
                     *patch_row_idx += 1;
                 }
@@ -1085,6 +1094,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                             shared_strings,
                             style_id_to_xf,
                             row_prefix,
+                            clear_cached_values_on_formula_change,
                         )?;
                     }
 
@@ -1112,6 +1122,7 @@ fn patch_sheet_data<R: std::io::BufRead>(
                         shared_strings,
                         style_id_to_xf,
                         sheet_prefix,
+                        clear_cached_values_on_formula_change,
                     )?;
                     *patch_row_idx += 1;
                 }
@@ -1206,6 +1217,7 @@ fn patch_row<R: std::io::BufRead>(
     shared_strings: &mut Option<&mut SharedStringsState>,
     style_id_to_xf: Option<&HashMap<u32, u32>>,
     default_prefix: Option<&str>,
+    clear_cached_values_on_formula_change: bool,
 ) -> Result<bool, XlsxError> {
     let mut buf = Vec::new();
     let mut patch_idx = 0usize;
@@ -1261,6 +1273,7 @@ fn patch_row<R: std::io::BufRead>(
                             shared_strings,
                             style_id_to_xf,
                             insert_prefix,
+                            clear_cached_values_on_formula_change,
                         )?;
                     }
                     patch_idx += 1;
@@ -1310,6 +1323,7 @@ fn patch_row<R: std::io::BufRead>(
                         shared_strings,
                         style_id_to_xf,
                         false,
+                        clear_cached_values_on_formula_change,
                     )?;
                     formula_changed |= cell_formula_changed;
                 } else {
@@ -1352,6 +1366,7 @@ fn patch_row<R: std::io::BufRead>(
                             shared_strings,
                             style_id_to_xf,
                             insert_prefix,
+                            clear_cached_values_on_formula_change,
                         )?;
                     }
                     patch_idx += 1;
@@ -1372,6 +1387,7 @@ fn patch_row<R: std::io::BufRead>(
                         shared_strings,
                         style_id_to_xf,
                         true,
+                        clear_cached_values_on_formula_change,
                     )?;
                     formula_changed |= cell_formula_changed;
                 } else {
@@ -1397,6 +1413,7 @@ fn patch_row<R: std::io::BufRead>(
                                 shared_strings,
                                 style_id_to_xf,
                                 insert_prefix,
+                                clear_cached_values_on_formula_change,
                             )?;
                         }
                         patch_idx += 1;
@@ -1421,6 +1438,7 @@ fn patch_row<R: std::io::BufRead>(
                                 shared_strings,
                                 style_id_to_xf,
                                 insert_prefix,
+                                clear_cached_values_on_formula_change,
                             )?;
                         }
                         patch_idx += 1;
@@ -1444,6 +1462,7 @@ fn patch_row<R: std::io::BufRead>(
                             shared_strings,
                             style_id_to_xf,
                             insert_prefix,
+                            clear_cached_values_on_formula_change,
                         )?;
                     }
                     patch_idx += 1;
@@ -1472,6 +1491,7 @@ fn write_new_row(
     shared_strings: &mut Option<&mut SharedStringsState>,
     style_id_to_xf: Option<&HashMap<u32, u32>>,
     prefix: Option<&str>,
+    clear_cached_values_on_formula_change: bool,
 ) -> Result<(), XlsxError> {
     let Some((min_c, max_c)) = patch_cols_bounds(patches, style_id_to_xf)? else {
         return Ok(());
@@ -1502,6 +1522,7 @@ fn write_new_row(
             shared_strings,
             style_id_to_xf,
             prefix,
+            clear_cached_values_on_formula_change,
         )?;
     }
 
@@ -1519,6 +1540,7 @@ fn write_cell_patch(
     shared_strings: &mut Option<&mut SharedStringsState>,
     style_id_to_xf: Option<&HashMap<u32, u32>>,
     prefix: Option<&str>,
+    clear_cached_values_on_formula_change: bool,
 ) -> Result<bool, XlsxError> {
     let cell_ref = CellRef::new(row_num - 1, col);
     let a1 = cell_ref.to_a1();
@@ -1536,6 +1558,9 @@ fn write_cell_patch(
         Some(formula) if formula_is_material(Some(formula)) => Some(formula),
         _ => None,
     };
+
+    let clear_value = clear_cached_values_on_formula_change && formula.is_some();
+    let value = if clear_value { None } else { value };
 
     let (new_t, body_kind) =
         cell_representation_for_patch(value, formula, existing_t, shared_strings)?;
@@ -1625,6 +1650,7 @@ fn patch_cell_element(
     shared_strings: &mut Option<&mut SharedStringsState>,
     style_id_to_xf: Option<&HashMap<u32, u32>>,
     original_was_empty: bool,
+    clear_cached_values_on_formula_change: bool,
 ) -> Result<bool, XlsxError> {
     let (patch_value, patch_formula) = match patch {
         CellPatch::Clear { .. } => (None, None),
@@ -1659,7 +1685,9 @@ fn patch_cell_element(
     };
 
     let update_formula = !formula_eq;
-    let update_value = !value_eq;
+    let clear_value =
+        clear_cached_values_on_formula_change && update_formula && patch_formula.is_some();
+    let update_value = !value_eq || clear_value;
     let any_change = style_change || update_formula || update_value;
 
     if !any_change {
@@ -1686,6 +1714,7 @@ fn patch_cell_element(
     let is_tag = prefixed_tag(prefix_str, "is");
     let t_tag = prefixed_tag(prefix_str, "t");
 
+    let patch_value = if clear_value { None } else { patch_value };
     let (new_t, body_kind) = if update_value {
         cell_representation_for_patch(
             patch_value,

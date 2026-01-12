@@ -279,8 +279,13 @@ pub fn write_to_vec_with_recalc_policy(
     recalc_policy: RecalcPolicy,
 ) -> Result<Vec<u8>, WriteError> {
     let formula_changed = formulas_changed(doc);
+    let changed_formula_cells = if recalc_policy.clear_cached_values_on_formula_change {
+        formula_changed_cells(doc)
+    } else {
+        HashSet::new()
+    };
 
-    let mut parts = build_parts(doc)?;
+    let mut parts = build_parts(doc, &changed_formula_cells)?;
     if formula_changed {
         apply_recalc_policy_to_parts(&mut parts, recalc_policy)?;
     }
@@ -427,6 +432,110 @@ fn formulas_changed(doc: &XlsxDocument) -> bool {
     false
 }
 
+/// Returns the set of formula cells whose *material* formula text differs from the baseline
+/// metadata, excluding formula removals.
+///
+/// This mirrors the comparison logic in [`formulas_changed`], but instead of returning early it
+/// records the addresses of changed/added formulas so callers can selectively clear cached `<v>`
+/// values for those edited cells.
+fn formula_changed_cells(doc: &XlsxDocument) -> HashSet<(WorksheetId, CellRef)> {
+    let mut changed: HashSet<(WorksheetId, CellRef)> = HashSet::new();
+
+    // WorksheetId values can differ between the in-memory workbook and the preserved metadata
+    // (e.g. if the model is reconstructed from persisted state). Use the workbook's stable XLSX
+    // identity fields when available to map back to the metadata worksheet IDs.
+    let mut meta_by_ws_id: HashMap<WorksheetId, usize> = HashMap::new();
+    let mut meta_by_rel_id: HashMap<&str, usize> = HashMap::new();
+    let mut meta_by_sheet_id: HashMap<u32, usize> = HashMap::new();
+    for (idx, meta) in doc.meta.sheets.iter().enumerate() {
+        meta_by_ws_id.insert(meta.worksheet_id, idx);
+        meta_by_rel_id.insert(meta.relationship_id.as_str(), idx);
+        meta_by_sheet_id.insert(meta.sheet_id, idx);
+    }
+
+    let mut workbook_to_meta_sheet_id: HashMap<WorksheetId, WorksheetId> = HashMap::new();
+    for sheet in &doc.workbook.sheets {
+        let idx = sheet
+            .xlsx_rel_id
+            .as_deref()
+            .and_then(|rid| meta_by_rel_id.get(rid).copied())
+            .or_else(|| sheet.xlsx_sheet_id.and_then(|sid| meta_by_sheet_id.get(&sid).copied()))
+            .or_else(|| meta_by_ws_id.get(&sheet.id).copied());
+        let Some(idx) = idx else {
+            continue;
+        };
+        let meta_sheet_id = doc
+            .meta
+            .sheets
+            .get(idx)
+            .map(|meta| meta.worksheet_id)
+            .unwrap_or(sheet.id);
+        workbook_to_meta_sheet_id.insert(sheet.id, meta_sheet_id);
+    }
+
+    let mut shared_formulas_by_sheet: HashMap<WorksheetId, HashMap<u32, SharedFormulaGroup>> =
+        HashMap::new();
+
+    for sheet in &doc.workbook.sheets {
+        let sheet_id = sheet.id;
+        let meta_sheet_id = workbook_to_meta_sheet_id
+            .get(&sheet_id)
+            .copied()
+            .unwrap_or(sheet_id);
+        let shared_formulas = shared_formulas_by_sheet
+            .entry(meta_sheet_id)
+            .or_insert_with(|| shared_formula_groups(doc, meta_sheet_id));
+        for (cell_ref, cell) in sheet.iter_cells() {
+            let Some(formula) = cell.formula.as_deref() else {
+                continue;
+            };
+            if strip_leading_equals(formula).is_empty() {
+                continue;
+            }
+
+            let meta_formula = doc
+                .meta
+                .cell_meta
+                .get(&(meta_sheet_id, cell_ref))
+                .and_then(|m| m.formula.as_ref());
+
+            // `read` expands textless shared-formula follower cells into explicit formulas in the
+            // in-memory model. Those synthesized formulas should not count as edits when deciding
+            // whether we need to drop `xl/calcChain.xml`, and similarly should not trigger cached
+            // value clearing.
+            if let Some(meta_formula) = meta_formula {
+                let is_textless_shared_follower = meta_formula.t.as_deref() == Some("shared")
+                    && meta_formula.reference.is_none()
+                    && meta_formula.file_text.is_empty()
+                    && meta_formula.shared_index.is_some();
+                if is_textless_shared_follower {
+                    if let Some(shared_index) = meta_formula.shared_index {
+                        if let Some(expected) =
+                            shared_formula_expected(shared_formulas, shared_index, cell_ref)
+                        {
+                            if !formula_text_differs(Some(expected.as_str()), Some(formula)) {
+                                continue;
+                            }
+                        }
+                    }
+
+                    // If we can't validate equivalence with the shared-formula master, be
+                    // conservative and treat this as a formula change.
+                    changed.insert((meta_sheet_id, cell_ref));
+                    continue;
+                }
+            }
+
+            let baseline = meta_formula.map(|f| f.file_text.as_str());
+            if formula_text_differs(baseline, Some(formula)) {
+                changed.insert((meta_sheet_id, cell_ref));
+            }
+        }
+    }
+
+    changed
+}
+
 fn formula_text_differs(baseline_file_text: Option<&str>, model_formula: Option<&str>) -> bool {
     let baseline = normalize_formula_for_compare(baseline_file_text);
     let model = normalize_formula_for_compare(model_formula);
@@ -446,7 +555,10 @@ fn normalize_formula_for_compare(formula: Option<&str>) -> Option<String> {
     Some(crate::formula_text::strip_xlfn_prefixes(stripped))
 }
 
-fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteError> {
+fn build_parts(
+    doc: &XlsxDocument,
+    changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
+) -> Result<BTreeMap<String, Vec<u8>>, WriteError> {
     let mut parts = doc.parts.clone();
     let is_new = parts.is_empty();
 
@@ -628,6 +740,7 @@ fn build_parts(doc: &XlsxDocument) -> Result<BTreeMap<String, Vec<u8>>, WriteErr
             &shared_string_lookup,
             &style_to_xf,
             &sheet_plan.cell_meta_sheet_ids,
+            changed_formula_cells,
         )?;
         if orig.is_some()
             && !tab_color_changed
@@ -1935,6 +2048,7 @@ fn write_worksheet_xml(
     shared_lookup: &HashMap<SharedStringKey, u32>,
     style_to_xf: &HashMap<u32, u32>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
 ) -> Result<Vec<u8>, WriteError> {
     if let Some(original) = original {
         return patch_worksheet_xml(
@@ -1945,9 +2059,10 @@ fn write_worksheet_xml(
             shared_lookup,
             style_to_xf,
             cell_meta_sheet_ids,
+            changed_formula_cells,
         );
     }
- 
+  
     let dimension = dimension::worksheet_dimension_range(sheet).to_string();
     let cols_xml = render_cols(sheet, None);
     let sheet_data_xml = render_sheet_data(
@@ -1958,6 +2073,7 @@ fn write_worksheet_xml(
         style_to_xf,
         cell_meta_sheet_ids,
         None,
+        changed_formula_cells,
     );
 
     let mut xml = String::new();
@@ -1982,6 +2098,7 @@ fn patch_worksheet_xml(
     shared_lookup: &HashMap<SharedStringKey, u32>,
     style_to_xf: &HashMap<u32, u32>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
 ) -> Result<Vec<u8>, WriteError> {
     let (original_has_dimension, original_used_range) = scan_worksheet_xml(original)?;
     let new_used_range = dimension::worksheet_used_range(sheet);
@@ -1996,6 +2113,7 @@ fn patch_worksheet_xml(
         shared_lookup,
         style_to_xf,
         cell_meta_sheet_ids,
+        changed_formula_cells,
     )?;
 
     patch_worksheet_dimension(&patched, insert_dimension, dimension_range, &dimension_ref)
@@ -2339,6 +2457,7 @@ fn render_sheet_data(
     style_to_xf: &HashMap<u32, u32>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     outline: Option<&Outline>,
+    changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
 ) -> String {
     let shared_formulas = shared_formula_groups(doc, sheet_meta.worksheet_id);
 
@@ -2353,6 +2472,7 @@ fn render_sheet_data(
                 cell_meta_sheet_ids,
                 outline,
                 &shared_formulas,
+                changed_formula_cells,
                 origin,
                 rows,
                 cols,
@@ -2447,8 +2567,9 @@ fn render_sheet_data(
                 style_to_xf,
                 cell_meta_sheet_ids,
                 &shared_formulas,
+                changed_formula_cells,
             );
-    }
+        }
 
         if wrote_any_cell {
             out.push_str("</row>");
@@ -2469,6 +2590,7 @@ fn render_sheet_data_columnar(
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     outline: Option<&Outline>,
     shared_formulas: &HashMap<u32, SharedFormulaGroup>,
+    changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
     origin: CellRef,
     table_rows: usize,
     table_cols: usize,
@@ -2606,6 +2728,7 @@ fn render_sheet_data_columnar(
                     style_to_xf,
                     cell_meta_sheet_ids,
                     shared_formulas,
+                    changed_formula_cells,
                 );
                 overlay_cell_idx += 1;
                 wrote_any_cell = true;
@@ -2629,6 +2752,7 @@ fn render_sheet_data_columnar(
                         style_to_xf,
                         cell_meta_sheet_ids,
                         shared_formulas,
+                        changed_formula_cells,
                     );
                     overlay_cell_idx += 1;
                     wrote_any_cell = true;
@@ -2662,6 +2786,7 @@ fn render_sheet_data_columnar(
                     style_to_xf,
                     cell_meta_sheet_ids,
                     shared_formulas,
+                    changed_formula_cells,
                 );
                 wrote_any_cell = true;
             }
@@ -2680,6 +2805,7 @@ fn render_sheet_data_columnar(
                     style_to_xf,
                     cell_meta_sheet_ids,
                     shared_formulas,
+                    changed_formula_cells,
                 );
                 overlay_cell_idx += 1;
                 wrote_any_cell = true;
@@ -2698,6 +2824,7 @@ fn render_sheet_data_columnar(
                     style_to_xf,
                     cell_meta_sheet_ids,
                     shared_formulas,
+                    changed_formula_cells,
                 );
                 wrote_any_cell = true;
             }
@@ -2757,6 +2884,7 @@ fn append_cell_xml(
     style_to_xf: &HashMap<u32, u32>,
     cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
     shared_formulas: &HashMap<u32, SharedFormulaGroup>,
+    changed_formula_cells: &HashSet<(WorksheetId, CellRef)>,
 ) {
     out.push_str(r#"<c r=""#);
     out.push_str(&cell_ref.to_a1());
@@ -2771,7 +2899,18 @@ fn append_cell_xml(
     let meta = lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
     let value_kind = effective_value_kind(meta, cell);
 
-    if !matches!(cell.value, CellValue::Empty) {
+    let meta_sheet_id = cell_meta_sheet_ids
+        .get(&sheet_meta.worksheet_id)
+        .copied()
+        .unwrap_or(sheet_meta.worksheet_id);
+    let clear_cached_value = cell
+        .formula
+        .as_deref()
+        .is_some_and(|f| !strip_leading_equals(f).is_empty())
+        && changed_formula_cells.contains(&(meta_sheet_id, cell_ref));
+    let has_value = !clear_cached_value && !matches!(cell.value, CellValue::Empty);
+
+    if has_value {
         match &value_kind {
             CellValueKind::SharedString { .. } => out.push_str(r#" t="s""#),
             CellValueKind::InlineString => out.push_str(r#" t="inlineStr""#),
@@ -2879,68 +3018,70 @@ fn append_cell_xml(
         }
     }
 
-    match &cell.value {
-        CellValue::Empty => {}
-        value @ CellValue::String(s) if matches!(&value_kind, CellValueKind::Other { .. }) => {
-            out.push_str("<v>");
-            out.push_str(&escape_text(&raw_or_other(meta, s)));
-            out.push_str("</v>");
-        }
-        CellValue::Number(n) => {
-            out.push_str("<v>");
-            out.push_str(&escape_text(&raw_or_number(meta, *n)));
-            out.push_str("</v>");
-        }
-        CellValue::Boolean(b) => {
-            out.push_str("<v>");
-            out.push_str(raw_or_bool(meta, *b));
-            out.push_str("</v>");
-        }
-        CellValue::Error(err) => {
-            out.push_str("<v>");
-            out.push_str(&escape_text(&raw_or_error(meta, *err)));
-            out.push_str("</v>");
-        }
-        value @ CellValue::String(s) => match &value_kind {
-            CellValueKind::SharedString { .. } => {
-                let idx = shared_string_index(doc, meta, value, shared_lookup);
+    if !clear_cached_value {
+        match &cell.value {
+            CellValue::Empty => {}
+            value @ CellValue::String(s) if matches!(&value_kind, CellValueKind::Other { .. }) => {
                 out.push_str("<v>");
-                out.push_str(&idx.to_string());
+                out.push_str(&escape_text(&raw_or_other(meta, s)));
                 out.push_str("</v>");
             }
-            CellValueKind::InlineString => {
-                out.push_str("<is><t");
-                if needs_space_preserve(s) {
-                    out.push_str(r#" xml:space="preserve""#);
+            CellValue::Number(n) => {
+                out.push_str("<v>");
+                out.push_str(&escape_text(&raw_or_number(meta, *n)));
+                out.push_str("</v>");
+            }
+            CellValue::Boolean(b) => {
+                out.push_str("<v>");
+                out.push_str(raw_or_bool(meta, *b));
+                out.push_str("</v>");
+            }
+            CellValue::Error(err) => {
+                out.push_str("<v>");
+                out.push_str(&escape_text(&raw_or_error(meta, *err)));
+                out.push_str("</v>");
+            }
+            value @ CellValue::String(s) => match &value_kind {
+                CellValueKind::SharedString { .. } => {
+                    let idx = shared_string_index(doc, meta, value, shared_lookup);
+                    out.push_str("<v>");
+                    out.push_str(&idx.to_string());
+                    out.push_str("</v>");
                 }
-                out.push('>');
-                out.push_str(&escape_text(s));
-                out.push_str("</t></is>");
-            }
-            CellValueKind::Str => {
-                out.push_str("<v>");
-                out.push_str(&escape_text(&raw_or_str(meta, s)));
-                out.push_str("</v>");
+                CellValueKind::InlineString => {
+                    out.push_str("<is><t");
+                    if needs_space_preserve(s) {
+                        out.push_str(r#" xml:space="preserve""#);
+                    }
+                    out.push('>');
+                    out.push_str(&escape_text(s));
+                    out.push_str("</t></is>");
+                }
+                CellValueKind::Str => {
+                    out.push_str("<v>");
+                    out.push_str(&escape_text(&raw_or_str(meta, s)));
+                    out.push_str("</v>");
+                }
+                _ => {
+                    // Fallback: treat as shared string.
+                    let idx = shared_string_index(doc, meta, value, shared_lookup);
+                    out.push_str("<v>");
+                    out.push_str(&idx.to_string());
+                    out.push_str("</v>");
+                }
+            },
+            value @ CellValue::RichText(rich) => {
+                // Rich text is stored in the shared strings table.
+                let idx = shared_string_index(doc, meta, value, shared_lookup);
+                if idx != 0 || !rich.text.is_empty() {
+                    out.push_str("<v>");
+                    out.push_str(&idx.to_string());
+                    out.push_str("</v>");
+                }
             }
             _ => {
-                // Fallback: treat as shared string.
-                let idx = shared_string_index(doc, meta, value, shared_lookup);
-                out.push_str("<v>");
-                out.push_str(&idx.to_string());
-                out.push_str("</v>");
+                // Array/Spill not yet modeled for writing. Preserve as blank.
             }
-        },
-        value @ CellValue::RichText(rich) => {
-            // Rich text is stored in the shared strings table.
-            let idx = shared_string_index(doc, meta, value, shared_lookup);
-            if idx != 0 || !rich.text.is_empty() {
-                out.push_str("<v>");
-                out.push_str(&idx.to_string());
-                out.push_str("</v>");
-            }
-        }
-        _ => {
-            // Array/Spill not yet modeled for writing. Preserve as blank.
         }
     }
 
