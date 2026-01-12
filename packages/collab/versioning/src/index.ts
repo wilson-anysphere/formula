@@ -72,14 +72,33 @@ export class CollabVersioning {
 
     const store = opts.store ?? new YjsVersionStore({ doc: opts.session.doc });
 
-    // When version history itself is stored in the Yjs doc (YjsVersionStore),
-    // we must exclude those roots from snapshots/restores to avoid recursive
-    // snapshots and to prevent restores from rolling back history.
+    // CollabVersioning snapshots/restores should only affect user workbook state,
+    // not internal collaboration metadata stored inside the same Y.Doc.
+    //
+    // Always exclude:
+    // - Structural conflict op log (`cellStructuralOps`)
+    // - Default YjsBranchStore graph roots (`branching:*`)
+    //
+    // Note: CollabBranchingWorkflow allows configuring the branch root name
+    // (default "branching"). We only exclude the default roots here.
+    //
+    // Additionally, when version history itself is stored in the Yjs doc
+    // (YjsVersionStore), we must exclude those roots from snapshots/restores to
+    // avoid recursive snapshots and to prevent restores from rolling back
+    // history.
     const storeCtorName = (store as any)?.constructor?.name ?? "";
     const storeInDoc = store instanceof (YjsVersionStore as any) || storeCtorName === "YjsVersionStore";
-    const excludeRoots = storeInDoc ? ["versions", "versionsMeta"] : undefined;
+    const excludeRoots = [
+      // Always excluded internal collaboration roots.
+      "cellStructuralOps",
+      "branching:branches",
+      "branching:commits",
+      "branching:meta",
+      // Exclude versioning history roots only when history is stored in-doc.
+      ...(storeInDoc ? ["versions", "versionsMeta"] : []),
+    ];
 
-    const doc = createYjsSpreadsheetDocAdapter(opts.session.doc, excludeRoots ? { excludeRoots } : undefined);
+    const doc = createYjsSpreadsheetDocAdapter(opts.session.doc, { excludeRoots });
     this.manager = new VersionManager({
       doc,
       store,
