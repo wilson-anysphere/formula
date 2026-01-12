@@ -28,6 +28,7 @@ const BITMAPINFOHEADER_SIZE: usize = 40;
 const BITMAPV5HEADER_SIZE: usize = 124;
 const BI_RGB: u32 = 0;
 const BI_BITFIELDS: u32 = 3;
+const BI_ALPHABITFIELDS: u32 = 6;
 
 // 'sRGB' as a u32 in little-endian.
 const LCS_SRGB: u32 = 0x7352_4742;
@@ -375,7 +376,8 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
     let (row_bytes, stride) = match bit_count {
         32 => {
-            if compression != BI_RGB && compression != BI_BITFIELDS {
+            if compression != BI_RGB && compression != BI_BITFIELDS && compression != BI_ALPHABITFIELDS
+            {
                 return Err(format!(
                     "unsupported DIB compression for 32bpp: {compression}"
                 ));
@@ -404,19 +406,27 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
     };
 
     // In a BITMAPINFOHEADER with BI_BITFIELDS compression, the color masks are stored immediately
-    // after the 40-byte header (3 DWORDs, i.e. 12 bytes). For BITMAPV4/V5 headers the masks live
-    // inside the header itself.
+    // after the 40-byte header (3 DWORDs, i.e. 12 bytes). With BI_ALPHABITFIELDS there are 4 masks
+    // (16 bytes). For BITMAPV4/V5 headers the masks live inside the header itself.
     let mut pixel_offset = header_size;
     if compression == BI_BITFIELDS && header_size == BITMAPINFOHEADER_SIZE {
         pixel_offset = header_size
             .checked_add(12)
             .ok_or_else(|| "dib pixel offset overflow".to_string())?;
+    } else if compression == BI_ALPHABITFIELDS && header_size == BITMAPINFOHEADER_SIZE {
+        pixel_offset = header_size
+            .checked_add(16)
+            .ok_or_else(|| "dib pixel offset overflow".to_string())?;
     }
 
     // For BI_BITFIELDS, treat the 4th byte as alpha only when a non-zero alpha mask is present
     // (BITMAPV4/V5 headers).
-    let alpha_mask = if bit_count == 32 && compression == BI_BITFIELDS && header_size >= 56 {
-        read_u32_le(dib_bytes, 52).unwrap_or(0)
+    let alpha_mask = if bit_count == 32 {
+        match compression {
+            BI_BITFIELDS if header_size >= 56 => read_u32_le(dib_bytes, 52).unwrap_or(0),
+            BI_ALPHABITFIELDS => read_u32_le(dib_bytes, 52).unwrap_or(0),
+            _ => 0,
+        }
     } else {
         0
     };
@@ -436,7 +446,7 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
     // treat it as alpha. If alpha is constant 0 or 255, treat it as padding and force opaque.
     let has_alpha = if bit_count == 32 {
         match compression {
-            BI_BITFIELDS => alpha_mask != 0,
+            BI_BITFIELDS | BI_ALPHABITFIELDS => alpha_mask != 0,
             BI_RGB => {
                 let mut first: Option<u8> = None;
                 let mut saw_variation = false;
@@ -676,5 +686,38 @@ mod tests {
         let png = dibv5_to_png(&dib).expect("dibv5_to_png failed");
         let (_w, _h, px) = decode_png(&png);
         assert_eq!(px, vec![255, 0, 0, 128, 0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn dib32_bi_alphabitfields_preserves_alpha() {
+        // Some producers use BI_ALPHABITFIELDS with a BITMAPINFOHEADER and explicit color masks.
+        // Treat this like BI_BITFIELDS with alpha.
+        let mut dib = Vec::new();
+        push_u32_le(&mut dib, BITMAPINFOHEADER_SIZE as u32); // biSize
+        push_i32_le(&mut dib, 1); // biWidth
+        push_i32_le(&mut dib, 1); // biHeight (bottom-up)
+        push_u16_le(&mut dib, 1); // biPlanes
+        push_u16_le(&mut dib, 32); // biBitCount
+        push_u32_le(&mut dib, BI_ALPHABITFIELDS); // biCompression
+        push_u32_le(&mut dib, 0); // biSizeImage
+        push_i32_le(&mut dib, 0); // biXPelsPerMeter
+        push_i32_le(&mut dib, 0); // biYPelsPerMeter
+        push_u32_le(&mut dib, 0); // biClrUsed
+        push_u32_le(&mut dib, 0); // biClrImportant
+
+        // Color masks (BGRA).
+        push_u32_le(&mut dib, 0x00FF_0000); // red
+        push_u32_le(&mut dib, 0x0000_FF00); // green
+        push_u32_le(&mut dib, 0x0000_00FF); // blue
+        push_u32_le(&mut dib, 0xFF00_0000); // alpha
+
+        debug_assert_eq!(dib.len(), BITMAPINFOHEADER_SIZE + 16);
+
+        // One BGRA pixel: red at 50% alpha.
+        dib.extend_from_slice(&[0, 0, 255, 128]);
+
+        let png = dibv5_to_png(&dib).expect("dibv5_to_png failed");
+        let (_w, _h, px) = decode_png(&png);
+        assert_eq!(px, vec![255, 0, 0, 128]);
     }
 }
