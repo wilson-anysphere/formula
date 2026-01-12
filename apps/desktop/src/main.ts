@@ -1550,7 +1550,7 @@ if (
     // Fall back to treating the name as a raw sheet id (eg: in-memory sessions where
     // sheet ids are "Sheet1", "Sheet2", ...).
     if (workbookSheetStore.getById(query)) return query;
-    if (app.getDocument().getSheetIds().includes(query)) return query;
+    if (listDocumentSheetIds().includes(query)) return query;
 
     const activeSheetId = app.getCurrentSheetId();
     const activeSheetName = workbookSheetStore.getName(activeSheetId) ?? activeSheetId;
@@ -1621,6 +1621,87 @@ if (
       const sheets = workbookSheetStore.listAll();
       if (sheets.length > 0) return sheets.map((sheet) => ({ id: sheet.id, name: sheet.name }));
       return [{ id: "Sheet1", name: "Sheet1" }];
+    },
+    onSelectionChanged(callback: (payload: any) => void) {
+      // SpreadsheetApp selection listeners fire immediately (to seed UI state). Extensions expect
+      // events only on changes, so ignore the first callback and de-dupe subsequent emissions.
+      let initialized = false;
+      let lastKey = "";
+      let lastSheetId = app.getCurrentSheetId();
+
+      const unsubscribe = app.subscribeSelection((selection) => {
+        const sheetId = app.getCurrentSheetId();
+        const range = selection.ranges[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
+        const key = `${range.startRow},${range.startCol},${range.endRow},${range.endCol}`;
+
+        if (!initialized) {
+          initialized = true;
+          lastSheetId = sheetId;
+          lastKey = key;
+          return;
+        }
+
+        // Mirror the Node/InMemorySpreadsheet behavior: activating a sheet emits `sheetActivated`
+        // but does not implicitly emit `selectionChanged`.
+        if (sheetId !== lastSheetId) {
+          lastSheetId = sheetId;
+          lastKey = key;
+          return;
+        }
+
+        if (key === lastKey) return;
+        lastKey = key;
+
+        const values: Array<Array<string | number | boolean | null>> = [];
+        for (let r = range.startRow; r <= range.endRow; r++) {
+          const row: Array<string | number | boolean | null> = [];
+          for (let c = range.startCol; c <= range.endCol; c++) {
+            const cell = app.getDocument().getCell(sheetId, { row: r, col: c }) as any;
+            row.push(normalizeExtensionCellValue(cell?.value ?? null));
+          }
+          values.push(row);
+        }
+
+        callback?.({ selection: { ...range, values } });
+      });
+
+      return { dispose: unsubscribe };
+    },
+    onCellChanged(callback: (payload: any) => void) {
+      const unsubscribe = app.getDocument().on("change", (evt: any) => {
+        const deltas = Array.isArray(evt?.deltas) ? evt.deltas : [];
+        if (deltas.length === 0) return;
+        const activeSheetId = app.getCurrentSheetId();
+        for (const delta of deltas) {
+          if (!delta || typeof delta !== "object") continue;
+          if (delta.sheetId !== activeSheetId) continue;
+          const row = Number(delta.row);
+          const col = Number(delta.col);
+          if (!Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0) continue;
+          const value = normalizeExtensionCellValue(delta.after?.value ?? null);
+          callback?.({ row, col, value });
+        }
+      });
+      return { dispose: unsubscribe };
+    },
+    onSheetActivated(callback: (payload: any) => void) {
+      // Like `onSelectionChanged`, selection listeners fire immediately; ignore the initial call.
+      let initialized = false;
+      let lastSheetId = app.getCurrentSheetId();
+
+      const unsubscribe = app.subscribeSelection(() => {
+        const sheetId = app.getCurrentSheetId();
+        if (!initialized) {
+          initialized = true;
+          lastSheetId = sheetId;
+          return;
+        }
+        if (sheetId === lastSheetId) return;
+        lastSheetId = sheetId;
+        callback?.({ sheet: { id: sheetId, name: workbookSheetStore.getName(sheetId) ?? sheetId } });
+      });
+
+      return { dispose: unsubscribe };
     },
     async getSheet(name: string) {
       const sheetId = findSheetIdByName(name);
