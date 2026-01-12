@@ -355,6 +355,13 @@ def _build_rust_helper() -> Path:
     # compiling locally for determinism/reliability unless the user explicitly opted in.
     env.setdefault("RUSTC_WRAPPER", "")
     env.setdefault("RUSTC_WORKSPACE_WRAPPER", "")
+    # Cargo can also read wrapper config via `CARGO_BUILD_RUSTC_WRAPPER`. Set it explicitly so a
+    # global Cargo config cannot unexpectedly re-enable a flaky wrapper when `RUSTC_WRAPPER` is
+    # unset.
+    env.setdefault("CARGO_BUILD_RUSTC_WRAPPER", env.get("RUSTC_WRAPPER", ""))
+    env.setdefault(
+        "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER", env.get("RUSTC_WORKSPACE_WRAPPER", "")
+    )
 
     # Concurrency defaults: keep Rust builds stable on high-core-count multi-agent hosts.
     #
