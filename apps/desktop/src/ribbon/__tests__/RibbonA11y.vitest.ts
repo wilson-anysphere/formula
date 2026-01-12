@@ -71,6 +71,35 @@ describe("Ribbon a11y + keyboard navigation", () => {
     act(() => root.unmount());
   });
 
+  it("closes an open ribbon dropdown menu when pressing Tab from a menuitem", async () => {
+    const { container, root } = renderRibbon();
+
+    const paste = container.querySelector<HTMLButtonElement>('[data-command-id="home.clipboard.paste"]');
+    expect(paste).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      paste?.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    const menu = container.querySelector<HTMLElement>(".ribbon-dropdown__menu");
+    expect(menu).toBeInstanceOf(HTMLElement);
+    if (!menu) throw new Error("Missing dropdown menu");
+
+    const firstItem = menu.querySelector<HTMLButtonElement>(".ribbon-dropdown__menuitem:not(:disabled)");
+    expect(firstItem).toBeInstanceOf(HTMLButtonElement);
+    firstItem?.focus();
+
+    await act(async () => {
+      firstItem?.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    expect(container.querySelector(".ribbon-dropdown__menu")).toBeNull();
+
+    act(() => root.unmount());
+  });
+
   it("wires tabs to tabpanels via aria-controls / aria-labelledby", () => {
     const { container, root } = renderRibbon();
 

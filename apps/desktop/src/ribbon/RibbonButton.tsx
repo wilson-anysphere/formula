@@ -209,6 +209,14 @@ export const RibbonButton = React.memo(function RibbonButton({
             if (items.length === 0) return;
             const currentIndex = items.findIndex((el) => el === document.activeElement);
 
+            if (event.key === "Tab") {
+              // Allow the browser to perform normal sequential focus navigation (Tab / Shift+Tab),
+              // then close the menu on the next frame. This avoids unmounting the focused menuitem
+              // before the browser has a chance to move focus.
+              requestAnimationFrame(() => closeMenu());
+              return;
+            }
+
             if (event.key === "ArrowDown") {
               event.preventDefault();
               const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % items.length : 0;
