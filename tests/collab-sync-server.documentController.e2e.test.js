@@ -24,18 +24,18 @@ async function waitForCell(documentController, sheetId, coord, expected) {
   }, 10_000);
 }
 
-async function waitForCellStyle(documentController, sheetId, coord, expectedStyle) {
+async function waitForCellFormat(documentController, sheetId, coord, expectedFormat) {
   await waitForCondition(() => {
     const cell = documentController.getCell(sheetId, coord);
     const style =
       typeof documentController.getCellFormat === "function"
         ? documentController.getCellFormat(sheetId, coord)
         : documentController.styleTable.get(cell.styleId);
-    if (expectedStyle == null) {
+    if (expectedFormat == null) {
       return !style || (typeof style === "object" && Object.keys(style).length === 0);
     }
     try {
-      assert.deepEqual(style, expectedStyle);
+      assert.deepEqual(style, expectedFormat);
       return true;
     } catch {
       return false;
@@ -303,13 +303,13 @@ test("sync-server + Yjs↔DocumentController binder: sync format-only cells", as
   );
   const WebSocket = requireFromSyncServer("ws");
 
-  const server = await startSyncServer({
+  let server = await startSyncServer({
     port,
     dataDir,
     auth: { mode: "opaque", token: "test-token" },
   });
   t.after(async () => {
-    await server.stop();
+    await server?.stop();
   });
 
   const createClient = ({ wsUrl: wsBaseUrl, docId, token, user, activeSheet }) => {
@@ -373,20 +373,48 @@ test("sync-server + Yjs↔DocumentController binder: sync format-only cells", as
 
   await Promise.all([clientA.session.whenSynced(), clientB.session.whenSynced()]);
 
-  // Apply formatting to an empty cell and ensure it propagates.
-  clientA.documentController.setRangeFormat("Sheet1", "A1", { font: { bold: true } });
-  await waitForCell(clientB.documentController, "Sheet1", "A1", { value: null, formula: null });
-  await waitForCellStyle(clientB.documentController, "Sheet1", "A1", { font: { bold: true } });
+  // Apply formatting to the full height of column A (layered formatting) and ensure it propagates.
+  clientA.documentController.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } });
+  await waitForCellFormat(clientB.documentController, "Sheet1", "A1", { font: { bold: true } });
+  assert.equal(clientB.documentController.getCell("Sheet1", "A1").styleId, 0);
 
   // Ensure content+format updates round-trip.
   clientA.documentController.setCellValue("Sheet1", "A1", "hello");
   await waitForCell(clientB.documentController, "Sheet1", "A1", { value: "hello", formula: null });
-  await waitForCellStyle(clientB.documentController, "Sheet1", "A1", { font: { bold: true } });
+  await waitForCellFormat(clientB.documentController, "Sheet1", "A1", { font: { bold: true } });
+  assert.equal(clientB.documentController.getCell("Sheet1", "A1").styleId, 0);
 
-  // Clearing formatting should preserve the value.
-  clientA.documentController.setRangeFormat("Sheet1", "A1", null);
-  await waitForCell(clientB.documentController, "Sheet1", "A1", { value: "hello", formula: null });
-  await waitForCellStyle(clientB.documentController, "Sheet1", "A1", null);
+  // Tear down clients and restart the server to validate persistence.
+  clientA.destroy();
+  clientB.destroy();
+
+  // Give the server a moment to persist state after the last client disconnects.
+  await new Promise((r) => setTimeout(r, 500));
+
+  await server.stop();
+  server = await startSyncServer({
+    port,
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+  });
+
+  const clientC = createClient({
+    wsUrl,
+    docId,
+    token: "test-token",
+    user: { id: "u-c", name: "User C", color: "#0000ff" },
+    activeSheet: "Sheet1",
+  });
+
+  t.after(() => {
+    clientC.destroy();
+  });
+
+  await clientC.session.whenSynced();
+
+  await waitForCell(clientC.documentController, "Sheet1", "A1", { value: "hello", formula: null });
+  await waitForCellFormat(clientC.documentController, "Sheet1", "A1", { font: { bold: true } });
+  assert.equal(clientC.documentController.getCell("Sheet1", "A1").styleId, 0);
 });
 
 test("sync-server + Yjs↔DocumentController binder: permission-masked cells are unreadable and uneditable", async (t) => {

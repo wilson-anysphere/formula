@@ -546,3 +546,34 @@ test("binder: local sheet view changes do not echo back as external changes", as
     ydoc.destroy();
   }
 });
+
+test("binder: syncs layered full-column formatting via sheet metadata (no per-cell materialization)", async () => {
+  const ydoc = new Y.Doc();
+  const documentControllerA = new DocumentController();
+  const documentControllerB = new DocumentController();
+
+  const binderA = bindYjsToDocumentController({ ydoc, documentController: documentControllerA, defaultSheetId: "Sheet1" });
+  const binderB = bindYjsToDocumentController({ ydoc, documentController: documentControllerB, defaultSheetId: "Sheet1" });
+
+  try {
+    // Apply formatting to the full height of column A. This should update the column layer,
+    // not materialize 1M cells in the sparse `cells` map.
+    documentControllerA.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } });
+
+    await waitForCondition(() => {
+      const entry = findSheetEntry(ydoc, "Sheet1");
+      const colFormats = entry?.get?.("colFormats") ?? entry?.colFormats;
+      const col0 = colFormats?.get?.("0") ?? colFormats?.["0"];
+      return col0?.font?.bold === true;
+    });
+
+    await waitForCondition(() => documentControllerB.getCellFormat("Sheet1", "A1")?.font?.bold === true);
+
+    assert.equal(documentControllerB.getCell("Sheet1", "A1").styleId, 0);
+    assert.equal(documentControllerB.getCellFormat("Sheet1", "A1")?.font?.bold, true);
+  } finally {
+    binderA.destroy();
+    binderB.destroy();
+    ydoc.destroy();
+  }
+});

@@ -1252,9 +1252,11 @@ export function bindYjsToDocumentController(options) {
     for (const event of events) {
       const path = event?.path;
       const touchesView = Array.isArray(path) && path.includes("view");
+      const touchesFormats =
+        Array.isArray(path) && (path.includes("rowFormats") || path.includes("colFormats") || path.includes("defaultFormat"));
       const changes = event?.changes?.keys;
 
-      // Array-level changes (insert/delete/move) don't expose `changes.keys`. This can
+      // Array-level changes (insert/delete/move) don't expose meaningful `changes.keys`. This can
       // happen for the root `sheets` array, or for nested arrays under `sheet.view`.
       //
       // If the path indicates which sheet index was touched (e.g. nested view arrays),
@@ -1262,7 +1264,7 @@ export function bindYjsToDocumentController(options) {
       // Note: in some Yjs versions `changes.keys` exists but is an empty Map for
       // array-level changes, so treat `size===0` as "no keys" as well.
       if (!changes || changes.size === 0) {
-        if (touchesView && Array.isArray(path) && typeof path[0] === "number") {
+        if ((touchesView || touchesFormats) && Array.isArray(path) && typeof path[0] === "number") {
           const entry = sheets.get(path[0]);
           const id = coerceString(entry?.get?.("id") ?? entry?.id);
           if (id) {
@@ -1868,13 +1870,89 @@ export function bindYjsToDocumentController(options) {
   }
 
   /**
+   * Extract layered-format deltas from a DocumentController change payload.
+   *
+   * Prefer the unified `payload.formatDeltas` stream, but accept the split
+   * `rowStyleDeltas`/`colStyleDeltas`/`sheetStyleDeltas` variants for compatibility.
+   *
+   * @param {any} payload
+   * @returns {any[]}
+   */
+  function readFormatDeltasFromDocumentChange(payload) {
+    const formatDeltas = Array.isArray(payload?.formatDeltas) ? payload.formatDeltas : [];
+    if (formatDeltas.length > 0) return formatDeltas;
+
+    /** @type {any[]} */
+    const out = [];
+
+    const sheetStyleDeltas = Array.isArray(payload?.sheetStyleDeltas)
+      ? payload.sheetStyleDeltas
+      : Array.isArray(payload?.sheetStyleIdDeltas)
+        ? payload.sheetStyleIdDeltas
+        : [];
+    for (const delta of sheetStyleDeltas) {
+      if (!delta) continue;
+      const sheetId = delta.sheetId;
+      if (typeof sheetId !== "string" || sheetId === "") continue;
+      out.push({
+        sheetId,
+        layer: "sheet",
+        beforeStyleId: delta.beforeStyleId,
+        afterStyleId: delta.afterStyleId,
+      });
+    }
+
+    const rowStyleDeltas = Array.isArray(payload?.rowStyleDeltas)
+      ? payload.rowStyleDeltas
+      : Array.isArray(payload?.rowStyleIdDeltas)
+        ? payload.rowStyleIdDeltas
+        : [];
+    for (const delta of rowStyleDeltas) {
+      if (!delta) continue;
+      const sheetId = delta.sheetId;
+      const row = delta.row;
+      if (typeof sheetId !== "string" || sheetId === "") continue;
+      if (!Number.isInteger(row) || row < 0) continue;
+      out.push({
+        sheetId,
+        layer: "row",
+        index: row,
+        beforeStyleId: delta.beforeStyleId,
+        afterStyleId: delta.afterStyleId,
+      });
+    }
+
+    const colStyleDeltas = Array.isArray(payload?.colStyleDeltas)
+      ? payload.colStyleDeltas
+      : Array.isArray(payload?.colStyleIdDeltas)
+        ? payload.colStyleIdDeltas
+        : [];
+    for (const delta of colStyleDeltas) {
+      if (!delta) continue;
+      const sheetId = delta.sheetId;
+      const col = delta.col;
+      if (typeof sheetId !== "string" || sheetId === "") continue;
+      if (!Number.isInteger(col) || col < 0) continue;
+      out.push({
+        sheetId,
+        layer: "col",
+        index: col,
+        beforeStyleId: delta.beforeStyleId,
+        afterStyleId: delta.afterStyleId,
+      });
+    }
+
+    return out;
+  }
+
+  /**
    * @param {any} payload
    */
   const handleDocumentChange = (payload) => {
     if (applyingRemote) return;
     const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
     const sheetViewDeltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
-    const formatDeltas = Array.isArray(payload?.formatDeltas) ? payload.formatDeltas : [];
+    const formatDeltas = readFormatDeltasFromDocumentChange(payload);
 
     if (sheetViewDeltas.length > 0) {
       enqueueSheetViewWrite(sheetViewDeltas);
