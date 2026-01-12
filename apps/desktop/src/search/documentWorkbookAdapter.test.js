@@ -186,4 +186,7 @@ test("DocumentWorkbookAdapter does not create phantom sheets after a rename (sta
   const renamed = workbook.getSheet("Budget2026");
   assert.equal(renamed.sheetId, "sheet-1");
   assert.equal(renamed.name, "Budget2026");
+
+  // Workbook sheet listing should also reflect the updated display name.
+  assert.deepEqual(workbook.sheets.map((s) => s.name), ["Budget2026"]);
 });
