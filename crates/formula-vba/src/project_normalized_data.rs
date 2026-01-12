@@ -176,7 +176,7 @@ pub fn project_normalized_data_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
             }
 
             // Non-string module metadata records included in V3.
-            0x001E | 0x0021 | 0x0025 | 0x0028 => {
+            0x001E | 0x0021 | 0x0022 | 0x0025 | 0x0028 => {
                 out.extend_from_slice(data);
                 if in_module {
                     module_seen_non_name_record = true;
@@ -332,7 +332,7 @@ fn scan_unicode_presence(
             }
             // Any non-name module record helps disambiguate MODULENAMEUNICODE as either an alternate
             // representation (immediately after MODULENAME) or the start of a new module group.
-            0x001E | 0x0021 | 0x0025 | 0x0028 | 0x002B | 0x002C | 0x0031 => {
+            0x001E | 0x0021 | 0x0022 | 0x0025 | 0x0028 | 0x002B | 0x002C | 0x0031 => {
                 if current_module.is_some() {
                     current_module_seen_non_name_record = true;
                 }

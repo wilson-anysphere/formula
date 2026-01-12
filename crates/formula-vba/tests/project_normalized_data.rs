@@ -1188,6 +1188,27 @@ fn project_normalized_data_v3_ignores_modulehelpfilepathunicode_0049() {
 }
 
 #[test]
+fn project_normalized_data_v3_includes_nonprocedural_moduletype_record_id_0022() {
+    // Some module groups use TypeRecord.Id=0x0022 (non-procedural modules). This helper includes
+    // module type record data bytes, so it should include the 0x0022 payload too.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        push_record(&mut out, 0x0019, b"Module1");
+        push_record(&mut out, 0x0022, &0u16.to_le_bytes()); // MODULETYPE (non-procedural)
+
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let normalized =
+        project_normalized_data_v3_dir_records(&vba_bin).expect("ProjectNormalizedDataV3");
+
+    let expected = [b"Module1".to_vec(), 0u16.to_le_bytes().to_vec()].concat();
+    assert_eq!(normalized, expected);
+}
+
+#[test]
 fn project_normalized_data_v3_strips_unicode_length_prefix_when_prefix_is_byte_count() {
     // Some producers embed an internal u32 length prefix in Unicode dir record payloads where the
     // length is the UTF-16LE byte count (not code units). Ensure we strip the prefix in this case.
