@@ -1440,11 +1440,8 @@ export class SpreadsheetApp {
     if (collabEnabled && this.collabSession) {
       // Conflicts UI (mounted once; new conflicts stream in via the monitor callbacks).
       this.conflictUiContainer = document.createElement("div");
-      this.conflictUiContainer.style.position = "absolute";
-      this.conflictUiContainer.style.inset = "0";
-      this.conflictUiContainer.style.zIndex = "50";
       // Avoid blocking grid interactions unless the user is interacting with the conflict UI itself.
-      this.conflictUiContainer.style.pointerEvents = "none";
+      this.conflictUiContainer.classList.add("conflict-ui-overlay");
       this.root.appendChild(this.conflictUiContainer);
 
       this.conflictUi = new ConflictUiController({
@@ -1469,25 +1466,11 @@ export class SpreadsheetApp {
       // Re-enable pointer events for the conflict UX primitives.
       const toastRoot = this.conflictUiContainer.querySelector<HTMLElement>('[data-testid="conflict-toast-root"]');
       if (toastRoot) {
-        toastRoot.style.pointerEvents = "auto";
-        toastRoot.style.position = "absolute";
-        toastRoot.style.left = "16px";
-        toastRoot.style.bottom = "16px";
+        toastRoot.classList.add("conflict-ui-toast-root");
       }
       const dialogRoot = this.conflictUiContainer.querySelector<HTMLElement>('[data-testid="conflict-dialog-root"]');
       if (dialogRoot) {
-        dialogRoot.style.pointerEvents = "auto";
-        dialogRoot.style.position = "absolute";
-        dialogRoot.style.left = "16px";
-        dialogRoot.style.top = "16px";
-        dialogRoot.style.maxWidth = "min(720px, 92vw)";
-        dialogRoot.style.maxHeight = "min(560px, 92vh)";
-        dialogRoot.style.overflow = "auto";
-        dialogRoot.style.background = "var(--dialog-bg)";
-        dialogRoot.style.border = "1px solid var(--dialog-border)";
-        dialogRoot.style.borderRadius = "10px";
-        dialogRoot.style.padding = "12px";
-        dialogRoot.style.boxShadow = "var(--dialog-shadow)";
+        dialogRoot.classList.add("conflict-ui-dialog-root");
       }
 
       this.structuralConflictUi = new StructuralConflictUiController({
@@ -1506,27 +1489,13 @@ export class SpreadsheetApp {
         '[data-testid="structural-conflict-toast-root"]',
       );
       if (structuralToastRoot) {
-        structuralToastRoot.style.pointerEvents = "auto";
-        structuralToastRoot.style.position = "absolute";
-        structuralToastRoot.style.right = "16px";
-        structuralToastRoot.style.bottom = "16px";
+        structuralToastRoot.classList.add("structural-conflict-ui-toast-root");
       }
       const structuralDialogRoot = this.conflictUiContainer.querySelector<HTMLElement>(
         '[data-testid="structural-conflict-dialog-root"]',
       );
       if (structuralDialogRoot) {
-        structuralDialogRoot.style.pointerEvents = "auto";
-        structuralDialogRoot.style.position = "absolute";
-        structuralDialogRoot.style.right = "16px";
-        structuralDialogRoot.style.top = "16px";
-        structuralDialogRoot.style.maxWidth = "min(720px, 92vw)";
-        structuralDialogRoot.style.maxHeight = "min(560px, 92vh)";
-        structuralDialogRoot.style.overflow = "auto";
-        structuralDialogRoot.style.background = "var(--dialog-bg)";
-        structuralDialogRoot.style.border = "1px solid var(--dialog-border)";
-        structuralDialogRoot.style.borderRadius = "10px";
-        structuralDialogRoot.style.padding = "12px";
-        structuralDialogRoot.style.boxShadow = "var(--dialog-shadow)";
+        structuralDialogRoot.classList.add("structural-conflict-ui-dialog-root");
       }
 
       if (this.pendingStructuralConflicts.length > 0) {

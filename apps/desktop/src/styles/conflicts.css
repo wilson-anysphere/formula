@@ -5,6 +5,54 @@
   (enforced by `apps/desktop/test/noHardcodedColors.test.js`).
 */
 
+.conflict-ui-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  /* Avoid blocking grid interactions unless the user is interacting with the conflict UI itself. */
+  pointer-events: none;
+}
+
+.conflict-ui-toast-root,
+.structural-conflict-ui-toast-root {
+  position: absolute;
+  bottom: 16px;
+  /* `pointer-events: none` is inherited from the overlay container; re-enable so the UI is interactive. */
+  pointer-events: auto;
+}
+
+.conflict-ui-toast-root {
+  left: 16px;
+}
+
+.structural-conflict-ui-toast-root {
+  right: 16px;
+}
+
+.conflict-ui-dialog-root,
+.structural-conflict-ui-dialog-root {
+  position: absolute;
+  top: 16px;
+  max-width: min(720px, 92vw);
+  max-height: min(560px, 92vh);
+  overflow: auto;
+  background: var(--dialog-bg);
+  border: 1px solid var(--dialog-border);
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: var(--dialog-shadow);
+  /* `pointer-events: none` is inherited from the overlay container; re-enable so the UI is interactive. */
+  pointer-events: auto;
+}
+
+.conflict-ui-dialog-root {
+  left: 16px;
+}
+
+.structural-conflict-ui-dialog-root {
+  right: 16px;
+}
+
 .conflict-dialog__body {
   display: flex;
   gap: 16px;
