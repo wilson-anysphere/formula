@@ -158,7 +158,7 @@ fn dump_rich_data_cli_prints_resolved_mapping() -> Result<(), Box<dyn std::error
 
     let stdout = String::from_utf8(output.stdout)?;
     assert!(
-        stdout.contains("Sheet1\tA1\t1\t0\t0\txl/media/image1.png"),
+        stdout.contains("Sheet1!A1 vm=1 -> rv=0 -> xl/media/image1.png"),
         "unexpected stdout:\n{stdout}"
     );
 
