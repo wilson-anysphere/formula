@@ -272,10 +272,16 @@ fn parse_cell_images_part(
             // External relationships are not backed by OPC parts.
             continue;
         }
+        if rel.type_uri != REL_TYPE_IMAGE {
+            // Be conservative: `<a:blip r:embed>` should refer to an image relationship.
+            continue;
+        }
+
         let target_path = resolve_target_best_effort(path, &rels_path, &rel.target, parts)?;
 
         let file_name = target_path
             .strip_prefix("xl/media/")
+            .or_else(|| target_path.strip_prefix("media/"))
             .unwrap_or(&target_path)
             .to_string();
         let image_id = ImageId::new(file_name);
@@ -341,9 +347,10 @@ fn parse_cell_images_part(
             continue;
         }
 
-        let target_path = resolve_target(path, &rel.target);
+        let target_path = resolve_target_best_effort(path, &rels_path, &rel.target, parts)?;
         let file_name = target_path
             .strip_prefix("xl/media/")
+            .or_else(|| target_path.strip_prefix("media/"))
             .unwrap_or(&target_path)
             .to_string();
         let image_id = ImageId::new(file_name);
@@ -397,16 +404,32 @@ fn resolve_target_best_effort(
         return Ok(direct);
     }
 
+    // Some producers emit targets rooted at `media/` (or similar) even for workbook-level parts
+    // under `xl/`. Try toggling the `xl/` prefix before other fallbacks.
+    if let Some(stripped) = direct.strip_prefix("xl/") {
+        if parts.contains_key(stripped) {
+            return Ok(stripped.to_string());
+        }
+    } else {
+        let xl_prefixed = format!("xl/{direct}");
+        if parts.contains_key(&xl_prefixed) {
+            return Ok(xl_prefixed);
+        }
+    }
+
     // Fallback: treat the target as relative to the relationships part location.
     let rels_relative = resolve_target(rels_part, target);
     if parts.contains_key(&rels_relative) {
         return Ok(rels_relative);
     }
 
-    // Fallback: if the resolved path accidentally escaped the `xl/` prefix (e.g. `../media/...`
-    // from a workbook-level part), try re-rooting it under `xl/`.
-    if !direct.starts_with("xl/") {
-        let xl_prefixed = format!("xl/{direct}");
+    // Apply the same `xl/` prefix toggling for the rels-relative candidate.
+    if let Some(stripped) = rels_relative.strip_prefix("xl/") {
+        if parts.contains_key(stripped) {
+            return Ok(stripped.to_string());
+        }
+    } else {
+        let xl_prefixed = format!("xl/{rels_relative}");
         if parts.contains_key(&xl_prefixed) {
             return Ok(xl_prefixed);
         }
@@ -430,6 +453,8 @@ fn get_blip_embed_rel_id(blip_node: &roxmltree::Node<'_, '_>) -> Option<String> 
 }
 
 fn get_cell_image_rel_id(cell_image_node: &roxmltree::Node<'_, '_>) -> Option<String> {
+    // Most recent Excel builds seem to use `r:id` on `<cellImage>`, but older variants may use
+    // `r:embed` (mirroring `<a:blip r:embed>`). Treat either as a relationship ID.
     cell_image_node
         .attribute((REL_NS, "id"))
         .or_else(|| cell_image_node.attribute("r:id"))
@@ -437,9 +462,14 @@ fn get_cell_image_rel_id(cell_image_node: &roxmltree::Node<'_, '_>) -> Option<St
             let clark = format!("{{{REL_NS}}}id");
             cell_image_node.attribute(clark.as_str())
         })
+        .or_else(|| cell_image_node.attribute((REL_NS, "embed")))
+        .or_else(|| cell_image_node.attribute("r:embed"))
+        .or_else(|| {
+            let clark = format!("{{{REL_NS}}}embed");
+            cell_image_node.attribute(clark.as_str())
+        })
         .map(|s| s.to_string())
 }
-
 fn slice_node_xml(node: &roxmltree::Node<'_, '_>, doc: &str) -> Option<String> {
     let range = node.range();
     doc.get(range).map(|s| s.to_string())
