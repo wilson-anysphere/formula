@@ -210,22 +210,41 @@ fn detect_utf16_bomless_encoding(prefix: &[u8]) -> Option<&'static encoding_rs::
     }
     let sample = &prefix[..len];
 
+    let mut le_markers = 0usize;
+    let mut be_markers = 0usize;
     let mut even_zero = 0usize;
     let mut odd_zero = 0usize;
+
     for (idx, b) in sample.iter().enumerate() {
-        if *b != 0 {
-            continue;
-        }
-        if idx % 2 == 0 {
-            even_zero += 1;
-        } else {
-            odd_zero += 1;
+        if *b == 0 {
+            if idx % 2 == 0 {
+                even_zero += 1;
+            } else {
+                odd_zero += 1;
+            }
         }
     }
-    let zeros = even_zero + odd_zero;
-    if zeros * 8 < len {
-        // <~12.5% NUL bytes is unlikely to be UTF-16 text.
-        return None;
+
+    const MARKERS: [u8; 6] = [b',', b';', b'\t', b'|', b'\r', b'\n'];
+    for pair in sample.chunks_exact(2) {
+        let a = pair[0];
+        let b = pair[1];
+        if b == 0 && MARKERS.contains(&a) {
+            le_markers += 1;
+        }
+        if a == 0 && MARKERS.contains(&b) {
+            be_markers += 1;
+        }
+    }
+
+    const MIN_MARKERS: usize = 2;
+    if le_markers >= MIN_MARKERS || be_markers >= MIN_MARKERS {
+        if le_markers > be_markers {
+            return Some(UTF_16LE);
+        }
+        if be_markers > le_markers {
+            return Some(UTF_16BE);
+        }
     }
 
     if odd_zero > even_zero.saturating_mul(3) {

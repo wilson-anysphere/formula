@@ -489,26 +489,49 @@ fn detect_utf16_bomless_encoding(buf: &[u8]) -> Option<&'static encoding_rs::Enc
     }
     let sample = &buf[..len];
 
+    // Prefer endianness based on common delimiter/newline patterns instead of a raw NUL-byte ratio.
+    // This handles BOM-less UTF-16 files where the content is mostly non-ASCII (low NUL ratio), but
+    // still contains ASCII record separators like `\t` and `\r\n`.
+    let mut le_markers = 0usize;
+    let mut be_markers = 0usize;
     let mut even_zero = 0usize;
     let mut odd_zero = 0usize;
+
     for (idx, b) in sample.iter().enumerate() {
-        if *b != 0 {
-            continue;
+        if *b == 0 {
+            if idx % 2 == 0 {
+                even_zero += 1;
+            } else {
+                odd_zero += 1;
+            }
         }
-        if idx % 2 == 0 {
-            even_zero += 1;
-        } else {
-            odd_zero += 1;
-        }
-    }
-    let zeros = even_zero + odd_zero;
-    if zeros * 8 < len {
-        // Fewer than ~12.5% NUL bytes is unlikely to be UTF-16 text (even for mostly non-ASCII
-        // inputs, delimiters/newlines typically contribute some NUL bytes).
-        return None;
     }
 
-    // Require a strong skew toward one byte position.
+    const MARKERS: [u8; 6] = [b',', b';', b'\t', b'|', b'\r', b'\n'];
+    for pair in sample.chunks_exact(2) {
+        let a = pair[0];
+        let b = pair[1];
+        if b == 0 && MARKERS.contains(&a) {
+            le_markers += 1;
+        }
+        if a == 0 && MARKERS.contains(&b) {
+            be_markers += 1;
+        }
+    }
+
+    // Require at least a couple marker hits (e.g. tab + CRLF) to avoid misclassifying arbitrary
+    // binary data that happens to contain a few NUL bytes.
+    const MIN_MARKERS: usize = 2;
+    if le_markers >= MIN_MARKERS || be_markers >= MIN_MARKERS {
+        if le_markers > be_markers {
+            return Some(UTF_16LE);
+        }
+        if be_markers > le_markers {
+            return Some(UTF_16BE);
+        }
+    }
+
+    // Fall back to NUL-byte skew if marker counts are inconclusive.
     if odd_zero > even_zero.saturating_mul(3) {
         Some(UTF_16LE)
     } else if even_zero > odd_zero.saturating_mul(3) {

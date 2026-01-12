@@ -700,7 +700,11 @@ fn open_workbook_model_sniffs_utf16le_tab_delimited_text_without_bom_non_ascii()
     let tmp = tempfile::tempdir().expect("temp dir");
     let path = tmp.path().join("jp_no_bom.txt");
 
-    let tsv = "こんにちは\t世界\r\nさようなら\t世界\r\n";
+    let header_left = "あ".repeat(200);
+    let header_right = "い".repeat(200);
+    let row_left = "う".repeat(200);
+    let row_right = "え".repeat(200);
+    let tsv = format!("{header_left}\t{header_right}\r\n{row_left}\t{row_right}\r\n");
     let mut bytes = Vec::new();
     for unit in tsv.encode_utf16() {
         bytes.extend_from_slice(&unit.to_le_bytes());
@@ -714,14 +718,8 @@ fn open_workbook_model_sniffs_utf16le_tab_delimited_text_without_bom_non_ascii()
     let sheet = workbook
         .sheet_by_name("jp_no_bom")
         .expect("jp_no_bom sheet missing");
-    assert_eq!(
-        sheet.value_a1("A1").unwrap(),
-        CellValue::String("さようなら".to_string())
-    );
-    assert_eq!(
-        sheet.value_a1("B1").unwrap(),
-        CellValue::String("世界".to_string())
-    );
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::String(row_left));
+    assert_eq!(sheet.value_a1("B1").unwrap(), CellValue::String(row_right));
 }
 
 #[test]

@@ -265,7 +265,9 @@ fn csv_import_supports_utf16be_tab_delimited_text_without_bom() {
 fn csv_import_supports_utf16le_tab_delimited_text_without_bom_mostly_non_ascii() {
     // Regression test for BOM-less UTF-16 detection: if the content is mostly non-ASCII, the NUL
     // byte ratio can be much lower than the typical ~50% seen in ASCII-heavy UTF-16.
-    let tsv = "こんにちは\t世界\r\n";
+    let left = "あ".repeat(200);
+    let right = "い".repeat(200);
+    let tsv = format!("{left}\t{right}\r\n");
     let mut bytes = Vec::new();
     for unit in tsv.encode_utf16() {
         bytes.extend_from_slice(&unit.to_le_bytes());
@@ -282,14 +284,8 @@ fn csv_import_supports_utf16le_tab_delimited_text_without_bom_mostly_non_ascii()
     )
     .expect("import utf16le tsv without bom");
 
-    assert_eq!(
-        sheet.value(CellRef::new(0, 0)),
-        CellValue::String("こんにちは".to_string())
-    );
-    assert_eq!(
-        sheet.value(CellRef::new(0, 1)),
-        CellValue::String("世界".to_string())
-    );
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::String(left));
+    assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::String(right));
 }
 
 #[test]
