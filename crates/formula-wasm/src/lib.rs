@@ -2109,6 +2109,37 @@ mod tests {
     }
 
     #[test]
+    fn get_cell_data_degrades_engine_rich_values_to_display_string_and_chains() {
+        use formula_engine::eval::CellAddr;
+        use formula_engine::functions::{Reference, SheetId};
+
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        // Set a rich engine value directly into the engine cell store.
+        wb.engine
+            .set_cell_value(
+                DEFAULT_SHEET,
+                "A1",
+                EngineValue::Reference(Reference {
+                    sheet_id: SheetId::Local(0),
+                    start: CellAddr { row: 0, col: 0 },
+                    end: CellAddr { row: 0, col: 0 },
+                }),
+            )
+            .unwrap();
+
+        // Ensure a formula that references the rich value produces the same degraded display output.
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1")).unwrap();
+        wb.recalculate_internal(None).unwrap();
+
+        let a1 = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        let b1 = wb.get_cell_data(DEFAULT_SHEET, "B1").unwrap();
+
+        assert_eq!(a1.value, json!("#VALUE!"));
+        assert_eq!(b1.value, json!("#VALUE!"));
+    }
+
+    #[test]
     fn recalculate_includes_spill_output_cells() {
         let mut wb = WorkbookState::new_with_default_sheet();
         wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("=SEQUENCE(1,2)"))
