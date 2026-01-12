@@ -253,9 +253,6 @@ fn parse_criteria_range(
 
                     if let Some(formula_text) = ctx.get_cell_formula(&criteria_ref.sheet_id, addr) {
                         let db_ref = table.source_ref.as_ref().ok_or(ErrorKind::Value)?;
-                        let crate::functions::SheetId::Local(_) = db_ref.sheet_id else {
-                            return Err(ErrorKind::Value);
-                        };
                         let first_row = db_ref.start.row.checked_add(1).ok_or(ErrorKind::Value)?;
                         let origin = ParserCellAddr::new(first_row, db_ref.start.col);
                         let ast = crate::parse_formula(
@@ -267,7 +264,13 @@ fn parse_criteria_range(
                             },
                         )
                         .map_err(|_| ErrorKind::Value)?;
-                        computed.push(ComputedCriteria { expr: ast.expr });
+                        let mut expr = ast.expr;
+                        if let crate::functions::SheetId::External(key) = &db_ref.sheet_id {
+                            let (workbook, sheet) =
+                                split_external_sheet_key(key).ok_or(ErrorKind::Value)?;
+                            expr = qualify_unprefixed_sheet_references(&expr, workbook, sheet);
+                        }
+                        computed.push(ComputedCriteria { expr });
                         continue;
                     }
 
@@ -354,8 +357,9 @@ fn row_matches(
         // Evaluate computed criteria formulas, if any.
         if !clause.computed.is_empty() {
             let db_ref = table.source_ref.as_ref().ok_or(ErrorKind::Value)?;
-            let crate::functions::SheetId::Local(sheet_id) = db_ref.sheet_id else {
-                return Err(ErrorKind::Value);
+            let current_sheet_for_compile = match db_ref.sheet_id {
+                crate::functions::SheetId::Local(id) => id,
+                crate::functions::SheetId::External(_) => ctx.current_sheet_id(),
             };
             let row_u32 = u32::try_from(row).map_err(|_| ErrorKind::Value)?;
             let origin = crate::eval::CellAddr {
@@ -372,7 +376,7 @@ fn row_matches(
                 let mut sheet_dimensions = |_sheet_id: usize| (EXCEL_MAX_ROWS, EXCEL_MAX_COLS);
                 let compiled = compile_canonical_expr(
                     &comp.expr,
-                    sheet_id,
+                    current_sheet_for_compile,
                     origin,
                     &mut resolve_sheet,
                     &mut sheet_dimensions,
@@ -394,6 +398,107 @@ fn row_matches(
     }
 
     Ok(any_clause)
+}
+
+fn split_external_sheet_key(key: &str) -> Option<(&str, &str)> {
+    if !key.starts_with('[') {
+        return None;
+    }
+    let end = key.find(']')?;
+    let workbook = &key[1..end];
+    let sheet = &key[end.saturating_add(1)..];
+    if workbook.is_empty() || sheet.is_empty() {
+        return None;
+    }
+    if sheet.contains(':') {
+        // External 3D sheet spans are treated as invalid by the evaluator.
+        return None;
+    }
+    Some((workbook, sheet))
+}
+
+fn qualify_unprefixed_sheet_references(expr: &crate::Expr, workbook: &str, sheet: &str) -> crate::Expr {
+    match expr {
+        crate::Expr::Number(v) => crate::Expr::Number(v.clone()),
+        crate::Expr::String(v) => crate::Expr::String(v.clone()),
+        crate::Expr::Boolean(v) => crate::Expr::Boolean(*v),
+        crate::Expr::Error(v) => crate::Expr::Error(v.clone()),
+        crate::Expr::Missing => crate::Expr::Missing,
+        crate::Expr::NameRef(n) => crate::Expr::NameRef(n.clone()),
+        crate::Expr::StructuredRef(r) => crate::Expr::StructuredRef(r.clone()),
+        crate::Expr::FieldAccess(access) => crate::Expr::FieldAccess(crate::FieldAccessExpr {
+            base: Box::new(qualify_unprefixed_sheet_references(&access.base, workbook, sheet)),
+            field: access.field.clone(),
+        }),
+        crate::Expr::CellRef(r) => {
+            let mut r = r.clone();
+            if r.workbook.is_none() && r.sheet.is_none() {
+                r.workbook = Some(workbook.to_string());
+                r.sheet = Some(crate::SheetRef::Sheet(sheet.to_string()));
+            }
+            crate::Expr::CellRef(r)
+        }
+        crate::Expr::ColRef(r) => {
+            let mut r = r.clone();
+            if r.workbook.is_none() && r.sheet.is_none() {
+                r.workbook = Some(workbook.to_string());
+                r.sheet = Some(crate::SheetRef::Sheet(sheet.to_string()));
+            }
+            crate::Expr::ColRef(r)
+        }
+        crate::Expr::RowRef(r) => {
+            let mut r = r.clone();
+            if r.workbook.is_none() && r.sheet.is_none() {
+                r.workbook = Some(workbook.to_string());
+                r.sheet = Some(crate::SheetRef::Sheet(sheet.to_string()));
+            }
+            crate::Expr::RowRef(r)
+        }
+        crate::Expr::Array(arr) => crate::Expr::Array(crate::ArrayLiteral {
+            rows: arr
+                .rows
+                .iter()
+                .map(|row| {
+                    row.iter()
+                        .map(|el| qualify_unprefixed_sheet_references(el, workbook, sheet))
+                        .collect()
+                })
+                .collect(),
+        }),
+        crate::Expr::FunctionCall(call) => crate::Expr::FunctionCall(crate::FunctionCall {
+            name: call.name.clone(),
+            args: call
+                .args
+                .iter()
+                .map(|arg| qualify_unprefixed_sheet_references(arg, workbook, sheet))
+                .collect(),
+        }),
+        crate::Expr::Call(call) => crate::Expr::Call(crate::CallExpr {
+            callee: Box::new(qualify_unprefixed_sheet_references(
+                &call.callee,
+                workbook,
+                sheet,
+            )),
+            args: call
+                .args
+                .iter()
+                .map(|arg| qualify_unprefixed_sheet_references(arg, workbook, sheet))
+                .collect(),
+        }),
+        crate::Expr::Unary(u) => crate::Expr::Unary(crate::UnaryExpr {
+            op: u.op,
+            expr: Box::new(qualify_unprefixed_sheet_references(&u.expr, workbook, sheet)),
+        }),
+        crate::Expr::Postfix(p) => crate::Expr::Postfix(crate::PostfixExpr {
+            op: p.op,
+            expr: Box::new(qualify_unprefixed_sheet_references(&p.expr, workbook, sheet)),
+        }),
+        crate::Expr::Binary(b) => crate::Expr::Binary(crate::BinaryExpr {
+            op: b.op,
+            left: Box::new(qualify_unprefixed_sheet_references(&b.left, workbook, sheet)),
+            right: Box::new(qualify_unprefixed_sheet_references(&b.right, workbook, sheet)),
+        }),
+    }
 }
 
 fn header_label(ctx: &dyn FunctionContext, value: &Value) -> Result<Option<String>, ErrorKind> {

@@ -240,3 +240,49 @@ fn external_3d_sheet_range_refs_are_ref_error_even_if_provider_has_value() {
         Value::Error(formula_engine::ErrorKind::Ref)
     );
 }
+
+#[test]
+fn database_functions_support_computed_criteria_over_external_database() {
+    let provider = Arc::new(TestExternalProvider::default());
+
+    // External database: [Book.xlsx]Sheet1!A1:D4 (header + 3 records).
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, "Name");
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 1 }, "Dept");
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 2 }, "Age");
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 3 }, "Salary");
+
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 0 }, "Alice");
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 1 }, "Sales");
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 2 }, 30.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 3 }, 1000.0);
+
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 2, col: 0 }, "Bob");
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 2, col: 1 }, "Sales");
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 2, col: 2 }, 35.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 2, col: 3 }, 1500.0);
+
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 3, col: 0 }, "Carol");
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 3, col: 1 }, "HR");
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 3, col: 2 }, 28.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 3, col: 3 }, 1200.0);
+
+    let mut engine = Engine::new();
+    engine.set_external_value_provider(Some(provider));
+
+    // Computed criteria: blank header + formula referencing the first database record row.
+    engine
+        .set_cell_formula("Sheet1", "F2", "=C2>30")
+        .unwrap();
+
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            "=DSUM([Book.xlsx]Sheet1!A1:D4,\"Salary\",F1:F2)",
+        )
+        .unwrap();
+    engine.recalculate();
+
+    // Age > 30 matches only Bob => sum salary = 1500.
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1500.0));
+}
