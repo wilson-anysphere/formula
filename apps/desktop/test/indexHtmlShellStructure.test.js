@@ -6,39 +6,54 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 test("desktop index.html exposes required shell containers and testids", () => {
   const htmlPath = path.join(__dirname, "..", "index.html");
   const html = fs.readFileSync(htmlPath, "utf8");
 
-  const requiredSnippets = [
+  const requiredIds = [
     // Shell roots
-    'id="app"',
-    'id="titlebar-root"',
-    'id="ribbon"',
-    'id="formula-bar"',
-    'id="workspace"',
-    'id="grid-split"',
-    'id="grid"',
-    'id="grid-secondary"',
-    'id="dock-left"',
-    'id="dock-right"',
-    'id="dock-bottom"',
-    'id="floating-root"',
-    'id="sheet-tabs"',
-    'data-testid="sheet-tabs"',
-    'id="toast-root"',
-    'data-testid="toast-root"',
-
-    // Status bar (e2e relies on these)
-    'data-testid="active-cell"',
-    'data-testid="selection-range"',
-    'data-testid="active-value"',
-    'data-testid="sheet-switcher"',
-    'data-testid="zoom-control"',
-    'data-testid="sheet-position"',
+    "app",
+    "titlebar-root",
+    "ribbon",
+    "formula-bar",
+    "workspace",
+    "grid-split",
+    "grid",
+    "grid-secondary",
+    "dock-left",
+    "dock-right",
+    "dock-bottom",
+    "floating-root",
+    "sheet-tabs",
+    "toast-root",
   ];
 
-  const missing = requiredSnippets.filter((snippet) => !html.includes(snippet));
+  const requiredTestIds = [
+    "titlebar",
+    "sheet-tabs",
+    "toast-root",
+
+    // Status bar (e2e relies on these)
+    "active-cell",
+    "selection-range",
+    "active-value",
+    "sheet-switcher",
+    "zoom-control",
+    "sheet-position",
+  ];
+
+  const missingIds = requiredIds
+    .filter((id) => !new RegExp(`\\bid=["']${escapeRegExp(id)}["']`).test(html))
+    .map((id) => `id="${id}"`);
+  const missingTestIds = requiredTestIds
+    .filter((testId) => !html.includes(`data-testid="${testId}"`))
+    .map((testId) => `data-testid="${testId}"`);
+  const missing = [...missingIds, ...missingTestIds];
+
   assert.deepEqual(
     missing,
     [],
