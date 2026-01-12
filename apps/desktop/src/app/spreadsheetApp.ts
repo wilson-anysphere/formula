@@ -3770,15 +3770,6 @@ export class SpreadsheetApp {
       return;
     }
 
-    // Comment tooltips only apply to the sheet body (not row/col headers).
-    // Prefer the renderer sizes in case header indices are ever resized.
-    const headerWidth = this.sharedGrid.renderer.getColWidth(0);
-    const headerHeight = this.sharedGrid.renderer.getRowHeight(0);
-    if (x < headerWidth || y < headerHeight) {
-      if (this.lastHoveredCommentCellKey != null) this.hideCommentTooltip();
-      return;
-    }
-
     const cachedRect = this.sharedHoverCellRect;
     if (
       cachedRect &&
@@ -3821,6 +3812,15 @@ export class SpreadsheetApp {
       this.commentTooltip.style.setProperty("--comment-tooltip-y", `${y + 12}px`);
       this.commentTooltipVisible = true;
       this.commentTooltip.classList.add("comment-tooltip--visible");
+      return;
+    }
+
+    // Comment tooltips only apply to the sheet body (not row/col headers).
+    // Prefer the renderer sizes in case header indices are ever resized.
+    const headerWidth = this.sharedGrid.renderer.getColWidth(0);
+    const headerHeight = this.sharedGrid.renderer.getRowHeight(0);
+    if (x < headerWidth || y < headerHeight) {
+      if (this.lastHoveredCommentCellKey != null) this.hideCommentTooltip();
       return;
     }
 
