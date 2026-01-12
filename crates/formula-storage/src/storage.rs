@@ -2514,11 +2514,18 @@ fn sync_named_range_into_defined_names_tx(tx: &Transaction<'_>, range: &NamedRan
         DefinedNameScope::Sheet(sheet_id)
     };
 
-    let defined_names: Option<String> = tx.query_row(
-        "SELECT defined_names FROM workbooks WHERE id = ?1",
-        params![&workbook_id_str],
-        |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
-    )?;
+    let Some(defined_names) = tx
+        .query_row(
+            "SELECT defined_names FROM workbooks WHERE id = ?1",
+            params![&workbook_id_str],
+            |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
+        )
+        .optional()?
+    else {
+        // Orphaned named range row; avoid failing the legacy API just because the workbook row is
+        // missing.
+        return Ok(());
+    };
 
     let mut names = match defined_names {
         Some(raw) => match serde_json::from_str::<Vec<DefinedName>>(&raw) {
@@ -2790,11 +2797,14 @@ fn rewrite_sheet_rename_references_tx(
 
     // Keep workbook-level JSON columns in sync so `export_model_workbook` round-trips correctly.
     {
-        let defined_names: Option<String> = tx.query_row(
-            "SELECT defined_names FROM workbooks WHERE id = ?1",
-            params![&workbook_id_str],
-            |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
-        )?;
+        let defined_names: Option<String> = tx
+            .query_row(
+                "SELECT defined_names FROM workbooks WHERE id = ?1",
+                params![&workbook_id_str],
+                |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
+            )
+            .optional()?
+            .flatten();
         if let Some(raw) = defined_names {
             if let Ok(mut names) = serde_json::from_str::<Vec<DefinedName>>(&raw) {
                 let mut changed = false;
@@ -2819,11 +2829,14 @@ fn rewrite_sheet_rename_references_tx(
     }
 
     {
-        let print_settings: Option<String> = tx.query_row(
-            "SELECT print_settings FROM workbooks WHERE id = ?1",
-            params![&workbook_id_str],
-            |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
-        )?;
+        let print_settings: Option<String> = tx
+            .query_row(
+                "SELECT print_settings FROM workbooks WHERE id = ?1",
+                params![&workbook_id_str],
+                |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
+            )
+            .optional()?
+            .flatten();
         if let Some(raw) = print_settings {
             if let Ok(mut settings) =
                 serde_json::from_str::<formula_model::WorkbookPrintSettings>(&raw)
@@ -3084,11 +3097,14 @@ fn rewrite_sheet_delete_references_tx(
 
     // Keep workbook-level JSON columns in sync so `export_model_workbook` round-trips correctly.
     {
-        let defined_names: Option<String> = tx.query_row(
-            "SELECT defined_names FROM workbooks WHERE id = ?1",
-            params![&workbook_id_str],
-            |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
-        )?;
+        let defined_names: Option<String> = tx
+            .query_row(
+                "SELECT defined_names FROM workbooks WHERE id = ?1",
+                params![&workbook_id_str],
+                |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
+            )
+            .optional()?
+            .flatten();
         if let Some(raw) = defined_names {
             if let Ok(mut names) = serde_json::from_str::<Vec<DefinedName>>(&raw) {
                 let mut changed = false;
@@ -3122,11 +3138,14 @@ fn rewrite_sheet_delete_references_tx(
     }
 
     {
-        let print_settings: Option<String> = tx.query_row(
-            "SELECT print_settings FROM workbooks WHERE id = ?1",
-            params![&workbook_id_str],
-            |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
-        )?;
+        let print_settings: Option<String> = tx
+            .query_row(
+                "SELECT print_settings FROM workbooks WHERE id = ?1",
+                params![&workbook_id_str],
+                |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
+            )
+            .optional()?
+            .flatten();
         if let Some(raw) = print_settings {
             if let Ok(mut settings) =
                 serde_json::from_str::<formula_model::WorkbookPrintSettings>(&raw)
@@ -3148,11 +3167,14 @@ fn rewrite_sheet_delete_references_tx(
     }
 
     {
-        let view: Option<String> = tx.query_row(
-            "SELECT view FROM workbooks WHERE id = ?1",
-            params![&workbook_id_str],
-            |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
-        )?;
+        let view: Option<String> = tx
+            .query_row(
+                "SELECT view FROM workbooks WHERE id = ?1",
+                params![&workbook_id_str],
+                |r| Ok(r.get::<_, Option<String>>(0).ok().flatten()),
+            )
+            .optional()?
+            .flatten();
         if let Some(raw) = view {
             if let Ok(mut view) = serde_json::from_str::<formula_model::WorkbookView>(&raw) {
                 if let Some(deleted_id) = deleted_model_sheet_id {
