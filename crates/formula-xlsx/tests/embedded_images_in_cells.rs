@@ -272,6 +272,8 @@ fn extracts_embedded_image_even_without_metadata_xml() {
     let cell_img = images.get(&key).expect("expected A1 embedded image");
     assert_eq!(cell_img.image_part, "xl/media/image1.png");
     assert_eq!(cell_img.image_bytes, png);
+    assert_eq!(cell_img.calc_origin, 0);
+    assert!(cell_img.alt_text.is_none());
 }
 
 #[test]
@@ -296,10 +298,14 @@ fn extracts_embedded_images_without_metadata_when_vm_is_zero_based() {
     let a1 = images.get(&key_a1).expect("expected A1 embedded image");
     assert_eq!(a1.image_part, "xl/media/image1.png");
     assert_eq!(a1.image_bytes, img1);
+    assert_eq!(a1.calc_origin, 0);
+    assert!(a1.alt_text.is_none());
 
     let a2 = images.get(&key_a2).expect("expected A2 embedded image");
     assert_eq!(a2.image_part, "xl/media/image2.png");
     assert_eq!(a2.image_bytes, img2);
+    assert_eq!(a2.calc_origin, 0);
+    assert!(a2.alt_text.is_none());
 }
 
 #[test]
