@@ -549,12 +549,6 @@ function isTauriInvokeAvailable(): boolean {
   return typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
 }
 
-// In web builds (no Tauri invoke), force AutoSave off regardless of any persisted value.
-if (!isTauriInvokeAvailable()) {
-  autoSaveEnabled = false;
-  writeAutoSaveEnabledToStorage(false);
-}
-
 function clearAutoSaveTimer(): void {
   if (autoSaveTimer == null) return;
   globalThis.clearTimeout(autoSaveTimer);
@@ -636,6 +630,12 @@ async function attemptAutoSave(): Promise<void> {
     // Ensure any pending microtask-batched workbook edits are flushed before saving.
     await new Promise<void>((resolve) => queueMicrotask(resolve));
     await drainBackendSync();
+
+    // Another save (manual or AutoSave) could have completed while we were waiting for the
+    // backend sync queue to drain. Re-check whether we still have anything to persist
+    // before issuing a new save_workbook.
+    if (!autoSaveEnabled) return;
+    if (!doc.isDirty && !autoSaveForceNextSave) return;
 
     if (workbookSync) {
       await workbookSync.markSaved();
