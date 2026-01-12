@@ -28,6 +28,22 @@ marketplace packaging tests.
 `dist/extension.mjs` is an ES module build that can be used by the browser extension host
 (`package.json` `browser`/`module` fields).
 
+## Desktop/Tauri runtime notes (WebView extension host)
+
+In Formula Desktop (Tauri/WebView), extensions run inside a **Web Worker** (`BrowserExtensionHost`) with a best-effort
+sandbox (permission-gated `fetch`/`WebSocket`, no `XMLHttpRequest`, etc).
+
+Extension panels (`contributes.panels` / `formula.ui.createPanel`) are rendered in a sandboxed `<iframe>` with a very
+restrictive CSP (notably `connect-src 'none'`), so panel HTML:
+
+- cannot make network requests directly
+- cannot load remote scripts
+
+Panels should communicate with the extension worker via `postMessage`.
+
+Marketplace-installed extensions are loaded from in-memory `blob:`/`data:` module URLs, so the browser entrypoint should
+be a **single-file ESM bundle** (no relative imports). This sample’s `dist/extension.mjs` is built that way.
+
 To regenerate:
 
 ```bash
