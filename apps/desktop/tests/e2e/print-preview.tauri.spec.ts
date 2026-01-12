@@ -156,5 +156,9 @@ test.describe("Print Preview (tauri)", () => {
     await page.waitForFunction(() => Array.isArray((window as any).__downloadClicks) && (window as any).__downloadClicks.length > 0);
     const download = await page.evaluate(() => (window as any).__downloadClicks?.[(window as any).__downloadClicks.length - 1] ?? null);
     expect(download?.download).toMatch(/\.pdf$/i);
+
+    // Escape should close the modal (keyboard accessible).
+    await page.keyboard.press("Escape");
+    await expect(page.locator("dialog.print-preview-dialog")).toHaveCount(0);
   });
 });
