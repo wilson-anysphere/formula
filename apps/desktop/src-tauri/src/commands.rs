@@ -422,6 +422,7 @@ pub struct PivotTableSummary {
 #[cfg(feature = "desktop")]
 use crate::file_io::read_workbook;
 #[cfg(feature = "desktop")]
+use crate::ipc_origin;
 use crate::persistence::{
     autosave_db_path_for_new_workbook, autosave_db_path_for_workbook, WorkbookPersistenceLocation,
 };
@@ -514,9 +515,14 @@ fn cell_update_from_state(update: CellUpdateData) -> CellUpdate {
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn open_workbook(
+    window: tauri::WebviewWindow,
     path: String,
     state: State<'_, SharedAppState>,
 ) -> Result<WorkbookInfo, String> {
+    ipc_origin::ensure_main_window(window.label(), "workbook opening", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "workbook opening", ipc_origin::Verb::Is)?;
+
     let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
     let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
         std::path::Path::new(&path),
@@ -773,7 +779,11 @@ fn read_text_file_blocking(path: &std::path::Path) -> Result<String, String> {
 /// depending on the optional Tauri FS plugin.
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn read_text_file(path: String) -> Result<String, String> {
+pub async fn read_text_file(window: tauri::WebviewWindow, path: String) -> Result<String, String> {
+    ipc_origin::ensure_main_window(window.label(), "filesystem access", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "filesystem access", ipc_origin::Verb::Is)?;
+
     tauri::async_runtime::spawn_blocking(move || {
         let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
         let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
@@ -801,8 +811,12 @@ pub struct FileStat {
 /// reused when reading local sources (CSV/JSON/Parquet).
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn stat_file(path: String) -> Result<FileStat, String> {
+pub async fn stat_file(window: tauri::WebviewWindow, path: String) -> Result<FileStat, String> {
     use std::time::UNIX_EPOCH;
+
+    ipc_origin::ensure_main_window(window.label(), "filesystem access", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "filesystem access", ipc_origin::Verb::Is)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
@@ -831,8 +845,15 @@ pub async fn stat_file(path: String) -> Result<FileStat, String> {
 /// The frontend decodes this into a `Uint8Array` for Parquet sources.
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn read_binary_file(path: String) -> Result<String, String> {
+pub async fn read_binary_file(
+    window: tauri::WebviewWindow,
+    path: String,
+) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    ipc_origin::ensure_main_window(window.label(), "filesystem access", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "filesystem access", ipc_origin::Verb::Is)?;
 
     let bytes = tauri::async_runtime::spawn_blocking(move || {
         let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
@@ -905,11 +926,16 @@ fn read_binary_file_range_blocking(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn read_binary_file_range(
+    window: tauri::WebviewWindow,
     path: String,
     offset: u64,
     length: u64,
 ) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    ipc_origin::ensure_main_window(window.label(), "filesystem access", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "filesystem access", ipc_origin::Verb::Is)?;
 
     let len =
         crate::ipc_file_limits::validate_read_range_length(length).map_err(|e| e.to_string())?;
@@ -1038,8 +1064,16 @@ fn list_dir_blocking(path: &str, recursive: bool) -> Result<Vec<ListDirEntry>, S
 /// If a limit is reached, the command returns an error instead of a truncated result.
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn list_dir(path: String, recursive: Option<bool>) -> Result<Vec<ListDirEntry>, String> {
+pub async fn list_dir(
+    window: tauri::WebviewWindow,
+    path: String,
+    recursive: Option<bool>,
+) -> Result<Vec<ListDirEntry>, String> {
     let recursive = recursive.unwrap_or(false);
+
+    ipc_origin::ensure_main_window(window.label(), "filesystem access", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "filesystem access", ipc_origin::Verb::Is)?;
 
     tauri::async_runtime::spawn_blocking(move || list_dir_blocking(&path, recursive))
         .await
@@ -1275,9 +1309,14 @@ pub fn list_tables(state: State<'_, SharedAppState>) -> Result<Vec<TableInfo>, S
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn save_workbook(
+    window: tauri::WebviewWindow,
     path: Option<String>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
+    ipc_origin::ensure_main_window(window.label(), "workbook saving", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "workbook saving", ipc_origin::Verb::Is)?;
+
     let (save_path, workbook, storage, memory, workbook_id, autosave) = {
         let state = state.inner().lock().unwrap();
         let workbook = state.get_workbook().map_err(app_error)?.clone();
@@ -3938,26 +3977,13 @@ pub fn check_for_updates(
 #[tauri::command]
 pub async fn open_external_url(window: tauri::Window, url: String) -> Result<(), String> {
     use tauri::Manager as _;
-
-    // Restrict URL opening to the main application window. This avoids accidental abuse if we
-    // ever embed untrusted content in secondary webviews.
-    if window.label() != "main" {
-        return Err("external URL opening is only allowed from the main window".to_string());
-    }
-
-    // Prevent arbitrary remote web content from using IPC to open external URLs. This is a
-    // defense-in-depth check: even though Tauri's security model should prevent remote origins
-    // from accessing the invoke API by default, keep the command itself resilient.
-    //
-    // Mirrors the trusted-origin checks used by other privileged commands in `main.rs`.
+    ipc_origin::ensure_main_window(window.label(), "external URL opening", ipc_origin::Verb::Is)?;
     {
         let Some(webview) = window.app_handle().get_webview_window(window.label()) else {
             return Err("main webview window not available".to_string());
         };
         let origin_url = webview.url().map_err(|err| err.to_string())?;
-        if !is_trusted_ipc_origin(&origin_url) {
-            return Err("external URL opening is not allowed from this origin".to_string());
-        }
+        ipc_origin::ensure_trusted_origin(&origin_url, "external URL opening", ipc_origin::Verb::Is)?;
     }
 
     let parsed =
@@ -3985,26 +4011,6 @@ pub async fn open_external_url(window: tauri::Window, url: String) -> Result<(),
         .open(parsed.as_str(), None)
         .map_err(|e| format!("Failed to open URL: {e}"))?;
     Ok(())
-}
-
-#[cfg(feature = "desktop")]
-fn is_trusted_ipc_origin(url: &tauri::Url) -> bool {
-    // Treat app-local content as trusted:
-    // - packaged builds typically run on an internal `*.localhost` origin
-    // - dev builds run on `http://localhost:<port>`
-    //
-    // Note: `file://` is included as a best-effort compatibility fallback.
-    match url.scheme() {
-        "data" => return false,
-        "file" => return true,
-        _ => {}
-    }
-
-    let Some(host) = url.host_str() else {
-        return false;
-    };
-
-    host == "localhost" || host == "127.0.0.1" || host == "::1" || host.ends_with(".localhost")
 }
 
 #[cfg(feature = "desktop")]
@@ -4052,15 +4058,20 @@ pub fn restart_app(app: tauri::AppHandle) {
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn read_clipboard(
-    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
 ) -> Result<crate::clipboard::ClipboardContent, String> {
+    ipc_origin::ensure_main_window(window.label(), "clipboard access", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "clipboard access", ipc_origin::Verb::Is)?;
+
     // Clipboard APIs on macOS call into AppKit. AppKit is not thread-safe, and Tauri
     // commands can execute on a background thread, so we always dispatch to the main
     // thread before touching NSPasteboard.
     #[cfg(target_os = "macos")]
     {
         use tauri::Manager as _;
-        return app
+        return window
+            .app_handle()
             .run_on_main_thread(crate::clipboard::read)
             .map_err(|e| e.to_string())?
             .map_err(|e| e.to_string());
@@ -4068,7 +4079,6 @@ pub async fn read_clipboard(
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = app;
         tauri::async_runtime::spawn_blocking(|| crate::clipboard::read().map_err(|e| e.to_string()))
             .await
             .map_err(|e| e.to_string())?
@@ -4079,12 +4089,16 @@ pub async fn read_clipboard(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn write_clipboard(
-    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     text: String,
     html: Option<String>,
     rtf: Option<String>,
     image_png_base64: Option<String>,
 ) -> Result<(), String> {
+    ipc_origin::ensure_main_window(window.label(), "clipboard access", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "clipboard access", ipc_origin::Verb::Is)?;
+
     let payload = crate::clipboard::ClipboardWritePayload {
         text: Some(text),
         html,
@@ -4094,7 +4108,8 @@ pub async fn write_clipboard(
     #[cfg(target_os = "macos")]
     {
         use tauri::Manager as _;
-        return app
+        return window
+            .app_handle()
             .run_on_main_thread(move || crate::clipboard::write(&payload))
             .map_err(|e| e.to_string())?
             .map_err(|e| e.to_string());
@@ -4102,7 +4117,6 @@ pub async fn write_clipboard(
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = app;
         tauri::async_runtime::spawn_blocking(move || {
             crate::clipboard::write(&payload).map_err(|e| e.to_string())
         })

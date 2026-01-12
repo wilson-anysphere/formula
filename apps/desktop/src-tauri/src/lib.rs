@@ -12,6 +12,7 @@ mod clipboard_fallback;
 pub mod file_io;
 #[cfg(any(feature = "desktop", test))]
 mod ipc_file_limits;
+pub mod ipc_origin;
 pub mod ipc_limits;
 pub mod macro_trust;
 pub mod macros;

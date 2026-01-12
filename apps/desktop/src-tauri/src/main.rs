@@ -491,43 +491,20 @@ fn cell_update_from_state(update: CellUpdateData) -> commands::CellUpdate {
     }
 }
 
-fn is_trusted_notification_origin(url: &Url) -> bool {
-    // Prevent arbitrary remote web content from using IPC to trigger system notifications.
-    //
-    // We treat app-local content as trusted:
-    // - packaged builds typically run on an internal `*.localhost` origin
-    // - dev builds run on `http://localhost:<port>`
-    //
-    // Note: `file://` is included as a best-effort compatibility fallback.
-    match url.scheme() {
-        "data" => return false,
-        "file" => return true,
-        _ => {}
-    }
-
-    let Some(host) = url.host_str() else {
-        return false;
-    };
-
-    host == "localhost" || host == "127.0.0.1" || host == "::1" || host.ends_with(".localhost")
-}
-
 #[tauri::command]
 async fn show_system_notification(
     window: tauri::WebviewWindow,
     title: String,
     body: Option<String>,
 ) -> Result<(), String> {
-    // Restrict notification triggers to the main application window. This avoids
-    // accidental abuse if we ever embed untrusted content in secondary webviews.
-    if window.label() != "main" {
-        return Err("notifications are only allowed from the main window".to_string());
-    }
+    desktop::ipc_origin::ensure_main_window(
+        window.label(),
+        "notifications",
+        desktop::ipc_origin::Verb::Are,
+    )?;
 
     let url = window.url().map_err(|err| err.to_string())?;
-    if !is_trusted_notification_origin(&url) {
-        return Err("notifications are not allowed from this origin".to_string());
-    }
+    desktop::ipc_origin::ensure_trusted_origin(&url, "notifications", desktop::ipc_origin::Verb::Are)?;
 
     let mut builder = window.app_handle().notification().builder().title(title);
 
