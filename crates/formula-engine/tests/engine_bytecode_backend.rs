@@ -1162,6 +1162,18 @@ fn bytecode_backend_matches_ast_for_concatenate_function() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_concat_operator_with_numeric_literals() {
+    let mut engine = Engine::new();
+    engine.set_cell_formula("Sheet1", "A1", "=1&2").unwrap();
+
+    // Ensure we're exercising the bytecode path.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, "=1&2", "A1");
+}
+
+#[test]
 fn bytecode_lower_flattens_concat_operator_chains() {
     use formula_engine::bytecode;
     use formula_engine::{LocaleConfig, ParseOptions, ReferenceStyle};
@@ -1216,6 +1228,29 @@ fn bytecode_backend_matches_ast_for_postfix_percent_operator() {
 
     assert_engine_matches_ast(&engine, "=10%", "A1");
     assert_engine_matches_ast(&engine, "=A2%", "B2");
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_postfix_percent_blank_and_error_literals() {
+    let mut engine = Engine::new();
+
+    // A1 left blank.
+    engine.set_cell_formula("Sheet1", "B1", "=A1%").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=#DIV/0!%")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=200*50%")
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path.
+    assert_eq!(engine.bytecode_program_count(), 3);
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=A1%", "B1");
+    assert_engine_matches_ast(&engine, "=#DIV/0!%", "B2");
+    assert_engine_matches_ast(&engine, "=200*50%", "B3");
 }
 
 #[test]
