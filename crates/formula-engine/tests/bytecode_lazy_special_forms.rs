@@ -602,6 +602,30 @@ fn bytecode_iferror_evaluates_fallback_for_errors() {
 }
 
 #[test]
+fn bytecode_iferror_evaluates_fallback_for_na_error() {
+    // IFERROR should treat #N/A like any other error and evaluate the fallback.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IFERROR(NA(), A2)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("iferror_na_fallback"), &expr);
+
+    let grid = TextGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        coord: CellCoord::new(1, 0),
+        value: Value::Number(7.0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(7.0));
+}
+
+#[test]
 fn bytecode_ifna_evaluates_fallback_for_na_error() {
     // IFNA should evaluate its fallback when the first argument is #N/A.
     let origin = CellCoord::new(0, 0);
