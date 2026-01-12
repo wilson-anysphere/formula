@@ -189,8 +189,11 @@ variant shapes are documented further below.
     - `http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages`
     - `http://schemas.microsoft.com/office/spreadsheetml/2020/07/main`
     - `http://schemas.microsoft.com/office/spreadsheetml/2019/11/main`
-- Exact schema shape(s) emitted by real Excel (e.g. whether `<cellImage>` always contains a full
-  `<xdr:pic>` subtree or can be a lightweight `<cellImage><a:blip .../></cellImage>` entry).
+- Exact schema shape(s) emitted by real Excel across versions.
+  - Confirmed in the real Excel fixture `fixtures/xlsx/rich-data/images-in-cell.xlsx`: `<cellImage>`
+    contains a full DrawingML `<xdr:pic>` subtree with an `<a:blip r:embed="…"/>` reference.
+  - It is still unknown whether Excel ever emits the lightweight `<cellImage><a:blip .../></cellImage>`
+    form (that shape is currently only observed in synthetic fixtures/tests in this repo).
 - Whether Excel consistently uses a single relationship `Type` URI (and whether the relationship is
   always on `xl/_rels/workbook.xml.rels` vs sometimes worksheet-level).
 - The exact “cell → image” mapping mechanism across **all** Excel scenarios.
@@ -227,7 +230,8 @@ variant shapes are documented further below.
   - `http://schemas.microsoft.com/office/spreadsheetml/2020/07/main`
   - `http://schemas.microsoft.com/office/spreadsheetml/2019/11/main`
 - The root contains one or more `<cellImage>` entries. Some schemas embed a full DrawingML picture
-  subtree (e.g. `<xdr:pic>`), but the fixtures above also use a lightweight:
+  subtree (e.g. `<xdr:pic>`; observed in the real Excel fixture `fixtures/xlsx/rich-data/images-in-cell.xlsx`),
+  but the in-repo synthetic fixtures/tests also use a lightweight:
   - `<cellImage><a:blip r:embed="rIdX"/></cellImage>`
 - `r:embed="rIdX"` is resolved via `xl/_rels/cellImages.xml.rels` to a `Target` under `xl/media/*`.
 
