@@ -2,7 +2,7 @@ import { RefreshOrchestrator, type Query, type QueryExecutionContext, type Query
 
 import type { DocumentController } from "../document/documentController.js";
 
-// Use `.ts` extension so Node's `--experimental-strip-types` test runner can resolve
+// Use `.ts` extension so the repo's TypeScript-aware node:test runner can resolve
 // the module without relying on bundler-specific `.js`→`.ts` mapping.
 import { applyTableToDocument, type QuerySheetDestination } from "./applyToDocument.ts";
 import { enqueueApplyForDocument } from "./applyQueue.ts";

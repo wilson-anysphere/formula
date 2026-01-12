@@ -1,7 +1,7 @@
 // Node-friendly entrypoint for benchmarks/tests.
 //
 // `@formula/grid`'s primary entrypoint (`src/index.ts`) re-exports React components (TSX),
-// which Node cannot execute under `--experimental-strip-types` (type stripping does not
+// which Node cannot execute under built-in "strip types" TS support (type stripping does not
 // transform JSX). The desktop perf suite runs under Node, so it imports from this module.
 
 export type {

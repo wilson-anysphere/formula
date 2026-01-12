@@ -60,7 +60,7 @@ The frontend installs listeners in `apps/desktop/src/tauri/startupMetrics.ts` an
 - **Optional multi-run benchmark**: `apps/desktop/tests/performance/desktop-startup-runner.ts` can launch a built desktop binary multiple times and compute p50/p95 for window-visible + TTI.
   - Example:
     ```bash
-    node --experimental-strip-types apps/desktop/tests/performance/desktop-startup-runner.ts --bin target/release/formula-desktop --runs 20
+    node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-startup-runner.ts --bin target/release/formula-desktop --runs 20
     ```
 
 ---

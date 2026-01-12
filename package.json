@@ -26,7 +26,7 @@
     "test:e2e": "pnpm -C apps/web test:e2e && pnpm -C apps/desktop test:e2e",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "bench:gpu-kernels": "node packages/gpu-kernels/bench/bench.mjs",
-    "benchmark": "node --experimental-strip-types apps/desktop/tests/performance/run.ts",
+    "benchmark": "node scripts/run-node-ts.mjs apps/desktop/tests/performance/run.ts",
     "test:perf": "pnpm benchmark",
     "extension:build": "node tools/extension-builder/src/cli.js build",
     "extension:check": "node tools/extension-builder/src/cli.js check",
