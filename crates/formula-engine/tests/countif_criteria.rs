@@ -256,6 +256,20 @@ fn countif_reference_union_blank_criteria_equal_empty_string_counts_missing_cell
 }
 
 #[test]
+fn countif_reference_union_blank_criteria_equal_empty_string_literal_counts_missing_cells() {
+    let mut engine = Engine::new();
+    // A1/A3 left unset (blank).
+    engine.set_cell_value("Sheet1", "A2", "").unwrap();
+
+    // Same as above, but expressed as a single criteria string literal `=""` using Excel string
+    // escaping (`"=""""` inside the formula source).
+    assert_eq!(
+        eval(&mut engine, r#"=COUNTIF((A1:A2,A2:A3), "=""""")"#),
+        Value::Number(3.0)
+    );
+}
+
+#[test]
 fn countifs_multiple_criteria_pairs() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
