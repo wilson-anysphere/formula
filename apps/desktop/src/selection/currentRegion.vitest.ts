@@ -88,6 +88,44 @@ describe("computeCurrentRegionRange", () => {
     expect(rangeToA1(range)).toBe("A1:B2");
   });
 
+  it("does not connect cells diagonally (4-neighborhood only)", () => {
+    const cells = new Map<string, { value: unknown; formula: string | null }>();
+    const setValue = (row: number, col: number, value: unknown, formula: string | null = null) => {
+      cells.set(`${row},${col}`, { value, formula });
+    };
+
+    // Diagonal-only connection:
+    // A1 and B2 are non-empty but only touch diagonally.
+    setValue(0, 0, "A1");
+    setValue(1, 1, "B2");
+
+    const data = {
+      getUsedRange(): Range | null {
+        let minRow = Infinity;
+        let minCol = Infinity;
+        let maxRow = -Infinity;
+        let maxCol = -Infinity;
+        for (const key of cells.keys()) {
+          const [rowStr, colStr] = key.split(",");
+          const row = Number(rowStr);
+          const col = Number(colStr);
+          minRow = Math.min(minRow, row);
+          minCol = Math.min(minCol, col);
+          maxRow = Math.max(maxRow, row);
+          maxCol = Math.max(maxCol, col);
+        }
+        return { startRow: minRow, endRow: maxRow, startCol: minCol, endCol: maxCol };
+      },
+      isCellEmpty(cell: CellCoord): boolean {
+        const entry = cells.get(`${cell.row},${cell.col}`);
+        return entry == null || (entry.value == null && entry.formula == null);
+      },
+    };
+
+    const range = computeCurrentRegionRange({ row: 0, col: 0 }, data, { maxRows: 100, maxCols: 100 });
+    expect(rangeToA1(range)).toBe("A1");
+  });
+
   it("falls back to the active cell if the active cell is empty and has no non-empty neighbor", () => {
     const data = {
       getUsedRange: () => null,
