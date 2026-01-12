@@ -3295,6 +3295,13 @@ function installSheetStoreSubscription(): void {
       if (fallback) {
         app.activateSheet(fallback);
         restoreFocusAfterSheetNavigation();
+        if (syncingSheetUi) {
+          // If this sheet activation is triggered while we're applying a DocumentController -> sheet-store sync
+          // transaction (i.e. `syncingSheetUi` is true), the `app.activateSheet` hook's call to `syncSheetUi()`
+          // will be gated by the same flag. Schedule a follow-up sync so tabs/switcher/status bar reflect the
+          // new active sheet once the transaction completes.
+          queueMicrotask(() => syncSheetUi());
+        }
         return;
       }
     }
