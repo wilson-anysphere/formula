@@ -390,6 +390,8 @@ pub struct PivotTableSummary {
 #[cfg(feature = "desktop")]
 use crate::file_io::read_workbook;
 #[cfg(feature = "desktop")]
+use crate::path_scope::PathScopePolicy;
+#[cfg(feature = "desktop")]
 use crate::persistence::{
     autosave_db_path_for_new_workbook, autosave_db_path_for_workbook, WorkbookPersistenceLocation,
 };
@@ -485,7 +487,11 @@ pub async fn open_workbook(
     path: String,
     state: State<'_, SharedAppState>,
 ) -> Result<WorkbookInfo, String> {
-    let workbook = read_workbook(path.clone()).await.map_err(|e| e.to_string())?;
+    let policy = PathScopePolicy::default_desktop();
+    let validated_path = policy.validate_read_path(std::path::Path::new(&path))?;
+    let path = validated_path.to_string_lossy().to_string();
+
+    let workbook = read_workbook(validated_path).await.map_err(|e| e.to_string())?;
     let location = autosave_db_path_for_workbook(&path)
         .map(WorkbookPersistenceLocation::OnDisk)
         .unwrap_or(WorkbookPersistenceLocation::InMemory);
@@ -1139,7 +1145,6 @@ pub async fn save_workbook(
     let save_path = coerce_save_path_to_xlsx(&save_path);
 
     let wants_origin_bytes = wants_origin_bytes_for_save_path(&save_path);
-
     if let Some(autosave) = autosave.as_ref() {
         autosave.flush().await.map_err(|e| e.to_string())?;
     }
@@ -1150,7 +1155,10 @@ pub async fn save_workbook(
 
     let save_path_clone = save_path.clone();
     let written_bytes = tauri::async_runtime::spawn_blocking(move || {
-        let path = std::path::Path::new(&save_path_clone);
+        let policy = PathScopePolicy::default_desktop();
+        let validated_path = policy.validate_write_path(std::path::Path::new(&save_path_clone))?;
+
+        let path = validated_path.as_path();
         let ext = path
             .extension()
             .and_then(|s| s.to_str())

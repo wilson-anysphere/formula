@@ -1876,6 +1876,7 @@ dependencies = [
  "calamine 0.26.1",
  "cfb 0.10.0",
  "directories",
+ "dunce",
  "formula-columnar",
  "formula-engine",
  "formula-format",

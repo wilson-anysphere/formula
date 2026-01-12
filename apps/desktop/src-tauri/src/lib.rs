@@ -10,6 +10,7 @@ pub mod ipc_limits;
 pub mod macro_trust;
 pub mod macros;
 pub mod open_file;
+pub mod path_scope;
 pub mod persistence;
 #[cfg(any(feature = "desktop", test))]
 mod power_query_validation;
