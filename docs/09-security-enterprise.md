@@ -455,7 +455,7 @@ Classifications are stored as `document_classifications` records with a `selecto
 
 ### API: resolve endpoint
 
-`services/api` exposes `POST /docs/:docId/classifications/resolve` (requires document read permission) which uses **selector precedence**:
+`services/api` exposes `POST /docs/:docId/classifications/resolve` (requires org membership + document read permission) which uses **selector precedence**:
 
 - Request body: `{ selector: <cell|range selector> }`
 - Response: `{ classification, source }` where `source` includes the resolved scope and `selectorKey`.
@@ -471,7 +471,7 @@ If an organization has no `org_dlp_policies` row, `services/api` falls back to a
 
 The backend exposes a policy evaluation endpoint for clients to understand whether an action is permitted:
 
-- `POST /docs/:docId/dlp/evaluate` (requires document read permission)
+- `POST /docs/:docId/dlp/evaluate` (requires org membership + document read permission)
   - Body: `{ action, selector?, options? }`
   - Response: `{ decision, reasonCode?, classification, maxAllowed }`
 
