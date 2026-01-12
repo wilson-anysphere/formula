@@ -1233,7 +1233,16 @@ export class WebExtensionManager {
     onExtensionError?: (info: { id: string; version: string; error: unknown }) => void;
   } = {}): Promise<string[]> {
     if (!this.host) throw new Error("WebExtensionManager requires a BrowserExtensionHost to load extensions");
-    const initialHostExtensionCount = this.host.listExtensions().length;
+    const initialHostExtensions = this.host.listExtensions();
+    const initialHostExtensionCount = initialHostExtensions.length;
+    const initialHostHasActiveExtension = initialHostExtensions.some((ext: any) => {
+      // `BrowserExtensionHost` includes `active`; treat any known-active extension as a signal that
+      // calling `startup()` again would risk re-broadcasting `workbookOpened` to already-running
+      // extensions.
+      if (!ext || typeof ext !== "object") return false;
+      if (!Object.prototype.hasOwnProperty.call(ext, "active")) return false;
+      return Boolean((ext as any).active);
+    });
     const installed = await this.listInstalled();
 
     const newlyLoaded: string[] = [];
@@ -1264,7 +1273,11 @@ export class WebExtensionManager {
 
     // Preferred behavior: call host.startup() exactly once so existing extensions don't receive
     // duplicate startup events.
-    if (this.host.startup && (!this._didHostStartup || (initialHostExtensionCount === 0 && newlyLoaded.length > 0))) {
+    if (
+      this.host.startup &&
+      (!this._didHostStartup || (initialHostExtensionCount === 0 && newlyLoaded.length > 0)) &&
+      !initialHostHasActiveExtension
+    ) {
       await this.host.startup();
       this._didHostStartup = true;
     }
