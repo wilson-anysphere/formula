@@ -3453,9 +3453,6 @@ impl Engine {
                 .as_single_sheet()
                 .and_then(|name| self.workbook.sheet_id(name)),
         }?;
-        if sheet_id != current_sheet {
-            return None;
-        }
 
         self.resolve_defined_name_expr_for_bytecode(sheet_id, &name_key, visiting, lexical_scopes)
     }
