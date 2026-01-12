@@ -96,6 +96,7 @@ describe("KeybindingService", () => {
         { extensionId: "ext", command: "ext.stealCopy", title: "Ext" },
         { extensionId: "ext", command: "ext.stealPreviousSheet", title: "Ext" },
         { extensionId: "ext", command: "ext.stealNextSheet", title: "Ext" },
+        { extensionId: "ext", command: "ext.stealContextMenu", title: "Ext" },
       ],
       async (commandId) => extRun(commandId),
     );
@@ -143,6 +144,8 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealQuit", key: "ctrl+q", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealQuit", key: "cmd+q", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealQuit", key: "ctrl+cmd+q", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealContextMenu", key: "shift+f10", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealContextMenu", key: "contextmenu", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealPreviousSheet", key: "ctrl+pageup", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealPreviousSheet", key: "cmd+pageup", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealPreviousSheet", key: "ctrl+cmd+pageup", mac: null, when: null },
@@ -434,6 +437,19 @@ describe("KeybindingService", () => {
     expect(fileEvent18.defaultPrevented).toBe(false);
 
     expect(extRun).not.toHaveBeenCalled();
+
+    // Open context menu: Shift+F10 / ContextMenu key.
+    const contextMenuEvent1 = makeKeydownEvent({ key: "F10", shiftKey: true });
+    const contextMenuHandled1 = await service.dispatchKeydown(contextMenuEvent1);
+    expect(contextMenuHandled1).toBe(false);
+    expect(contextMenuEvent1.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    const contextMenuEvent2 = makeKeydownEvent({ key: "ContextMenu", code: "ContextMenu" });
+    const contextMenuHandled2 = await service.dispatchKeydown(contextMenuEvent2);
+    expect(contextMenuHandled2).toBe(false);
+    expect(contextMenuEvent2.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
   });
 
   it("does not advertise reserved shortcuts in the command keybinding display index", () => {
@@ -480,6 +496,8 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealQuit", key: "ctrl+q", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealQuit", key: "cmd+q", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealQuit", key: "ctrl+cmd+q", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealContextMenu", key: "shift+f10", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealContextMenu", key: "contextmenu", mac: null, when: null },
       { extensionId: "ext", command: "ext.allowed", key: "ctrl+j", mac: null, when: null },
     ]);
 
@@ -505,6 +523,7 @@ describe("KeybindingService", () => {
     expect(index.get("ext.stealSaveAs")).toBeUndefined();
     expect(index.get("ext.stealClose")).toBeUndefined();
     expect(index.get("ext.stealQuit")).toBeUndefined();
+    expect(index.get("ext.stealContextMenu")).toBeUndefined();
   });
 
   it("matches shifted punctuation keybindings via KeyboardEvent.code fallback", async () => {

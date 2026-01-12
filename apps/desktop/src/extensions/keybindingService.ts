@@ -118,6 +118,9 @@ export const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   "f2",
   // Add Comment (Excel-style).
   "shift+f2",
+  // Open context menu (Excel-style / Windows keyboard context-menu key).
+  "shift+f10",
+  "contextmenu",
   // Workbook sheet navigation (Excel-style).
   "ctrl+pageup",
   "cmd+pageup",
