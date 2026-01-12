@@ -162,6 +162,11 @@ export function computeSelectionFormatState(
     else if (state.numberFormat !== "mixed" && state.numberFormat !== value) state.numberFormat = "mixed";
   };
 
+  const anyDoc = doc as any;
+  const hasGetCellFormat = typeof anyDoc.getCellFormat === "function";
+  const hasGetCellFormatStyleIds = typeof anyDoc.getCellFormatStyleIds === "function";
+  const effectiveStyleCache = new Map<string, any>();
+
   const inspectCell = (row: number, col: number) => {
     const key = `${row},${col}`;
     if (visited.has(key)) return;
@@ -170,11 +175,24 @@ export function computeSelectionFormatState(
 
     // Prefer effective formatting (layered sheet/row/col/cell styles) when available.
     // Fall back to legacy cell-level styleId for older controller implementations.
-    const anyDoc = doc as any;
-    const style =
-      typeof anyDoc.getCellFormat === "function"
-        ? (anyDoc.getCellFormat(sheetId, { row, col }) as any)
-        : (doc.styleTable.get((doc.getCell(sheetId, { row, col }) as any)?.styleId ?? 0) as any);
+    const style = (() => {
+      if (hasGetCellFormat) {
+        // `getCellFormat()` does a deep-merge across style layers. Cache by contributing
+        // style ids so large selections with uniform formatting don't repeatedly merge.
+        if (hasGetCellFormatStyleIds) {
+          const styleIds = anyDoc.getCellFormatStyleIds(sheetId, { row, col }) as any;
+          const cacheKey = Array.isArray(styleIds) ? styleIds.join("|") : String(styleIds);
+          const cached = effectiveStyleCache.get(cacheKey);
+          if (cached !== undefined) return cached;
+          const computed = anyDoc.getCellFormat(sheetId, { row, col }) as any;
+          effectiveStyleCache.set(cacheKey, computed);
+          return computed;
+        }
+        return anyDoc.getCellFormat(sheetId, { row, col }) as any;
+      }
+
+      return doc.styleTable.get((doc.getCell(sheetId, { row, col }) as any)?.styleId ?? 0) as any;
+    })();
 
     state.bold = state.bold && Boolean(style?.font?.bold);
     state.italic = state.italic && Boolean(style?.font?.italic);
