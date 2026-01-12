@@ -2901,6 +2901,29 @@ mod tests {
     }
 
     #[test]
+    fn set_cell_rich_image_roundtrips_and_degrades_in_get_cell() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        let image = CellValue::Image(formula_model::ImageValue {
+            image_id: formula_model::drawings::ImageId::new("image1.png"),
+            alt_text: Some("Logo".to_string()),
+            width: None,
+            height: None,
+        });
+
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", image.clone())
+            .unwrap();
+
+        let scalar = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(scalar.input, JsonValue::Null);
+        assert_eq!(scalar.value, json!("Logo"));
+
+        let rich = wb.get_cell_rich_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(rich.input, image);
+        assert_eq!(rich.value, CellValue::String("Logo".to_string()));
+    }
+
+    #[test]
     fn cell_value_json_roundtrips_entity_and_record() {
         let mut record_fields = BTreeMap::new();
         record_fields.insert("Name".to_string(), CellValue::String("Alice".to_string()));
