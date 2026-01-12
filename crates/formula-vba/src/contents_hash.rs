@@ -1544,9 +1544,9 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
             if offset + 6 > dir_decompressed.len() {
                 return Err(DirParseError::Truncated.into());
             }
-
-            // For the fixed-length layout, this u32 is `Reserved`.
-            // For the TLV layout, this u32 is `Size` (and must be excluded from the transcript).
+            // For the fixed-length layout, the u32 after `Id` is `Reserved`.
+            // For the TLV layout, the u32 after `Id` is `Size` (and must be excluded from the
+            // transcript).
             let size_or_reserved = u32::from_le_bytes([
                 dir_decompressed[offset + 2],
                 dir_decompressed[offset + 3],
@@ -1567,9 +1567,9 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                 && fixed_next_ok
                 && (!tlv_next_ok || size_or_reserved < 10)
             {
-                // Fixed-length form: emit the record bytes verbatim.
                 out.extend_from_slice(&dir_decompressed[offset..fixed_end]);
                 offset = fixed_end;
+                expect_reference_name_unicode = false;
                 continue;
             }
 
@@ -1579,7 +1579,7 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
             let data_end = data_start.saturating_add(size_or_reserved);
             if data_end > dir_decompressed.len() {
                 return Err(DirParseError::BadRecordLength {
-                    id: 0x0009,
+                    id,
                     len: size_or_reserved,
                 }
                 .into());

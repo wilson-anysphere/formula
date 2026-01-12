@@ -637,7 +637,6 @@ fn build_project_with_project_info_records_only_noncanonical_unicode_ids() -> Ve
     let version_minor = 0xBEEFu16;
 
     let constants = b"ABC=1";
-    // UTF-16LE("ABC=1").
     let constants_unicode = b"A\x00B\x00C\x00=\x001\x00";
 
     let dir_decompressed = {
@@ -674,7 +673,76 @@ fn build_project_with_project_info_records_only_noncanonical_unicode_ids() -> Ve
         out
     };
     let dir_container = compress_container(&dir_decompressed);
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
 
+    ole.into_inner().into_inner()
+}
+
+fn build_project_with_project_info_records_only_tlv_projectversion() -> Vec<u8> {
+    // Same as `build_project_with_project_info_records_only`, but encodes PROJECTVERSION (0x0009)
+    // using a TLV framing (`Id || Size || Data`) instead of the spec fixed-length layout.
+    //
+    // Some real-world producers and fixtures use this encoding; `v3_content_normalized_data` should
+    // still be able to scan the dir stream without losing alignment.
+
+    let project_name = b"MyV3Project";
+
+    let syskind = 0xA1B2C3D4u32;
+    let lcid = 0x11223344u32;
+    let lcid_invoke = 0x55667788u32;
+    let codepage = 0xCAFEu16;
+
+    let docstring = b"__DOCSTRING_BYTES__";
+    let docstring_unicode = b"D\0O\0C\0U\0N\0I\0";
+
+    let helpfile1 = b"__HELPFILE1_PATH__";
+    let helpfile2 = b"__HELPFILE2_PATH__";
+
+    let helpcontext = 0x0BADF00Du32;
+
+    let project_lib_flags = 0x01020304u32;
+
+    let version_major = 0xCAFEBABEu32;
+    let version_minor = 0xBEEFu16;
+
+    let constants = b"ABC=1";
+    let constants_unicode = b"A\x00B\x00C\x00=\x001\x00";
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        push_record(&mut out, 0x0001, &syskind.to_le_bytes());
+        push_record(&mut out, 0x0002, &lcid.to_le_bytes());
+        push_record(&mut out, 0x0014, &lcid_invoke.to_le_bytes());
+        push_record(&mut out, 0x0003, &codepage.to_le_bytes());
+        push_record(&mut out, 0x0004, project_name);
+        push_record(&mut out, 0x0005, docstring);
+        push_record(&mut out, 0x0040, docstring_unicode);
+        push_record(&mut out, 0x0006, helpfile1);
+        push_record(&mut out, 0x003D, helpfile2);
+        push_record(&mut out, 0x0007, &helpcontext.to_le_bytes());
+        push_record(&mut out, 0x0008, &project_lib_flags.to_le_bytes());
+
+        // PROJECTVERSION (0x0009) encoded as TLV: Data == Reserved(u32) || VersionMajor(u32) ||
+        // VersionMinor(u16).
+        let mut version = Vec::new();
+        version.extend_from_slice(&0x00000004u32.to_le_bytes());
+        version.extend_from_slice(&version_major.to_le_bytes());
+        version.extend_from_slice(&version_minor.to_le_bytes());
+        push_record(&mut out, 0x0009, &version);
+
+        push_record(&mut out, 0x000C, constants);
+        push_record(&mut out, 0x003C, constants_unicode);
+        out
+    };
+
+    let dir_container = compress_container(&dir_decompressed);
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
     ole.create_storage("VBA").expect("VBA storage");
@@ -708,6 +776,22 @@ fn v3_content_normalized_data_includes_module_metadata_even_without_designers() 
         "v3 transcript includes module metadata and should differ from ContentNormalizedData"
     );
     assert_eq!(v3, expected);
+}
+
+#[test]
+fn v3_content_normalized_data_accepts_tlv_projectversion_record_framing() {
+    let fixed = build_project_with_project_info_records_only();
+    let tlv = build_project_with_project_info_records_only_tlv_projectversion();
+
+    let expected = v3_content_normalized_data(&fixed)
+        .expect("V3ContentNormalizedData should parse fixed-length PROJECTVERSION");
+    let actual = v3_content_normalized_data(&tlv)
+        .expect("V3ContentNormalizedData should parse TLV PROJECTVERSION");
+
+    assert_eq!(
+        actual, expected,
+        "PROJECTVERSION TLV framing should not change V3ContentNormalizedData output"
+    );
 }
 
 #[test]
