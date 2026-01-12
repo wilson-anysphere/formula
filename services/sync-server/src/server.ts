@@ -76,10 +76,17 @@ function pickIp(req: IncomingMessage, trustProxy: boolean): string {
           : null;
     if (raw && raw.length > 0) {
       const first = raw.split(",")[0]?.trim();
-      if (first) return first;
+      if (first) {
+        return first.length > MAX_CLIENT_IP_CHARS
+          ? first.slice(0, MAX_CLIENT_IP_CHARS)
+          : first;
+      }
     }
   }
-  return req.socket.remoteAddress ?? "unknown";
+  const remote = req.socket.remoteAddress ?? "unknown";
+  return remote.length > MAX_CLIENT_IP_CHARS
+    ? remote.slice(0, MAX_CLIENT_IP_CHARS)
+    : remote;
 }
 
 function rawPathnameFromUrl(requestUrl: string): string {
@@ -111,6 +118,8 @@ function rawDataByteLength(raw: WebSocket.RawData): number {
   return 0;
 }
 
+const MAX_CLIENT_IP_CHARS = 128;
+const MAX_USER_AGENT_CHARS = 512;
 const MAX_DOC_NAME_BYTES = 1024;
 
 function sendUpgradeRejection(
@@ -1380,12 +1389,20 @@ export function createSyncServer(
       try {
         const ip = pickIp(req, config.trustProxy);
         const uaHeader = req.headers["user-agent"];
-        const userAgent =
-          typeof uaHeader === "string"
-            ? uaHeader
-            : Array.isArray(uaHeader)
-              ? uaHeader[0]
-              : undefined;
+        const userAgent = (() => {
+          const raw =
+            typeof uaHeader === "string"
+              ? uaHeader
+              : Array.isArray(uaHeader)
+                ? uaHeader[0]
+                : undefined;
+          if (!raw) return undefined;
+          const trimmed = raw.trim();
+          if (trimmed.length === 0) return undefined;
+          return trimmed.length > MAX_USER_AGENT_CHARS
+            ? trimmed.slice(0, MAX_USER_AGENT_CHARS)
+            : trimmed;
+        })();
 
         if (!connectionAttemptLimiter.consume(ip)) {
           recordUpgradeRejection("rate_limit");

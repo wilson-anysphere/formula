@@ -127,7 +127,7 @@ test("sync-server rejects connections when introspection marks token inactive", 
   });
 
   const introspectionAdminToken = "introspection-admin-token";
-  const calls: Array<{ token: string; docId: string; clientIp: unknown }> = [];
+  const calls: Array<{ token: string; docId: string; clientIp: unknown; userAgent: unknown }> = [];
 
   const introspectionPort = await getAvailablePort();
   const introspectionServer = http.createServer((req, res) => {
@@ -155,6 +155,7 @@ test("sync-server rejects connections when introspection marks token inactive", 
         token: parsed.token as string,
         docId: parsed.docId as string,
         clientIp: parsed.clientIp,
+        userAgent: parsed.userAgent,
       });
 
       let body: any;
@@ -224,7 +225,15 @@ test("sync-server rejects connections when introspection marks token inactive", 
   });
 
   // Happy path: introspection active=true allows websocket connection.
-  const okWs = new WebSocket(`${syncServer.wsUrl}/${docName}?token=${encodeURIComponent(okToken)}`);
+  const longUserAgent = `sync-server-test-${"a".repeat(2_000)}`;
+  const okWs = new WebSocket(
+    `${syncServer.wsUrl}/${docName}?token=${encodeURIComponent(okToken)}`,
+    {
+      headers: {
+        "user-agent": longUserAgent,
+      },
+    }
+  );
   t.after(() => {
     okWs.terminate();
   });
@@ -274,6 +283,11 @@ test("sync-server rejects connections when introspection marks token inactive", 
   assert.ok(calls.some((c) => c.token === mfaRequiredToken && c.docId === docName));
   assert.ok(calls.some((c) => c.token === notOrgMemberToken && c.docId === docName));
   assert.ok(calls.some((c) => c.token === notMemberToken && c.docId === docName));
+
+  const okCall = calls.find((c) => c.token === okToken && c.docId === docName);
+  assert.ok(okCall);
+  assert.equal(typeof okCall.userAgent, "string");
+  assert.equal(okCall.userAgent, longUserAgent.slice(0, 512));
 
   for (const call of calls) {
     assert.ok(typeof call.clientIp === "string" && call.clientIp.length > 0);
