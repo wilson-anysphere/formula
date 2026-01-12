@@ -4,6 +4,7 @@ use formula_vba::{
     compress_container, contents_hash_v3, forms_normalized_data, project_normalized_data_v3,
     v3_content_normalized_data,
 };
+use sha2::{Digest as _, Sha256};
 
 fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
     out.extend_from_slice(&id.to_le_bytes());
@@ -359,6 +360,7 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
         0x14, 0x9b, 0x87, 0x58, 0xb2, 0xd0, 0xda, 0x28, 0xe7, 0x9b, 0x71, 0xb8, 0x8d, 0x75,
         0x8c, 0x76, 0xc1, 0xb5,
     ];
+    assert_eq!(Sha256::digest(&expected).as_slice(), expected_digest.as_ref());
     assert_eq!(actual_digest.as_slice(), expected_digest.as_ref());
 }
 

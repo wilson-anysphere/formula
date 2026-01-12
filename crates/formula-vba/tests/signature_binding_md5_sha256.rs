@@ -253,6 +253,22 @@ fn ms_oshared_md5_source_hash_even_when_spc_indirect_data_content_v2_advertises_
         VbaSignatureBinding::Bound,
         "expected signature binding to be Bound: SpcIndirectDataContentV2 sourceHash must be MD5 (16 bytes) even when algorithmId indicates SHA-256"
     );
+
+    // Also exercise the binding-only helper API with a raw PKCS#7 blob (like OOXML external
+    // signature parts).
+    let binding = verify_vba_project_signature_binding(&unsigned_vba_project_bin, &pkcs7_der)
+        .expect("binding verification should succeed");
+    match binding {
+        VbaProjectBindingVerification::BoundVerified(debug) => {
+            // For V2 signatures we normalize to MD5 since the SigData sourceHash is always MD5 per
+            // MS-OSHARED §4.3.
+            assert_eq!(debug.hash_algorithm_oid.as_deref(), Some("1.2.840.113549.2.5"));
+            assert_eq!(debug.hash_algorithm_name.as_deref(), Some("MD5"));
+            assert_eq!(debug.signed_digest.as_deref(), Some(project_md5.as_slice()));
+            assert_eq!(debug.computed_digest.as_deref(), Some(project_md5.as_slice()));
+        }
+        other => panic!("expected BoundVerified, got {other:?}"),
+    }
 }
 
 #[test]
