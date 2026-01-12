@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
 
+use formula_fs::{atomic_write_with_path, AtomicWriteError};
 use thiserror::Error;
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
@@ -53,48 +54,55 @@ pub fn write_shared_strings_to_xlsx(
     let input_file = File::open(input_path)?;
     let mut input_zip = ZipArchive::new(input_file)?;
 
-    let output_file = File::create(output_path)?;
-    let mut output_zip = ZipWriter::new(output_file);
-
     let shared_strings_xml = write_shared_strings_xml(shared_strings)?;
 
-    let mut seen_shared_strings = false;
-    for i in 0..input_zip.len() {
-        let mut file = input_zip.by_index(i)?;
-        let name = file.name().strip_prefix('/').unwrap_or(file.name()).to_string();
+    let output_path = output_path.as_ref();
+    atomic_write_with_path(output_path, |tmp_path| {
+        let output_file = File::create(tmp_path)?;
+        let mut output_zip = ZipWriter::new(output_file);
 
-        if name == "xl/sharedStrings.xml" {
-            seen_shared_strings = true;
-            let options =
-                FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+        let mut seen_shared_strings = false;
+        for i in 0..input_zip.len() {
+            let mut file = input_zip.by_index(i)?;
+            let name = file.name().strip_prefix('/').unwrap_or(file.name()).to_string();
+
+            if name == "xl/sharedStrings.xml" {
+                seen_shared_strings = true;
+                let options =
+                    FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+                output_zip.start_file(name, options)?;
+                output_zip.write_all(shared_strings_xml.as_bytes())?;
+                continue;
+            }
+
+            let mut buf = Vec::new();
+            file.read_to_end(&mut buf)?;
+
+            let mut options = FileOptions::<()>::default().compression_method(match file.compression() {
+                CompressionMethod::Stored => CompressionMethod::Stored,
+                _ => CompressionMethod::Deflated,
+            });
+            if let Some(modified) = file.last_modified() {
+                options = options.last_modified_time(modified);
+            }
+
             output_zip.start_file(name, options)?;
+            output_zip.write_all(&buf)?;
+        }
+
+        if !seen_shared_strings {
+            output_zip.start_file(
+                "xl/sharedStrings.xml",
+                FileOptions::<()>::default().compression_method(CompressionMethod::Deflated),
+            )?;
             output_zip.write_all(shared_strings_xml.as_bytes())?;
-            continue;
         }
 
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
-        let mut options = FileOptions::<()>::default().compression_method(match file.compression() {
-            CompressionMethod::Stored => CompressionMethod::Stored,
-            _ => CompressionMethod::Deflated,
-        });
-        if let Some(modified) = file.last_modified() {
-            options = options.last_modified_time(modified);
-        }
-
-        output_zip.start_file(name, options)?;
-        output_zip.write_all(&buf)?;
-    }
-
-    if !seen_shared_strings {
-        output_zip.start_file(
-            "xl/sharedStrings.xml",
-            FileOptions::<()>::default().compression_method(CompressionMethod::Deflated),
-        )?;
-        output_zip.write_all(shared_strings_xml.as_bytes())?;
-    }
-
-    output_zip.finish()?;
-    Ok(())
+        output_zip.finish()?;
+        Ok(())
+    })
+    .map_err(|err| match err {
+        AtomicWriteError::Io(err) => SharedStringsXlsxError::Io(err),
+        AtomicWriteError::Writer(err) => err,
+    })
 }
