@@ -71,7 +71,10 @@ pub const CSV_DELIMITER_AUTO: u8 = 0;
 /// in-memory prefix (useful for callers that need the delimiter before constructing their own CSV
 /// reader).
 ///
-/// Note: this also honors Excel's `sep=<delimiter>` directive when present on the first line.
+/// Note:
+/// - This honors Excel's `sep=<delimiter>` directive when present on the first line.
+/// - This uses `.` as the decimal separator hint; for locales that use `,` as the decimal
+///   separator, prefer [`sniff_csv_delimiter_with_decimal_separator`].
 pub fn sniff_csv_delimiter(sample: &[u8]) -> u8 {
     sniff_csv_delimiter_with_decimal_separator(sample, '.')
 }
