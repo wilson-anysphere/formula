@@ -100,6 +100,32 @@ test("cursor AI policy guard scans Dockerfiles for provider strings", async () =
   }
 });
 
+test("cursor AI policy guard scans Dockerfile.* variants (e.g. Dockerfile.dev)", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-dockerfile-variant-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "services/example/Dockerfile.dev", "OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans Makefile.* variants (e.g. Makefile.dev)", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-makefile-variant-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "packages/example/Makefile.dev", "OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("cursor AI policy guard scans extensionless dotfiles (e.g. .gitignore)", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-dotfile-fail-"));
   try {

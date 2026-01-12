@@ -163,7 +163,7 @@ const SCANNED_BASENAMES_WITHOUT_EXTENSION = new Set([
 // Some config files embed their "extension" into the basename (notably `.env`,
 // `.env.local`, `.env.production`, etc). Scan them by prefix so they can't be
 // used to stash provider keys in a committed env file.
-const SCANNED_BASENAME_PREFIXES = [".env"];
+const SCANNED_BASENAME_PREFIXES = [".env", "dockerfile", "makefile"];
 
 /**
  * @typedef {{ file: string, ruleId: string, message: string, line?: number, column?: number }} Violation
