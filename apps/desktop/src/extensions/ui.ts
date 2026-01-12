@@ -6,6 +6,28 @@ function nextExtensionsUiDialogTitleId(kind: "input-box" | "quick-pick"): string
   return `extensions-ui-${kind}-title-${extensionsUiDialogTitleId}`;
 }
 
+function showModal(dialog: HTMLDialogElement): void {
+  if (typeof (dialog as any).showModal === "function") {
+    (dialog as any).showModal();
+    return;
+  }
+  // jsdom doesn't implement showModal(). Best-effort fallback so unit tests can
+  // drive the DOM without a full dialog polyfill.
+  dialog.setAttribute("open", "true");
+}
+
+function closeDialog(dialog: HTMLDialogElement, returnValue: string): void {
+  if (typeof (dialog as any).close === "function") {
+    (dialog as any).close(returnValue);
+    return;
+  }
+  // jsdom doesn't implement close()/returnValue. Emulate the close contract so
+  // our prompt logic and tests can rely on the close event.
+  (dialog as any).returnValue = returnValue;
+  dialog.removeAttribute("open");
+  dialog.dispatchEvent(new Event("close"));
+}
+
 function ensureToastRoot(): HTMLElement {
   const root = document.getElementById("toast-root");
   if (!root) {
@@ -85,7 +107,7 @@ export async function showInputBox(options: InputBoxOptions = {}): Promise<strin
     dialog.addEventListener(
       "close",
       () => {
-        const returnValue = dialog.returnValue;
+        const returnValue = String((dialog as any).returnValue ?? dialog.returnValue ?? "");
         cleanup();
         resolve(returnValue === "ok" ? input.value : null);
       },
@@ -94,19 +116,19 @@ export async function showInputBox(options: InputBoxOptions = {}): Promise<strin
 
     dialog.addEventListener("cancel", (e) => {
       e.preventDefault();
-      dialog.close("cancel");
+      closeDialog(dialog, "cancel");
     });
 
-    cancelBtn.addEventListener("click", () => dialog.close("cancel"));
-    okBtn.addEventListener("click", () => dialog.close("ok"));
+    cancelBtn.addEventListener("click", () => closeDialog(dialog, "cancel"));
+    okBtn.addEventListener("click", () => closeDialog(dialog, "ok"));
 
-    dialog.showModal();
+    showModal(dialog);
     input.focus();
 
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
-        dialog.close("ok");
+        closeDialog(dialog, "ok");
       }
     });
   });
@@ -144,7 +166,7 @@ export async function showQuickPick<T>(
     dialog.addEventListener(
       "close",
       () => {
-        const returnValue = dialog.returnValue;
+        const returnValue = String((dialog as any).returnValue ?? dialog.returnValue ?? "");
         cleanup();
         if (!returnValue) resolve(null);
         else resolve(items[Number(returnValue)]?.value ?? null);
@@ -154,7 +176,7 @@ export async function showQuickPick<T>(
 
     dialog.addEventListener("cancel", (e) => {
       e.preventDefault();
-      dialog.close("");
+      closeDialog(dialog, "");
     });
 
     for (const [idx, item] of items.entries()) {
@@ -177,12 +199,12 @@ export async function showQuickPick<T>(
       }
 
       btn.addEventListener("click", () => {
-        dialog.close(String(idx));
+        closeDialog(dialog, String(idx));
       });
 
       list.appendChild(btn);
     }
 
-    dialog.showModal();
+    showModal(dialog);
   });
 }
