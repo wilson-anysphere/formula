@@ -717,7 +717,8 @@ fixture `fixtures/xlsx/rich-data/richdata-minimal.xlsx` (used by tests) uses the
   <Default Extension="png" ContentType="image/png"/>
   <!-- ... -->
 
-  <!-- These overrides may be absent; Excel sometimes relies on the default XML content type. -->
+  <!-- In this repo’s fixtures, explicit overrides are present for these parts. Other producers may omit
+       some overrides and rely on the default XML content type; preserve whatever the source workbook uses. -->
   <Override PartName="/xl/cellImages.xml"
              ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml"/>
 
@@ -725,7 +726,8 @@ fixture `fixtures/xlsx/rich-data/richdata-minimal.xlsx` (used by tests) uses the
             ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
 
   <!-- Unprefixed “richValue*” naming (observed in the synthetic fixture `fixtures/xlsx/rich-data/richdata-minimal.xlsx`
-       and the real Excel fixture `fixtures/xlsx/rich-data/images-in-cell.xlsx`; overrides may be absent in other workbooks). -->
+       and the real Excel fixture `fixtures/xlsx/rich-data/images-in-cell.xlsx`; other producers may omit explicit
+       overrides even when parts exist). -->
   <Override PartName="/xl/richData/richValueTypes.xml" ContentType="application/vnd.ms-excel.richvaluetypes+xml"/>
   <Override PartName="/xl/richData/richValueStructure.xml" ContentType="application/vnd.ms-excel.richvaluestructure+xml"/>
   <Override PartName="/xl/richData/richValue.xml" ContentType="application/vnd.ms-excel.richvalue+xml"/>
