@@ -116,6 +116,16 @@ export class SiemExportWorker {
     this.defaultBatchSize = options.defaultBatchSize ?? 250;
   }
 
+  private recordErrorMetrics(error: unknown): void {
+    const label =
+      error && typeof error === "object" && "siemErrorLabel" in error && typeof (error as any).siemErrorLabel === "string"
+        ? ((error as any).siemErrorLabel as string)
+        : undefined;
+
+    if (!label) return;
+    this.options.metrics.siemBatchErrorsTotal.inc({ reason: label });
+  }
+
   start(): void {
     if (this.timer) return;
     this.timer = setInterval(() => {
@@ -309,6 +319,7 @@ export class SiemExportWorker {
           }
 
           this.options.metrics.siemBatchesTotal.inc({ status: "error" });
+          this.recordErrorMetrics(err);
           await this.stateStore.markFailure(org.orgId, err);
           this.options.logger.warn({ err, orgId: org.orgId }, "siem_export_org_failed");
           span.recordException(err as Error);

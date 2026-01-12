@@ -1,6 +1,12 @@
 import crypto from "node:crypto";
 import tls from "node:tls";
-import { Agent, fetch as undiciFetch, type Dispatcher, type RequestInit as UndiciRequestInit } from "undici";
+import {
+  Agent,
+  buildConnector,
+  fetch as undiciFetch,
+  type Dispatcher,
+  type RequestInit as UndiciRequestInit
+} from "undici";
 
 export type CheckServerIdentity = (hostname: string, cert: tls.PeerCertificate) => Error | undefined;
 
@@ -134,6 +140,48 @@ export function createTlsConnectOptions({
   return options;
 }
 
+function createPinnedConnector(policy: OrgTlsPolicy): ReturnType<typeof buildConnector> {
+  const connectOptions = createTlsConnectOptions(policy);
+  const checkServerIdentity = connectOptions.checkServerIdentity;
+
+  const baseConnector = buildConnector({
+    ...connectOptions,
+    // Treat certificate pinning as the trust anchor. We still enforce hostname
+    // validation (via tls.checkServerIdentity) and the pin match.
+    rejectUnauthorized: false
+  });
+
+  return (options, callback) => {
+    baseConnector(options, (err, socket) => {
+      if (err || !socket) return callback(err as Error, socket);
+
+      if (typeof checkServerIdentity !== "function") {
+        const error = new Error("Certificate pinning failed: TLS checkServerIdentity not configured");
+        (error as { retriable?: boolean }).retriable = false;
+        (socket as any).destroy?.(error);
+        return callback(error, null);
+      }
+
+      const hostname = options.servername ?? options.hostname;
+      const cert = (socket as any).getPeerCertificate?.();
+      if (!cert) {
+        const error = new Error("Certificate pinning failed: peer certificate not available");
+        (error as { retriable?: boolean }).retriable = false;
+        (socket as any).destroy?.(error);
+        return callback(error, null);
+      }
+
+      const verifyError = checkServerIdentity(hostname, cert);
+      if (verifyError) {
+        (socket as any).destroy?.(verifyError);
+        return callback(verifyError, null);
+      }
+
+      return callback(null, socket);
+    });
+  };
+}
+
 const agentCache = new Map<string, Agent>();
 
 function createAgentCacheKey(policy: OrgTlsPolicy): string {
@@ -157,7 +205,7 @@ function getOrCreateAgent(policy: OrgTlsPolicy): Agent {
   const cached = agentCache.get(key);
   if (cached) return cached;
 
-  const connect = createTlsConnectOptions(policy);
+  const connect = policy.certificatePinningEnabled ? createPinnedConnector(policy) : createTlsConnectOptions(policy);
   const agent = new Agent({ connect });
   agentCache.set(key, agent);
   return agent;

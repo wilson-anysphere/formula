@@ -8,7 +8,32 @@ import type {
 } from "./types";
 import { fetchWithOrgTls, type OrgTlsPolicy } from "../http/tls";
 
-type RetriableError = Error & { retriable?: boolean; status?: number; responseBody?: string };
+type RetriableError = Error & {
+  retriable?: boolean;
+  status?: number;
+  responseBody?: string;
+  siemErrorLabel?: string;
+};
+
+const SIEM_ERROR_TLS_PINNING = "tls_pinning_failed";
+const SIEM_ERROR_INSECURE_HTTP = "insecure_http_endpoint";
+
+function isProductionEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NODE_ENV === "production";
+}
+
+function findCertificatePinningError(error: unknown): Error | undefined {
+  const visited = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === "object" && !visited.has(current)) {
+    visited.add(current);
+    if (current instanceof Error) {
+      if (current.message.startsWith("Certificate pinning failed:")) return current;
+    }
+    current = (current as any).cause;
+  }
+  return undefined;
+}
 
 function sanitizeRedactionOptions(
   options: SiemEndpointConfig["redactionOptions"] | undefined
@@ -185,6 +210,14 @@ export async function sendSiemBatch(
 ): Promise<void> {
   if (!events || events.length === 0) return;
 
+  const endpoint = new URL(config.endpointUrl);
+  if (endpoint.protocol !== "https:" && isProductionEnv()) {
+    const error: RetriableError = new Error("SIEM endpoint must use https in production");
+    error.retriable = false;
+    error.siemErrorLabel = SIEM_ERROR_INSECURE_HTTP;
+    throw error;
+  }
+
   const redactionOptions = sanitizeRedactionOptions(config.redactionOptions);
   const { body, contentType } = serializeBatch(events, {
     format: config.format ?? "json",
@@ -214,6 +247,16 @@ export async function sendSiemBatch(
           tls: options.tls
         });
       } catch (err) {
+        const pinningError = findCertificatePinningError(err);
+        if (pinningError) {
+          const error: RetriableError = new Error(pinningError.message, {
+            cause: err instanceof Error ? err : undefined
+          });
+          error.retriable = false;
+          error.siemErrorLabel = SIEM_ERROR_TLS_PINNING;
+          throw error;
+        }
+
         const error: RetriableError =
           err instanceof Error
             ? (err as RetriableError)

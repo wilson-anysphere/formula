@@ -17,6 +17,7 @@ export type ApiMetrics = {
   auditStreamEventsTotal: Counter;
   auditStreamBackpressureDropsTotal: Counter;
   siemBatchesTotal: Counter<"status">;
+  siemBatchErrorsTotal: Counter<"reason">;
   siemEventsTotal: Counter<"status">;
   siemBatchDurationSeconds: Histogram;
   siemExportLagSeconds: Gauge;
@@ -132,6 +133,13 @@ export function createMetrics(): ApiMetrics {
     registers: [registry]
   });
 
+  const siemBatchErrorsTotal = new Counter({
+    name: "siem_batch_errors_total",
+    help: "SIEM export batch failures by reason",
+    labelNames: ["reason"],
+    registers: [registry]
+  });
+
   const siemEventsTotal = new Counter({
     name: "siem_events_total",
     help: "SIEM export events processed",
@@ -166,6 +174,7 @@ export function createMetrics(): ApiMetrics {
     auditStreamEventsTotal,
     auditStreamBackpressureDropsTotal,
     siemBatchesTotal,
+    siemBatchErrorsTotal,
     siemEventsTotal,
     siemBatchDurationSeconds,
     siemExportLagSeconds
