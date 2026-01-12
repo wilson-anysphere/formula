@@ -9,15 +9,15 @@ This document is an **internal implementation spec** for the Excel-compatible �
 The intent is to clearly define:
 
 - **Validation behavior** (`#NUM!` vs valid)
-- **Coupon date schedule derivation** (PCD/NCD) via month-stepping
+- **Coupon date schedule derivation** (PCD/NCD) via maturity-anchored month-stepping (including Excel’s end-of-month pinning)
 - **Day-count basis** handling (basis `0..4`) and its impact on `A`, `DSC`, `E`
 - **Clean vs dirty** price and accrued interest
-- `YIELD` root-finding expectations (Newton-Raphson)
+- `YIELD` root-finding expectations (safeguarded Newton with bracketing + bisection fallback)
 
 Implementation should reuse existing helpers where possible:
 
-- Month stepping / date conversion: `crates/formula-engine/src/functions/date_time/mod.rs` (`edate`, `days360`, `yearfrac`)
-- Iterative solver: `crates/formula-engine/src/functions/financial/iterative.rs` (`newton_raphson`, `EXCEL_ITERATION_TOLERANCE`)
+- Month stepping / date conversion: `crates/formula-engine/src/functions/date_time/mod.rs` (`edate`, `eomonth`, `days360`, `yearfrac`)
+- Iterative solver: `crates/formula-engine/src/functions/financial/iterative.rs` (`solve_root_newton_bisection`, `EXCEL_ITERATION_TOLERANCE`)
 
 > Scope note: `COUP*`, `PRICE`, `YIELD`, `DURATION`, `MDURATION` assume a **regular coupon schedule**
 > (no odd first/last period). Excel provides `ODDF*` / `ODDL*` for irregular schedules; those are
@@ -110,6 +110,21 @@ Implementation should reuse `date_time::edate`:
 
 - `crates/formula-engine/src/functions/date_time/mod.rs::edate(start_date, months, system)`
 
+### Excel end-of-month (EOM) pinning rule (as implemented)
+
+Excel has an additional coupon-schedule rule that goes beyond plain `EDATE` month stepping:
+
+- If `maturity` is the **last day of its month** (i.e. `maturity == EOMONTH(maturity, 0)`), Excel treats the *entire coupon schedule* as an **end-of-month schedule** and pins every coupon date to month-end.
+
+This is implemented by computing coupon dates as an offset from maturity **and then** applying `EOMONTH(..., 0)`:
+
+```text
+coupon_date(k) = EOMONTH(EDATE(maturity, -k*m), 0)     # when maturity is EOM
+coupon_date(k) = EDATE(maturity, -k*m)                # otherwise
+```
+
+This matters when `maturity` is month-end but not the 31st (e.g. Feb 28/29, Nov 30): without EOM pinning, `EDATE` offsets preserve the 28th/30th and do not “restore” later month-ends (Aug 31, Dec 31, ...).
+
 ### Finding `PCD` and `NCD`
 
 Definition:
@@ -121,24 +136,27 @@ Implementation note (maturity-anchored, non-drifting):
 
 - Because `EDATE` clamps to the end of month when the target month is shorter, *iteratively*
   stepping `EDATE(EDATE(...), ...)` can drift the day-of-month (e.g. 31st → 30th). Excel’s `COUP*`
-  functions behave as if each coupon date is computed as an offset from `maturity`, i.e.
-  `EDATE(maturity, -k*m)`.
+  functions behave as if each coupon date is computed as an offset from `maturity`. Additionally,
+  when `maturity` is month-end, Excel pins all coupon dates to month-end (see the EOM pinning rule
+  above).
 
 Reference pseudocode (scan coupon periods back from `maturity`):
 
 ```text
 m = 12 / frequency
+eom = (maturity == EOMONTH(maturity, 0))
+coupon_date(k) = if eom then EOMONTH(EDATE(maturity, -k*m), 0) else EDATE(maturity, -k*m)
 for n in 1..:
-  pcd = EDATE(maturity, -(n*m))
-  ncd = if n == 1 then maturity else EDATE(maturity, -((n-1)*m))
+  pcd = coupon_date(n)
+  ncd = if n == 1 then maturity else coupon_date(n-1)
   if pcd <= settlement < ncd:
-     return (pcd, ncd, n)  # n is COUPNUM
+      return (pcd, ncd, n)  # n is COUPNUM
 ```
 
 This naturally supports:
 
 - settlement exactly on a coupon date: `PCD = settlement`, `NCD = next coupon date`
-- end-of-month clamping (via `EDATE`)
+- end-of-month behavior (via `EDATE` clamping, plus EOM pinning when `maturity` is month-end)
 
 ### Computing `COUPNUM` (number of remaining coupons)
 
@@ -171,16 +189,16 @@ This definition matches the needs of `PRICE`/`YIELD`/`DURATION` where “remaini
 
 `DSC` (days from settlement to the next coupon) follows an Excel quirk:
 
-- basis `0`/`4` (30/360): Excel treats `E` as a fixed `360/f` model-period and defines `DSC = E - A`
-  (so `A + DSC = E` for any settlement date within the coupon period).
+- basis `0`/`4` (30/360): **`COUPDAYSNC` is not `DAYS360(settlement, NCD, ...)`**. Excel treats `E`
+  as a fixed `360/f` model-period and defines `DSC = E - A` (so `A + DSC = E` for any settlement
+  date within the coupon period).
 - basis `1`/`2`/`3`: `DSC = NCD - settlement` (actual days).
 
 ### Computing `E` (days in coupon period)
 
 `E` is **not always** `days_between(PCD, NCD, basis)` in Excel. Excel uses basis-specific conventions:
 
-- basis `0` and `4`: `E = 360 / f` (constant)
-- basis `2`: `E = 360 / f` (constant)
+- basis `0`/`2`/`4`: `E = 360 / f` (constant)
 - basis `3`: `E = 365 / f` (constant)
 - basis `1`: `E = actual_days(NCD - PCD)` (variable, depends on the coupon period)
 
@@ -213,7 +231,9 @@ Signature (Excel):
 
 - `f = frequency`, `m = 12/f` months per coupon
 - Coupon payment per regular period: `C = par * rate / f`
-- Coupon schedule is anchored at `first_interest` (not maturity), stepping by `±m` months using `EDATE`.
+- Coupon schedule is anchored at `first_interest` (not maturity). Coupon dates are computed as offsets
+  from the anchor (rather than iteratively stepping `EDATE` from the previous coupon date) to avoid
+  month-end drift.
 
 ### Finding the relevant coupon period (PCD/NCD) anchored at `first_interest`
 
@@ -226,10 +246,12 @@ If `settlement >= first_interest`:
 
 ```text
 pcd = first_interest
-ncd = EDATE(first_interest, +m)
+k = 0
+ncd = EDATE(first_interest, (k+1)*m)
 while settlement >= ncd:
+  k = k + 1
   pcd = ncd
-  ncd = EDATE(ncd, +m)
+  ncd = EDATE(first_interest, (k+1)*m)
 ```
 
 ### Accrued-interest start date (`calc_method`)
@@ -290,6 +312,11 @@ For regular coupon bonds, Excel’s accrued interest within the current coupon p
 - Accrued interest at settlement: `AI = C * (A / E)`
 
 (`A` and `E` are basis-dependent as described above.)
+
+Note the scaling difference:
+
+- `PRICE`/`YIELD` scale coupon cashflows by `redemption` (Excel’s “redemption value per 100 face value”).
+- `ACCRINT` scales coupon cashflows by `par`.
 
 ### Clean vs dirty
 
@@ -373,7 +400,8 @@ Use a safeguarded Newton-Raphson solver (Newton + bracketing / bisection) via:
 Recommended constants (matching existing style):
 
 - `MAX_ITER_YIELD = 100` (same as `XIRR`)
-- `guess = 0.1` (10%) if no better guess is available
+- `guess = rate` when `rate > 0`, otherwise `0.1` (10%)
+- Bracketing bounds: `lower = -f + 1e-8`, `upper = 1e10`
 
 ### Domain restrictions
 
@@ -405,7 +433,7 @@ d/dy Dirty(y) = - Σ (t / f) * CF / d^{t+1}
 
 Use the same `t_i` exponents as in the `PRICE` section (`t0 + i - 1`), with `CF = C` for coupons and `CF = redemption` at `t_N` (or combine `C+redemption` at `t0` for `N=1`).
 
-If derivative is `0`, non-finite, or Newton fails to converge → `#NUM!`.
+If derivative is `0`/non-finite (preventing Newton steps) or the safeguarded solver fails to converge → `#NUM!`.
 
 ---
 
@@ -478,26 +506,26 @@ Inputs:
 - `frequency  = 2`  ⇒ `m = 6 months`
 - `basis      = 0` (US 30/360)
 
-Step backwards from maturity by 6 months (`EDATE`):
+Because `maturity` is month-end, the coupon schedule is treated as end-of-month (EOM) and pinned via `EOMONTH(EDATE(...), 0)`. Step backwards from maturity by 6 months:
 
 | Step | Coupon date |
 |------|-------------|
 | 0 | 2024-11-30 (maturity) |
-| -6 mo | 2024-05-30 |
+| -6 mo | 2024-05-31 |
 | -12 mo | 2023-11-30 |
-| -18 mo | 2023-05-30 |
+| -18 mo | 2023-05-31 |
 | -24 mo | 2022-11-30 |
 
-`settlement=2023-05-15` lies in `(2022-11-30, 2023-05-30]`, so:
+`settlement=2023-05-15` lies in `(2022-11-30, 2023-05-31]`, so:
 
 - `COUPPCD = PCD = 2022-11-30`
-- `COUPNCD = NCD = 2023-05-30`
+- `COUPNCD = NCD = 2023-05-31`
 
 Coupons after settlement up to maturity are:
 
-- 2023-05-30
+- 2023-05-31
 - 2023-11-30
-- 2024-05-30
+- 2024-05-31
 - 2024-11-30 (maturity)
 
 So:
@@ -508,7 +536,7 @@ Day-count values for basis 0 (30/360 US):
 
 - `E = 360 / f = 360 / 2 = 180`
 - `A   = days360(2022-11-30, 2023-05-15, FALSE) = 165`
-- `DSC = days360(2023-05-15, 2023-05-30, FALSE) = 15`
+- `DSC = E - A = 15` (Excel quirk for `COUPDAYSNC` on 30/360 bases)
 
 So the corresponding coupon helpers should return:
 
@@ -591,10 +619,10 @@ Excel’s bond functions are historically underspecified. The following are know
    - Resolution: `NCD` is **strictly after** settlement; `PCD` is **on or before** settlement.
    - This matches typical Excel interpretations and makes `settlement` on a coupon date yield `A=0`.
 
-2. **`COUPDAYS` for basis 1 vs basis 2/3**
+2. **`COUPDAYS` (`E`) conventions by basis**
    - Resolution:
-     - basis 1: `E = actual_days(PCD→NCD)`
-     - basis 2: `E = 360/f` (constant)
+     - basis 1: `E = actual_days(PCD→NCD)` (variable)
+     - basis 0/2/4: `E = 360/f` (constant)
      - basis 3: `E = 365/f` (constant)
    - This implies `A + DSC` may not equal `E` for basis 2/3; that is expected.
 
@@ -607,3 +635,8 @@ Excel’s bond functions are historically underspecified. The following are know
 4. **Irregular coupon schedules**
    - Resolution: `COUP*`, `PRICE`, `YIELD`, `DURATION`, `MDURATION` assume regular schedules.
    - If maturity does not align to a regular coupon schedule, behavior is unspecified here; prefer implementing and routing such cases to `ODD*` functions once those exist, rather than trying to emulate irregular schedules in these functions.
+
+5. **End-of-month (EOM) coupon schedule pinning**
+   - Resolution: if `maturity` is month-end, treat the entire coupon schedule as month-end pinned:
+     `coupon_date(k) = EOMONTH(EDATE(maturity, -k*m), 0)`.
+   - This matches Excel and avoids day-of-month drift on month-end schedules.
