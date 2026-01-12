@@ -344,6 +344,26 @@ describe("EngineWorker RPC", () => {
     expect(requests[0].params).toEqual({ formula: "=1+2", options: undefined });
   });
 
+  it("forwards lexFormula options in the RPC params", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    await engine.lexFormula("=1+2", { localeId: "de-DE", referenceStyle: "R1C1" });
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "lexFormula"
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({
+      formula: "=1+2",
+      options: { localeId: "de-DE", referenceStyle: "R1C1" }
+    });
+  });
+
   it("sends parseFormulaPartial RPC requests with the expected params", async () => {
     const worker = new MockWorker();
     const engine = await EngineWorker.connect({
@@ -359,6 +379,27 @@ describe("EngineWorker RPC", () => {
     );
     expect(requests).toHaveLength(1);
     expect(requests[0].params).toEqual({ formula: "=SUM(1,", cursor: 6, options: undefined });
+  });
+
+  it("forwards parseFormulaPartial options in the RPC params", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    await engine.parseFormulaPartial("=SUM(1,", 6, { localeId: "de-DE", referenceStyle: "R1C1" });
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "parseFormulaPartial"
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({
+      formula: "=SUM(1,",
+      cursor: 6,
+      options: { localeId: "de-DE", referenceStyle: "R1C1" }
+    });
   });
 
   it("forwards setLocale calls with the correct RPC method name", async () => {
