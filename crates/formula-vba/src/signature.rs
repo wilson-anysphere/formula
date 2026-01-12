@@ -1074,3 +1074,91 @@ fn extract_first_certificate_subject(bytes: &[u8]) -> Option<String> {
 
     None
 }
+
+/// Verify MS-OVBA "project digest" signature binding when the signature payload is provided
+/// separately (e.g. `xl/vbaProjectSignature.bin` in OOXML / XLSM).
+///
+/// `signature_bytes` can be:
+/// - An OLE container holding `\u{0005}DigitalSignature*` streams (like `vbaProjectSignature.bin`)
+/// - A raw `\u{0005}DigitalSignature*` stream payload
+/// - A raw PKCS#7/CMS blob (DER), optionally wrapped in an Office DigSig structure
+///
+/// Returns [`VbaProjectBindingVerification::BoundUnknown`] when no signed project digest could be
+/// extracted (or when we can't compare it to the project bytes).
+pub fn verify_vba_project_signature_binding(
+    project_ole: &[u8],
+    signature_bytes: &[u8],
+) -> Result<VbaProjectBindingVerification, SignatureError> {
+    let payloads = signature_payload_candidates(signature_bytes);
+
+    let mut any_signed_digest = None::<VbaProjectDigestDebugInfo>;
+    let mut first_comparison = None::<VbaProjectDigestDebugInfo>;
+    for payload in payloads {
+        let signed = match extract_vba_signature_signed_digest(&payload) {
+            Ok(Some(signed)) => signed,
+            Ok(None) | Err(_) => continue,
+        };
+
+        let mut debug = VbaProjectDigestDebugInfo::default();
+        debug.hash_algorithm_oid = Some(signed.digest_algorithm_oid.clone());
+        debug.signed_digest = Some(signed.digest.clone());
+
+        if any_signed_digest.is_none() {
+            any_signed_digest = Some(debug.clone());
+        }
+
+        let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) else {
+            continue;
+        };
+
+        debug.hash_algorithm_name = Some(match alg {
+            DigestAlg::Sha1 => "SHA-1".to_owned(),
+            DigestAlg::Sha256 => "SHA-256".to_owned(),
+        });
+
+        let computed = compute_vba_project_digest(project_ole, alg)?;
+        debug.computed_digest = Some(computed.clone());
+
+        if first_comparison.is_none() {
+            first_comparison = Some(debug.clone());
+        }
+
+        if computed == signed.digest {
+            return Ok(VbaProjectBindingVerification::BoundVerified(debug));
+        }
+    }
+
+    if let Some(debug) = first_comparison {
+        return Ok(VbaProjectBindingVerification::BoundMismatch(debug));
+    }
+
+    Ok(VbaProjectBindingVerification::BoundUnknown(
+        any_signed_digest.unwrap_or_default(),
+    ))
+}
+
+fn signature_payload_candidates(signature_bytes: &[u8]) -> Vec<Vec<u8>> {
+    // 1) If it looks like an OLE container, extract `\x05DigitalSignature*` streams.
+    if let Ok(mut ole) = OleFile::open(signature_bytes) {
+        if let Ok(streams) = ole.list_streams() {
+            let mut candidates = streams
+                .into_iter()
+                .filter(|path| path.split('/').any(is_signature_component))
+                .collect::<Vec<_>>();
+            candidates.sort_by(|a, b| signature_path_rank(a).cmp(&signature_path_rank(b)).then(a.cmp(b)));
+
+            let mut out = Vec::new();
+            for path in candidates {
+                if let Ok(Some(bytes)) = ole.read_stream_opt(&path) {
+                    out.push(bytes);
+                }
+            }
+            if !out.is_empty() {
+                return out;
+            }
+        }
+    }
+
+    // 2) Otherwise treat the whole buffer as a signature blob/stream payload.
+    vec![signature_bytes.to_vec()]
+}

@@ -70,6 +70,27 @@ impl XlsxPackage {
     ) -> Result<Option<formula_vba::VbaDigitalSignatureTrusted>, formula_vba::SignatureError> {
         verify_vba_digital_signature_with_trust_from_parts(self.parts_map(), options)
     }
+
+    /// Verify MS-OVBA "project digest" signature binding for an embedded VBA project.
+    ///
+    /// Returns `Ok(None)` when there is no `xl/vbaProject.bin`.
+    pub fn vba_project_signature_binding(
+        &self,
+    ) -> Result<Option<formula_vba::VbaProjectBindingVerification>, SignatureError> {
+        let Some(project_ole) = self.vba_project_bin() else {
+            return Ok(None);
+        };
+
+        let parts = self.parts_map();
+        let signature_bytes = resolve_vba_signature_part_name(parts)
+            .and_then(|name| parts.get(&name).map(|v| v.as_slice()))
+            .unwrap_or(project_ole);
+
+        Ok(Some(formula_vba::verify_vba_project_signature_binding(
+            project_ole,
+            signature_bytes,
+        )?))
+    }
 }
 
 impl XlsxDocument {
@@ -114,6 +135,27 @@ impl XlsxDocument {
         options: &formula_vba::VbaSignatureTrustOptions,
     ) -> Result<Option<formula_vba::VbaDigitalSignatureTrusted>, formula_vba::SignatureError> {
         verify_vba_digital_signature_with_trust_from_parts(self.parts(), options)
+    }
+
+    /// Verify MS-OVBA "project digest" signature binding for an embedded VBA project.
+    ///
+    /// Returns `Ok(None)` when there is no `xl/vbaProject.bin`.
+    pub fn vba_project_signature_binding(
+        &self,
+    ) -> Result<Option<formula_vba::VbaProjectBindingVerification>, SignatureError> {
+        let parts = self.parts();
+        let Some(project_ole) = parts.get("xl/vbaProject.bin") else {
+            return Ok(None);
+        };
+
+        let signature_bytes = resolve_vba_signature_part_name(parts)
+            .and_then(|name| parts.get(&name).map(|v| v.as_slice()))
+            .unwrap_or(project_ole);
+
+        Ok(Some(formula_vba::verify_vba_project_signature_binding(
+            project_ole,
+            signature_bytes,
+        )?))
     }
 }
 

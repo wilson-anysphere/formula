@@ -4,9 +4,11 @@
 //! appear to rely on a workbook-level `xl/cellimages.xml` part containing
 //! DrawingML `<pic>` payloads that reference media via relationships.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use formula_model::drawings::{ImageData, ImageId};
+use quick_xml::events::Event;
+use quick_xml::Reader;
 use roxmltree::Document;
 
 use crate::drawings::content_type_for_extension;
@@ -18,20 +20,134 @@ type Result<T> = std::result::Result<T, XlsxError>;
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
-/// Best-effort loader for Excel "in-cell" images.
+/// Best-effort loader for workbook-level "in-cell" images.
 ///
-/// This mirrors the old `cell_images.rs` behavior: missing parts, missing rels, or parse errors
-/// should not prevent the workbook from loading. Successfully parsed image relationships are
-/// loaded into `workbook.images`.
+/// Excel stores the image catalog in `xl/cellimages.xml` (and/or `xl/cellimages*.xml`), with image
+/// payloads referenced via the part's relationships (`xl/_rels/cellimages*.xml.rels`).
+///
+/// This helper is intentionally tolerant of incomplete/malformed workbooks:
+/// - Missing `cellimages*.xml` → no-op
+/// - Missing `.rels` → skip that part
+/// - Missing referenced media part → skip that image
+/// - Parse errors → skip that part
+///
+/// This is used by `load_from_bytes` to opportunistically populate `Workbook.images` during import.
 pub fn load_cell_images_from_parts(parts: &BTreeMap<String, Vec<u8>>, workbook: &mut formula_model::Workbook) {
     for path in parts.keys() {
         if !is_cell_images_part(path) {
             continue;
         }
-        let _ = parse_cell_images_part(path, parts, workbook);
+
+        let rels_path = crate::openxml::rels_part_name(path);
+        let Some(rels_bytes) = parts.get(&rels_path) else {
+            continue;
+        };
+        let relationships = match crate::openxml::parse_relationships(rels_bytes) {
+            Ok(rels) => rels,
+            Err(_) => continue,
+        };
+        let rels_by_id: HashMap<String, crate::openxml::Relationship> = relationships
+            .into_iter()
+            .map(|rel| (rel.id.clone(), rel))
+            .collect();
+
+        let Some(xml_bytes) = parts.get(path) else {
+            continue;
+        };
+        let referenced_ids = extract_relationship_ids(xml_bytes);
+        if referenced_ids.is_empty() {
+            continue;
+        }
+
+        for rel_id in referenced_ids {
+            let Some(rel) = rels_by_id.get(&rel_id) else {
+                continue;
+            };
+
+            if rel
+                .target_mode
+                .as_deref()
+                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+            {
+                continue;
+            }
+            if rel.type_uri != REL_TYPE_IMAGE {
+                continue;
+            }
+
+            let Ok(target_path) = resolve_target_best_effort(path, &rels_path, &rel.target, parts)
+            else {
+                continue;
+            };
+            let Some(bytes) = parts.get(&target_path) else {
+                continue;
+            };
+
+            let file_name = target_path
+                .strip_prefix("xl/media/")
+                .or_else(|| target_path.strip_prefix("media/"))
+                .unwrap_or(&target_path)
+                .to_string();
+            let image_id = ImageId::new(file_name);
+
+            if workbook.images.get(&image_id).is_some() {
+                continue;
+            }
+
+            let ext = image_id
+                .as_str()
+                .rsplit_once('.')
+                .map(|(_, ext)| ext)
+                .unwrap_or("");
+            let content_type = content_type_for_extension(ext).to_string();
+            workbook.images.insert(
+                image_id,
+                ImageData {
+                    bytes: bytes.clone(),
+                    content_type: Some(content_type),
+                },
+            );
+        }
     }
 }
 
+fn extract_relationship_ids(xml: &[u8]) -> HashSet<String> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut out = HashSet::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+                for attr in e.attributes() {
+                    let Ok(attr) = attr else {
+                        continue;
+                    };
+                    let key_local = crate::openxml::local_name(attr.key.as_ref());
+                    if !key_local.eq_ignore_ascii_case(b"id")
+                        && !key_local.eq_ignore_ascii_case(b"embed")
+                    {
+                        continue;
+                    }
+                    let Ok(value) = attr.unescape_value() else {
+                        continue;
+                    };
+                    let value = value.into_owned();
+                    if value.starts_with("rId") {
+                        out.insert(value);
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    out
+}
 /// Parsed workbook-level cell images parts.
 #[derive(Debug, Clone, Default)]
 pub struct CellImages {
