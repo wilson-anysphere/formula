@@ -810,42 +810,6 @@ pub async fn read_binary_file_range(
     Ok(STANDARD.encode(bytes))
 }
 
-#[cfg(any(feature = "desktop", test))]
-fn verify_ed25519_signature_inner(
-    payload: &[u8],
-    signature_base64: &str,
-    public_key_pem: &str,
-) -> Result<bool, String> {
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
-    use ed25519_dalek::{Signature, VerifyingKey};
-    use pkcs8::DecodePublicKey;
-
-    let signature_bytes = STANDARD
-        .decode(signature_base64.as_bytes())
-        .map_err(|e| format!("Invalid signature_base64: {e}"))?;
-
-    let signature = Signature::try_from(signature_bytes.as_slice())
-        .map_err(|e| format!("Invalid Ed25519 signature bytes: {e}"))?;
-
-    let public_key = VerifyingKey::from_public_key_pem(public_key_pem)
-        .map_err(|e| format!("Invalid public_key_pem: {e}"))?;
-
-    Ok(public_key.verify_strict(payload, &signature).is_ok())
-}
-
-/// Verify an Ed25519 signature over a payload, implemented in Rust so desktop builds
-/// can verify v2 extension packages even when the embedded WebView's WebCrypto
-/// implementation does not support Ed25519 (notably some WebKit-based runtimes).
-#[cfg(feature = "desktop")]
-#[tauri::command]
-pub fn verify_ed25519_signature(
-    payload: Vec<u8>,
-    signature_base64: String,
-    public_key_pem: String,
-) -> Result<bool, String> {
-    verify_ed25519_signature_inner(&payload, &signature_base64, &public_key_pem)
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ListDirEntry {
@@ -4380,10 +4344,6 @@ pub async fn marketplace_download_package(
 mod tests {
     use super::*;
     use crate::file_io::read_xlsx_blocking;
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
-    use ed25519_dalek::pkcs8::EncodePublicKey;
-    use ed25519_dalek::Signer as _;
-    use rand_core::OsRng;
     use std::path::Path;
     use tempfile::TempDir;
 
@@ -4905,41 +4865,6 @@ export default async function main(ctx) {
             "",
             "expected Sheet1!A1 to remain empty"
         );
-    }
-
-    #[test]
-    fn verify_ed25519_signature_accepts_valid_signature() {
-        let signing_key = ed25519_dalek::SigningKey::generate(&mut OsRng);
-        let verifying_key = signing_key.verifying_key();
-        let public_key_pem = verifying_key
-            .to_public_key_pem(pkcs8::LineEnding::LF)
-            .expect("encode public key pem");
-
-        let payload = b"hello world".to_vec();
-        let signature = signing_key.sign(&payload);
-        let signature_base64 = STANDARD.encode(signature.to_bytes());
-
-        let ok = verify_ed25519_signature_inner(&payload, &signature_base64, &public_key_pem)
-            .expect("verify signature");
-        assert!(ok);
-    }
-
-    #[test]
-    fn verify_ed25519_signature_rejects_invalid_signature() {
-        let signing_key = ed25519_dalek::SigningKey::generate(&mut OsRng);
-        let verifying_key = signing_key.verifying_key();
-        let public_key_pem = verifying_key
-            .to_public_key_pem(pkcs8::LineEnding::LF)
-            .expect("encode public key pem");
-
-        let payload = b"hello world".to_vec();
-        let mut signature_bytes = signing_key.sign(&payload).to_bytes();
-        signature_bytes[0] ^= 0x01;
-        let signature_base64 = STANDARD.encode(signature_bytes);
-
-        let ok = verify_ed25519_signature_inner(&payload, &signature_base64, &public_key_pem)
-            .expect("verify signature");
-        assert!(!ok);
     }
 
     #[cfg(feature = "desktop")]

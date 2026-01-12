@@ -817,7 +817,6 @@ fn main() {
             commands::read_text_file,
             commands::read_binary_file,
             commands::read_binary_file_range,
-            commands::verify_ed25519_signature,
             commands::stat_file,
             commands::list_dir,
             commands::open_external_url,
