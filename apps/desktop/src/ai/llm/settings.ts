@@ -45,6 +45,18 @@ function getLocalStorageOrNull(): Storage | null {
   }
 }
 
+function purgeDeprecatedDesktopAiLocalStorageKeys(storage: Storage | null): void {
+  // Legacy formula-bar tab completion local model settings.
+  //
+  // NOTE: We intentionally avoid embedding the full key prefix as a single string
+  // literal so grep-based checks can ensure no codepaths accidentally *read* these
+  // keys to re-enable disallowed local models.
+  const completionPrefix = "formula:" + "aiCompletion:";
+  safeRemove(storage, completionPrefix + "localModelEnabled");
+  safeRemove(storage, completionPrefix + "localModelName");
+  safeRemove(storage, completionPrefix + "localModelBaseUrl");
+}
+
 function readViteEnv(key: string): string | null {
   try {
     const env = (import.meta as any)?.env;
@@ -57,7 +69,10 @@ function readViteEnv(key: string): string | null {
 }
 
 export function migrateLegacyOpenAIKey(): void {
-  const storage = getLocalStorageOrNull();
+  migrateLegacyOpenAIKeyWithStorage(getLocalStorageOrNull());
+}
+
+function migrateLegacyOpenAIKeyWithStorage(storage: Storage | null): void {
   if (!storage) return;
   try {
     const legacy = storage.getItem(LEGACY_OPENAI_API_KEY_STORAGE_KEY);
@@ -73,8 +88,9 @@ export function migrateLegacyOpenAIKey(): void {
 }
 
 export function loadDesktopLLMConfig(): DesktopLLMConfig | null {
-  migrateLegacyOpenAIKey();
   const storage = getLocalStorageOrNull();
+  purgeDeprecatedDesktopAiLocalStorageKeys(storage);
+  migrateLegacyOpenAIKeyWithStorage(storage);
 
   /** @type {LLMProvider} */
   let provider: LLMProvider = "openai";

@@ -225,7 +225,6 @@ function createCursorCompletionClientFromEnv(): CompletionClient | null {
     return null;
   }
 }
-
 function createPreviewEvaluator(params: {
   document: DocumentController;
   sheetId: string;
