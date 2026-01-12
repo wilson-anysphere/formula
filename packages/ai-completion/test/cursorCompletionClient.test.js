@@ -29,10 +29,38 @@ test("CursorCompletionClient sends a structured request body", async () => {
   assert.equal(seen?.url, "http://example.test/api/ai/tab-completion");
   assert.equal(seen?.init?.method, "POST");
   assert.equal(seen?.init?.headers?.["content-type"], "application/json");
+  assert.equal(seen?.init?.credentials, "include");
   assert.equal(typeof seen?.init?.signal?.aborted, "boolean");
 
   const body = JSON.parse(seen?.init?.body ?? "{}");
   assert.deepEqual(body, { input: "=1+", cursorPosition: 3, cellA1: "A1" });
+});
+
+test("CursorCompletionClient accepts a fully-qualified endpoint URL (does not append /api/ai/tab-completion twice)", async () => {
+  /** @type {{ url: string, init: any } | null} */
+  let seen = null;
+
+  const fetchImpl = async (url, init) => {
+    seen = { url, init };
+    return {
+      ok: true,
+      async json() {
+        return { completion: "2" };
+      },
+    };
+  };
+
+  const client = new CursorCompletionClient({
+    baseUrl: "http://example.test/api/ai/tab-completion",
+    fetchImpl,
+    timeoutMs: 500,
+  });
+
+  const completion = await client.completeTabCompletion({ input: "=1+", cursorPosition: 3, cellA1: "A1" });
+  assert.equal(completion, "2");
+
+  assert.equal(seen?.url, "http://example.test/api/ai/tab-completion");
+  assert.equal(seen?.init?.credentials, "include");
 });
 
 test("CursorCompletionClient aborts the request when the timeout budget is exceeded", async () => {
@@ -83,4 +111,3 @@ test("CursorCompletionClient returns empty string on non-2xx responses", async (
   const completion = await client.completeTabCompletion({ input: "=1+", cursorPosition: 3, cellA1: "A1" });
   assert.equal(completion, "");
 });
-
