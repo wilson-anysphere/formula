@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../spreadsheetApp";
-import { buildSelection } from "../../selection/selection";
+import { buildSelection, DEFAULT_GRID_LIMITS } from "../../selection/selection";
 
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
@@ -256,5 +256,68 @@ describe("SpreadsheetApp formatting keyboard shortcuts", () => {
     app.destroy();
     root.remove();
   });
-});
 
+  it("expands full-column selections to Excel bounds before applying formatting", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc = app.getDocument();
+
+    // Full column A within legacy limits (10k rows).
+    app.selectRange({ range: { startRow: 0, endRow: 9_999, startCol: 0, endCol: 0 } });
+
+    let lastRange: any = null;
+    const original = doc.setRangeFormat.bind(doc);
+    // Stub the write; we only want to assert the expanded range passed in.
+    doc.setRangeFormat = (_sheetId: string, range: any, patch: any, options?: any) => {
+      lastRange = range;
+      return true;
+    };
+
+    const event = new KeyboardEvent("keydown", { key: "b", ctrlKey: true, cancelable: true });
+    root.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+
+    doc.setRangeFormat = original;
+
+    expect(lastRange).not.toBeNull();
+    expect(lastRange.end.row).toBe(DEFAULT_GRID_LIMITS.maxRows - 1);
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("blocks formatting shortcuts for oversized non-band selections", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc = app.getDocument();
+
+    // 600 rows x 180 cols = 108k cells (above the 100k cap), and not a full row/col band.
+    app.selectRange({ range: { startRow: 0, endRow: 599, startCol: 0, endCol: 179 } });
+
+    const spy = vi.spyOn(doc, "setRangeFormat");
+    const event = new KeyboardEvent("keydown", { key: "b", ctrlKey: true, cancelable: true });
+    root.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("Selection is too large to format");
+
+    // Cleanup toast to avoid leaving timers running.
+    (document.querySelector<HTMLElement>('[data-testid="toast"]') as any)?.click?.();
+
+    app.destroy();
+    root.remove();
+  });
+});
