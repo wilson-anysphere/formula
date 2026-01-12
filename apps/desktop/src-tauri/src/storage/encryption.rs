@@ -49,6 +49,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use crate::atomic_write::write_file_atomic_io;
 use aes_gcm::aead::{AeadInPlace, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use base64::engine::general_purpose;
@@ -484,11 +485,8 @@ fn read_store_file(path: &Path) -> Result<StoreFile, DesktopStorageEncryptionErr
 }
 
 fn write_json_file(path: &Path, value: &impl Serialize) -> Result<(), DesktopStorageEncryptionError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     let json = serde_json::to_string_pretty(value)?;
-    fs::write(path, json)?;
+    write_file_atomic_io(path, json.as_bytes())?;
     Ok(())
 }
 

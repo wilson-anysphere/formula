@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
+use crate::atomic_write::write_file_atomic;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -125,10 +126,7 @@ impl MacroTrustStore {
             entries: self.persisted.clone(),
         };
         let json = serde_json::to_vec_pretty(&file).context("serialize macro trust store")?;
-        if let Some(dir) = path.parent() {
-            fs::create_dir_all(dir).with_context(|| format!("create trust store dir {dir:?}"))?;
-        }
-        fs::write(path, json).with_context(|| format!("write macro trust store {path:?}"))?;
+        write_file_atomic(path, &json).with_context(|| format!("write macro trust store {path:?}"))?;
         Ok(())
     }
 }
