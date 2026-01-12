@@ -12,6 +12,44 @@
  * @typedef {{ r: number, g: number, b: number }} RgbColor
  */
 
+/**
+ * Minimal CSS named color support so clipboard formats that use named colors
+ * (e.g. "red", "yellow", theme values like "rebeccapurple") serialize into a
+ * deterministic RTF color table even in non-DOM environments (Node tests).
+ *
+ * This is not an exhaustive list, but covers common spreadsheet colors and
+ * theme tokens used in this codebase.
+ *
+ * @type {Record<string, RgbColor>}
+ */
+const CSS_NAMED_COLORS = {
+  // Basic HTML colors + common aliases.
+  black: { r: 0, g: 0, b: 0 },
+  silver: { r: 192, g: 192, b: 192 },
+  gray: { r: 128, g: 128, b: 128 },
+  grey: { r: 128, g: 128, b: 128 },
+  white: { r: 255, g: 255, b: 255 },
+  maroon: { r: 128, g: 0, b: 0 },
+  red: { r: 255, g: 0, b: 0 },
+  purple: { r: 128, g: 0, b: 128 },
+  fuchsia: { r: 255, g: 0, b: 255 },
+  magenta: { r: 255, g: 0, b: 255 },
+  green: { r: 0, g: 128, b: 0 },
+  lime: { r: 0, g: 255, b: 0 },
+  olive: { r: 128, g: 128, b: 0 },
+  yellow: { r: 255, g: 255, b: 0 },
+  navy: { r: 0, g: 0, b: 128 },
+  blue: { r: 0, g: 0, b: 255 },
+  teal: { r: 0, g: 128, b: 128 },
+  aqua: { r: 0, g: 255, b: 255 },
+  cyan: { r: 0, g: 255, b: 255 },
+
+  // Common extras.
+  orange: { r: 255, g: 165, b: 0 },
+  hotpink: { r: 255, g: 105, b: 180 },
+  rebeccapurple: { r: 102, g: 51, b: 153 },
+};
+
 function clampByte(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return 0;
@@ -20,14 +58,58 @@ function clampByte(value) {
 
 /**
  * @param {string} value
+ * @returns {string | null}
+ */
+function normalizeCssColorViaDom(value) {
+  try {
+    // eslint-disable-next-line no-undef
+    const doc = typeof document !== "undefined" ? document : null;
+    // eslint-disable-next-line no-undef
+    const compute = typeof getComputedStyle === "function" ? getComputedStyle : null;
+    if (!doc || typeof doc.createElement !== "function" || !compute) return null;
+
+    const el = doc.createElement("span");
+    el.style.color = "";
+    el.style.color = value;
+    if (!el.style.color) return null;
+
+    const parent = doc.body ?? doc.documentElement;
+    if (parent && typeof parent.appendChild === "function") parent.appendChild(el);
+    const computed = compute(el).color;
+    el.remove();
+    return typeof computed === "string" && computed.trim() ? computed.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {string} value
  * @returns {RgbColor | null}
  */
 function parseCssColorToRgb(value) {
+  const parsed = parseCssColorToRgbNoDom(value);
+  if (parsed) return parsed;
+
+  const normalized = normalizeCssColorViaDom(value);
+  if (!normalized) return null;
+  return parseCssColorToRgbNoDom(normalized);
+}
+
+/**
+ * @param {string} value
+ * @returns {RgbColor | null}
+ */
+function parseCssColorToRgbNoDom(value) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
 
-  if (trimmed.toLowerCase() === "transparent") return null;
+  const lower = trimmed.toLowerCase();
+  if (lower === "transparent" || lower === "none") return null;
+
+  const named = CSS_NAMED_COLORS[lower];
+  if (named) return named;
 
   if (trimmed.startsWith("#")) {
     const hex = trimmed.slice(1);
@@ -48,13 +130,38 @@ function parseCssColorToRgb(value) {
     return null;
   }
 
-  const rgbMatch = /^rgba?\((.*)\)$/i.exec(trimmed);
-  if (rgbMatch) {
-    const inner = rgbMatch[1] ?? "";
-    const parts = inner
-      .split(",")
-      .map((p) => p.trim())
-      .filter(Boolean);
+  const match = /^(rgb|rgba)\(\s*([\s\S]+)\s*\)$/i.exec(trimmed);
+  if (match) {
+    let args = match[2]?.trim() ?? "";
+    if (!args) return null;
+
+    let alphaPart = null;
+
+    // Support modern slash syntax: rgb(1 2 3 / 0.5).
+    if (args.includes("/")) {
+      const parts = args.split("/");
+      if (parts.length !== 2) return null;
+      args = parts[0].trim();
+      alphaPart = parts[1].trim();
+    }
+
+    let parts = [];
+    if (args.includes(",")) {
+      parts = args
+        .split(",")
+        .map((p) => p.trim())
+        .filter(Boolean);
+    } else {
+      parts = args
+        .split(/\s+/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+    }
+
+    if (alphaPart == null && parts.length === 4) {
+      alphaPart = parts[3];
+      parts = parts.slice(0, 3);
+    }
 
     if (parts.length < 3) return null;
 
@@ -67,25 +174,31 @@ function parseCssColorToRgb(value) {
       return clampByte(Number.parseFloat(raw));
     };
 
-    let r = parseChannel(parts[0]);
-    let g = parseChannel(parts[1]);
-    let b = parseChannel(parts[2]);
+    const r = parseChannel(parts[0]);
+    const g = parseChannel(parts[1]);
+    const b = parseChannel(parts[2]);
 
-    if (parts.length >= 4) {
-      const a = Number.parseFloat(parts[3]);
-      const alpha = Number.isFinite(a) ? Math.max(0, Math.min(1, a)) : 1;
-      // RTF doesn't support alpha. Approximate by blending with white.
-      if (alpha < 1) {
-        r = clampByte(alpha * r + (1 - alpha) * 255);
-        g = clampByte(alpha * g + (1 - alpha) * 255);
-        b = clampByte(alpha * b + (1 - alpha) * 255);
-      }
+    if (alphaPart == null) return { r, g, b };
+
+    let alpha;
+    if (alphaPart.endsWith("%")) {
+      const pct = Number.parseFloat(alphaPart.slice(0, -1));
+      alpha = Number.isFinite(pct) ? pct / 100 : 1;
+    } else {
+      alpha = Number.parseFloat(alphaPart);
     }
+    alpha = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1;
 
-    return { r, g, b };
+    // RTF doesn't support alpha. Approximate by blending with white.
+    if (alpha >= 1) return { r, g, b };
+    return {
+      r: clampByte(alpha * r + (1 - alpha) * 255),
+      g: clampByte(alpha * g + (1 - alpha) * 255),
+      b: clampByte(alpha * b + (1 - alpha) * 255),
+    };
   }
 
-  // Unknown CSS color (named colors, hsl(), etc). Leave unset.
+  // Unknown CSS color (hsl(), var(--foo), etc). Leave unset.
   return null;
 }
 
@@ -153,6 +266,18 @@ function registerColor(colorIndexByKey, colors, cssColor) {
 }
 
 /**
+ * @param {Map<string, number>} colorIndexByKey
+ * @param {string | undefined} cssColor
+ * @returns {number}
+ */
+function getColorIndex(colorIndexByKey, cssColor) {
+  const rgb = cssColor ? parseCssColorToRgb(cssColor) : null;
+  if (!rgb) return 0;
+  const key = `${rgb.r},${rgb.g},${rgb.b}`;
+  return colorIndexByKey.get(key) ?? 0;
+}
+
+/**
  * @param {CellState} cell
  * @returns {string}
  */
@@ -216,7 +341,7 @@ export function serializeCellGridToRtf(grid) {
     for (let col = 0; col < colCount; col++) {
       const cell = row?.[col] ?? { value: null, formula: null, format: null };
       const bg = cell?.format?.backgroundColor;
-      const bgIndex = registerColor(colorIndexByKey, colors, bg);
+      const bgIndex = getColorIndex(colorIndexByKey, bg);
       const shading = bgIndex > 0 ? 10000 : 0;
       const cellx = (col + 1) * CELL_WIDTH_TWIPS;
       out.push(`\\clcbpat${bgIndex}\\clshdng${shading}\\cellx${cellx}`);
@@ -227,7 +352,7 @@ export function serializeCellGridToRtf(grid) {
       const cell = row?.[col] ?? { value: null, formula: null, format: null };
       const format = cell?.format ?? null;
 
-      const textIndex = registerColor(colorIndexByKey, colors, format?.textColor);
+      const textIndex = getColorIndex(colorIndexByKey, format?.textColor);
       const bold = Boolean(format?.bold);
       const italic = Boolean(format?.italic);
       const underline = Boolean(format?.underline);
@@ -248,4 +373,3 @@ export function serializeCellGridToRtf(grid) {
   out.push("}");
   return out.join("\n");
 }
-

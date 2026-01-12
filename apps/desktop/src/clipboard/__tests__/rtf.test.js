@@ -31,6 +31,18 @@ test("clipboard RTF includes basic formatting control words", () => {
   assert.match(rtf, /\\i(?=\\|\s)/); // \i
 });
 
+test("clipboard RTF serializes named colors into a color table", () => {
+  const rtf = serializeCellGridToRtf([
+    [{ value: "X", format: { textColor: "red", backgroundColor: "yellow" } }],
+  ]);
+
+  assert.match(rtf, /\\colortbl;/);
+  assert.match(rtf, /\\red255\\green0\\blue0;/);
+  assert.match(rtf, /\\red255\\green255\\blue0;/);
+  assert.match(rtf, /\\cf1\b/);
+  assert.match(rtf, /\\clcbpat2\b/);
+});
+
 test("serializeCellGridToClipboardPayload includes rtf", () => {
   const payload = serializeCellGridToClipboardPayload([[{ value: "X" }]]);
   assert.equal(typeof payload.rtf, "string");
