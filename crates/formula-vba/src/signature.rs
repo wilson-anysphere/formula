@@ -718,6 +718,19 @@ pub fn verify_vba_signature_certificate_trust(
     verify_pkcs7_trust(signature, &options.trusted_root_certs_der)
 }
 
+fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
+    // DigestInfo.algorithm values found in Authenticode `SpcIndirectDataContent`.
+    //
+    // - MD5:    1.2.840.113549.2.5
+    // - SHA-1:  1.3.14.3.2.26
+    // - SHA-256:2.16.840.1.101.3.4.2.1
+    match oid.trim() {
+        "1.2.840.113549.2.5" => Some(DigestAlg::Md5),
+        "1.3.14.3.2.26" => Some(DigestAlg::Sha1),
+        "2.16.840.1.101.3.4.2.1" => Some(DigestAlg::Sha256),
+        _ => None,
+    }
+}
 fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
     digest_alg_from_oid_str(oid).map(|alg| match alg {
         DigestAlg::Md5 => "MD5",
