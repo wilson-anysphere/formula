@@ -1394,6 +1394,47 @@ fn rich_values_support_field_access_formulas() {
 }
 
 #[wasm_bindgen_test]
+fn rich_values_support_image_inputs() {
+    let mut wb = WasmWorkbook::new();
+
+    let image = json!({
+        "type": "image",
+        "value": {
+            "imageId": "image1.png",
+            "altText": "Logo"
+        }
+    });
+
+    wb.set_cell_rich(
+        "A1".to_string(),
+        serde_wasm_bindgen::to_value(&image).unwrap(),
+        Some(DEFAULT_SHEET.to_string()),
+    )
+    .unwrap();
+
+    // Scalar getCell must keep returning scalar values/inputs.
+    let a1_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let a1: CellData = serde_wasm_bindgen::from_value(a1_js).unwrap();
+    assert!(a1.input.is_null());
+    assert_eq!(a1.value, JsonValue::String("Logo".to_string()));
+
+    // Rich getter preserves the rich input schema, but the engine degrades the value to text today.
+    let got_js = wb
+        .get_cell_rich("A1".to_string(), Some(DEFAULT_SHEET.to_string()))
+        .unwrap();
+    let got: JsonValue = serde_wasm_bindgen::from_value(got_js).unwrap();
+    assert_eq!(
+        got,
+        json!({
+            "sheet": DEFAULT_SHEET,
+            "address": "A1",
+            "input": image,
+            "value": { "type": "string", "value": "Logo" },
+        })
+    );
+}
+
+#[wasm_bindgen_test]
 fn rich_values_support_bracketed_field_access_formulas() {
     let mut wb = WasmWorkbook::new();
 
