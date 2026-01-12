@@ -4184,11 +4184,16 @@ export class SpreadsheetApp {
     if (!sumEl && !avgEl && !countEl) return;
 
     const summary = this.getSelectionSummary();
+    // `getSelectionSummary` returns `null` when there are no numeric values, but the
+    // status bar expects stable numeric formatting (and shouldn't crash Intl formatting).
+    const sum = summary.sum ?? 0;
+    const avg = summary.average ?? 0;
+    const count = summary.countNonEmpty;
     const formatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 
-    if (sumEl) sumEl.textContent = `Sum: ${formatter.format(summary.sum ?? 0)}`;
-    if (avgEl) avgEl.textContent = `Avg: ${formatter.format(summary.average ?? 0)}`;
-    if (countEl) countEl.textContent = `Count: ${formatter.format(summary.count)}`;
+    if (sumEl) sumEl.textContent = `Sum: ${formatter.format(sum)}`;
+    if (avgEl) avgEl.textContent = `Avg: ${formatter.format(avg)}`;
+    if (countEl) countEl.textContent = `Count: ${formatter.format(count)}`;
   }
 
   private syncEngineNow(): void {
@@ -7503,6 +7508,18 @@ function intersectRanges(a: Range, b: Range): Range | null {
 function mod(n: number, m: number): number {
   if (!Number.isFinite(n) || !Number.isFinite(m) || m === 0) return 0;
   return ((n % m) + m) % m;
+}
+
+function coerceNumber(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed === "") return null;
+    const num = Number(trimmed);
+    return Number.isFinite(num) ? num : null;
+  }
+  return null;
 }
 
 function colToName(col: number): string {
