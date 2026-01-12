@@ -2808,7 +2808,7 @@ function installSheetStoreSubscription(): void {
             if (!addedSet.has(sheetId)) continue;
             const meta = nextById.get(sheetId);
             if (!meta) continue;
-            void invoke("add_sheet", { sheet_id: sheetId, name: meta.name, index: idx }).catch(() => {
+            void invoke("add_sheet_with_id", { sheet_id: sheetId, name: meta.name, index: idx }).catch(() => {
               // ignore
             });
           }

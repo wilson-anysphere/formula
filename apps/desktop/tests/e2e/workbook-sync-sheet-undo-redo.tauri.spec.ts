@@ -88,6 +88,9 @@ function installTauriStubForTests() {
             return { id, name: args?.name ?? id, visibility: "visible" };
           }
 
+          case "add_sheet_with_id":
+            return null;
+
           case "stat_file":
             return { mtime_ms: 0, size_bytes: 0 };
 
@@ -293,5 +296,44 @@ test.describe("tauri workbookSync sheet metadata undo/redo", () => {
 
     const moveCalls = (await getInvokeCalls(page)).filter((c) => c.cmd === "move_sheet");
     expect(moveCalls.some((c) => c.args?.sheet_id === "Sheet3" && c.args?.to_index === 2)).toBe(true);
+  });
+
+  test("delete renamed sheet then undo recreates it via add_sheet_with_id (stable sheet id)", async ({ page }) => {
+    await page.addInitScript(installTauriStubForTests);
+    await page.addInitScript(() => {
+      // Avoid native blocking confirm; use a stubbed confirm so nativeDialogs.confirm proceeds.
+      (window as any).confirm = () => true;
+    });
+    await gotoDesktop(page);
+
+    const tab = page.getByTestId("sheet-tab-Sheet1");
+    await expect(tab).toBeVisible();
+
+    // Rename (changes display name but keeps sheet id stable).
+    await tab.dblclick();
+    const input = tab.locator("input");
+    await expect(input).toBeVisible();
+    await input.fill("Budget");
+    await input.press("Enter");
+    await expect(tab.locator(".sheet-tab__name")).toHaveText("Budget");
+
+    // Delete via context menu.
+    await tab.click({ button: "right" });
+    const menu = page.getByTestId("sheet-tab-context-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Delete" }).click();
+
+    await expect
+      .poll(async () => (await getInvokeCalls(page)).filter((c) => c.cmd === "delete_sheet").length, { timeout: 10_000 })
+      .toBe(1);
+
+    await page.evaluate(() => (window as any).__formulaApp.undo());
+
+    await expect
+      .poll(async () => (await getInvokeCalls(page)).filter((c) => c.cmd === "add_sheet_with_id").length, { timeout: 10_000 })
+      .toBe(1);
+
+    const calls = (await getInvokeCalls(page)).filter((c) => c.cmd === "add_sheet_with_id");
+    expect(calls[0]?.args).toMatchObject({ sheet_id: "Sheet1", name: "Budget" });
   });
 });
