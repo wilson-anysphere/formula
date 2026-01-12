@@ -7547,6 +7547,7 @@ export class SpreadsheetApp {
     })();
 
     this.document.beginBatch({ label: batchLabel });
+    let applied = true;
     try {
       for (const range of ranges) {
         const docRange = {
@@ -7556,21 +7557,28 @@ export class SpreadsheetApp {
 
         switch (action.kind) {
           case "bold":
-            toggleBold(this.document, this.sheetId, docRange);
+            if (toggleBold(this.document, this.sheetId, docRange) === false) applied = false;
             break;
           case "italic":
-            toggleItalic(this.document, this.sheetId, docRange);
+            if (toggleItalic(this.document, this.sheetId, docRange) === false) applied = false;
             break;
           case "underline":
-            toggleUnderline(this.document, this.sheetId, docRange);
+            if (toggleUnderline(this.document, this.sheetId, docRange) === false) applied = false;
             break;
           case "numberFormat":
-            applyNumberFormatPreset(this.document, this.sheetId, docRange, action.preset);
+            if (applyNumberFormatPreset(this.document, this.sheetId, docRange, action.preset) === false) applied = false;
             break;
         }
       }
     } finally {
       this.document.endBatch();
+    }
+    if (!applied) {
+      try {
+        showToast("Formatting could not be applied to the full selection. Try selecting fewer cells/rows.", "warning");
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
     }
 
     this.refresh();
