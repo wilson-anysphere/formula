@@ -16,6 +16,14 @@ export type BuiltinKeybinding = KeybindingContribution & {
    * If omitted, all bindings have the same weight.
    */
   weight?: number;
+  /**
+   * If true, the binding is allowed to fire on repeated `keydown` events while
+   * the user holds the chord down (e.g. Excel-like sheet navigation).
+   *
+   * Defaults to false to avoid accidental repeats for toggle commands (palette,
+   * AI chat, etc).
+   */
+  allowRepeat?: boolean;
 };
 
 export type KeybindingSource = { kind: "builtin" } | { kind: "extension"; extensionId: string };
@@ -25,6 +33,7 @@ type StoredKeybinding = {
   binding: ParsedKeybinding;
   weight: number;
   order: number;
+  allowRepeat: boolean;
 };
 
 function detectPlatform(): "mac" | "other" {
@@ -202,6 +211,7 @@ export class KeybindingService {
           binding: parsed,
           weight: typeof kb.weight === "number" ? kb.weight : 0,
           order: ++this.orderCounter,
+          allowRepeat: kb.allowRepeat === true,
         });
       }
     }
@@ -226,6 +236,7 @@ export class KeybindingService {
         binding: parsed,
         weight: 0,
         order: ++this.orderCounter,
+        allowRepeat: false,
       });
     }
     this.extensionKeybindings = filtered;
@@ -269,7 +280,6 @@ export class KeybindingService {
     opts: { allowBuiltins?: boolean; allowExtensions?: boolean } = {},
   ): boolean {
     if (event.defaultPrevented) return false;
-    if (event.repeat) return false;
     if (isInsideKeybindingBarrier(event.target)) return false;
     const inputTarget = isInputTarget(event.target);
     if (inputTarget && this.ignoreInputTargets === "all") return false;
@@ -298,9 +308,6 @@ export class KeybindingService {
     opts: { allowBuiltins?: boolean; allowExtensions?: boolean } = {},
   ): Promise<boolean> {
     if (event.defaultPrevented) return false;
-    // Avoid repeatedly firing commands when the user holds a key down (e.g. toggles like
-    // command palette / AI chat). Spreadsheet-style repeat behavior is handled by the grid.
-    if (event.repeat) return false;
     if (isInsideKeybindingBarrier(event.target)) return false;
     const inputTarget = isInputTarget(event.target);
     if (inputTarget && this.ignoreInputTargets === "all") return false;
@@ -383,6 +390,9 @@ export class KeybindingService {
     // For now, do a simple linear scan picking the best match.
     let best: StoredKeybinding | null = null;
     for (const entry of bindings) {
+      // Avoid repeatedly firing commands when the user holds a key down (e.g. toggles like
+      // command palette / AI chat). Bindings must explicitly opt into repeat behavior.
+      if (event.repeat && !entry.allowRepeat) continue;
       if (!matchesKeybinding(entry.binding, event)) continue;
       if (!evaluateWhenClause(entry.binding.when, lookup)) continue;
       if (!best) {

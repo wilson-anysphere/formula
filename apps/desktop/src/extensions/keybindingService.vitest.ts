@@ -358,7 +358,7 @@ describe("KeybindingService", () => {
     expect(run).toHaveBeenCalledTimes(2);
   });
 
-  it("does not dispatch on repeated keydown events", async () => {
+  it("dispatches on repeated keydown events when a builtin binding opts into repeats", async () => {
     const contextKeys = new ContextKeyService();
     const commandRegistry = new CommandRegistry();
 
@@ -366,7 +366,25 @@ describe("KeybindingService", () => {
     commandRegistry.registerBuiltinCommand("builtin.repeatTest", "Builtin", builtinRun);
 
     const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
-    service.setBuiltinKeybindings([{ command: "builtin.repeatTest", key: "ctrl+k" }]);
+    service.setBuiltinKeybindings([{ command: "builtin.repeatTest", key: "ctrl+k", allowRepeat: true }]);
+
+    const event = makeKeydownEvent({ key: "k", ctrlKey: true, repeat: true });
+    const handled = await service.dispatchKeydown(event);
+
+    expect(handled).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+    expect(builtinRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not dispatch on repeated keydown events by default", async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const builtinRun = vi.fn();
+    commandRegistry.registerBuiltinCommand("builtin.repeatDefault", "Builtin", builtinRun);
+
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
+    service.setBuiltinKeybindings([{ command: "builtin.repeatDefault", key: "ctrl+k" }]);
 
     const event = makeKeydownEvent({ key: "k", ctrlKey: true, repeat: true });
     const handled = await service.dispatchKeydown(event);

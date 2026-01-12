@@ -3,6 +3,11 @@ export type BuiltinKeybinding = {
   key: string;
   mac?: string | null;
   when?: string | null;
+  /**
+   * If true, the command may fire repeatedly while the user holds the key chord down.
+   * Defaults to false to avoid accidental repeats for toggle commands.
+   */
+  allowRepeat?: boolean;
 };
 
 // Spreadsheet-affecting shortcuts should fail closed when the focus/edit context keys
@@ -302,12 +307,14 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     key: "ctrl+pageup",
     mac: "cmd+pageup",
     when: WHEN_SHEET_NAVIGATION,
+    allowRepeat: true,
   },
   {
     command: "workbook.nextSheet",
     key: "ctrl+pagedown",
     mac: "cmd+pagedown",
     when: WHEN_SHEET_NAVIGATION,
+    allowRepeat: true,
   },
   {
     command: "comments.addComment",
@@ -328,4 +335,3 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: WHEN_COMMAND_PALETTE_CLOSED,
   },
 ];
-
