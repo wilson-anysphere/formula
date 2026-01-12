@@ -90,13 +90,14 @@ pub(crate) fn parse_biff_defined_names(
                 itab_last,
             } => rgce::ExternSheetRef {
                 // Best-effort: the rgce decoder expects unsigned indices. Negative itab values are
-                // treated as out-of-range by the decoder and will render as `#SHEET(...)!`.
+                // treated as out-of-range by the decoder and will render as a placeholder quoted
+                // sheet name like `'#SHEET(...)'!`.
                 itab_first: itab_first as u16,
                 itab_last: itab_last as u16,
             },
             extern_sheet::ExternSheetRef::External => rgce::ExternSheetRef {
                 // External references cannot currently be resolved; use a sentinel that will render
-                // as `#SHEET(...)!` with a warning.
+                // as a placeholder quoted sheet name like `'#SHEET(...)'!` with a warning.
                 itab_first: u16::MAX,
                 itab_last: u16::MAX,
             },

@@ -451,7 +451,9 @@ pub(crate) fn decode_biff8_rgce(rgce: &[u8], ctx: &RgceDecodeContext<'_>) -> Dec
                             warnings.push(format!(
                                 "unknown BIFF function id 0x{func_id:04X} (PtgFuncVar) in rgce"
                             ));
-                            name_owned = format!("#UNKNOWN_FUNC(0x{func_id:04X})");
+                            // Keep the output parseable by using a plain identifier function name
+                            // (our parser doesn't accept parentheses inside error literals).
+                            name_owned = format!("_UNKNOWN_FUNC_0x{func_id:04X}");
                             &name_owned
                         }
                     };
@@ -478,7 +480,7 @@ pub(crate) fn decode_biff8_rgce(rgce: &[u8], ctx: &RgceDecodeContext<'_>) -> Dec
                 let idx = name_id.saturating_sub(1) as usize;
                 let Some(meta) = ctx.defined_names.get(idx) else {
                     warnings.push(format!("PtgName references missing name index {name_id}"));
-                    stack.push(ExprFragment::new(format!("#NAME_ID({name_id})")));
+                    stack.push(ExprFragment::new("#NAME?".to_string()));
                     continue;
                 };
 
@@ -656,13 +658,7 @@ pub(crate) fn decode_biff8_rgce(rgce: &[u8], ctx: &RgceDecodeContext<'_>) -> Dec
                 let col = u16::from_le_bytes([input[4], input[5]]);
                 input = &input[6..];
 
-                let sheet_prefix = match format_sheet_ref(ixti, ctx) {
-                    Ok(v) => v,
-                    Err(err) => {
-                        warnings.push(err);
-                        format!("#SHEET(ixti={ixti})!")
-                    }
-                };
+                let sheet_prefix = sheet_prefix_or_placeholder(ixti, ctx, &mut warnings);
                 let cell = format_cell_ref(row, col);
                 stack.push(ExprFragment::new(format!("{sheet_prefix}{cell}")));
             }
@@ -679,13 +675,7 @@ pub(crate) fn decode_biff8_rgce(rgce: &[u8], ctx: &RgceDecodeContext<'_>) -> Dec
                 let col2 = u16::from_le_bytes([input[8], input[9]]);
                 input = &input[10..];
 
-                let sheet_prefix = match format_sheet_ref(ixti, ctx) {
-                    Ok(v) => v,
-                    Err(err) => {
-                        warnings.push(err);
-                        format!("#SHEET(ixti={ixti})!")
-                    }
-                };
+                let sheet_prefix = sheet_prefix_or_placeholder(ixti, ctx, &mut warnings);
                 let area = format_area_ref(row1, col1, row2, col2);
                 stack.push(ExprFragment::new(format!("{sheet_prefix}{area}")));
             }
@@ -733,13 +723,7 @@ pub(crate) fn decode_biff8_rgce(rgce: &[u8], ctx: &RgceDecodeContext<'_>) -> Dec
                 {
                     stack.push(ExprFragment::new("#REF!".to_string()));
                 } else {
-                    let sheet_prefix = match format_sheet_ref(ixti, ctx) {
-                        Ok(v) => v,
-                        Err(err) => {
-                            warnings.push(err);
-                            format!("#SHEET(ixti={ixti})!")
-                        }
-                    };
+                    let sheet_prefix = sheet_prefix_or_placeholder(ixti, ctx, &mut warnings);
                     let cell = format_cell_ref_no_dollars(abs_row0 as u32, abs_col0 as u32);
                     stack.push(ExprFragment::new(format!("{sheet_prefix}{cell}")));
                 }
@@ -773,13 +757,7 @@ pub(crate) fn decode_biff8_rgce(rgce: &[u8], ctx: &RgceDecodeContext<'_>) -> Dec
                 {
                     stack.push(ExprFragment::new("#REF!".to_string()));
                 } else {
-                    let sheet_prefix = match format_sheet_ref(ixti, ctx) {
-                        Ok(v) => v,
-                        Err(err) => {
-                            warnings.push(err);
-                            format!("#SHEET(ixti={ixti})!")
-                        }
-                    };
+                    let sheet_prefix = sheet_prefix_or_placeholder(ixti, ctx, &mut warnings);
 
                     let start =
                         format_cell_ref_no_dollars(abs_row_first as u32, abs_col_first as u32);
@@ -816,7 +794,9 @@ pub(crate) fn decode_biff8_rgce(rgce: &[u8], ctx: &RgceDecodeContext<'_>) -> Dec
 
 fn unsupported(ptg: u8, warnings: Vec<String>) -> DecodeRgceResult {
     DecodeRgceResult {
-        text: format!("#UNSUPPORTED_PTG(0x{ptg:02X})"),
+        // Use a parseable error literal (no parentheses) so downstream formula parsing can still
+        // succeed when we hit an unsupported ptg.
+        text: format!("#UNSUPPORTED_PTG_0x{ptg:02X}!"),
         warnings,
     }
 }
@@ -931,6 +911,21 @@ fn format_sheet_ref(ixti: u16, ctx: &RgceDecodeContext<'_>) -> Result<String, St
             "{}!",
             quote_sheet_range_name_if_needed(first, last)
         ))
+    }
+}
+
+fn sheet_prefix_or_placeholder(
+    ixti: u16,
+    ctx: &RgceDecodeContext<'_>,
+    warnings: &mut Vec<String>,
+) -> String {
+    match format_sheet_ref(ixti, ctx) {
+        Ok(v) => v,
+        Err(err) => {
+            warnings.push(err);
+            let placeholder = format!("#SHEET(ixti={ixti})");
+            format!("{}!", quote_sheet_name_if_needed(&placeholder))
+        }
     }
 }
 
@@ -1477,6 +1472,47 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Sheet1!A1");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_ref3d_with_missing_sheet_to_placeholder_sheet_name() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // PtgRef3d with an ixti that points to a sheet index we don't have.
+        let rgce = [0x3A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "'#SHEET(ixti=0)'!$A$1");
+        assert!(
+            !decoded.warnings.is_empty(),
+            "expected warning for missing sheet, warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_name_missing_to_name_error() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // PtgName with name_id=1 but empty ctx.defined_names.
+        let rgce = [0x23, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#NAME?");
+        assert!(
+            !decoded.warnings.is_empty(),
+            "expected warning for missing name, warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
