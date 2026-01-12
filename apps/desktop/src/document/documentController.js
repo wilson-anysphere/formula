@@ -3638,7 +3638,7 @@ export class DocumentController {
     this.lastMergeTime = 0;
 
     const source = typeof options.source === "string" ? options.source : undefined;
-    this.#applyEdits([], [], [], deltas, { recalc: false, emitChange: true, source });
+    this.#applyEdits([], [], [], deltas, [], null, { recalc: false, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
     if (options.markDirty !== false) {
