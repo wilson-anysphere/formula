@@ -117,6 +117,9 @@ test.describe("in-cell editor F4 toggles absolute/relative references", () => {
 
       await page.keyboard.press("F4");
       await expect(editor).toHaveValue("='My Sheet'!$A$1:$B$2");
+      const value = await editor.inputValue();
+      await expect(editor).toHaveJSProperty("selectionStart", 1);
+      await expect(editor).toHaveJSProperty("selectionEnd", value.length);
     });
   }
 });

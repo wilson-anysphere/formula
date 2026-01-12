@@ -122,6 +122,13 @@ test.describe("formula bar F4 toggles absolute/relative references", () => {
 
       await page.keyboard.press("F4");
       await expect(input).toHaveValue("='My Sheet'!$A$1:$B$2");
+      const value = await input.inputValue();
+      expect(
+        await input.evaluate((el) => ({
+          start: (el as HTMLTextAreaElement).selectionStart,
+          end: (el as HTMLTextAreaElement).selectionEnd,
+        }))
+      ).toEqual({ start: 1, end: value.length });
     });
   }
 });

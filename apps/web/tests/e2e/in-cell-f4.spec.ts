@@ -115,4 +115,7 @@ test("in-cell editor F4 toggles sheet-qualified range references", async ({ page
 
   await editor.press("F4");
   await expect(editor).toHaveValue("='My Sheet'!$A$1:$B$2");
+  const value = await editor.inputValue();
+  await expect(editor).toHaveJSProperty("selectionStart", 1);
+  await expect(editor).toHaveJSProperty("selectionEnd", value.length);
 });

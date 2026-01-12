@@ -84,4 +84,7 @@ test("formula bar F4 preserves sheet qualifiers and toggles range endpoints", as
 
   await input.press("F4");
   await expect(input).toHaveValue("='My Sheet'!$A$1:$B$2");
+  const value = await input.inputValue();
+  await expect(input).toHaveJSProperty("selectionStart", 1);
+  await expect(input).toHaveJSProperty("selectionEnd", value.length);
 });
