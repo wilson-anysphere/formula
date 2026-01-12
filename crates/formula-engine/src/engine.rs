@@ -7282,7 +7282,8 @@ fn bytecode_expr_is_eligible_inner(
             {
                 [] => true,
                 [bytecode::Expr::CellRef(_)] => true,
-                [bytecode::Expr::RangeRef(r)] => r.start == r.end,
+                [bytecode::Expr::RangeRef(_)] => true,
+                [bytecode::Expr::MultiRangeRef(_)] => true,
                 _ => false,
             },
             bytecode::ast::Function::Rows | bytecode::ast::Function::Columns => {
@@ -7411,12 +7412,7 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 1 {
                     return false;
                 }
-                match &args[0] {
-                    // These functions support arrays in the AST evaluator; a multi-cell range
-                    // argument would spill. Only allow single-cell ranges in bytecode for now.
-                    bytecode::Expr::RangeRef(r) => r.start == r.end,
-                    other => bytecode_expr_is_eligible_inner(other, false, false, lexical_scopes),
-                }
+                bytecode_expr_is_eligible_inner(&args[0], true, true, lexical_scopes)
             }
             bytecode::ast::Function::Type => {
                 if args.len() != 1 {

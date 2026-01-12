@@ -1105,8 +1105,8 @@ pub fn call_function(
         Function::T => fn_t(args, grid, base),
         Function::Now => fn_now(args),
         Function::Today => fn_today(args),
-        Function::Row => fn_row(args, base),
-        Function::Column => fn_column(args, base),
+        Function::Row => fn_row(args, grid, base),
+        Function::Column => fn_column(args, grid, base),
         Function::Rows => fn_rows(args, base),
         Function::Columns => fn_columns(args, base),
         Function::Address => fn_address(args),
@@ -1965,35 +1965,73 @@ fn or_range_on_sheet(
     None
 }
 
-fn deref_single_cell_range(
-    grid: &dyn Grid,
-    range: RangeRef,
-    base: CellCoord,
-) -> Result<Value, ErrorKind> {
-    let resolved = range.resolve(base);
-    if resolved.rows() == 1 && resolved.cols() == 1 {
-        Ok(grid.get_value(CellCoord {
-            row: resolved.row_start,
-            col: resolved.col_start,
-        }))
-    } else {
-        Err(ErrorKind::Spill)
+fn map_value<F>(value: &Value, f: F) -> Value
+where
+    F: Fn(&Value) -> Value + Copy,
+{
+    match value {
+        Value::Array(arr) => {
+            let mut out = Vec::new();
+            if out.try_reserve_exact(arr.rows.saturating_mul(arr.cols)).is_err() {
+                return Value::Error(ErrorKind::Num);
+            }
+            for v in arr.iter() {
+                out.push(f(v));
+            }
+            Value::Array(ArrayValue::new(arr.rows, arr.cols, out))
+        }
+        other => f(other),
     }
 }
 
-fn scalar_or_single_cell_range(
-    arg: Value,
-    grid: &dyn Grid,
-    base: CellCoord,
-) -> Result<Value, ErrorKind> {
+fn map_arg<F>(arg: &Value, grid: &dyn Grid, base: CellCoord, f: F) -> Value
+where
+    F: Fn(&Value) -> Value + Copy,
+{
     match arg {
-        Value::Range(r) => deref_single_cell_range(grid, r, base),
-        Value::Array(_) => Err(ErrorKind::Spill),
+        Value::Range(r) => {
+            let resolved = r.resolve(base);
+            if !range_in_bounds(grid, resolved) {
+                return map_value(&Value::Error(ErrorKind::Ref), f);
+            }
+
+            if resolved.rows() == 1 && resolved.cols() == 1 {
+                let v = grid.get_value(CellCoord {
+                    row: resolved.row_start,
+                    col: resolved.col_start,
+                });
+                return map_value(&v, f);
+            }
+
+            let rows = match usize::try_from(resolved.rows()) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::Num),
+            };
+            let cols = match usize::try_from(resolved.cols()) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::Num),
+            };
+            let total = match rows.checked_mul(cols) {
+                Some(v) => v,
+                None => return Value::Error(ErrorKind::Num),
+            };
+            let mut values = Vec::new();
+            if values.try_reserve_exact(total).is_err() {
+                return Value::Error(ErrorKind::Num);
+            }
+            for row in resolved.row_start..=resolved.row_end {
+                for col in resolved.col_start..=resolved.col_end {
+                    let v = grid.get_value(CellCoord { row, col });
+                    values.push(f(&v));
+                }
+            }
+            Value::Array(ArrayValue::new(rows, cols, values))
+        }
         // Multi-sheet ranges (3D sheet spans) are lowered to a MultiRange value, which matches the
         // evaluator's "reference union" behavior. Information functions treat these as invalid
         // arguments (#VALUE!) rather than spilling arrays.
-        Value::MultiRange(_) => Err(ErrorKind::Value),
-        other => Ok(other),
+        Value::MultiRange(_) => Value::Error(ErrorKind::Value),
+        other => map_value(other, f),
     }
 }
 
@@ -2001,55 +2039,39 @@ fn fn_isblank(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let v = match scalar_or_single_cell_range(args[0].clone(), grid, base) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    Value::Bool(matches!(v, Value::Empty))
+    map_arg(&args[0], grid, base, |v| Value::Bool(matches!(v, Value::Empty)))
 }
 
 fn fn_isnumber(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let v = match scalar_or_single_cell_range(args[0].clone(), grid, base) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    Value::Bool(matches!(v, Value::Number(n) if n.is_finite()))
+    map_arg(&args[0], grid, base, |v| {
+        Value::Bool(matches!(v, Value::Number(n) if n.is_finite()))
+    })
 }
 
 fn fn_istext(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let v = match scalar_or_single_cell_range(args[0].clone(), grid, base) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    Value::Bool(matches!(v, Value::Text(_)))
+    map_arg(&args[0], grid, base, |v| Value::Bool(matches!(v, Value::Text(_))))
 }
 
 fn fn_islogical(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let v = match scalar_or_single_cell_range(args[0].clone(), grid, base) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    Value::Bool(matches!(v, Value::Bool(_)))
+    map_arg(&args[0], grid, base, |v| Value::Bool(matches!(v, Value::Bool(_))))
 }
 
 fn fn_iserr(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let v = match scalar_or_single_cell_range(args[0].clone(), grid, base) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    Value::Bool(matches!(v, Value::Error(e) if e != ErrorKind::NA))
+    map_arg(&args[0], grid, base, |v| {
+        Value::Bool(matches!(v, Value::Error(e) if *e != ErrorKind::NA))
+    })
 }
 
 fn type_code_for_scalar(value: &Value) -> i32 {
@@ -2099,63 +2121,93 @@ fn fn_error_type(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let v = match scalar_or_single_cell_range(args[0].clone(), grid, base) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    match v {
-        Value::Error(e) => Value::Number(error_type_code(e) as f64),
+    map_arg(&args[0], grid, base, |v| match v {
+        Value::Error(e) => Value::Number(error_type_code(*e) as f64),
         _ => Value::Error(ErrorKind::NA),
-    }
+    })
 }
 
 fn fn_n(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let v = match scalar_or_single_cell_range(args[0].clone(), grid, base) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    match v {
-        Value::Error(e) => Value::Error(e),
-        Value::Number(n) => Value::Number(n),
-        Value::Bool(b) => Value::Number(if b { 1.0 } else { 0.0 }),
+    map_arg(&args[0], grid, base, |v| match v {
+        Value::Error(e) => Value::Error(*e),
+        Value::Number(n) => Value::Number(*n),
+        Value::Bool(b) => Value::Number(if *b { 1.0 } else { 0.0 }),
         Value::Empty | Value::Text(_) => Value::Number(0.0),
-        Value::MultiRange(_) => Value::Error(ErrorKind::Value),
-        Value::Array(_) | Value::Range(_) => Value::Error(ErrorKind::Spill),
-    }
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Value::Error(ErrorKind::Value),
+    })
 }
 
 fn fn_t(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let v = match scalar_or_single_cell_range(args[0].clone(), grid, base) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    match v {
-        Value::Error(e) => Value::Error(e),
-        Value::Text(s) => Value::Text(s),
+    map_arg(&args[0], grid, base, |v| match v {
+        Value::Error(e) => Value::Error(*e),
+        Value::Text(s) => Value::Text(s.clone()),
         Value::Number(_) | Value::Bool(_) | Value::Empty => Value::Text(Arc::from("")),
-        Value::MultiRange(_) => Value::Error(ErrorKind::Value),
-        Value::Array(_) | Value::Range(_) => Value::Error(ErrorKind::Spill),
-    }
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Value::Error(ErrorKind::Value),
+    })
 }
 
-fn fn_row(args: &[Value], base: CellCoord) -> Value {
+fn fn_row(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     match args {
         [] => Value::Number((base.row + 1) as f64),
         [Value::Range(r)] => {
-            let resolved = r.resolve(base);
-            if resolved.rows() == 1 && resolved.cols() == 1 {
-                Value::Number((resolved.row_start + 1) as f64)
-            } else {
-                // `ROW(reference)` can return a dynamic array for multi-cell references, which the
-                // bytecode backend does not currently support.
-                Value::Error(ErrorKind::Spill)
+            let reference = r.resolve(base);
+            if !range_in_bounds(grid, reference) {
+                return Value::Error(ErrorKind::Ref);
             }
+
+            if reference.rows() == 1 && reference.cols() == 1 {
+                return Value::Number((reference.row_start + 1) as f64);
+            }
+
+            let rows = match usize::try_from(reference.rows()) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::Num),
+            };
+            let cols = match usize::try_from(reference.cols()) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::Num),
+            };
+
+            let spans_all_cols = reference.col_start == 0
+                && reference.col_end == (EXCEL_MAX_COLS as i32).saturating_sub(1);
+            let spans_all_rows = reference.row_start == 0
+                && reference.row_end == (EXCEL_MAX_ROWS as i32).saturating_sub(1);
+
+            if spans_all_cols || spans_all_rows {
+                let mut values = Vec::new();
+                if values.try_reserve_exact(rows).is_err() {
+                    return Value::Error(ErrorKind::Num);
+                }
+                for row in reference.row_start..=reference.row_end {
+                    values.push(Value::Number((row + 1) as f64));
+                }
+                if rows == 1 {
+                    return values.first().cloned().unwrap_or(Value::Empty);
+                }
+                return Value::Array(ArrayValue::new(rows, 1, values));
+            }
+
+            let total = match rows.checked_mul(cols) {
+                Some(v) => v,
+                None => return Value::Error(ErrorKind::Num),
+            };
+            let mut values = Vec::new();
+            if values.try_reserve_exact(total).is_err() {
+                return Value::Error(ErrorKind::Num);
+            }
+            for row in reference.row_start..=reference.row_end {
+                let n = Value::Number((row + 1) as f64);
+                for _ in reference.col_start..=reference.col_end {
+                    values.push(n.clone());
+                }
+            }
+            Value::Array(ArrayValue::new(rows, cols, values))
         }
         [Value::Error(e)] => Value::Error(*e),
         [_] => Value::Error(ErrorKind::Value),
@@ -2163,18 +2215,67 @@ fn fn_row(args: &[Value], base: CellCoord) -> Value {
     }
 }
 
-fn fn_column(args: &[Value], base: CellCoord) -> Value {
+fn fn_column(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     match args {
         [] => Value::Number((base.col + 1) as f64),
         [Value::Range(r)] => {
-            let resolved = r.resolve(base);
-            if resolved.rows() == 1 && resolved.cols() == 1 {
-                Value::Number((resolved.col_start + 1) as f64)
-            } else {
-                // `COLUMN(reference)` can return a dynamic array for multi-cell references, which
-                // the bytecode backend does not currently support.
-                Value::Error(ErrorKind::Spill)
+            let reference = r.resolve(base);
+            if !range_in_bounds(grid, reference) {
+                return Value::Error(ErrorKind::Ref);
             }
+
+            if reference.rows() == 1 && reference.cols() == 1 {
+                return Value::Number((reference.col_start + 1) as f64);
+            }
+
+            let rows = match usize::try_from(reference.rows()) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::Num),
+            };
+            let cols = match usize::try_from(reference.cols()) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::Num),
+            };
+
+            let spans_all_cols = reference.col_start == 0
+                && reference.col_end == (EXCEL_MAX_COLS as i32).saturating_sub(1);
+            let spans_all_rows = reference.row_start == 0
+                && reference.row_end == (EXCEL_MAX_ROWS as i32).saturating_sub(1);
+
+            if spans_all_cols || spans_all_rows {
+                let mut values = Vec::new();
+                if values.try_reserve_exact(cols).is_err() {
+                    return Value::Error(ErrorKind::Num);
+                }
+                for col in reference.col_start..=reference.col_end {
+                    values.push(Value::Number((col + 1) as f64));
+                }
+                if cols == 1 {
+                    return values.first().cloned().unwrap_or(Value::Empty);
+                }
+                return Value::Array(ArrayValue::new(1, cols, values));
+            }
+
+            let total = match rows.checked_mul(cols) {
+                Some(v) => v,
+                None => return Value::Error(ErrorKind::Num),
+            };
+            let mut values = Vec::new();
+            if values.try_reserve_exact(total).is_err() {
+                return Value::Error(ErrorKind::Num);
+            }
+            let mut row_values = Vec::new();
+            if row_values.try_reserve_exact(cols).is_err() {
+                return Value::Error(ErrorKind::Num);
+            }
+            for col in reference.col_start..=reference.col_end {
+                row_values.push(Value::Number((col + 1) as f64));
+            }
+            for _ in 0..rows {
+                values.extend(row_values.iter().cloned());
+            }
+
+            Value::Array(ArrayValue::new(rows, cols, values))
         }
         [Value::Error(e)] => Value::Error(*e),
         [_] => Value::Error(ErrorKind::Value),
