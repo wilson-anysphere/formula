@@ -25,6 +25,29 @@ pub use worksheet_scan::scan_cells_with_metadata_indices;
 pub use rich_value_images::{ExtractedRichValueImages, RichValueEntry, RichValueIndex, RichValueWarning};
 
 use std::cmp::Ordering;
+
+/// Workbook relationship type for `xl/richData/richValueRel.xml`.
+pub const REL_TYPE_RICH_VALUE_REL: &str =
+    "http://schemas.microsoft.com/office/2022/10/relationships/richValueRel";
+/// Workbook relationship type for `xl/richData/rdrichvalue.xml`.
+pub const REL_TYPE_RD_RICH_VALUE: &str =
+    "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue";
+/// Workbook relationship type for `xl/richData/rdrichvaluestructure.xml`.
+pub const REL_TYPE_RD_RICH_VALUE_STRUCTURE: &str =
+    "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure";
+/// Workbook relationship type for `xl/richData/rdrichvaluetypes.xml`.
+pub const REL_TYPE_RD_RICH_VALUE_TYPES: &str =
+    "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes";
+
+/// `[Content_Types].xml` override content type for `xl/richData/rdrichvaluetypes.xml`.
+pub const CONTENT_TYPE_RDRICHVALUETYPES: &str = "application/vnd.ms-excel.rdrichvaluetypes+xml";
+/// `[Content_Types].xml` override content type for `xl/richData/rdrichvalue.xml`.
+pub const CONTENT_TYPE_RDRICHVALUE: &str = "application/vnd.ms-excel.rdrichvalue+xml";
+/// `[Content_Types].xml` override content type for `xl/richData/rdrichvaluestructure.xml`.
+pub const CONTENT_TYPE_RDRICHVALUESTRUCTURE: &str =
+    "application/vnd.ms-excel.rdrichvaluestructure+xml";
+/// `[Content_Types].xml` override content type for `xl/richData/richValueRel.xml`.
+pub const CONTENT_TYPE_RICHVALUEREL: &str = "application/vnd.ms-excel.richvaluerel+xml";
 use std::collections::HashMap;
 
 use formula_model::CellRef;
