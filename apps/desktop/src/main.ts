@@ -4659,6 +4659,14 @@ if (
 
   type GridHitTest = { area: GridArea; row: number | null; col: number | null };
 
+  const gridAreaForSelection = (selection: SelectionState | null = lastSelection): GridArea => {
+    const type = selection?.type;
+    if (type === "row") return "rowHeader";
+    if (type === "column") return "colHeader";
+    if (type === "all") return "corner";
+    return "cell";
+  };
+
   const hitTestGridAreaAtClientPoint = (clientX: number, clientY: number): GridHitTest => {
     const anyApp = app as any;
     const rootRect = gridRoot.getBoundingClientRect();
@@ -4718,6 +4726,26 @@ if (
     if (pickedCell) return { area: "cell", row: pickedCell.row, col: pickedCell.col };
 
     return { area: "cell", row: null, col: null };
+  };
+
+  const hitTestSplitGridAreaAtClientPoint = (clientX: number, clientY: number): GridHitTest => {
+    if (!secondaryGridView) return { area: "cell", row: null, col: null };
+    const renderer = secondaryGridView.grid?.renderer as { pickCellAt?: (x: number, y: number) => { row: number; col: number } | null } | null;
+    if (!renderer?.pickCellAt) return { area: "cell", row: null, col: null };
+    const selectionCanvas = gridSecondaryEl.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+    const canvasRect = (selectionCanvas ?? gridSecondaryEl).getBoundingClientRect();
+    const vx = clientX - canvasRect.left;
+    const vy = clientY - canvasRect.top;
+    if (!Number.isFinite(vx) || !Number.isFinite(vy)) return { area: "cell", row: null, col: null };
+    if (vx < 0 || vy < 0 || vx > canvasRect.width || vy > canvasRect.height) return { area: "cell", row: null, col: null };
+    const picked = renderer.pickCellAt(vx, vy);
+    if (!picked) return { area: "cell", row: null, col: null };
+    const headerRows = SPLIT_HEADER_ROWS;
+    const headerCols = SPLIT_HEADER_COLS;
+    if (picked.row < headerRows && picked.col < headerCols) return { area: "corner", row: null, col: null };
+    if (picked.col < headerCols) return { area: "rowHeader", row: picked.row - headerRows, col: null };
+    if (picked.row < headerRows) return { area: "colHeader", row: null, col: picked.col - headerCols };
+    return { area: "cell", row: picked.row - headerRows, col: picked.col - headerCols };
   };
 
   const selectedRowIndices = (): number[] => {
@@ -5197,10 +5225,69 @@ if (
   gridSecondaryEl.addEventListener("contextmenu", (e) => {
     // Always prevent the native context menu; we render our own.
     e.preventDefault();
-    openGridContextMenuAtPoint(e.clientX, e.clientY);
+
+    const anchorX = e.clientX;
+    const anchorY = e.clientY;
+
+    const hit = hitTestSplitGridAreaAtClientPoint(anchorX, anchorY);
+    currentGridArea = hit.area;
+
+    const limits = getGridLimitsForFormatting();
+    const ranges = app.getSelectionRanges();
+    const normalizedRanges = ranges.map(normalizeSelectionRange);
+
+    // Mirror primary-grid right-click semantics, but do not steal focus/scroll from the other pane.
+    const selectionOpts = { scrollIntoView: false, focus: false } as const;
+
+    if (hit.area === "cell" && hit.row != null && hit.col != null) {
+      const inSelection = normalizedRanges.some(
+        (range) =>
+          hit.row! >= range.startRow && hit.row! <= range.endRow && hit.col! >= range.startCol && hit.col! <= range.endCol,
+      );
+      if (!inSelection) {
+        app.activateCell({ row: hit.row, col: hit.col }, selectionOpts);
+      }
+    } else if (hit.area === "rowHeader" && hit.row != null) {
+      const row = hit.row;
+      const alreadySelected = normalizedRanges.some(
+        (range) => range.startCol === 0 && range.endCol === limits.maxCols - 1 && row >= range.startRow && row <= range.endRow,
+      );
+      if (!alreadySelected) {
+        app.selectRange({ range: { startRow: row, endRow: row, startCol: 0, endCol: limits.maxCols - 1 } }, selectionOpts);
+      }
+    } else if (hit.area === "colHeader" && hit.col != null) {
+      const col = hit.col;
+      const alreadySelected = normalizedRanges.some(
+        (range) => range.startRow === 0 && range.endRow === limits.maxRows - 1 && col >= range.startCol && col <= range.endCol,
+      );
+      if (!alreadySelected) {
+        app.selectRange({ range: { startRow: 0, endRow: limits.maxRows - 1, startCol: col, endCol: col } }, selectionOpts);
+      }
+    } else if (hit.area === "corner") {
+      const alreadySelected = normalizedRanges.some(
+        (range) =>
+          range.startRow === 0 &&
+          range.endRow === limits.maxRows - 1 &&
+          range.startCol === 0 &&
+          range.endCol === limits.maxCols - 1,
+      );
+      if (!alreadySelected) {
+        app.selectRange(
+          { range: { startRow: 0, endRow: limits.maxRows - 1, startCol: 0, endCol: limits.maxCols - 1 } },
+          selectionOpts,
+        );
+      }
+    }
+
+    updateContextKeys();
+
+    openGridContextMenuAtPoint(anchorX, anchorY);
   });
 
   const openGridContextMenuAtActiveCell = () => {
+    currentGridArea = gridAreaForSelection();
+    updateContextKeys();
+
     // In split-view mode, anchor to the active pane so keyboard-invoked context menus
     // (Shift+F10 / ContextMenu key) open next to the focused grid.
     const split = layoutController.layout.splitView;
@@ -5223,15 +5310,11 @@ if (
 
     const rect = app.getActiveCellRect();
     if (rect) {
-      currentGridArea = "cell";
-      updateContextKeys();
       openGridContextMenuAtPoint(rect.x, rect.y + rect.height);
       return;
     }
 
     const gridRect = gridRoot.getBoundingClientRect();
-    currentGridArea = "cell";
-    updateContextKeys();
     openGridContextMenuAtPoint(gridRect.left + gridRect.width / 2, gridRect.top + gridRect.height / 2);
   };
 

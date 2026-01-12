@@ -21,6 +21,25 @@ async function waitForIdle(page: import("@playwright/test").Page): Promise<void>
   }
 }
 
+async function waitForGridCanvasesToBeSized(
+  page: import("@playwright/test").Page,
+  rootSelector: string,
+): Promise<void> {
+  // Canvas sizing happens asynchronously (ResizeObserver + rAF). Ensure the renderer
+  // has produced non-zero backing buffers before attempting hit-testing.
+  await page.waitForFunction(
+    (selector) => {
+      const root = document.querySelector(selector);
+      if (!root) return false;
+      const canvases = root.querySelectorAll("canvas");
+      if (canvases.length === 0) return false;
+      return Array.from(canvases).every((c) => (c as HTMLCanvasElement).width > 0 && (c as HTMLCanvasElement).height > 0);
+    },
+    rootSelector,
+    { timeout: 10_000 },
+  );
+}
+
 test.describe("Grid context menus", () => {
   test("right-clicking a row header opens a menu with Row Height…", async ({ page }) => {
     await gotoDesktop(page);
@@ -41,6 +60,38 @@ test.describe("Grid context menus", () => {
     await expect(page.locator("#grid")).toBeVisible();
     await page.click("#grid", { button: "right", position: { x: 100, y: 10 } });
 
+    const menu = page.getByTestId("context-menu");
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole("button", { name: "Column Width…" })).toBeVisible();
+  });
+
+  test("right-clicking a row header in split-view secondary pane opens a menu with Row Height…", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await expect(secondary.locator("canvas")).toHaveCount(3);
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+    await page.click("#grid-secondary", { button: "right", position: { x: 10, y: 40 } });
+    const menu = page.getByTestId("context-menu");
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole("button", { name: "Row Height…" })).toBeVisible();
+  });
+
+  test("right-clicking a column header in split-view secondary pane opens a menu with Column Width…", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await expect(secondary.locator("canvas")).toHaveCount(3);
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+    await page.click("#grid-secondary", { button: "right", position: { x: 100, y: 10 } });
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
     await expect(menu.getByRole("button", { name: "Column Width…" })).toBeVisible();

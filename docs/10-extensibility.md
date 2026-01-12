@@ -101,12 +101,10 @@ Built-in keys (desktop UI):
 | `activeCellA1` | string | Active cell address in A1 notation (e.g. `"C3"`). |
 | `commentsPanelVisible` | boolean | Whether the comments panel is currently open. |
 | `cellHasComment` | boolean | Whether the active cell currently has at least one comment thread. |
-
-Planned / reserved keys (not yet exposed in the desktop UI):
-
-| Key | Type | Meaning |
-| --- | --- | --- |
-| `gridArea` | `"cell" \| "rowHeader" \| "colHeader" \| "corner"` | Where the interaction happened (cell grid vs row/col header vs corner). |
+| `gridArea` | `"cell" \| "rowHeader" \| "colHeader" \| "corner"` | Where the grid context menu was opened (cell grid vs row/col header vs corner). |
+| `isRowHeader` | boolean | Convenience key: `true` when `gridArea == "rowHeader"`. |
+| `isColHeader` | boolean | Convenience key: `true` when `gridArea == "colHeader"`. |
+| `isCorner` | boolean | Convenience key: `true` when `gridArea == "corner"`. |
 
 Examples:
 
@@ -126,7 +124,7 @@ isSingleCell && cellHasValue
 # Sheet-specific enablement + address targeting
 sheetName == "Sheet1" && activeCellA1 == "A1"
 
-# (Planned) Separate header context menus
+# Enable only in the row header context menu
 gridArea == "rowHeader"
 
 # Only enable when a comment exists and the comments panel is visible
@@ -153,7 +151,7 @@ Notes:
 Supported menu locations (desktop UI):
 
 - `cell/context` — the grid (cell) context menu (`contributes.menus["cell/context"]`).
-  - Opened via right-click, or keyboard open (Shift+F10 / Menu key).
+  - Opened via right-click on a sheet cell, or keyboard open (Shift+F10 / Menu key).
     - Note: when focus is on a sheet tab, Shift+F10 / Menu key opens the sheet-tab context menu instead (not currently extension-contributed).
   - Excel-like behavior: right-clicking a cell outside the current selection moves the active cell/selection to the
     clicked cell before evaluating `when` clauses (so keys like `activeCellA1`/`cellHasValue` reflect the clicked cell).
@@ -164,17 +162,18 @@ Supported menu locations (desktop UI):
   - While the menu is open, the desktop re-evaluates `when` clauses as context keys change (e.g. selection changes),
     updating enabled/disabled state live.
 
+- `row/context` — the row header context menu (`contributes.menus["row/context"]`).
+  - Opened via right-click in the row header region.
+
+- `column/context` — the column header context menu (`contributes.menus["column/context"]`).
+  - Opened via right-click in the column header region.
+
+- `corner/context` — the corner (select-all) context menu (`contributes.menus["corner/context"]`).
+  - Opened via right-click in the top-left corner region.
+
 Other built-in context menus (not extension-contributed today):
 
 - Sheet tabs (bottom bar): includes actions like Rename/Delete, but does not currently accept extension menu contributions.
-
-Reserved menu locations (not yet wired in the desktop UI, but reserved for future parity):
-
-- `row/context` — row header context menu
-- `column/context` — column header context menu
-- `corner/context` — top-left corner (select-all) context menu
-  - Note: right-clicking row/column headers (and the corner/select-all area) currently opens the `cell/context` menu;
-    dedicated header menus are planned.
 
 ### `group` / `group@order` + separators
 
