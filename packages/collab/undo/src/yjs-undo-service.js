@@ -1,6 +1,50 @@
 import * as Y from "yjs";
 
 const patchedItemConstructors = new WeakSet();
+const patchedAbstractTypeConstructors = new WeakSet();
+
+function isYjsAbstractTypeStruct(value) {
+  if (!value || typeof value !== "object") return false;
+  const maybe = value;
+  // Yjs `AbstractType` instances (Map/Array/Text/etc) support deep observers.
+  if (typeof maybe.observeDeep !== "function") return false;
+  if (typeof maybe.unobserveDeep !== "function") return false;
+  // Internal fields differ by type, but at least one of these is typically present.
+  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
+}
+
+function patchForeignAbstractTypeConstructor(type) {
+  if (!type || typeof type !== "object") return;
+  if (!isYjsAbstractTypeStruct(type)) return;
+  if (type instanceof Y.AbstractType) return;
+  const ctor = type.constructor;
+  if (!ctor || ctor === Y.AbstractType) return;
+  if (patchedAbstractTypeConstructors.has(ctor)) return;
+  patchedAbstractTypeConstructors.add(ctor);
+
+  // In mixed-module environments (ESM + CJS), documents can contain AbstractType
+  // instances created by a different `yjs` module instance. Yjs' UndoManager
+  // uses `instanceof AbstractType` checks, and will warn `[yjs#509] Not same Y.Doc`
+  // if a scope type fails that check.
+  //
+  // Patch the foreign `AbstractType` prototype chain so foreign types pass
+  // `instanceof Y.AbstractType` checks in this module *without breaking*
+  // `instanceof` checks in the foreign module instance.
+  try {
+    const baseProto = Object.getPrototypeOf(ctor.prototype);
+    // `ctor.prototype` is usually a concrete type prototype (e.g. YMap.prototype),
+    // whose base prototype is the foreign AbstractType prototype. Patch that base
+    // prototype so the local AbstractType prototype is also in the chain.
+    if (baseProto && baseProto !== Object.prototype) {
+      Object.setPrototypeOf(baseProto, Y.AbstractType.prototype);
+    } else {
+      Object.setPrototypeOf(ctor.prototype, Y.AbstractType.prototype);
+    }
+  } catch {
+    // Best-effort: if we can't patch (frozen prototypes, etc), UndoManager will
+    // behave like upstream Yjs in mixed-module environments.
+  }
+}
 
 function isYjsItemStruct(value) {
   if (!value || typeof value !== "object") return false;
@@ -43,6 +87,7 @@ function patchForeignItemConstructor(item) {
 
 function patchForeignItemsInType(type) {
   if (!type || typeof type !== "object") return;
+  patchForeignAbstractTypeConstructor(type);
 
   const map = type._map;
   if (map instanceof Map) {
@@ -193,6 +238,14 @@ export function createCollabUndoService(opts) {
     captureTimeout: captureTimeoutMs,
     trackedOrigins: new Set([origin])
   });
+
+  // Also patch any types added later via `undoManager.addToScope(...)` so we
+  // don't regress in desktop-style flows that lazily extend the undo scope.
+  const addToScope = undoManager.addToScope.bind(undoManager);
+  undoManager.addToScope = (ytypes) => {
+    patchForeignItemsInScope(ytypes);
+    addToScope(ytypes);
+  };
 
   // Ensure our patching handler is removed if callers explicitly destroy the
   // UndoManager instance.
