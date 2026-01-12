@@ -424,15 +424,9 @@ export function QueryEditorPanelContainer(props: Props) {
       return;
     }
 
-    const includeHeader =
-      typeof window !== "undefined" && typeof window.confirm === "function"
-        ? await nativeDialogs.confirm("Include header row?")
-        : true;
+    const includeHeader = await nativeDialogs.confirm("Include header row?", { fallbackValue: true });
 
-    const clearExisting =
-      typeof window !== "undefined" && typeof window.confirm === "function"
-        ? await nativeDialogs.confirm("Clear previous output range (if known)?")
-        : true;
+    const clearExisting = await nativeDialogs.confirm("Clear previous output range (if known)?", { fallbackValue: true });
 
     const destination: QuerySheetDestination = {
       sheetId,

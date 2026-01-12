@@ -1021,21 +1021,19 @@ function parseConnectionIdentity(connection: unknown): unknown {
 }
 
 async function defaultPermissionPrompt(kind: string, details: unknown): Promise<boolean> {
-  if (typeof window === "undefined" || typeof window.confirm !== "function") return true;
-
   const request = (details as any)?.request;
   if (kind === "http:request") {
     const url = typeof request?.url === "string" ? request.url : "an external URL";
-    return nativeDialogs.confirm(`Allow this query to make a network request to ${url}?`);
+    return nativeDialogs.confirm(`Allow this query to make a network request to ${url}?`, { fallbackValue: true });
   }
   if (kind === "file:read") {
     const path = typeof request?.path === "string" ? request.path : "a local file";
-    return nativeDialogs.confirm(`Allow this query to read ${path}?`);
+    return nativeDialogs.confirm(`Allow this query to read ${path}?`, { fallbackValue: true });
   }
   if (kind === "database:query") {
-    return nativeDialogs.confirm("Allow this query to run a database query?");
+    return nativeDialogs.confirm("Allow this query to run a database query?", { fallbackValue: true });
   }
-  return nativeDialogs.confirm(`Allow this query to access: ${kind}?`);
+  return nativeDialogs.confirm(`Allow this query to access: ${kind}?`, { fallbackValue: true });
 }
 
 type PrivacyLevel = "public" | "organizational" | "private" | "unknown";

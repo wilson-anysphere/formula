@@ -55,6 +55,7 @@ describe("tauri/nativeDialogs", () => {
     vi.stubGlobal("window", { confirm: windowConfirm, alert: windowAlert });
 
     await expect(nativeDialogs.confirm("Discard?")).resolves.toBe(false);
+    await expect(nativeDialogs.confirm("Discard?", { fallbackValue: true })).resolves.toBe(true);
     await expect(nativeDialogs.alert("Something went wrong")).resolves.toBeUndefined();
   });
 });

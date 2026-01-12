@@ -63,7 +63,7 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
   const approvalResolver = useRef<((approved: boolean) => void) | null>(null);
 
   const onApprovalRequired = useCallback(async (request: { call: LLMToolCall; preview: ToolPlanPreview }) => {
-    // If we're not in a browser DOM environment, fall back to `window.confirm`.
+    // If we're not in a browser DOM environment, fall back to a native dialog helper.
     if (typeof document === "undefined") return confirmPreviewApproval(request as any);
 
     if (approvalResolver.current) {

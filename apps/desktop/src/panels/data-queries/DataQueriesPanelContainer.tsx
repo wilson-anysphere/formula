@@ -442,10 +442,8 @@ export function DataQueriesPanelContainer(props: Props) {
           setGlobalError("Power Query service not available.");
           return;
         }
-        if (typeof window !== "undefined" && typeof window.confirm === "function") {
-          const ok = await nativeDialogs.confirm("Delete this query?");
-          if (!ok) return;
-        }
+        const ok = await nativeDialogs.confirm("Delete this query?");
+        if (!ok) return;
         setGlobalError(null);
         service.unregisterQuery(queryId);
       } catch (err: any) {

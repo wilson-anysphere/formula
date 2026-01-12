@@ -2,6 +2,14 @@ export type ConfirmDialogOptions = {
   title?: string;
   okLabel?: string;
   cancelLabel?: string;
+  /**
+   * When no dialog API is available (e.g. non-browser env or jsdom "Not implemented"
+   * stubs), return this value instead of the default `false`.
+   *
+   * This is useful for non-destructive prompts whose safest behavior is to proceed
+   * when prompting isn't possible.
+   */
+  fallbackValue?: boolean;
 };
 
 export type AlertDialogOptions = {
@@ -39,11 +47,14 @@ function getWindowAlert(): ((message: string) => void) | null {
 }
 
 export async function confirm(message: string, opts: ConfirmDialogOptions = {}): Promise<boolean> {
+  const { fallbackValue, ...dialogOpts } = opts;
+  const fallback = fallbackValue ?? false;
+
   const dialog = getTauriDialogApi();
   const tauriConfirm = dialog?.confirm;
   if (typeof tauriConfirm === "function") {
     try {
-      return await tauriConfirm(message, opts);
+      return await tauriConfirm(message, dialogOpts);
     } catch {
       // Fall through to `window.confirm` below if the Tauri call fails.
     }
@@ -56,13 +67,13 @@ export async function confirm(message: string, opts: ConfirmDialogOptions = {}):
     } catch {
       // Some test/host environments (e.g. jsdom) define `window.confirm` but throw
       // a "Not implemented" error. Treat that the same as an unavailable API.
-      return false;
+      return fallback;
     }
   }
 
   // Non-browser environment (e.g. unit tests) without a stubbed `window.confirm`.
   // Default to `false` to avoid accidentally confirming destructive actions.
-  return false;
+  return fallback;
 }
 
 export async function alert(message: string, opts: AlertDialogOptions = {}): Promise<void> {
