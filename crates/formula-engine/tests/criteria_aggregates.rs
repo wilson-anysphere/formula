@@ -108,6 +108,14 @@ fn criteria_aggregates_reject_scalar_range_args() {
         sheet.eval(r#"=AVERAGEIFS(1,A1:A1,">0")"#),
         Value::Error(ErrorKind::Value)
     );
+    assert_eq!(
+        sheet.eval(r#"=MAXIFS(1,A1:A1,">0")"#),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval(r#"=MINIFS(1,A1:A1,">0")"#),
+        Value::Error(ErrorKind::Value)
+    );
 }
 
 #[test]
@@ -272,5 +280,28 @@ fn sumif_indirect_records_dynamic_dependencies() {
             }
         )),
         "expected A1 dependents to include Sheet1!Z1, got: {dependents:?}"
+    );
+}
+
+#[test]
+fn maxifs_and_minifs_require_matching_shapes() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1);
+    sheet.set("A2", 2);
+    sheet.set("A3", 3);
+    sheet.set("A4", 4);
+    sheet.set("B1", 10);
+    sheet.set("B2", 20);
+    sheet.set("B3", 30);
+    sheet.set("B4", 40);
+
+    // Same number of cells (4) but different shapes (4x1 vs 2x2).
+    assert_eq!(
+        sheet.eval(r#"=MAXIFS(B1:B4,A1:B2,">0")"#),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval(r#"=MINIFS(B1:B4,A1:B2,">0")"#),
+        Value::Error(ErrorKind::Value)
     );
 }

@@ -1254,6 +1254,216 @@ fn averageifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     Value::Number(sum / count as f64)
 }
 
+inventory::submit! {
+    FunctionSpec {
+        name: "MAXIFS",
+        min_args: 3,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: maxifs_fn,
+    }
+}
+
+fn maxifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    if args.len() < 3 || (args.len() - 1) % 2 != 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let max_range = match Range2D::try_from_arg(ctx.eval_arg(&args[0])) {
+        Ok(r) => r,
+        Err(e) => return Value::Error(e),
+    };
+    max_range.record_reference(ctx);
+    let (rows, cols) = max_range.shape();
+
+    let mut criteria_ranges = Vec::new();
+    let mut criteria = Vec::new();
+
+    for pair in args[1..].chunks_exact(2) {
+        let range = match Range2D::try_from_arg(ctx.eval_arg(&pair[0])) {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
+        let (r_rows, r_cols) = range.shape();
+        if r_rows != rows || r_cols != cols {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let crit_value = eval_scalar_arg(ctx, &pair[1]);
+        if let Value::Error(e) = crit_value {
+            return Value::Error(e);
+        }
+        let crit = match Criteria::parse_with_date_system(&crit_value, ctx.date_system()) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        };
+
+        criteria_ranges.push(range);
+        criteria.push(crit);
+    }
+
+    for range in &criteria_ranges {
+        range.record_reference(ctx);
+    }
+
+    let mut best: Option<f64> = None;
+    match &max_range {
+        Range2D::Reference(max_ref) => {
+            'cell: for addr in ctx.iter_reference_cells(max_ref) {
+                let row = (addr.row - max_ref.start.row) as usize;
+                let col = (addr.col - max_ref.start.col) as usize;
+
+                for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
+                    let v = range.get(ctx, row, col);
+                    if !crit.matches(&v) {
+                        continue 'cell;
+                    }
+                }
+
+                match ctx.get_cell_value(&max_ref.sheet_id, addr) {
+                    Value::Number(n) => best = Some(best.map_or(n, |b| b.max(n))),
+                    Value::Error(e) => return Value::Error(e),
+                    _ => {}
+                }
+            }
+        }
+        _ => {
+            for row in 0..rows {
+                for col in 0..cols {
+                    let mut matches = true;
+                    for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
+                        let v = range.get(ctx, row, col);
+                        if !crit.matches(&v) {
+                            matches = false;
+                            break;
+                        }
+                    }
+                    if !matches {
+                        continue;
+                    }
+
+                    match max_range.get(ctx, row, col) {
+                        Value::Number(n) => best = Some(best.map_or(n, |b| b.max(n))),
+                        Value::Error(e) => return Value::Error(e),
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    Value::Number(best.unwrap_or(0.0))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "MINIFS",
+        min_args: 3,
+        max_args: VAR_ARGS,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: minifs_fn,
+    }
+}
+
+fn minifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    if args.len() < 3 || (args.len() - 1) % 2 != 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let min_range = match Range2D::try_from_arg(ctx.eval_arg(&args[0])) {
+        Ok(r) => r,
+        Err(e) => return Value::Error(e),
+    };
+    min_range.record_reference(ctx);
+    let (rows, cols) = min_range.shape();
+
+    let mut criteria_ranges = Vec::new();
+    let mut criteria = Vec::new();
+
+    for pair in args[1..].chunks_exact(2) {
+        let range = match Range2D::try_from_arg(ctx.eval_arg(&pair[0])) {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
+        let (r_rows, r_cols) = range.shape();
+        if r_rows != rows || r_cols != cols {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let crit_value = eval_scalar_arg(ctx, &pair[1]);
+        if let Value::Error(e) = crit_value {
+            return Value::Error(e);
+        }
+        let crit = match Criteria::parse_with_date_system(&crit_value, ctx.date_system()) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        };
+
+        criteria_ranges.push(range);
+        criteria.push(crit);
+    }
+
+    for range in &criteria_ranges {
+        range.record_reference(ctx);
+    }
+
+    let mut best: Option<f64> = None;
+    match &min_range {
+        Range2D::Reference(min_ref) => {
+            'cell: for addr in ctx.iter_reference_cells(min_ref) {
+                let row = (addr.row - min_ref.start.row) as usize;
+                let col = (addr.col - min_ref.start.col) as usize;
+
+                for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
+                    let v = range.get(ctx, row, col);
+                    if !crit.matches(&v) {
+                        continue 'cell;
+                    }
+                }
+
+                match ctx.get_cell_value(&min_ref.sheet_id, addr) {
+                    Value::Number(n) => best = Some(best.map_or(n, |b| b.min(n))),
+                    Value::Error(e) => return Value::Error(e),
+                    _ => {}
+                }
+            }
+        }
+        _ => {
+            for row in 0..rows {
+                for col in 0..cols {
+                    let mut matches = true;
+                    for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
+                        let v = range.get(ctx, row, col);
+                        if !crit.matches(&v) {
+                            matches = false;
+                            break;
+                        }
+                    }
+                    if !matches {
+                        continue;
+                    }
+
+                    match min_range.get(ctx, row, col) {
+                        Value::Number(n) => best = Some(best.map_or(n, |b| b.min(n))),
+                        Value::Error(e) => return Value::Error(e),
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    Value::Number(best.unwrap_or(0.0))
+}
+
 #[derive(Clone)]
 enum Range2D {
     Reference(crate::functions::Reference),
