@@ -36,6 +36,46 @@ const HARDEN_TAURI_GLOBALS_SOURCE = `(() => {
     return true;
   };
 
+  const lockDownKey = (key) => {
+    let enumerable = false;
+    let isAccessor = false;
+    let configurable = true;
+    try {
+      const desc = Object.getOwnPropertyDescriptor(window, key);
+      if (desc) {
+        enumerable = Boolean(desc.enumerable);
+        configurable = Boolean(desc.configurable);
+        isAccessor = typeof desc.get === "function" || typeof desc.set === "function";
+      }
+    } catch {
+      // Ignore.
+    }
+
+    try {
+      if (isAccessor) {
+        // Can't redefine an accessor if it's non-configurable.
+        if (!configurable) return false;
+        Object.defineProperty(window, key, {
+          get: () => undefined,
+          set: () => {},
+          enumerable,
+          configurable: false,
+        });
+        return true;
+      }
+
+      Object.defineProperty(window, key, {
+        value: undefined,
+        writable: false,
+        enumerable,
+        configurable: false,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const scrubTauriGlobals = () => {
     for (const key of keys) {
       let hasKey = false;
@@ -66,49 +106,9 @@ const HARDEN_TAURI_GLOBALS_SOURCE = `(() => {
         if (!stillPresent) continue;
       }
 
-      const lockDown = () => {
-        let enumerable = false;
-        let isAccessor = false;
-        let configurable = true;
-        try {
-          const desc = Object.getOwnPropertyDescriptor(window, key);
-          if (desc) {
-            enumerable = Boolean(desc.enumerable);
-            configurable = Boolean(desc.configurable);
-            isAccessor = typeof desc.get === "function" || typeof desc.set === "function";
-          }
-        } catch {
-          // Ignore.
-        }
-
-        try {
-          if (isAccessor) {
-            // Can't redefine an accessor if it's non-configurable.
-            if (!configurable) return false;
-            Object.defineProperty(window, key, {
-              get: () => undefined,
-              set: () => {},
-              enumerable,
-              configurable: false,
-            });
-            return true;
-          }
-
-          Object.defineProperty(window, key, {
-            value: undefined,
-            writable: false,
-            enumerable,
-            configurable: false,
-          });
-          return true;
-        } catch {
-          return false;
-        }
-      };
-
       // If we couldn't fully delete the global, attempt to lock it down to undefined so it can't be
       // re-populated later in the page lifecycle.
-      if (lockDown()) continue;
+      if (lockDownKey(key)) continue;
 
       try {
         // If deletion fails, fall back to overwriting.
@@ -118,7 +118,15 @@ const HARDEN_TAURI_GLOBALS_SOURCE = `(() => {
       }
 
       // Best-effort: after overwriting, try to lock down the property to prevent later reinjection.
-      lockDown();
+      lockDownKey(key);
+    }
+
+    // If we ever observed any of the known keys as present, proactively lock down all of them so a
+    // runtime cannot re-inject the globals later in the page lifecycle.
+    if (tauriGlobalsPresent) {
+      for (const key of keys) {
+        lockDownKey(key);
+      }
     }
   };
 
