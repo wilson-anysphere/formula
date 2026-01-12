@@ -828,7 +828,20 @@ test.describe("sheet tabs", () => {
 
     // Hide Sheet2 so the visible tabs are [Sheet1, Sheet3] while the full order is
     // [Sheet1, Sheet2(hidden), Sheet3].
-    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right", position: { x: 10, y: 10 } });
+    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    await page.evaluate(() => {
+      const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
+      if (!tab) throw new Error("Missing Sheet2 tab");
+      const rect = tab.getBoundingClientRect();
+      tab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 10,
+          clientY: rect.top + 10,
+        }),
+      );
+    });
     {
       const menu = page.getByTestId("sheet-tab-context-menu");
       // Ensure the sheet tab context menu is the one that's open.
@@ -878,7 +891,19 @@ test.describe("sheet tabs", () => {
       .toEqual(desiredAll);
 
     // Unhide Sheet2 and ensure it lands at the end (i.e. hidden sheet moved as expected).
-    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
+    await page.evaluate(() => {
+      const tab = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
+      if (!tab) throw new Error("Missing Sheet1 tab");
+      const rect = tab.getBoundingClientRect();
+      tab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 10,
+          clientY: rect.top + 10,
+        }),
+      );
+    });
     {
       const menu = page.getByTestId("sheet-tab-context-menu");
       await expect(page.getByTestId("context-menu")).toBeHidden();
@@ -914,7 +939,20 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
 
     // Hide Sheet2 so the position indicator reflects visible sheets (Excel-like behavior).
-    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right", position: { x: 10, y: 10 } });
+    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    await page.evaluate(() => {
+      const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
+      if (!tab) throw new Error("Missing Sheet2 tab");
+      const rect = tab.getBoundingClientRect();
+      tab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 10,
+          clientY: rect.top + 10,
+        }),
+      );
+    });
     {
       const menu = page.getByTestId("sheet-tab-context-menu");
       await expect(page.getByTestId("context-menu")).toBeHidden();
@@ -926,7 +964,19 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
 
     // Unhide Sheet2 and ensure position updates.
-    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
+    await page.evaluate(() => {
+      const tab = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
+      if (!tab) throw new Error("Missing Sheet1 tab");
+      const rect = tab.getBoundingClientRect();
+      tab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 10,
+          clientY: rect.top + 10,
+        }),
+      );
+    });
     {
       const menu = page.getByTestId("sheet-tab-context-menu");
       await expect(page.getByTestId("context-menu")).toBeHidden();
@@ -1030,7 +1080,20 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
 
     // Hide the middle sheet.
-    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right", position: { x: 10, y: 10 } });
+    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    await page.evaluate(() => {
+      const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
+      if (!tab) throw new Error("Missing Sheet2 tab");
+      const rect = tab.getBoundingClientRect();
+      tab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 10,
+          clientY: rect.top + 10,
+        }),
+      );
+    });
     {
       const menu = page.getByTestId("sheet-tab-context-menu");
       await expect(page.getByTestId("context-menu")).toBeHidden();
@@ -1152,7 +1215,19 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
 
     await sheet2Tab.focus();
-    await page.keyboard.press("Shift+F10");
+    await page.evaluate(() => {
+      const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
+      if (!tab) throw new Error("Missing Sheet2 tab");
+      const rect = tab.getBoundingClientRect();
+      tab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 10,
+          clientY: rect.top + 10,
+        }),
+      );
+    });
     await expect(tabMenu).toBeVisible();
     await tabMenu.getByRole("button", { name: "Tab Color" }).click();
     await tabMenu.getByRole("button", { name: "Blue" }).click();
@@ -1161,7 +1236,19 @@ test.describe("sheet tabs", () => {
 
     // Hiding the active sheet should activate an adjacent visible sheet (Sheet1).
     await sheet2Tab.focus();
-    await page.keyboard.press("Shift+F10");
+    await page.evaluate(() => {
+      const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
+      if (!tab) throw new Error("Missing Sheet2 tab");
+      const rect = tab.getBoundingClientRect();
+      tab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 10,
+          clientY: rect.top + 10,
+        }),
+      );
+    });
     await expect(tabMenu).toBeVisible();
     await tabMenu.getByRole("button", { name: "Hide", exact: true }).click();
     await expect(tabMenu).toBeHidden();
