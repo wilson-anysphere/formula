@@ -940,6 +940,7 @@ export class SpreadsheetApp {
               this.hideCommentTooltip();
               this.renderCharts(zoomChanged);
               this.renderAuditing();
+              this.renderOutlineControls();
               this.renderSelection();
               if (this.scrollX !== prevX || this.scrollY !== prevY) {
                 this.notifyScrollListeners();
@@ -1005,6 +1006,9 @@ export class SpreadsheetApp {
       // Keep legacy overlay ordering: charts above cells, selection above charts.
       this.chartLayer.style.zIndex = "2";
       this.selectionCanvas.style.zIndex = "3";
+      // Outline toggles are DOM overlays; ensure they remain clickable above the
+      // shared selection canvas.
+      this.outlineLayer.style.zIndex = "4";
 
       this.initSharedChartPanes();
     }
@@ -3205,6 +3209,7 @@ export class SpreadsheetApp {
 
       this.renderCharts(true);
       this.renderAuditing();
+      this.renderOutlineControls();
       this.renderSelection();
       this.updateStatus();
       return;
@@ -4847,7 +4852,12 @@ export class SpreadsheetApp {
   }
 
   private renderOutlineControls(): void {
-    if (this.sharedGrid || !this.outline.pr.showOutlineSymbols) {
+    if (this.sharedGrid) {
+      this.renderSharedOutlineControls();
+      return;
+    }
+
+    if (!this.outline.pr.showOutlineSymbols) {
       for (const button of this.outlineButtons.values()) button.remove();
       this.outlineButtons.clear();
       return;
@@ -4942,15 +4952,126 @@ export class SpreadsheetApp {
     }
   }
 
-  private onOutlineUpdated(): void {
-    if (this.gridMode !== "legacy") {
-      // Outline groups (and hidden rows/cols) aren't implemented in the shared grid renderer yet.
+  private renderSharedOutlineControls(): void {
+    if (!this.sharedGrid) return;
+
+    if (!this.outline.pr.showOutlineSymbols) {
+      for (const button of this.outlineButtons.values()) button.remove();
+      this.outlineButtons.clear();
       return;
     }
 
-    this.rebuildAxisVisibilityCache();
+    const keep = new Set<string>();
+    const size = 14;
+    const padding = 4;
+
+    const renderer = this.sharedGrid.renderer;
+    const viewport = renderer.getViewportState();
+
+    const headerRows = this.sharedHeaderRows();
+    const headerCols = this.sharedHeaderCols();
+
+    const visibleGridRows: number[] = [];
+    for (let r = 0; r < viewport.frozenRows; r++) visibleGridRows.push(r);
+    for (let r = viewport.main.rows.start; r < viewport.main.rows.end; r++) visibleGridRows.push(r);
+
+    const visibleGridCols: number[] = [];
+    for (let c = 0; c < viewport.frozenCols; c++) visibleGridCols.push(c);
+    for (let c = viewport.main.cols.start; c < viewport.main.cols.end; c++) visibleGridCols.push(c);
+
+    // Row group toggles live in the row header column (grid col 0).
+    for (const gridRow of visibleGridRows) {
+      if (gridRow < headerRows) continue;
+      const docRow = gridRow - headerRows;
+      const summaryIndex = docRow + 1; // 1-based
+      const entry = this.outline.rows.entry(summaryIndex);
+      const details = groupDetailRange(this.outline.rows, summaryIndex, entry.level, this.outline.pr.summaryBelow);
+      if (!details) continue;
+
+      const key = `row:${summaryIndex}`;
+      keep.add(key);
+      let button = this.outlineButtons.get(key);
+      if (!button) {
+        button = document.createElement("button");
+        button.className = "outline-toggle";
+        button.type = "button";
+        button.setAttribute("data-testid", `outline-toggle-row-${summaryIndex}`);
+        button.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.outline.toggleRowGroup(summaryIndex);
+          this.onOutlineUpdated();
+        });
+        button.addEventListener("pointerdown", (e) => {
+          e.stopPropagation();
+        });
+        this.outlineButtons.set(key, button);
+        this.outlineLayer.appendChild(button);
+      }
+
+      button.textContent = entry.collapsed ? "+" : "-";
+      const rect = renderer.getCellRect(gridRow, 0);
+      if (!rect) continue;
+      button.style.left = `${rect.x + padding}px`;
+      button.style.top = `${rect.y + (rect.height - size) / 2}px`;
+      button.style.width = `${size}px`;
+      button.style.height = `${size}px`;
+    }
+
+    // Column group toggles live in the column header row (grid row 0).
+    for (const gridCol of visibleGridCols) {
+      if (gridCol < headerCols) continue;
+      const docCol = gridCol - headerCols;
+      const summaryIndex = docCol + 1; // 1-based
+      const entry = this.outline.cols.entry(summaryIndex);
+      const details = groupDetailRange(this.outline.cols, summaryIndex, entry.level, this.outline.pr.summaryRight);
+      if (!details) continue;
+
+      const key = `col:${summaryIndex}`;
+      keep.add(key);
+      let button = this.outlineButtons.get(key);
+      if (!button) {
+        button = document.createElement("button");
+        button.className = "outline-toggle";
+        button.type = "button";
+        button.setAttribute("data-testid", `outline-toggle-col-${summaryIndex}`);
+        button.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.outline.toggleColGroup(summaryIndex);
+          this.onOutlineUpdated();
+        });
+        button.addEventListener("pointerdown", (e) => {
+          e.stopPropagation();
+        });
+        this.outlineButtons.set(key, button);
+        this.outlineLayer.appendChild(button);
+      }
+
+      button.textContent = entry.collapsed ? "+" : "-";
+      const rect = renderer.getCellRect(0, gridCol);
+      if (!rect) continue;
+      button.style.left = `${rect.x + (rect.width - size) / 2}px`;
+      button.style.top = `${rect.y + padding}px`;
+      button.style.width = `${size}px`;
+      button.style.height = `${size}px`;
+    }
+
+    for (const [key, button] of this.outlineButtons) {
+      if (keep.has(key)) continue;
+      button.remove();
+      this.outlineButtons.delete(key);
+    }
+  }
+
+  private onOutlineUpdated(): void {
+    if (this.gridMode === "legacy") {
+      this.rebuildAxisVisibilityCache();
+    }
     this.ensureActiveCellVisible();
     this.scrollCellIntoView(this.selection.active);
+    if (this.sharedGrid) this.syncSharedGridSelectionFromState();
+    if (this.sharedGrid) this.renderOutlineControls();
     this.refresh();
     this.focus();
   }
@@ -6469,7 +6590,13 @@ export class SpreadsheetApp {
       // bounded slice (the selected row/column within the UI's grid limits). For an
       // entirely empty sheet (`all`), fall back to the active cell to avoid generating
       // a massive empty payload.
-      return this.selection.type === "all" ? activeCellFallback : activeRange;
+      if (this.selection.type === "all") return activeCellFallback;
+
+      // Copying an entire (empty) Excel-scale column would allocate a huge 2D payload.
+      // If there's no used-range overlap, treat it as a single-cell copy instead.
+      if (this.selection.type === "column") return activeCellFallback;
+
+      return activeRange;
     }
 
     return activeRange;
