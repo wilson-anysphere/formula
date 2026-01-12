@@ -67,4 +67,17 @@ test.describe("dockable panels layout persistence", () => {
     await expect(rightDock.getByTestId("panel-aiChat")).toBeVisible();
     await expect(rightDock.getByTestId("panel-macros")).toHaveCount(0);
   });
+
+  test("Cmd+I toggles AI chat panel open/closed", async ({ page }) => {
+    await gotoDesktop(page);
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+
+    await page.keyboard.press("Meta+I");
+    await expect(page.getByTestId("dock-right").getByTestId("panel-aiChat")).toBeVisible();
+
+    await page.keyboard.press("Meta+I");
+    await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
+  });
 });

@@ -2156,10 +2156,14 @@ if (
   splitNone.addEventListener("click", () => layoutController.setSplitDirection("none", 0.5));
 
   openAiPanel.addEventListener("click", () => {
+    toggleAiChatPanel();
+  });
+
+  function toggleAiChatPanel(): void {
     const placement = getPanelPlacement(layoutController.layout, PanelIds.AI_CHAT);
     if (placement.kind === "closed") layoutController.openPanel(PanelIds.AI_CHAT);
     else layoutController.closePanel(PanelIds.AI_CHAT);
-  });
+  }
 
   openAiAuditPanel.addEventListener("click", () => {
     const placement = getPanelPlacement(layoutController.layout, PanelIds.AI_AUDIT);
@@ -2297,6 +2301,24 @@ if (
 
     e.preventDefault();
     paletteController.open();
+  });
+
+  // Cmd+I toggles the AI sidebar (chat panel).
+  // Keep this as a global shortcut so it works even when focus isn't on the grid.
+  window.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented) return;
+    if (e.repeat) return;
+    if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    if (e.key !== "I" && e.key !== "i") return;
+
+    const target = (e.target instanceof HTMLElement ? e.target : null) ?? (document.activeElement as HTMLElement | null);
+    if (target) {
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+    }
+
+    e.preventDefault();
+    toggleAiChatPanel();
   });
 
   layoutController.on("change", () => renderLayout());
