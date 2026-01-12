@@ -48,15 +48,12 @@ test.describe("command palette shortcut hints", () => {
 
     const input = page.getByTestId("command-palette-input");
 
-    // Sanity check: a command without a keybinding (Insert Pivot Table) is visible in normal search.
-    await input.fill("pivot");
-    await expect(page.locator("li.command-palette__item", { hasText: "Insert Pivot Table" }).first()).toBeVisible();
-
-    // Enter shortcut mode with a leading '/' (after trimming). The pivot command should be filtered out
-    // because it doesn't have a keybinding display string.
-    await input.fill(" / pivot");
+    // Enter shortcut mode with a leading '/' (after trimming).
+    await input.fill(" /");
     await expect(page.locator(".command-palette__hint")).toBeVisible();
-    await expect(page.locator("li.command-palette__item", { hasText: "Insert Pivot Table" })).toHaveCount(0);
+
+    // Shortcut mode should only render rows with visible shortcut pills.
+    await expect(page.locator(".command-palette__item-right[hidden]")).toHaveCount(0);
 
     // Shortcut mode should still return matching commands with shortcuts.
     await input.fill("/ copy");
