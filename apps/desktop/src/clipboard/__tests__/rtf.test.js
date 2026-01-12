@@ -43,6 +43,18 @@ test("clipboard RTF serializes named colors into a color table", () => {
   assert.match(rtf, /\\clcbpat2\b/);
 });
 
+test("clipboard RTF supports OOXML-style ARGB hex colors", () => {
+  const rtf = serializeCellGridToRtf([
+    [{ value: "X", format: { textColor: "#FF112233", backgroundColor: "80112233" } }],
+  ]);
+
+  // #FF112233 -> rgb(17,34,51)
+  assert.match(rtf, /\\red17\\green34\\blue51;/);
+
+  // 0x80 alpha should be blended with white; result should still contain some color entry.
+  assert.match(rtf, /\\colortbl;/);
+});
+
 test("clipboard RTF escapes unicode using \\\\uN? sequences", () => {
   // Astral-plane character (surrogate pair) + BMP character.
   const rtf = serializeCellGridToRtf([[{ value: "😀Ω" }]]);

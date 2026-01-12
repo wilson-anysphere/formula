@@ -111,24 +111,53 @@ function parseCssColorToRgbNoDom(value) {
   const named = CSS_NAMED_COLORS[lower];
   if (named) return named;
 
-  if (trimmed.startsWith("#")) {
-    const hex = trimmed.slice(1);
-    if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+  /**
+   * @param {string} raw
+   * @returns {RgbColor | null}
+   */
+  const parseHex = (raw) => {
+    if (/^[0-9a-fA-F]{6}$/.test(raw)) {
       return {
-        r: Number.parseInt(hex.slice(0, 2), 16),
-        g: Number.parseInt(hex.slice(2, 4), 16),
-        b: Number.parseInt(hex.slice(4, 6), 16),
+        r: Number.parseInt(raw.slice(0, 2), 16),
+        g: Number.parseInt(raw.slice(2, 4), 16),
+        b: Number.parseInt(raw.slice(4, 6), 16),
       };
     }
-    if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+    if (/^[0-9a-fA-F]{3}$/.test(raw)) {
       return {
-        r: Number.parseInt(hex[0] + hex[0], 16),
-        g: Number.parseInt(hex[1] + hex[1], 16),
-        b: Number.parseInt(hex[2] + hex[2], 16),
+        r: Number.parseInt(raw[0] + raw[0], 16),
+        g: Number.parseInt(raw[1] + raw[1], 16),
+        b: Number.parseInt(raw[2] + raw[2], 16),
       };
     }
+
+    // Spreadsheet clipboard formats sometimes carry OOXML-style ARGB values
+    // (AARRGGBB). CSS doesn't define that ordering, but we accept it for
+    // consistency with other clipboard serializers in this codebase.
+    if (/^[0-9a-fA-F]{8}$/.test(raw)) {
+      const a = Number.parseInt(raw.slice(0, 2), 16);
+      const r = Number.parseInt(raw.slice(2, 4), 16);
+      const g = Number.parseInt(raw.slice(4, 6), 16);
+      const b = Number.parseInt(raw.slice(6, 8), 16);
+      const alpha = Math.max(0, Math.min(1, a / 255));
+      if (alpha >= 1) return { r, g, b };
+      return {
+        r: clampByte(alpha * r + (1 - alpha) * 255),
+        g: clampByte(alpha * g + (1 - alpha) * 255),
+        b: clampByte(alpha * b + (1 - alpha) * 255),
+      };
+    }
+
     return null;
+  };
+
+  if (trimmed.startsWith("#")) {
+    return parseHex(trimmed.slice(1));
   }
+
+  // Accept raw hex tokens as a convenience (e.g. "112233" or "FF112233").
+  const hex = parseHex(trimmed);
+  if (hex) return hex;
 
   const match = /^(rgb|rgba)\(\s*([\s\S]+)\s*\)$/i.exec(trimmed);
   if (match) {
