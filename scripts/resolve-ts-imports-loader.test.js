@@ -35,14 +35,16 @@ function getBuiltInTypeScriptSupport() {
     writeFileSync(
       tmpFile,
       [
-        "const x: number = 1;",
+        "export const x: number = 1;",
         "if (x !== 1) throw new Error('strip-types probe failed');",
-        "process.exit(0);",
         "",
       ].join("\n"),
       "utf8",
     );
-    const nativeProbe = spawnSync(process.execPath, [tmpFile], { stdio: "ignore" });
+    const fileUrl = pathToFileURL(tmpFile).href;
+    const nativeProbe = spawnSync(process.execPath, ["--input-type=module", "-e", `import ${JSON.stringify(fileUrl)};`], {
+      stdio: "ignore",
+    });
     if (nativeProbe.status === 0) {
       return { enabled: true, args: [] };
     }

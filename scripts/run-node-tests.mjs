@@ -224,20 +224,23 @@ function getBuiltInTypeScriptSupport() {
   }
 
   // Newer Node versions may support executing `.ts` files without the flag. Probe that
-  // behavior by running a temporary `.ts` file with a basic type annotation.
+  // behavior by importing a temporary `.ts` module (ESM), since this runner executes
+  // test files under `node --test` in ESM mode.
   const tmpFile = path.join(os.tmpdir(), `formula-strip-types-probe.${process.pid}.${Date.now()}.ts`);
   try {
     writeFileSync(
       tmpFile,
       [
-        "const x: number = 1;",
+        "export const x: number = 1;",
         "if (x !== 1) throw new Error('strip-types probe failed');",
-        "process.exit(0);",
         "",
       ].join("\n"),
       "utf8",
     );
-    const nativeProbe = spawnSync(process.execPath, [tmpFile], { stdio: "ignore" });
+    const fileUrl = pathToFileURL(tmpFile).href;
+    const nativeProbe = spawnSync(process.execPath, ["--input-type=module", "-e", `import ${JSON.stringify(fileUrl)};`], {
+      stdio: "ignore",
+    });
     if (nativeProbe.status === 0) {
       return { enabled: true, args: [] };
     }
