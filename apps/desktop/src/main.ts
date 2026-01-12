@@ -1426,6 +1426,161 @@ function listSheetsFromCollabSession(session: CollabSession): SheetUiInfo[] {
   return out.length > 0 ? out : [{ id: "Sheet1", name: "Sheet1" }];
 }
 
+function findCollabSheetIndexById(session: CollabSession, sheetId: string): number {
+  const query = String(sheetId ?? "").trim();
+  if (!query) return -1;
+  for (let i = 0; i < session.sheets.length; i += 1) {
+    const entry: any = session.sheets.get(i);
+    const id = coerceCollabSheetField(entry?.get?.("id") ?? entry?.id);
+    if (id && id.trim() === query) return i;
+  }
+  return -1;
+}
+
+function cloneCollabSheetMetaValue(value: unknown): unknown {
+  if (value == null) return value;
+  if (typeof value !== "object") return value;
+
+  const maybe: any = value;
+  if (maybe?.constructor?.name === "YText" && typeof maybe.toString === "function") {
+    try {
+      return maybe.toString();
+    } catch {
+      return null;
+    }
+  }
+
+  // Avoid copying nested Yjs types directly; they can't be re-parented safely.
+  const ctor = maybe?.constructor?.name ?? "";
+  if (ctor.startsWith("Y") || ctor === "AbstractType") return undefined;
+
+  const structuredCloneFn = (globalThis as any).structuredClone as ((input: unknown) => unknown) | undefined;
+  if (typeof structuredCloneFn === "function") {
+    try {
+      return structuredCloneFn(value);
+    } catch {
+      // Fall through to JSON clone below.
+    }
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
+  }
+}
+
+function cloneCollabSheetMap(entry: unknown): Y.Map<unknown> {
+  const out = new Y.Map<unknown>();
+  const map: any = entry;
+
+  if (map && typeof map.forEach === "function") {
+    map.forEach((value: unknown, key: string) => {
+      const k = String(key ?? "");
+      if (!k) return;
+      if (k === "id") return;
+      if (k === "name") return;
+      const cloned = cloneCollabSheetMetaValue(value);
+      if (cloned === undefined) return;
+      out.set(k, cloned);
+    });
+  }
+
+  const id = coerceCollabSheetField(map?.get?.("id") ?? map?.id);
+  if (id) out.set("id", id.trim());
+
+  const hasName = typeof map?.has === "function" ? Boolean(map.has("name")) : map?.get?.("name") !== undefined;
+  if (hasName) {
+    const nameRaw = map?.get?.("name") ?? map?.name;
+    const name = coerceCollabSheetField(nameRaw);
+    if (name != null) out.set("name", name);
+  }
+
+  return out;
+}
+
+class CollabWorkbookSheetStore extends WorkbookSheetStore {
+  constructor(
+    private readonly session: CollabSession,
+    initialSheets: ConstructorParameters<typeof WorkbookSheetStore>[0],
+  ) {
+    super(initialSheets);
+  }
+
+  override rename(id: string, newName: string): void {
+    const before = this.getName(id);
+    super.rename(id, newName);
+    const after = this.getName(id);
+    if (!after || after === before) return;
+
+    this.session.transactLocal(() => {
+      const idx = findCollabSheetIndexById(this.session, id);
+      if (idx < 0) return;
+      const entry: any = this.session.sheets.get(idx);
+      if (!entry || typeof entry.set !== "function") return;
+      entry.set("name", after);
+      // This update originated locally; update the cached key so our observer
+      // doesn't unnecessarily rebuild the sheet store instance.
+      lastCollabSheetsKey = listSheetsFromCollabSession(this.session)
+        .map((s) => `${s.id}\u0000${s.name}`)
+        .join("|");
+    });
+  }
+
+  override move(id: string, toIndex: number): void {
+    const before = this.listAll().map((s) => s.id).join("|");
+    super.move(id, toIndex);
+    const after = this.listAll().map((s) => s.id).join("|");
+    if (after === before) return;
+
+    this.session.transactLocal(() => {
+      const fromIndex = findCollabSheetIndexById(this.session, id);
+      if (fromIndex < 0) return;
+
+      const entry: any = this.session.sheets.get(fromIndex);
+      if (!entry) return;
+
+      const clone = cloneCollabSheetMap(entry);
+      this.session.sheets.delete(fromIndex, 1);
+      this.session.sheets.insert(toIndex, [clone as any]);
+
+      // This update originated locally; update the cached key so our observer
+      // doesn't unnecessarily rebuild the sheet store instance.
+      lastCollabSheetsKey = listSheetsFromCollabSession(this.session)
+        .map((s) => `${s.id}\u0000${s.name}`)
+        .join("|");
+    });
+  }
+}
+
+function reconcileSheetStoreWithDocument(ids: string[]): void {
+  if (ids.length === 0) return;
+
+  const docIdSet = new Set(ids);
+  const existing = workbookSheetStore.listAll();
+  const existingIdSet = new Set(existing.map((s) => s.id));
+
+  // Add missing sheets (append in document order; UI order remains store-managed).
+  let insertAfterId = workbookSheetStore.listAll().at(-1)?.id ?? "";
+  for (const id of ids) {
+    if (existingIdSet.has(id)) continue;
+    workbookSheetStore.addAfter(insertAfterId, { id, name: id });
+    existingIdSet.add(id);
+    insertAfterId = id;
+  }
+
+  // Remove sheets that no longer exist in the document.
+  for (const sheet of existing) {
+    if (docIdSet.has(sheet.id)) continue;
+    try {
+      workbookSheetStore.remove(sheet.id);
+    } catch {
+      // Best-effort: avoid crashing the UI if the sheet store invariants don't
+      // allow the removal (e.g. last-sheet guard).
+    }
+  }
+}
+
 let lastCollabSheetsKey = "";
 
 function syncSheetStoreFromCollabSession(session: CollabSession): void {
@@ -1435,7 +1590,8 @@ function syncSheetStoreFromCollabSession(session: CollabSession): void {
   lastCollabSheetsKey = key;
 
   try {
-    workbookSheetStore = new WorkbookSheetStore(
+    workbookSheetStore = new CollabWorkbookSheetStore(
+      session,
       sheets.map((sheet) => ({
         id: sheet.id,
         name: sheet.name,
@@ -1447,7 +1603,8 @@ function syncSheetStoreFromCollabSession(session: CollabSession): void {
     // client writes bad metadata), fall back to using the stable sheet id as the display name
     // so the UI remains functional.
     console.error("[formula][desktop] Failed to apply collab sheet metadata:", err);
-    workbookSheetStore = new WorkbookSheetStore(
+    workbookSheetStore = new CollabWorkbookSheetStore(
+      session,
       sheets.map((sheet) => ({
         id: sheet.id,
         name: sheet.id,
