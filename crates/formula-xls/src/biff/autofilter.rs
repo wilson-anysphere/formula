@@ -476,10 +476,36 @@ fn decode_filter_database_rgce(
         .checked_add(consumed)
         .ok_or_else(|| "rgce offset overflow".to_string())?;
 
-    if pos != rgce.len() {
-        // FilterDatabase names in valid workbooks are usually a single reference token. If extra
-        // tokens are present, treat as unsupported so we don't misinterpret the formula.
-        return Ok(None);
+    // FilterDatabase names in valid workbooks are usually a single reference token, but some
+    // producers may include additional "wrapper" tokens (e.g. PtgParen or PtgAttr with only
+    // formatting flags). Be permissive and ignore those where possible.
+    //
+    // If the trailing token stream contains anything else, treat the formula as unsupported so we
+    // don't misinterpret it.
+    while pos < rgce.len() {
+        match rgce[pos] {
+            // PtgParen (explicit parentheses): no payload.
+            0x15 => pos = pos.saturating_add(1),
+            // PtgAttr: [grbit: u8][wAttr: u16]
+            0x19 => {
+                pos = pos.saturating_add(1);
+                if rgce.len() < pos + 3 {
+                    return Err("truncated PtgAttr token".to_string());
+                }
+                let grbit = rgce[pos];
+                let _w_attr = u16::from_le_bytes([rgce[pos + 1], rgce[pos + 2]]);
+                pos = pos.saturating_add(3);
+
+                // Some PtgAttr bits affect evaluation (notably tAttrSum / tAttrChoose). If present,
+                // the formula is no longer a simple range reference; treat as unsupported.
+                const T_ATTR_CHOOSE: u8 = 0x04;
+                const T_ATTR_SUM: u8 = 0x10;
+                if (grbit & (T_ATTR_CHOOSE | T_ATTR_SUM)) != 0 {
+                    return Ok(None);
+                }
+            }
+            _ => return Ok(None),
+        }
     }
 
     let sheet_idx = sheet_override.or(base_sheet).ok_or_else(|| {
@@ -655,6 +681,86 @@ mod tests {
         rgce.extend_from_slice(&4u16.to_le_bytes()); // rwLast
         rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
         rgce.extend_from_slice(&0x0402u16.to_le_bytes()); // colLast (C with a high bit set)
+
+        let mut name_data = Vec::new();
+        name_data.extend_from_slice(&NAME_FLAG_BUILTIN.to_le_bytes()); // grbit (builtin)
+        name_data.push(0); // chKey
+        name_data.push(1); // cch (builtin id length)
+        name_data.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        name_data.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        name_data.extend_from_slice(&1u16.to_le_bytes()); // itab (sheet 1)
+        name_data.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu..cchStatusText
+        name_data.push(BUILTIN_NAME_FILTER_DATABASE); // built-in name id
+        name_data.extend_from_slice(&rgce);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_globals()),
+            record(RECORD_NAME, &name_data),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_filter_database_ranges(&stream, BiffVersion::Biff8, 1252, Some(1))
+            .expect("parse");
+
+        assert_eq!(
+            parsed.by_sheet.get(&0).copied(),
+            Some(Range::new(CellRef::new(0, 0), CellRef::new(4, 2)))
+        );
+    }
+
+    #[test]
+    fn decodes_filter_database_area_with_trailing_ptg_paren() {
+        // Some producers may wrap the reference with an explicit PtgParen token.
+        let mut rgce = Vec::new();
+        rgce.push(0x25); // PtgArea
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        rgce.extend_from_slice(&4u16.to_le_bytes()); // rwLast
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        rgce.extend_from_slice(&2u16.to_le_bytes()); // colLast
+        rgce.push(0x15); // PtgParen
+
+        let mut name_data = Vec::new();
+        name_data.extend_from_slice(&NAME_FLAG_BUILTIN.to_le_bytes()); // grbit (builtin)
+        name_data.push(0); // chKey
+        name_data.push(1); // cch (builtin id length)
+        name_data.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        name_data.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        name_data.extend_from_slice(&1u16.to_le_bytes()); // itab (sheet 1)
+        name_data.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu..cchStatusText
+        name_data.push(BUILTIN_NAME_FILTER_DATABASE); // built-in name id
+        name_data.extend_from_slice(&rgce);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_globals()),
+            record(RECORD_NAME, &name_data),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_filter_database_ranges(&stream, BiffVersion::Biff8, 1252, Some(1))
+            .expect("parse");
+
+        assert_eq!(
+            parsed.by_sheet.get(&0).copied(),
+            Some(Range::new(CellRef::new(0, 0), CellRef::new(4, 2)))
+        );
+    }
+
+    #[test]
+    fn decodes_filter_database_area_with_trailing_ptg_attr() {
+        // Some producers may include a trailing PtgAttr token with only formatting/evaluation-hint
+        // flags. Accept it as best-effort.
+        let mut rgce = Vec::new();
+        rgce.push(0x25); // PtgArea
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        rgce.extend_from_slice(&4u16.to_le_bytes()); // rwLast
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        rgce.extend_from_slice(&2u16.to_le_bytes()); // colLast
+        // PtgAttr: [0x19][grbit][wAttr]
+        rgce.push(0x19);
+        rgce.push(0x00); // grbit
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // wAttr
 
         let mut name_data = Vec::new();
         name_data.extend_from_slice(&NAME_FLAG_BUILTIN.to_le_bytes()); // grbit (builtin)
