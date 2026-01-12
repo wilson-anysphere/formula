@@ -5889,12 +5889,37 @@ mountRibbon(ribbonReactRoot, {
           return;
         }
 
+        const startedAtMs = Date.now();
+        const queryCount = queries.length;
+
+        const shouldNotifyInBackground = (): boolean => {
+          try {
+            if (typeof document === "undefined") return false;
+            // Only notify when the app is not focused / not visible (user likely switched away).
+            if ((document as any).hidden) return true;
+            if (typeof document.hasFocus === "function") return !document.hasFocus();
+            return false;
+          } catch {
+            return false;
+          }
+        };
+
         try {
           const handle = service.refreshAll();
           await handle.promise;
+          const elapsedMs = Date.now() - startedAtMs;
+          // Avoid spamming notifications for extremely fast refreshes; only notify when the
+          // user likely switched away or when the refresh took long enough to be meaningful.
+          if (shouldNotifyInBackground() || elapsedMs >= 5_000) {
+            const noun = queryCount === 1 ? "query" : "queries";
+            void notify({ title: "Power Query refresh complete", body: `Refreshed ${queryCount} ${noun}.` });
+          }
         } catch (err) {
           console.error("Failed to refresh all queries:", err);
           showToast(`Failed to refresh queries: ${String(err)}`, "error");
+          if (shouldNotifyInBackground()) {
+            void notify({ title: "Power Query refresh failed", body: "One or more queries failed to refresh." });
+          }
         }
       })();
       // Don't wait for the refresh to complete; return focus immediately so long-running
