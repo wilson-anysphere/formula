@@ -3164,13 +3164,15 @@ window.addEventListener(
     if (target instanceof HTMLElement) {
       const tabList = target.closest?.("#sheet-tabs .sheet-tabs");
       if (tabList) {
-        // Let the sheet tab strip handle Ctrl/Cmd+PgUp/PgDn when focus is within the tab UI.
+        // Let the sheet tab strip handle shortcuts when focus is on a tab.
         //
-        // Still call `preventDefault()` here so:
-        // - browser-level tab switching doesn't fire
-        // - KeybindingService's capture-phase builtins don't also dispatch and steal focus
-        //   away from the tab strip (which wants to preserve keyboard focus on the tabs).
-        e.preventDefault();
+        // When inline rename is active the focused element is an <input>, and the tab strip
+        // intentionally does not handle Ctrl/Cmd+PgUp/PgDn. In that case, prevent browser
+        // defaults (e.g. tab switching) but keep focus in rename mode.
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) {
+          e.preventDefault();
+        }
         return;
       }
 
