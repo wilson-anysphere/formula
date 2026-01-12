@@ -431,7 +431,9 @@ fn dump_project_normalized_data_v3_dir_records(vba_project_bin: &[u8]) {
 fn dump_project_normalized_data_v3(vba_project_bin: &[u8]) {
     const PREFIX_LEN: usize = 64;
     println!();
-    println!("-- ProjectNormalizedDataV3 (V3ContentNormalizedData || FormsNormalizedData) --");
+    println!(
+        "-- ProjectNormalizedDataV3 (filtered PROJECT props || V3ContentNormalizedData || FormsNormalizedData) --"
+    );
 
     match formula_vba::project_normalized_data_v3(vba_project_bin) {
         Ok(data) => {
