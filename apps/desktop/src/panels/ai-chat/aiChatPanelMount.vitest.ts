@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
     })),
     getDesktopLLMClient: vi.fn(() => sentinelClient),
     getDesktopModel: vi.fn(() => "test-model"),
+    purgeLegacyDesktopLLMSettings: vi.fn(),
   };
 });
 
@@ -37,6 +38,7 @@ vi.mock("../../ai/audit/auditStore.js", () => ({
 vi.mock("../../ai/llm/desktopLLMClient.js", () => ({
   getDesktopLLMClient: mocks.getDesktopLLMClient,
   getDesktopModel: mocks.getDesktopModel,
+  purgeLegacyDesktopLLMSettings: mocks.purgeLegacyDesktopLLMSettings,
 }));
 
 // React 18 relies on this flag to suppress act() warnings in test runners.
@@ -62,6 +64,7 @@ describe("AI chat panel", () => {
     mocks.getDesktopAIAuditStore.mockClear();
     mocks.getDesktopLLMClient.mockClear();
     mocks.getDesktopModel.mockClear();
+    mocks.purgeLegacyDesktopLLMSettings.mockClear();
   });
 
   it(
@@ -72,9 +75,7 @@ describe("AI chat panel", () => {
 
       const { createPanelBodyRenderer } = await import("../panelBodyRenderer.js");
       const { PanelIds } = await import("../panelRegistry.js");
-      const renderer = createPanelBodyRenderer({
-        getDocumentController,
-      });
+      const renderer = createPanelBodyRenderer({ getDocumentController });
 
       const body = document.createElement("div");
       document.body.appendChild(body);
@@ -86,6 +87,7 @@ describe("AI chat panel", () => {
       expect(getDocumentController).toHaveBeenCalled();
       expect(mocks.getDesktopLLMClient).toHaveBeenCalled();
       expect(mocks.getDesktopAIAuditStore).toHaveBeenCalled();
+      expect(mocks.purgeLegacyDesktopLLMSettings).toHaveBeenCalled();
 
       expect(body.querySelector('[data-testid="ai-tab-chat"]')).toBeInstanceOf(HTMLButtonElement);
       expect(body.querySelector('[data-testid="ai-tab-agent"]')).toBeInstanceOf(HTMLButtonElement);
@@ -96,7 +98,6 @@ describe("AI chat panel", () => {
       const lastCall = mocks.createAiChatOrchestrator.mock.calls.at(-1)?.[0] as any;
       expect(lastCall?.llmClient).toBe(mocks.sentinelClient);
       expect(lastCall?.model).toBe("test-model");
-
       const orchestrator = mocks.createAiChatOrchestrator.mock.results.at(-1)?.value as any;
       act(() => {
         renderer.cleanup([]);
@@ -104,6 +105,6 @@ describe("AI chat panel", () => {
 
       expect(orchestrator.dispose).toHaveBeenCalled();
     },
-    TEST_TIMEOUT_MS,
+    TEST_TIMEOUT_MS
   );
 });

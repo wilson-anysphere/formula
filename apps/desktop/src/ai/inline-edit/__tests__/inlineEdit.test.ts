@@ -14,6 +14,7 @@ import { LocalClassificationStore } from "../../../../../../packages/security/dl
 import { LocalPolicyStore } from "../../../../../../packages/security/dlp/src/policyStore.js";
 
 let priorGridMode: string | undefined;
+const LEGACY_OPENAI_API_KEY_STORAGE_KEY = "formula:" + "openai" + "ApiKey";
 
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
@@ -374,10 +375,13 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
   });
 
   it("uses the default Cursor client when no inlineEdit llmClient is injected", async () => {
+    // Legacy user API keys should be proactively purged (and never used for auth).
+    localStorage.setItem(LEGACY_OPENAI_API_KEY_STORAGE_KEY, "sk-test-inline-edit");
+
     let callCount = 0;
     const fetchMock = vi.fn(async (url: string, init: any) => {
       callCount++;
-      expect(url).toBe("/v1/chat");
+      expect(url).toBe("/v1/chat/completions");
       expect(init?.method).toBe("POST");
       expect(init?.credentials).toBe("include");
       // Cursor-only: no user API keys should be sent from the client.
@@ -387,17 +391,25 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
         return {
           ok: true,
           json: async () => ({
-            message: {
-              content: "",
-              toolCalls: [
-                {
-                  id: "call-1",
-                  name: "set_range",
-                  arguments: { range: "C1:C3", values: [[1], [2], [3]] },
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [
+                    {
+                      id: "call-1",
+                      type: "function",
+                      function: {
+                        name: "set_range",
+                        arguments: JSON.stringify({ range: "C1:C3", values: [[1], [2], [3]] }),
+                      },
+                    },
+                  ],
                 },
-              ],
-            },
-            usage: { promptTokens: 10, completionTokens: 5 },
+              },
+            ],
+            usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
           }),
         } as any;
       }
@@ -405,8 +417,8 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
       return {
         ok: true,
         json: async () => ({
-          message: { content: "done" },
-          usage: { promptTokens: 1, completionTokens: 1 },
+          choices: [{ message: { role: "assistant", content: "done" } }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
         }),
       } as any;
     });
@@ -451,6 +463,8 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
       const el = overlay.querySelector<HTMLElement>('[data-testid="inline-edit-preview-summary"]');
       return el && el.textContent?.includes("Changes:") ? el : null;
     });
+
+    expect(localStorage.getItem(LEGACY_OPENAI_API_KEY_STORAGE_KEY)).toBeNull();
 
     overlay.querySelector<HTMLButtonElement>('[data-testid="inline-edit-approve"]')!.click();
 

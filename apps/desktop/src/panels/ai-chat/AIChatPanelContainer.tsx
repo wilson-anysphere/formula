@@ -10,7 +10,7 @@ import type { LLMToolCall } from "../../../../../packages/ai-tools/src/llm/integ
 import type { ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
 import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spreadsheet/api.js";
 import { getDesktopAIAuditStore } from "../../ai/audit/auditStore.js";
-import { getDesktopLLMClient, getDesktopModel } from "../../ai/llm/desktopLLMClient.js";
+import { getDesktopLLMClient, getDesktopModel, purgeLegacyDesktopLLMSettings } from "../../ai/llm/desktopLLMClient.js";
 
 import { AIChatPanel, type AIChatPanelSendMessage } from "./AIChatPanel.js";
 import { ApprovalModal } from "./ApprovalModal.js";
@@ -45,6 +45,9 @@ export interface AIChatPanelContainerProps {
 }
 
 export function AIChatPanelContainer(props: AIChatPanelContainerProps) {
+  useEffect(() => {
+    purgeLegacyDesktopLLMSettings();
+  }, []);
   return <AIChatPanelRuntime {...props} />;
 }
 

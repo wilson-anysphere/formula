@@ -60,13 +60,18 @@ describe("purgeLegacyDesktopLLMSettings", () => {
   });
 
   it("removes legacy LLM provider + API key settings from localStorage", () => {
-    const legacyKey = ["formula", "openaiApiKey"].join(":");
-    const llmProviderKey = ["formula", "llm", "provider"].join(":");
+    const legacyKey = "formula:" + "openai" + "ApiKey";
+    const llmPrefix = "formula:" + "llm:";
+    const llmProviderKey = llmPrefix + "provider";
+    const completionPrefix = "formula:" + "aiCompletion:";
 
     window.localStorage.setItem(legacyKey, "sk-legacy-test");
     window.localStorage.setItem(llmProviderKey, "openai");
 
-    const completionPrefix = "formula:" + "aiCompletion:";
+    window.localStorage.setItem(llmPrefix + "openai:apiKey", "sk-test");
+    window.localStorage.setItem(llmPrefix + "anthropic:model", "claude-test");
+    window.localStorage.setItem(llmPrefix + "ollama:model", "llama-test");
+
     window.localStorage.setItem(completionPrefix + "localModelEnabled", "true");
     window.localStorage.setItem(completionPrefix + "localModelName", "formula-completion");
     window.localStorage.setItem(completionPrefix + "localModelBaseUrl", "http://localhost:11434");
@@ -75,6 +80,10 @@ describe("purgeLegacyDesktopLLMSettings", () => {
 
     expect(window.localStorage.getItem(legacyKey)).toBeNull();
     expect(window.localStorage.getItem(llmProviderKey)).toBeNull();
+
+    expect(window.localStorage.getItem(llmPrefix + "openai:apiKey")).toBeNull();
+    expect(window.localStorage.getItem(llmPrefix + "anthropic:model")).toBeNull();
+    expect(window.localStorage.getItem(llmPrefix + "ollama:model")).toBeNull();
 
     expect(window.localStorage.getItem(completionPrefix + "localModelEnabled")).toBeNull();
     expect(window.localStorage.getItem(completionPrefix + "localModelName")).toBeNull();

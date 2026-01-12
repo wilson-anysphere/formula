@@ -4,7 +4,7 @@ import { analyzeVbaModule } from "../../../../../packages/vba-migrate/src/analyz
 import { VbaMigrator } from "../../../../../packages/vba-migrate/src/converter.js";
 
 import { getVbaProject, type VbaModuleSummary, type VbaProjectSummary } from "../../macros/vba_project.js";
-import { getDesktopLLMClient } from "../../ai/llm/desktopLLMClient.js";
+import { getDesktopLLMClient, purgeLegacyDesktopLLMSettings } from "../../ai/llm/desktopLLMClient.js";
 
 type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
 
@@ -274,14 +274,20 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [validationReport, setValidationReport] = useState<any>(null);
 
+  useEffect(() => {
+    purgeLegacyDesktopLLMSettings();
+  }, []);
+
+  const llmClient = useMemo(() => getDesktopLLMClient(), []);
+
   const migrator = useMemo(() => {
     if (props.createMigrator) return props.createMigrator();
     try {
-      return new VbaMigrator({ llm: getDesktopLLMClient() as any });
+      return new VbaMigrator({ llm: llmClient as any });
     } catch {
       return null;
     }
-  }, [props.createMigrator]);
+  }, [llmClient, props.createMigrator]);
 
   const refreshProject = useCallback(async () => {
     setLoadingProject(true);
