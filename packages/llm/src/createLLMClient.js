@@ -1,15 +1,32 @@
 import { CursorLLMClient } from "./cursor.js";
 
 /**
- * Create an LLM client backed by the Cursor inference backend.
+ * @typedef {import("./cursor.js").CursorLLMClient} CursorLLMClient
+ * @typedef {import("./cursor.js").CursorClientOptions} CursorClientOptions
+ */
+
+/**
+ * Create an LLM client that talks to the Cursor backend.
  *
+ * This helper is intentionally dependency-free and works in both Node and
+ * browser runtimes (relies on global `fetch`).
+ *
+ * @param {CursorClientOptions & { provider?: unknown }} [config]
  * @returns {import("./types.js").LLMClient}
  */
-export function createLLMClient() {
-  if (arguments.length > 0) {
-    throw new Error(
-      "createLLMClient no longer accepts provider configuration. All inference is routed through the Cursor backend.",
-    );
+export function createLLMClient(config) {
+  if (config == null) {
+    return new CursorLLMClient();
   }
-  return new CursorLLMClient();
+
+  if (!config || typeof config !== "object") {
+    throw new Error("createLLMClient expects an optional configuration object.");
+  }
+
+  if ("provider" in config) {
+    throw new Error("Provider selection is no longer supported; all AI uses Cursor backend.");
+  }
+
+  return new CursorLLMClient(config);
 }
+
