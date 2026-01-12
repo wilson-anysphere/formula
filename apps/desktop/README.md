@@ -133,7 +133,7 @@ pnpm -C apps/desktop check:coi
 ```
 
 This builds the production frontend + a release desktop binary and launches it in a special mode that exits with
-success/failure after evaluating `globalThis.crossOriginIsolated` and `SharedArrayBuffer` inside the WebView.
+success/failure after evaluating `globalThis.crossOriginIsolated`, `SharedArrayBuffer`, and basic Worker support inside the WebView.
 
 ### Manual check
 

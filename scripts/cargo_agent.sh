@@ -166,7 +166,6 @@ elif [[ "${desktop_pkg_name}" == "formula-desktop-tauri" ]]; then
   remap_from="desktop"
   remap_to="formula-desktop-tauri"
 fi
-
 remapped_args=()
 expect_pkg_name=false
 for arg in "$@"; do

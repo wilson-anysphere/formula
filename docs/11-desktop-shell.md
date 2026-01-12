@@ -153,6 +153,8 @@ including an automated smoke check:
 pnpm -C apps/desktop check:coi
 ```
 
+This check validates `globalThis.crossOriginIsolated`, `SharedArrayBuffer` availability, and that a basic Web Worker can start (to catch CSP / asset-protocol regressions that would break the Pyodide worker backend).
+
 To validate `asset://` (i.e. `convertFileSrc`) resources still load under COEP, the repo also includes:
 
 - `apps/desktop/asset-protocol-test.html` (open in the desktop app and follow the instructions on the page)

@@ -1042,8 +1042,8 @@ fn main() {
                 // packaged Tauri build by running in a special mode that exits quickly with a
                 // status code.
                 //
-                // This is evaluated inside the WebView so we can check `globalThis.crossOriginIsolated`
-                // and `SharedArrayBuffer` availability.
+                // This is evaluated inside the WebView so we can check `globalThis.crossOriginIsolated`,
+                // `SharedArrayBuffer` availability, and basic Worker support (for the Pyodide worker backend).
                 const TIMEOUT_SECS: u64 = 20;
                 std::thread::spawn(|| {
                     std::thread::sleep(Duration::from_secs(TIMEOUT_SECS));
@@ -1062,6 +1062,7 @@ fn main() {
                 struct CrossOriginIsolationCheckResult {
                     cross_origin_isolated: bool,
                     shared_array_buffer: bool,
+                    worker_ok: bool,
                 }
 
                 window.listen("coi-check-result", |event| {
@@ -1082,37 +1083,120 @@ fn main() {
                         };
 
                     println!(
-                        "[formula][coi-check] crossOriginIsolated={}, SharedArrayBuffer={}",
-                        parsed.cross_origin_isolated, parsed.shared_array_buffer
+                        "[formula][coi-check] crossOriginIsolated={}, SharedArrayBuffer={}, workerOk={}",
+                        parsed.cross_origin_isolated, parsed.shared_array_buffer, parsed.worker_ok
                     );
 
-                    let ok = parsed.cross_origin_isolated && parsed.shared_array_buffer;
+                    let ok = parsed.cross_origin_isolated && parsed.shared_array_buffer && parsed.worker_ok;
                     std::process::exit(if ok { 0 } else { 1 });
                 });
 
-                window
+                     window
                     .eval(
                         r#"
 (() => {
   const deadline = Date.now() + 10_000;
-  const tick = () => {
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const runWorker = (url, opts) =>
+    new Promise((resolve) => {
+      let worker;
+      try {
+        worker = opts ? new Worker(url, opts) : new Worker(url);
+      } catch {
+        resolve(false);
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        try {
+          worker.terminate();
+        } catch {}
+        resolve(false);
+      }, 1000);
+
+      worker.onmessage = () => {
+        clearTimeout(timeout);
+        try {
+          worker.terminate();
+        } catch {}
+        resolve(true);
+      };
+      worker.onerror = () => {
+        clearTimeout(timeout);
+        try {
+          worker.terminate();
+        } catch {}
+        resolve(false);
+      };
+
+      try {
+        worker.postMessage(null);
+      } catch {
+        clearTimeout(timeout);
+        try {
+          worker.terminate();
+        } catch {}
+        resolve(false);
+      }
+    });
+
+  const checkWorker = async () => {
+    if (typeof Worker === "undefined") return false;
+
+    // Use a real `self` URL (not `blob:`) so we validate the packaged asset protocol + CSP.
+    const workerUrl = new URL("coi-check-worker.js", globalThis.location.href).toString();
+
+    // Prefer module workers (used by the engine + extension host). Fall back to classic workers
+    // (used by the Pyodide worker backend).
+    try {
+      if (await runWorker(workerUrl, { type: "module" })) return true;
+    } catch {}
+
+    try {
+      if (await runWorker(workerUrl)) return true;
+    } catch {}
+
+    return false;
+  };
+
+  let started = false;
+  const tick = async () => {
+    if (started) return;
+
     const emit = globalThis.__TAURI__?.event?.emit;
-    if (typeof emit === "function") {
-      const crossOriginIsolated = globalThis.crossOriginIsolated === true;
-      const sharedArrayBuffer = typeof SharedArrayBuffer !== "undefined";
-      emit("coi-check-result", {
-        cross_origin_isolated: crossOriginIsolated,
-        shared_array_buffer: sharedArrayBuffer,
-      }).catch(() => {
-        if (Date.now() > deadline) return;
-        setTimeout(tick, 50);
-      });
+    if (typeof emit !== "function") {
+      if (Date.now() > deadline) return;
+      setTimeout(tick, 50);
       return;
     }
-    if (Date.now() > deadline) return;
-    setTimeout(tick, 50);
+
+    started = true;
+    const crossOriginIsolated = globalThis.crossOriginIsolated === true;
+    const sharedArrayBuffer = typeof SharedArrayBuffer !== "undefined";
+    let workerOk = false;
+    try {
+      workerOk = await checkWorker();
+    } catch {}
+
+    const payload = {
+      cross_origin_isolated: crossOriginIsolated,
+      shared_array_buffer: sharedArrayBuffer,
+      worker_ok: workerOk,
+    };
+
+    // Emit can reject if the Tauri event bridge isn't fully ready yet; retry briefly.
+    while (Date.now() <= deadline) {
+      try {
+        await emit("coi-check-result", payload);
+        return;
+      } catch {
+        await sleep(50);
+      }
+    }
   };
-  tick();
+
+  tick().catch(() => {});
 })();
 "#,
                     )

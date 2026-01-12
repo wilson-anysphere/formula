@@ -109,10 +109,10 @@ async function main() {
   });
   if (runCode !== 0) {
     console.error(
-      `[coi-check] FAILED: packaged Tauri build is not cross-origin isolated (exit code ${runCode}).`,
+      `[coi-check] FAILED: packaged Tauri build is missing cross-origin isolation and/or Worker support (exit code ${runCode}).`,
     );
   } else {
-    console.log("[coi-check] OK: packaged Tauri build is cross-origin isolated.");
+    console.log("[coi-check] OK: packaged Tauri build is cross-origin isolated (SharedArrayBuffer + Worker ready).");
   }
   process.exit(runCode);
 }
