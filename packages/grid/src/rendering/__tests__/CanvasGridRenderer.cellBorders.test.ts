@@ -503,4 +503,67 @@ describe("CanvasGridRenderer side border rendering (Excel-like)", () => {
 
     expect(gridStrokes.some((stroke) => stroke.strokeStyle === "#ff0000")).toBe(false);
   });
+
+  it("prefers merged perimeter border styles over adjacent cells when widths tie (style rank)", () => {
+    const merged: CellRange = { startRow: 0, endRow: 2, startCol: 0, endCol: 2 };
+    const contains = (range: CellRange, row: number, col: number) =>
+      row >= range.startRow && row < range.endRow && col >= range.startCol && col < range.endCol;
+    const intersects = (a: CellRange, b: CellRange) =>
+      a.startRow < b.endRow && a.endRow > b.startRow && a.startCol < b.endCol && a.endCol > b.startCol;
+
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        // Merged anchor defines a *double* border on the merged perimeter.
+        if (row === 0 && col === 0) {
+          return { row, col, value: null, style: { borders: { right: { width: 3, style: "double", color: "#ff00ff" } } } };
+        }
+        // Adjacent right cell defines an equal-width *solid* border (should lose to double style rank).
+        if ((row === 0 || row === 1) && col === 2) {
+          return { row, col, value: null, style: { borders: { left: { width: 3, style: "solid", color: "#0000ff" } } } };
+        }
+        return { row, col, value: null };
+      },
+      getMergedRangeAt: (row, col) => (contains(merged, row, col) ? merged : null),
+      getMergedRangesInRange: (range) => (intersects(range, merged) ? [merged] : [])
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const { ctx: gridCtx, strokes: gridStrokes } = createRecording2dContext(gridCanvas);
+    const contentCtx = createRecording2dContext(contentCanvas).ctx;
+    const selectionCtx = createRecording2dContext(selectionCanvas).ctx;
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, gridCtx],
+      [contentCanvas, contentCtx],
+      [selectionCanvas, selectionCtx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      return contexts.get(this) ?? createRecording2dContext(this).ctx;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 2,
+      colCount: 3,
+      defaultRowHeight: 10,
+      defaultColWidth: 10
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(200, 100, 1);
+    renderer.renderImmediately();
+
+    // Double border width=3 -> per-line width=1, offset=1 -> x=20±1 with crisp alignment -> 19.5 / 21.5.
+    const purpleStroke = gridStrokes.find((stroke) => stroke.strokeStyle === "#ff00ff" && stroke.lineWidth === 1);
+    expect(purpleStroke).toBeTruthy();
+    expect(hasNormalizedSegment(purpleStroke!.segments, { x1: 19.5, y1: 0, x2: 19.5, y2: 10 })).toBe(true);
+    expect(hasNormalizedSegment(purpleStroke!.segments, { x1: 19.5, y1: 10, x2: 19.5, y2: 20 })).toBe(true);
+    expect(hasNormalizedSegment(purpleStroke!.segments, { x1: 21.5, y1: 0, x2: 21.5, y2: 10 })).toBe(true);
+    expect(hasNormalizedSegment(purpleStroke!.segments, { x1: 21.5, y1: 10, x2: 21.5, y2: 20 })).toBe(true);
+
+    expect(gridStrokes.some((stroke) => stroke.strokeStyle === "#0000ff")).toBe(false);
+  });
 });
