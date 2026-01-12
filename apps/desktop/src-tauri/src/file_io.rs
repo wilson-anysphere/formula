@@ -510,6 +510,25 @@ enum SniffedWorkbookFormat {
 
 const PARQUET_MAGIC: [u8; 4] = *b"PAR1";
 
+fn zip_entry_name_matches(candidate: &str, target: &str) -> bool {
+    let target = target.trim_start_matches('/').replace('\\', "/");
+
+    let mut normalized = candidate.trim_start_matches('/');
+    let replaced;
+    if normalized.contains('\\') {
+        replaced = normalized.replace('\\', "/");
+        normalized = &replaced;
+    }
+
+    normalized.eq_ignore_ascii_case(&target)
+}
+
+fn zip_archive_has_entry<R: Read + std::io::Seek>(archive: &zip::ZipArchive<R>, name: &str) -> bool {
+    archive
+        .file_names()
+        .any(|candidate| zip_entry_name_matches(candidate, name))
+}
+
 fn sniff_workbook_format(path: &Path) -> Option<SniffedWorkbookFormat> {
     use std::io::{Read, Seek, SeekFrom};
 
@@ -541,11 +560,11 @@ fn sniff_workbook_format(path: &Path) -> Option<SniffedWorkbookFormat> {
     }
 
     let _ = file.seek(SeekFrom::Start(0));
-    let mut archive = zip::ZipArchive::new(file).ok()?;
-    if archive.by_name("xl/workbook.bin").is_ok() {
+    let archive = zip::ZipArchive::new(file).ok()?;
+    if zip_archive_has_entry(&archive, "xl/workbook.bin") {
         return Some(SniffedWorkbookFormat::Xlsb);
     }
-    if archive.by_name("xl/workbook.xml").is_ok() {
+    if zip_archive_has_entry(&archive, "xl/workbook.xml") {
         return Some(SniffedWorkbookFormat::Xlsx);
     }
 
@@ -1515,12 +1534,10 @@ pub(crate) fn workbook_main_content_type_for_extension(ext: &str) -> Option<&'st
 
 fn zip_part_exists(bytes: &[u8], part_name: &str) -> bool {
     let mut cursor = Cursor::new(bytes);
-    let Ok(mut archive) = zip::ZipArchive::new(&mut cursor) else {
+    let Ok(archive) = zip::ZipArchive::new(&mut cursor) else {
         return false;
     };
-    let name = part_name.strip_prefix('/').unwrap_or(part_name);
-    let exists = archive.by_name(name).is_ok();
-    exists
+    zip_archive_has_entry(&archive, part_name)
 }
 
 fn workbook_override_matches_content_type(content_types_xml: &str, desired: &str) -> bool {
@@ -1848,13 +1865,12 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         }
 
         if saw_content_types {
-            if let Ok(mut file) = archive.by_name("[Content_Types].xml") {
-                let mut bytes = Vec::new();
-                if file.read_to_end(&mut bytes).is_ok() {
-                    let content_types = String::from_utf8_lossy(&bytes);
-                    if content_types.contains("macroEnabled.main+xml") {
-                        return true;
-                    }
+            if let Ok(Some(bytes)) =
+                formula_xlsx::read_part_from_reader(Cursor::new(origin_bytes), "[Content_Types].xml")
+            {
+                let content_types = String::from_utf8_lossy(&bytes);
+                if content_types.contains("macroEnabled.main+xml") {
+                    return true;
                 }
             }
         }

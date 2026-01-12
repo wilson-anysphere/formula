@@ -1427,20 +1427,6 @@ impl AppState {
         let tab_color = match tab_color {
             None => None,
             Some(mut color) => {
-                // We currently only support setting sheet tab colors via explicit ARGB hex values.
-                // Theme/indexed colors can still be loaded and round-tripped from XLSX, but are not
-                // accepted as updates via the host APIs yet.
-                if color.theme.is_some()
-                    || color.indexed.is_some()
-                    || color.tint.is_some()
-                    || color.auto.is_some()
-                {
-                    return Err(AppStateError::WhatIf(
-                        "tab color must be specified using an ARGB hex value in `rgb` (AARRGGBB)"
-                            .to_string(),
-                    ));
-                }
-
                 if let Some(rgb) = color.rgb.as_deref() {
                     let trimmed = rgb.trim();
                     if trimmed.is_empty() {
@@ -1461,7 +1447,12 @@ impl AppState {
                 }
 
                 // Treat an all-empty payload as clearing the tab color.
-                if color.rgb.is_none() {
+                let is_empty = color.rgb.is_none()
+                    && color.theme.is_none()
+                    && color.indexed.is_none()
+                    && color.tint.is_none()
+                    && color.auto.is_none();
+                if is_empty {
                     None
                 } else {
                     Some(color)
@@ -1471,15 +1462,6 @@ impl AppState {
 
         if current == tab_color {
             return Ok(());
-        }
-
-        // The UI/setters currently only support direct ARGB (CT_Color rgb="AARRGGBB") updates.
-        // Non-RGB representations (theme/indexed/auto/tint) can be round-tripped when reading and
-        // saving existing files, but are rejected for user-initiated updates.
-        if tab_color.is_some() && tab_color.as_ref().and_then(|c| c.rgb.as_deref()).is_none() {
-            return Err(AppStateError::WhatIf(
-                "tab color must be specified as an ARGB hex value".to_string(),
-            ));
         }
 
         // Persist first so we don't leave the in-memory workbook in a partially-updated state if
