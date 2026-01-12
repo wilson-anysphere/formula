@@ -350,6 +350,9 @@ Observed root namespaces (from in-repo tests; Excel versions may vary):
 - `http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages`
 - `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
 
+Namespace prefixes vary (`cx`, `etc`, or none). Parsers should match by **local-name** (e.g.
+`cellImages`, `cellImage`, `pic`, `blip`) and by relationship-namespace attributes, not by prefix.
+
 Representative example (from `crates/formula-xlsx/tests/cell_images.rs`; non-normative):
 
 ```xml
@@ -386,13 +389,17 @@ in a `cellImage` container element:
 
 Some producers emit a more lightweight schema where the relationship ID is stored directly on a
 `<cellImage>` element (rather than within a DrawingML `<pic>` subtree). Formula’s `cell_images` parser
-has explicit support for `r:id` on `<cellImage>`:
+has explicit support for `r:id` on `<cellImage>` (and some variants use `r:embed` instead):
 
 ```xml
 <etc:cellImages xmlns:etc="http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages"
                 xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <etc:cellImage r:id="rId1"/>
 </etc:cellImages>
+```
+
+```xml
+<cellImage r:embed="rId1"/>
 ```
 
 ### `xl/_rels/cellImages.xml.rels` (a.k.a. `xl/_rels/cellimages.xml.rels`)
@@ -746,7 +753,7 @@ does not “orphan” images or break Excel’s internal references.
   - Parser: `crates/formula-xlsx/src/cell_images/mod.rs`
   - Test: `crates/formula-xlsx/tests/cell_images.rs`
 - **Best-effort image import during `XlsxDocument` load**
-  - `crates/formula-xlsx/src/read/mod.rs` calls `load_cell_images_from_parts(...)` to populate `workbook.images`.
+  - `crates/formula-xlsx/src/read/mod.rs` calls `CellImages::parse_from_parts(...)` (best-effort) to populate `workbook.images`.
 - **Preservation of `xl/cellImages.xml` / `xl/cellimages.xml` + matching `.rels` + `xl/media/*` on cell edits**
   - Test: `crates/formula-xlsx/tests/cellimages_preservation.rs`
 - **Round-trip preservation of richData-backed in-cell image parts**
