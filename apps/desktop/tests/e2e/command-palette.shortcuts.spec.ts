@@ -72,6 +72,13 @@ test.describe("command palette shortcut hints", () => {
     const fallbackCopy = page.locator("li.command-palette__item", { hasText: "Copy" }).first();
     await expect(fallbackCopy).toBeVisible();
     await expect(fallbackCopy.locator(".command-palette__shortcut")).toHaveText(expectedFallbackCopyShortcut);
+
+    // Toggle Comments Panel has both the primary chord and an explicit Ctrl+Cmd/Meta fallback chord for remote desktop setups.
+    const expectedFallbackCommentsShortcut = process.platform === "darwin" ? "⌃⇧⌘M" : "Ctrl+Shift+Meta+M";
+    await input.fill("/ ctrl+cmd+shift+m");
+    const comments = page.locator("li.command-palette__item", { hasText: "Toggle Comments Panel" }).first();
+    await expect(comments).toBeVisible();
+    await expect(comments.locator(".command-palette__shortcut")).toHaveText(expectedFallbackCommentsShortcut);
   });
 
   test("renders the platform shortcut hint for Replace", async ({ page }) => {
