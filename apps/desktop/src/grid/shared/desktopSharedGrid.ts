@@ -110,6 +110,19 @@ function describeCell(
   return `Active cell ${address}, value ${valueDescription}. Selection ${selectionDescription}.`;
 }
 
+function applySrOnlyStyle(el: HTMLElement): void {
+  // Keep in sync with packages/grid/src/react/CanvasGrid.tsx SR_ONLY_STYLE.
+  el.style.position = "absolute";
+  el.style.width = "1px";
+  el.style.height = "1px";
+  el.style.padding = "0";
+  el.style.margin = "-1px";
+  el.style.overflow = "hidden";
+  el.style.clip = "rect(0, 0, 0, 0)";
+  el.style.whiteSpace = "nowrap";
+  el.style.border = "0";
+}
+
 export class DesktopSharedGrid {
   readonly renderer: CanvasGridRenderer;
 
@@ -159,6 +172,8 @@ export class DesktopSharedGrid {
 
   private readonly a11yStatusId: string;
   private readonly a11yStatusEl: HTMLDivElement;
+  private readonly a11yActiveCellId: string;
+  private readonly a11yActiveCellEl: HTMLDivElement;
 
   private disposeFns: Array<() => void> = [];
 
@@ -218,17 +233,16 @@ export class DesktopSharedGrid {
     this.a11yStatusEl.setAttribute("role", "status");
     this.a11yStatusEl.setAttribute("aria-live", "polite");
     this.a11yStatusEl.setAttribute("aria-atomic", "true");
-    this.a11yStatusEl.style.position = "absolute";
-    this.a11yStatusEl.style.width = "1px";
-    this.a11yStatusEl.style.height = "1px";
-    this.a11yStatusEl.style.padding = "0";
-    this.a11yStatusEl.style.margin = "-1px";
-    this.a11yStatusEl.style.overflow = "hidden";
-    this.a11yStatusEl.style.clip = "rect(0, 0, 0, 0)";
-    this.a11yStatusEl.style.whiteSpace = "nowrap";
-    this.a11yStatusEl.style.border = "0";
+    applySrOnlyStyle(this.a11yStatusEl);
     this.a11yStatusEl.textContent = describeCell(null, null, this.provider, this.headerRows, this.headerCols);
     this.container.appendChild(this.a11yStatusEl);
+
+    this.a11yActiveCellId = `desktop-grid-active-cell-${this.a11yStatusId}`;
+    this.a11yActiveCellEl = document.createElement("div");
+    this.a11yActiveCellEl.id = this.a11yActiveCellId;
+    this.a11yActiveCellEl.dataset.testid = "canvas-grid-a11y-active-cell";
+    this.a11yActiveCellEl.setAttribute("role", "gridcell");
+    applySrOnlyStyle(this.a11yActiveCellEl);
 
     this.container.setAttribute("role", "grid");
     this.container.setAttribute("aria-rowcount", String(options.rowCount));
@@ -269,6 +283,7 @@ export class DesktopSharedGrid {
     this.stopAutoScroll();
     this.renderer.destroy();
     this.a11yStatusEl.remove();
+    this.a11yActiveCellEl.remove();
   }
 
   setInteractionMode(mode: DesktopGridInteractionMode): void {
@@ -394,6 +409,36 @@ export class DesktopSharedGrid {
 
     this.lastAnnounced = { selection, range };
     this.a11yStatusEl.textContent = describeCell(selection, range, this.provider, this.headerRows, this.headerCols);
+
+    if (!selection) {
+      this.container.removeAttribute("aria-activedescendant");
+      this.a11yActiveCellEl.remove();
+      this.a11yActiveCellEl.textContent = "";
+      this.a11yActiveCellEl.removeAttribute("aria-rowindex");
+      this.a11yActiveCellEl.removeAttribute("aria-colindex");
+      this.a11yActiveCellEl.removeAttribute("aria-selected");
+      return;
+    }
+
+    // Ensure the active gridcell exists before referencing it with aria-activedescendant.
+    if (!this.a11yActiveCellEl.isConnected) {
+      this.container.appendChild(this.a11yActiveCellEl);
+    }
+
+    this.container.setAttribute("aria-activedescendant", this.a11yActiveCellId);
+    this.a11yActiveCellEl.setAttribute("aria-rowindex", String(selection.row + 1));
+    this.a11yActiveCellEl.setAttribute("aria-colindex", String(selection.col + 1));
+    this.a11yActiveCellEl.setAttribute("aria-selected", "true");
+
+    const row0 = selection.row - this.headerRows;
+    const col0 = selection.col - this.headerCols;
+    const address =
+      row0 >= 0 && col0 >= 0 ? toA1Address(row0, col0) : `row ${selection.row + 1}, column ${selection.col + 1}`;
+
+    const cell = this.provider.getCell(selection.row, selection.col);
+    const valueText = formatCellDisplayText(cell?.value ?? null);
+    const valueDescription = valueText.trim() === "" ? "blank" : valueText;
+    this.a11yActiveCellEl.textContent = `Cell ${address}, value ${valueDescription}.`;
   }
 
   private emitScroll(): void {
