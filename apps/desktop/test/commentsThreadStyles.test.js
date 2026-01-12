@@ -59,3 +59,36 @@ test("SpreadsheetApp.renderCommentThread is styled via CSS classes (no inline st
     "comments.css should style resolved threads via .comment-thread[data-resolved=\"true\"]",
   );
 });
+
+test("comment tooltip is token-styled and positioned via CSS variables (not left/top inline styles)", () => {
+  const appPath = path.join(__dirname, "..", "src", "app", "spreadsheetApp.ts");
+  const app = fs.readFileSync(appPath, "utf8");
+
+  assert.equal(
+    /commentTooltip\.style\.(left|top)\b/.test(app),
+    false,
+    "Comment tooltip should not be positioned via style.left/top; use CSS vars instead for consistency with token-based styling",
+  );
+
+  assert.ok(
+    app.includes('commentTooltip.style.setProperty("--comment-tooltip-x"') ||
+      app.includes('commentTooltip.style.setProperty(\'--comment-tooltip-x\''),
+    "SpreadsheetApp should set --comment-tooltip-x via style.setProperty",
+  );
+  assert.ok(
+    app.includes('commentTooltip.style.setProperty("--comment-tooltip-y"') ||
+      app.includes('commentTooltip.style.setProperty(\'--comment-tooltip-y\''),
+    "SpreadsheetApp should set --comment-tooltip-y via style.setProperty",
+  );
+
+  const cssPath = path.join(__dirname, "..", "src", "styles", "comments.css");
+  const css = fs.readFileSync(cssPath, "utf8");
+  assert.ok(
+    css.includes("background: var(--tooltip-bg)") && css.includes("color: var(--tooltip-text)"),
+    "comments.css tooltip should use --tooltip-bg/--tooltip-text tokens",
+  );
+  assert.ok(
+    css.includes("left: var(--comment-tooltip-x") && css.includes("top: var(--comment-tooltip-y"),
+    "comments.css tooltip should read --comment-tooltip-x/--comment-tooltip-y positioning vars",
+  );
+});
