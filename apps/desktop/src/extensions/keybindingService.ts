@@ -190,6 +190,7 @@ export class KeybindingService {
    */
   handleKeydown(event: KeyboardEvent): boolean {
     if (event.defaultPrevented) return false;
+    if (event.repeat) return false;
     if (shouldIgnoreTarget(event.target)) return false;
 
     const match = this.findMatchingBinding(event);
