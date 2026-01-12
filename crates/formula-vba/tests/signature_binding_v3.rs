@@ -446,6 +446,48 @@ fn verify_vba_project_signature_binding_supports_v3_signature_part_md5_digest() 
 }
 
 #[test]
+fn verify_vba_signature_binding_accepts_v3_md5_digest_even_without_stream_path() {
+    let project_ole = build_minimal_vba_project_bin_v3(None, b"ABC");
+    let digest = compute_vba_project_digest_v3(&project_ole, DigestAlg::Md5).expect("digest v3");
+    assert_eq!(digest.len(), 16, "MD5 digest must be 16 bytes");
+
+    let signed_content = build_spc_indirect_data_content_md5(&digest);
+    let pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&signed_content);
+    let mut signature_stream_payload = signed_content.clone();
+    signature_stream_payload.extend_from_slice(&pkcs7);
+
+    // Verify binding without providing a stream path/stream kind: this exercises the best-effort
+    // v3 fallback for spec-correct 16-byte MD5 digests.
+    let binding = verify_vba_signature_binding(&project_ole, &signature_stream_payload);
+    assert_eq!(binding, VbaSignatureBinding::Bound);
+}
+
+#[test]
+fn verify_vba_project_signature_binding_accepts_v3_md5_raw_stream_payload() {
+    let project_ole = build_minimal_vba_project_bin_v3(None, b"ABC");
+    let digest = compute_vba_project_digest_v3(&project_ole, DigestAlg::Md5).expect("digest v3");
+    assert_eq!(digest.len(), 16, "MD5 digest must be 16 bytes");
+
+    let signed_content = build_spc_indirect_data_content_md5(&digest);
+    let pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&signed_content);
+    let mut signature_stream_payload = signed_content.clone();
+    signature_stream_payload.extend_from_slice(&pkcs7);
+
+    // Pass raw stream bytes (not an OLE signature part) and ensure we still attempt v3 binding.
+    let binding =
+        verify_vba_project_signature_binding(&project_ole, &signature_stream_payload).expect("binding");
+    match binding {
+        VbaProjectBindingVerification::BoundVerified(debug) => {
+            assert_eq!(debug.hash_algorithm_oid.as_deref(), Some("1.2.840.113549.2.5"));
+            assert_eq!(debug.hash_algorithm_name.as_deref(), Some("MD5"));
+            assert_eq!(debug.signed_digest.as_deref(), Some(digest.as_slice()));
+            assert_eq!(debug.computed_digest.as_deref(), Some(digest.as_slice()));
+        }
+        other => panic!("expected BoundVerified, got {other:?}"),
+    }
+}
+
+#[test]
 fn verify_vba_project_signature_binding_v3_uses_digest_len_when_oid_is_inconsistent() {
     let project_ole = build_minimal_vba_project_bin_v3(None, b"ABC");
 
