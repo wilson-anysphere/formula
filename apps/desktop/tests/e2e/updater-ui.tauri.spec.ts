@@ -104,6 +104,14 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     await page.waitForFunction(() => (window as any).__tauriShowCalls >= 1);
     await page.waitForFunction(() => (window as any).__tauriFocusCalls >= 1);
 
+    await waitForTauriListeners(page, "update-check-error");
+    await dispatchTauriEvent(page, "update-check-error", { source: "manual", error: "network down" });
+    await expect(page.locator("#toast-root")).toContainText("Error: network down");
+
+    await waitForTauriListeners(page, "update-check-already-running");
+    await dispatchTauriEvent(page, "update-check-already-running", { source: "manual" });
+    await expect(page.locator("#toast-root")).toContainText("Already checking for updates…");
+
     await waitForTauriListeners(page, "update-available");
     await dispatchTauriEvent(page, "update-available", {
       source: "manual",
