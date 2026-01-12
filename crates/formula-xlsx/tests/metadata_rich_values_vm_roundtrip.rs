@@ -5,6 +5,8 @@ use formula_model::{CellRef, CellValue};
 use formula_xlsx::load_from_bytes;
 use zip::ZipArchive;
 
+const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
 fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {
     let cursor = Cursor::new(zip_bytes);
     let mut archive = ZipArchive::new(cursor).expect("open zip");
@@ -43,6 +45,42 @@ fn preserves_metadata_xml_and_vm_attrs_on_edit_roundtrip() -> Result<(), Box<dyn
     let rels = std::str::from_utf8(&rels_bytes)?;
     assert!(rels.contains("relationships/metadata"));
     assert!(rels.contains("Target=\"metadata.xml\""));
+
+    // Ensure the `<metadata r:id="..."/>` element inside `xl/workbook.xml` is retained and still
+    // points at the metadata relationship in `workbook.xml.rels`.
+    let workbook_xml_bytes = zip_part(&saved, "xl/workbook.xml");
+    let workbook_xml = std::str::from_utf8(&workbook_xml_bytes)?;
+    let rels_doc = roxmltree::Document::parse(rels)?;
+    let metadata_rel = rels_doc
+        .descendants()
+        .find(|n| {
+            n.is_element()
+                && n.tag_name().name().eq_ignore_ascii_case("Relationship")
+                && n.attribute("Type").is_some_and(|t| {
+                    t.ends_with("/metadata") || t.ends_with("/relationships/metadata")
+                })
+                && n.attribute("Target")
+                    .is_some_and(|t| t.ends_with("metadata.xml"))
+        })
+        .expect("workbook.xml.rels must contain metadata relationship");
+    let metadata_rel_id = metadata_rel
+        .attribute("Id")
+        .expect("metadata relationship should have Id");
+
+    let workbook_doc = roxmltree::Document::parse(workbook_xml)?;
+    let metadata_node = workbook_doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("metadata"))
+        .expect("expected <metadata> element in xl/workbook.xml");
+    let metadata_rid = metadata_node
+        .attribute((REL_NS, "id"))
+        .or_else(|| metadata_node.attribute("r:id"))
+        .or_else(|| metadata_node.attribute("id"))
+        .expect("<metadata> element should have r:id attribute");
+    assert_eq!(
+        metadata_rid, metadata_rel_id,
+        "expected workbook.xml <metadata r:id> to match metadata relationship Id (rels: {rels}, workbook.xml: {workbook_xml})"
+    );
 
     // Ensure the `vm="..."` attribute on the original cell is preserved.
     let sheet_xml_bytes = zip_part(&saved, "xl/worksheets/sheet1.xml");

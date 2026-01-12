@@ -6,6 +6,8 @@ use formula_xlsx::{
 };
 use zip::ZipArchive;
 
+const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
 fn build_rich_value_fixture_xlsx() -> Vec<u8> {
     let root_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -28,6 +30,7 @@ fn build_rich_value_fixture_xlsx() -> Vec<u8> {
   <sheets>
     <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
   </sheets>
+  <metadata r:id="rId2"/>
 </workbook>"#;
 
     // Intentionally encode the calcChain relationship as a non-empty element so the calc-chain
@@ -142,6 +145,50 @@ fn assert_workbook_rels_has_metadata_relationship(rels_xml: &str) {
     );
 }
 
+fn metadata_rel_id_from_workbook_rels(rels_xml: &str) -> String {
+    let doc = roxmltree::Document::parse(rels_xml).expect("parse workbook rels");
+    let rel = doc.descendants().find(|n| {
+        n.is_element()
+            && n.tag_name().name() == "Relationship"
+            && n.attribute("Type")
+                .is_some_and(|t| t.ends_with("/metadata") || t.ends_with("/relationships/metadata"))
+            && n.attribute("Target")
+                .is_some_and(|t| t.ends_with("metadata.xml"))
+    });
+    let Some(rel) = rel else {
+        panic!("expected workbook.xml.rels to contain a metadata relationship, got: {rels_xml}");
+    };
+    rel.attribute("Id")
+        .or_else(|| rel.attribute("id"))
+        .expect("metadata relationship should have Id attribute")
+        .to_string()
+}
+
+fn metadata_rid_from_workbook_xml(workbook_xml: &str) -> String {
+    let doc = roxmltree::Document::parse(workbook_xml).expect("parse workbook xml");
+    let metadata = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "metadata");
+    let Some(metadata) = metadata else {
+        panic!("expected xl/workbook.xml to contain <metadata r:id=\"...\"/>, got: {workbook_xml}");
+    };
+    metadata
+        .attribute((REL_NS, "id"))
+        .or_else(|| metadata.attribute("r:id"))
+        .or_else(|| metadata.attribute("id"))
+        .expect("metadata element should have r:id attribute")
+        .to_string()
+}
+
+fn assert_workbook_xml_has_metadata_reference(workbook_xml: &str, rels_xml: &str) {
+    let rel_id = metadata_rel_id_from_workbook_rels(rels_xml);
+    let rid = metadata_rid_from_workbook_xml(workbook_xml);
+    assert_eq!(
+        rid, rel_id,
+        "expected xl/workbook.xml <metadata r:id> to reference the metadata relationship id (rels: {rels_xml}, workbook.xml: {workbook_xml})"
+    );
+}
+
 #[test]
 fn streaming_patcher_preserves_rich_value_vm_cm_and_metadata_parts(
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -172,6 +219,9 @@ fn streaming_patcher_preserves_rich_value_vm_cm_and_metadata_parts(
 
     let workbook_rels = String::from_utf8(zip_part(&out_bytes, "xl/_rels/workbook.xml.rels"))?;
     assert_workbook_rels_has_metadata_relationship(&workbook_rels);
+
+    let workbook_xml = String::from_utf8(zip_part(&out_bytes, "xl/workbook.xml"))?;
+    assert_workbook_xml_has_metadata_reference(&workbook_xml, &workbook_rels);
 
     assert!(
         !zip_part_exists(&out_bytes, "xl/calcChain.xml"),
@@ -219,6 +269,9 @@ fn package_patcher_preserves_rich_value_vm_cm_and_metadata_parts(
 
     let workbook_rels = std::str::from_utf8(pkg.part("xl/_rels/workbook.xml.rels").unwrap())?;
     assert_workbook_rels_has_metadata_relationship(workbook_rels);
+
+    let workbook_xml = std::str::from_utf8(pkg.part("xl/workbook.xml").unwrap())?;
+    assert_workbook_xml_has_metadata_reference(workbook_xml, workbook_rels);
 
     assert!(
         pkg.part("xl/calcChain.xml").is_none(),
