@@ -672,9 +672,35 @@ struct MetadataPart {
     rich_type_indices: HashSet<u32>,
     /// Mapping of `metadataRecords` entry index -> rich value record index.
     rich_value_by_record: HashMap<u32, u32>,
+    /// Rich value indices referenced via `<futureMetadata name="XLRICHVALUE">`.
+    ///
+    /// When present, `valueMetadata` `<rc v="...">` values often index into this list, which then
+    /// points to the rich value record index (`rvb/@i`).
+    future_rich_value_by_bk: Vec<Option<u32>>,
+    /// Whether the document contains a `<futureMetadata name="XLRICHVALUE">` block.
+    ///
+    /// This is used to avoid misinterpreting `rc/@v` as a direct rich value index when we know
+    /// there's an intermediate mapping layer.
+    saw_future_rich_value_metadata: bool,
     /// `valueMetadata` entries, indexed by `vm` (with potential 0/1-based ambiguity handled in
     /// [`Self::vm_to_rich_value_index`]).
     value_metadata: Vec<Vec<(u32, u32)>>,
+    /// Best-effort inference of whether `rc/@t` values are 0-based or 1-based indices into
+    /// `<metadataTypes>`.
+    rc_t_base: RcIndexBase,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RcIndexBase {
+    ZeroBased,
+    OneBased,
+    Unknown,
+}
+
+impl Default for RcIndexBase {
+    fn default() -> Self {
+        Self::Unknown
+    }
 }
 
 impl MetadataPart {
@@ -706,6 +732,8 @@ impl MetadataPart {
 
         let mut rich_type_indices: HashSet<u32> = HashSet::new();
         let mut rich_value_by_record: HashMap<u32, u32> = HashMap::new();
+        let mut future_rich_value_by_bk: Vec<Option<u32>> = Vec::new();
+        let mut saw_future_rich_value_metadata = false;
         let mut value_metadata: Vec<Vec<(u32, u32)>> = Vec::new();
 
         let mut in_metadata_types = false;
@@ -715,6 +743,11 @@ impl MetadataPart {
         let mut in_mdr = false;
         let mut next_mdr_idx: u32 = 0;
         let mut current_mdr_idx: Option<u32> = None;
+
+        let mut in_future_metadata = false;
+        let mut current_future_is_rich_value = false;
+        let mut in_future_bk = false;
+        let mut current_future_rich_idx: Option<u32> = None;
 
         let mut in_value_metadata = false;
         let mut in_bk = false;
@@ -808,6 +841,87 @@ impl MetadataPart {
                     }
                 }
 
+                Event::Start(e) if e.local_name().as_ref() == b"futureMetadata" => {
+                    in_future_metadata = true;
+                    current_future_is_rich_value = false;
+
+                    let mut name: Option<String> = None;
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        if crate::openxml::local_name(attr.key.as_ref()) == b"name" {
+                            name = Some(attr.unescape_value()?.into_owned());
+                        }
+                    }
+
+                    if let Some(name) = name {
+                        if name.eq_ignore_ascii_case("XLRICHVALUE") {
+                            current_future_is_rich_value = true;
+                            saw_future_rich_value_metadata = true;
+                        }
+                    }
+                }
+                Event::End(e) if e.local_name().as_ref() == b"futureMetadata" => {
+                    in_future_metadata = false;
+                    current_future_is_rich_value = false;
+                    in_future_bk = false;
+                    current_future_rich_idx = None;
+                }
+                Event::Start(e)
+                    if in_future_metadata
+                        && current_future_is_rich_value
+                        && e.local_name().as_ref() == b"bk" =>
+                {
+                    in_future_bk = true;
+                    current_future_rich_idx = None;
+                    drop(e);
+                }
+                Event::Empty(e)
+                    if in_future_metadata
+                        && current_future_is_rich_value
+                        && e.local_name().as_ref() == b"bk" =>
+                {
+                    future_rich_value_by_bk.push(None);
+                    drop(e);
+                }
+                Event::End(e)
+                    if in_future_metadata
+                        && current_future_is_rich_value
+                        && in_future_bk
+                        && e.local_name().as_ref() == b"bk" =>
+                {
+                    future_rich_value_by_bk.push(current_future_rich_idx.take());
+                    in_future_bk = false;
+                    drop(e);
+                }
+                Event::Start(e) | Event::Empty(e)
+                    if in_future_metadata && current_future_is_rich_value && in_future_bk =>
+                {
+                    // Look for the rich-value index (`rvb/@i`) inside the future metadata block.
+                    //
+                    // Prefix/namespace can vary (`xlrd:rvb`, `rvb`, etc.), so match by local name.
+                    if e.local_name().as_ref() != b"rvb" {
+                        continue;
+                    }
+                    if current_future_rich_idx.is_some() {
+                        continue;
+                    }
+
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        let key = crate::openxml::local_name(attr.key.as_ref());
+                        if key == b"i" || key == b"idx" || key == b"index" || key == b"v" {
+                            current_future_rich_idx = attr
+                                .unescape_value()?
+                                .into_owned()
+                                .parse::<u32>()
+                                .ok();
+                            if current_future_rich_idx.is_some() {
+                                break;
+                            }
+                        }
+                    }
+                }
+
                 Event::Start(e) if e.local_name().as_ref() == b"valueMetadata" => {
                     in_value_metadata = true;
                     drop(e);
@@ -858,11 +972,39 @@ impl MetadataPart {
             buf.clear();
         }
 
+        let metadata_type_count = next_metadata_type_idx;
+
+        let mut saw_t_zero = false;
+        let mut saw_t_eq_count = false;
+        if metadata_type_count > 0 {
+            for bk in &value_metadata {
+                for (t, _) in bk {
+                    if *t == 0 {
+                        saw_t_zero = true;
+                    }
+                    if *t == metadata_type_count {
+                        saw_t_eq_count = true;
+                    }
+                }
+            }
+        }
+
+        let rc_t_base = if saw_t_zero {
+            RcIndexBase::ZeroBased
+        } else if saw_t_eq_count {
+            RcIndexBase::OneBased
+        } else {
+            RcIndexBase::Unknown
+        };
+
         Ok(Self {
             vm_to_rich_value: HashMap::new(),
             rich_type_indices,
             rich_value_by_record,
+            future_rich_value_by_bk,
+            saw_future_rich_value_metadata,
             value_metadata,
+            rc_t_base,
         })
     }
 
@@ -882,6 +1024,49 @@ impl MetadataPart {
         })
     }
 
+    fn t_matches_rich_type(&self, t: u32) -> bool {
+        if self.rich_type_indices.is_empty() {
+            return true;
+        }
+
+        match self.rc_t_base {
+            RcIndexBase::ZeroBased => self.rich_type_indices.contains(&t),
+            RcIndexBase::OneBased => t
+                .checked_sub(1)
+                .is_some_and(|t0| self.rich_type_indices.contains(&t0)),
+            RcIndexBase::Unknown => self.rich_type_indices.contains(&t)
+                || t
+                    .checked_sub(1)
+                    .is_some_and(|t0| self.rich_type_indices.contains(&t0)),
+        }
+    }
+
+    fn resolve_rich_value_index(&self, v: u32) -> Option<u32> {
+        // 1) metadataRecords-style indirection:
+        if let Some(idx) = self.rich_value_by_record.get(&v) {
+            return Some(*idx);
+        }
+        // Some files appear to use 1-based indices into `metadataRecords`.
+        if v > 0 {
+            if let Some(idx) = self.rich_value_by_record.get(&(v - 1)) {
+                return Some(*idx);
+            }
+        }
+
+        // 2) futureMetadata-style indirection:
+        if let Some(Some(idx)) = self.future_rich_value_by_bk.get(v as usize) {
+            return Some(*idx);
+        }
+        // Some files appear to use 1-based indices into `futureMetadata` `<bk>` lists.
+        if v > 0 {
+            if let Some(Some(idx)) = self.future_rich_value_by_bk.get((v - 1) as usize) {
+                return Some(*idx);
+            }
+        }
+
+        None
+    }
+
     fn vm_to_rich_value_index_with_candidate(&self, vm_idx: u32) -> Option<u32> {
         let rc_refs = self.value_metadata.get(vm_idx as usize)?;
 
@@ -889,26 +1074,17 @@ impl MetadataPart {
         // to any record if we don't know the type.
         for pass in 0..2 {
             for (t, v) in rc_refs {
-                if pass == 0
-                    && !self.rich_type_indices.is_empty()
-                    && !self.rich_type_indices.contains(t)
-                {
+                if pass == 0 && !self.t_matches_rich_type(*t) {
                     continue;
                 }
 
-                if let Some(idx) = self.rich_value_by_record.get(v) {
-                    return Some(*idx);
-                }
-                // Some files appear to use 1-based indices into `metadataRecords`.
-                if *v > 0 {
-                    if let Some(idx) = self.rich_value_by_record.get(&(*v - 1)) {
-                        return Some(*idx);
-                    }
+                if let Some(idx) = self.resolve_rich_value_index(*v) {
+                    return Some(idx);
                 }
 
-                // If we couldn't resolve via `metadataRecords`, avoid guessing unless we have no
-                // parsed record mapping at all.
-                if self.rich_value_by_record.is_empty() {
+                // If we couldn't resolve via `metadataRecords`/`futureMetadata`, avoid guessing
+                // unless we have no structured mapping at all.
+                if self.rich_value_by_record.is_empty() && !self.saw_future_rich_value_metadata {
                     return Some(*v);
                 }
             }
