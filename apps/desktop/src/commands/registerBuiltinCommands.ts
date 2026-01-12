@@ -329,6 +329,36 @@ export function registerBuiltinCommands(params: {
   );
 
   commandRegistry.registerBuiltinCommand(
+    "edit.undo",
+    "Undo",
+    () => {
+      app.undo();
+      app.focus();
+    },
+    {
+      category: "Editing",
+      icon: null,
+      description: "Undo the last action",
+      keywords: ["undo"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "edit.redo",
+    "Redo",
+    () => {
+      app.redo();
+      app.focus();
+    },
+    {
+      category: "Editing",
+      icon: null,
+      description: "Redo the last undone action",
+      keywords: ["redo"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
     "clipboard.copy",
     t("clipboard.copy"),
     () => app.copyToClipboard(),

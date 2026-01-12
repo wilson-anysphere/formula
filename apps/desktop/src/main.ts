@@ -2210,7 +2210,27 @@ if (
   const primaryShiftShortcut = (key: string) => (isMac ? `⌘⇧${key}` : `Ctrl+Shift+${key}`);
 
   const buildGridContextMenuItems = (): ContextMenuItem[] => {
+    const doc = app.getDocument();
+    const undoLabel = doc.undoLabel;
+    const redoLabel = doc.redoLabel;
+
     const menuItems: ContextMenuItem[] = [
+      {
+        type: "item",
+        label: undoLabel ? `Undo ${undoLabel}` : "Undo",
+        enabled: doc.canUndo,
+        shortcut: getPrimaryCommandKeybindingDisplay("edit.undo", commandKeybindingDisplayIndex) ?? primaryShortcut("Z"),
+        onSelect: () => executeBuiltinCommand("edit.undo"),
+      },
+      {
+        type: "item",
+        label: redoLabel ? `Redo ${redoLabel}` : "Redo",
+        enabled: doc.canRedo,
+        shortcut:
+          getPrimaryCommandKeybindingDisplay("edit.redo", commandKeybindingDisplayIndex) ?? (isMac ? "⇧⌘Z" : "Ctrl+Y"),
+        onSelect: () => executeBuiltinCommand("edit.redo"),
+      },
+      { type: "separator" },
       {
         type: "item",
         label: t("clipboard.cut"),
