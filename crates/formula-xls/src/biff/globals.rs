@@ -756,6 +756,14 @@ pub(crate) fn parse_biff_workbook_globals(
 ) -> Result<BiffWorkbookGlobals, String> {
     let mut out = BiffWorkbookGlobals::default();
 
+    // BIFF workbook streams always start with a `BOF` record at offset 0. Treat `FILEPASS`
+    // (encryption) as meaningful only when that invariant holds, otherwise we risk flagging
+    // non-Excel/garbled streams as encrypted when they merely contain the byte pattern.
+    let starts_with_bof = matches!(
+        records::read_biff_record(workbook_stream, 0),
+        Some((record_id, _)) if records::is_bof_record(record_id)
+    );
+
     let mut saw_eof = false;
     let mut continuation_parse_failed = false;
     let mut saw_external_supbook = false;
@@ -792,7 +800,7 @@ pub(crate) fn parse_biff_workbook_globals(
             // This record indicates the workbook is encrypted/password-protected. We do not
             // attempt to parse encryption details; callers should treat the workbook stream as
             // unreadable without a password and abort import.
-            records::RECORD_FILEPASS => {
+            records::RECORD_FILEPASS if starts_with_bof => {
                 out.is_encrypted = true;
                 // Stop scanning: subsequent records are encrypted and may decode to nonsense.
                 // Treat this as an intentional early-termination so we don't emit a misleading
@@ -1935,6 +1943,33 @@ mod tests {
             "expected no warnings, got {:?}",
             globals.warnings
         );
+    }
+
+    #[test]
+    fn globals_does_not_flag_filepass_without_bof() {
+        // A stream that contains a FILEPASS record but does not start with a BOF record should not
+        // be treated as an encrypted workbook stream.
+        let stream = [
+            record(0x0001, &[0xAA]),
+            record(records::RECORD_FILEPASS, &[0x00, 0x00]),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        assert!(!globals.is_encrypted);
+    }
+
+    #[test]
+    fn globals_flags_filepass_when_bof_present() {
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(records::RECORD_FILEPASS, &[0x00, 0x00]),
+        ]
+        .concat();
+
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        assert!(globals.is_encrypted);
     }
 
     #[test]

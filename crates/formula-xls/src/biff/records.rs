@@ -24,6 +24,16 @@ pub(crate) fn is_bof_record(record_id: u16) -> bool {
 ///
 /// This is a best-effort scan: malformed/truncated streams simply return `false`.
 pub(crate) fn workbook_globals_has_filepass_record(workbook_stream: &[u8]) -> bool {
+    // BIFF workbook streams always start with a `BOF` record at offset 0. Guard on that
+    // before scanning so we don't misclassify arbitrary/non-Excel streams named `Workbook`
+    // as encrypted just because the byte pattern happens to match `FILEPASS`.
+    let Some((record_id, _)) = read_biff_record(workbook_stream, 0) else {
+        return false;
+    };
+    if !is_bof_record(record_id) {
+        return false;
+    }
+
     let Ok(iter) = BestEffortSubstreamIter::from_offset(workbook_stream, 0) else {
         return false;
     };
@@ -380,6 +390,32 @@ mod tests {
         let iter = BestEffortSubstreamIter::from_offset(&stream, 0).unwrap();
         let ids: Vec<u16> = iter.map(|r| r.record_id).collect();
         assert_eq!(ids, vec![0x0001]);
+    }
+
+    #[test]
+    fn filepass_scan_requires_bof_at_offset_zero() {
+        // Construct a stream that *contains* a FILEPASS record, but does not start with a BOF
+        // record. This should not be treated as an encrypted workbook stream.
+        let stream = [
+            record(0x0001, &[0xAA]),
+            record(RECORD_FILEPASS, &[0x00, 0x00]),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        assert!(!workbook_globals_has_filepass_record(&stream));
+    }
+
+    #[test]
+    fn filepass_scan_detects_encryption_when_bof_present() {
+        let stream = [
+            record(RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_FILEPASS, &[0x00, 0x00]),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        assert!(workbook_globals_has_filepass_record(&stream));
     }
 
     #[test]
