@@ -2197,9 +2197,14 @@ window.addEventListener(
       // Let the sheet tab strip (including inline rename state) handle shortcuts when focused.
       if (sheetTabsRootEl.contains(target)) return;
 
-      // Never steal the shortcut from text inputs / contenteditable (formula bar, rename input, etc).
+      // Never steal the shortcut from arbitrary text inputs / contenteditable surfaces.
+      //
+      // Exception: allow it while actively editing in the formula bar so users can
+      // navigate sheets during range selection (Excel behavior).
       const tag = target.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) {
+        if (!formulaBarRoot.contains(target) || !app.isFormulaBarEditing()) return;
+      }
     }
 
     const visible = workbookSheetStore.listVisible();
@@ -2218,7 +2223,7 @@ window.addEventListener(
     if (!next || next.id === current) return;
 
     app.activateSheet(next.id);
-    app.focus();
+    restoreFocusAfterSheetNavigation();
   },
   { capture: true },
 );
