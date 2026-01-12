@@ -3558,18 +3558,57 @@ impl Engine {
                 self.normalize_cell_ref_for_bytecode(r, current_sheet)?,
             )),
             crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
-                let left = self.normalize_range_endpoint_for_bytecode(
+                // Preserve unprefixed endpoints when the opposite endpoint carries a sheet prefix
+                // (e.g. the parser represents `Sheet1!A1:B2` as `Sheet1!A1` + `B2`). This keeps
+                // the range shape compatible with the bytecode lowerer's prefix-merging logic,
+                // which applies the explicit prefix to both endpoints.
+                let mut left = self.normalize_range_endpoint_for_bytecode_preserve_sheet(
                     &b.left,
                     current_sheet,
                     visiting,
                     lexical_scopes,
                 )?;
-                let right = self.normalize_range_endpoint_for_bytecode(
+                let mut right = self.normalize_range_endpoint_for_bytecode_preserve_sheet(
                     &b.right,
                     current_sheet,
                     visiting,
                     lexical_scopes,
                 )?;
+
+                let left_unprefixed = match &left {
+                    crate::Expr::CellRef(r) => r.sheet.is_none(),
+                    crate::Expr::ColRef(r) => r.sheet.is_none(),
+                    crate::Expr::RowRef(r) => r.sheet.is_none(),
+                    _ => false,
+                };
+                let right_unprefixed = match &right {
+                    crate::Expr::CellRef(r) => r.sheet.is_none(),
+                    crate::Expr::ColRef(r) => r.sheet.is_none(),
+                    crate::Expr::RowRef(r) => r.sheet.is_none(),
+                    _ => false,
+                };
+                let both_unprefixed = left_unprefixed && right_unprefixed;
+
+                // When both endpoints are unprefixed, interpret them relative to the sheet context
+                // used to resolve the defined name (which may differ from the formula's sheet when
+                // the name reference is explicitly sheet-qualified).
+                if both_unprefixed {
+                    let sheet_ref = crate::SheetRef::Sheet(
+                        self.workbook.sheet_names.get(current_sheet)?.clone(),
+                    );
+                    match &mut left {
+                        crate::Expr::CellRef(r) => r.sheet = Some(sheet_ref.clone()),
+                        crate::Expr::ColRef(r) => r.sheet = Some(sheet_ref.clone()),
+                        crate::Expr::RowRef(r) => r.sheet = Some(sheet_ref.clone()),
+                        _ => {}
+                    }
+                    match &mut right {
+                        crate::Expr::CellRef(r) => r.sheet = Some(sheet_ref.clone()),
+                        crate::Expr::ColRef(r) => r.sheet = Some(sheet_ref.clone()),
+                        crate::Expr::RowRef(r) => r.sheet = Some(sheet_ref.clone()),
+                        _ => {}
+                    }
+                }
                 Some(crate::Expr::Binary(crate::BinaryExpr {
                     op: crate::BinaryOp::Range,
                     left: Box::new(left),
@@ -3586,7 +3625,7 @@ impl Engine {
         }
     }
 
-    fn normalize_range_endpoint_for_bytecode(
+    fn normalize_range_endpoint_for_bytecode_preserve_sheet(
         &self,
         expr: &crate::Expr,
         current_sheet: SheetId,
@@ -3594,15 +3633,53 @@ impl Engine {
         lexical_scopes: &mut Vec<HashSet<String>>,
     ) -> Option<crate::Expr> {
         match expr {
-            crate::Expr::CellRef(r) => Some(crate::Expr::CellRef(
-                self.normalize_cell_ref_for_bytecode(r, current_sheet)?,
-            )),
-            crate::Expr::ColRef(r) => Some(crate::Expr::ColRef(
-                self.normalize_col_ref_for_bytecode(r, current_sheet)?,
-            )),
-            crate::Expr::RowRef(r) => Some(crate::Expr::RowRef(
-                self.normalize_row_ref_for_bytecode(r, current_sheet)?,
-            )),
+            crate::Expr::CellRef(r) => {
+                if r.workbook.is_some() {
+                    return None;
+                }
+                let col = match r.col {
+                    crate::Coord::A1 { index, .. } => crate::Coord::A1 { index, abs: true },
+                    crate::Coord::Offset(_) => return None,
+                };
+                let row = match r.row {
+                    crate::Coord::A1 { index, .. } => crate::Coord::A1 { index, abs: true },
+                    crate::Coord::Offset(_) => return None,
+                };
+                Some(crate::Expr::CellRef(crate::CellRef {
+                    workbook: None,
+                    sheet: r.sheet.clone(),
+                    col,
+                    row,
+                }))
+            }
+            crate::Expr::ColRef(r) => {
+                if r.workbook.is_some() {
+                    return None;
+                }
+                let col = match r.col {
+                    crate::Coord::A1 { index, .. } => crate::Coord::A1 { index, abs: true },
+                    crate::Coord::Offset(_) => return None,
+                };
+                Some(crate::Expr::ColRef(crate::ColRef {
+                    workbook: None,
+                    sheet: r.sheet.clone(),
+                    col,
+                }))
+            }
+            crate::Expr::RowRef(r) => {
+                if r.workbook.is_some() {
+                    return None;
+                }
+                let row = match r.row {
+                    crate::Coord::A1 { index, .. } => crate::Coord::A1 { index, abs: true },
+                    crate::Coord::Offset(_) => return None,
+                };
+                Some(crate::Expr::RowRef(crate::RowRef {
+                    workbook: None,
+                    sheet: r.sheet.clone(),
+                    row,
+                }))
+            }
             crate::Expr::NameRef(nref) => {
                 let resolved = self.try_inline_defined_name_ref_for_bytecode(
                     nref,
@@ -3653,64 +3730,6 @@ impl Engine {
             workbook: None,
             sheet,
             col,
-            row,
-        })
-    }
-
-    fn normalize_col_ref_for_bytecode(
-        &self,
-        r: &crate::ColRef,
-        current_sheet: SheetId,
-    ) -> Option<crate::ColRef> {
-        if r.workbook.is_some() {
-            return None;
-        }
-        let sheet = match r.sheet.as_ref() {
-            None => Some(crate::SheetRef::Sheet(
-                self.workbook.sheet_names.get(current_sheet)?.clone(),
-            )),
-            Some(crate::SheetRef::Sheet(name)) => Some(crate::SheetRef::Sheet(name.clone())),
-            Some(crate::SheetRef::SheetRange { start, end }) => Some(crate::SheetRef::SheetRange {
-                start: start.clone(),
-                end: end.clone(),
-            }),
-        };
-        let col = match r.col {
-            crate::Coord::A1 { index, .. } => crate::Coord::A1 { index, abs: true },
-            crate::Coord::Offset(_) => return None,
-        };
-        Some(crate::ColRef {
-            workbook: None,
-            sheet,
-            col,
-        })
-    }
-
-    fn normalize_row_ref_for_bytecode(
-        &self,
-        r: &crate::RowRef,
-        current_sheet: SheetId,
-    ) -> Option<crate::RowRef> {
-        if r.workbook.is_some() {
-            return None;
-        }
-        let sheet = match r.sheet.as_ref() {
-            None => Some(crate::SheetRef::Sheet(
-                self.workbook.sheet_names.get(current_sheet)?.clone(),
-            )),
-            Some(crate::SheetRef::Sheet(name)) => Some(crate::SheetRef::Sheet(name.clone())),
-            Some(crate::SheetRef::SheetRange { start, end }) => Some(crate::SheetRef::SheetRange {
-                start: start.clone(),
-                end: end.clone(),
-            }),
-        };
-        let row = match r.row {
-            crate::Coord::A1 { index, .. } => crate::Coord::A1 { index, abs: true },
-            crate::Coord::Offset(_) => return None,
-        };
-        Some(crate::RowRef {
-            workbook: None,
-            sheet,
             row,
         })
     }
