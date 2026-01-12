@@ -49,7 +49,7 @@ fn run() -> Result<(), String> {
     let project = project_normalized_data_v3(&vba_project_bin)
         .map_err(|e| format!("failed to compute ProjectNormalizedData: {e}"))?;
     println!(
-        "project_normalized_data:    len={} head[0..{}]={}",
+        "project_normalized_data_v3: len={} head[0..{}]={}",
         project.len(),
         DEFAULT_HEAD_BYTES.min(project.len()),
         bytes_to_lower_hex(&project[..DEFAULT_HEAD_BYTES.min(project.len())])
