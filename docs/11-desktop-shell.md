@@ -965,6 +965,7 @@ These commands enforce a filesystem scope equivalent to the platform allowlist:
 
 - `$HOME/**`
 - `$DOCUMENT/**`
+- `$DOWNLOADS/**` (if the OS/user has a Downloads dir configured and it exists/canonicalizes successfully; notably on Linux this may be outside `$HOME` via XDG user dirs)
 
 Implementation notes:
 

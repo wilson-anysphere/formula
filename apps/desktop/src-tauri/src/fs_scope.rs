@@ -14,6 +14,7 @@ pub(crate) const ACCESS_DENIED_SCOPE: &str =
 /// This mirrors the desktop filesystem scope policy used for local file access:
 /// - `$HOME/**`
 /// - `$DOCUMENT/**`
+/// - `$DOWNLOADS/**` (if the OS/user has a Downloads dir configured and it exists/canonicalizes successfully)
 pub(crate) fn desktop_allowed_roots() -> Result<Vec<PathBuf>> {
     let base_dirs =
         BaseDirs::new().ok_or_else(|| anyhow!("unable to determine home directory"))?;
@@ -22,6 +23,9 @@ pub(crate) fn desktop_allowed_roots() -> Result<Vec<PathBuf>> {
     if let Some(user_dirs) = UserDirs::new() {
         if let Some(documents) = user_dirs.document_dir() {
             roots.push(documents.to_path_buf());
+        }
+        if let Some(downloads) = user_dirs.download_dir() {
+            roots.push(downloads.to_path_buf());
         }
     }
 
@@ -152,6 +156,41 @@ pub(crate) fn canonicalize_in_allowed_roots(path: &Path, allowed_roots: &[PathBu
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::{Mutex, OnceLock};
+
+    static ENV_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn env_mutex() -> &'static Mutex<()> {
+        ENV_MUTEX.get_or_init(|| Mutex::new(()))
+    }
+
+    #[cfg(target_os = "linux")]
+    use std::ffi::OsString;
+
+    #[cfg(target_os = "linux")]
+    struct EnvVarGuard {
+        key: &'static str,
+        prev: Option<OsString>,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let prev = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, prev }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(prev) => std::env::set_var(self.key, prev),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 
     fn tempdir_outside_allowed_roots(allowed_roots: &[PathBuf]) -> tempfile::TempDir {
         fn tempdir_if_outside(
@@ -290,6 +329,8 @@ mod tests {
 
     #[test]
     fn desktop_scope_open_validation_allows_home_file_and_rejects_out_of_scope() {
+        let _guard = env_mutex().lock().unwrap();
+
         let base_dirs = BaseDirs::new().expect("base dirs");
         let in_scope_tmp = tempfile::tempdir_in(base_dirs.home_dir()).expect("tempdir in home");
         let in_scope_file = in_scope_tmp.path().join("in-scope.xlsx");
@@ -308,8 +349,48 @@ mod tests {
         assert!(err.to_string().to_lowercase().contains("outside"));
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn desktop_scope_includes_xdg_downloads_dir_outside_home() {
+        let _guard = env_mutex().lock().unwrap();
+
+        let config_dir = tempfile::tempdir().expect("config tempdir");
+        let downloads_dir = tempfile::tempdir().expect("downloads tempdir");
+        fs::write(
+            config_dir.path().join("user-dirs.dirs"),
+            format!("XDG_DOWNLOAD_DIR=\"{}\"\n", downloads_dir.path().display()),
+        )
+        .expect("write user-dirs.dirs");
+
+        let _xdg_config_home = EnvVarGuard::set("XDG_CONFIG_HOME", config_dir.path());
+
+        // Sanity: this test configures Downloads to resolve outside `$HOME`.
+        let base_dirs = BaseDirs::new().expect("base dirs");
+        let home_canon = dunce::canonicalize(base_dirs.home_dir()).expect("canonicalize home");
+        let downloads_canon = dunce::canonicalize(downloads_dir.path()).expect("canonicalize downloads");
+        assert!(
+            !downloads_canon.starts_with(&home_canon),
+            "test setup error: downloads dir should be outside home"
+        );
+
+        let allowed_roots = desktop_allowed_roots().expect("allowed roots");
+        assert!(
+            allowed_roots.iter().any(|root| root == &downloads_canon),
+            "expected desktop_allowed_roots to include downloads root"
+        );
+
+        let file_path = downloads_dir.path().join("from_downloads.txt");
+        fs::write(&file_path, "hello").expect("write file");
+
+        let resolved =
+            canonicalize_in_allowed_roots(&file_path, &allowed_roots).expect("downloads allowed");
+        assert!(resolved.starts_with(&downloads_canon));
+    }
+
     #[test]
     fn desktop_scope_save_validation_allows_nonexistent_home_path_and_rejects_out_of_scope() {
+        let _guard = env_mutex().lock().unwrap();
+
         let base_dirs = BaseDirs::new().expect("base dirs");
         let in_scope_tmp = tempfile::tempdir_in(base_dirs.home_dir()).expect("tempdir in home");
         let in_scope_dest = in_scope_tmp.path().join("new-workbook.xlsx");
