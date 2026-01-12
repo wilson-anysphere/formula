@@ -1,3 +1,7 @@
+/**
+ * @vitest-environment jsdom
+ */
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CommandRegistry } from "../extensions/commandRegistry.js";
@@ -34,4 +38,3 @@ describe("CommandPaletteController", () => {
     expect(ensureExtensionsLoaded).toHaveBeenCalledTimes(1);
   });
 });
-
