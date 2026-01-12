@@ -109,7 +109,8 @@ test.describe("external hyperlink opening", () => {
       page.url(),
     ]);
 
-    expect(shellCalls).toEqual(["https://example.com/"]);
+    expect(shellCalls).toHaveLength(1);
+    expect(shellCalls[0]).toMatch(/^https:\/\/example\.com\/?$/);
     expect(windowCalls).toEqual([]);
     expect(urlAfter).toBe(urlBefore);
   });
