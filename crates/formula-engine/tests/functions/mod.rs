@@ -7,6 +7,7 @@ mod dynamic_arrays_randarray;
 mod dynamic_arrays_shape;
 mod dynamic_arrays_sortby;
 mod dynamic_arrays_stack;
+mod dynamic_arrays_textsplit;
 mod financial_cashflows;
 mod financial_dates;
 mod financial_depreciation;

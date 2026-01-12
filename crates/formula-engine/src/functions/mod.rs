@@ -34,6 +34,7 @@ pub enum SheetId {
 mod builtins_array;
 mod builtins_date_time;
 mod builtins_dynamic_arrays;
+mod builtins_dynamic_array_textsplit;
 mod builtins_information;
 mod builtins_lambda;
 mod builtins_logical;
