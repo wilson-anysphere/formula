@@ -148,6 +148,52 @@ test("BrowserExtensionHost: records taint for selectionChanged events (and passe
   });
 });
 
+test("BrowserExtensionHost: selectionChanged taints using active-sheet fallback when sheetId omitted", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async setCell() {},
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.selection-event-taint-fallback";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "selection-event-taint-fallback",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: [],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+
+  host._broadcastEvent("sheetActivated", { sheet: { id: "sheet2", name: "Sheet2" } });
+  host._broadcastEvent("selectionChanged", {
+    selection: { startRow: 1, startCol: 2, endRow: 3, endCol: 4, values: [[null]] },
+  });
+
+  assert.deepEqual(sortRanges(extension.taintedRanges), [
+    { sheetId: "sheet2", startRow: 1, startCol: 2, endRow: 3, endCol: 4 },
+  ]);
+});
+
 test("BrowserExtensionHost: records taint for cellChanged events (and passes it to clipboard guard)", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 

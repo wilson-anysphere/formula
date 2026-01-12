@@ -2261,6 +2261,20 @@ class BrowserExtensionHost {
   }
 
   _broadcastEvent(event, data) {
+    // Best-effort: track the active sheet id from events so that downstream logic
+    // (including event-based clipboard taint tracking) can fall back to it when
+    // payloads omit `sheetId`.
+    try {
+      if (String(event ?? "") === "sheetActivated") {
+        const id = data?.sheet?.id;
+        if (typeof id === "string" && id.trim()) {
+          this._activeSheetId = id.trim();
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     for (const extension of this._extensions.values()) {
       this._sendEventToExtension(extension, event, data);
     }
