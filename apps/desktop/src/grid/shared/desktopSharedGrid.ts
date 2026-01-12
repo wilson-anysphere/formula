@@ -380,7 +380,10 @@ export class DesktopSharedGrid {
   }
 
   scrollToCell(row: number, col: number, opts?: { align?: ScrollToCellAlign; padding?: number }): void {
+    const before = this.renderer.scroll.getScroll();
     this.renderer.scrollToCell(row, col, opts);
+    const after = this.renderer.scroll.getScroll();
+    if (before.x === after.x && before.y === after.y) return;
     this.syncScrollbars();
     this.emitScroll();
   }
@@ -444,9 +447,7 @@ export class DesktopSharedGrid {
     this.emitSelectionRangeChange(prevRange, nextRange);
 
     if (nextSelection && opts?.scrollIntoView !== false) {
-      this.renderer.scrollToCell(nextSelection.row, nextSelection.col, { align: "auto", padding: 8 });
-      this.syncScrollbars();
-      this.emitScroll();
+      this.scrollToCell(nextSelection.row, nextSelection.col, { align: "auto", padding: 8 });
     }
   }
 
@@ -742,9 +743,7 @@ export class DesktopSharedGrid {
 
         this.announceSelection(nextSelection, nextRange);
         if (nextSelection) {
-          renderer.scrollToCell(nextSelection.row, nextSelection.col, { align: "auto", padding: 8 });
-          this.syncScrollbars();
-          this.emitScroll();
+          this.scrollToCell(nextSelection.row, nextSelection.col, { align: "auto", padding: 8 });
         }
 
         this.emitSelectionChange(prevSelection, nextSelection);
@@ -878,9 +877,7 @@ export class DesktopSharedGrid {
         const activeIndex = renderer.getActiveSelectionIndex();
         renderer.setSelectionRanges(ranges, { activeIndex, activeCell: { row: nextRow, col: nextCol } });
 
-        renderer.scrollToCell(nextRow, nextCol, { align: "auto", padding: 8 });
-        this.syncScrollbars();
-        this.emitScroll();
+        this.scrollToCell(nextRow, nextCol, { align: "auto", padding: 8 });
 
         const nextSelection = renderer.getSelection();
         const nextRange = renderer.getSelectionRange();
@@ -980,9 +977,7 @@ export class DesktopSharedGrid {
         renderer.setSelection({ row: nextRow, col: nextCol });
       }
 
-      renderer.scrollToCell(nextRow, nextCol, { align: "auto", padding: 8 });
-      this.syncScrollbars();
-      this.emitScroll();
+      this.scrollToCell(nextRow, nextCol, { align: "auto", padding: 8 });
 
       const nextSelection = renderer.getSelection();
       const nextRange = renderer.getSelectionRange();
@@ -1035,10 +1030,11 @@ export class DesktopSharedGrid {
       const before = renderer.scroll.getScroll();
       renderer.scrollBy(dx, dy);
       const after = renderer.scroll.getScroll();
-      this.syncScrollbars();
-      this.emitScroll();
 
       if (before.x === after.x && before.y === after.y) return;
+
+      this.syncScrollbars();
+      this.emitScroll();
 
       const clampedX = Math.max(0, Math.min(viewport.width, point.x));
       const clampedY = Math.max(0, Math.min(viewport.height, point.y));
