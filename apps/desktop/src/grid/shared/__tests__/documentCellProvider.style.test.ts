@@ -84,4 +84,40 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     expect(style.fill).toBe("#ff0000");
     expect(style.wrapMode).toBe("word");
   });
+
+  it("maps alignment.indent into grid CellStyle.textIndentPx", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    doc.setCellValue(sheetId, "A1", "Indented");
+    doc.setRangeFormat(sheetId, "A1", { alignment: { indent: 2 } });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell).not.toBeNull();
+    expect((cell as any)?.style?.textIndentPx).toBe(16);
+
+    // Absent when indent is 0/undefined.
+    doc.setCellValue(sheetId, "B1", "No indent");
+    doc.setRangeFormat(sheetId, "B1", { font: { bold: true }, alignment: { indent: 0 } });
+    const cellB1 = provider.getCell(1, 2);
+    expect(cellB1).not.toBeNull();
+    expect((cellB1 as any)?.style?.fontWeight).toBe("700");
+    expect((cellB1 as any)?.style?.textIndentPx).toBeUndefined();
+
+    doc.setCellValue(sheetId, "C1", "No indent 2");
+    const cellC1 = provider.getCell(1, 3);
+    expect(cellC1).not.toBeNull();
+    expect((cellC1 as any)?.style?.textIndentPx).toBeUndefined();
+  });
 });

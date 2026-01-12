@@ -12,12 +12,9 @@ type DocStyle = Record<string, any>;
 
 const CACHE_KEY_COL_STRIDE = 65_536;
 const SHEET_CACHE_MAX_SIZE = 50_000;
-
-// Excel stores alignment indent as an integer "level". There isn't a stable
-// px-based representation (it depends on font + rendering), but visually it is
-// close to ~one character width per level in the default font. We approximate
-// this as 8px per indent level for shared-grid rendering.
-const INDENT_PX_PER_LEVEL = 8;
+// Excel stores alignment indent as an integer "level" (Increase Indent).
+// We approximate each indent level as an 8px text indent at zoom=1.
+const INDENT_STEP_PX = 8;
 
 function isPlainObject(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -310,9 +307,16 @@ export class DocumentCellProvider implements CellProvider {
     if (alignment?.wrapText === true || (alignment as any)?.wrap_text === true) out.wrapMode = "word";
 
     const indentRaw = (alignment as any)?.indent;
-    if (typeof indentRaw === "number" && Number.isFinite(indentRaw) && indentRaw > 0) {
-      const level = Math.max(0, Math.trunc(indentRaw));
-      if (level > 0) out.textIndentPx = level * INDENT_PX_PER_LEVEL;
+    const indentLevel =
+      typeof indentRaw === "number"
+        ? indentRaw
+        : typeof indentRaw === "string" && indentRaw.trim() !== ""
+          ? Number(indentRaw)
+          : null;
+    if (indentLevel != null && Number.isFinite(indentLevel)) {
+      // Cap at a reasonable max to avoid pathological values creating huge padding.
+      const textIndentPx = clamp(indentLevel, 0, 250) * INDENT_STEP_PX;
+      if (textIndentPx > 0) out.textIndentPx = textIndentPx;
     }
 
     const vertical = alignment?.vertical;
