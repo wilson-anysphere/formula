@@ -34,6 +34,32 @@ python tools/excel-oracle/pin_dataset.py \
 
 Commit the pinned dataset to enable PR/push validation without Excel.
 
+## Incremental patching (recommended for targeted parity work)
+
+If you only need to validate/pin **a subset** of the corpus (e.g. odd-coupon bonds) you do *not*
+need to regenerate the entire dataset.
+
+Instead, run the convenience wrapper that:
+
+1) runs Excel on a subset corpus, then
+2) overwrites just those `caseId`s in the pinned dataset (merge-friendly).
+
+Example (odd-coupon boundary equality cases):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset-with-excel.ps1 `
+  -SubsetCasesPath tools/excel-oracle/odd_coupon_boundary_cases.json
+```
+
+This workflow records compact provenance under `source.patches` in the pinned dataset so it’s clear
+which Excel build produced the patched values.
+
+Then verify parity:
+
+```bash
+python tools/excel-oracle/compat_gate.py --include-tag odd_coupon
+```
+
 ## Common pitfalls
 
 - **Runner as a service:** Excel COM may fail or hang when no desktop session is available.
