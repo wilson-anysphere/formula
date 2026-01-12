@@ -176,5 +176,60 @@ describe("SpreadsheetApp comments sheet qualification", () => {
       else process.env.DESKTOP_GRID_MODE = priorGridMode;
     }
   });
-});
 
+  it("shows legacy unqualified A1 comments on the default sheet in collab mode", () => {
+    const priorGridMode = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status, { collabMode: true });
+      const doc = app.getDocument();
+      doc.setCellValue("Sheet2", { row: 0, col: 0 }, "Seed2");
+
+      app.activateCell({ sheetId: "Sheet1", row: 0, col: 0 });
+      app.toggleCommentsPanel();
+
+      const panel = root.querySelector('[data-testid="comments-panel"]') as HTMLDivElement | null;
+      if (!panel) throw new Error("Missing comments panel");
+
+      const cellLabel = panel.querySelector('[data-testid="comments-active-cell"]') as HTMLDivElement | null;
+      if (!cellLabel) throw new Error("Missing active cell label");
+
+      // Inject a legacy comment stored under an unqualified A1 ref.
+      const manager = (app as any).commentManager as {
+        addComment: (input: { cellRef: string; kind: "threaded"; content: string; author: { id: string; name: string } }) => string;
+        listForCell: (ref: string) => Array<{ content: string }>;
+      };
+      manager.addComment({ cellRef: "A1", kind: "threaded", content: "Legacy comment", author: { id: "u1", name: "User" } });
+
+      // Underlying storage remains unqualified.
+      expect(manager.listForCell("A1").map((c) => c.content)).toEqual(["Legacy comment"]);
+      expect(manager.listForCell("Sheet1!A1").map((c) => c.content)).toEqual([]);
+
+      // UI should surface it as Sheet1!A1 (default sheet) without showing it on other sheets.
+      expect(cellLabel.textContent).toContain("Sheet1!A1");
+      expect(panel.textContent).toContain("Legacy comment");
+
+      app.activateSheet("Sheet2");
+      expect(cellLabel.textContent).toContain("Sheet2!A1");
+      expect(panel.textContent).not.toContain("Legacy comment");
+      expect(panel.querySelectorAll('[data-testid="comment-thread"]').length).toBe(0);
+
+      app.activateSheet("Sheet1");
+      expect(cellLabel.textContent).toContain("Sheet1!A1");
+      expect(panel.textContent).toContain("Legacy comment");
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = priorGridMode;
+    }
+  });
+});
