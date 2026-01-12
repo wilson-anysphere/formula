@@ -6499,7 +6499,6 @@ export class SpreadsheetApp {
     // Do not implement sheet navigation here based on DocumentController sheet ids; instead,
     // allow the global keybinding layer to dispatch `workbook.previousSheet`/`workbook.nextSheet`
     // using the sheet store's visible order.
-
     if (!primary && e.shiftKey && e.code === "Space") {
       // Shift+Space selects entire row.
       e.preventDefault();
