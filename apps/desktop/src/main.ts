@@ -6491,23 +6491,26 @@ mountRibbon(ribbonReactRoot, {
         return;
       case "home.clipboard.paste.default":
         void app.clipboardPaste();
-        app.focus();
+        // Ribbon dropdown menu items restore focus to the trigger button after dispatching the
+        // command. Defer grid focus so keyboard shortcuts continue to work even if the clipboard
+        // operation is a no-op (e.g. blocked clipboard permissions).
+        queueMicrotask(() => app.focus());
         return;
       case "home.clipboard.paste.values":
         void app.clipboardPasteSpecial("values");
-        app.focus();
+        queueMicrotask(() => app.focus());
         return;
       case "home.clipboard.paste.formulas":
         void app.clipboardPasteSpecial("formulas");
-        app.focus();
+        queueMicrotask(() => app.focus());
         return;
       case "home.clipboard.paste.formats":
         void app.clipboardPasteSpecial("formats");
-        app.focus();
+        queueMicrotask(() => app.focus());
         return;
       case "home.clipboard.paste.transpose":
         showToast("Paste Transpose not implemented");
-        app.focus();
+        queueMicrotask(() => app.focus());
         return;
       case "home.clipboard.pasteSpecial":
       case "home.clipboard.pasteSpecial.dialog":
@@ -6526,19 +6529,19 @@ mountRibbon(ribbonReactRoot, {
         return;
       case "home.clipboard.pasteSpecial.values":
         void app.clipboardPasteSpecial("values");
-        app.focus();
+        queueMicrotask(() => app.focus());
         return;
       case "home.clipboard.pasteSpecial.formulas":
         void app.clipboardPasteSpecial("formulas");
-        app.focus();
+        queueMicrotask(() => app.focus());
         return;
       case "home.clipboard.pasteSpecial.formats":
         void app.clipboardPasteSpecial("formats");
-        app.focus();
+        queueMicrotask(() => app.focus());
         return;
       case "home.clipboard.pasteSpecial.transpose":
         showToast("Paste Transpose not implemented");
-        app.focus();
+        queueMicrotask(() => app.focus());
         return;
 
       case "view.macros.viewMacros":
