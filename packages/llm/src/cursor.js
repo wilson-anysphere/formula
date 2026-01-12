@@ -197,7 +197,10 @@ export class CursorLLMClient {
     this.baseUrl = resolveBaseUrl(options.baseUrl);
     this.chatCompletionsEndpoint = chatCompletionsEndpointFromBaseUrl(this.baseUrl);
     this.timeoutMs = resolveTimeoutMs(options.timeoutMs);
-    this.model = options.model ?? "gpt-4o-mini";
+
+    // Cursor backend controls model routing. `model` is treated as an optional
+    // hint that may be ignored by the backend.
+    this.model = options.model;
 
     this.authToken = options.authToken;
     this.getAuthHeaders = options.getAuthHeaders;
@@ -210,16 +213,18 @@ export class CursorLLMClient {
     /** @type {Record<string, string>} */
     const headers = { "Content-Type": "application/json" };
 
+    if (this.authToken) {
+      headers.Authorization = `Bearer ${this.authToken}`;
+    }
+
+    // Prefer `getAuthHeaders()` so Cursor can manage authentication. If it
+    // returns an Authorization header, it should override `authToken`.
     const extra = this.getAuthHeaders ? await this.getAuthHeaders() : null;
     if (extra && typeof extra === "object") {
       for (const [key, value] of Object.entries(extra)) {
         if (typeof value !== "string") continue;
         headers[key] = value;
       }
-    }
-
-    if (this.authToken) {
-      headers.Authorization = `Bearer ${this.authToken}`;
     }
 
     // Always ensure JSON content type.
@@ -240,6 +245,8 @@ export class CursorLLMClient {
       const response = await fetch(this.chatCompletionsEndpoint, {
         method: "POST",
         headers: await this._resolveHeaders(),
+        // Allow cookie-based auth in browser/desktop runtimes when a proxy is
+        // used. Node runtimes typically ignore cookies anyway.
         credentials: "include",
         body: JSON.stringify({
           model: request.model ?? this.model,
@@ -373,6 +380,15 @@ export class CursorLLMClient {
       /** @type {{ promptTokens?: number, completionTokens?: number, totalTokens?: number } | null} */
       let usage = null;
       /**
+       * OpenAI identifies tool calls by a stable `index` and sometimes omits the
+       * `id` field on early chunks. Buffer argument fragments by index until we
+       * learn the stable `id` + `name`, then emit `tool_call_start` followed by
+       * the buffered `tool_call_delta` fragments.
+       *
+       * Some OpenAI-compatible backends incorrectly stream the full arguments
+       * string repeatedly (instead of deltas). Track the reconstructed argument
+       * string so we can diff and only emit the incremental suffix.
+       *
        * @type {Map<number, { id?: string, name?: string, started: boolean, pendingArgs: string, args: string }>}
        */
       const toolCallsByIndex = new Map();
@@ -386,6 +402,12 @@ export class CursorLLMClient {
         return ids;
       }
 
+      /**
+       * OpenAI tool calls are logically ordered by the numeric `index` field.
+       * Some backends can emit tool call chunks out of order; only emit tool call
+       * start events once we've seen contiguous indexes starting from 0 so the
+       * downstream tool loop executes calls in a deterministic order.
+       */
       function* startToolCallsInOrder() {
         while (true) {
           const state = toolCallsByIndex.get(nextToolCallIndexToStart);
@@ -486,7 +508,8 @@ export class CursorLLMClient {
               toolCallsByIndex.set(index, state);
 
               if (argsFragment) {
-                // Some backends repeatedly stream the full argument string.
+                // Best-effort diffing: tolerate backends that repeatedly send the
+                // full argument string instead of deltas.
                 let deltaArgs = argsFragment;
                 if (typeof state.args === "string" && argsFragment.startsWith(state.args)) {
                   deltaArgs = argsFragment.slice(state.args.length);
@@ -523,3 +546,4 @@ export class CursorLLMClient {
     }
   }
 }
+
