@@ -58,6 +58,15 @@ describe("builtin keybinding catalog", () => {
     expect(typeof paletteWhen).toBe("string");
     expect(evaluateWhenClause(paletteWhen, emptyLookup)).toBe(false);
 
+    const findWhen = builtinKeybindings.find((kb) => kb.command === "edit.find" && kb.key === "ctrl+f")?.when;
+    expect(typeof findWhen).toBe("string");
+    expect(evaluateWhenClause(findWhen, emptyLookup)).toBe(false);
+
+    const commentsToggleWhen = builtinKeybindings.find((kb) => kb.command === "comments.togglePanel" && kb.key === "ctrl+shift+m")
+      ?.when;
+    expect(typeof commentsToggleWhen).toBe("string");
+    expect(evaluateWhenClause(commentsToggleWhen, emptyLookup)).toBe(false);
+
     const saveWhen = builtinKeybindings.find((kb) => kb.command === "workbench.saveWorkbook" && kb.key === "ctrl+s")?.when;
     expect(typeof saveWhen).toBe("string");
     expect(evaluateWhenClause(saveWhen, emptyLookup)).toBe(false);
@@ -73,6 +82,20 @@ describe("builtin keybinding catalog", () => {
     contextKeys.batch({ "spreadsheet.isEditing": false, "focus.inTextInput": false });
     expect(evaluateWhenClause(copyWhen, lookup)).toBe(true);
     expect(evaluateWhenClause(saveWhen, lookup)).toBe(true);
+
+    // Dialog-style shortcuts should not steal focus while the user is typing, and should
+    // also be blocked while the command palette is open.
+    contextKeys.batch({ "workbench.commandPaletteOpen": false, "focus.inTextInput": false });
+    expect(evaluateWhenClause(findWhen, lookup)).toBe(true);
+    expect(evaluateWhenClause(commentsToggleWhen, lookup)).toBe(true);
+
+    contextKeys.batch({ "workbench.commandPaletteOpen": false, "focus.inTextInput": true });
+    expect(evaluateWhenClause(findWhen, lookup)).toBe(false);
+    expect(evaluateWhenClause(commentsToggleWhen, lookup)).toBe(false);
+
+    contextKeys.batch({ "workbench.commandPaletteOpen": true, "focus.inTextInput": false });
+    expect(evaluateWhenClause(findWhen, lookup)).toBe(false);
+    expect(evaluateWhenClause(commentsToggleWhen, lookup)).toBe(false);
 
     // Undo is unguarded (command will decide whether to route to text undo or spreadsheet history).
     expect(evaluateWhenClause(undoWhen, lookup)).toBe(true);
