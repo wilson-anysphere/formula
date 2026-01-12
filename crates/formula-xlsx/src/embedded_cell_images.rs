@@ -110,14 +110,25 @@ impl XlsxPackage {
         //
         // Some simplified workbooks omit or do not populate `xl/metadata.xml`. In that case we
         // fall back to interpreting `vm` as a direct relationship-slot index.
+        //
+        // Some producers use numbered metadata part names like `xl/metadata1.xml`; prefer the
+        // canonical `xl/metadata.xml` when present, but fall back to the lowest-numbered
+        // `xl/metadata*.xml`.
+        let metadata_part = if self.part("xl/metadata.xml").is_some() {
+            Some("xl/metadata.xml".to_string())
+        } else {
+            find_lowest_numbered_part(self, "xl/metadata", ".xml")
+        };
         let mut vm_to_rich_value: HashMap<u32, u32> = HashMap::new();
-        if let Some(metadata_bytes) = self.part("xl/metadata.xml") {
-            let parsed =
-                crate::rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map(
-                    metadata_bytes,
-                )
-                .map_err(|e| XlsxError::Invalid(format!("failed to parse xl/metadata.xml: {e}")))?;
-            vm_to_rich_value = parsed;
+        if let Some(metadata_part) = metadata_part.as_deref() {
+            if let Some(metadata_bytes) = self.part(metadata_part) {
+                let parsed =
+                    crate::rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map(
+                        metadata_bytes,
+                    )
+                    .map_err(|e| XlsxError::Invalid(format!("failed to parse {metadata_part}: {e}")))?;
+                vm_to_rich_value = parsed;
+            }
         }
         let has_vm_mapping = !vm_to_rich_value.is_empty();
 
