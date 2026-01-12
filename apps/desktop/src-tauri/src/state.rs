@@ -562,7 +562,16 @@ impl AppState {
                 next_ctx.selection = Some(next_sel);
             }
             if next_ctx != ctx {
-                self.macro_host.set_runtime_context(next_ctx);
+                // Avoid `self.get_workbook()` here: it borrows the entire `AppState` immutably for
+                // the lifetime of the returned reference, which prevents us from mutably borrowing
+                // the disjoint `macro_host` field below.
+                let workbook = self
+                    .workbook
+                    .as_ref()
+                    .ok_or(AppStateError::NoWorkbookLoaded)?;
+                let macro_host = &mut self.macro_host;
+                macro_host.sync_with_workbook(workbook);
+                macro_host.set_runtime_context(next_ctx);
             }
         }
 
@@ -686,7 +695,16 @@ impl AppState {
                 next_ctx.selection = Some(next_sel);
             }
             if next_ctx != ctx {
-                self.macro_host.set_runtime_context(next_ctx);
+                // Avoid `self.get_workbook()` here: it borrows the entire `AppState` immutably for
+                // the lifetime of the returned reference, which prevents us from mutably borrowing
+                // the disjoint `macro_host` field below.
+                let workbook = self
+                    .workbook
+                    .as_ref()
+                    .ok_or(AppStateError::NoWorkbookLoaded)?;
+                let macro_host = &mut self.macro_host;
+                macro_host.sync_with_workbook(workbook);
+                macro_host.set_runtime_context(next_ctx);
             }
         }
 
@@ -1228,7 +1246,16 @@ impl AppState {
                 }
             }
 
-            self.macro_host.set_runtime_context(next_ctx);
+            // Avoid `self.get_workbook()` here: it borrows the entire `AppState` immutably for the
+            // lifetime of the returned reference, which prevents us from mutably borrowing the
+            // disjoint `macro_host` field below.
+            let workbook = self
+                .workbook
+                .as_ref()
+                .ok_or(AppStateError::NoWorkbookLoaded)?;
+            let macro_host = &mut self.macro_host;
+            macro_host.sync_with_workbook(workbook);
+            macro_host.set_runtime_context(next_ctx);
         }
 
         // Drop any pivot registrations that referenced the deleted sheet.
@@ -4916,6 +4943,91 @@ mod tests {
                 Some(0),
             )
             .expect("add sheet succeeds");
+
+        let ctx = state.macro_runtime_context();
+        assert_eq!(ctx.active_sheet, 3);
+        assert_eq!(ctx.selection.expect("selection").sheet, 2);
+    }
+
+    #[test]
+    fn add_sheet_shifts_macro_runtime_context_before_macro_host_has_synced_vba_hash() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        workbook.add_sheet("Sheet3".to_string());
+        workbook.vba_project_bin = Some(vec![1, 2, 3, 4]);
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        // Simulate a macro UI context that was set before the macro host has a chance to compute
+        // the workbook's VBA project hash (i.e. before the first `sync_with_workbook`).
+        state.macro_host.set_runtime_context(MacroRuntimeContext {
+            active_sheet: 2,
+            active_cell: (1, 1),
+            selection: Some(formula_vba_runtime::VbaRangeRef {
+                sheet: 1,
+                start_row: 1,
+                start_col: 1,
+                end_row: 1,
+                end_col: 1,
+            }),
+        });
+
+        state
+            .add_sheet("Inserted".to_string(), None, None, Some(0))
+            .expect("add sheet succeeds");
+
+        // `add_sheet` should keep the adjusted context stable even after the macro host later
+        // synchronizes with the workbook's VBA project hash.
+        {
+            let workbook = state.workbook.as_ref().expect("workbook loaded");
+            let macro_host = &mut state.macro_host;
+            macro_host.sync_with_workbook(workbook);
+        }
+
+        let ctx = state.macro_runtime_context();
+        assert_eq!(ctx.active_sheet, 3);
+        assert_eq!(ctx.selection.expect("selection").sheet, 2);
+    }
+
+    #[test]
+    fn add_sheet_with_id_shifts_macro_runtime_context_before_macro_host_has_synced_vba_hash() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        workbook.add_sheet("Sheet3".to_string());
+        workbook.vba_project_bin = Some(vec![1, 2, 3, 4]);
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        state.macro_host.set_runtime_context(MacroRuntimeContext {
+            active_sheet: 2,
+            active_cell: (1, 1),
+            selection: Some(formula_vba_runtime::VbaRangeRef {
+                sheet: 1,
+                start_row: 1,
+                start_col: 1,
+                end_row: 1,
+                end_col: 1,
+            }),
+        });
+
+        state
+            .add_sheet_with_id(
+                "InsertedSheet".to_string(),
+                "Inserted".to_string(),
+                None,
+                Some(0),
+            )
+            .expect("add sheet succeeds");
+
+        {
+            let workbook = state.workbook.as_ref().expect("workbook loaded");
+            let macro_host = &mut state.macro_host;
+            macro_host.sync_with_workbook(workbook);
+        }
 
         let ctx = state.macro_runtime_context();
         assert_eq!(ctx.active_sheet, 3);
