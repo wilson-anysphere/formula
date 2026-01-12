@@ -286,6 +286,29 @@ impl XlsxDocument {
         &self.parts
     }
 
+    /// Returns the parsed XLSX round-trip metadata captured while loading the workbook.
+    ///
+    /// This is an advanced API intended for round-trip diagnostics and integration
+    /// tests that need to assert on preserved SpreadsheetML details (for example
+    /// unknown cell value types, `vm/cm`-derived cell metadata, or future
+    /// `xl/metadata.xml` parsing).
+    ///
+    /// Most callers should treat [`XlsxDocument::workbook`] as the primary source
+    /// of truth and only consult this metadata when working on fidelity / OPC
+    /// preservation issues.
+    pub fn xlsx_meta(&self) -> &XlsxMeta {
+        &self.meta
+    }
+
+    /// Returns metadata captured for a specific cell (if any).
+    ///
+    /// This is a convenience wrapper over [`XlsxMeta::cell_meta`] and exists
+    /// primarily for round-trip oriented tooling/tests. Many cells have no
+    /// associated metadata entry.
+    pub fn cell_meta(&self, sheet_id: WorksheetId, cell: CellRef) -> Option<&CellMeta> {
+        self.meta.cell_meta.get(&(sheet_id, cell))
+    }
+
     pub fn rich_value_index(&self, sheet: WorksheetId, cell: CellRef) -> Option<u32> {
         self.rich_value_index_for_cell(sheet, cell).ok().flatten()
     }
