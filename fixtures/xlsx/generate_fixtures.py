@@ -835,6 +835,98 @@ def drawing1_rels_xml() -> str:
 """
 
 
+def sheet_smartart_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>SmartArt</t></is></c>
+    </row>
+  </sheetData>
+  <drawing r:id="rId1"/>
+</worksheet>
+"""
+
+
+def drawing_smartart_xml() -> str:
+    # Minimal DrawingML structure that references a SmartArt/diagram payload via
+    # `dgm:relIds` relationship IDs. The diagram parts live under `xl/diagrams/*`
+    # and are referenced from `xl/drawings/_rels/drawing1.xml.rels`.
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+          xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+          xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram">
+  <xdr:twoCellAnchor>
+    <xdr:from>
+      <xdr:col>1</xdr:col>
+      <xdr:colOff>0</xdr:colOff>
+      <xdr:row>1</xdr:row>
+      <xdr:rowOff>0</xdr:rowOff>
+    </xdr:from>
+    <xdr:to>
+      <xdr:col>6</xdr:col>
+      <xdr:colOff>0</xdr:colOff>
+      <xdr:row>10</xdr:row>
+      <xdr:rowOff>0</xdr:rowOff>
+    </xdr:to>
+    <xdr:graphicFrame macro="">
+      <xdr:nvGraphicFramePr>
+        <xdr:cNvPr id="2" name="SmartArt 1"/>
+        <xdr:cNvGraphicFramePr/>
+      </xdr:nvGraphicFramePr>
+      <xdr:xfrm>
+        <a:off x="0" y="0"/>
+        <a:ext cx="0" cy="0"/>
+      </xdr:xfrm>
+      <a:graphic>
+        <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/diagram">
+          <dgm:relIds r:dm="rId1" r:lo="rId2" r:qs="rId3" r:cs="rId4"/>
+        </a:graphicData>
+      </a:graphic>
+    </xdr:graphicFrame>
+    <xdr:clientData/>
+  </xdr:twoCellAnchor>
+</xdr:wsDr>
+"""
+
+
+def drawing_smartart_rels_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/diagramData" Target="../diagrams/data1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/diagramLayout" Target="../diagrams/layout1.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/diagramQuickStyle" Target="../diagrams/quickStyle1.xml"/>
+  <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/diagramColors" Target="../diagrams/colors1.xml"/>
+</Relationships>
+"""
+
+
+def diagram_data1_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<dgm:dataModel xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram"/>
+"""
+
+
+def diagram_layout1_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<dgm:layoutDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram"/>
+"""
+
+
+def diagram_quick_style1_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<dgm:styleDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram"/>
+"""
+
+
+def diagram_colors1_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<dgm:colorsDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram"/>
+"""
+
+
 def chart1_xml() -> str:
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
@@ -1434,6 +1526,28 @@ def main() -> None:
     write_chart_sheet_xlsx(ROOT / "charts" / "chart-sheet.xlsx")
     write_hyperlinks_xlsx(ROOT / "hyperlinks" / "hyperlinks.xlsx")
     write_activex_control_xlsx(ROOT / "basic" / "activex-control.xlsx")
+    write_xlsx(
+        ROOT / "basic" / "smartart.xlsx",
+        [sheet_smartart_xml()],
+        styles_minimal_xml(),
+        content_types_extra_overrides=[
+            '  <Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>',
+            '  <Override PartName="/xl/diagrams/data1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.diagramData+xml"/>',
+            '  <Override PartName="/xl/diagrams/layout1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.diagramLayout+xml"/>',
+            '  <Override PartName="/xl/diagrams/quickStyle1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.diagramStyle+xml"/>',
+            '  <Override PartName="/xl/diagrams/colors1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.diagramColors+xml"/>',
+        ],
+        extra_parts={
+            "xl/worksheets/_rels/sheet1.xml.rels": sheet1_drawing_rels_xml(),
+            "xl/drawings/drawing1.xml": drawing_smartart_xml(),
+            "xl/drawings/_rels/drawing1.xml.rels": drawing_smartart_rels_xml(),
+            "xl/diagrams/data1.xml": diagram_data1_xml(),
+            "xl/diagrams/layout1.xml": diagram_layout1_xml(),
+            "xl/diagrams/quickStyle1.xml": diagram_quick_style1_xml(),
+            "xl/diagrams/colors1.xml": diagram_colors1_xml(),
+        },
+        sheet_names=["Sheet1"],
+    )
 
     write_xlsx(
         ROOT / "metadata" / "date-iso-cell.xlsx",
