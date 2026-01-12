@@ -21,6 +21,7 @@ pub struct ParsedXlsbString {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlagsWidth {
     U8,
+    #[allow(dead_code)]
     U16,
 }
 

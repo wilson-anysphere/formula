@@ -1357,20 +1357,20 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                                 }
                                 Err(e) => return Err(e),
                             }
-
-                            let (flags, v, preserved) = if let Some((flags, parsed)) = parsed {
-                                if preserve_parsed_parts
-                                    && (parsed.rich.is_some() || parsed.phonetic.is_some())
-                                {
-                                    (flags, parsed.text.clone(), Some(parsed))
-                                } else {
-                                    (flags, parsed.text, None)
-                                }
-                            } else {
-                                let cch = rr.read_u32()? as usize;
-                                let flags = rr.read_u16()?;
-                                (flags, rr.read_utf16_chars(cch)?, None)
-                            };
+ 
+                             let (flags, v, preserved) = if let Some((flags, parsed)) = parsed {
+                                 if preserve_parsed_parts
+                                     && (parsed.rich.is_some() || parsed.phonetic.is_some())
+                                 {
+                                     (flags, parsed.text.clone(), Some(parsed))
+                                 } else {
+                                     (flags, parsed.text, None)
+                                 }
+                             } else {
+                                 let cch = rr.read_u32()? as usize;
+                                 let flags = rr.read_u16()?;
+                                 (flags, rr.read_utf16_chars(cch)?, None)
+                             };
 
                             let cce = rr.read_u32()? as usize;
                             let mut rgce = rr.read_slice(cce)?.to_vec();

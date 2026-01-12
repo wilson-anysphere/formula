@@ -1636,7 +1636,7 @@ fn patch_fmla_string<W: io::Write>(
 
     // BrtFmlaString:
     //   [col: u32][style: u32]
-    //   [cached value: XLWideString (cch + flags + utf16 + optional rich/phonetic blocks)]
+    //   [cached value: u32 cch + u16 flags + utf16 chars...]
     //   [cce: u32][rgce bytes...][extra...]
     let ws = parse_fmla_string_cached_value_offsets(payload)?;
     let flags = ws.flags;

@@ -1905,6 +1905,8 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "quick-xml 0.31.0",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 1.0.69",
  "xlsx-diff",

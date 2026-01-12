@@ -925,7 +925,17 @@ fn decode_rgce_impl(
                     });
                 }
                 // MS-XLSB/BIFF: u16 cce (size of a subexpression, used by the evaluator).
+                let cce = u16::from_le_bytes([rgce[i], rgce[i + 1]]) as usize;
                 i += 2;
+                if rgce.len().saturating_sub(i) < cce {
+                    return Err(DecodeError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: cce,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                i += cce;
             }
             // PtgRefErr: [row: u32][col: u16]
             0x2A | 0x4A | 0x6A => {
