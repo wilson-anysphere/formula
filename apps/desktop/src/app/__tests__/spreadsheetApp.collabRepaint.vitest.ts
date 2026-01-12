@@ -252,6 +252,43 @@ describe("SpreadsheetApp collab repaint", () => {
     root.remove();
   });
 
+  it("schedules a repaint when applyState replaces workbook contents (legacy grid)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    expect(app.getGridMode()).toBe("legacy");
+
+    const refreshSpy = vi.spyOn(app, "refresh");
+
+    const doc = app.getDocument() as any;
+    const snapshot = doc.encodeState() as Uint8Array;
+
+    const decoded = new TextDecoder().decode(snapshot);
+    const parsed = JSON.parse(decoded) as any;
+    const sheetId = app.getCurrentSheetId();
+    const sheet = (parsed?.sheets ?? []).find((s: any) => s && s.id === sheetId);
+    expect(sheet).toBeTruthy();
+
+    const cells: any[] = Array.isArray(sheet.cells) ? sheet.cells : [];
+    const target = cells.find((c) => c && c.row === 0 && c.col === 0);
+    expect(target).toBeTruthy();
+    target.value = "From ApplyState";
+    target.formula = null;
+
+    const encoded = new TextEncoder().encode(JSON.stringify(parsed));
+    doc.applyState(encoded);
+
+    expect(refreshSpy).toHaveBeenCalledWith("scroll");
+
+    app.destroy();
+    root.remove();
+  });
+
   it("keeps the status bar in sync when a remote edit changes an active cell dependency", () => {
     const root = createRoot();
     const status = {

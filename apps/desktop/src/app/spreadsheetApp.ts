@@ -1500,7 +1500,8 @@ export class SpreadsheetApp {
         source === "pivot" ||
         source === "extension" ||
         source === "sheetRename" ||
-        source === "sheetDelete";
+        source === "sheetDelete" ||
+        source === "applyState";
       if (!isExternalSource) return;
       // Shared-grid mode repaints via CanvasGridRenderer/provider invalidations; avoid scheduling
       // redundant SpreadsheetApp refreshes (which mainly exist for the legacy renderer).
