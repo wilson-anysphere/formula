@@ -479,6 +479,17 @@ test.describe("sheet tabs", () => {
     await expect(formulaInput).toBeFocused();
     await formulaInput.fill("=");
     await expect(formulaInput).toHaveValue("=");
+    // `fill()` updates the DOM value immediately, but the formula bar model updates via an
+    // `input` event handler. Wait until the app reports it is in formula-editing mode so the
+    // Ctrl+PgUp/PgDn global shortcut can treat this as an Excel-like range-selection session.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const app = (window as any).__formulaApp;
+          return Boolean(app?.isFormulaBarFormulaEditing?.());
+        }),
+      )
+      .toBe(true);
 
     // Dispatch Ctrl+PgDn directly to the textarea so the global handler must allow it.
     await page.evaluate(() => {
@@ -488,6 +499,7 @@ test.describe("sheet tabs", () => {
       input.dispatchEvent(evt);
     });
 
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
     await expect(formulaInput).toBeFocused();
 
@@ -499,6 +511,7 @@ test.describe("sheet tabs", () => {
       input.dispatchEvent(evt);
     });
 
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
     await expect(formulaInput).toBeFocused();
     await expect(formulaInput).toHaveValue("=");
