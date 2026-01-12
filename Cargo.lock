@@ -1384,6 +1384,7 @@ dependencies = [
  "formula-storage",
  "formula-vba",
  "formula-vba-runtime",
+ "formula-xls",
  "formula-xlsb",
  "formula-xlsx",
  "hex",

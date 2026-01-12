@@ -476,11 +476,94 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         out.sheets = workbook_model
             .sheets
             .iter()
-            .map(formula_model_sheet_to_app_sheet)
+            .map(|sheet| formula_model_sheet_to_app_sheet(sheet, &workbook_model.styles))
             .collect::<anyhow::Result<Vec<_>>>()?;
         for sheet in &mut out.sheets {
             sheet.xlsx_worksheet_part = worksheet_parts_by_name.get(&sheet.name).cloned();
         }
+
+        let sheet_names_by_id: HashMap<WorksheetId, String> = workbook_model
+            .sheets
+            .iter()
+            .map(|sheet| (sheet.id, sheet.name.clone()))
+            .collect();
+
+        out.defined_names = workbook_model
+            .defined_names
+            .iter()
+            .map(|dn| {
+                let sheet_id = match dn.scope {
+                    formula_model::DefinedNameScope::Workbook => None,
+                    formula_model::DefinedNameScope::Sheet(id) => {
+                        sheet_names_by_id.get(&id).cloned()
+                    }
+                };
+
+                DefinedName {
+                    name: dn.name.clone(),
+                    refers_to: dn.refers_to.clone(),
+                    sheet_id,
+                    hidden: dn.hidden,
+                }
+            })
+            .collect();
+
+        out.tables = workbook_model
+            .sheets
+            .iter()
+            .flat_map(|sheet| {
+                let sheet_id = sheet.name.clone();
+                sheet.tables.iter().map(move |table| Table {
+                    name: table.display_name.clone(),
+                    sheet_id: sheet_id.clone(),
+                    start_row: table.range.start.row as usize,
+                    start_col: table.range.start.col as usize,
+                    end_row: table.range.end.row as usize,
+                    end_col: table.range.end.col as usize,
+                    columns: table.columns.iter().map(|c| c.name.clone()).collect(),
+                })
+            })
+            .collect();
+
+        out.ensure_sheet_ids();
+        for sheet in &mut out.sheets {
+            sheet.clear_dirty_cells();
+        }
+        return Ok(out);
+    }
+
+    if matches!(extension.as_deref(), Some("xls")) {
+        let imported = formula_xls::import_xls_path(path)
+            .map_err(|e| anyhow::anyhow!(e))
+            .with_context(|| format!("import xls {:?}", path))?;
+        let workbook_model = imported.workbook;
+
+        let mut out = Workbook {
+            path: Some(path.to_string_lossy().to_string()),
+            origin_path: Some(path.to_string_lossy().to_string()),
+            origin_xlsx_bytes: None,
+            power_query_xml: None,
+            origin_xlsb_path: None,
+            vba_project_bin: None,
+            macro_fingerprint: None,
+            preserved_drawing_parts: None,
+            preserved_pivot_parts: None,
+            theme_palette: None,
+            date_system: workbook_model.date_system,
+            defined_names: Vec::new(),
+            tables: Vec::new(),
+            sheets: Vec::new(),
+            print_settings: WorkbookPrintSettings::default(),
+            original_print_settings: WorkbookPrintSettings::default(),
+            original_power_query_xml: None,
+            cell_input_baseline: HashMap::new(),
+        };
+
+        out.sheets = workbook_model
+            .sheets
+            .iter()
+            .map(|sheet| formula_model_sheet_to_app_sheet(sheet, &workbook_model.styles))
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         let sheet_names_by_id: HashMap<WorksheetId, String> = workbook_model
             .sheets
@@ -631,7 +714,10 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
     Ok(out)
 }
 
-fn formula_model_sheet_to_app_sheet(sheet: &formula_model::Worksheet) -> anyhow::Result<Sheet> {
+fn formula_model_sheet_to_app_sheet(
+    sheet: &formula_model::Worksheet,
+    styles: &formula_model::StyleTable,
+) -> anyhow::Result<Sheet> {
     let mut out = Sheet::new(sheet.name.clone(), sheet.name.clone());
 
     for (cell_ref, cell) in sheet.iter_cells() {
@@ -639,22 +725,38 @@ fn formula_model_sheet_to_app_sheet(sheet: &formula_model::Worksheet) -> anyhow:
         let col = cell_ref.col as usize;
 
         let cached_value = formula_model_value_to_scalar(&cell.value);
+        let number_format = (cell.style_id != 0)
+            .then(|| {
+                styles
+                    .get(cell.style_id)
+                    .and_then(|style| style.number_format.clone())
+            })
+            .flatten();
+
         if let Some(formula) = cell.formula.as_deref() {
             let normalized = formula_model::display_formula_text(formula);
-            if normalized.is_empty() {
+            if !normalized.is_empty() {
+                let mut c = Cell::from_formula(normalized);
+                c.computed_value = cached_value;
+                c.number_format = number_format;
+                out.set_cell(row, col, c);
                 continue;
             }
-            let mut c = Cell::from_formula(normalized);
-            c.computed_value = cached_value;
-            out.set_cell(row, col, c);
-            continue;
+            // Treat empty formulas as blank/no-formula cells, matching our XLSB import behavior.
         }
 
         if matches!(cached_value, CellScalar::Empty) {
+            if let Some(number_format) = number_format {
+                let mut c = Cell::empty();
+                c.number_format = Some(number_format);
+                out.set_cell(row, col, c);
+            }
             continue;
         }
 
-        out.set_cell(row, col, Cell::from_literal(Some(cached_value)));
+        let mut c = Cell::from_literal(Some(cached_value));
+        c.number_format = number_format;
+        out.set_cell(row, col, c);
     }
 
     Ok(out)
@@ -1888,6 +1990,16 @@ mod tests {
     }
 
     #[test]
+    fn reads_xls_date_system_1904_fixture() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xls/tests/fixtures/date_system_1904.xls"
+        ));
+        let workbook = read_xlsx_blocking(fixture_path).expect("read xls workbook");
+        assert_eq!(workbook.date_system, WorkbookDateSystem::Excel1904);
+    }
+
+    #[test]
     fn reads_xlsb_populates_defined_names() {
         let fixture_path = Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -2323,6 +2435,24 @@ mod tests {
         let cell = state.get_cell(&sheet_id, 0, 0).expect("get cell");
         assert_eq!(cell.value, CellScalar::Number(44927.0));
         assert_eq!(cell.display_value, expected);
+    }
+
+    #[test]
+    fn reads_xlsx_propagates_number_formats_into_cells() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/styles/varied_styles.xlsx"
+        ));
+
+        let workbook = read_xlsx_blocking(fixture_path).expect("read xlsx workbook");
+        assert_eq!(workbook.sheets.len(), 1);
+
+        // `fixtures/xlsx/styles/varied_styles.xlsx` has a date-formatted serial in I1 (style XF
+        // with built-in numFmtId=14).
+        let sheet = &workbook.sheets[0];
+        let cell = sheet.get_cell(0, 8); // I1
+        assert_eq!(cell.computed_value, CellScalar::Number(44927.0));
+        assert_eq!(cell.number_format.as_deref(), Some("m/d/yyyy"));
     }
 
     #[test]
