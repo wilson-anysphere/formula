@@ -1105,10 +1105,8 @@ pub fn build_autofilterinfo_only_fixture_xls() -> Vec<u8> {
 /// Build a BIFF8 `.xls` fixture where the `_xlnm._FilterDatabase` NAME record uses a `PtgAreaN`
 /// token (relative area reference) rather than `PtgArea`.
 ///
-/// The importer has a dedicated `_FilterDatabase` scanner that only understands a subset of rgce
-/// tokens (e.g. PtgArea/PtgArea3d). This fixture ensures we still recover the correct AutoFilter
-/// range from the fully-decoded defined name, even when that specialized scanner cannot interpret
-/// the rgce bytes.
+/// Some producers encode the AutoFilter range using BIFF8 relative-reference ptgs. The importer
+/// should still recover the correct dropdown range.
 pub fn build_autofilter_filterdatabase_arean_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_autofilter_filterdatabase_arean_workbook_stream();
 
