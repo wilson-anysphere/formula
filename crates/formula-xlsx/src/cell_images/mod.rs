@@ -98,17 +98,6 @@ impl CellImages {
     }
 }
 
-/// Best-effort in-cell image loader (`xl/cellimages*.xml`).
-///
-/// This is a convenience wrapper used by the XLSX reader to populate `workbook.images` without
-/// failing the overall workbook load when cell images are missing or malformed.
-pub(crate) fn load_cell_images_from_parts(
-    parts: &BTreeMap<String, Vec<u8>>,
-    workbook: &mut formula_model::Workbook,
-) {
-    let _ = CellImages::parse_from_parts(parts, workbook);
-}
-
 fn is_cell_images_part(path: &str) -> bool {
     let Some(rest) = path.strip_prefix("xl/") else {
         return false;
