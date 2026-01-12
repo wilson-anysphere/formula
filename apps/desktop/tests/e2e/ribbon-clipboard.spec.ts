@@ -23,7 +23,7 @@ test.describe("ribbon clipboard (Home → Clipboard)", () => {
 
     // Seed A1 = Hello, A2 = World.
     await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       const doc = app.getDocument();
       const sheetId = app.getCurrentSheetId();
       doc.beginBatch({ label: "Seed ribbon clipboard cells" });
@@ -66,8 +66,8 @@ test.describe("ribbon clipboard (Home → Clipboard)", () => {
     await ribbon.getByRole("menuitem", { name: "Paste", exact: true }).click();
     await waitForGridFocus(page);
 
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"))).toBe("Hello");
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C2"))).toBe("World");
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getCellValueA1("C1"))).toBe("Hello");
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getCellValueA1("C2"))).toBe("World");
 
     // Cut the original A1:A2 via ribbon, then paste into E1 to verify cut+paste behavior.
     await page.click("#grid", { position: { x: 53, y: 29 } }); // A1
@@ -80,8 +80,8 @@ test.describe("ribbon clipboard (Home → Clipboard)", () => {
     await ribbon.getByRole("button", { name: "Cut" }).click();
     await waitForGridFocus(page);
 
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("");
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A2"))).toBe("");
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getCellValueA1("A1"))).toBe("");
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getCellValueA1("A2"))).toBe("");
 
     await page.click("#grid", { position: { x: 460, y: 40 } }); // E1
     await expect(page.getByTestId("active-cell")).toHaveText("E1");
@@ -89,8 +89,8 @@ test.describe("ribbon clipboard (Home → Clipboard)", () => {
     await ribbon.getByRole("menuitem", { name: "Paste", exact: true }).click();
     await waitForGridFocus(page);
 
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("E1"))).toBe("Hello");
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("E2"))).toBe("World");
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getCellValueA1("E1"))).toBe("Hello");
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getCellValueA1("E2"))).toBe("World");
   });
 
   test("Paste Values from the Paste dropdown uses paste-special values semantics", async ({ page }) => {
@@ -102,7 +102,7 @@ test.describe("ribbon clipboard (Home → Clipboard)", () => {
 
     // Seed A1 = 1, B1 = =A1+1 (-> 2) with bold formatting.
     await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       const doc = app.getDocument();
       const sheetId = app.getCurrentSheetId();
       doc.beginBatch({ label: "Seed ribbon paste values" });
@@ -127,11 +127,11 @@ test.describe("ribbon clipboard (Home → Clipboard)", () => {
     await ribbon.getByRole("menuitem", { name: "Paste Values" }).click();
     await waitForGridFocus(page);
 
-    const c1Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"));
+    const c1Value = await page.evaluate(() => (window.__formulaApp as any).getCellValueA1("C1"));
     expect(c1Value).toBe("2");
 
     const { formula, styleId } = await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       const doc = app.getDocument();
       const sheetId = app.getCurrentSheetId();
       const cell = doc.getCell(sheetId, "C1");
