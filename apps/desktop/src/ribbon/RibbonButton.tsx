@@ -38,6 +38,7 @@ export const RibbonButton = React.memo(function RibbonButton({ button, pressed, 
   const ariaPressed = kind === "toggle" ? Boolean(pressed) : undefined;
   const ariaHaspopup = kind === "dropdown" ? ("menu" as const) : undefined;
   const hasMenu = kind === "dropdown" && Boolean(button.menuItems?.length);
+  const menuId = React.useMemo(() => `ribbon-menu-${button.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`, [button.id]);
 
   const [menuOpen, setMenuOpen] = React.useState(false);
   const dropdownRef = React.useRef<HTMLDivElement | null>(null);
@@ -109,6 +110,7 @@ export const RibbonButton = React.memo(function RibbonButton({ button, pressed, 
       aria-pressed={ariaPressed}
       aria-haspopup={ariaHaspopup}
       aria-expanded={hasMenu ? menuOpen : undefined}
+      aria-controls={hasMenu ? menuId : undefined}
       disabled={button.disabled}
       data-testid={button.testId}
       data-command-id={button.id}
@@ -159,6 +161,7 @@ export const RibbonButton = React.memo(function RibbonButton({ button, pressed, 
       {buttonEl}
       {menuOpen ? (
         <div
+          id={menuId}
           className="ribbon-dropdown__menu"
           role="menu"
           aria-label={button.ariaLabel}
@@ -168,6 +171,11 @@ export const RibbonButton = React.memo(function RibbonButton({ button, pressed, 
             const items = Array.from(root.querySelectorAll<HTMLButtonElement>(".ribbon-dropdown__menuitem:not(:disabled)"));
             if (items.length === 0) return;
             const currentIndex = items.findIndex((el) => el === document.activeElement);
+
+            if (event.key === "Tab") {
+              closeMenu();
+              return;
+            }
 
             if (event.key === "ArrowDown") {
               event.preventDefault();
