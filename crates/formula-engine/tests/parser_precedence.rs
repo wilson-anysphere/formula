@@ -65,3 +65,23 @@ fn percent_binds_tighter_than_exponent() {
     assert_eq!(op, BinaryOp::Pow);
     assert!(matches!(right.as_ref(), Expr::Postfix(_)));
 }
+
+#[test]
+fn concat_binds_looser_than_addition() {
+    let ast = parse_formula("=1+2&3", ParseOptions::default()).unwrap();
+
+    let expected = bin(BinaryOp::Concat, bin(BinaryOp::Add, num("1"), num("2")), num("3"));
+    assert_eq!(ast.expr, expected);
+}
+
+#[test]
+fn comparison_binds_looser_than_concat() {
+    let ast = parse_formula("=1&2=12", ParseOptions::default()).unwrap();
+
+    let expected = bin(
+        BinaryOp::Eq,
+        bin(BinaryOp::Concat, num("1"), num("2")),
+        num("12"),
+    );
+    assert_eq!(ast.expr, expected);
+}
