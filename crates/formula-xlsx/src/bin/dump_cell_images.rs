@@ -4,7 +4,7 @@ use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use formula_xlsx::XlsxPackage;
+use formula_xlsx::{openxml, XlsxPackage};
 use serde::Serialize;
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -290,7 +290,7 @@ fn discover_workbook_relationship_type_uri(pkg: &XlsxPackage, cell_images_part: 
             continue;
         };
 
-        let resolved = resolve_target("xl/workbook.xml", target);
+        let resolved = openxml::resolve_target("xl/workbook.xml", target);
         if resolved == needle {
             found.insert(type_uri.to_string());
         }
@@ -352,39 +352,6 @@ fn parse_rels_type_uris(pkg: &XlsxPackage, rels_part_path: &str) -> Option<Vec<S
     }
 
     Some(out.into_iter().collect())
-}
-
-fn resolve_target(base_part: &str, target: &str) -> String {
-    let (target, is_absolute) = match target.strip_prefix('/') {
-        Some(target) => (target, true),
-        None => (target, false),
-    };
-    let base_dir = if is_absolute {
-        ""
-    } else {
-        base_part
-            .rsplit_once('/')
-            .map(|(dir, _)| dir)
-            .unwrap_or("")
-    };
-
-    let mut components: Vec<&str> = if base_dir.is_empty() {
-        Vec::new()
-    } else {
-        base_dir.split('/').collect()
-    };
-
-    for segment in target.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                components.pop();
-            }
-            _ => components.push(segment),
-        }
-    }
-
-    components.join("/")
 }
 
 fn fallback_cell_images_part(pkg: &XlsxPackage) -> Option<(String, String)> {

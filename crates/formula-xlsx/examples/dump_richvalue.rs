@@ -9,7 +9,7 @@ use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 
-use formula_xlsx::{parse_rich_value_structure_xml, parse_rich_value_types_xml, XlsxPackage};
+use formula_xlsx::{openxml, parse_rich_value_structure_xml, parse_rich_value_types_xml, XlsxPackage};
 use roxmltree::Document;
 
 const EXPECTED_PARTS: &[&str] = &[
@@ -424,35 +424,9 @@ fn parse_relationship_targets(
         if target.starts_with("http://") || target.starts_with("https://") {
             continue;
         }
-        out.insert(id.to_string(), resolve_target(source_part, target));
+        out.insert(id.to_string(), openxml::resolve_target(source_part, target));
     }
     Ok(out)
-}
-
-fn resolve_target(source_part: &str, target: &str) -> String {
-    if let Some(target) = target.strip_prefix('/') {
-        return normalize_path(target);
-    }
-
-    let base_dir = source_part
-        .rsplit_once('/')
-        .map(|(dir, _)| dir)
-        .unwrap_or("");
-    normalize_path(&format!("{base_dir}/{target}"))
-}
-
-fn normalize_path(path: &str) -> String {
-    let mut out: Vec<&str> = Vec::new();
-    for part in path.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                out.pop();
-            }
-            other => out.push(other),
-        }
-    }
-    out.join("/")
 }
 
 #[cfg(test)]
@@ -462,7 +436,7 @@ mod tests {
     #[test]
     fn resolve_target_handles_parent_dir() {
         assert_eq!(
-            resolve_target("xl/richData/richValueRel.xml", "../media/image1.png"),
+            openxml::resolve_target("xl/richData/richValueRel.xml", "../media/image1.png"),
             "xl/media/image1.png"
         );
     }

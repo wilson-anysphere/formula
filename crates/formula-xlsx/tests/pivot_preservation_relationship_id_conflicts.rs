@@ -1,5 +1,6 @@
 use std::io::{Cursor, Write};
 
+use formula_xlsx::openxml;
 use formula_xlsx::XlsxPackage;
 use roxmltree::Document;
 use zip::write::FileOptions;
@@ -99,13 +100,13 @@ fn pivot_preservation_renumbers_relationship_ids_on_conflict() {
     assert_eq!(drawing_target, "../drawings/drawing1.xml");
 
     // pivot_graph(): make sure the relationship chain resolves to real parts.
-    let cache_part = resolve_target("xl/workbook.xml", &cache_rel_target);
+    let cache_part = openxml::resolve_target("xl/workbook.xml", &cache_rel_target);
     assert!(
         merged_pkg.part(&cache_part).is_some(),
         "workbook pivot cache target should exist: {cache_part}"
     );
 
-    let pivot_table_part = resolve_target("xl/worksheets/sheet1.xml", &table_rel_target);
+    let pivot_table_part = openxml::resolve_target("xl/worksheets/sheet1.xml", &table_rel_target);
     assert!(
         merged_pkg.part(&pivot_table_part).is_some(),
         "worksheet pivot table target should exist: {pivot_table_part}"
@@ -126,29 +127,6 @@ fn find_relationship(xml: &str, id: &str) -> Option<(String, String, String)> {
         return Some((type_, target, node.text().unwrap_or_default().to_string()));
     }
     None
-}
-
-fn resolve_target(base_part: &str, target: &str) -> String {
-    let target = target.trim_start_matches('/');
-    let base_dir = base_part.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-
-    let mut components: Vec<&str> = if base_dir.is_empty() {
-        Vec::new()
-    } else {
-        base_dir.split('/').collect()
-    };
-
-    for segment in target.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                components.pop();
-            }
-            other => components.push(other),
-        }
-    }
-
-    components.join("/")
 }
 
 fn build_source_with_pivots_using_rid2() -> Vec<u8> {
