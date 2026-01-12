@@ -5,6 +5,10 @@
   hardcode colors (enforced by `noHardcodedColors.test.js`).
 */
 
+dialog.extensions-ui {
+  width: min(520px, calc(100vw - 32px));
+}
+
 .extensions-ui .dialog__field {
   box-sizing: border-box;
   width: 100%;
@@ -37,6 +41,8 @@
   flex-direction: column;
   gap: 6px;
   margin-top: 10px;
+  max-height: min(340px, calc(100vh - 220px));
+  overflow: auto;
 }
 
 .extensions-ui .quick-pick__item {
