@@ -20,6 +20,7 @@ This section exists to avoid duplicated follow-up work across the task queue.
 **Status: closed (implemented).**
 
 Goal: make NOTE author parsing resilient to malformed/producer-divergent BIFF payloads.
+This task **supersedes Task 140** (embedded NUL stripping) to avoid duplicated work.
 
 Scope:
 
