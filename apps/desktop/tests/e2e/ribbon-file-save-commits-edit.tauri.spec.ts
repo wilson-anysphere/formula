@@ -129,8 +129,9 @@ test.describe("ribbon File save (tauri)", () => {
     // File -> Save should commit the editor value first, then flush it via set_cell, then save_workbook.
     const ribbon = page.getByTestId("ribbon-root");
     await ribbon.getByRole("tab", { name: "File" }).click();
-    await expect(page.getByTestId("file-save")).toBeVisible();
-    await page.getByTestId("file-save").click();
+    const save = ribbon.getByTestId("file-save");
+    await expect(save).toBeVisible();
+    await save.click();
 
     await page.waitForFunction(() => {
       const invokes = (window as any).__tauriInvokes as Array<{ cmd: string; args: any }> | undefined;
