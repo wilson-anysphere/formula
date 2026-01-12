@@ -8103,9 +8103,6 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if let Value::Error(e) = lookup_value {
         return Value::Error(*e);
     }
-    if matches!(lookup_value, Value::Lambda(_)) {
-        return Value::Error(ErrorKind::Value);
-    }
     // MATCH treats LAMBDA values as invalid lookup values (Excel returns #VALUE! when a lambda is
     // passed where a scalar is expected). Keep behavior aligned with the AST evaluator's MATCH
     // implementation in `functions/builtins_lookup.rs`.
