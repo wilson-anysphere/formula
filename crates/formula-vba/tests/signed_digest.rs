@@ -93,6 +93,32 @@ fn make_pkcs7_detached_signature(data: &[u8]) -> Vec<u8> {
     pkcs7.to_der().expect("pkcs7 DER")
 }
 
+fn wrap_in_digsig_info_serialized(pkcs7: &[u8]) -> Vec<u8> {
+    // Synthetic DigSigInfoSerialized-like blob:
+    // [cbSignature, cbSigningCertStore, cchProjectName] (LE u32)
+    // [projectName UTF-16LE] [certStore bytes] [signature bytes]
+    let project_name_utf16: Vec<u16> = "VBAProject\0".encode_utf16().collect();
+    let mut project_name_bytes = Vec::new();
+    for ch in &project_name_utf16 {
+        project_name_bytes.extend_from_slice(&ch.to_le_bytes());
+    }
+
+    let cert_store = vec![0xAA, 0xBB, 0xCC, 0xDD];
+
+    let cb_signature = pkcs7.len() as u32;
+    let cb_cert_store = cert_store.len() as u32;
+    let cch_project = project_name_utf16.len() as u32;
+
+    let mut out = Vec::new();
+    out.extend_from_slice(&cb_signature.to_le_bytes());
+    out.extend_from_slice(&cb_cert_store.to_le_bytes());
+    out.extend_from_slice(&cch_project.to_le_bytes());
+    out.extend_from_slice(&project_name_bytes);
+    out.extend_from_slice(&cert_store);
+    out.extend_from_slice(pkcs7);
+    out
+}
+
 fn der_len(len: usize) -> Vec<u8> {
     if len < 0x80 {
         return vec![len as u8];
@@ -206,6 +232,22 @@ fn extracts_signed_digest_when_pkcs7_is_prefixed_by_header_bytes() {
 
     let mut stream = b"VBA\0SIG\0HDR".to_vec();
     stream.extend_from_slice(&pkcs7);
+
+    let got = extract_vba_signature_signed_digest(&stream)
+        .expect("extract digest")
+        .expect("digest present");
+    assert_eq!(got.digest_algorithm_oid, "2.16.840.1.101.3.4.2.1");
+    assert_eq!(got.digest, digest);
+}
+
+#[test]
+fn extracts_signed_digest_when_pkcs7_is_wrapped_in_digsig_info_serialized() {
+    let digest = (100u8..132).collect::<Vec<_>>();
+    assert_eq!(digest.len(), 32);
+    let spc = make_spc_indirect_data_content_sha256(&digest);
+    let pkcs7 = make_pkcs7_signed_message(&spc);
+
+    let stream = wrap_in_digsig_info_serialized(&pkcs7);
 
     let got = extract_vba_signature_signed_digest(&stream)
         .expect("extract digest")
