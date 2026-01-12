@@ -1093,6 +1093,16 @@ test.describe("split view", () => {
     await expect(secondary).toBeVisible();
     await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
+    // Clear the seeded A1 value so the test doesn't depend on demo/fixture content.
+    // (F2 editing uses Excel semantics: caret at end of existing contents.)
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument();
+      doc.setCellValue(sheetId, "A1", "");
+    });
+    await waitForIdle(page);
+
     await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
@@ -1377,6 +1387,9 @@ test.describe("split view / shared grid zoom", () => {
 
       doc.setCellValue(sheetId, "A1", 1);
       doc.setCellValue(sheetId, "A2", 2);
+      // Clear seeded values in A3/A4 so we can assert cancellation leaves them untouched.
+      doc.setCellValue(sheetId, "A3", "");
+      doc.setCellValue(sheetId, "A4", "");
 
       const grid = (window as any).__formulaSecondaryGrid;
       grid.setSelectionRanges(
