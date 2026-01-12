@@ -2050,6 +2050,9 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
                 "xl/vbaProject.bin",
                 workbook.vba_project_bin.clone().expect("checked is_some"),
             );
+            if let Some(sig) = workbook.vba_project_signature_bin.clone() {
+                pkg.set_part("xl/vbaProjectSignature.bin", sig);
+            }
             bytes = pkg
                 .write_to_bytes()
                 .context("write workbook package with injected VBA")?;

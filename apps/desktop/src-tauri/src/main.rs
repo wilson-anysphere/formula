@@ -492,15 +492,24 @@ fn macros_trusted_for_before_close(
 
     let trust = trust_store.trust_state(&fingerprint);
 
-    let sig_part = workbook.origin_xlsx_bytes.as_deref().and_then(|origin| {
-        formula_xlsx::read_part_from_reader(
-            std::io::Cursor::new(origin),
-            "xl/vbaProjectSignature.bin",
-        )
-        .ok()
-        .flatten()
-    });
-    let sig_status = signature_status(vba_bin, sig_part.as_deref());
+    // Prefer the in-memory signature part payload when available, because some workflows drop the
+    // original XLSX bytes (forcing regeneration on save) while still preserving VBA payloads.
+    let mut sig_part_fallback: Option<Vec<u8>> = None;
+    if workbook.vba_project_signature_bin.is_none() {
+        sig_part_fallback = workbook.origin_xlsx_bytes.as_deref().and_then(|origin| {
+            formula_xlsx::read_part_from_reader(
+                std::io::Cursor::new(origin),
+                "xl/vbaProjectSignature.bin",
+            )
+            .ok()
+            .flatten()
+        });
+    }
+    let sig_part = workbook
+        .vba_project_signature_bin
+        .as_deref()
+        .or(sig_part_fallback.as_deref());
+    let sig_status = signature_status(vba_bin, sig_part);
     Ok(commands::evaluate_macro_trust(trust, sig_status).is_ok())
 }
 

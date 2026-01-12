@@ -1,4 +1,3 @@
-#[cfg(feature = "desktop")]
 use super::{ClipboardContent, ClipboardError, ClipboardWritePayload};
 
 fn normalize_target_name(target: &str) -> String {
@@ -438,6 +437,23 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
 #[cfg(feature = "desktop")]
 pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
     gtk_backend::write(payload)
+}
+
+// The GTK-backed Linux clipboard implementation relies on system libraries that we intentionally
+// keep behind the `desktop` feature. Provide a stub for unit tests so this module compiles under
+// `cfg(test)` without enabling the full desktop toolchain.
+#[cfg(not(feature = "desktop"))]
+pub fn read() -> Result<ClipboardContent, ClipboardError> {
+    Err(ClipboardError::Unavailable(
+        "GTK clipboard backend requires the `desktop` feature".to_string(),
+    ))
+}
+
+#[cfg(not(feature = "desktop"))]
+pub fn write(_payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
+    Err(ClipboardError::Unavailable(
+        "GTK clipboard backend requires the `desktop` feature".to_string(),
+    ))
 }
 
 #[cfg(test)]

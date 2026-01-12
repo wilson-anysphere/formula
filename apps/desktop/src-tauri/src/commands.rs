@@ -431,11 +431,10 @@ use crate::persistence::{
 use crate::state::SharedAppState;
 #[cfg(any(feature = "desktop", test))]
 use crate::state::{AppState, AppStateError, CellUpdateData};
+#[cfg(any(feature = "desktop", test))]
+use crate::{file_io::Workbook, macro_trust::compute_macro_fingerprint};
 #[cfg(feature = "desktop")]
-use crate::{
-    file_io::Workbook,
-    macro_trust::{compute_macro_fingerprint, SharedMacroTrustStore},
-};
+use crate::macro_trust::SharedMacroTrustStore;
 #[cfg(any(feature = "desktop", test))]
 use std::path::PathBuf;
 #[cfg(feature = "desktop")]
@@ -2302,7 +2301,7 @@ pub struct MigrationValidationReport {
     pub error: Option<String>,
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", test))]
 fn workbook_identity_for_trust(workbook: &Workbook, workbook_id: Option<&str>) -> String {
     workbook
         .origin_path
@@ -2313,7 +2312,7 @@ fn workbook_identity_for_trust(workbook: &Workbook, workbook_id: Option<&str>) -
         .to_string()
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", test))]
 fn compute_workbook_fingerprint(
     workbook: &mut Workbook,
     workbook_id: Option<&str>,
@@ -2334,7 +2333,7 @@ fn compute_workbook_fingerprint(
     Some(fp)
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", test))]
 fn build_macro_security_status(
     workbook: &mut Workbook,
     workbook_id: Option<&str>,
@@ -2348,31 +2347,38 @@ fn build_macro_security_status(
     let signature = if let Some(vba_bin) = workbook.vba_project_bin.as_deref() {
         // Signature parsing is best-effort: failures should not prevent macro listing or
         // execution (trust decisions are still enforced by the fingerprint).
-        let parsed = {
-            // Prefer the dedicated `xl/vbaProjectSignature.bin` part when present, because some XLSM
-            // producers store the `\x05DigitalSignature*` streams outside of `vbaProject.bin`.
-            if let Some(origin) = workbook.origin_xlsx_bytes.as_deref() {
-                let sig_part = formula_xlsx::read_part_from_reader(
-                    std::io::Cursor::new(origin),
-                    "xl/vbaProjectSignature.bin",
-                )
-                .ok()
-                .flatten();
-
-                if let Some(sig_part) = sig_part.as_deref() {
-                    match formula_vba::verify_vba_digital_signature_with_project(vba_bin, sig_part)
-                    {
-                        Ok(Some(sig)) => Some(sig),
-                        Ok(None) | Err(_) => formula_vba::verify_vba_digital_signature(vba_bin)
-                            .ok()
-                            .flatten(),
-                    }
-                } else {
-                    formula_vba::verify_vba_digital_signature(vba_bin).ok().flatten()
-                }
-            } else {
-                formula_vba::verify_vba_digital_signature(vba_bin).ok().flatten()
-            }
+        // Prefer the dedicated `xl/vbaProjectSignature.bin` part when present, because some XLSM
+        // producers store the `\x05DigitalSignature*` streams outside of `vbaProject.bin`.
+        //
+        // Note: `origin_xlsx_bytes` may be dropped during some workbook edits (forcing regeneration
+        // on save). In that case, rely on the in-memory `Workbook::vba_project_signature_bin`
+        // instead of re-reading the original package.
+        let mut sig_part_fallback: Option<Vec<u8>> = None;
+        if workbook.vba_project_signature_bin.is_none() {
+            sig_part_fallback = workbook
+                .origin_xlsx_bytes
+                .as_deref()
+                .and_then(|origin| {
+                    formula_xlsx::read_part_from_reader(
+                        std::io::Cursor::new(origin),
+                        "xl/vbaProjectSignature.bin",
+                    )
+                    .ok()
+                    .flatten()
+                });
+        }
+        let sig_part = workbook
+            .vba_project_signature_bin
+            .as_deref()
+            .or(sig_part_fallback.as_deref());
+        let parsed = match sig_part {
+            Some(sig_part) => match formula_vba::verify_vba_digital_signature_with_project(vba_bin, sig_part) {
+                Ok(Some(sig)) => Some(sig),
+                Ok(None) | Err(_) => formula_vba::verify_vba_digital_signature(vba_bin)
+                    .ok()
+                    .flatten(),
+            },
+            None => formula_vba::verify_vba_digital_signature(vba_bin).ok().flatten(),
         };
         Some(match parsed {
             Some(sig) => MacroSignatureInfo {
@@ -4644,6 +4650,7 @@ pub async fn marketplace_download_package(
 mod tests {
     use super::*;
     use crate::file_io::read_xlsx_blocking;
+    use std::io::Write;
     use std::path::Path;
     use tempfile::TempDir;
 
@@ -4802,6 +4809,41 @@ mod tests {
                 "expected wants_origin_bytes_for_save_path to reject {ext}"
             );
         }
+    }
+
+    #[test]
+    fn macro_security_status_uses_in_memory_vba_project_signature_part_when_origin_bytes_missing() {
+        // Build a minimal OLE container that looks like a VBA signature payload:
+        // it contains a `\x05DigitalSignature` stream, but the bytes are not a valid PKCS#7 blob
+        // so the verifier reports a parse error.
+        let signature_part = {
+            let cursor = std::io::Cursor::new(Vec::new());
+            let mut ole = cfb::CompoundFile::create(cursor).expect("create signature OLE");
+            let mut stream = ole
+                .create_stream("\u{0005}DigitalSignature")
+                .expect("create signature stream");
+            stream
+                .write_all(b"not-a-valid-pkcs7")
+                .expect("write signature bytes");
+            ole.into_inner().into_inner()
+        };
+
+        // No need for a fully-formed VBA project OLE for this test: signature parsing happens
+        // against the signature part, and we only use the project bytes for fingerprinting.
+        let mut workbook = Workbook::new_empty(None);
+        workbook.vba_project_bin = Some(vec![1, 2, 3]);
+        workbook.vba_project_signature_bin = Some(signature_part);
+        workbook.origin_xlsx_bytes = None;
+
+        let trust_store = crate::macro_trust::MacroTrustStore::new_ephemeral();
+        let status =
+            build_macro_security_status(&mut workbook, None, &trust_store).expect("macro status");
+        let sig = status.signature.expect("signature info present");
+        assert_eq!(
+            sig.status,
+            MacroSignatureStatus::SignedParseError,
+            "expected signature status to come from vba_project_signature_bin even when origin_xlsx_bytes is None"
+        );
     }
 
     #[test]
