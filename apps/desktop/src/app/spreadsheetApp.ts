@@ -611,6 +611,7 @@ export class SpreadsheetApp {
   private sharedHoverCellKey: number | null = null;
   private sharedHoverCellRect: { x: number; y: number; width: number; height: number } | null = null;
   private sharedHoverCellHasComment = false;
+  private sharedHoverCellCommentIndexVersion = -1;
 
   private collabSession: CollabSession | null = null;
   private collabBinder: { destroy: () => void } | null = null;
@@ -3238,16 +3239,23 @@ export class SpreadsheetApp {
       x < cachedRect.x + cachedRect.width &&
       y < cachedRect.y + cachedRect.height
     ) {
+      const cellKey = this.sharedHoverCellKey;
+      if (cellKey == null) {
+        this.hideCommentTooltip();
+        return;
+      }
+
+      let previewOverride: string | undefined = undefined;
+      if (this.sharedHoverCellCommentIndexVersion !== this.commentIndexVersion) {
+        previewOverride = this.commentPreviewByCoord.get(cellKey) ?? "";
+        this.sharedHoverCellHasComment = Boolean(previewOverride);
+        this.sharedHoverCellCommentIndexVersion = this.commentIndexVersion;
+      }
+
       if (!this.sharedHoverCellHasComment) {
         if (this.commentTooltip.classList.contains("comment-tooltip--visible")) {
           this.hideCommentTooltip();
         }
-        return;
-      }
-
-      const cellKey = this.sharedHoverCellKey;
-      if (cellKey == null) {
-        this.hideCommentTooltip();
         return;
       }
 
@@ -3259,7 +3267,7 @@ export class SpreadsheetApp {
         return;
       }
 
-      const preview = this.commentPreviewByCoord.get(cellKey) ?? "";
+      const preview = previewOverride ?? (this.commentPreviewByCoord.get(cellKey) ?? "");
       if (!preview) {
         this.sharedHoverCellHasComment = false;
         this.hideCommentTooltip();
@@ -3303,6 +3311,7 @@ export class SpreadsheetApp {
     this.sharedHoverCellKey = cellKey;
     const preview = this.commentPreviewByCoord.get(cellKey);
     this.sharedHoverCellHasComment = Boolean(preview);
+    this.sharedHoverCellCommentIndexVersion = this.commentIndexVersion;
     if (!preview) {
       this.hideCommentTooltip();
       return;
@@ -3696,6 +3705,7 @@ export class SpreadsheetApp {
     this.sharedHoverCellKey = null;
     this.sharedHoverCellRect = null;
     this.sharedHoverCellHasComment = false;
+    this.sharedHoverCellCommentIndexVersion = -1;
   }
 
   private commentCellRefFromA1(sheetId: string, a1: string): string {
