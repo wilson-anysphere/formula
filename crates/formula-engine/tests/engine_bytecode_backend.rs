@@ -1,7 +1,7 @@
+use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::eval::{
     parse_a1, EvalContext, Evaluator, RecalcContext, SheetReference, ValueResolver,
 };
-use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::value::NumberLocale;
 use formula_engine::{
@@ -48,7 +48,13 @@ impl ValueResolver for EngineResolver<'_> {
         &self,
         _ctx: EvalContext,
         _sref: &formula_engine::structured_refs::StructuredRef,
-    ) -> Option<Vec<(usize, formula_engine::eval::CellAddr, formula_engine::eval::CellAddr)>> {
+    ) -> Option<
+        Vec<(
+            usize,
+            formula_engine::eval::CellAddr,
+            formula_engine::eval::CellAddr,
+        )>,
+    > {
         None
     }
 }
@@ -252,11 +258,21 @@ fn bytecode_backend_matches_ast_for_scalar_math_and_comparisons() {
     // Scalar-only math.
     engine.set_cell_formula("Sheet1", "B1", "=ABS(A1)").unwrap();
     engine.set_cell_formula("Sheet1", "B2", "=INT(A2)").unwrap();
-    engine.set_cell_formula("Sheet1", "B3", "=ROUND(A2, 0)").unwrap();
-    engine.set_cell_formula("Sheet1", "B4", "=ROUNDUP(A1, 0)").unwrap();
-    engine.set_cell_formula("Sheet1", "B5", "=ROUNDDOWN(A1, 0)").unwrap();
-    engine.set_cell_formula("Sheet1", "B6", "=MOD(7, 4)").unwrap();
-    engine.set_cell_formula("Sheet1", "B7", "=SIGN(A1)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=ROUND(A2, 0)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B4", "=ROUNDUP(A1, 0)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B5", "=ROUNDDOWN(A1, 0)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B6", "=MOD(7, 4)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B7", "=SIGN(A1)")
+        .unwrap();
 
     // CONCAT (scalar-only fast path).
     engine
@@ -265,8 +281,12 @@ fn bytecode_backend_matches_ast_for_scalar_math_and_comparisons() {
 
     // Pow + comparisons (new bytecode ops).
     engine.set_cell_formula("Sheet1", "C1", "=2^3").unwrap();
-    engine.set_cell_formula("Sheet1", "C2", "=\"a\"=\"A\"").unwrap();
-    engine.set_cell_formula("Sheet1", "C3", "=(-1)^0.5").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", "=\"a\"=\"A\"")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C3", "=(-1)^0.5")
+        .unwrap();
 
     assert_eq!(engine.bytecode_program_count(), 11);
 
@@ -457,6 +477,112 @@ fn bytecode_implicit_intersection_matches_ast_for_2d_range_inside_rectangle() {
     assert_eq!(bytecode_value_to_engine(bc_value), expected);
 }
 
+#[test]
+fn bytecode_backend_matches_ast_for_vlookup_and_hlookup() {
+    let mut engine = Engine::new();
+
+    // VLOOKUP table: ascending numeric keys.
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", "a").unwrap();
+    engine.set_cell_value("Sheet1", "A2", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", "b").unwrap();
+    engine.set_cell_value("Sheet1", "A3", 5.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", "c").unwrap();
+
+    // Mixed numeric/text keys (valid Excel ascending order: numbers < text).
+    engine.set_cell_value("Sheet1", "D1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "D2", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "D3", "A").unwrap();
+    engine.set_cell_value("Sheet1", "E1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "E2", 30.0).unwrap();
+    engine.set_cell_value("Sheet1", "E3", 40.0).unwrap();
+
+    // HLOOKUP table: ascending numeric keys.
+    engine.set_cell_value("Sheet1", "A10", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B10", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "C10", 5.0).unwrap();
+    engine.set_cell_value("Sheet1", "A11", "a").unwrap();
+    engine.set_cell_value("Sheet1", "B11", "b").unwrap();
+    engine.set_cell_value("Sheet1", "C11", "c").unwrap();
+
+    // Error propagation from lookup_value.
+    engine
+        .set_cell_value("Sheet1", "F1", Value::Error(ErrorKind::Div0))
+        .unwrap();
+
+    // VLOOKUP: exact match.
+    engine
+        .set_cell_formula("Sheet1", "G1", "=VLOOKUP(3, A1:B3, 2, FALSE)")
+        .unwrap();
+    // VLOOKUP: approximate match (range_lookup omitted => TRUE).
+    engine
+        .set_cell_formula("Sheet1", "G2", "=VLOOKUP(4, A1:B3, 2)")
+        .unwrap();
+    // VLOOKUP: missing => #N/A.
+    engine
+        .set_cell_formula("Sheet1", "G3", "=VLOOKUP(0, A1:B3, 2)")
+        .unwrap();
+    // VLOOKUP: bad index (< 1) => #VALUE!.
+    engine
+        .set_cell_formula("Sheet1", "G4", "=VLOOKUP(3, A1:B3, 0, FALSE)")
+        .unwrap();
+    // VLOOKUP: bad index (out of range) => #REF!.
+    engine
+        .set_cell_formula("Sheet1", "G5", "=VLOOKUP(3, A1:B3, 3, FALSE)")
+        .unwrap();
+    // VLOOKUP: approximate match with mixed-type key column.
+    engine
+        .set_cell_formula("Sheet1", "G6", "=VLOOKUP(4, D1:E3, 2)")
+        .unwrap();
+    // VLOOKUP: propagate lookup_value error.
+    engine
+        .set_cell_formula("Sheet1", "G7", "=VLOOKUP(F1, A1:B3, 2, FALSE)")
+        .unwrap();
+
+    // HLOOKUP: exact match.
+    engine
+        .set_cell_formula("Sheet1", "H1", "=HLOOKUP(3, A10:C11, 2, FALSE)")
+        .unwrap();
+    // HLOOKUP: approximate match.
+    engine
+        .set_cell_formula("Sheet1", "H2", "=HLOOKUP(4, A10:C11, 2)")
+        .unwrap();
+    // HLOOKUP: missing => #N/A.
+    engine
+        .set_cell_formula("Sheet1", "H3", "=HLOOKUP(0, A10:C11, 2)")
+        .unwrap();
+    // HLOOKUP: bad index (< 1) => #VALUE!.
+    engine
+        .set_cell_formula("Sheet1", "H4", "=HLOOKUP(3, A10:C11, 0, FALSE)")
+        .unwrap();
+    // HLOOKUP: bad index (out of range) => #REF!.
+    engine
+        .set_cell_formula("Sheet1", "H5", "=HLOOKUP(3, A10:C11, 3, FALSE)")
+        .unwrap();
+
+    // Ensure VLOOKUP/HLOOKUP formulas compile to bytecode (i.e. don't fall back to AST).
+    assert_eq!(engine.bytecode_program_count(), 12);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        ("=VLOOKUP(3, A1:B3, 2, FALSE)", "G1"),
+        ("=VLOOKUP(4, A1:B3, 2)", "G2"),
+        ("=VLOOKUP(0, A1:B3, 2)", "G3"),
+        ("=VLOOKUP(3, A1:B3, 0, FALSE)", "G4"),
+        ("=VLOOKUP(3, A1:B3, 3, FALSE)", "G5"),
+        ("=VLOOKUP(4, D1:E3, 2)", "G6"),
+        ("=VLOOKUP(F1, A1:B3, 2, FALSE)", "G7"),
+        ("=HLOOKUP(3, A10:C11, 2, FALSE)", "H1"),
+        ("=HLOOKUP(4, A10:C11, 2)", "H2"),
+        ("=HLOOKUP(0, A10:C11, 2)", "H3"),
+        ("=HLOOKUP(3, A10:C11, 0, FALSE)", "H4"),
+        ("=HLOOKUP(3, A10:C11, 3, FALSE)", "H5"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig { cases: 32, .. ProptestConfig::default() })]
     #[test]
@@ -510,7 +636,7 @@ fn bytecode_backend_matches_ast_for_countif_full_criteria_semantics() {
     engine.set_cell_value("Sheet1", "A5", "ab").unwrap();
     engine.set_cell_value("Sheet1", "A6", "abc").unwrap();
     engine.set_cell_value("Sheet1", "A7", "").unwrap(); // empty string counts as blank
-    // A8 left blank
+                                                        // A8 left blank
     engine
         .set_cell_value("Sheet1", "A9", Value::Error(ErrorKind::Div0))
         .unwrap();
@@ -539,7 +665,7 @@ fn bytecode_backend_matches_ast_for_countif_full_criteria_semantics() {
         (Value::Text("ap*".to_string()), Value::Number(2.0)),
         (Value::Text("~*".to_string()), Value::Number(1.0)),
         (Value::Text("??".to_string()), Value::Number(1.0)),
-        (Value::Text("".to_string()), Value::Number(2.0)),  // blanks
+        (Value::Text("".to_string()), Value::Number(2.0)), // blanks
         (Value::Text("<>".to_string()), Value::Number(7.0)), // non-blanks (errors excluded)
         (Value::Text("#DIV/0!".to_string()), Value::Number(1.0)),
         (Value::Bool(true), Value::Number(1.0)),
@@ -664,7 +790,10 @@ fn bytecode_backend_coerces_scalar_text_using_engine_value_locale() {
     let system = engine.date_system();
     let expected = ymd_to_serial(ExcelDate::new(2020, 5, 1), system).unwrap();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected as f64));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Number(expected as f64)
+    );
     assert_engine_matches_ast(&engine, r#"="1.5.2020"+0"#, "A1");
 }
 

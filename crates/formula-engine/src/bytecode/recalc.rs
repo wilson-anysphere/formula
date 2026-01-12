@@ -2,9 +2,9 @@ use super::ast::Expr;
 use super::grid::{Grid, GridMut};
 use super::value::{CellCoord, Value};
 use super::{BytecodeCache, Program, Vm};
-use ahash::{AHashMap, AHashSet};
 use crate::date::ExcelDateSystem;
 use crate::locale::ValueLocaleConfig;
+use ahash::{AHashMap, AHashSet};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::prelude::*;
 use std::sync::Arc;
@@ -133,25 +133,22 @@ impl RecalcEngine {
                 let g: &dyn Grid = &*grid;
                 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
                 {
-                    results
-                        .par_iter_mut()
-                        .zip(level.par_iter())
-                        .for_each_init(
-                            || {
-                                (
-                                    Vm::with_capacity(32),
-                                    super::runtime::set_thread_eval_context(
-                                        date_system,
-                                        value_locale,
-                                        now_utc.clone(),
-                                    ),
-                                )
-                            },
-                            |(vm, _guard), (out, &idx)| {
-                                let node = &graph.nodes[idx];
-                                *out = vm.eval(&node.program, g, node.coord, &locale);
-                            },
-                        );
+                    results.par_iter_mut().zip(level.par_iter()).for_each_init(
+                        || {
+                            (
+                                Vm::with_capacity(32),
+                                super::runtime::set_thread_eval_context(
+                                    date_system,
+                                    value_locale,
+                                    now_utc.clone(),
+                                ),
+                            )
+                        },
+                        |(vm, _guard), (out, &idx)| {
+                            let node = &graph.nodes[idx];
+                            *out = vm.eval(&node.program, g, node.coord, &locale);
+                        },
+                    );
                 }
                 #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
                 {
@@ -294,7 +291,10 @@ mod tests {
             tx.send(result).ok();
         });
 
-        match rx.recv_timeout(Duration::from_secs(5)).expect("recalc task") {
+        match rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("recalc task")
+        {
             Ok(()) => {}
             Err(panic) => std::panic::resume_unwind(panic),
         }

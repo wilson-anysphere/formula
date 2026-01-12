@@ -4,13 +4,15 @@ use super::value::{Array as ArrayValue, CellCoord, ErrorKind, RangeRef, Resolved
 use crate::date::ExcelDateSystem;
 use crate::error::ExcelError;
 use crate::functions::math::criteria::Criteria as EngineCriteria;
+use crate::functions::wildcard::WildcardPattern;
 use crate::locale::ValueLocaleConfig;
+use crate::simd::{self, CmpOp, NumericCriteria};
 use crate::value::{
     cmp_case_insensitive, parse_number, ErrorKind as EngineErrorKind, Value as EngineValue,
 };
-use crate::simd::{self, CmpOp, NumericCriteria};
 use chrono::{DateTime, Utc};
 use smallvec::SmallVec;
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::sync::Arc;
@@ -89,7 +91,12 @@ fn parse_value_from_text(s: &str) -> Result<f64, ErrorKind> {
     })
 }
 
-pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord, locale: &crate::LocaleConfig) -> Value {
+pub fn eval_ast(
+    expr: &Expr,
+    grid: &dyn Grid,
+    base: CellCoord,
+    locale: &crate::LocaleConfig,
+) -> Value {
     match expr {
         Expr::Literal(v) => v.clone(),
         Expr::CellRef(r) => grid.get_value(r.resolve(base)),
@@ -119,6 +126,7 @@ pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord, locale: &crate::L
                     | Function::Count => true,
                     Function::CountIf => arg_idx == 0,
                     Function::SumProduct => true,
+                    Function::VLookup | Function::HLookup | Function::Match => arg_idx == 1,
                     Function::Abs
                     | Function::Int
                     | Function::Round
@@ -489,6 +497,9 @@ pub fn call_function(
         Function::Count => fn_count(args, grid, base),
         Function::CountIf => fn_countif(args, grid, base, locale),
         Function::SumProduct => fn_sumproduct(args, grid, base),
+        Function::VLookup => fn_vlookup(args, grid, base),
+        Function::HLookup => fn_hlookup(args, grid, base),
+        Function::Match => fn_match(args, grid, base),
         Function::Abs => fn_abs(args),
         Function::Int => fn_int(args),
         Function::Round => fn_round(args),
@@ -829,7 +840,12 @@ fn fn_count(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     Value::Number(count as f64)
 }
 
-fn fn_countif(args: &[Value], grid: &dyn Grid, base: CellCoord, locale: &crate::LocaleConfig) -> Value {
+fn fn_countif(
+    args: &[Value],
+    grid: &dyn Grid,
+    base: CellCoord,
+    locale: &crate::LocaleConfig,
+) -> Value {
     if args.len() != 2 {
         return Value::Error(ErrorKind::Value);
     }
@@ -888,6 +904,495 @@ fn fn_sumproduct(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     }
 }
 
+fn fn_vlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.len() < 3 || args.len() > 4 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let lookup_value = args[0].clone();
+    if let Value::Error(e) = lookup_value {
+        return Value::Error(e);
+    }
+    if matches!(lookup_value, Value::Array(_) | Value::Range(_)) {
+        return Value::Error(ErrorKind::Spill);
+    }
+
+    let table = match &args[1] {
+        Value::Range(r) => r.resolve(base),
+        _ => return Value::Error(ErrorKind::Value),
+    };
+    if !range_in_bounds(grid, table) {
+        return Value::Error(ErrorKind::Ref);
+    }
+
+    let col_index = match coerce_to_i64(args[2].clone()) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    if col_index < 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let cols = table.cols() as i64;
+    if col_index > cols {
+        return Value::Error(ErrorKind::Ref);
+    }
+
+    let approx = if args.len() == 4 {
+        match coerce_to_bool(args[3].clone()) {
+            Ok(b) => b,
+            Err(e) => return Value::Error(e),
+        }
+    } else {
+        true
+    };
+
+    let row_offset = if approx {
+        match approximate_match_in_first_col(grid, &lookup_value, table) {
+            Some(r) => r,
+            None => return Value::Error(ErrorKind::NA),
+        }
+    } else {
+        match exact_match_in_first_col(grid, &lookup_value, table) {
+            Some(r) => r,
+            None => return Value::Error(ErrorKind::NA),
+        }
+    };
+
+    let row = table.row_start + row_offset;
+    let col = table.col_start + (col_index as i32) - 1;
+    grid.get_value(CellCoord { row, col })
+}
+
+fn fn_hlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.len() < 3 || args.len() > 4 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let lookup_value = args[0].clone();
+    if let Value::Error(e) = lookup_value {
+        return Value::Error(e);
+    }
+    if matches!(lookup_value, Value::Array(_) | Value::Range(_)) {
+        return Value::Error(ErrorKind::Spill);
+    }
+
+    let table = match &args[1] {
+        Value::Range(r) => r.resolve(base),
+        _ => return Value::Error(ErrorKind::Value),
+    };
+    if !range_in_bounds(grid, table) {
+        return Value::Error(ErrorKind::Ref);
+    }
+
+    let row_index = match coerce_to_i64(args[2].clone()) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    if row_index < 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let rows = table.rows() as i64;
+    if row_index > rows {
+        return Value::Error(ErrorKind::Ref);
+    }
+
+    let approx = if args.len() == 4 {
+        match coerce_to_bool(args[3].clone()) {
+            Ok(b) => b,
+            Err(e) => return Value::Error(e),
+        }
+    } else {
+        true
+    };
+
+    let col_offset = if approx {
+        match approximate_match_in_first_row(grid, &lookup_value, table) {
+            Some(c) => c,
+            None => return Value::Error(ErrorKind::NA),
+        }
+    } else {
+        match exact_match_in_first_row(grid, &lookup_value, table) {
+            Some(c) => c,
+            None => return Value::Error(ErrorKind::NA),
+        }
+    };
+
+    let row = table.row_start + (row_index as i32) - 1;
+    let col = table.col_start + col_offset;
+    grid.get_value(CellCoord { row, col })
+}
+
+fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.len() < 2 || args.len() > 3 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let lookup_value = args[0].clone();
+    if let Value::Error(e) = lookup_value {
+        return Value::Error(e);
+    }
+    if matches!(lookup_value, Value::Array(_) | Value::Range(_)) {
+        return Value::Error(ErrorKind::Spill);
+    }
+
+    let match_type = if args.len() == 3 {
+        match coerce_to_i64(args[2].clone()) {
+            Ok(n) => n,
+            Err(e) => return Value::Error(e),
+        }
+    } else {
+        1
+    };
+
+    let range = match &args[1] {
+        Value::Range(r) => r.resolve(base),
+        _ => return Value::Error(ErrorKind::Value),
+    };
+    if !range_in_bounds(grid, range) {
+        return Value::Error(ErrorKind::Ref);
+    }
+
+    let pos = if range.row_start == range.row_end {
+        let len = range.cols() as usize;
+        let row = range.row_start;
+        let value_at = |idx: usize| {
+            let col = range.col_start + idx as i32;
+            grid.get_value(CellCoord { row, col })
+        };
+        match match_type {
+            0 => exact_match_1d(&lookup_value, len, &value_at),
+            1 => approximate_match_1d(&lookup_value, len, &value_at, true),
+            -1 => approximate_match_1d(&lookup_value, len, &value_at, false),
+            _ => return Value::Error(ErrorKind::NA),
+        }
+    } else if range.col_start == range.col_end {
+        let len = range.rows() as usize;
+        let col = range.col_start;
+        let value_at = |idx: usize| {
+            let row = range.row_start + idx as i32;
+            grid.get_value(CellCoord { row, col })
+        };
+        match match_type {
+            0 => exact_match_1d(&lookup_value, len, &value_at),
+            1 => approximate_match_1d(&lookup_value, len, &value_at, true),
+            -1 => approximate_match_1d(&lookup_value, len, &value_at, false),
+            _ => return Value::Error(ErrorKind::NA),
+        }
+    } else {
+        // MATCH requires a 1D array/range.
+        return Value::Error(ErrorKind::NA);
+    };
+
+    match pos {
+        Some(idx) => Value::Number((idx + 1) as f64),
+        None => Value::Error(ErrorKind::NA),
+    }
+}
+
+fn wildcard_pattern_for_lookup(lookup: &Value) -> Option<WildcardPattern> {
+    let Value::Text(pattern) = lookup else {
+        return None;
+    };
+    if !pattern.contains('*') && !pattern.contains('?') && !pattern.contains('~') {
+        return None;
+    }
+    Some(WildcardPattern::new(pattern))
+}
+
+fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
+    match (lookup_value, candidate) {
+        (Value::Number(a), Value::Number(b)) => a == b,
+        (Value::Text(a), Value::Text(b)) => cmp_case_insensitive(a, b) == Ordering::Equal,
+        (Value::Bool(a), Value::Bool(b)) => a == b,
+        (Value::Error(a), Value::Error(b)) => a == b,
+        (Value::Empty, Value::Empty) => true,
+        (Value::Number(a), Value::Text(b)) | (Value::Text(b), Value::Number(a)) => {
+            let trimmed = b.trim();
+            if trimmed.is_empty() {
+                false
+            } else {
+                crate::coercion::datetime::parse_value_text(
+                    trimmed,
+                    ValueLocaleConfig::en_us(),
+                    Utc::now(),
+                    ExcelDateSystem::EXCEL_1900,
+                )
+                .is_ok_and(|parsed| parsed == *a)
+            }
+        }
+        (Value::Bool(a), Value::Number(b)) | (Value::Number(b), Value::Bool(a)) => {
+            (*b == 0.0 && !*a) || (*b == 1.0 && *a)
+        }
+        _ => false,
+    }
+}
+
+fn error_code(e: ErrorKind) -> &'static str {
+    match e {
+        ErrorKind::Null => "#NULL!",
+        ErrorKind::Div0 => "#DIV/0!",
+        ErrorKind::Ref => "#REF!",
+        ErrorKind::Value => "#VALUE!",
+        ErrorKind::Name => "#NAME?",
+        ErrorKind::Num => "#NUM!",
+        ErrorKind::NA => "#N/A",
+        ErrorKind::Spill => "#SPILL!",
+        ErrorKind::Calc => "#CALC!",
+    }
+}
+
+fn excel_le(a: &Value, b: &Value) -> Option<bool> {
+    excel_cmp(a, b).map(|o| o <= 0)
+}
+
+fn excel_ge(a: &Value, b: &Value) -> Option<bool> {
+    excel_cmp(a, b).map(|o| o >= 0)
+}
+
+fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
+    fn ordering_to_i32(ord: std::cmp::Ordering) -> i32 {
+        match ord {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        }
+    }
+
+    fn type_rank(v: &Value) -> Option<u8> {
+        match v {
+            Value::Number(_) => Some(0),
+            Value::Text(_) => Some(1),
+            Value::Bool(_) => Some(2),
+            Value::Empty => Some(3),
+            Value::Error(_) => Some(4),
+            Value::Array(_) | Value::Range(_) => None,
+        }
+    }
+
+    match (a, b) {
+        // Blank coerces to the other type (Excel semantics).
+        (Value::Empty, Value::Number(y)) => Some(ordering_to_i32(0.0_f64.partial_cmp(y)?)),
+        (Value::Number(x), Value::Empty) => Some(ordering_to_i32(x.partial_cmp(&0.0_f64)?)),
+        (Value::Empty, Value::Text(y)) => Some(ordering_to_i32(cmp_case_insensitive("", y))),
+        (Value::Text(x), Value::Empty) => Some(ordering_to_i32(cmp_case_insensitive(x, ""))),
+        (Value::Empty, Value::Bool(y)) => Some(ordering_to_i32(false.cmp(y))),
+        (Value::Bool(x), Value::Empty) => Some(ordering_to_i32(x.cmp(&false))),
+        _ => {
+            let ra = type_rank(a)?;
+            let rb = type_rank(b)?;
+            if ra != rb {
+                return Some(ordering_to_i32(ra.cmp(&rb)));
+            }
+
+            match (a, b) {
+                (Value::Number(x), Value::Number(y)) => Some(ordering_to_i32(x.partial_cmp(y)?)),
+                (Value::Text(x), Value::Text(y)) => {
+                    Some(ordering_to_i32(cmp_case_insensitive(x, y)))
+                }
+                (Value::Bool(x), Value::Bool(y)) => Some(ordering_to_i32(x.cmp(y))),
+                (Value::Empty, Value::Empty) => Some(0),
+                (Value::Error(x), Value::Error(y)) => {
+                    Some(ordering_to_i32(error_code(*x).cmp(error_code(*y))))
+                }
+                _ => None,
+            }
+        }
+    }
+}
+
+fn coerce_to_string_for_lookup(v: &Value) -> Result<String, ErrorKind> {
+    let engine_value = bytecode_value_to_engine(v.clone());
+    engine_value
+        .coerce_to_string()
+        .map_err(engine_error_to_bytecode)
+}
+
+fn exact_match_in_first_col(grid: &dyn Grid, lookup: &Value, table: ResolvedRange) -> Option<i32> {
+    let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
+    let rows = table.row_start..=table.row_end;
+    for (idx, row) in rows.enumerate() {
+        let key = grid.get_value(CellCoord {
+            row,
+            col: table.col_start,
+        });
+        if let Some(pattern) = &wildcard_pattern {
+            let text = match &key {
+                Value::Error(_) => continue,
+                Value::Text(s) => Cow::Borrowed(s.as_ref()),
+                other => match coerce_to_string_for_lookup(other) {
+                    Ok(s) => Cow::Owned(s),
+                    Err(_) => continue,
+                },
+            };
+            if pattern.matches(text.as_ref()) {
+                return Some(idx as i32);
+            }
+        } else if values_equal_for_lookup(lookup, &key) {
+            return Some(idx as i32);
+        }
+    }
+    None
+}
+
+fn exact_match_in_first_row(grid: &dyn Grid, lookup: &Value, table: ResolvedRange) -> Option<i32> {
+    let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
+    let cols = table.col_start..=table.col_end;
+    for (idx, col) in cols.enumerate() {
+        let key = grid.get_value(CellCoord {
+            row: table.row_start,
+            col,
+        });
+        if let Some(pattern) = &wildcard_pattern {
+            let text = match &key {
+                Value::Error(_) => continue,
+                Value::Text(s) => Cow::Borrowed(s.as_ref()),
+                other => match coerce_to_string_for_lookup(other) {
+                    Ok(s) => Cow::Owned(s),
+                    Err(_) => continue,
+                },
+            };
+            if pattern.matches(text.as_ref()) {
+                return Some(idx as i32);
+            }
+        } else if values_equal_for_lookup(lookup, &key) {
+            return Some(idx as i32);
+        }
+    }
+    None
+}
+
+fn approximate_match_in_first_col(
+    grid: &dyn Grid,
+    lookup: &Value,
+    table: ResolvedRange,
+) -> Option<i32> {
+    let len = (table.row_end - table.row_start + 1) as usize;
+    if len == 0 {
+        return None;
+    }
+
+    // Fast path: numeric-only contiguous column slice (blanks are NaN).
+    let lookup_num = match lookup {
+        Value::Number(n) if !n.is_nan() => Some(*n),
+        Value::Empty => Some(0.0),
+        _ => None,
+    };
+    if let Some(lookup_num) = lookup_num {
+        if let Some(slice) = grid.column_slice(table.col_start, table.row_start, table.row_end) {
+            let mut lo = 0usize;
+            let mut hi = slice.len();
+            while lo < hi {
+                let mid = lo + (hi - lo) / 2;
+                let key = slice[mid];
+                let key = if key.is_nan() { 0.0 } else { key };
+                if key <= lookup_num {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+            return lo.checked_sub(1).map(|idx| idx as i32);
+        }
+    }
+
+    // General path: Excel-style compare semantics over cell values.
+    let mut lo = 0usize;
+    let mut hi = len;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let key = grid.get_value(CellCoord {
+            row: table.row_start + mid as i32,
+            col: table.col_start,
+        });
+        if excel_le(&key, lookup)? {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    lo.checked_sub(1).map(|idx| idx as i32)
+}
+
+fn approximate_match_in_first_row(
+    grid: &dyn Grid,
+    lookup: &Value,
+    table: ResolvedRange,
+) -> Option<i32> {
+    let len = (table.col_end - table.col_start + 1) as usize;
+    if len == 0 {
+        return None;
+    }
+
+    let mut lo = 0usize;
+    let mut hi = len;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let key = grid.get_value(CellCoord {
+            row: table.row_start,
+            col: table.col_start + mid as i32,
+        });
+        if excel_le(&key, lookup)? {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    lo.checked_sub(1).map(|idx| idx as i32)
+}
+
+fn exact_match_1d(lookup: &Value, len: usize, value_at: &dyn Fn(usize) -> Value) -> Option<usize> {
+    let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
+    for idx in 0..len {
+        let candidate = value_at(idx);
+        if let Some(pattern) = &wildcard_pattern {
+            let text = match &candidate {
+                Value::Error(_) => continue,
+                Value::Text(s) => Cow::Borrowed(s.as_ref()),
+                other => match coerce_to_string_for_lookup(other) {
+                    Ok(s) => Cow::Owned(s),
+                    Err(_) => continue,
+                },
+            };
+            if pattern.matches(text.as_ref()) {
+                return Some(idx);
+            }
+        } else if values_equal_for_lookup(lookup, &candidate) {
+            return Some(idx);
+        }
+    }
+    None
+}
+
+fn approximate_match_1d(
+    lookup: &Value,
+    len: usize,
+    value_at: &dyn Fn(usize) -> Value,
+    ascending: bool,
+) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+
+    let mut lo = 0usize;
+    let mut hi = len;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let v = value_at(mid);
+        let ok = if ascending {
+            excel_le(&v, lookup)?
+        } else {
+            excel_ge(&v, lookup)?
+        };
+        if ok {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+
+    lo.checked_sub(1)
+}
+
 enum RangeArg<'a> {
     Range(RangeRef),
     Array(&'a ArrayValue),
@@ -944,10 +1449,9 @@ fn parse_countif_criteria(
     }
 
     let criteria_value = match criteria {
-        Value::Number(_)
-        | Value::Bool(_)
-        | Value::Text(_)
-        | Value::Empty => bytecode_value_to_engine(criteria.clone()),
+        Value::Number(_) | Value::Bool(_) | Value::Text(_) | Value::Empty => {
+            bytecode_value_to_engine(criteria.clone())
+        }
         Value::Error(_) => unreachable!("handled above"),
         Value::Array(_) | Value::Range(_) => return Err(ErrorKind::Value),
     };
@@ -1159,7 +1663,8 @@ fn count_if_range(
             count += count_if_f64_blank_as_zero(slice, criteria);
         } else {
             for row in range.row_start..=range.row_end {
-                if let Some(v) = coerce_countif_value_to_number(grid.get_value(CellCoord { row, col }))
+                if let Some(v) =
+                    coerce_countif_value_to_number(grid.get_value(CellCoord { row, col }))
                 {
                     if matches_numeric_criteria(v, criteria) {
                         count += 1;

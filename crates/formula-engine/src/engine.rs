@@ -14,7 +14,9 @@ use crate::eval::{
 };
 use crate::graph::{CellDeps, DependencyGraph as CalcGraph, Precedent, SheetRange};
 use crate::iterative;
-use crate::locale::{canonicalize_formula, canonicalize_formula_with_style, FormulaLocale, ValueLocaleConfig};
+use crate::locale::{
+    canonicalize_formula, canonicalize_formula_with_style, FormulaLocale, ValueLocaleConfig,
+};
 use crate::value::{Array, ErrorKind, Value};
 use formula_model::{CellId, CellRef, Range, Table, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
@@ -1637,14 +1639,15 @@ impl Engine {
                     };
                     let value = match compiled {
                         CompiledFormula::Ast(expr) => {
-                            let evaluator = crate::eval::Evaluator::new_with_date_system_and_locales(
-                                &snapshot,
-                                ctx,
-                                recalc_ctx,
-                                date_system,
-                                value_locale,
-                                locale_config.clone(),
-                            );
+                            let evaluator =
+                                crate::eval::Evaluator::new_with_date_system_and_locales(
+                                    &snapshot,
+                                    ctx,
+                                    recalc_ctx,
+                                    date_system,
+                                    value_locale,
+                                    locale_config.clone(),
+                                );
                             evaluator.eval_formula(expr)
                         }
                         CompiledFormula::Bytecode(bc) => {
@@ -2587,10 +2590,8 @@ impl Engine {
         self.next_recalc_id = self.next_recalc_id.wrapping_add(1);
         let mut ctx = crate::eval::RecalcContext::new(id);
         let separators = self.value_locale.separators;
-        ctx.number_locale = crate::value::NumberLocale::new(
-            separators.decimal_sep,
-            Some(separators.thousands_sep),
-        );
+        ctx.number_locale =
+            crate::value::NumberLocale::new(separators.decimal_sep, Some(separators.thousands_sep));
         ctx
     }
 
@@ -3779,12 +3780,19 @@ fn precedent_node_cmp(a: &PrecedentNode, b: &PrecedentNode) -> Ordering {
     };
 
     rank(a).cmp(&rank(b)).then_with(|| match (a, b) {
-        (PrecedentNode::Cell { sheet: a_sheet, addr: a_addr }, PrecedentNode::Cell { sheet: b_sheet, addr: b_addr }) => {
-            a_sheet
-                .cmp(b_sheet)
-                .then_with(|| a_addr.row.cmp(&b_addr.row))
-                .then_with(|| a_addr.col.cmp(&b_addr.col))
-        }
+        (
+            PrecedentNode::Cell {
+                sheet: a_sheet,
+                addr: a_addr,
+            },
+            PrecedentNode::Cell {
+                sheet: b_sheet,
+                addr: b_addr,
+            },
+        ) => a_sheet
+            .cmp(b_sheet)
+            .then_with(|| a_addr.row.cmp(&b_addr.row))
+            .then_with(|| a_addr.col.cmp(&b_addr.col)),
         (
             PrecedentNode::Range {
                 sheet: a_sheet,
@@ -3927,7 +3935,9 @@ fn expand_nodes_to_cells(nodes: &[PrecedentNode], limit: usize) -> Vec<(SheetId,
                         done: false,
                     }
                 }
-                PrecedentNode::ExternalCell { .. } | PrecedentNode::ExternalRange { .. } => Stream::Empty,
+                PrecedentNode::ExternalCell { .. } | PrecedentNode::ExternalRange { .. } => {
+                    Stream::Empty
+                }
             }
         }
 
@@ -4167,11 +4177,9 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn sheet_id(&self, name: &str) -> Option<usize> {
-        self.sheet_names_by_id
-            .iter()
-            .position(|candidate| {
-                crate::value::cmp_case_insensitive(candidate, name) == Ordering::Equal
-            })
+        self.sheet_names_by_id.iter().position(|candidate| {
+            crate::value::cmp_case_insensitive(candidate, name) == Ordering::Equal
+        })
     }
 
     fn iter_sheet_cells(&self, sheet_id: usize) -> Option<Box<dyn Iterator<Item = CellAddr> + '_>> {
@@ -4190,9 +4198,7 @@ impl crate::eval::ValueResolver for Snapshot {
             },
         };
         Some(Box::new(
-            self.ordered_cells
-                .range(start..=end)
-                .map(|k| k.addr),
+            self.ordered_cells.range(start..=end).map(|k| k.addr),
         ))
     }
 
@@ -4496,11 +4502,16 @@ enum ColumnSliceMode {
 }
 
 fn slice_mode_for_program(program: &bytecode::Program) -> ColumnSliceMode {
-    if program
-        .funcs
-        .iter()
-        .any(|f| matches!(f, bytecode::ast::Function::SumProduct | bytecode::ast::Function::CountIf))
-    {
+    if program.funcs.iter().any(|f| {
+        matches!(
+            f,
+            bytecode::ast::Function::SumProduct
+                | bytecode::ast::Function::CountIf
+                | bytecode::ast::Function::VLookup
+                | bytecode::ast::Function::HLookup
+                | bytecode::ast::Function::Match
+        )
+    }) {
         ColumnSliceMode::StrictNumeric
     } else {
         ColumnSliceMode::IgnoreNonNumeric
@@ -4917,6 +4928,43 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
                     && (matches!(args[1], bytecode::Expr::RangeRef(_))
                         || matches!(args[1], bytecode::Expr::CellRef(_)))
             }
+            bytecode::ast::Function::VLookup | bytecode::ast::Function::HLookup => {
+                if args.len() < 3 || args.len() > 4 {
+                    return false;
+                }
+
+                let table_ok = matches!(
+                    args[1],
+                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
+                );
+                let lookup_ok = bytecode_expr_is_eligible_inner(&args[0], false);
+                let index_ok = bytecode_expr_is_eligible_inner(&args[2], false);
+                let range_lookup_ok = if args.len() == 4 {
+                    bytecode_expr_is_eligible_inner(&args[3], false)
+                } else {
+                    true
+                };
+
+                table_ok && lookup_ok && index_ok && range_lookup_ok
+            }
+            bytecode::ast::Function::Match => {
+                if args.len() < 2 || args.len() > 3 {
+                    return false;
+                }
+
+                let array_ok = matches!(
+                    args[1],
+                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
+                );
+                let lookup_ok = bytecode_expr_is_eligible_inner(&args[0], false);
+                let match_type_ok = if args.len() == 3 {
+                    bytecode_expr_is_eligible_inner(&args[2], false)
+                } else {
+                    true
+                };
+
+                array_ok && lookup_ok && match_type_ok
+            }
             bytecode::ast::Function::Abs
             | bytecode::ast::Function::Int
             | bytecode::ast::Function::Round
@@ -4996,7 +5044,8 @@ fn walk_expr_flags(
             // LET/LAMBDA lexical bindings are only visible for unqualified identifiers.
             // If a name reference is explicitly sheet-qualified (e.g. `Sheet1!X`), it should
             // bypass the local LET/LAMBDA scope and resolve as a defined name.
-            if matches!(nref.sheet, SheetReference::Current) && name_is_local(lexical_scopes, &name_key)
+            if matches!(nref.sheet, SheetReference::Current)
+                && name_is_local(lexical_scopes, &name_key)
             {
                 return;
             }
@@ -5382,7 +5431,8 @@ fn walk_external_expr(
             // LET/LAMBDA lexical bindings are only visible for unqualified identifiers.
             // Explicit sheet-qualified names (e.g. `Sheet1!X`) should still resolve as defined
             // names and surface any external precedents.
-            if matches!(nref.sheet, SheetReference::Current) && name_is_local(lexical_scopes, &name_key)
+            if matches!(nref.sheet, SheetReference::Current)
+                && name_is_local(lexical_scopes, &name_key)
             {
                 return;
             }
@@ -5411,16 +5461,14 @@ fn walk_external_expr(
         Expr::Unary { expr, .. }
         | Expr::Postfix { expr, .. }
         | Expr::ImplicitIntersection(expr)
-        | Expr::SpillRange(expr) => {
-            walk_external_expr(
-                expr,
-                current_cell,
-                workbook,
-                precedents,
-                visiting_names,
-                lexical_scopes,
-            )
-        }
+        | Expr::SpillRange(expr) => walk_external_expr(
+            expr,
+            current_cell,
+            workbook,
+            precedents,
+            visiting_names,
+            lexical_scopes,
+        ),
         Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
             walk_external_expr(
                 left,
@@ -5694,7 +5742,8 @@ fn walk_calc_expr(
             // LET/LAMBDA lexical bindings are only visible for unqualified identifiers.
             // Explicit sheet-qualified names (e.g. `Sheet1!X`) should still resolve as defined
             // names for dependency analysis and dirty propagation.
-            if matches!(nref.sheet, SheetReference::Current) && name_is_local(lexical_scopes, &name_key)
+            if matches!(nref.sheet, SheetReference::Current)
+                && name_is_local(lexical_scopes, &name_key)
             {
                 return;
             }

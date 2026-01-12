@@ -93,6 +93,7 @@ impl Compiler {
             }
             Function::CountIf => arg_idx == 0,
             Function::SumProduct => true,
+            Function::VLookup | Function::HLookup | Function::Match => arg_idx == 1,
             Function::Abs
             | Function::Int
             | Function::Round

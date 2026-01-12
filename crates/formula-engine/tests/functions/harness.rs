@@ -49,6 +49,10 @@ impl TestSheet {
         self.engine.get_cell_value(self.sheet, addr)
     }
 
+    pub fn bytecode_program_count(&self) -> usize {
+        self.engine.bytecode_program_count()
+    }
+
     pub fn eval(&mut self, formula: &str) -> Value {
         self.set_formula(self.scratch_cell, formula);
         self.recalc();

@@ -22,11 +22,20 @@ fn xmatch_and_xlookup_are_case_insensitive_for_unicode_text() {
     sheet.set("B1", 123.0);
 
     // Uses Unicode-aware uppercasing: ß -> SS.
-    assert_eq!(sheet.eval("=XMATCH(\"STRASSE\", A1:A1)"), Value::Number(1.0));
-    assert_eq!(sheet.eval("=XLOOKUP(\"STRASSE\", A1:A1, B1:B1)"), Value::Number(123.0));
+    assert_eq!(
+        sheet.eval("=XMATCH(\"STRASSE\", A1:A1)"),
+        Value::Number(1.0)
+    );
+    assert_eq!(
+        sheet.eval("=XLOOKUP(\"STRASSE\", A1:A1, B1:B1)"),
+        Value::Number(123.0)
+    );
 
     // Wildcard mode should also use Unicode-aware case folding.
-    assert_eq!(sheet.eval("=XMATCH(\"straß*\", A1:A1, 2)"), Value::Number(1.0));
+    assert_eq!(
+        sheet.eval("=XMATCH(\"straß*\", A1:A1, 2)"),
+        Value::Number(1.0)
+    );
 }
 
 #[test]
@@ -48,7 +57,10 @@ fn match_and_vlookup_are_case_insensitive_for_unicode_text() {
     sheet.set("A1", "Straße");
     sheet.set("B1", 42.0);
 
-    assert_eq!(sheet.eval("=MATCH(\"STRASSE\", A1:A1, 0)"), Value::Number(1.0));
+    assert_eq!(
+        sheet.eval("=MATCH(\"STRASSE\", A1:A1, 0)"),
+        Value::Number(1.0)
+    );
     assert_eq!(
         sheet.eval("=VLOOKUP(\"STRASSE\", A1:B1, 2, FALSE)"),
         Value::Number(42.0)
@@ -197,7 +209,10 @@ fn xmatch_supports_next_smaller_and_next_larger() {
 
     assert_eq!(sheet.eval("=XMATCH(4, A1:A3, -1)"), Value::Number(2.0));
     assert_eq!(sheet.eval("=XMATCH(4, A1:A3, 1)"), Value::Number(3.0));
-    assert_eq!(sheet.eval("=XMATCH(0, A1:A3, -1)"), Value::Error(ErrorKind::NA));
+    assert_eq!(
+        sheet.eval("=XMATCH(0, A1:A3, -1)"),
+        Value::Error(ErrorKind::NA)
+    );
 }
 
 #[test]
@@ -364,9 +379,15 @@ fn xlookup_spills_rows_and_columns_from_2d_return_arrays() {
     engine.set_cell_value("Sheet1", "A3", "C").unwrap();
 
     for (row, base) in [(1, 10.0), (2, 20.0), (3, 30.0)] {
-        engine.set_cell_value("Sheet1", &format!("B{row}"), base).unwrap();
-        engine.set_cell_value("Sheet1", &format!("C{row}"), base + 1.0).unwrap();
-        engine.set_cell_value("Sheet1", &format!("D{row}"), base + 2.0).unwrap();
+        engine
+            .set_cell_value("Sheet1", &format!("B{row}"), base)
+            .unwrap();
+        engine
+            .set_cell_value("Sheet1", &format!("C{row}"), base + 1.0)
+            .unwrap();
+        engine
+            .set_cell_value("Sheet1", &format!("D{row}"), base + 2.0)
+            .unwrap();
     }
 
     engine
@@ -386,9 +407,15 @@ fn xlookup_spills_rows_and_columns_from_2d_return_arrays() {
     // 3x3 return array under the headers in row 5.
     for (row_off, base) in [(0, 100.0), (1, 110.0), (2, 120.0)] {
         let row = 6 + row_off;
-        engine.set_cell_value("Sheet1", &format!("A{row}"), base).unwrap();
-        engine.set_cell_value("Sheet1", &format!("B{row}"), base + 10.0).unwrap();
-        engine.set_cell_value("Sheet1", &format!("C{row}"), base + 20.0).unwrap();
+        engine
+            .set_cell_value("Sheet1", &format!("A{row}"), base)
+            .unwrap();
+        engine
+            .set_cell_value("Sheet1", &format!("B{row}"), base + 10.0)
+            .unwrap();
+        engine
+            .set_cell_value("Sheet1", &format!("C{row}"), base + 20.0)
+            .unwrap();
     }
 
     engine
@@ -412,11 +439,20 @@ fn xlookup_errors_on_mismatched_shapes_and_invalid_modes() {
     sheet.set("B2", 20.0);
 
     // return_array is too short.
-    assert_eq!(sheet.eval("=XLOOKUP(2, A1:A3, B1:B2)"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        sheet.eval("=XLOOKUP(2, A1:A3, B1:B2)"),
+        Value::Error(ErrorKind::Value)
+    );
 
     // Invalid match/search modes.
-    assert_eq!(sheet.eval("=XMATCH(2, A1:A3, 3)"), Value::Error(ErrorKind::Value));
-    assert_eq!(sheet.eval("=XMATCH(2, A1:A3, 0, 0)"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        sheet.eval("=XMATCH(2, A1:A3, 3)"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=XMATCH(2, A1:A3, 0, 0)"),
+        Value::Error(ErrorKind::Value)
+    );
     assert_eq!(
         sheet.eval("=XLOOKUP(2, A1:A3, A1:A3, \"\", 3)"),
         Value::Error(ErrorKind::Value)
@@ -465,7 +501,10 @@ fn xmatch_and_xlookup_treat_missing_optional_args_as_defaults() {
     );
 
     // Missing search_mode should default to 1 for XLOOKUP as well.
-    assert_eq!(sheet.eval("=XLOOKUP(2, A1:A3, B1:B3,,0,)"), Value::Number(20.0));
+    assert_eq!(
+        sheet.eval("=XLOOKUP(2, A1:A3, B1:B3,,0,)"),
+        Value::Number(20.0)
+    );
 }
 
 #[test]
@@ -510,6 +549,35 @@ fn vlookup_approximate_match() {
         sheet.eval("=VLOOKUP(0, A1:B3, 2)"),
         Value::Error(ErrorKind::NA)
     );
+}
+
+#[test]
+fn vlookup_and_hlookup_compile_to_bytecode_backend_for_simple_range_tables() {
+    let mut sheet = TestSheet::new();
+
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 2.0);
+    sheet.set("A3", 3.0);
+    sheet.set("B1", "a");
+    sheet.set("B2", "b");
+    sheet.set("B3", "c");
+
+    sheet.set("D1", 1.0);
+    sheet.set("E1", 2.0);
+    sheet.set("F1", 3.0);
+    sheet.set("D2", "a");
+    sheet.set("E2", "b");
+    sheet.set("F2", "c");
+
+    sheet.set_formula("C1", "=VLOOKUP(2, A1:B3, 2, FALSE)");
+    sheet.set_formula("C2", "=HLOOKUP(2, D1:F2, 2, FALSE)");
+
+    assert_eq!(sheet.bytecode_program_count(), 2);
+
+    sheet.recalculate();
+
+    assert_eq!(sheet.get("C1"), Value::Text("b".to_string()));
+    assert_eq!(sheet.get("C2"), Value::Text("b".to_string()));
 }
 
 #[test]
