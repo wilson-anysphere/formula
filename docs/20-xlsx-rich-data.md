@@ -4,6 +4,11 @@
 
 Excel historically stores images via the **drawing layer** (`xl/drawings/*`, anchored/floating shapes). Newer Excel builds (Microsoft 365) also support **“Place in Cell” / “Image in Cell”**, where an image behaves like a *cell value*.
 
+For the dedicated “images in cells” packaging overview (including the `xl/cellImages.xml` part), see:
+
+- [`docs/20-images-in-cells.md`](./20-images-in-cells.md)
+- [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md)
+
 In OOXML this is implemented using **Rich Values** (“richData”) plus **cell value metadata**:
 
 - The worksheet cell points to a **value-metadata record** via the cell attribute `vm="…"`.
@@ -48,18 +53,26 @@ At a high level:
 
 ```
 sheetN.xml: <c vm="VM_INDEX">…</c>
-  └─> xl/metadata.xml: valueMetadata[VM_INDEX]
-        └─> <xlrd:rvb i="RV_INDEX"/>
-              └─> xl/richData/richValue*.xml: <rv> entry at RV_INDEX
-                    └─> (image payload references REL_SLOT_INDEX)
-                          └─> xl/richData/richValueRel.xml: <rel> at REL_SLOT_INDEX => r:id="rIdX"
-                                └─> xl/richData/_rels/richValueRel.xml.rels: Relationship Id="rIdX"
-                                      └─> Target="../media/imageY.png" => xl/media/imageY.png bytes
+  └─> xl/metadata.xml: valueMetadata[VM_INDEX]   (vm is typically 1-based; treat as opaque)
+         └─> <xlrd:rvb i="RV_INDEX"/>
+               └─> xl/richData/richValue*.xml: <rv> entry at RV_INDEX
+                     └─> (image payload references REL_SLOT_INDEX)
+                           └─> xl/richData/richValueRel.xml: <rel> at REL_SLOT_INDEX => r:id="rIdX"
+                                 └─> xl/richData/_rels/richValueRel.xml.rels: Relationship Id="rIdX"
+                                       └─> Target="../media/imageY.png" => xl/media/imageY.png bytes
 ```
 
 ### Indexing notes (practical assumptions)
 
-- **`vm` and `i` are treated as 0-based indices** (consistent with most SpreadsheetML index fields like shared strings and style IDs). Validate against real Excel fixtures before hard-coding.
+- **`vm` is commonly 1-based in real Excel files.** For example, `fixtures/xlsx/metadata/rich-values-vm.xlsx`
+  uses `vm="1"` for the first `<valueMetadata><bk>` record (see
+  `crates/formula-xlsx/tests/metadata_rich_values_vm_roundtrip.rs`).
+  - Some producers appear to emit 0-based `vm`; treat `vm` as opaque and be tolerant.
+- `<xlrd:rvb i="…"/>` is a **0-based** index into `xl/richData/richValue*.xml` records.
+- Inside `xl/metadata.xml` for the `XLRICHVALUE` metadata type:
+  - `rc/@t` is a **1-based** index into `<metadataTypes>`
+  - `rc/@v` is a **0-based** index into `<futureMetadata name="XLRICHVALUE">`’s `<bk>` list
+  - `xlrd:rvb/@i` is a **0-based** index into `xl/richData/richValue*.xml`
 - `richValue*.xml` can be **split across multiple parts** (`richValue.xml`, `richValue1.xml`, …). The `RV_INDEX` should be interpreted as a **global index across the concatenated `<rv>` streams** in part order.
   - Open question: the exact ordering rules Excel uses when multiple parts exist (lexicographic vs numeric suffix). Use numeric suffix ordering (`richValue.xml` then `richValue1.xml`, `richValue2.xml`, …) and verify with fixtures.
 - Image references inside `<rv>` appear to use an **integer relationship-slot index** (not an `rId` string directly). That slot index points into the ordered `<rel>` list in `richValueRel.xml`.
@@ -76,8 +89,8 @@ The following example is *synthetic* but demonstrates the mapping.
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheetData>
     <row r="2">
-      <!-- vm="0" => valueMetadata record #0 in xl/metadata.xml -->
-      <c r="B2" vm="0">
+      <!-- vm="1" => the first valueMetadata record in xl/metadata.xml -->
+      <c r="B2" vm="1">
         <!-- The cell's plain <v> is not the image payload.
              The image binding is driven by vm + metadata.xml. -->
         <v>0</v>
@@ -89,30 +102,38 @@ The following example is *synthetic* but demonstrates the mapping.
 
 ### 2) Value metadata (`xl/metadata.xml`)
 
-This is where Excel binds a cell’s `vm` index to a rich value index via the richData extension element `<xlrd:rvb>`.
+This is where Excel binds a cell’s `vm` index to a rich value index via the richData extension element
+`<xlrd:rvb>`. In commonly observed schemas, the `vm` index selects a `<valueMetadata><bk>` record, which
+contains an `<rc t="…" v="…"/>` mapping into a `<futureMetadata name="XLRICHVALUE">` table, whose `<bk>`
+payload contains `<xlrd:rvb i="…"/>`.
 
 ```xml
 <metadata
   xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
   xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
 
-  <!-- The list of metadata “types”. Records refer to this by index (t="…"). -->
+  <!-- The list of metadata “types”. Records refer to this by 1-based index (t="…"). -->
   <metadataTypes count="1">
-    <metadataType name="XLDAPR" minSupportedVersion="120000"/>
+    <metadataType name="XLRICHVALUE"/>
   </metadataTypes>
 
-  <!-- vm="0" points at the first (0th) value-metadata record. -->
+  <!-- Future metadata table: rc/@v is a 0-based index into this bk list. -->
+  <futureMetadata name="XLRICHVALUE" count="1">
+    <bk>
+      <extLst>
+        <ext uri="{BDBB8CDC-FA1E-496E-A857-3C3F30B4D73F}">
+          <!-- i="5" => rich value #5 (0-based) in richValue*.xml -->
+          <xlrd:rvb i="5"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+
+  <!-- vm="1" points at the first (1st) value-metadata record. -->
   <valueMetadata count="1">
     <bk>
-      <!-- Record 0: type t="0" (metadataTypes[0]) -->
-      <rc t="0">
-        <extLst>
-          <ext uri="{BDBB8CDC-FA1E-496E-A857-3C3F30B4D73F}">
-            <!-- i="5" => rich value #5 (0-based) in richValue*.xml -->
-            <xlrd:rvb i="5"/>
-          </ext>
-        </extLst>
-      </rc>
+      <!-- Record 1: type t="1" (metadataTypes[0]) and v="0" (futureMetadata bk[0]) -->
+      <rc t="1" v="0"/>
     </bk>
   </valueMetadata>
 </metadata>
@@ -206,4 +227,3 @@ Even before full rich-data editing is implemented, round-trip compatibility need
    - Confirm how `xl/metadata.xml` and `xl/richData/*` are linked from the workbook part in various Excel versions.
 
 If you add fixtures for this feature, document them under `fixtures/xlsx/**` and update this doc with the observed exact XML.
-
