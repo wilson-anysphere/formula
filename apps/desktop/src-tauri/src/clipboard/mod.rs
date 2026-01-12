@@ -9,7 +9,10 @@ mod windows_dib;
 #[cfg(target_os = "windows")]
 mod windows;
 
-#[cfg(all(target_os = "linux", feature = "desktop"))]
+// Keep the GTK-backed Linux clipboard implementation behind the `desktop` feature for production
+// builds, but still compile the module in unit tests so we can validate pure helper logic (e.g.
+// target selection) without requiring a system GTK/WebKit toolchain.
+#[cfg(all(target_os = "linux", any(feature = "desktop", test)))]
 mod linux;
 
 #[cfg(target_os = "macos")]
