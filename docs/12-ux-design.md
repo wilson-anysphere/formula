@@ -99,9 +99,9 @@ The user experience must honor Excel's familiar mental model while introducing m
 
 ### Search Behavior
 
-- Fuzzy matching: "pvt tbl" → "Pivot Table" *(planned)*
+- Fuzzy matching: "pvt tbl" → "Pivot Table"
+- Recent commands prioritized
 - Shortcut search: "/" → shows all shortcuts *(planned)*
-- Recent commands prioritized *(planned)*
 - Context-aware suggestions *(planned)*
 
 ---
