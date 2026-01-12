@@ -672,6 +672,10 @@ export class SpreadsheetApp {
     hSize: number | null;
     hOffset: number | null;
   } = { vSize: null, vOffset: null, hSize: null, hOffset: null };
+  private readonly scrollbarThumbScratch = {
+    v: { size: 0, offset: 0 },
+    h: { size: 0, offset: 0 }
+  };
   private scrollbarDrag:
     | { axis: "x" | "y"; pointerId: number; grabOffset: number; thumbTravel: number; trackStart: number; maxScroll: number }
     | null = null;
@@ -5901,6 +5905,7 @@ export class SpreadsheetApp {
     contentSize: number;
     trackSize: number;
     minThumbSize?: number;
+    out?: { size: number; offset: number };
   }): { size: number; offset: number } {
     const minThumbSize = options.minThumbSize ?? 24;
     const trackSize = Math.max(0, options.trackSize);
@@ -5909,13 +5914,35 @@ export class SpreadsheetApp {
     const maxScroll = Math.max(0, contentSize - viewportSize);
     const scrollPos = Math.min(Math.max(0, options.scrollPos), maxScroll);
 
-    if (trackSize === 0) return { size: 0, offset: 0 };
-    if (contentSize === 0 || maxScroll === 0) return { size: trackSize, offset: 0 };
+    const out = options.out;
+
+    if (trackSize === 0) {
+      if (out) {
+        out.size = 0;
+        out.offset = 0;
+        return out;
+      }
+      return { size: 0, offset: 0 };
+    }
+    if (contentSize === 0 || maxScroll === 0) {
+      if (out) {
+        out.size = trackSize;
+        out.offset = 0;
+        return out;
+      }
+      return { size: trackSize, offset: 0 };
+    }
 
     const rawThumbSize = (viewportSize / contentSize) * trackSize;
     const thumbSize = Math.min(trackSize, Math.max(minThumbSize, rawThumbSize));
     const thumbTravel = Math.max(0, trackSize - thumbSize);
     const offset = thumbTravel === 0 ? 0 : (scrollPos / maxScroll) * thumbTravel;
+
+    if (out) {
+      out.size = thumbSize;
+      out.offset = offset;
+      return out;
+    }
 
     return { size: thumbSize, offset };
   }
@@ -5994,7 +6021,8 @@ export class SpreadsheetApp {
         scrollPos: this.scrollY,
         viewportSize: Math.max(0, this.viewportHeight() - this.frozenHeight),
         contentSize: Math.max(0, this.contentHeight() - this.frozenHeight),
-        trackSize
+        trackSize,
+        out: this.scrollbarThumbScratch.v
       });
 
       if (this.lastScrollbarThumb.vSize !== size) {
@@ -6016,7 +6044,8 @@ export class SpreadsheetApp {
         scrollPos: this.scrollX,
         viewportSize: Math.max(0, this.viewportWidth() - this.frozenWidth),
         contentSize: Math.max(0, this.contentWidth() - this.frozenWidth),
-        trackSize
+        trackSize,
+        out: this.scrollbarThumbScratch.h
       });
 
       if (this.lastScrollbarThumb.hSize !== size) {
