@@ -6,7 +6,7 @@ test.describe("name box go to", () => {
   test("sheet-qualified references resolve sheet display names to stable ids (no phantom sheets)", async ({ page }) => {
     await gotoDesktop(page);
 
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
       const app = (window as any).__formulaApp;
       if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
       const store = (app as any).getWorkbookSheetStore?.();
@@ -14,6 +14,9 @@ test.describe("name box go to", () => {
 
       // Create a stable-id sheet ("Sheet2") then rename its display name to "Budget".
       app.getDocument().setCellValue("Sheet2", "A1", "BudgetCell");
+      // Sheet store → document reconciliation is microtask-debounced; wait for it to
+      // materialize the lazily-created sheet id before attempting the rename.
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
       store.rename("Sheet2", "Budget");
     });
 
@@ -32,4 +35,3 @@ test.describe("name box go to", () => {
     expect(sheetIds).not.toContain("Budget");
   });
 });
-

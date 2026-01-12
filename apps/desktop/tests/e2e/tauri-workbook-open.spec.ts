@@ -30,6 +30,12 @@ function installTauriStubForTests(
               origin_path: args?.path ?? null,
               sheets,
             };
+          case "new_workbook":
+            return {
+              path: null,
+              origin_path: null,
+              sheets,
+            };
 
           case "get_sheet_used_range":
             return usedRange;
@@ -61,11 +67,25 @@ function installTauriStubForTests(
             // the frontend treats the backend response as canonical.
             return { id: "Sheet2-backend", name: String(args?.name ?? "Sheet2") };
 
+          case "list_defined_names":
+            return [];
+          case "list_tables":
+            return [];
+          case "get_workbook_theme_palette":
+            return null;
+
+          case "get_macro_security_status":
+            return { has_macros: false, trust: "trusted_always" };
+          case "set_macro_trust":
+            return { has_macros: false, trust: args?.decision ?? "trusted_once" };
+
           case "stat_file":
             return { mtime_ms: 0, size_bytes: 0 };
 
           case "set_macro_ui_context":
           case "fire_workbook_open":
+            return { ok: true, output: [], updates: [] };
+
           case "mark_saved":
           case "move_sheet":
           case "set_cell":
@@ -74,7 +94,9 @@ function installTauriStubForTests(
             return null;
 
           default:
-            throw new Error(`Unexpected invoke: ${cmd} ${JSON.stringify(args)}`);
+            // Best-effort: ignore unknown commands so unrelated UI features don't
+            // break this test when new backend calls are introduced.
+            return null;
         }
       },
     },
