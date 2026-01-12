@@ -113,8 +113,16 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
   const focusFirstControl = React.useCallback((tabId: string) => {
     const panel = document.getElementById(`ribbon-panel-${tabId}`);
     if (!panel) return;
-    const first = panel.querySelector<HTMLButtonElement>("button:not(:disabled)");
-    first?.focus();
+    const first = panel.querySelector<HTMLElement>(
+      'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+    );
+    if (first) {
+      first.focus();
+      return;
+    }
+    // Ensure Tab from the tab strip doesn't become a focus trap when a panel has
+    // no tabbable controls (e.g. all commands are disabled).
+    (panel as HTMLElement).focus?.();
   }, []);
 
   return (
@@ -230,6 +238,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
               role="tabpanel"
               aria-labelledby={`ribbon-tab-${tab.id}`}
               aria-label={tab.label}
+              tabIndex={-1}
               hidden={!isActive}
               className="ribbon__tabpanel"
             >
