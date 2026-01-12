@@ -805,7 +805,9 @@ Defines member/field layouts keyed by **string IDs**. Structures are typically i
 
 Notes:
 
-* Excel appears to support multiple “kinds” (string/number/bool/rel/…).
+ * The `kind="…"` attribute encodes the value representation. In the in-repo images-in-cell fixtures it is
+   observed as `kind="rel"` for the image relationship field; other rich value types may use additional
+   kinds.
 * The **ordering** of `<member>` entries is significant: instances generally encode member values positionally.
 
 ### 3) `xl/richData/richValueRel.xml`
