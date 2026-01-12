@@ -127,7 +127,7 @@ The user experience must honor Excel's familiar mental model while introducing m
 | `Ctrl+Arrow` | Jump to edge of data |
 | `Ctrl+Home` | Go to A1 |
 | `Ctrl+End` | Go to last used cell |
-| `Ctrl+G` | Go to... dialog |
+| `Cmd/Ctrl+G` | Go to... dialog |
 | `Tab` | Move right, wrap to next row |
 | `Enter` | Move down, wrap to next column |
 | `Page Up/Down` | Scroll viewport |
