@@ -36,6 +36,7 @@ const INCLUDED_DIRS = [
   "shared",
   "extensions",
   ".github",
+  ".cargo",
   "scripts",
   "python",
   "test",
