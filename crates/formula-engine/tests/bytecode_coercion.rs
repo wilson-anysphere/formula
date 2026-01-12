@@ -95,3 +95,15 @@ fn bytecode_coercion_date_string_to_number_matches_ast() {
     assert!(bc_programs > 0, "expected formula to compile to bytecode");
     assert_eq!(bc_val, ast_val);
 }
+
+#[test]
+fn bytecode_coercion_not_date_string_matches_ast() {
+    let formula = "=NOT(\"2020-01-01\")";
+
+    let (ast_val, _) = eval_single_cell(formula, false, ValueLocaleConfig::en_us());
+    assert_eq!(ast_val, Value::Bool(false));
+
+    let (bc_val, bc_programs) = eval_single_cell(formula, true, ValueLocaleConfig::en_us());
+    assert!(bc_programs > 0, "expected formula to compile to bytecode");
+    assert_eq!(bc_val, ast_val);
+}

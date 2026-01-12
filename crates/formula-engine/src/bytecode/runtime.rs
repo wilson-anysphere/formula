@@ -142,14 +142,6 @@ pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord) -> Value {
     }
 }
 
-fn parse_number_from_text(s: &str) -> Result<f64, ErrorKind> {
-    parse_number(s, thread_number_locale()).map_err(|e| match e {
-        ExcelError::Div0 => ErrorKind::Value,
-        ExcelError::Value => ErrorKind::Value,
-        ExcelError::Num => ErrorKind::Num,
-    })
-}
-
 fn coerce_to_number(v: Value) -> Result<f64, ErrorKind> {
     match v {
         Value::Number(n) => Ok(n),
@@ -159,14 +151,6 @@ fn coerce_to_number(v: Value) -> Result<f64, ErrorKind> {
         Value::Error(e) => Err(e),
         // Dynamic arrays / range-as-scalar: treat as a spill attempt (engine semantics).
         Value::Array(_) | Value::Range(_) => Err(ErrorKind::Spill),
-    }
-}
-
-fn map_excel_error(error: ExcelError) -> ErrorKind {
-    match error {
-        ExcelError::Div0 => ErrorKind::Div0,
-        ExcelError::Value => ErrorKind::Value,
-        ExcelError::Num => ErrorKind::Num,
     }
 }
 
@@ -186,7 +170,9 @@ fn coerce_to_bool(v: Value) -> Result<bool, ErrorKind> {
             if trimmed.eq_ignore_ascii_case("FALSE") {
                 return Ok(false);
             }
-            let n = parse_number(trimmed, thread_number_locale()).map_err(map_excel_error)?;
+            // Match evaluator semantics: if the text isn't a boolean literal, coerce it via the
+            // same value parser used for numeric/date coercion.
+            let n = parse_value_from_text(trimmed)?;
             Ok(n != 0.0)
         }
         Value::Error(e) => Err(e),
@@ -222,7 +208,7 @@ fn coerce_countif_value_to_number(v: Value) -> Option<f64> {
         Value::Number(n) => Some(n),
         Value::Bool(b) => Some(if b { 1.0 } else { 0.0 }),
         Value::Empty => Some(0.0),
-        Value::Text(s) => parse_number_from_text(&s).ok(),
+        Value::Text(s) => parse_number(&s, thread_number_locale()).ok(),
         Value::Error(_) | Value::Array(_) | Value::Range(_) => None,
     }
 }
@@ -1129,10 +1115,11 @@ fn coerce_sumproduct_number(v: Value) -> Result<f64, ErrorKind> {
     match v {
         Value::Number(n) => Ok(n),
         Value::Bool(b) => Ok(if b { 1.0 } else { 0.0 }),
-        Value::Text(s) => match parse_number_from_text(&s) {
+        Value::Text(s) => match parse_number(&s, thread_number_locale()) {
             Ok(n) => Ok(n),
-            Err(ErrorKind::Value) => Ok(0.0),
-            Err(e) => Err(e),
+            Err(ExcelError::Value) => Ok(0.0),
+            Err(ExcelError::Div0) => Err(ErrorKind::Div0),
+            Err(ExcelError::Num) => Err(ErrorKind::Num),
         },
         Value::Empty => Ok(0.0),
         Value::Error(e) => Err(e),
