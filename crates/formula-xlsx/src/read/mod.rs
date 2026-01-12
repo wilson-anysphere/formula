@@ -39,6 +39,8 @@ const REL_TYPE_SHARED_STRINGS: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
 const REL_TYPE_METADATA: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata";
+const REL_TYPE_SHEET_METADATA: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata";
 
 #[derive(Debug, Error)]
 pub enum ReadError {
@@ -586,6 +588,7 @@ fn parse_relationships(bytes: &[u8]) -> Result<RelationshipsInfo, ReadError> {
     let mut styles_target = None;
     let mut shared_strings_target = None;
     let mut metadata_target = None;
+    let mut sheet_metadata_target = None;
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) | Event::Empty(e)
@@ -618,6 +621,13 @@ fn parse_relationships(bytes: &[u8]) -> Result<RelationshipsInfo, ReadError> {
                             REL_TYPE_METADATA => {
                                 metadata_target.get_or_insert_with(|| target.clone());
                             }
+                            // Modern Excel emits the metadata part using the `sheetMetadata`
+                            // relationship type. Prefer this over the legacy `metadata` relationship
+                            // type if both are present, since `sheetMetadata` may point at a
+                            // non-default target name.
+                            REL_TYPE_SHEET_METADATA => {
+                                sheet_metadata_target.get_or_insert_with(|| target.clone());
+                            }
                             _ => {}
                         }
                     }
@@ -633,7 +643,7 @@ fn parse_relationships(bytes: &[u8]) -> Result<RelationshipsInfo, ReadError> {
         id_to_target,
         styles_target,
         shared_strings_target,
-        metadata_target,
+        metadata_target: sheet_metadata_target.or(metadata_target),
     })
 }
 
