@@ -205,3 +205,23 @@ There is also an optional size gate (off by default):
    FORMULA_ENFORCE_BUNDLE_SIZE=1 FORMULA_BUNDLE_SIZE_LIMIT_MB=50 \
      python scripts/desktop_bundle_size_report.py
    ```
+
+## 7) Rollback / downgrade support (do not delete old releases)
+
+The platform requirement **"Rollback capability"** is satisfied by supporting a **user-facing
+downgrade path**:
+
+- Users can open the Formula GitHub Releases page, download a prior version for their platform, and
+  install it (see rollback notes in `docs/11-desktop-shell.md`):
+  https://github.com/wilson-anysphere/formula/releases
+
+This only works if older release assets remain available.
+
+**Release hygiene requirements**
+
+1. **Do not delete prior GitHub Releases or assets.**
+   - Keep at least several older versions available so users can downgrade when needed.
+2. If you mirror artifacts to `releases.formula.app` (or another CDN), ensure you **retain older
+   installers/bundles** there too.
+   - Users may need to roll back even if the app can't start, so the download URLs must work
+     without relying on the updater UI.

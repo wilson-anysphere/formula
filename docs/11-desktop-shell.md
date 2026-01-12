@@ -154,6 +154,40 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
 }
 ```
 
+#### Rollback / downgrade (rollback capability)
+
+Tauri's updater flow is designed to be **failure-safe** (signature verification + install handoff to the
+platform installer). If an update **fails to download or fails to install**, the current version
+should remain installed.
+
+Tauri does **not** keep multiple versions installed and does **not** provide a one-click "revert to
+previous version" after a successful upgrade.
+
+To satisfy the platform requirement **"Rollback capability"**, Formula supports a clear **manual
+downgrade path**:
+
+1. Open Formula's **Releases** page (in-app via the updater dialog's **"View all versions"** action,
+   or directly in your browser): https://github.com/wilson-anysphere/formula/releases
+2. Download the installer/bundle for the **older version** you want.
+3. Install it over your current install (or uninstall first if your platform's installer blocks
+   downgrades).
+
+**Platform notes**
+
+- **Windows (NSIS/MSI):**
+  - Running an older installer may be blocked if a newer version is installed.
+  - If that happens, uninstall Formula from *Apps & Features* and then run the older installer.
+- **macOS (.dmg):**
+  - Download the `.dmg`, open it, then drag `Formula.app` into `/Applications`.
+  - macOS will prompt to **Replace** the existing app; confirm to downgrade.
+- **Linux (.AppImage / .deb / .rpm):**
+  - **AppImage:** download the older AppImage and replace the current file.
+  - **deb/rpm:** install the older package with your package manager (some distros require an
+    explicit downgrade flag).
+
+Important: rollback depends on old versions staying available. See `docs/release.md` — we must not
+delete prior release assets.
+
 ---
 
 ## Rust host (Tauri backend)
@@ -310,7 +344,9 @@ Events emitted by the Rust host (see `main.rs`, `tray.rs`, `updater.rs`):
   - `update-check-error` (payload: `{ source, message }`)
   - `update-available` (payload: `{ source, version, body }`)
 
-Note: at the time of writing, `apps/desktop/src/main.ts` does not yet listen for these updater events (they are emitted by the Rust host, but there is no UI flow wired up yet).
+These events are consumed by the desktop frontend in `apps/desktop/src/tauri/updaterUi.ts` (installed
+from `apps/desktop/src/main.ts`). The update-available dialog includes a **"View all versions"**
+action that opens the GitHub Releases page for manual downgrade/rollback.
 
 Related frontend → backend events used as acknowledgements during close:
 
