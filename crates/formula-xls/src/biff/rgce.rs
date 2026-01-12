@@ -3398,6 +3398,57 @@ mod tests {
     }
 
     #[test]
+    fn decodes_ptg_ref3d_with_internal_supbook_marker() {
+        // Some writers reference the internal workbook via an explicit SUPBOOK entry (virtPath=0x0001)
+        // instead of using iSupBook=0 in EXTERNSHEET. Ensure we treat that as an internal sheet ref.
+        let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 1,
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+
+        let supbooks = vec![
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "\u{0002}".to_string(),
+                kind: SupBookKind::Other,
+                workbook_name: None,
+                sheet_names: Vec::new(),
+                extern_names: Vec::new(),
+            },
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "\u{0001}".to_string(),
+                kind: SupBookKind::Internal,
+                workbook_name: None,
+                sheet_names: Vec::new(),
+                extern_names: Vec::new(),
+            },
+        ];
+
+        let ctx = RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &sheet_names,
+            externsheet: &externsheet,
+            supbooks: &supbooks,
+            defined_names: &defined_names,
+        };
+
+        // Sheet1!$A$1.
+        let rgce = [0x3Au8, 0, 0, 0, 0, 0, 0];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "Sheet1!$A$1");
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn decodes_ptg_namex_udf_function_name_for_ptg_funcvar_00ff() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
