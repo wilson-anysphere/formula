@@ -125,11 +125,17 @@ export class AiContextManager {
     // Render as a small TSV-like snippet. This matches many LLM prompt conventions and
     // is deterministic for tests.
     const lines = [];
+    // Reuse a single cell ref object for per-cell classification checks to avoid allocating
+    // `{documentId,sheetId,row,col}` objects in hot loops.
+    const cellRef = { documentId, sheetId, row: 0, col: 0 };
     for (let row = normalizedRange.start.row; row <= normalizedRange.end.row; row++) {
       const rowValues = [];
       for (let col = normalizedRange.start.col; col <= normalizedRange.end.col; col++) {
-        const value = byRowCol.get(`${row},${col}`);
-        const classification = effectiveCellClassificationFromIndex(index, { documentId, sheetId, row, col });
+        const coordKey = `${row},${col}`;
+        const value = byRowCol.get(coordKey);
+        cellRef.row = row;
+        cellRef.col = col;
+        const classification = effectiveCellClassificationFromIndex(index, cellRef, coordKey);
         const cellRank = classificationRank(classification.level);
         const allowed =
           cellRank === RESTRICTED_CLASSIFICATION_RANK ? restrictedAllowed : maxAllowedRank !== null && cellRank <= maxAllowedRank;
@@ -284,7 +290,7 @@ function buildDlpRangeIndex(ref, records, opts) {
   };
 }
 
-function effectiveCellClassificationFromIndex(index, cellRef) {
+function effectiveCellClassificationFromIndex(index, cellRef, coordKey) {
   let classification = { ...DEFAULT_CLASSIFICATION };
 
   classification = maxClassification(classification, index.baseClassificationMax);
@@ -295,7 +301,8 @@ function effectiveCellClassificationFromIndex(index, cellRef) {
   }
 
   if (classification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
-    const cellClassification = index.cellClassificationByCoord.get(`${cellRef.row},${cellRef.col}`);
+    const key = coordKey ?? `${cellRef.row},${cellRef.col}`;
+    const cellClassification = index.cellClassificationByCoord.get(key);
     if (cellClassification) classification = maxClassification(classification, cellClassification);
   }
 
