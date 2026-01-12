@@ -182,4 +182,39 @@ describe("SpreadsheetApp shared-grid comment tooltip hover perf", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("skips cell picking entirely when the active sheet has no comments", async () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect(app.getGridMode()).toBe("shared");
+
+      const tooltip = (app as any).commentTooltip as HTMLDivElement;
+      const pickSpy = vi.spyOn((app as any).sharedGrid.renderer, "pickCellAt");
+
+      const move = (clientX: number, clientY: number) => {
+        (app as any).onSharedPointerMove({ clientX, clientY, buttons: 0 } as any);
+      };
+
+      move(60, 30);
+      await flushMicrotasks();
+
+      expect(pickSpy).toHaveBeenCalledTimes(0);
+      expect(tooltip.classList.contains("comment-tooltip--visible")).toBe(false);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });
