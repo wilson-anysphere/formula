@@ -20,7 +20,8 @@ Excel has (at least) two distinct storage mechanisms:
    - Stored under `xl/drawings/*` with image binaries under `xl/media/*`.
    - Already covered by the general DrawingML preservation strategy.
 2. **Images in cells** (newer Excel / Microsoft 365)
-   - Stored via a workbook-level **cell image store** plus the **rich value / metadata** system.
+   - Stored via the workbook-level **rich value / metadata** system, and may additionally use a
+     dedicated **cell image store** part (`xl/cellImages.xml`) depending on producer/version.
    - The rest of this document focuses on this second mechanism.
 
 ## Expected OOXML parts
