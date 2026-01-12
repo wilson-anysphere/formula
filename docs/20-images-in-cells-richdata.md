@@ -286,6 +286,11 @@ Excel uses OPC relationships to connect:
 * `xl/metadata.xml` → `xl/richData/*` (the rich value tables).
 * `xl/richData/richValueRel.xml` → external OPC targets (commonly `xl/media/*` images) via `xl/richData/_rels/richValueRel.xml.rels`.
 
+The workbook → metadata relationship uses a standard SpreadsheetML relationship type URI:
+
+* `http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata`
+  * Observed in `fixtures/xlsx/metadata/rich-values-vm.xlsx`
+
 In many Excel-generated workbooks, the richData parts are not related directly from `workbook.xml.rels`, but instead via a separate relationships part:
 
 * `xl/_rels/metadata.xml.rels` (for `xl/metadata.xml`)

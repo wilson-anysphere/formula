@@ -328,9 +328,15 @@ If we ever need to synthesize this part from scratch, `application/vnd.ms-excel.
 reasonable default (it matches Excel’s vendor-specific pattern like `...threadedcomments+xml` / `...person+xml`),
 but we should still prefer the original file’s value when round-tripping.
 
-### Other content types (TODO: fixture-driven)
+### `xl/metadata.xml` content type override
 
-Content types for `xl/metadata.xml` and `xl/richData/*` still need confirmation from a real Excel-exported
+Observed in `fixtures/xlsx/metadata/rich-values-vm.xlsx`:
+
+- `application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml`
+
+### `xl/richData/*` content types (TODO: fixture-driven)
+
+Content types for `xl/richData/*` still need confirmation from a real Excel-exported
 workbook (and corresponding fixture + tests).
 
 Likely patterns seen in the ecosystem (unverified; do not hardcode without a real Excel fixture in
@@ -350,8 +356,10 @@ Likely patterns seen in the ecosystem (unverified; do not hardcode without a rea
   <Override PartName="/xl/cellImages.xml"
              ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml"/>
 
+  <Override PartName="/xl/metadata.xml"
+            ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
+
   <!-- TODO: confirm these from an Excel fixture -->
-  <Override PartName="/xl/metadata.xml" ContentType="TODO"/>
   <Override PartName="/xl/richData/richValueTypes.xml" ContentType="TODO"/>
   <Override PartName="/xl/richData/richValueStructure.xml" ContentType="TODO"/>
   <Override PartName="/xl/richData/richValue.xml" ContentType="TODO"/>
@@ -360,7 +368,7 @@ Likely patterns seen in the ecosystem (unverified; do not hardcode without a rea
 ```
 
 **TODO (fixture-driven):** add an Excel-generated workbook using real images-in-cells, then update this
-section with the exact `ContentType="..."` strings for `metadata.xml` and `richData/*`.
+section with the exact `ContentType="..."` strings for `richData/*`.
 
 ## Relationship type URIs (what we know vs TODO)
 
@@ -371,6 +379,10 @@ Known (stable, used across OOXML):
 
 Partially known (fixture-driven details still recommended):
 
+- Workbook → `xl/metadata.xml` relationship:
+  - Lives in `xl/_rels/workbook.xml.rels`.
+  - Observed in `fixtures/xlsx/metadata/rich-values-vm.xlsx`:
+    - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
 - Workbook → `xl/cellImages.xml` relationship:
   - Lives in `xl/_rels/workbook.xml.rels`.
   - Excel uses a Microsoft-extension relationship `Type` URI that has been observed to vary.
@@ -384,7 +396,6 @@ Partially known (fixture-driven details still recommended):
 TODO (confirm via real Excel fixture, then harden parsers/writers):
 
 - Relationship type(s) connecting `xl/workbook.xml` (or other workbook-level parts) to:
-  - `xl/metadata.xml`
   - `xl/richData/*`
   - `xl/cellImages.xml`
 
