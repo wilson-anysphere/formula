@@ -264,16 +264,6 @@ fn coupon_period_e(
     freq: f64,
     system: ExcelDateSystem,
 ) -> ExcelResult<f64> {
-    // NOTE: Excel's odd-coupon bond functions appear to treat basis=4 (30/360 European) differently
-    // than the regular COUP* helpers when computing the regular coupon-period length `E`.
-    //
-    // Empirically (via parity tests), `E` is computed as `DAYS360(pcd, ncd, TRUE)` rather than the
-    // constant `360/frequency`. This matters for end-of-month schedules where the coupon boundary
-    // dates may not both be the 30th/31st (e.g. Feb 28 -> Aug 31 yields 182 under DAYS360 EU).
-    if basis == 4 {
-        return days_between(pcd, ncd, 4, system);
-    }
-
     // `freq` is the number of coupon payments per year. Reuse the shared COUP* helper to ensure
     // `E` conventions stay in sync across regular and odd coupon bond implementations.
     //
