@@ -10872,6 +10872,16 @@ mod tests {
                 engine.set_cell_value(sheet, "A1048576", values[2]).unwrap();
             }
 
+            // Boolean values spread across a full Excel column on each sheet.
+            //
+            // Keep the overall XOR result non-trivial by using an odd number of TRUE values across
+            // the full 3D span.
+            for (sheet, end_true) in [("Sheet1", true), ("Sheet2", false), ("Sheet3", true)] {
+                engine.set_cell_value(sheet, "E1", true).unwrap();
+                engine.set_cell_value(sheet, "E500000", false).unwrap();
+                engine.set_cell_value(sheet, "E1048576", end_true).unwrap();
+            }
+
             engine
                 .set_cell_formula("Sheet1", "B1", "=SUM(Sheet1:Sheet3!A:A)")
                 .unwrap();
@@ -10884,48 +10894,68 @@ mod tests {
             engine
                 .set_cell_formula("Sheet1", "B4", "=MAX(Sheet1:Sheet3!A:A)")
                 .unwrap();
+
+            engine
+                .set_cell_formula("Sheet1", "B5", "=COUNT(Sheet1:Sheet3!A:A)")
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B6", "=AVERAGE(Sheet1:Sheet3!A:A)")
+                .unwrap();
+
+            engine
+                .set_cell_formula("Sheet1", "B7", "=AND(Sheet1:Sheet3!E:E)")
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B8", "=OR(Sheet1:Sheet3!E:E)")
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B9", "=XOR(Sheet1:Sheet3!E:E)")
+                .unwrap();
         }
 
         let mut bytecode_engine = Engine::new();
         setup(&mut bytecode_engine);
 
-        // Ensure the SUM formula is actually bytecode-compiled.
+        // Ensure the full-column formulas are actually bytecode-compiled.
         let sheet1_id = bytecode_engine.workbook.sheet_id("Sheet1").unwrap();
-        let b1 = parse_a1("B1").unwrap();
-        let cell_b1 = bytecode_engine.workbook.sheets[sheet1_id]
-            .cells
-            .get(&b1)
-            .and_then(|c| c.compiled.as_ref())
-            .expect("compiled formula");
-        assert!(
-            matches!(cell_b1, CompiledFormula::Bytecode(_)),
-            "expected SUM(Sheet1:Sheet3!A:A) to compile to bytecode"
-        );
+        let formula_cells = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9"];
+        let mut tasks: Vec<(CellKey, CompiledFormula)> = Vec::with_capacity(formula_cells.len());
+        for cell in formula_cells {
+            let addr = parse_a1(cell).unwrap();
+            let compiled = bytecode_engine.workbook.sheets[sheet1_id]
+                .cells
+                .get(&addr)
+                .and_then(|c| c.compiled.as_ref())
+                .cloned()
+                .expect("compiled formula");
+            assert!(
+                matches!(compiled, CompiledFormula::Bytecode(_)),
+                "expected {cell} to compile to bytecode"
+            );
+            tasks.push((
+                CellKey {
+                    sheet: sheet1_id,
+                    addr,
+                },
+                compiled,
+            ));
+        }
 
-        // Column caches should *not* allocate full-column buffers for 3D spans over `A:A`.
+        // Column caches should *not* allocate full-column buffers for 3D spans over `A:A` / `E:E`.
         let snapshot = Snapshot::from_workbook(
             &bytecode_engine.workbook,
             &bytecode_engine.spills,
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
         );
-        let key_b1 = CellKey {
-            sheet: sheet1_id,
-            addr: b1,
-        };
-        let tasks = vec![(key_b1, cell_b1.clone())];
         let column_cache =
             BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
 
         for sheet_name in ["Sheet1", "Sheet2", "Sheet3"] {
             let sheet_id = bytecode_engine.workbook.sheet_id(sheet_name).unwrap();
             assert!(
-                !column_cache
-                    .by_sheet
-                    .get(sheet_id)
-                    .map(|cols| cols.contains_key(&0))
-                    .unwrap_or(false),
-                "expected full-column 3D span to skip column-slice cache allocation for {sheet_name}"
+                column_cache.by_sheet[sheet_id].is_empty(),
+                "expected full-column 3D span to skip column-slice cache allocation for {sheet_name}",
             );
         }
 
@@ -10934,6 +10964,11 @@ mod tests {
         let bc_countif = bytecode_engine.get_cell_value("Sheet1", "B2");
         let bc_min = bytecode_engine.get_cell_value("Sheet1", "B3");
         let bc_max = bytecode_engine.get_cell_value("Sheet1", "B4");
+        let bc_count = bytecode_engine.get_cell_value("Sheet1", "B5");
+        let bc_average = bytecode_engine.get_cell_value("Sheet1", "B6");
+        let bc_and = bytecode_engine.get_cell_value("Sheet1", "B7");
+        let bc_or = bytecode_engine.get_cell_value("Sheet1", "B8");
+        let bc_xor = bytecode_engine.get_cell_value("Sheet1", "B9");
 
         let mut ast_engine = Engine::new();
         ast_engine.set_bytecode_enabled(false);
@@ -10943,17 +10978,32 @@ mod tests {
         let ast_countif = ast_engine.get_cell_value("Sheet1", "B2");
         let ast_min = ast_engine.get_cell_value("Sheet1", "B3");
         let ast_max = ast_engine.get_cell_value("Sheet1", "B4");
+        let ast_count = ast_engine.get_cell_value("Sheet1", "B5");
+        let ast_average = ast_engine.get_cell_value("Sheet1", "B6");
+        let ast_and = ast_engine.get_cell_value("Sheet1", "B7");
+        let ast_or = ast_engine.get_cell_value("Sheet1", "B8");
+        let ast_xor = ast_engine.get_cell_value("Sheet1", "B9");
 
         assert_eq!(bc_sum, ast_sum, "SUM mismatch");
         assert_eq!(bc_countif, ast_countif, "COUNTIF mismatch");
         assert_eq!(bc_min, ast_min, "MIN mismatch");
         assert_eq!(bc_max, ast_max, "MAX mismatch");
+        assert_eq!(bc_count, ast_count, "COUNT mismatch");
+        assert_eq!(bc_average, ast_average, "AVERAGE mismatch");
+        assert_eq!(bc_and, ast_and, "AND mismatch");
+        assert_eq!(bc_or, ast_or, "OR mismatch");
+        assert_eq!(bc_xor, ast_xor, "XOR mismatch");
 
         // Sanity check expected values.
         assert_eq!(bc_sum, Value::Number(45.0));
         assert_eq!(bc_countif, Value::Number(3_145_719.0));
         assert_eq!(bc_min, Value::Number(1.0));
         assert_eq!(bc_max, Value::Number(9.0));
+        assert_eq!(bc_count, Value::Number(9.0));
+        assert_eq!(bc_average, Value::Number(5.0));
+        assert_eq!(bc_and, Value::Bool(false));
+        assert_eq!(bc_or, Value::Bool(true));
+        assert_eq!(bc_xor, Value::Bool(true));
     }
 
     #[test]
