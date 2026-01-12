@@ -605,9 +605,10 @@ JS provider contract (normalized API):
 - Read: `provider.read()` → `{ text?: string, html?: string, rtf?: string, imagePng?: Uint8Array, pngBase64?: string }`
 - Write: `provider.write({ text, html?, rtf?, imagePng?, pngBase64? })` → `void`
 
-Note: `pngBase64` is a legacy/internal escape hatch. The preferred JS-facing image field is `imagePng`
-(`Uint8Array`). The provider will generally decode any native `pngBase64` payload into `imagePng` before
-returning it to callers.
+Notes:
+
+- `imagePng` (raw bytes) is the primary JS-facing image API.
+- `pngBase64` is a legacy/internal escape hatch. The provider will generally decode any native base64 payload into `imagePng` before returning it to callers, and only preserves `pngBase64` when decoding fails.
 
 Tauri wire contract (internal, used only for `__TAURI__.core.invoke`):
 
@@ -618,9 +619,8 @@ Tauri wire contract (internal, used only for `__TAURI__.core.invoke`):
 
 Provider return shape:
 
-- `createClipboardProvider().read()` returns a merged `ClipboardContent` that may include either/both:
-  - `pngBase64: string` (legacy/internal; only preserved when base64 decoding fails), and/or
-  - `imagePng: Uint8Array` (Web Clipboard API `image/png` path)
+- `createClipboardProvider().read()` returns a merged `ClipboardContent` and normalizes images to `imagePng: Uint8Array` when possible.
+- `pngBase64` may be present only as a legacy/internal fallback when decoding into bytes fails; callers should not rely on it.
 
 Image wire format:
 
