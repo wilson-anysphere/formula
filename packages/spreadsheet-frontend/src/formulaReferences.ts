@@ -171,6 +171,54 @@ function isAsciiLetter(ch: string): boolean {
   return ch >= "A" && ch <= "Z" ? true : ch >= "a" && ch <= "z";
 }
 
+function isReservedUnquotedSheetName(name: string): boolean {
+  const lower = String(name ?? "").toLowerCase();
+  return lower === "true" || lower === "false";
+}
+
+function looksLikeA1CellReference(name: string): boolean {
+  let i = 0;
+  let letters = "";
+  while (i < name.length) {
+    const ch = name[i];
+    if (!ch || !isAsciiLetter(ch)) break;
+    if (letters.length >= 3) return false;
+    letters += ch;
+    i += 1;
+  }
+  if (letters.length === 0) return false;
+
+  let digits = "";
+  while (i < name.length) {
+    const ch = name[i];
+    if (!ch || !isDigit(ch)) break;
+    digits += ch;
+    i += 1;
+  }
+  if (digits.length === 0) return false;
+  if (i !== name.length) return false;
+
+  const col = letters
+    .split("")
+    .reduce((acc, c) => acc * 26 + (c.toUpperCase().charCodeAt(0) - "A".charCodeAt(0) + 1), 0);
+  return col <= 16_384;
+}
+
+function looksLikeR1C1CellReference(name: string): boolean {
+  const upper = String(name ?? "").toUpperCase();
+  if (upper === "R" || upper === "C") return true;
+  if (!upper.startsWith("R")) return false;
+
+  let i = 1;
+  while (i < upper.length && isDigit(upper[i] ?? "")) i += 1;
+  if (i >= upper.length) return false;
+  if (upper[i] !== "C") return false;
+
+  i += 1;
+  while (i < upper.length && isDigit(upper[i] ?? "")) i += 1;
+  return i === upper.length;
+}
+
 const UNICODE_LETTER_RE: RegExp | null = (() => {
   try {
     return new RegExp("^\\p{Alphabetic}$", "u");
@@ -302,6 +350,14 @@ function tryReadSheetPrefix(input: string, start: number): { text: string; end: 
   let i = start + 1;
   while (i < input.length && isIdentifierPart(input[i]!)) i += 1;
   if (input[i] === "!") {
+    const sheetName = input.slice(start, i);
+    if (
+      isReservedUnquotedSheetName(sheetName) ||
+      looksLikeA1CellReference(sheetName) ||
+      looksLikeR1C1CellReference(sheetName)
+    ) {
+      return null;
+    }
     return { text: input.slice(start, i + 1), end: i + 1 };
   }
   return null;
