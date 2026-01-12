@@ -728,8 +728,8 @@ pub fn verify_vba_digital_signature_with_trust(
 /// Verify whether a VBA signature blob is bound to the given `vbaProject.bin` payload via the
 /// MS-OVBA "Contents Hash" mechanism.
 ///
-/// Note: for legacy VBA signature streams (`DigitalSignature` / `DigitalSignatureEx`), the embedded
-/// digest bytes are always a 16-byte MD5 per MS-OSHARED §4.3 even when the
+/// Note: for VBA signatures, the embedded binding digest bytes are always a 16-byte MD5 per
+/// MS-OSHARED §4.3 even when the
 /// `DigestInfo.digestAlgorithm.algorithm` OID indicates SHA-256.
 ///
 /// This is a best-effort helper: it returns [`VbaSignatureBinding::Unknown`] when the signature does
@@ -756,13 +756,14 @@ pub fn verify_vba_signature_binding_with_stream_path(
         let signed_digest = signed.digest.as_slice();
 
         let stream_kind = signature_path_stream_kind(signature_stream_path);
-        // Prefer v3 when the stream kind indicates `DigitalSignatureExt`. If the stream kind is
-        // unknown (or not provided), fall back to digest-length heuristics.
+        // Prefer v3 when the stream kind indicates `DigitalSignatureExt`.
         //
-        // Note: per MS-OSHARED §4.3, legacy VBA signature streams use 16-byte MD5 digest bytes for
-        // binding, but the v3 `DigitalSignatureExt` stream uses the MS-OVBA v3 transcript and is
-        // typically a non-16-byte digest (e.g. 32-byte SHA-256). When we don't know which stream
-        // variant we're verifying, digest length is a useful best-effort signal.
+        // When the stream kind is unknown (or not provided), note that MS-OSHARED §4.3 specifies
+        // the embedded VBA signature binding digest bytes are always a 16-byte MD5 across all
+        // variants, so digest length is *not* a reliable way to distinguish v3 from v1/v2.
+        //
+        // We therefore only treat non-16-byte digests as a non-spec/legacy signal of v3 and, for
+        // 16-byte digests, try legacy v1/v2 binding first with a best-effort v3 fallback below.
         let treat_as_v3 = match stream_kind {
             Some(VbaSignatureStreamKind::DigitalSignatureExt) => true,
             Some(VbaSignatureStreamKind::DigitalSignature)
@@ -824,10 +825,10 @@ pub fn verify_vba_signature_binding_with_stream_path(
             }
         }
 
-        // If the stream kind is unknown (or not provided), the digest length heuristic above might
-        // incorrectly classify a v3 signature with an MD5 digest as a legacy signature. As a
-        // best-effort fallback, attempt v3 binding even for 16-byte digests when we couldn't match
-        // the legacy Content/Agile hash.
+        // If the stream kind is unknown (or not provided), the digest length heuristic above will
+        // classify a spec-correct v3 signature (MD5 digest bytes per MS-OSHARED §4.3) as a legacy
+        // signature. As a best-effort fallback, attempt v3 binding even for 16-byte digests when we
+        // couldn't match the legacy Content/Agile hash.
         if matches!(stream_kind, Some(VbaSignatureStreamKind::Unknown) | None) {
             if let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) {
                 if let Ok(computed) = compute_vba_project_digest_v3(vba_project_bin, alg) {
@@ -1449,7 +1450,11 @@ pub fn verify_vba_project_signature_binding(
         // Prefer v3 transcript computation when we know this signature was loaded from a
         // `\x05DigitalSignatureExt` stream. When verifying signature payloads outside the main
         // `vbaProject.bin` (e.g. `xl/vbaProjectSignature.bin`) we may not know the original stream
-        // name; in that case we fall back to heuristics (including digest-length heuristics).
+        // name; in that case we fall back to heuristics.
+        //
+        // Note: per MS-OSHARED §4.3, the embedded VBA signature binding digest bytes are always a
+        // 16-byte MD5 across all variants, so digest length is *not* a reliable way to distinguish
+        // v3 from v1/v2. Any digest-length heuristics here are legacy/non-spec behavior.
         //
         // If we *do* know the stream kind and it is a legacy `DigitalSignature`/`DigitalSignatureEx`
         // stream, keep legacy semantics even if the digest length is unexpected.
