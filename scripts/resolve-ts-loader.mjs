@@ -2,6 +2,9 @@ import { readFile } from "node:fs/promises";
 
 import ts from "typescript";
 
+/** @type {Map<string, { format: "module", source: string }>} */
+const transpileCache = new Map();
+
 /**
  * Minimal Node ESM loader that lets us run repo TypeScript sources directly under `node --test`.
  *
@@ -110,6 +113,11 @@ export async function load(url, context, defaultLoad) {
   const urlObj = new URL(url);
   const pathname = urlObj.pathname;
   if (pathname.endsWith(".ts") || pathname.endsWith(".tsx")) {
+    const cached = transpileCache.get(url);
+    if (cached) {
+      return { ...cached, shortCircuit: true };
+    }
+
     urlObj.search = "";
     urlObj.hash = "";
     const source = await readFile(urlObj, "utf8");
@@ -119,15 +127,16 @@ export async function load(url, context, defaultLoad) {
       compilerOptions: {
         module: ts.ModuleKind.ESNext,
         target: ts.ScriptTarget.ES2022,
+        // Helpful stack traces when running with `node --enable-source-maps`.
+        inlineSourceMap: true,
         ...(isTsx ? { jsx: ts.JsxEmit.ReactJSX } : {}),
       },
     });
 
-    return {
-      format: "module",
-      source: result.outputText,
-      shortCircuit: true,
-    };
+    /** @type {{ format: "module", source: string }} */
+    const loaded = { format: "module", source: result.outputText };
+    transpileCache.set(url, loaded);
+    return { ...loaded, shortCircuit: true };
   }
 
   return defaultLoad(url, context, defaultLoad);
