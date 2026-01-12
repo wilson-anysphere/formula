@@ -1005,6 +1005,22 @@ fn project_normalized_data_multiple_baseclass_entries_preserve_order_and_precede
     let idx_formb = find_subslice(&normalized, &formb_padded).expect("FormB designer bytes");
     let idx_forma = find_subslice(&normalized, &forma_padded).expect("FormA designer bytes");
     assert!(idx_formb < idx_forma, "expected FormB before FormA (PROJECT order)");
+    assert_eq!(
+        normalized
+            .windows(formb_padded.len())
+            .filter(|w| *w == formb_padded.as_slice())
+            .count(),
+        1,
+        "expected FormB normalized designer bytes to appear exactly once"
+    );
+    assert_eq!(
+        normalized
+            .windows(forma_padded.len())
+            .filter(|w| *w == forma_padded.as_slice())
+            .count(),
+        1,
+        "expected FormA normalized designer bytes to appear exactly once"
+    );
 
     // Assert that the BaseClass property *tokens* preserve PROJECT stream order too.
     //
