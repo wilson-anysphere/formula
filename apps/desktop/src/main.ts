@@ -1803,6 +1803,42 @@ class CollabWorkbookSheetStore extends WorkbookSheetStore {
       lastCollabSheetsKey = collabSheetsKey(this.session);
     });
   }
+
+  override hide(id: string): void {
+    const before = this.getById(id)?.visibility ?? null;
+    super.hide(id);
+    const after = this.getById(id)?.visibility ?? null;
+    if (!after || after === before) return;
+
+    this.session.transactLocal(() => {
+      const idx = findCollabSheetIndexById(this.session, id);
+      if (idx < 0) return;
+      const entry: any = this.session.sheets.get(idx);
+      if (!entry || typeof entry.set !== "function") return;
+      entry.set("visibility", after);
+      // This update originated locally; update the cached key so our observer
+      // doesn't unnecessarily rebuild the sheet store instance.
+      lastCollabSheetsKey = collabSheetsKey(this.session);
+    });
+  }
+
+  override unhide(id: string): void {
+    const before = this.getById(id)?.visibility ?? null;
+    super.unhide(id);
+    const after = this.getById(id)?.visibility ?? null;
+    if (!after || after === before) return;
+
+    this.session.transactLocal(() => {
+      const idx = findCollabSheetIndexById(this.session, id);
+      if (idx < 0) return;
+      const entry: any = this.session.sheets.get(idx);
+      if (!entry || typeof entry.set !== "function") return;
+      entry.set("visibility", after);
+      // This update originated locally; update the cached key so our observer
+      // doesn't unnecessarily rebuild the sheet store instance.
+      lastCollabSheetsKey = collabSheetsKey(this.session);
+    });
+  }
 }
 
 function reconcileSheetStoreWithDocument(ids: string[]): void {
@@ -2076,7 +2112,21 @@ let collabSheetsUnloadHookInstalled = false;
 
 function ensureCollabSheetObserver(): void {
   const session = app.getCollabSession?.() ?? null;
-  if (!session) return;
+  if (!session) {
+    // Collab session can be torn down without a full page unload (e.g. workbook close).
+    // Ensure we detach any previously registered observers so we don't leak listeners or
+    // reference a destroyed Y.Doc.
+    if (observedCollabSession && collabSheetsObserver) {
+      try {
+        observedCollabSession.sheets.unobserveDeep(collabSheetsObserver as any);
+      } catch {
+        // ignore
+      }
+    }
+    observedCollabSession = null;
+    collabSheetsObserver = null;
+    return;
+  }
   if (observedCollabSession === session) return;
 
   if (observedCollabSession && collabSheetsObserver) {
