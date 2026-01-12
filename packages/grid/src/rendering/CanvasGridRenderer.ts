@@ -2557,9 +2557,20 @@ export class CanvasGridRenderer {
       spanEndRow: number;
       spanStartCol: number;
       spanEndCol: number;
+      /**
+       * Optional row range to use when probing for horizontal text overflow.
+       *
+       * For extremely tall merged cells, scanning the full merged height can be
+       * prohibitively expensive. Since rendering is viewport-clipped, we can
+       * safely limit overflow probing to the rows that are actually visible in
+       * the current paint pass.
+       */
+      probeStartRow?: number;
+      probeEndRow?: number;
       isHeader: boolean;
     }): void => {
-      const { cell, x, y, width, height, spanStartRow, spanEndRow, spanStartCol, spanEndCol, isHeader } = options;
+      const { cell, x, y, width, height, spanStartRow, spanEndRow, spanStartCol, spanEndCol, probeStartRow, probeEndRow, isHeader } =
+        options;
       const style = cell.style;
 
       const richText = cell.richText;
@@ -2781,6 +2792,9 @@ export class CanvasGridRenderer {
             let clipX = x;
             let clipWidth = width;
 
+            const rowProbeStart = probeStartRow ?? spanStartRow;
+            const rowProbeEnd = probeEndRow ?? spanEndRow;
+
             if (shouldClip && (resolvedAlign === "left" || resolvedAlign === "right") && totalWidth > width - paddingX) {
               const requiredExtra = paddingX + totalWidth - width;
               if (requiredExtra > 0) {
@@ -2792,7 +2806,7 @@ export class CanvasGridRenderer {
                     probeCol++, steps++
                   ) {
                     let blocked = false;
-                    for (let r = spanStartRow; r < spanEndRow; r++) {
+                    for (let r = rowProbeStart; r < rowProbeEnd; r++) {
                       if (r < 0 || r >= rowCount) {
                         blocked = true;
                         break;
@@ -2814,7 +2828,7 @@ export class CanvasGridRenderer {
                     probeCol--, steps++
                   ) {
                     let blocked = false;
-                    for (let r = spanStartRow; r < spanEndRow; r++) {
+                    for (let r = rowProbeStart; r < rowProbeEnd; r++) {
                       if (r < 0 || r >= rowCount) {
                         blocked = true;
                         break;
@@ -3044,6 +3058,9 @@ export class CanvasGridRenderer {
               let clipX = x;
               let clipWidth = width;
 
+              const rowProbeStart = probeStartRow ?? spanStartRow;
+              const rowProbeEnd = probeEndRow ?? spanEndRow;
+
               if ((resolvedAlign === "left" || resolvedAlign === "right") && textWidth > width - paddingX) {
                 const requiredExtra = paddingX + textWidth - width;
                 if (requiredExtra > 0) {
@@ -3055,7 +3072,7 @@ export class CanvasGridRenderer {
                       probeCol++, steps++
                     ) {
                       let blocked = false;
-                      for (let r = spanStartRow; r < spanEndRow; r++) {
+                      for (let r = rowProbeStart; r < rowProbeEnd; r++) {
                         if (r < 0 || r >= rowCount) {
                           blocked = true;
                           break;
@@ -3077,7 +3094,7 @@ export class CanvasGridRenderer {
                       probeCol--, steps++
                     ) {
                       let blocked = false;
-                      for (let r = spanStartRow; r < spanEndRow; r++) {
+                      for (let r = rowProbeStart; r < rowProbeEnd; r++) {
                         if (r < 0 || r >= rowCount) {
                           blocked = true;
                           break;
@@ -3292,6 +3309,8 @@ export class CanvasGridRenderer {
           spanEndRow: range.endRow,
           spanStartCol: range.startCol,
           spanEndCol: range.endCol,
+          probeStartRow: Math.max(startRow, range.startRow),
+          probeEndRow: Math.min(endRow, range.endRow),
           isHeader
         });
       }
