@@ -576,6 +576,11 @@ impl XlsbWorkbook {
             let CellValue::Text(text) = &edit.new_value else {
                 continue;
             };
+            if edit.new_formula.is_some() || edit.new_rgcb.is_some() {
+                // Formula cells store cached string results inline (BrtFmlaString). Even when the
+                // workbook has a shared string table, cached formula strings do not reference it.
+                continue;
+            }
 
             let coord = (edit.row, edit.col);
             let record = cell_records.get(&coord);
@@ -739,6 +744,11 @@ impl XlsbWorkbook {
             let CellValue::Text(text) = &edit.new_value else {
                 continue;
             };
+            if edit.new_formula.is_some() || edit.new_rgcb.is_some() {
+                // Formula cells store cached string results inline (BrtFmlaString). Even when the
+                // workbook has a shared string table, cached formula strings do not reference it.
+                continue;
+            }
 
             let coord = (edit.row, edit.col);
             let record = cell_records.get(&coord);

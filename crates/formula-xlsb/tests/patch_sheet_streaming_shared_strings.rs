@@ -158,6 +158,65 @@ fn build_single_sst_fixture_bytes() -> Vec<u8> {
     builder.build_bytes()
 }
 
+#[test]
+fn streaming_shared_strings_does_not_touch_sst_for_inserted_formula_string_cells() {
+    // This workbook has a shared string table, but no cells that reference it (totalCount=0).
+    // Inserting a formula string cell should *not* intern the cached value into the SST or bump
+    // `totalCount` because formula cached strings are stored inline.
+
+    fn ptg_str(s: &str) -> Vec<u8> {
+        // PtgStr (0x17): [cch:u16][utf16 chars...]
+        let mut out = vec![0x17];
+        let units: Vec<u16> = s.encode_utf16().collect();
+        out.extend_from_slice(&(units.len() as u16).to_le_bytes());
+        for unit in units {
+            out.extend_from_slice(&unit.to_le_bytes());
+        }
+        out
+    }
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.add_shared_string("Hello");
+    let input_bytes = builder.build_bytes();
+
+    let tmpdir = tempfile::tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    std::fs::write(&input_path, &input_bytes).expect("write input workbook");
+    let wb = XlsbWorkbook::open(&input_path).expect("open workbook");
+    let out_path = tmpdir.path().join("out.xlsb");
+
+    wb.save_with_cell_edits_streaming_shared_strings(
+        &out_path,
+        0,
+        &[CellEdit {
+            row: 0,
+            col: 1,
+            new_value: CellValue::Text("New".to_string()),
+            new_formula: Some(ptg_str("New")),
+            new_rgcb: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("save_with_cell_edits_streaming_shared_strings");
+
+    let sheet_bin = read_zip_part(&out_path, "xl/worksheets/sheet1.bin");
+    let (id, _payload) = find_cell_record(&sheet_bin, 0, 1).expect("find B1 record");
+    assert_eq!(id, 0x0008, "expected BrtFmlaString/FORMULA_STRING record id");
+
+    let shared_strings_in = read_zip_part(&input_path, "xl/sharedStrings.bin");
+    let shared_strings_out = read_zip_part(&out_path, "xl/sharedStrings.bin");
+    assert_eq!(
+        shared_strings_out, shared_strings_in,
+        "expected sharedStrings.bin to be byte-identical for formula string inserts"
+    );
+
+    let stats = read_shared_strings_stats(&shared_strings_out);
+    assert_eq!(stats.total_count, Some(0));
+    assert_eq!(stats.unique_count, Some(1));
+    assert_eq!(stats.si_count, 1);
+    assert!(!stats.strings.contains(&"New".to_string()));
+}
+
 fn with_corrupt_sst_unique_count(input: &[u8], bad_unique_count: u32) -> Vec<u8> {
     let mut zip = ZipArchive::new(Cursor::new(input)).expect("open xlsb zip");
 
