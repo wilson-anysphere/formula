@@ -135,6 +135,13 @@ test.describe("Extensions UI integration", () => {
     await openPanelBtn.dispatchEvent("click");
 
     await expect(page.getByTestId("panel-sampleHello.panel")).toBeAttached();
+    const iframeLocator = page.locator('iframe[data-testid="extension-webview-sampleHello.panel"]');
+    await expect(iframeLocator, "webview iframe should be sandboxed").toHaveAttribute("sandbox", /allow-scripts/);
+    const sandboxAttr = await iframeLocator.getAttribute("sandbox");
+    expect(sandboxAttr ?? "").not.toContain("allow-same-origin");
+    await expect(iframeLocator, "webview should not send referrers").toHaveAttribute("referrerpolicy", "no-referrer");
+    await expect(iframeLocator, "webview should load from a blob: URL").toHaveAttribute("src", /^blob:/);
+
     const frame = page.frameLocator('iframe[data-testid="extension-webview-sampleHello.panel"]');
     await expect(frame.locator("h1")).toHaveText("Sample Hello Panel");
     await expect(
