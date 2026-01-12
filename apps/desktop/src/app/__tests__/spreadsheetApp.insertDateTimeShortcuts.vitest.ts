@@ -4,6 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { dateToExcelSerial } from "../../shared/valueParsing.js";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 function createInMemoryLocalStorage(): Storage {
@@ -76,10 +77,12 @@ describe("SpreadsheetApp Excel-style date/time insertion shortcuts", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    delete process.env.DESKTOP_GRID_MODE;
   });
 
   beforeEach(() => {
     document.body.innerHTML = "";
+    process.env.DESKTOP_GRID_MODE = "legacy";
 
     const storage = createInMemoryLocalStorage();
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
@@ -133,10 +136,16 @@ describe("SpreadsheetApp Excel-style date/time insertion shortcuts", () => {
 
     const doc = app.getDocument();
     const sheetId = app.getCurrentSheetId();
-    expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBe("1/2/2020");
-    expect(doc.getCell(sheetId, { row: 0, col: 1 }).value).toBe("1/2/2020");
-    expect(doc.getCell(sheetId, { row: 1, col: 0 }).value).toBe("1/2/2020");
-    expect(doc.getCell(sheetId, { row: 1, col: 1 }).value).toBe("1/2/2020");
+    const expectedSerial = dateToExcelSerial(new Date(Date.UTC(2020, 0, 2)));
+    expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBe(expectedSerial);
+    expect(doc.getCell(sheetId, { row: 0, col: 1 }).value).toBe(expectedSerial);
+    expect(doc.getCell(sheetId, { row: 1, col: 0 }).value).toBe(expectedSerial);
+    expect(doc.getCell(sheetId, { row: 1, col: 1 }).value).toBe(expectedSerial);
+
+    expect(doc.getCellFormat(sheetId, { row: 0, col: 0 }).numberFormat).toBe("yyyy-mm-dd");
+    expect(doc.getCellFormat(sheetId, { row: 0, col: 1 }).numberFormat).toBe("yyyy-mm-dd");
+    expect(doc.getCellFormat(sheetId, { row: 1, col: 0 }).numberFormat).toBe("yyyy-mm-dd");
+    expect(doc.getCellFormat(sheetId, { row: 1, col: 1 }).numberFormat).toBe("yyyy-mm-dd");
 
     expect(doc.undoLabel).toBe("Insert Date");
     expect(doc.undo()).toBe(true);
@@ -174,10 +183,16 @@ describe("SpreadsheetApp Excel-style date/time insertion shortcuts", () => {
 
     const doc = app.getDocument();
     const sheetId = app.getCurrentSheetId();
-    expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBe("3:04");
-    expect(doc.getCell(sheetId, { row: 0, col: 1 }).value).toBe("3:04");
-    expect(doc.getCell(sheetId, { row: 1, col: 0 }).value).toBe("3:04");
-    expect(doc.getCell(sheetId, { row: 1, col: 1 }).value).toBe("3:04");
+    const expectedSerial = (3 * 3600 + 4 * 60 + 5) / 86_400;
+    expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBeCloseTo(expectedSerial, 10);
+    expect(doc.getCell(sheetId, { row: 0, col: 1 }).value).toBeCloseTo(expectedSerial, 10);
+    expect(doc.getCell(sheetId, { row: 1, col: 0 }).value).toBeCloseTo(expectedSerial, 10);
+    expect(doc.getCell(sheetId, { row: 1, col: 1 }).value).toBeCloseTo(expectedSerial, 10);
+
+    expect(doc.getCellFormat(sheetId, { row: 0, col: 0 }).numberFormat).toBe("hh:mm:ss");
+    expect(doc.getCellFormat(sheetId, { row: 0, col: 1 }).numberFormat).toBe("hh:mm:ss");
+    expect(doc.getCellFormat(sheetId, { row: 1, col: 0 }).numberFormat).toBe("hh:mm:ss");
+    expect(doc.getCellFormat(sheetId, { row: 1, col: 1 }).numberFormat).toBe("hh:mm:ss");
 
     expect(doc.undoLabel).toBe("Insert Time");
     expect(doc.undo()).toBe(true);
@@ -254,7 +269,9 @@ describe("SpreadsheetApp Excel-style date/time insertion shortcuts", () => {
 
     const doc = app.getDocument();
     const sheetId = app.getCurrentSheetId();
-    expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBe("1/2/2020");
+    const expectedSerial = dateToExcelSerial(new Date(Date.UTC(2020, 0, 2)));
+    expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBe(expectedSerial);
+    expect(doc.getCellFormat(sheetId, { row: 0, col: 0 }).numberFormat).toBe("yyyy-mm-dd");
     // This cell is inside the selection, but should remain unchanged due to the safety cap.
     expect(doc.getCell(sheetId, { row: 1, col: 1 }).value).toBe(2);
 
