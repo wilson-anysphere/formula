@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { builtinKeybindings } from "./builtinKeybindings.js";
-import { buildCommandKeybindingDisplayIndex, getPrimaryCommandKeybindingDisplay } from "../extensions/keybindings.js";
+import { buildCommandKeybindingDisplayIndex, getPrimaryCommandKeybindingDisplay, parseKeybinding } from "../extensions/keybindings.js";
 
 describe("builtin keybinding catalog", () => {
   it("does not contain exact duplicate entries", () => {
@@ -13,6 +13,19 @@ describe("builtin keybinding catalog", () => {
       seen.add(signature);
     }
     expect(dups).toEqual([]);
+  });
+
+  it("does not bind Cmd+H on macOS (reserved for the system Hide shortcut)", () => {
+    const offenders = builtinKeybindings
+      .filter((kb) => kb.mac)
+      .filter((kb) => {
+        const parsed = parseKeybinding(kb.command, kb.mac ?? "", kb.when ?? null);
+        if (!parsed) return false;
+        return parsed.meta && !parsed.ctrl && !parsed.alt && !parsed.shift && parsed.key === "h";
+      })
+      .map((kb) => kb.command);
+
+    expect(offenders).toEqual([]);
   });
 
   it("formats expected display strings per platform", () => {
