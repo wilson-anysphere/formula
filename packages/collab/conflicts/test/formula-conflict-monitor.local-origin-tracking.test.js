@@ -93,6 +93,54 @@ test("FormulaConflictMonitor tracks local-origin edits for causal conflict detec
   docB.destroy();
 });
 
+test("FormulaConflictMonitor does not emit conflicts for sequential overwrites when local edits were written via local-origin transactions", () => {
+  const docA = new Y.Doc();
+  const docB = new Y.Doc();
+
+  const localOrigin = { type: "local-a" };
+
+  /** @type {Array<any>} */
+  const conflicts = [];
+
+  const monitor = new FormulaConflictMonitor({
+    doc: docA,
+    localUserId: "user-a",
+    origin: localOrigin,
+    localOrigins: new Set([localOrigin]),
+    onConflict: (c) => conflicts.push(c)
+  });
+
+  const disconnect = connectDocs(docA, docB);
+
+  const cellKey = "Sheet1:0:0";
+
+  // Establish the cell map.
+  docA.transact(() => {
+    docA.getMap("cells").set(cellKey, new Y.Map());
+  }, localOrigin);
+
+  // Local edit via a raw local-origin transaction (no setLocalFormula / modifiedBy).
+  docA.transact(() => {
+    const cell = /** @type {Y.Map<any>} */ (docA.getMap("cells").get(cellKey));
+    cell.set("formula", "=1");
+    cell.set("value", null);
+  }, localOrigin);
+
+  // Sequential overwrite: B has already integrated A's edit (connected).
+  docB.transact(() => {
+    const cell = /** @type {Y.Map<any>} */ (docB.getMap("cells").get(cellKey));
+    cell.set("formula", "=2");
+    cell.set("value", null);
+  });
+
+  assert.equal(conflicts.length, 0, "expected no conflict for sequential overwrite");
+
+  monitor.dispose();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
 test("FormulaConflictMonitor tracks local-origin formula clears for causal conflict detection (without setLocalFormula)", () => {
   // Ensure deterministic map-entry overwrite tie-breaking: higher clientID wins.
   const docA = new Y.Doc();
