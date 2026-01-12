@@ -205,6 +205,21 @@ python tools/excel-oracle/pin_dataset.py \
   --versioned-dir tests/compatibility/excel-oracle/datasets/versioned
 ```
 
+## Incremental pinned dataset updates (smaller diffs)
+
+If you *only added new cases* to `cases.json` (i.e. existing `caseId`s remain valid), regenerating the
+entire pinned dataset can produce a very large diff.
+
+You can instead fill in only the missing case results:
+
+```bash
+python tools/excel-oracle/update_pinned_dataset.py
+```
+
+Note: `compat_gate.py` prefers the matching dataset under `datasets/versioned/` (by `cases.json` hash)
+when present. `update_pinned_dataset.py` updates `excel-oracle.pinned.json` **and** refreshes the
+matching versioned copy by default; pass `--no-versioned` to disable.
+
 ## Run the engine runner directly
 
 ```bash
