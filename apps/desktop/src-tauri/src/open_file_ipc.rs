@@ -76,4 +76,28 @@ mod tests {
         assert_eq!(immediate, Some(vec!["d.xlsx".into()]));
         assert_eq!(state.pending_len(), 0);
     }
+
+    #[test]
+    fn tauri_main_wires_open_file_ready_handshake() {
+        // `src/main.rs` is only compiled when the `desktop` feature is enabled (it depends on the
+        // system WebView toolchain on Linux). Still, we want a lightweight regression test that
+        // fails if someone removes the open-file readiness handshake wiring.
+        //
+        // Use a simple source-level check so this test runs in headless CI.
+        let main_rs = include_str!("main.rs");
+
+        // Ensure the ready signal is listened for, and that the queue/flush helpers are used.
+        assert!(
+            main_rs.contains("listen(OPEN_FILE_READY_EVENT"),
+            "desktop main.rs must listen for OPEN_FILE_READY_EVENT"
+        );
+        assert!(
+            main_rs.contains("queue_or_emit("),
+            "desktop main.rs must queue open-file requests via OpenFileState::queue_or_emit"
+        );
+        assert!(
+            main_rs.contains("mark_ready_and_drain("),
+            "desktop main.rs must flush pending open-file requests via OpenFileState::mark_ready_and_drain"
+        );
+    }
 }
