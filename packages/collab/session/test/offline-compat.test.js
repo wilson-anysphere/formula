@@ -4,8 +4,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { promises as fs } from "node:fs";
 
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
+import * as Y from "yjs";
 
 import { createCollabSession } from "../src/index.ts";
 
@@ -15,6 +17,61 @@ globalThis.IDBKeyRange = IDBKeyRange;
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+function encodeRecord(update) {
+  const header = Buffer.allocUnsafe(4);
+  header.writeUInt32BE(update.byteLength, 0);
+  return Buffer.concat([header, Buffer.from(update)]);
+}
+
+test("CollabSession legacy `options.offline` (file) migrates old .yjslog format and clear removes it", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "collab-session-offline-compat-file-migrate-"));
+  const legacyFilePath = path.join(dir, "doc.yjslog");
+
+  t.after(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // Create a legacy offline log file containing a single snapshot update.
+  {
+    const seed = createCollabSession({ schema: { autoInit: false } });
+    await seed.setCellValue("Sheet1:0:0", "from-legacy");
+    const update = Y.encodeStateAsUpdate(seed.doc);
+    await fs.writeFile(legacyFilePath, encodeRecord(update));
+    seed.destroy();
+    seed.doc.destroy();
+  }
+
+  // New session should load from the legacy file via migration.
+  {
+    const session = createCollabSession({
+      schema: { autoInit: false },
+      offline: { mode: "file", filePath: legacyFilePath },
+    });
+
+    await session.offline?.whenLoaded();
+    assert.equal((await session.getCell("Sheet1:0:0"))?.value, "from-legacy");
+
+    await session.offline?.clear();
+
+    session.destroy();
+    session.doc.destroy();
+  }
+
+  // After clear(), the legacy file should be removed and the migrated state should not reappear.
+  {
+    const session = createCollabSession({
+      schema: { autoInit: false },
+      offline: { mode: "file", filePath: legacyFilePath },
+    });
+
+    await session.offline?.whenLoaded();
+    assert.equal(await session.getCell("Sheet1:0:0"), null);
+
+    session.destroy();
+    session.doc.destroy();
+  }
+});
 
 test("CollabSession legacy `options.offline` (file) is implemented via collab-persistence", async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), "collab-session-offline-compat-file-"));
@@ -133,4 +190,3 @@ test("CollabSession legacy `options.offline` (indexeddb) is implemented via coll
     session.doc.destroy();
   }
 });
-

@@ -587,6 +587,7 @@ export class CollabSession {
   private readonly rejectLocalPersistenceLoaded: ((err: unknown) => void) | null;
   private readonly localPersistenceFactory: (() => Promise<CollabPersistence>) | null;
   private persistenceDetached = false;
+  private readonly legacyOfflineFilePath: string | null;
 
   private permissions: SessionPermissions | null = null;
   private readonly defaultSheetId: string;
@@ -664,6 +665,10 @@ export class CollabSession {
     this.offlineAutoConnectAfterLoad = offlineAutoConnectAfterLoad;
 
     const offlineShouldConfigurePersistence = offlineEnabled && !explicitPersistence;
+    this.legacyOfflineFilePath =
+      offlineShouldConfigurePersistence && options.offline?.mode === "file"
+        ? options.offline.filePath ?? null
+        : null;
 
     const persistenceDocId =
       explicitPersistence
@@ -1135,8 +1140,21 @@ export class CollabSession {
       (this.localPersistenceFactory ? await this.localPersistenceFactory() : null);
     if (!persistence) return;
     this.persistence = persistence;
-    if (typeof persistence.clear !== "function") return;
-    await persistence.clear(docId);
+    if (typeof persistence.clear === "function") {
+      await persistence.clear(docId);
+    }
+
+    // If we migrated from the legacy `@formula/collab-offline` file log format,
+    // also clear the original `offline.filePath` so the migration doesn't
+    // resurrect cleared state on the next session start.
+    if (this.legacyOfflineFilePath) {
+      try {
+        const { promises: fs } = await import("node:fs");
+        await fs.rm(this.legacyOfflineFilePath, { force: true });
+      } catch {
+        // Best-effort cleanup.
+      }
+    }
   }
 
   private scheduleProviderConnectAfterHydration(): void {
