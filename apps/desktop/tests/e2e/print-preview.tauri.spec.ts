@@ -160,5 +160,35 @@ test.describe("Print Preview (tauri)", () => {
     // Escape should close the modal (keyboard accessible).
     await page.keyboard.press("Escape");
     await expect(page.locator("dialog.print-preview-dialog")).toHaveCount(0);
+
+    // Native menu wiring: menu-print-preview should also open the dialog.
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["menu-print-preview"]));
+    const beforeMenuPreview = await page.evaluate(() => {
+      const invokes = (window as any).__tauriInvokes ?? [];
+      return Array.isArray(invokes) ? invokes.filter((e: any) => e?.cmd === "export_sheet_range_pdf").length : 0;
+    });
+    await page.evaluate(() => {
+      const handlers = (window as any).__tauriListeners?.["menu-print-preview"] ?? [];
+      for (const handler of handlers) handler({ payload: null });
+    });
+    await page.waitForFunction(
+      ({ prev }) => {
+        const invokes = (window as any).__tauriInvokes ?? [];
+        if (!Array.isArray(invokes)) return false;
+        return invokes.filter((e: any) => e?.cmd === "export_sheet_range_pdf").length > prev;
+      },
+      { prev: beforeMenuPreview },
+    );
+    await expect(page.locator("dialog.print-preview-dialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator("dialog.print-preview-dialog")).toHaveCount(0);
+
+    // Native menu wiring: menu-print should open the dialog (and attempt printing on capable platforms).
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["menu-print"]));
+    await page.evaluate(() => {
+      const handlers = (window as any).__tauriListeners?.["menu-print"] ?? [];
+      for (const handler of handlers) handler({ payload: null });
+    });
+    await expect(page.locator("dialog.print-preview-dialog")).toBeVisible();
   });
 });
