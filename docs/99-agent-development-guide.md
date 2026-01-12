@@ -64,7 +64,7 @@ cargo test
 
 The wrapper script:
 1. Enforces a **14GB address space limit** via `RLIMIT_AS`
-2. Limits parallelism to **-j4** by default
+2. Limits parallelism to **-j4** by default (and defaults `cargo test` to `-j1` unless you explicitly set `FORMULA_CARGO_JOBS` / `FORMULA_CARGO_TEST_JOBS`)
 3. Caps **RUST_TEST_THREADS** to avoid spawning hundreds of threads (default: `min(nproc, 16, jobs * 4)`)
 4. Caps **RAYON_NUM_THREADS** (defaults to `FORMULA_CARGO_JOBS`) to avoid huge per-process Rayon thread pools on high-core agent hosts
 5. Defaults `MAKEFLAGS=-j<jobs>` and `CARGO_PROFILE_*_CODEGEN_UNITS=<jobs>` to keep non-Rust build steps + rustc/LLVM parallelism aligned
@@ -114,7 +114,7 @@ bash scripts/cargo_agent.sh bench --bench perf_regressions
 
 Environment variables to tune behavior:
 - `FORMULA_CARGO_JOBS` - parallelism (default: 4)
-- `FORMULA_CARGO_TEST_JOBS` - `cargo test` parallelism (default: 1)
+- `FORMULA_CARGO_TEST_JOBS` - `cargo test` parallelism (default: 1 unless `FORMULA_CARGO_JOBS` is set)
 - `FORMULA_CARGO_LIMIT_AS` - address space limit (default: 14G)
 - `FORMULA_RUST_TEST_THREADS` - test parallelism (default: min(nproc, 16, jobs * 4))
 - `FORMULA_RAYON_NUM_THREADS` - Rayon thread pool size (`RAYON_NUM_THREADS`) (default: `FORMULA_CARGO_JOBS`)
