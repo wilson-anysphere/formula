@@ -358,8 +358,8 @@ The repository already has fixtures/tests exercising preservation of these attri
 ### Images-in-cells cell shapes (observed)
 
 Cells containing an image-in-cell typically signal that fact via metadata pointers (`c/@vm` and sometimes
-`c/@cm`). The cached `<v>` value does **not** directly reference the image bytes; it appears to be an
-internal placeholder/cache value used by Excel.
+`c/@cm`). The cached `<v>` value does **not** directly reference the image bytes; in the fixtures in this
+repo it is an internal placeholder/cache value (e.g. `#VALUE!` or `0`).
 
 Observed shapes in **real Excel fixtures** in this repo:
 
@@ -872,7 +872,7 @@ Checklist (what we still want additional fixtures for):
    - observed: `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main` (synthetic fixture `cell-images.xlsx`)
 3. Discover additional XML shapes:
    - observed: `<cellImages><cellImage><xdr:pic>...` (real Excel fixture `images-in-cell.xlsx`)
-4. Confirm additional `[Content_Types].xml` override strings (Excel appears to vary):
+4. Confirm additional `[Content_Types].xml` override strings (observed to vary across producers/fixtures):
    - observed: `application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml`
    - observed: `application/vnd.ms-excel.cellimages+xml`
 5. Discover additional relationship Type URIs and owning-part behaviors:

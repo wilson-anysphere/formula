@@ -232,7 +232,7 @@ From `xl/worksheets/sheet1.xml`:
 
 Notes:
 
-* In this fixture, `vm` and `cm` **appear to be 1-based** (`vm="1"` selects the first `<valueMetadata><bk>`).
+ * In this fixture, `vm` and `cm` are **1-based** (`vm="1"` selects the first `<valueMetadata><bk>`).
 * The cached cell value is a placeholder numeric `<v>0</v>` (no `t="e"`/`#VALUE!`); the image binding still
   comes from `vm`/`cm` + `xl/metadata.xml`.
 
@@ -392,7 +392,7 @@ From `xl/worksheets/sheet1.xml` (excerpt):
 
 Notes:
 
-* In this fixture, `vm` **appears to be 1-based** (`vm="1"` selects the first `<valueMetadata><bk>`).
+ * In this fixture, `vm` is **1-based** (`vm="1"` selects the first `<valueMetadata><bk>`).
 
 **`xl/metadata.xml` (`futureMetadata name="XLRICHVALUE"` + `xlrd:rvb i="..."`)**
 
