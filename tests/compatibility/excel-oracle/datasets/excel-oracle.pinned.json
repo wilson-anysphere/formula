@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T10:28:59.54671309Z",
+  "generatedAt": "2026-01-12T10:50:14.9199023Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -12750,6 +12750,26 @@
       "displayText": "หนึ่งพันสองร้อยสามสิบสี่บาทห้าสิบสตางค์"
     },
     {
+      "caseId": "thai_bfb29f1ab0d4",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "ศูนย์บาทถ้วน"
+      },
+      "address": "C1",
+      "displayText": "ศูนย์บาทถ้วน"
+    },
+    {
+      "caseId": "thai_a20f566ab461",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "ลบสิบเอ็ดบาทยี่สิบห้าสตางค์"
+      },
+      "address": "C1",
+      "displayText": "ลบสิบเอ็ดบาทยี่สิบห้าสตางค์"
+    },
+    {
       "caseId": "thai_d4a11c47141a",
       "outputCell": "C1",
       "result": {
@@ -12760,7 +12780,27 @@
       "displayText": "๑๒๓"
     },
     {
+      "caseId": "thai_31c56d061ad9",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "๑๒๓๔"
+      },
+      "address": "C1",
+      "displayText": "๑๒๓๔"
+    },
+    {
       "caseId": "thai_9f9a50e82a56",
+      "outputCell": "C1",
+      "result": {
+        "t": "b",
+        "v": true
+      },
+      "address": "C1",
+      "displayText": "TRUE"
+    },
+    {
+      "caseId": "thai_dd49a2c49f49",
       "outputCell": "C1",
       "result": {
         "t": "b",
@@ -12780,6 +12820,16 @@
       "displayText": "๑๒๓๔.๕"
     },
     {
+      "caseId": "thai_ce388cb82446",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "-๑๒๓๔.๕"
+      },
+      "address": "C1",
+      "displayText": "-๑๒๓๔.๕"
+    },
+    {
       "caseId": "thai_6b997365ec98",
       "outputCell": "C1",
       "result": {
@@ -12788,6 +12838,16 @@
       },
       "address": "C1",
       "displayText": "หนึ่งพันสองร้อยสามสิบสี่จุดห้า"
+    },
+    {
+      "caseId": "thai_0bca4ff14c82",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "ลบหนึ่งพันสองร้อยสามสิบสี่จุดห้า"
+      },
+      "address": "C1",
+      "displayText": "ลบหนึ่งพันสองร้อยสามสิบสี่จุดห้า"
     },
     {
       "caseId": "thai_a1d0e5414f02",
@@ -12820,6 +12880,26 @@
       "displayText": "1.5"
     },
     {
+      "caseId": "thai_55de0e20af85",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": -1.25
+      },
+      "address": "C1",
+      "displayText": "-1.25"
+    },
+    {
+      "caseId": "thai_9fad3e947a04",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": -1.5
+      },
+      "address": "C1",
+      "displayText": "-1.5"
+    },
+    {
       "caseId": "thai_cec3b3faf981",
       "outputCell": "C1",
       "result": {
@@ -12828,6 +12908,16 @@
       },
       "address": "C1",
       "displayText": "วันพุธ"
+    },
+    {
+      "caseId": "thai_7e0203755dfa",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "วันอาทิตย์"
+      },
+      "address": "C1",
+      "displayText": "วันอาทิตย์"
     },
     {
       "caseId": "thai_b01b1aaf649a",
@@ -12840,6 +12930,16 @@
       "displayText": "มกราคม"
     },
     {
+      "caseId": "thai_44e86e4e49e9",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "ธันวาคม"
+      },
+      "address": "C1",
+      "displayText": "ธันวาคม"
+    },
+    {
       "caseId": "thai_bff36ef1b3d1",
       "outputCell": "C1",
       "result": {
@@ -12848,6 +12948,16 @@
       },
       "address": "C1",
       "displayText": "2563"
+    },
+    {
+      "caseId": "thai_6d5dab1aaeff",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2443.0
+      },
+      "address": "C1",
+      "displayText": "2443"
     },
     {
       "caseId": "concat_new_577bb69cae3a",
@@ -16823,116 +16933,6 @@
       },
       "address": "A1",
       "displayText": "#NAME?"
-    },
-    {
-      "caseId": "thai_bfb29f1ab0d4",
-      "outputCell": "C1",
-      "result": {
-        "t": "s",
-        "v": "ศูนย์บาทถ้วน"
-      },
-      "address": "C1",
-      "displayText": "ศูนย์บาทถ้วน"
-    },
-    {
-      "caseId": "thai_a20f566ab461",
-      "outputCell": "C1",
-      "result": {
-        "t": "s",
-        "v": "ลบสิบเอ็ดบาทยี่สิบห้าสตางค์"
-      },
-      "address": "C1",
-      "displayText": "ลบสิบเอ็ดบาทยี่สิบห้าสตางค์"
-    },
-    {
-      "caseId": "thai_31c56d061ad9",
-      "outputCell": "C1",
-      "result": {
-        "t": "s",
-        "v": "๑๒๓๔"
-      },
-      "address": "C1",
-      "displayText": "๑๒๓๔"
-    },
-    {
-      "caseId": "thai_dd49a2c49f49",
-      "outputCell": "C1",
-      "result": {
-        "t": "b",
-        "v": true
-      },
-      "address": "C1",
-      "displayText": "TRUE"
-    },
-    {
-      "caseId": "thai_ce388cb82446",
-      "outputCell": "C1",
-      "result": {
-        "t": "s",
-        "v": "-๑๒๓๔.๕"
-      },
-      "address": "C1",
-      "displayText": "-๑๒๓๔.๕"
-    },
-    {
-      "caseId": "thai_0bca4ff14c82",
-      "outputCell": "C1",
-      "result": {
-        "t": "s",
-        "v": "ลบหนึ่งพันสองร้อยสามสิบสี่จุดห้า"
-      },
-      "address": "C1",
-      "displayText": "ลบหนึ่งพันสองร้อยสามสิบสี่จุดห้า"
-    },
-    {
-      "caseId": "thai_55de0e20af85",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": -1.25
-      },
-      "address": "C1",
-      "displayText": "-1.25"
-    },
-    {
-      "caseId": "thai_9fad3e947a04",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": -1.5
-      },
-      "address": "C1",
-      "displayText": "-1.5"
-    },
-    {
-      "caseId": "thai_7e0203755dfa",
-      "outputCell": "C1",
-      "result": {
-        "t": "s",
-        "v": "วันอาทิตย์"
-      },
-      "address": "C1",
-      "displayText": "วันอาทิตย์"
-    },
-    {
-      "caseId": "thai_44e86e4e49e9",
-      "outputCell": "C1",
-      "result": {
-        "t": "s",
-        "v": "ธันวาคม"
-      },
-      "address": "C1",
-      "displayText": "ธันวาคม"
-    },
-    {
-      "caseId": "thai_6d5dab1aaeff",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 2443.0
-      },
-      "address": "C1",
-      "displayText": "2443"
     }
   ]
 }
