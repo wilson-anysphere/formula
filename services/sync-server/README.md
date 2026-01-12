@@ -270,6 +270,7 @@ Notable metrics (prefix `sync_server_`):
 
   - `SYNC_SERVER_MAX_AWARENESS_STATE_BYTES`
   - `SYNC_SERVER_MAX_AWARENESS_ENTRIES`
+  - Setting either to `0` effectively disables awareness updates (they will be dropped).
 
 - Optional JWT cell-range restriction enforcement (fail-closed):
 
