@@ -119,3 +119,40 @@ test("ThemeController updates reduced motion attribute when preference changes",
   env.setMatches("(prefers-reduced-motion: reduce)", true);
   assert.equal(document.documentElement.getAttribute("data-reduced-motion"), "true");
 });
+
+test("ThemeController prefers high contrast when forced-colors is active (system theme)", () => {
+  const env = createMatchMediaStub({
+    "(prefers-color-scheme: dark)": true,
+    "(forced-colors: active)": true
+  });
+  const document = createStubDocument();
+  const controller = new ThemeController({ env, document, storage: createMemoryStorage() });
+  controller.start();
+
+  assert.equal(controller.getThemePreference(), "system");
+  assert.equal(document.documentElement.getAttribute("data-theme"), "high-contrast");
+});
+
+test("ThemeController falls back gracefully when storage is unavailable", () => {
+  const env = createMatchMediaStub({
+    "(prefers-color-scheme: dark)": true,
+    "(forced-colors: active)": false
+  });
+  const document = createStubDocument();
+  const storage = {
+    getItem() {
+      throw new Error("Storage disabled");
+    },
+    setItem() {
+      throw new Error("Storage disabled");
+    },
+  };
+
+  const controller = new ThemeController({ env, document, storage });
+  controller.start();
+  assert.equal(document.documentElement.getAttribute("data-theme"), "dark");
+
+  // Mutations still apply even if persistence fails.
+  controller.setThemePreference("light");
+  assert.equal(document.documentElement.getAttribute("data-theme"), "light");
+});
