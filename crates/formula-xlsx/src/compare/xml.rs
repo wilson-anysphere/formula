@@ -13,10 +13,30 @@ pub fn normalize_xml(bytes: &[u8]) -> Result<String, quick_xml::Error> {
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
     let mut out = String::new();
+    // Track whether whitespace-only text nodes should be preserved in the current
+    // element context.
+    //
+    // Per XML, `xml:space="preserve"` is inherited by descendants. SpreadsheetML
+    // commonly uses this on `<t>` elements where a leading/trailing/standalone
+    // space is semantically significant.
+    let mut preserve_space: Vec<bool> = vec![false];
 
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) => {
+                let mut this_preserve = preserve_space.last().copied().unwrap_or(false);
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if is_xml_space_attr(attr.key.as_ref()) {
+                        let value = attr.unescape_value()?.into_owned();
+                        match value.as_str() {
+                            "preserve" => this_preserve = true,
+                            "default" => this_preserve = false,
+                            _ => {}
+                        }
+                    }
+                }
+                preserve_space.push(this_preserve);
                 out.push('<');
                 out.push_str(std::str::from_utf8(e.name().as_ref()).unwrap_or(""));
                 write_sorted_attrs(&mut out, &e)?;
@@ -29,19 +49,22 @@ pub fn normalize_xml(bytes: &[u8]) -> Result<String, quick_xml::Error> {
                 out.push_str("/>");
             }
             Event::End(e) => {
+                preserve_space.pop();
                 out.push_str("</");
                 out.push_str(std::str::from_utf8(e.name().as_ref()).unwrap_or(""));
                 out.push('>');
             }
             Event::Text(e) => {
                 let text = e.unescape()?.into_owned();
-                if !text.chars().all(|c| c.is_whitespace()) {
+                let preserve = preserve_space.last().copied().unwrap_or(false);
+                if preserve || !text.chars().all(|c| c.is_whitespace()) {
                     out.push_str(&escape_text(&text));
                 }
             }
             Event::CData(e) => {
                 let text = String::from_utf8_lossy(e.as_ref());
-                if !text.chars().all(|c: char| c.is_whitespace()) {
+                let preserve = preserve_space.last().copied().unwrap_or(false);
+                if preserve || !text.chars().all(|c: char| c.is_whitespace()) {
                     out.push_str(&escape_text(&text));
                 }
             }
@@ -52,6 +75,12 @@ pub fn normalize_xml(bytes: &[u8]) -> Result<String, quick_xml::Error> {
     }
 
     Ok(out)
+}
+
+fn is_xml_space_attr(key: &[u8]) -> bool {
+    // The XML namespace (`xml:*`) prefix is reserved and fixed, so we can match
+    // the literal attribute name. Keep this helper small and allocation-free.
+    key == b"xml:space"
 }
 
 pub fn assert_xml_semantic_eq(expected: &[u8], actual: &[u8]) {
@@ -93,4 +122,19 @@ fn escape_attr(value: &str) -> String {
 
 fn escape_text(value: &str) -> String {
     value.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_xml;
+
+    #[test]
+    fn normalize_xml_respects_xml_space_preserve_for_whitespace_only_text() {
+        let xml = br#"<root><t xml:space="preserve"> </t><t> </t></root>"#;
+        let normalized = normalize_xml(xml).expect("normalize xml");
+        assert_eq!(
+            normalized,
+            r#"<root><t xml:space="preserve"> </t><t></t></root>"#
+        );
+    }
 }
