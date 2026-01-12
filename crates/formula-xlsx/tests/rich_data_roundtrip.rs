@@ -3,6 +3,7 @@ use std::io::{Cursor, Read};
 use std::path::Path;
 
 use formula_model::{CellRef, CellValue};
+use roxmltree::Document;
 use zip::ZipArchive;
 
 const REQUIRED_PARTS: &[&str] = &[
@@ -79,6 +80,27 @@ fn assert_rich_data_parts_preserved(original: &[u8], roundtripped: &[u8]) -> Res
     Ok(())
 }
 
+fn assert_a1_vm_is_zero(xlsx_bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    let mut archive = ZipArchive::new(Cursor::new(xlsx_bytes))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+
+    let doc = Document::parse(&sheet_xml)?;
+    let cell = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
+        .expect("expected A1 cell in sheet1.xml");
+    assert_eq!(
+        cell.attribute("vm"),
+        Some("0"),
+        "expected A1 cell to preserve vm=\"0\""
+    );
+
+    Ok(())
+}
+
 #[test]
 fn roundtrip_preserves_richdata_parts_for_image_in_cell() -> Result<(), Box<dyn std::error::Error>> {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -89,6 +111,7 @@ fn roundtrip_preserves_richdata_parts_for_image_in_cell() -> Result<(), Box<dyn 
     let mut doc = formula_xlsx::load_from_path(&fixture)?;
     let out_bytes = doc.save_to_vec()?;
     assert_rich_data_parts_preserved(&original_bytes, &out_bytes)?;
+    assert_a1_vm_is_zero(&out_bytes)?;
 
     // Regression: editing an unrelated cell should not delete or modify richData parts.
     let sheet_id = doc.workbook.sheets[0].id;
@@ -98,7 +121,7 @@ fn roundtrip_preserves_richdata_parts_for_image_in_cell() -> Result<(), Box<dyn 
     );
     let out_bytes = doc.save_to_vec()?;
     assert_rich_data_parts_preserved(&original_bytes, &out_bytes)?;
+    assert_a1_vm_is_zero(&out_bytes)?;
 
     Ok(())
 }
-
