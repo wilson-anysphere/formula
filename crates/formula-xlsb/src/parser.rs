@@ -2193,6 +2193,29 @@ fn materialize_rgce(
                 out.extend_from_slice(&base[i..i + 2 + bytes]);
                 i += 2 + bytes;
             }
+            0x18 | 0x38 | 0x58 => {
+                // PtgExtend / PtgExtendV / PtgExtendA.
+                //
+                // Used by structured references (table formulas) and other newer operand tokens.
+                // Structured references do not embed relative row/col offsets, so we can copy the
+                // token verbatim during shared-formula materialization.
+                let etpg = *base.get(i)?;
+                i += 1;
+                out.push(ptg);
+                out.push(etpg);
+
+                match etpg {
+                    // PtgList (structured reference): fixed 12-byte payload.
+                    0x19 => {
+                        if i + 12 > base.len() {
+                            return None;
+                        }
+                        out.extend_from_slice(&base[i..i + 12]);
+                        i += 12;
+                    }
+                    _ => return None,
+                }
+            }
             0x1C | 0x1D => {
                 // PtgErr / PtgBool: 1 byte.
                 out.push(ptg);

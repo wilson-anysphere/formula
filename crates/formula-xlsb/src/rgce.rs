@@ -117,6 +117,10 @@ pub enum DecodeWarning {
     ///
     /// The decoder will emit `#UNKNOWN!` in the output formula text and continue.
     UnknownArrayErrorCode { code: u8, offset: usize },
+    /// Encountered unknown flag bits while decoding an Excel structured reference (table ref).
+    ///
+    /// The decoder will ignore unknown bits and emit best-effort formula text.
+    UnknownStructuredRefFlags { flags: u32, offset: usize },
 }
 
 /// Result of decoding an rgce token stream.
@@ -748,6 +752,137 @@ fn decode_rgce_impl(
                 let s = String::from_utf16_lossy(&units);
                 let escaped = escape_excel_string_literal(&s);
                 stack.push(ExprFragment::new(format!("\"{escaped}\"")));
+            }
+            0x18 | 0x38 | 0x58 => {
+                // PtgExtend / PtgExtendV / PtgExtendA.
+                //
+                // MS-XLSB encodes newer operand tokens (including structured references / table
+                // refs) using `PtgExtend` followed by an `etpg` subtype byte.
+                //
+                // We currently decode the variants required for Excel structured references
+                // (tables), which appear as `etpg=0x19` (`PtgList` in documentation).
+                if rgce.len().saturating_sub(i) < 1 {
+                    return Err(DecodeError::UnexpectedEof {
+                        offset: ptg_offset,
+                        ptg,
+                        needed: 1,
+                        remaining: rgce.len().saturating_sub(i),
+                    });
+                }
+                let etpg = rgce[i];
+                i += 1;
+
+                match etpg {
+                    0x19 => {
+                        // PtgList (structured reference / table ref).
+                        //
+                        // Excel uses a fixed 12-byte payload. The exact layout is documented in
+                        // MS-XLSB, but in practice there are multiple observed encodings in the
+                        // wild. We decode in a best-effort way by trying a handful of plausible
+                        // interpretations and preferring the one that matches available workbook
+                        // context (table/column name lookups).
+                        if rgce.len().saturating_sub(i) < 12 {
+                            return Err(DecodeError::UnexpectedEof {
+                                offset: ptg_offset,
+                                ptg,
+                                needed: 12,
+                                remaining: rgce.len().saturating_sub(i),
+                            });
+                        }
+
+                        let mut payload = [0u8; 12];
+                        payload.copy_from_slice(&rgce[i..i + 12]);
+                        i += 12;
+
+                        let decoded = decode_ptg_list_payload_best_effort(&payload, ctx);
+
+                        // Interpret row/item flags. We intentionally accept unknown bits and
+                        // continue decoding.
+                        let flags16 = (decoded.flags & 0xFFFF) as u16;
+                        const FLAG_ALL: u16 = 0x0001;
+                        const FLAG_HEADERS: u16 = 0x0002;
+                        const FLAG_DATA: u16 = 0x0004;
+                        const FLAG_TOTALS: u16 = 0x0008;
+                        const FLAG_THIS_ROW: u16 = 0x0010;
+                        const KNOWN_FLAGS: u16 =
+                            FLAG_ALL | FLAG_HEADERS | FLAG_DATA | FLAG_TOTALS | FLAG_THIS_ROW;
+                        let unknown = flags16 & !KNOWN_FLAGS;
+                        if unknown != 0 {
+                            if let Some(warnings) = warnings.as_deref_mut() {
+                                warnings.push(DecodeWarning::UnknownStructuredRefFlags {
+                                    flags: decoded.flags,
+                                    offset: ptg_offset,
+                                });
+                            }
+                        }
+
+                        let item = if flags16 & FLAG_THIS_ROW != 0 {
+                            Some(StructuredRefItem::ThisRow)
+                        } else if flags16 & FLAG_HEADERS != 0 {
+                            Some(StructuredRefItem::Headers)
+                        } else if flags16 & FLAG_TOTALS != 0 {
+                            Some(StructuredRefItem::Totals)
+                        } else if flags16 & FLAG_ALL != 0 {
+                            Some(StructuredRefItem::All)
+                        } else if flags16 & FLAG_DATA != 0 {
+                            Some(StructuredRefItem::Data)
+                        } else {
+                            None
+                        };
+
+                        let table_name = ctx
+                            .and_then(|ctx| ctx.table_name(decoded.table_id))
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| format!("Table{}", decoded.table_id));
+
+                        let col_first = decoded.col_first;
+                        let col_last = decoded.col_last;
+
+                        let columns = if col_first == 0 && col_last == 0 {
+                            StructuredColumns::All
+                        } else if col_first == col_last {
+                            StructuredColumns::Single(
+                                ctx.and_then(|ctx| ctx.table_column_name(decoded.table_id, col_first))
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| format!("Column{col_first}")),
+                            )
+                        } else {
+                            let start = ctx
+                                .and_then(|ctx| ctx.table_column_name(decoded.table_id, col_first))
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| format!("Column{col_first}"));
+                            let end = ctx
+                                .and_then(|ctx| ctx.table_column_name(decoded.table_id, col_last))
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| format!("Column{col_last}"));
+                            StructuredColumns::Range { start, end }
+                        };
+
+                        let display_table_name = match item {
+                            Some(StructuredRefItem::ThisRow) => None,
+                            _ => Some(table_name.as_str()),
+                        };
+
+                        let mut out = format_structured_ref(display_table_name, item, &columns);
+
+                        let mut prec = 100;
+                        let is_value_class = ptg == 0x38;
+                        if is_value_class && !structured_ref_is_single_cell(item, &columns) {
+                            // Like value-class range/name tokens, Excel uses value-class list
+                            // tokens to represent legacy implicit intersection.
+                            out = format!("@{out}");
+                            prec = 70;
+                        }
+
+                        stack.push(ExprFragment {
+                            text: out,
+                            precedence: prec,
+                            contains_union: false,
+                            is_missing: false,
+                        });
+                    }
+                    _ => return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg }),
+                }
             }
             0x19 => {
                 // PtgAttr: [grbit: u8][wAttr: u16]
@@ -1645,6 +1780,229 @@ fn format_cell_ref_from_field(row0: u32, col_field: u16) -> String {
     }
     out.push_str(&row1.to_string());
     out
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StructuredRefItem {
+    All,
+    Data,
+    Headers,
+    Totals,
+    ThisRow,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StructuredColumns {
+    All,
+    Single(String),
+    Range { start: String, end: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PtgListDecoded {
+    table_id: u32,
+    flags: u32,
+    col_first: u32,
+    col_last: u32,
+}
+
+fn decode_ptg_list_payload_best_effort(payload: &[u8; 12], ctx: Option<&WorkbookContext>) -> PtgListDecoded {
+    // There are multiple "in the wild" encodings for the 12-byte PtgList payload (table refs /
+    // structured references). We try a handful of plausible layouts and prefer the one that
+    // resolves cleanly against the provided workbook context.
+    //
+    // Layout A (u32 + 4*u16):
+    //   [table_id: u32][flags: u16][col_first: u16][col_last: u16][reserved: u16]
+    //
+    // Layout B (u32 + 2*u32):
+    //   [table_id: u32][col_first_raw: u32][col_last_raw: u32]
+    //   where `col_first_raw` packs `[col_first: u16][flags: u16]` (and `col_last_raw` packs
+    //   `[col_last: u16][reserved: u16]`).
+    //
+    // Layout C (3*u32):
+    //   [table_id: u32][flags: u32][col_spec: u32]
+    //   where `col_spec` packs `[col_first: u16][col_last: u16]`.
+
+    let table_id = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+
+    let flags_a = u16::from_le_bytes([payload[4], payload[5]]) as u32;
+    let col_first_a = u16::from_le_bytes([payload[6], payload[7]]) as u32;
+    let col_last_a = u16::from_le_bytes([payload[8], payload[9]]) as u32;
+
+    let col_first_raw = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let col_last_raw = u32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]);
+    let col_first_b = (col_first_raw & 0xFFFF) as u32;
+    let flags_b = (col_first_raw >> 16) & 0xFFFF;
+    let col_last_b = (col_last_raw & 0xFFFF) as u32;
+
+    let flags_c = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let col_spec_c = u32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]);
+    let col_first_c = (col_spec_c & 0xFFFF) as u32;
+    let col_last_c = ((col_spec_c >> 16) & 0xFFFF) as u32;
+
+    let mut candidates = [
+        PtgListDecoded {
+            table_id,
+            flags: flags_a,
+            col_first: col_first_a,
+            col_last: col_last_a,
+        },
+        PtgListDecoded {
+            table_id,
+            flags: flags_b,
+            col_first: col_first_b,
+            col_last: col_last_b,
+        },
+        PtgListDecoded {
+            table_id,
+            flags: flags_c,
+            col_first: col_first_c,
+            col_last: col_last_c,
+        },
+        // Layout D: treat the middle/end u32s as raw column ids with no separate flags.
+        PtgListDecoded {
+            table_id,
+            flags: 0,
+            col_first: col_first_raw,
+            col_last: col_last_raw,
+        },
+    ];
+
+    if let Some(ctx) = ctx {
+        candidates.sort_by_key(|cand| std::cmp::Reverse(score_ptg_list_candidate(cand, ctx)));
+    }
+
+    candidates[0]
+}
+
+fn score_ptg_list_candidate(cand: &PtgListDecoded, ctx: &WorkbookContext) -> i32 {
+    let mut score = 0i32;
+
+    if ctx.table_name(cand.table_id).is_some() {
+        score += 100;
+    }
+
+    let col_first = cand.col_first;
+    let col_last = cand.col_last;
+
+    // Column id `0` is treated as a sentinel for "all columns"; seeing it on only one side is
+    // usually a sign we've chosen the wrong payload layout.
+    if (col_first == 0) ^ (col_last == 0) {
+        score -= 50;
+    }
+
+    if col_first == 0 && col_last == 0 {
+        score += 1;
+        return score;
+    }
+
+    if col_first != 0 && ctx.table_column_name(cand.table_id, col_first).is_some() {
+        score += 10;
+    }
+    if col_last != 0 && ctx.table_column_name(cand.table_id, col_last).is_some() {
+        score += 10;
+    }
+
+    // Table column ids are typically small.
+    if col_first <= 16_384 {
+        score += 1;
+    }
+    if col_last <= 16_384 {
+        score += 1;
+    }
+
+    score
+}
+
+fn structured_ref_is_single_cell(item: Option<StructuredRefItem>, columns: &StructuredColumns) -> bool {
+    match (item, columns) {
+        (Some(StructuredRefItem::ThisRow), StructuredColumns::Single(_)) => true,
+        (Some(StructuredRefItem::Headers), StructuredColumns::Single(_)) => true,
+        (Some(StructuredRefItem::Totals), StructuredColumns::Single(_)) => true,
+        _ => false,
+    }
+}
+
+fn format_structured_ref(
+    table_name: Option<&str>,
+    item: Option<StructuredRefItem>,
+    columns: &StructuredColumns,
+) -> String {
+    // This-row shorthand: `[@Col]` and `[@]`.
+    if matches!(item, Some(StructuredRefItem::ThisRow)) {
+        match columns {
+            StructuredColumns::Single(col) => {
+                return format!("[@{}]", escape_structured_ref_bracket_content(col));
+            }
+            StructuredColumns::All => return "[@]".to_string(),
+            StructuredColumns::Range { start, end } => {
+                let start = escape_structured_ref_bracket_content(start);
+                let end = escape_structured_ref_bracket_content(end);
+                return format!("[[#This Row],[{start}]:[{end}]]");
+            }
+        }
+    }
+
+    let table = table_name.unwrap_or("");
+
+    // Item-only selections: `Table1[#All]`, `Table1[#Headers]`, etc.
+    if columns == &StructuredColumns::All {
+        if let Some(item) = item {
+            return format!("{table}[{}]", structured_ref_item_literal(item));
+        }
+        // Default row selector with no column selection: treat as `[#Data]`.
+        return format!("{table}[#Data]");
+    }
+
+    // Single-column selection with default/data item: `Table1[Col]`
+    if matches!(item, None | Some(StructuredRefItem::Data)) {
+        match columns {
+            StructuredColumns::Single(col) => {
+                return format!("{table}[{}]", escape_structured_ref_bracket_content(col));
+            }
+            StructuredColumns::Range { start, end } => {
+                let start = escape_structured_ref_bracket_content(start);
+                let end = escape_structured_ref_bracket_content(end);
+                return format!("{table}[[{start}]:[{end}]]");
+            }
+            StructuredColumns::All => {}
+        }
+    }
+
+    // General nested form: `Table1[[#Headers],[Col]]` or `Table1[[#Headers],[Col1]:[Col2]]`.
+    let item = item.expect("handled None above");
+    match columns {
+        StructuredColumns::Single(col) => {
+            let col = escape_structured_ref_bracket_content(col);
+            format!("{table}[[{}],[{col}]]", structured_ref_item_literal(item))
+        }
+        StructuredColumns::Range { start, end } => {
+            let start = escape_structured_ref_bracket_content(start);
+            let end = escape_structured_ref_bracket_content(end);
+            format!(
+                "{table}[[{}],[{start}]:[{end}]]",
+                structured_ref_item_literal(item)
+            )
+        }
+        StructuredColumns::All => unreachable!("handled above"),
+    }
+}
+
+fn structured_ref_item_literal(item: StructuredRefItem) -> &'static str {
+    match item {
+        StructuredRefItem::All => "#All",
+        StructuredRefItem::Data => "#Data",
+        StructuredRefItem::Headers => "#Headers",
+        StructuredRefItem::Totals => "#Totals",
+        StructuredRefItem::ThisRow => "#This Row",
+    }
+}
+
+fn escape_structured_ref_bracket_content(s: &str) -> String {
+    if !s.contains(']') {
+        return s.to_string();
+    }
+    s.replace(']', "]]")
 }
 
 fn function_name(iftab: u16) -> Option<&'static str> {

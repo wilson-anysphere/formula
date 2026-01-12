@@ -36,6 +36,19 @@ pub struct WorkbookContext {
     namex_extern_names: HashMap<(u16, u16), ExternName>,
     /// Map `ixti` (ExternSheet index) -> supbook index for `PtgNameX`.
     namex_ixti_supbooks: HashMap<u16, u16>,
+
+    /// Excel table (ListObject) metadata, keyed by table id.
+    ///
+    /// Structured references in XLSB formulas (`Table1[Col]`, `[@Col]`, etc.) are encoded using
+    /// numeric table + column identifiers. The rgce decoder needs a mapping back to display names
+    /// to reconstruct Excel-canonical formula text.
+    tables: HashMap<u32, TableInfo>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TableInfo {
+    name: String,
+    columns: HashMap<u32, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -366,6 +379,43 @@ impl WorkbookContext {
             .unwrap_or(supbook_index);
 
         Some((ixti, name_index))
+    }
+
+    // --- Tables / structured references -----------------------------------------------
+
+    /// Registers an Excel table (ListObject) by id.
+    pub fn add_table(&mut self, table_id: u32, name: impl Into<String>) {
+        let name = name.into();
+        self.tables
+            .entry(table_id)
+            .and_modify(|t| t.name = name.clone())
+            .or_insert_with(|| TableInfo {
+                name,
+                columns: HashMap::new(),
+            });
+    }
+
+    /// Registers a table column name for structured reference decoding.
+    pub fn add_table_column(&mut self, table_id: u32, column_id: u32, name: impl Into<String>) {
+        let name = name.into();
+        let entry = self.tables.entry(table_id).or_insert_with(|| TableInfo {
+            name: format!("Table{table_id}"),
+            columns: HashMap::new(),
+        });
+        entry.columns.insert(column_id, name);
+    }
+
+    /// Returns the display name for a table id.
+    pub fn table_name(&self, table_id: u32) -> Option<&str> {
+        self.tables.get(&table_id).map(|t| t.name.as_str())
+    }
+
+    /// Returns the display name for a table column id.
+    pub fn table_column_name(&self, table_id: u32, column_id: u32) -> Option<&str> {
+        self.tables
+            .get(&table_id)
+            .and_then(|t| t.columns.get(&column_id))
+            .map(|s| s.as_str())
     }
 }
 
