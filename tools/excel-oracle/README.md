@@ -311,6 +311,13 @@ python tools/excel-oracle/compat_gate.py --tier p0      # broader common-functio
 python tools/excel-oracle/compat_gate.py --tier full    # full corpus (no include-tag filtering)
 ```
 
+To inspect which datasets/tags will be selected (and to see the exact engine + compare commands)
+without running `cargo`, use:
+
+```bash
+python tools/excel-oracle/compat_gate.py --dry-run --tier smoke --max-cases 10
+```
+
 See `tests/compatibility/excel-oracle/README.md` for the exact tag presets and
 recommended runtime tradeoffs.
 

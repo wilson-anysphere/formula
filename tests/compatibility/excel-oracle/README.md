@@ -13,6 +13,12 @@ From repo root:
 python tools/excel-oracle/compat_gate.py
 ```
 
+To see what the gate would run (resolved dataset paths + commands) without executing `cargo`, use:
+
+```bash
+python tools/excel-oracle/compat_gate.py --dry-run
+```
+
 This runs the default **smoke** tier gate:
 
 1. `cargo run -p formula-excel-oracle` → writes `datasets/engine-results.json`
