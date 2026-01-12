@@ -1130,6 +1130,12 @@ fn decode_dictionary(bytes: Vec<u8>) -> Result<Arc<Vec<Arc<str>>>> {
         return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
     }
     let count = cursor.read_u32()? as usize;
+    // Guard against corrupted headers that claim an absurd number of entries, which would
+    // otherwise attempt to allocate huge vectors.
+    let max_possible_entries = cursor.remaining() / 4;
+    if count > max_possible_entries {
+        return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+    }
     let mut out: Vec<Arc<str>> = Vec::with_capacity(count);
     for _ in 0..count {
         let len = cursor.read_u32()? as usize;
@@ -1245,6 +1251,13 @@ fn decode_chunk(kind: DataModelChunkKind, bytes: &[u8]) -> Result<formula_column
         }
         DataModelChunkKind::Float => {
             let len = cursor.read_u32()? as usize;
+            let values_bytes = len
+                .checked_mul(8)
+                .ok_or_else(|| StorageError::Sqlite(rusqlite::Error::InvalidQuery))?;
+            // Need at least 1 more byte for the validity tag.
+            if cursor.remaining() < values_bytes.saturating_add(1) {
+                return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+            }
             let mut values = Vec::with_capacity(len);
             for _ in 0..len {
                 values.push(cursor.read_f64()?);
@@ -1313,7 +1326,18 @@ fn decode_validity(cursor: &mut Cursor<'_>) -> Result<Option<formula_columnar::B
         0 => Ok(None),
         1 => {
             let len = cursor.read_u32()? as usize;
-            let words_len = cursor.read_u32()? as usize;
+            let words_len_raw = cursor.read_u32()? as usize;
+            let required_words = len.saturating_add(63) / 64;
+            if words_len_raw < required_words {
+                return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+            }
+            let words_len = required_words;
+            let bytes_needed = words_len
+                .checked_mul(8)
+                .ok_or_else(|| StorageError::Sqlite(rusqlite::Error::InvalidQuery))?;
+            if cursor.remaining() < bytes_needed {
+                return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+            }
             let mut words = Vec::with_capacity(words_len);
             for _ in 0..words_len {
                 words.push(cursor.read_u64()?);
@@ -1359,6 +1383,12 @@ fn decode_u64_sequence(cursor: &mut Cursor<'_>) -> Result<formula_columnar::U64S
         }
         2 => {
             let run_count = cursor.read_u32()? as usize;
+            let bytes_needed = run_count
+                .checked_mul(12)
+                .ok_or_else(|| StorageError::Sqlite(rusqlite::Error::InvalidQuery))?;
+            if cursor.remaining() < bytes_needed {
+                return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+            }
             let mut values = Vec::with_capacity(run_count);
             for _ in 0..run_count {
                 values.push(cursor.read_u64()?);
@@ -1411,6 +1441,12 @@ fn decode_u32_sequence(cursor: &mut Cursor<'_>) -> Result<formula_columnar::U32S
         }
         2 => {
             let run_count = cursor.read_u32()? as usize;
+            let bytes_needed = run_count
+                .checked_mul(8)
+                .ok_or_else(|| StorageError::Sqlite(rusqlite::Error::InvalidQuery))?;
+            if cursor.remaining() < bytes_needed {
+                return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+            }
             let mut values = Vec::with_capacity(run_count);
             for _ in 0..run_count {
                 values.push(cursor.read_u32()?);
@@ -1449,6 +1485,10 @@ impl<'a> Cursor<'a> {
             .ok_or_else(|| StorageError::Sqlite(rusqlite::Error::InvalidQuery))?;
         self.pos = end;
         Ok(slice)
+    }
+
+    fn remaining(&self) -> usize {
+        self.buf.len().saturating_sub(self.pos)
     }
 
     fn read_u8(&mut self) -> Result<u8> {
