@@ -149,10 +149,10 @@ function normalizeRangeRuns(raw) {
   if (!Array.isArray(raw)) return out;
   for (const run of raw) {
     if (!run || typeof run !== "object") continue;
-    let startRow = Number(run.startRow ?? run.start?.row ?? run.sr);
-    let startCol = Number(run.startCol ?? run.start?.col ?? run.sc);
-    let endRow = Number(run.endRow ?? run.end?.row ?? run.er);
-    let endCol = Number(run.endCol ?? run.end?.col ?? run.ec);
+    let startRow = Number(run.startRow ?? run.start?.row ?? run.sr ?? run.r0 ?? run.rect?.r0);
+    let startCol = Number(run.startCol ?? run.start?.col ?? run.sc ?? run.c0 ?? run.rect?.c0);
+    let endRow = Number(run.endRow ?? run.end?.row ?? run.er ?? run.r1 ?? run.rect?.r1);
+    let endCol = Number(run.endCol ?? run.end?.col ?? run.ec ?? run.c1 ?? run.rect?.c1);
     if (!Number.isInteger(startRow) || startRow < 0) continue;
     if (!Number.isInteger(startCol) || startCol < 0) continue;
     if (!Number.isInteger(endRow) || endRow < 0) continue;
@@ -208,6 +208,10 @@ export function sheetStateFromDocumentSnapshot(snapshot, opts) {
     extractStyleObject(sheet?.cellStyle) ??
     extractStyleObject(sheet?.format) ??
     extractStyleObject(sheet?.style) ??
+    extractStyleObject(sheet?.view?.defaultFormat) ??
+    extractStyleObject(sheet?.view?.defaultStyle) ??
+    extractStyleObject(sheet?.view?.sheetFormat) ??
+    extractStyleObject(sheet?.view?.sheetStyle) ??
     extractStyleObject(sheet?.defaults?.format) ??
     extractStyleObject(sheet?.defaults?.style) ??
     extractStyleObject(sheet?.cellDefaults?.format) ??
@@ -223,6 +227,9 @@ export function sheetStateFromDocumentSnapshot(snapshot, opts) {
     sheet?.rowStyles,
     sheet?.rowFormat,
     sheet?.rowStyle,
+    sheet?.view?.rowDefaults,
+    sheet?.view?.rowFormats,
+    sheet?.view?.rowStyles,
     sheet?.defaults?.rows,
     sheet?.defaults?.rowDefaults,
     sheet?.defaults?.rowFormats,
@@ -248,6 +255,9 @@ export function sheetStateFromDocumentSnapshot(snapshot, opts) {
     sheet?.columnDefaults,
     sheet?.columnFormats,
     sheet?.columnStyles,
+    sheet?.view?.colDefaults,
+    sheet?.view?.colFormats,
+    sheet?.view?.colStyles,
     sheet?.defaults?.cols,
     sheet?.defaults?.columns,
     sheet?.defaults?.colDefaults,
@@ -268,7 +278,15 @@ export function sheetStateFromDocumentSnapshot(snapshot, opts) {
   }
 
   const formatRuns = normalizeRangeRuns(
-    sheet?.formatRuns ?? sheet?.rangeFormatRuns ?? sheet?.rangeRuns ?? sheet?.formattingRuns ?? null,
+    sheet?.formatRuns ??
+      sheet?.rangeFormatRuns ??
+      sheet?.rangeRuns ??
+      sheet?.formattingRuns ??
+      sheet?.view?.formatRuns ??
+      sheet?.view?.rangeFormatRuns ??
+      sheet?.view?.rangeRuns ??
+      sheet?.view?.formattingRuns ??
+      null,
   );
 
   /**

@@ -228,3 +228,44 @@ test("diffDocumentWorkbookSnapshots reports formatOnly edits when range format r
   assert.equal(sheet1Diff.formatOnly.length, 1);
   assert.deepEqual(sheet1Diff.formatOnly[0].cell, { row: 0, col: 0 });
 });
+
+test("diffDocumentWorkbookSnapshots reports formatOnly edits when sheet default format changes (layered formats)", () => {
+  const beforeSnapshot = encodeSnapshot({
+    schemaVersion: 1,
+    sheets: [
+      {
+        id: "sheet1",
+        name: "Sheet1",
+        cells: [{ row: 0, col: 0, value: "x", formula: null, format: null }],
+        defaultFormat: null,
+        rowFormats: [],
+        colFormats: [],
+      },
+    ],
+  });
+
+  const afterSnapshot = encodeSnapshot({
+    schemaVersion: 1,
+    sheets: [
+      {
+        id: "sheet1",
+        name: "Sheet1",
+        cells: [{ row: 0, col: 0, value: "x", formula: null, format: null }],
+        defaultFormat: { font: { bold: true } },
+        rowFormats: [],
+        colFormats: [],
+      },
+    ],
+  });
+
+  const diff = diffDocumentWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  const sheet1Diff = diff.cellsBySheet.find((entry) => entry.sheetId === "sheet1")?.diff;
+  assert.ok(sheet1Diff);
+
+  assert.deepEqual(sheet1Diff.added, []);
+  assert.deepEqual(sheet1Diff.removed, []);
+  assert.deepEqual(sheet1Diff.modified, []);
+  assert.deepEqual(sheet1Diff.moved, []);
+  assert.equal(sheet1Diff.formatOnly.length, 1);
+  assert.deepEqual(sheet1Diff.formatOnly[0].cell, { row: 0, col: 0 });
+});
