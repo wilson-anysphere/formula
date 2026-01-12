@@ -6,7 +6,7 @@ This script is intended as an "integration safety net" for changes that add new
 deterministic built-in functions (e.g. STAT distributions / moments / frequency
 functions) and therefore need coordinated updates across:
 
-- shared/functionCatalog.json (+ .mjs)
+- shared/functionCatalog.json (+ .mjs + .d.mts)
 - tools/excel-oracle/generate_cases.py (must include coverage cases)
 - tests/compatibility/excel-oracle/cases.json (generated)
 - tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json (synthetic baseline)

@@ -71,6 +71,7 @@ function isCatalogVolatility(value) {
 const raw = await run("cargo", [
   "run",
   "--quiet",
+  "--locked",
   "-p",
   "formula-engine",
   "--bin",
