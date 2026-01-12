@@ -3589,6 +3589,25 @@ fn bytecode_backend_distinguishes_missing_args_from_blank_cells_for_address() {
 }
 
 #[test]
+fn bytecode_backend_rows_and_columns_accept_array_literals() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=ROWS({1,2;3,4})")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=COLUMNS({1,2;3,4})")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(2.0));
+    assert_engine_matches_ast(&engine, "=ROWS({1,2;3,4})", "A1");
+    assert_engine_matches_ast(&engine, "=COLUMNS({1,2;3,4})", "A2");
+}
+
+#[test]
 fn bytecode_backend_xor_reference_semantics_match_ast() {
     let mut engine = Engine::new();
     engine

@@ -110,6 +110,87 @@ fn bytecode_blocked_spills_match_ast() {
 }
 
 #[test]
+fn bytecode_spills_match_ast_for_row_and_column_functions() {
+    let mut ast = setup_base_engine(false);
+    ast.set_cell_formula("Sheet1", "C1", "=ROW(A1:A3)").unwrap();
+    ast.set_cell_formula("Sheet1", "D1", "=COLUMN(A1:C1)").unwrap();
+    ast.recalculate_single_threaded();
+
+    let mut bytecode = setup_base_engine(true);
+    bytecode
+        .set_cell_formula("Sheet1", "C1", "=ROW(A1:A3)")
+        .unwrap();
+    bytecode
+        .set_cell_formula("Sheet1", "D1", "=COLUMN(A1:C1)")
+        .unwrap();
+    assert_eq!(
+        bytecode.bytecode_program_count(),
+        2,
+        "expected ROW/COLUMN spill formulas to compile to bytecode"
+    );
+    bytecode.recalculate_single_threaded();
+
+    assert_eq!(bytecode.spill_range("Sheet1", "C1"), ast.spill_range("Sheet1", "C1"));
+    assert_eq!(bytecode.spill_range("Sheet1", "D1"), ast.spill_range("Sheet1", "D1"));
+
+    for addr in ["C1", "C2", "C3", "D1", "E1", "F1"] {
+        assert_eq!(
+            bytecode.get_cell_value("Sheet1", addr),
+            ast.get_cell_value("Sheet1", addr),
+            "mismatch at {addr}"
+        );
+    }
+}
+
+#[test]
+fn bytecode_spills_match_ast_for_row_and_column_functions_over_spill_ranges() {
+    fn run(bytecode_enabled: bool) -> Engine {
+        let mut engine = Engine::new();
+        engine.set_bytecode_enabled(bytecode_enabled);
+
+        // Use scalar-only functions (ABS) to ensure the spill origins are evaluated by the AST
+        // backend even when bytecode is enabled; this isolates the test to the `A1#` spill-range
+        // reference handling in the ROW/COLUMN bytecode programs.
+        engine
+            .set_cell_formula("Sheet1", "A1", "=ABS({1;2;3})")
+            .unwrap();
+        engine.set_cell_formula("Sheet1", "C1", "=ROW(A1#)").unwrap();
+
+        engine
+            .set_cell_formula("Sheet1", "A10", "=ABS({1,2,3})")
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", "E10", "=COLUMN(A10#)")
+            .unwrap();
+
+        engine.recalculate_single_threaded();
+        engine
+    }
+
+    let ast = run(false);
+    let bytecode = run(true);
+    assert_eq!(
+        bytecode.bytecode_program_count(),
+        2,
+        "expected ROW/COLUMN formulas over spill-range refs to compile to bytecode"
+    );
+
+    assert_eq!(bytecode.spill_range("Sheet1", "C1"), ast.spill_range("Sheet1", "C1"));
+    assert_eq!(
+        bytecode.spill_range("Sheet1", "E10"),
+        ast.spill_range("Sheet1", "E10")
+    );
+
+    for addr in ["C1", "C2", "C3", "E10", "F10", "G10"] {
+        assert_eq!(
+            bytecode.get_cell_value("Sheet1", addr),
+            ast.get_cell_value("Sheet1", addr),
+            "mismatch at {addr}"
+        );
+    }
+}
+
+#[test]
 fn bytecode_spills_match_ast_for_information_functions_over_ranges() {
     for (formula, expected) in [
         (

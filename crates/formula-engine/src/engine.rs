@@ -7722,16 +7722,14 @@ fn bytecode_expr_is_eligible_inner(
                 [bytecode::Expr::CellRef(_)] => true,
                 [bytecode::Expr::RangeRef(_)] => true,
                 [bytecode::Expr::MultiRangeRef(_)] => true,
+                [bytecode::Expr::SpillRange(_)] => true,
                 _ => false,
             },
             bytecode::ast::Function::Rows | bytecode::ast::Function::Columns => {
                 if args.len() != 1 {
                     return false;
                 }
-                matches!(
-                    args[0],
-                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
-                )
+                bytecode_expr_is_eligible_inner(&args[0], true, true, lexical_scopes)
             }
             bytecode::ast::Function::Address => {
                 if !(2..=5).contains(&args.len()) {

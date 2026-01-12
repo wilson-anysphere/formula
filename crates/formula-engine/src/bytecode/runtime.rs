@@ -3951,6 +3951,7 @@ fn fn_rows(args: &[Value], base: CellCoord) -> Value {
     }
     match &args[0] {
         Value::Range(r) => Value::Number(r.resolve(base).rows() as f64),
+        Value::Array(a) => Value::Number(a.rows as f64),
         Value::Error(e) => Value::Error(*e),
         _ => Value::Error(ErrorKind::Value),
     }
@@ -3962,6 +3963,7 @@ fn fn_columns(args: &[Value], base: CellCoord) -> Value {
     }
     match &args[0] {
         Value::Range(r) => Value::Number(r.resolve(base).cols() as f64),
+        Value::Array(a) => Value::Number(a.cols as f64),
         Value::Error(e) => Value::Error(*e),
         _ => Value::Error(ErrorKind::Value),
     }
