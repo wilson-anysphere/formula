@@ -202,6 +202,14 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
     let mut rich_value_rel_part: Option<String> = None;
 
     for rel in relationships {
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        {
+            continue;
+        }
+
         if metadata_part.is_none()
             && (rel.type_uri.eq_ignore_ascii_case(REL_TYPE_SHEET_METADATA)
                 || rel.type_uri.eq_ignore_ascii_case(REL_TYPE_METADATA))
@@ -842,4 +850,98 @@ fn parse_rich_value_rel_ids(xml: &[u8]) -> Result<Vec<String>, XlsxError> {
     }
 
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::io::{Cursor, Write};
+
+    use zip::write::FileOptions;
+    use zip::ZipWriter;
+
+    fn build_package(entries: &[(&str, &[u8])]) -> XlsxPackage {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+        for (name, bytes) in entries {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+
+        let bytes = zip.finish().unwrap().into_inner();
+        XlsxPackage::from_bytes(&bytes).expect("read test pkg")
+    }
+
+    #[test]
+    fn ignores_external_workbook_relationships_for_rich_data_parts() {
+        // External workbook relationships should not prevent discovery of internal rich-data parts.
+        // If we accidentally select an external target, we won't find `xl/metadata.xml` or the
+        // `xl/richData/*` tables and extraction will incorrectly return an empty result.
+        let workbook_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="https://example.com/metadata.xml" TargetMode="External"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.microsoft.com/office/2017/06/relationships/richValue" Target="https://example.com/richData/richValue.xml" TargetMode="External"/>
+  <Relationship Id="rId4" Type="http://schemas.microsoft.com/office/2017/06/relationships/richValue" Target="richData/richValue.xml"/>
+  <Relationship Id="rId5" Type="http://schemas.microsoft.com/office/2022/10/relationships/richValueRel" Target="https://example.com/richData/richValueRel.xml" TargetMode="External"/>
+  <Relationship Id="rId6" Type="http://schemas.microsoft.com/office/2022/10/relationships/richValueRel" Target="richData/richValueRel.xml"/>
+</Relationships>"#;
+
+        let metadata = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+  <valueMetadata count="1">
+    <bk><rc t="1" v="0"/></bk>
+  </valueMetadata>
+</metadata>"#;
+
+        let worksheet = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" vm="1"/>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+        let rich_value = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<richValue>
+  <rv><v kind="rel">0</v></rv>
+</richValue>"#;
+
+        let rich_value_rel = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<richValueRel xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rel r:id="rId1"/>
+</richValueRel>"#;
+
+        let rich_value_rel_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>"#;
+
+        let pkg = build_package(&[
+            ("xl/_rels/workbook.xml.rels", workbook_rels),
+            ("xl/metadata.xml", metadata),
+            ("xl/worksheets/sheet1.xml", worksheet),
+            ("xl/richData/richValue.xml", rich_value),
+            ("xl/richData/richValueRel.xml", rich_value_rel),
+            ("xl/richData/_rels/richValueRel.xml.rels", rich_value_rel_rels),
+            ("xl/media/image1.png", b"png-bytes"),
+        ]);
+
+        let extracted = extract_embedded_images(&pkg).expect("extract embedded images");
+        assert_eq!(extracted.len(), 1);
+        assert_eq!(extracted[0].sheet_part, "xl/worksheets/sheet1.xml");
+        assert_eq!(extracted[0].cell, CellRef::from_a1("A1").unwrap());
+        assert_eq!(extracted[0].image_target, "xl/media/image1.png");
+        assert_eq!(extracted[0].bytes, b"png-bytes");
+        assert_eq!(extracted[0].alt_text, None);
+        assert!(!extracted[0].decorative);
+    }
 }
