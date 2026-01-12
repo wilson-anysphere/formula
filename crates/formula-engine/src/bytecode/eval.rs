@@ -335,6 +335,10 @@ mod tests {
         }
 
         fn column_slice(&self, col: i32, row_start: i32, row_end: i32) -> Option<&[f64]> {
+            // Count columnar reads too (used by bulk range functions like SUM) so short-circuit
+            // tests can catch unused branch evaluation even when it uses column slices instead of
+            // per-cell `get_value` calls.
+            self.reads.fetch_add(1, Ordering::SeqCst);
             self.inner.column_slice(col, row_start, row_end)
         }
 
@@ -359,6 +363,21 @@ mod tests {
         assert_eq!(value, Value::Number(1.0));
         assert_eq!(grid.reads(), 0, "unused IF branch should not be evaluated");
 
+        // IF(FALSE, SUM(A1:A10), 1) should not evaluate the TRUE branch, even though it would use
+        // column-slice access when evaluated.
+        let expr =
+            super::super::parse_formula("=IF(FALSE, SUM(A1:A10), 1)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Number(1.0));
+        assert_eq!(
+            grid.reads(),
+            0,
+            "unused IF branch should not be evaluated (including range reads)"
+        );
+
         // IF(TRUE, 1, A1) should not evaluate the FALSE branch.
         let expr = super::super::parse_formula("=IF(TRUE, 1, A1)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
@@ -369,6 +388,21 @@ mod tests {
 
         assert_eq!(value, Value::Number(1.0));
         assert_eq!(grid.reads(), 0, "unused IF branch should not be evaluated");
+
+        // IF(TRUE, 1, SUM(A1:A10)) should not evaluate the FALSE branch, even though it would use
+        // column-slice access when evaluated.
+        let expr =
+            super::super::parse_formula("=IF(TRUE, 1, SUM(A1:A10))", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Number(1.0));
+        assert_eq!(
+            grid.reads(),
+            0,
+            "unused IF branch should not be evaluated (including range reads)"
+        );
 
         // If the IF condition is an error, neither branch should be evaluated and the error should
         // be returned.
@@ -401,6 +435,19 @@ mod tests {
         assert_eq!(value, Value::Number(1.0));
         assert_eq!(grid.reads(), 0, "unused IFERROR fallback should not be evaluated");
 
+        // IFERROR(1, SUM(A1:A10)) should not evaluate the fallback.
+        let expr = super::super::parse_formula("=IFERROR(1, SUM(A1:A10))", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Number(1.0));
+        assert_eq!(
+            grid.reads(),
+            0,
+            "unused IFERROR fallback should not be evaluated (including range reads)"
+        );
+
         // IFERROR(1/0, A1) should evaluate the fallback.
         let expr = super::super::parse_formula("=IFERROR(1/0, A1)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
@@ -409,6 +456,19 @@ mod tests {
         let value = vm.eval(&program, &grid, 0, origin, &locale);
         assert_eq!(value, Value::Empty); // A1 is empty.
         assert_eq!(grid.reads(), 1, "IFERROR fallback should be evaluated for errors");
+
+        // IFERROR(1/0, SUM(A1:A10)) should evaluate the fallback (range read).
+        let expr =
+            super::super::parse_formula("=IFERROR(1/0, SUM(A1:A10))", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Number(0.0));
+        assert!(
+            grid.reads() > 0,
+            "IFERROR fallback should be evaluated for errors (including range reads)"
+        );
 
         // IFNA(1, A1) should not evaluate the fallback.
         let expr = super::super::parse_formula("=IFNA(1, A1)", origin).expect("parse");
@@ -419,6 +479,19 @@ mod tests {
         assert_eq!(value, Value::Number(1.0));
         assert_eq!(grid.reads(), 0, "unused IFNA fallback should not be evaluated");
 
+        // IFNA(1, SUM(A1:A10)) should not evaluate the fallback.
+        let expr = super::super::parse_formula("=IFNA(1, SUM(A1:A10))", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Number(1.0));
+        assert_eq!(
+            grid.reads(),
+            0,
+            "unused IFNA fallback should not be evaluated (including range reads)"
+        );
+
         // IFNA(1/0, A1) should not evaluate the fallback because the error is not #N/A.
         let expr = super::super::parse_formula("=IFNA(1/0, A1)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
@@ -428,6 +501,19 @@ mod tests {
         assert_eq!(value, Value::Error(super::super::value::ErrorKind::Div0));
         assert_eq!(grid.reads(), 0, "IFNA fallback should not be evaluated for non-#N/A errors");
 
+        // IFNA(1/0, SUM(A1:A10)) should not evaluate the fallback because the error is not #N/A.
+        let expr = super::super::parse_formula("=IFNA(1/0, SUM(A1:A10))", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Error(super::super::value::ErrorKind::Div0));
+        assert_eq!(
+            grid.reads(),
+            0,
+            "IFNA fallback should not be evaluated for non-#N/A errors (including range reads)"
+        );
+
         // IFNA(NA(), A1) should evaluate the fallback.
         let expr = super::super::parse_formula("=IFNA(NA(), A1)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
@@ -436,6 +522,18 @@ mod tests {
         let value = vm.eval(&program, &grid, 0, origin, &locale);
         assert_eq!(value, Value::Empty); // A1 is empty.
         assert_eq!(grid.reads(), 1, "IFNA fallback should be evaluated for #N/A");
+
+        // IFNA(NA(), SUM(A1:A10)) should evaluate the fallback (range read).
+        let expr = super::super::parse_formula("=IFNA(NA(), SUM(A1:A10))", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Number(0.0));
+        assert!(
+            grid.reads() > 0,
+            "IFNA fallback should be evaluated for #N/A (including range reads)"
+        );
     }
 
     #[test]

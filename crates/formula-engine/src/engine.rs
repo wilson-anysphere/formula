@@ -9502,10 +9502,7 @@ mod tests {
 
         let report = engine.bytecode_compile_report(10);
         assert_eq!(report.len(), 1);
-        assert_eq!(
-            report[0].reason,
-            BytecodeCompileReason::LowerError(bytecode::LowerError::Unsupported)
-        );
+        assert_eq!(report[0].reason, BytecodeCompileReason::IneligibleExpr);
     }
 
     #[test]
