@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { rmSync, writeFileSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { builtinModules, createRequire } from "node:module";
 import os from "node:os";
@@ -56,8 +57,8 @@ await collect(repoRoot, testFiles);
 testFiles.sort();
 
 const tsLoaderArgs = resolveTypeScriptLoaderArgs();
-const canStripTypes = supportsTypeStripping();
-const canExecuteTypeScript = canStripTypes || tsLoaderArgs.length > 0;
+const builtInTypeScript = getBuiltInTypeScriptSupport();
+const canExecuteTypeScript = builtInTypeScript.enabled || tsLoaderArgs.length > 0;
 let runnableTestFiles = canExecuteTypeScript ? testFiles : await filterTypeScriptImportTests(testFiles);
 const typeScriptFilteredCount = testFiles.length - runnableTestFiles.length;
 
@@ -101,8 +102,8 @@ if (runnableTestFiles.length === 0) {
 const baseNodeArgs = ["--no-warnings"];
 if (tsLoaderArgs.length > 0) {
   baseNodeArgs.push(...tsLoaderArgs);
-} else if (canStripTypes) {
-  baseNodeArgs.push("--experimental-strip-types");
+} else if (builtInTypeScript.enabled) {
+  baseNodeArgs.push(...builtInTypeScript.args);
   // Many TS sources in this repo use `.js` specifiers that point at `.ts` files
   // (bundler-style resolution). Node's default ESM resolver does not support that,
   // so we install a tiny loader that falls back from `./foo.js` -> `./foo.ts`.
@@ -197,11 +198,40 @@ if (exitCode !== 0) process.exit(exitCode);
 exitCode = await runTestBatch(unitTestFiles, testConcurrency);
 process.exit(exitCode);
 
-function supportsTypeStripping() {
-  const probe = spawnSync(process.execPath, ["--experimental-strip-types", "-e", "process.exit(0)"], {
+function getBuiltInTypeScriptSupport() {
+  // Prefer explicit flag support when available (older Node versions require it).
+  const flagProbe = spawnSync(process.execPath, ["--experimental-strip-types", "-e", "process.exit(0)"], {
     stdio: "ignore",
   });
-  return probe.status === 0;
+  if (flagProbe.status === 0) {
+    return { enabled: true, args: ["--experimental-strip-types"] };
+  }
+
+  // Newer Node versions may support executing `.ts` files without the flag. Probe that
+  // behavior by running a temporary `.ts` file with a basic type annotation.
+  const tmpFile = path.join(os.tmpdir(), `formula-strip-types-probe.${process.pid}.${Date.now()}.ts`);
+  try {
+    writeFileSync(
+      tmpFile,
+      [
+        "const x: number = 1;",
+        "if (x !== 1) throw new Error('strip-types probe failed');",
+        "process.exit(0);",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const nativeProbe = spawnSync(process.execPath, [tmpFile], { stdio: "ignore" });
+    if (nativeProbe.status === 0) {
+      return { enabled: true, args: [] };
+    }
+  } catch {
+    // ignore
+  } finally {
+    rmSync(tmpFile, { force: true });
+  }
+
+  return { enabled: false, args: [] };
 }
 
 /**
