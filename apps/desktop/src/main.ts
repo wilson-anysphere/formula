@@ -897,6 +897,16 @@ function activeCellNumberFormat(): string | null {
   return typeof format === "string" && format.trim() ? format : null;
 }
 
+function activeCellIndentLevel(): number {
+  const sheetId = app.getCurrentSheetId();
+  const cell = app.getActiveCell();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const docAny = app.getDocument() as any;
+  const raw = docAny.getCellFormat?.(sheetId, cell)?.alignment?.indent;
+  const value = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : 0;
+  return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+}
+
 function stepFontSize(current: number, direction: "increase" | "decrease"): number {
   const value = Number(current);
   const resolved = Number.isFinite(value) && value > 0 ? value : 11;
@@ -1206,6 +1216,8 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "home.alignment.center": true,
             "home.alignment.alignRight": true,
             "home.alignment.orientation": true,
+            "home.alignment.increaseIndent": true,
+            "home.alignment.decreaseIndent": true,
             "home.number.numberFormat": true,
             "home.number.moreFormats": true,
             "home.number.percent": true,
@@ -7117,6 +7129,31 @@ mountRibbon(ribbonReactRoot, {
       case "home.alignment.alignRight":
         applyFormattingToSelection("Align right", (doc, sheetId, ranges) => setHorizontalAlign(doc, sheetId, ranges, "right"));
         return;
+
+      case "home.alignment.increaseIndent": {
+        const current = activeCellIndentLevel();
+        const next = Math.min(250, current + 1);
+        if (next === current) return;
+        applyFormattingToSelection("Indent", (doc, sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { alignment: { indent: next } }, { label: "Indent" });
+          }
+        });
+        return;
+      }
+
+      case "home.alignment.decreaseIndent": {
+        const current = activeCellIndentLevel();
+        const next = Math.max(0, current - 1);
+        if (next === current) return;
+        applyFormattingToSelection("Indent", (doc, sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { alignment: { indent: next } }, { label: "Indent" });
+          }
+        });
+        return;
+      }
+
       case "home.alignment.orientation.angleCounterclockwise":
         applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
           let applied = true;
