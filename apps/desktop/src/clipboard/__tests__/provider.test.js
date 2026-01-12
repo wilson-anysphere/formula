@@ -96,6 +96,91 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("web: read ignores oversized image/png blobs", async () => {
+    const large = new Blob([new ArrayBuffer(11 * 1024 * 1024)], { type: "image/png" });
+
+    // Ensure we don't accidentally allocate another large ArrayBuffer by calling
+    // `Blob#arrayBuffer()`.
+    // @ts-ignore
+    large.arrayBuffer = async () => {
+      throw new Error("should not call arrayBuffer() for oversized images");
+    };
+
+    await withGlobals(
+      {
+        __TAURI__: undefined,
+        navigator: {
+          clipboard: {
+            async read() {
+              return [
+                {
+                  types: ["image/png", "text/plain"],
+                  /**
+                   * @param {string} type
+                   */
+                  async getType(type) {
+                    switch (type) {
+                      case "image/png":
+                        return large;
+                      case "text/plain":
+                        return new Blob(["hello"], { type });
+                      default:
+                        throw new Error(`Unexpected clipboard type: ${type}`);
+                    }
+                  },
+                },
+              ];
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.deepEqual(content, { text: "hello" });
+      }
+    );
+  });
+
+  await t.test("web: read returns small image/png blobs", async () => {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+
+    await withGlobals(
+      {
+        __TAURI__: undefined,
+        navigator: {
+          clipboard: {
+            async read() {
+              return [
+                {
+                  types: ["image/png"],
+                  /**
+                   * @param {string} type
+                   */
+                  async getType(type) {
+                    switch (type) {
+                      case "image/png":
+                        return new Blob([bytes], { type });
+                      default:
+                        throw new Error(`Unexpected clipboard type: ${type}`);
+                    }
+                  },
+                },
+              ];
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+
+        assert.ok(content.imagePng instanceof Uint8Array);
+        assert.deepEqual(content, { imagePng: bytes });
+      }
+    );
+  });
+
   await t.test("web: write uses navigator.clipboard.write with text/plain + text/html", async () => {
     /** @type {any[]} */
     const writes = [];
