@@ -89,16 +89,11 @@ def _scan_features(zip_names: list[str]) -> dict[str, Any]:
     features["has_connections"] = "xl/connections.xml" in zip_names
     features["has_shared_strings"] = "xl/sharedStrings.xml" in zip_names
     # Excel's "Images in Cell" feature (aka `cellImages`).
-    cellimages_part_re = re.compile(r"^cellimages\d*\.xml$")
-    zip_names_casefold = [n.replace("\\", "/").casefold() for n in zip_names]
+    cellimages_part_re = re.compile(r"(?i)^cellimages\d*\.xml$")
     features["has_cell_images"] = any(
-        n == "xl/cellimages.xml"
-        or n.endswith("/cellimages.xml")
-        # Defensive: some writers may include folder-based layouts under `xl/cellImages/`.
-        or n.startswith("xl/cellimages/")
-        # Also detect numeric-suffix variants like `xl/cellImages1.xml`.
-        or (n.startswith("xl/") and cellimages_part_re.match(posixpath.basename(n)))
-        for n in zip_names_casefold
+        (normalized := n.replace("\\", "/")).casefold().startswith("xl/")
+        and cellimages_part_re.match(posixpath.basename(normalized))
+        for n in zip_names
     )
     features["sheet_xml_count"] = len([n for n in zip_names if n.startswith("xl/worksheets/sheet")])
     return features
@@ -124,7 +119,7 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
     import re
 
     cellimages_part_re = re.compile(r"(?i)^cellimages(\d*)\.xml$")
-    zip_names_casefold_set = {n.casefold() for n in zip_names}
+    zip_names_casefold_set = {n.replace("\\", "/").casefold() for n in zip_names}
 
     def _is_cellimages_part(n: str) -> bool:
         normalized = n.replace("\\", "/")
