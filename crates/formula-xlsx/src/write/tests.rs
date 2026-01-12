@@ -139,7 +139,12 @@ fn sheetdata_patch_emits_vm_cm_for_inserted_cells() {
     doc.workbook
         .sheet_mut(sheet_id)
         .expect("sheet exists")
-        .set_value(b1, formula_model::CellValue::Number(2.0));
+        // Rich-data cells (entities/images) are typically represented in worksheets as a cached
+        // `#VALUE!` placeholder plus a `vm="..."` pointer into `xl/metadata.xml`.
+        .set_value(
+            b1,
+            formula_model::CellValue::Error(formula_model::ErrorValue::Value),
+        );
 
     doc.meta.cell_meta.insert(
         (sheet_id, b1),
