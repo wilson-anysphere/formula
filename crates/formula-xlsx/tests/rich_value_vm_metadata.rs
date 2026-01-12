@@ -27,14 +27,18 @@ fn build_fixture_xlsx() -> Vec<u8> {
   <metadataTypes count="1">
     <metadataType name="XLRICHVALUE"/>
   </metadataTypes>
-  <metadataRecords count="1">
-    <mdr>
-      <xlrd:rvb i="7"/>
-    </mdr>
-  </metadataRecords>
+  <futureMetadata name="XLRICHVALUE" count="1">
+    <bk>
+      <extLst>
+        <ext uri="{00000000-0000-0000-0000-000000000000}">
+          <xlrd:rvb i="7"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
   <valueMetadata count="1">
     <bk>
-      <rc t="0" v="0"/>
+      <rc t="1" v="0"/>
     </bk>
   </valueMetadata>
 </metadata>
@@ -87,4 +91,3 @@ fn loads_rich_value_indices_from_vm_and_metadata_part() -> Result<(), Box<dyn st
 
     Ok(())
 }
-

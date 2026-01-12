@@ -662,6 +662,12 @@ struct RelationshipsInfo {
 /// resolved. In that case we treat the cell as having no rich value.
 #[derive(Debug, Clone, Default)]
 struct MetadataPart {
+    /// Direct mapping from worksheet `vm` indices to rich value record indices.
+    ///
+    /// When `xl/metadata.xml` follows the modern `metadataTypes` + `futureMetadata` form, we can
+    /// resolve these indices via the richer DOM-based parser in `crate::rich_data::metadata`.
+    /// The mapping is stored in this field so worksheet parsing can remain streaming.
+    vm_to_rich_value: HashMap<u32, u32>,
     /// Metadata type indices that appear to represent rich values.
     rich_type_indices: HashSet<u32>,
     /// Mapping of `metadataRecords` entry index -> rich value record index.
@@ -673,6 +679,27 @@ struct MetadataPart {
 
 impl MetadataPart {
     fn parse(xml: &[u8]) -> Result<Self, ReadError> {
+        if let Ok(parsed) = crate::rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map(xml)
+        {
+            if !parsed.is_empty() {
+                // Excel's `vm` appears in the wild as both 0-based and 1-based. To be tolerant,
+                // insert both the original key and its 0-based equivalent.
+                let mut vm_to_rich_value: HashMap<u32, u32> =
+                    HashMap::with_capacity(parsed.len().saturating_mul(2));
+                for (vm, idx) in parsed {
+                    vm_to_rich_value.entry(vm).or_insert(idx);
+                    if vm > 0 {
+                        vm_to_rich_value.entry(vm - 1).or_insert(idx);
+                    }
+                }
+
+                return Ok(Self {
+                    vm_to_rich_value,
+                    ..Default::default()
+                });
+            }
+        }
+
         let mut reader = Reader::from_reader(xml);
         reader.config_mut().trim_text(true);
         let mut buf = Vec::new();
@@ -832,6 +859,7 @@ impl MetadataPart {
         }
 
         Ok(Self {
+            vm_to_rich_value: HashMap::new(),
             rich_type_indices,
             rich_value_by_record,
             value_metadata,
@@ -839,6 +867,15 @@ impl MetadataPart {
     }
 
     fn vm_to_rich_value_index(&self, vm: u32) -> Option<u32> {
+        if let Some(idx) = self.vm_to_rich_value.get(&vm) {
+            return Some(*idx);
+        }
+        if let Some(vm) = vm.checked_sub(1) {
+            if let Some(idx) = self.vm_to_rich_value.get(&vm) {
+                return Some(*idx);
+            }
+        }
+
         self.vm_to_rich_value_index_with_candidate(vm).or_else(|| {
             vm.checked_sub(1)
                 .and_then(|vm| self.vm_to_rich_value_index_with_candidate(vm))
