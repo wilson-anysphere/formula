@@ -377,6 +377,35 @@ test.describe("split view", () => {
     expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"))).toBe("");
   });
 
+  test("Shift+F2 opens the comments panel and focuses the new comment input from the secondary pane", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
+
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+    // Focus/select A1 in secondary pane.
+    await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    await secondary.focus();
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe("grid-secondary");
+
+    await page.keyboard.press("Shift+F2");
+
+    const panel = page.getByTestId("comments-panel");
+    await expect(panel).toBeVisible();
+
+    const input = page.getByTestId("new-comment-input");
+    await expect(input).toBeVisible();
+    await expect(input).toBeFocused();
+  });
+
   test("primary in-cell edits commit on blur when clicking another cell (shared grid)", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());

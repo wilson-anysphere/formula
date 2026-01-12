@@ -446,6 +446,9 @@ export function registerBuiltinCommands(params: {
     "comments.addComment",
     t("command.comments.addComment"),
     () => {
+      // Match spreadsheet shortcut behavior: don't trigger comment UX while the user is
+      // actively editing a cell/formula (Excel-style).
+      if (app.isEditing()) return;
       app.openCommentsPanel();
       app.focusNewCommentInput();
     },

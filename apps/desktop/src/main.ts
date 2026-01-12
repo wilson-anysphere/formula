@@ -41,7 +41,6 @@ import { LayoutController } from "./layout/layoutController.js";
 import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
 import { SecondaryGridView } from "./grid/splitView/secondaryGridView.js";
-import { handleSecondaryGridKeyDown } from "./grid/splitView/secondaryGridShortcuts.js";
 import { resolveDesktopGridMode } from "./grid/shared/desktopGridMode.js";
 import { getPanelTitle, panelRegistry, PanelIds } from "./panels/panelRegistry.js";
 import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
@@ -3156,16 +3155,20 @@ if (
 
   // --- Split view secondary pane keyboard shortcuts ---------------------------------
   //
-  // SpreadsheetApp owns most Excel-style shortcuts, but its grid-level keydown handler only runs
-  // when the primary grid element (`#grid`) has focus. When focus is in the secondary pane we need
-  // to map the same keystrokes back into SpreadsheetApp command APIs.
+  // Most Excel-style shortcuts are now handled by the global KeybindingService /
+  // CommandRegistry (see `./commands/builtinKeybindings.ts` and `registerBuiltinCommands.ts`).
+  //
+  // Keep only the pieces that cannot yet be expressed as commands (e.g. canceling an
+  // in-progress fill-handle drag, which is owned by the secondary renderer).
   gridSecondaryEl.addEventListener("keydown", (e) => {
-    handleSecondaryGridKeyDown(e, {
-      app,
-      isSpreadsheetEditing,
-      isTextInputTarget,
-      cancelFillHandleDrag: () => secondaryGridView?.grid.cancelFillHandleDrag() ?? false,
-    });
+    if (e.defaultPrevented) return;
+
+    // Cancel an in-progress fill handle drag (matches primary-grid Escape semantics).
+    if (e.key === "Escape") {
+      if (secondaryGridView?.grid.cancelFillHandleDrag()) {
+        e.preventDefault();
+      }
+    }
   });
 
   const workspaceManager = new LayoutWorkspaceManager({ storage: localStorage, panelRegistry });
