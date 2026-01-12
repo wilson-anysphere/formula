@@ -30913,6 +30913,95 @@
       "id": "pduration_714b36cd13f7"
     },
     {
+      "formula": "=COUPDAYBS(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYBS"
+      ],
+      "id": "coupdaybs_4b2eba1dee34"
+    },
+    {
+      "formula": "=COUPDAYS(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYS"
+      ],
+      "id": "coupdays_f155f62d6a93"
+    },
+    {
+      "formula": "=COUPDAYSNC(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYSNC"
+      ],
+      "id": "coupdaysnc_934b16a50735"
+    },
+    {
+      "formula": "=COUPNCD(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPNCD"
+      ],
+      "id": "coupncd_f5e830ea3bf5"
+    },
+    {
+      "formula": "=COUPNUM(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPNUM"
+      ],
+      "id": "coupnum_7e75448b6428"
+    },
+    {
+      "formula": "=COUPPCD(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPPCD"
+      ],
+      "id": "couppcd_788e658c75dd"
+    },
+    {
+      "formula": "=FVSCHEDULE(100,{0.1,0.2})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "FVSCHEDULE"
+      ],
+      "id": "fvschedule_a45f06da5a3b"
+    },
+    {
+      "formula": "=FVSCHEDULE(100,A1:A2)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 0.1
+        },
+        {
+          "cell": "A2",
+          "value": 0.2
+        }
+      ],
+      "tags": [
+        "financial",
+        "FVSCHEDULE"
+      ],
+      "id": "fvschedule_bd22748f5227"
+    },
+    {
       "formula": "=SLN(30, 0, 3)",
       "outputCell": "C1",
       "inputs": [],
@@ -31433,6 +31522,54 @@
       ],
       "description": "ODDLYIELD with a price that implies a negative yield if allowed (confirm whether Excel returns a negative yield or #NUM!)",
       "id": "oddlyield_high_price_ee9439059f8e"
+    },
+    {
+      "formula": "=ODDFPRICE(43831,44378,43739,44013,0,0.1,100,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE",
+        "zero-coupon"
+      ],
+      "description": "ODDFPRICE zero-coupon: discounted redemption with odd first coupon schedule",
+      "id": "financial_oddfprice_zero_coupon_b8408a077367"
+    },
+    {
+      "formula": "=ODDFYIELD(43831,44378,43739,44013,0,86.3837598531476,100,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFYIELD",
+        "zero-coupon"
+      ],
+      "description": "ODDFYIELD inverts ODDFPRICE for a zero-coupon bond",
+      "id": "financial_oddfyield_zero_coupon_36c9153d9464"
+    },
+    {
+      "formula": "=ODDLPRICE(44228,44317,44197,0,0.1,100,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLPRICE",
+        "zero-coupon"
+      ],
+      "description": "ODDLPRICE zero-coupon: discounted redemption with odd last coupon schedule",
+      "id": "financial_oddlprice_zero_coupon_f0be8364d2e7"
+    },
+    {
+      "formula": "=ODDLYIELD(44228,44317,44197,0,97.59000729485331,100,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLYIELD",
+        "zero-coupon"
+      ],
+      "description": "ODDLYIELD inverts ODDLPRICE for a zero-coupon bond",
+      "id": "financial_oddlyield_zero_coupon_f5ac1d87a838"
     },
     {
       "formula": "=ODDFPRICE(\"2008-11-11\",\"2021-03-01\",\"2008-10-15\",\"2009-03-01\",0.0785,0.0625,100,2,0)",

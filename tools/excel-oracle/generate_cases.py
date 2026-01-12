@@ -1780,6 +1780,55 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="nominal", tags=["financial", "NOMINAL"], formula="=NOMINAL(0.1,12)")
     _add_case(cases, prefix="rri", tags=["financial", "RRI"], formula="=RRI(10,-100,200)")
     _add_case(cases, prefix="pduration", tags=["financial", "PDURATION"], formula="=PDURATION(0.025,2000,2200)")
+    _add_case(
+        cases,
+        prefix="coupdaybs",
+        tags=["financial", "COUPDAYBS"],
+        formula="=COUPDAYBS(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+    )
+    _add_case(
+        cases,
+        prefix="coupdays",
+        tags=["financial", "COUPDAYS"],
+        formula="=COUPDAYS(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+    )
+    _add_case(
+        cases,
+        prefix="coupdaysnc",
+        tags=["financial", "COUPDAYSNC"],
+        formula="=COUPDAYSNC(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+    )
+    _add_case(
+        cases,
+        prefix="coupncd",
+        tags=["financial", "COUPNCD"],
+        formula="=COUPNCD(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+    )
+    _add_case(
+        cases,
+        prefix="coupnum",
+        tags=["financial", "COUPNUM"],
+        formula="=COUPNUM(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+    )
+    _add_case(
+        cases,
+        prefix="couppcd",
+        tags=["financial", "COUPPCD"],
+        formula="=COUPPCD(DATE(2024,6,15),DATE(2025,1,1),2,0)",
+    )
+    _add_case(
+        cases,
+        prefix="fvschedule",
+        tags=["financial", "FVSCHEDULE"],
+        formula="=FVSCHEDULE(100,{0.1,0.2})",
+    )
+    _add_case(
+        cases,
+        prefix="fvschedule",
+        tags=["financial", "FVSCHEDULE"],
+        formula="=FVSCHEDULE(100,A1:A2)",
+        inputs=[CellInput("A1", 0.1), CellInput("A2", 0.2)],
+    )
     _add_case(cases, prefix="sln", tags=["financial", "SLN"], formula="=SLN(30, 0, 3)")
     _add_case(cases, prefix="syd", tags=["financial", "SYD"], formula="=SYD(30, 0, 3, 1)")
     _add_case(cases, prefix="ddb", tags=["financial", "DDB"], formula="=DDB(1000, 100, 5, 1)")
@@ -2031,6 +2080,38 @@ def generate_cases() -> dict[str, Any]:
         tags=["financial", "odd_coupon", "ODDLYIELD"],
         formula="=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,300,100,2,0)",
         description="ODDLYIELD with a price that implies a negative yield if allowed (confirm whether Excel returns a negative yield or #NUM!)",
+    )
+    _add_case(
+        cases,
+        prefix="financial_oddfprice_zero_coupon",
+        tags=["financial", "ODDFPRICE", "zero-coupon"],
+        formula="=ODDFPRICE(43831,44378,43739,44013,0,0.1,100,2,0)",
+        output_cell="A1",
+        description="ODDFPRICE zero-coupon: discounted redemption with odd first coupon schedule",
+    )
+    _add_case(
+        cases,
+        prefix="financial_oddfyield_zero_coupon",
+        tags=["financial", "ODDFYIELD", "zero-coupon"],
+        formula="=ODDFYIELD(43831,44378,43739,44013,0,86.3837598531476,100,2,0)",
+        output_cell="A1",
+        description="ODDFYIELD inverts ODDFPRICE for a zero-coupon bond",
+    )
+    _add_case(
+        cases,
+        prefix="financial_oddlprice_zero_coupon",
+        tags=["financial", "ODDLPRICE", "zero-coupon"],
+        formula="=ODDLPRICE(44228,44317,44197,0,0.1,100,2,0)",
+        output_cell="A1",
+        description="ODDLPRICE zero-coupon: discounted redemption with odd last coupon schedule",
+    )
+    _add_case(
+        cases,
+        prefix="financial_oddlyield_zero_coupon",
+        tags=["financial", "ODDLYIELD", "zero-coupon"],
+        formula="=ODDLYIELD(44228,44317,44197,0,97.59000729485331,100,2,0)",
+        output_cell="A1",
+        description="ODDLYIELD inverts ODDLPRICE for a zero-coupon bond",
     )
 
     _add_case(

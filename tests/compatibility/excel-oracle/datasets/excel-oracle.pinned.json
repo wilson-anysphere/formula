@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T09:45:50.862555316Z",
+  "generatedAt": "2026-01-12T09:57:46.788859085Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "8a9441ffad7e73d4d1254a6a2ec092740bfa6e404b81d613d0d2233c9e2f2b37",
-    "count": 1599
+    "sha256": "724b5a364413d8b7b5b7fcfda674f8f800f8c50a63b2141fbec4e4bf06b8188f",
+    "count": 1611
   },
   "results": [
     {
@@ -14575,6 +14575,86 @@
       "displayText": "3.859866162622662"
     },
     {
+      "caseId": "coupdaybs_4b2eba1dee34",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 164.0
+      },
+      "address": "C1",
+      "displayText": "164"
+    },
+    {
+      "caseId": "coupdays_f155f62d6a93",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 180.0
+      },
+      "address": "C1",
+      "displayText": "180"
+    },
+    {
+      "caseId": "coupdaysnc_934b16a50735",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 16.0
+      },
+      "address": "C1",
+      "displayText": "16"
+    },
+    {
+      "caseId": "coupncd_f5e830ea3bf5",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 45474.0
+      },
+      "address": "C1",
+      "displayText": "45474"
+    },
+    {
+      "caseId": "coupnum_7e75448b6428",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "couppcd_788e658c75dd",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 45292.0
+      },
+      "address": "C1",
+      "displayText": "45292"
+    },
+    {
+      "caseId": "fvschedule_a45f06da5a3b",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 132.0
+      },
+      "address": "C1",
+      "displayText": "132"
+    },
+    {
+      "caseId": "fvschedule_bd22748f5227",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 132.0
+      },
+      "address": "C1",
+      "displayText": "132"
+    },
+    {
       "caseId": "sln_61d0cf1afc0c",
       "outputCell": "C1",
       "result": {
@@ -15043,6 +15123,46 @@
       },
       "address": "C1",
       "displayText": "-1.6534921783048486"
+    },
+    {
+      "caseId": "financial_oddfprice_zero_coupon_b8408a077367",
+      "outputCell": "A1",
+      "result": {
+        "t": "n",
+        "v": 86.3837598531476
+      },
+      "address": "A1",
+      "displayText": "86.3837598531476"
+    },
+    {
+      "caseId": "financial_oddfyield_zero_coupon_36c9153d9464",
+      "outputCell": "A1",
+      "result": {
+        "t": "n",
+        "v": 0.1
+      },
+      "address": "A1",
+      "displayText": "0.1"
+    },
+    {
+      "caseId": "financial_oddlprice_zero_coupon_f0be8364d2e7",
+      "outputCell": "A1",
+      "result": {
+        "t": "n",
+        "v": 97.59000729485332
+      },
+      "address": "A1",
+      "displayText": "97.59000729485332"
+    },
+    {
+      "caseId": "financial_oddlyield_zero_coupon_f5ac1d87a838",
+      "outputCell": "A1",
+      "result": {
+        "t": "n",
+        "v": 0.10000000000000062
+      },
+      "address": "A1",
+      "displayText": "0.10000000000000062"
     },
     {
       "caseId": "oddfprice_date_text_b84f071d663c",

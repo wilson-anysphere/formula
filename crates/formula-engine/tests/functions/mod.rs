@@ -28,6 +28,7 @@ mod financial_misc;
 mod financial_odd_coupon;
 mod financial_oddcoupons;
 mod financial_pduration;
+mod financial_schedules;
 mod financial_time_value;
 #[cfg(not(target_arch = "wasm32"))]
 mod financial_odd_coupon_prop;
