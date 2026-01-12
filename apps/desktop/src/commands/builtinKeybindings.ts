@@ -151,16 +151,19 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
   {
     command: "format.numberFormat.currency",
     key: "ctrl+shift+$",
+    mac: "cmd+shift+$",
     when: null,
   },
   {
     command: "format.numberFormat.percent",
     key: "ctrl+shift+%",
+    mac: "cmd+shift+%",
     when: null,
   },
   {
     command: "format.numberFormat.date",
     key: "ctrl+shift+#",
+    mac: "cmd+shift+#",
     when: null,
   },
   {
