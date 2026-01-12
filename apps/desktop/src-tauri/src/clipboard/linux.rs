@@ -442,6 +442,38 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "desktop"))]
+    #[test]
+    fn read_returns_unavailable_without_desktop_feature() {
+        let err = super::read().expect_err("read should be unavailable without the `desktop` feature");
+        match err {
+            super::ClipboardError::Unavailable(msg) => {
+                assert!(
+                    msg.contains("GTK clipboard backend requires the `desktop` feature"),
+                    "unexpected error message: {msg}"
+                );
+            }
+            other => panic!("expected ClipboardError::Unavailable, got {other:?}"),
+        }
+    }
+
+    #[cfg(not(feature = "desktop"))]
+    #[test]
+    fn write_returns_unavailable_without_desktop_feature() {
+        let payload = super::ClipboardWritePayload::default();
+        let err = super::write(&payload)
+            .expect_err("write should be unavailable without the `desktop` feature");
+        match err {
+            super::ClipboardError::Unavailable(msg) => {
+                assert!(
+                    msg.contains("GTK clipboard backend requires the `desktop` feature"),
+                    "unexpected error message: {msg}"
+                );
+            }
+            other => panic!("expected ClipboardError::Unavailable, got {other:?}"),
+        }
+    }
+
     #[test]
     fn choose_best_target_prefers_exact_match() {
         let targets = vec!["text/html;charset=utf-8", "text/html"];
