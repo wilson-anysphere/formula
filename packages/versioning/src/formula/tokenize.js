@@ -1,8 +1,9 @@
 /**
  * Very small Excel-ish formula tokenizer.
  *
- * This intentionally supports only the subset needed for semantic diff:
- * - numbers, strings, identifiers, cell refs, basic operators, ranges, and function calls
+ * This intentionally supports only the subset needed for semantic diff + formula history diffs:
+ * - numbers, strings, identifiers, basic operators, ranges, and function calls
+ * - a handful of extra operators/punctuation seen in real-world formulas (e.g. <=, >=, <>, &, [], {})
  *
  * It is NOT intended to be a full Excel parser.
  */

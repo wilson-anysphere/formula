@@ -239,8 +239,14 @@ function commonSuffixLength(a, b, equals, prefixLen) {
  *
  * By default (`opts.normalize !== false`), formulas are lightly normalized before
  * tokenization:
- * - trimmed
- * - ensured to have a leading `=`
+ * - trimmed + ensured to have a leading `=`
+ * - identifier tokens (functions/cell refs/names) are compared case-insensitively
+ * - `,` and `;` are treated as equivalent argument separators (locale differences)
+ * - number tokens are compared by numeric value (e.g. `1` vs `1.0`)
+ *
+ * When normalization is enabled, `equal` ops emit tokens from `newFormula` so
+ * callers can reconstruct/render the "after" formula even when cosmetic
+ * differences were ignored.
  *
  * @param {string | null} oldFormula
  * @param {string | null} newFormula

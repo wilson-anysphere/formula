@@ -114,6 +114,7 @@ export function normalizeFormula(formula) {
  * - trim leading/trailing whitespace
  * - treat empty/whitespace-only as `null`
  * - ensure a leading `=` so callers can consistently tokenize/render formulas
+ * - treat a bare `=` (or `=   `) as empty (`null`)
  *
  * This is intentionally *not* semantic normalization; use {@link normalizeFormula}
  * when you need to compare formulas for semantic equivalence.
