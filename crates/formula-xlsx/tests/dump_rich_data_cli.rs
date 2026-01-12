@@ -7,9 +7,15 @@ use formula_model::{Alignment, Range};
 use formula_xlsx::write_minimal_xlsx;
 use tempfile::tempdir;
 
-fn build_synthetic_rich_data_xlsx_impl(include_rich_value_part: bool) -> Vec<u8> {
+fn build_synthetic_rich_data_xlsx_impl(include_rich_value_part: bool, include_metadata: bool) -> Vec<u8> {
     let rich_value_override = if include_rich_value_part {
         r#"  <Override PartName="/xl/richData/richValue.xml" ContentType="application/vnd.ms-excel.richvalue+xml"/>
+"#
+    } else {
+        ""
+    };
+    let metadata_override = if include_metadata {
+        r#"  <Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
 "#
     } else {
         ""
@@ -23,10 +29,10 @@ fn build_synthetic_rich_data_xlsx_impl(include_rich_value_part: bool) -> Vec<u8>
   <Default Extension="png" ContentType="image/png"/>
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-  <Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
-{rich_value_override}  <Override PartName="/xl/richData/richValueRel.xml" ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
+{metadata_override}{rich_value_override}  <Override PartName="/xl/richData/richValueRel.xml" ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
 </Types>"#,
-        rich_value_override = rich_value_override
+        rich_value_override = rich_value_override,
+        metadata_override = metadata_override,
     );
 
     let root_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -42,11 +48,20 @@ fn build_synthetic_rich_data_xlsx_impl(include_rich_value_part: bool) -> Vec<u8>
   </sheets>
 </workbook>"#;
 
-    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    let metadata_rel = if include_metadata {
+        r#"  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"/>
+"#
+    } else {
+        ""
+    };
+
+    let workbook_rels = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"/>
-</Relationships>"#;
+{metadata_rel}</Relationships>"#,
+        metadata_rel = metadata_rel
+    );
 
     let sheet1_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -130,8 +145,10 @@ fn build_synthetic_rich_data_xlsx_impl(include_rich_value_part: bool) -> Vec<u8>
     zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
     zip.write_all(sheet1_xml.as_bytes()).unwrap();
 
-    zip.start_file("xl/metadata.xml", options).unwrap();
-    zip.write_all(metadata_xml.as_bytes()).unwrap();
+    if include_metadata {
+        zip.start_file("xl/metadata.xml", options).unwrap();
+        zip.write_all(metadata_xml.as_bytes()).unwrap();
+    }
 
     if include_rich_value_part {
         zip.start_file("xl/richData/richValue.xml", options)
@@ -154,11 +171,15 @@ fn build_synthetic_rich_data_xlsx_impl(include_rich_value_part: bool) -> Vec<u8>
 }
 
 fn build_synthetic_rich_data_xlsx() -> Vec<u8> {
-    build_synthetic_rich_data_xlsx_impl(true)
+    build_synthetic_rich_data_xlsx_impl(true, true)
 }
 
 fn build_synthetic_rich_data_xlsx_without_rich_value_part() -> Vec<u8> {
-    build_synthetic_rich_data_xlsx_impl(false)
+    build_synthetic_rich_data_xlsx_impl(false, true)
+}
+
+fn build_synthetic_rich_data_xlsx_without_metadata() -> Vec<u8> {
+    build_synthetic_rich_data_xlsx_impl(false, false)
 }
 
 #[test]
@@ -283,6 +304,64 @@ fn dump_rich_data_cli_extracts_cell_images_and_writes_manifest(
     assert!(cols[2].parse::<usize>().is_ok(), "bytes column not numeric: {row}");
     assert_eq!(cols[3], "Sheet1_A1.png");
     assert_eq!(cols[4], "xl/media/image1.png");
+    assert_eq!(cols[5], "0");
+    assert_eq!(cols[6], "-");
+    assert_eq!(cols[7], "-");
+
+    Ok(())
+}
+
+#[test]
+fn dump_rich_data_cli_extracts_cell_images_without_metadata(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_synthetic_rich_data_xlsx_without_metadata();
+    let dir = tempdir()?;
+    let path = dir.path().join("fixture.xlsx");
+    std::fs::write(&path, bytes)?;
+
+    let out_dir = dir.path().join("out");
+
+    let bin = env!("CARGO_BIN_EXE_dump_rich_data");
+    let output = Command::new(bin)
+        .arg(&path)
+        .arg("--extract-cell-images-out")
+        .arg(&out_dir)
+        .output()?;
+    assert!(
+        output.status.success(),
+        "dump_rich_data failed: status={:?} stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let image_path = out_dir.join("Sheet1_A1.png");
+    assert!(
+        image_path.exists(),
+        "expected extracted image at {}",
+        image_path.display()
+    );
+
+    let manifest_path = out_dir.join("manifest.tsv");
+    let manifest = std::fs::read_to_string(&manifest_path)?;
+    let mut lines = manifest.lines();
+
+    let header = lines.next().unwrap_or_default();
+    assert_eq!(
+        header,
+        "sheet\tcell\tbytes\tfile\timage_part\tcalc_origin\talt_text\thyperlink"
+    );
+
+    let row = lines.next().unwrap_or_default();
+    let cols: Vec<&str> = row.split('\t').collect();
+    assert_eq!(cols.len(), 8, "unexpected manifest row: {row}");
+
+    assert_eq!(cols[0], "Sheet1");
+    assert_eq!(cols[1], "A1");
+    assert!(cols[2].parse::<usize>().is_ok(), "bytes column not numeric: {row}");
+    assert_eq!(cols[3], "Sheet1_A1.png");
+    assert_eq!(cols[4], "xl/media/image1.png");
+    // Metadata is missing, so the extractor falls back to relationship-slot indexing without
+    // rdRichValue CalcOrigin/alt text data.
     assert_eq!(cols[5], "0");
     assert_eq!(cols[6], "-");
     assert_eq!(cols[7], "-");
