@@ -273,8 +273,12 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
 
     // Focus the formula bar input (it is a textarea).
+    //
+    // In view mode the formula bar input is hidden and hover events are handled by the
+    // highlighted <pre> below, so click the highlight to enter edit mode and focus the textarea.
+    await page.getByTestId("formula-highlight").click();
     const formulaInput = page.getByTestId("formula-input");
-    await formulaInput.click();
+    await expect(formulaInput).toBeVisible();
     await expect(formulaInput).toBeFocused();
     const initialSheetId = await page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId());
 
@@ -309,7 +313,7 @@ test.describe("sheet tabs", () => {
     await input.fill("A/B");
     await input.press("Enter");
 
-    await expect(page.locator('[data-testid="toast"]').filter({ hasText: /cannot contain/i })).toBeVisible();
+    await expect(page.locator('[data-testid="toast"]').filter({ hasText: /invalid character/i })).toBeVisible();
 
     // Attempt to switch sheets; invalid rename should block activation.
     await page.getByTestId("sheet-tab-Sheet2").click();
