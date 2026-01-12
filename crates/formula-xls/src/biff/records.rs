@@ -223,6 +223,17 @@ impl<'a> LogicalBiffRecordIter<'a> {
             allows_continuation,
         }
     }
+
+    pub(crate) fn from_offset(
+        workbook_stream: &'a [u8],
+        offset: usize,
+        allows_continuation: fn(u16) -> bool,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            iter: BiffRecordIter::from_offset(workbook_stream, offset)?.peekable(),
+            allows_continuation,
+        })
+    }
 }
 
 impl<'a> Iterator for LogicalBiffRecordIter<'a> {
@@ -420,5 +431,31 @@ mod tests {
         let second = iter.next().unwrap().unwrap();
         assert_eq!(second.record_id, RECORD_CONTINUE);
         assert_eq!(second.data.as_ref(), &[3]);
+    }
+
+    #[test]
+    fn logical_iter_from_offset_starts_at_record_boundary() {
+        let prefix = record(0x0001, &[0xAA]);
+        let start_offset = prefix.len();
+
+        let stream = [
+            prefix,
+            record(0x00AA, &[1, 2]),
+            record(RECORD_CONTINUE, &[3]),
+            record(0x00BB, &[9]),
+        ]
+        .concat();
+
+        let allows = |id: u16| id == 0x00AA;
+        let mut iter = LogicalBiffRecordIter::from_offset(&stream, start_offset, allows).unwrap();
+
+        let first = iter.next().unwrap().unwrap();
+        assert_eq!(first.record_id, 0x00AA);
+        assert_eq!(first.data.as_ref(), &[1, 2, 3]);
+
+        let second = iter.next().unwrap().unwrap();
+        assert_eq!(second.record_id, 0x00BB);
+        assert_eq!(second.data.as_ref(), &[9]);
+        assert!(iter.next().is_none());
     }
 }
