@@ -495,13 +495,17 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
 
   const startProviderPoll = (): void => {
     if (providerPollTimer != null) return;
+    // Similar to `startOfflinePoll`, re-arm on each tick only if polling is still needed.
+    // This avoids a race where `render()` decides polling is no longer required but the
+    // polling tick would otherwise reschedule itself unconditionally.
     const tick = (): void => {
       if (abortController.signal.aborted) {
         stopProviderPoll();
         return;
       }
+      providerPollTimer = null;
       render();
-      providerPollTimer = globalThis.setTimeout(tick, 1000) as unknown as number;
+      // `render()` will call `startProviderPoll()` again if it still needs polling.
     };
     providerPollTimer = globalThis.setTimeout(tick, 1000) as unknown as number;
   };
