@@ -7742,7 +7742,7 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 
     let if_not_found = match args.get(3) {
         None | Some(Value::Missing) => None,
-        Some(v) => Some(v.clone()),
+        Some(v) => Some(v),
     };
 
     let match_mode = match parse_xmatch_match_mode(args.get(4)) {
@@ -7784,7 +7784,7 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         }
     };
 
-    let lookup_value_engine = bytecode_value_to_engine(lookup_value.clone());
+    let lookup_value_engine = bytecode_value_to_engine(lookup_value);
     let match_pos = lookup::xmatch_with_modes_accessor_with_locale(
         &lookup_value_engine,
         lookup_len,
@@ -7811,7 +7811,9 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     let match_pos = match match_pos {
         Ok(p) => p,
         Err(EngineErrorKind::NA) => {
-            return if_not_found.unwrap_or(Value::Error(ErrorKind::NA));
+            return if_not_found
+                .cloned()
+                .unwrap_or(Value::Error(ErrorKind::NA));
         }
         Err(e) => return Value::Error(ErrorKind::from(e)),
     };
@@ -8331,7 +8333,7 @@ fn parse_countif_criteria(
         | Value::Entity(_)
         | Value::Record(_)
         | Value::Empty
-        | Value::Missing => bytecode_value_to_engine(criteria.clone()),
+        | Value::Missing => bytecode_value_to_engine_ref(criteria),
         Value::Error(_) => unreachable!("handled above"),
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => return Err(ErrorKind::Value),
     };
