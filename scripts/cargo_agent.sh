@@ -107,6 +107,22 @@ fi
 # `source scripts/agent-init.sh` (which sets `CARGO_BUILD_JOBS`) influences the wrapper too.
 caller_jobs_env="${FORMULA_CARGO_JOBS:-${FORMULA_CARGO_TEST_JOBS:-}}"
 jobs="${FORMULA_CARGO_JOBS:-${CARGO_BUILD_JOBS:-4}}"
+# Guardrails: reject/avoid dangerous values from generic env vars.
+#
+# - `cargo -j0` means "use the Cargo default" (typically nproc), which is unsafe on multi-agent hosts.
+# - Extremely large `CARGO_BUILD_JOBS` values (often set globally) can cause rustc stampedes and
+#   `EAGAIN` thread/process spawn failures even under RLIMIT_AS.
+#
+# Allow opting into higher parallelism explicitly via `FORMULA_CARGO_JOBS`; otherwise clamp to a
+# conservative upper bound.
+if ! [[ "${jobs}" =~ ^[0-9]+$ ]] || [[ "${jobs}" -lt 1 ]]; then
+  echo "cargo_agent: invalid CARGO_BUILD_JOBS/FORMULA_CARGO_JOBS value (${jobs}); defaulting to 4" >&2
+  jobs="4"
+fi
+if [[ -z "${FORMULA_CARGO_JOBS:-}" && "${jobs}" -gt 8 ]]; then
+  echo "cargo_agent: CARGO_BUILD_JOBS=${jobs} is high; clamping to 8 (set FORMULA_CARGO_JOBS to override)" >&2
+  jobs="8"
+fi
 limit_as="${FORMULA_CARGO_LIMIT_AS:-14G}"
 
 # Note: For `cargo test`, this wrapper may override the above `jobs` default to `1` (unless callers

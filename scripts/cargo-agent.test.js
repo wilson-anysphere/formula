@@ -67,6 +67,28 @@ test(
 );
 
 test(
+  'cargo_agent clamps very high CARGO_BUILD_JOBS unless FORMULA_CARGO_JOBS is set',
+  { skip: !hasBash || !hasCargo },
+  () => {
+    {
+      const { stderr } = runBash(
+        'unset FORMULA_CARGO_JOBS && export CARGO_BUILD_JOBS=99 && bash scripts/cargo_agent.sh check -h',
+      );
+      assert.ok(stderr.includes('clamping to 8'), stderr);
+      assert.ok(stderr.includes('jobs=8'), stderr);
+    }
+
+    {
+      const { stderr } = runBash(
+        'export FORMULA_CARGO_JOBS=99 && export CARGO_BUILD_JOBS=99 && bash scripts/cargo_agent.sh check -h',
+      );
+      assert.ok(!stderr.includes('clamping to 8'), stderr);
+      assert.ok(stderr.includes('jobs=99'), stderr);
+    }
+  },
+);
+
+test(
   'cargo_agent preserves stdout (cargo metadata JSON not corrupted by stderr logs)',
   { skip: !hasBash || !hasCargo },
   () => {
