@@ -161,12 +161,13 @@ pub fn patch_xlsx_streaming_with_recalc_policy<R: Read + Seek, W: Write + Seek>(
     let mut archive = ZipArchive::new(input)?;
     // `vm` points into `xl/metadata.xml` value metadata (rich values / images-in-cell). The
     // low-level streaming patcher (`patch_xlsx_streaming`) is sometimes used on "partial" ZIPs
-    // that only contain worksheet XML (no `[Content_Types].xml` / root rels). In those cases, we
-    // preserve `vm` for maximum fidelity.
+    // that only contain worksheet XML (no `xl/workbook.xml` / root rels). In those cases, we
+    // preserve `vm` for maximum fidelity (callers may be patching an extracted worksheet part to
+    // reinsert into the original package).
     //
     // When patching a real workbook package we drop `vm` on patched cells to avoid leaving a
     // dangling metadata pointer (we preserve `cm` and all other unrelated attributes).
-    let drop_vm_on_patched_cells = zip_part_exists(&mut archive, "[Content_Types].xml")?;
+    let drop_vm_on_patched_cells = zip_part_exists(&mut archive, "xl/workbook.xml")?;
     let mut formula_changed = cell_patches
         .iter()
         .any(|p| formula_is_material(p.formula.as_deref()));
@@ -602,8 +603,7 @@ mod macro_strip_streaming {
 
         // Parts referenced by `xl/_rels/vbaProject.bin.rels` (e.g. signature payloads).
         if part_names.contains("xl/_rels/vbaProject.bin.rels") {
-            let rels_bytes =
-                read_zip_part(archive, "xl/_rels/vbaProject.bin.rels", read_cache)?;
+            let rels_bytes = read_zip_part(archive, "xl/_rels/vbaProject.bin.rels", read_cache)?;
             let targets = parse_internal_relationship_targets(
                 &rels_bytes,
                 "xl/vbaProject.bin",
@@ -830,8 +830,13 @@ mod macro_strip_streaming {
             }
 
             let bytes = read_zip_part(archive, &rels_name, read_cache)?;
-            let (updated, removed_ids) =
-                strip_deleted_relationships(&rels_name, &source_part, &bytes, delete_parts, part_names)?;
+            let (updated, removed_ids) = strip_deleted_relationships(
+                &rels_name,
+                &source_part,
+                &bytes,
+                delete_parts,
+                part_names,
+            )?;
 
             if let Some(updated) = updated {
                 updated_parts.insert(rels_name.clone(), updated);
@@ -1439,7 +1444,12 @@ mod macro_strip_streaming {
                 }
 
                 let bytes = read_zip_part(archive, rels_part, read_cache)?;
-                let targets = parse_internal_relationship_targets(&bytes, &source_part, rels_part, part_names)?;
+                let targets = parse_internal_relationship_targets(
+                    &bytes,
+                    &source_part,
+                    rels_part,
+                    part_names,
+                )?;
                 for target in targets {
                     outgoing
                         .entry(source_part.clone())
@@ -3585,8 +3595,9 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         patch.value,
         CellValue::Error(formula_model::ErrorValue::Value)
     );
-    let drop_vm =
-        has_vm && !patch_value_is_value_error && (existing_value_is_value_error || drop_vm_on_patched_cells);
+    let drop_vm = has_vm
+        && !patch_value_is_value_error
+        && (existing_value_is_value_error || drop_vm_on_patched_cells);
 
     let mut c = BytesStart::new(cell_tag.as_str());
     let mut has_r = false;
@@ -3912,8 +3923,10 @@ fn write_patched_cell<W: Write>(
         Some(formula) if formula_is_material(Some(formula)) => Some(formula),
         _ => None,
     };
-    let patch_value_is_value_error =
-        matches!(patch.value, CellValue::Error(formula_model::ErrorValue::Value));
+    let patch_value_is_value_error = matches!(
+        patch.value,
+        CellValue::Error(formula_model::ErrorValue::Value)
+    );
     let drop_vm = drop_vm_on_patched_cells && !patch_value_is_value_error;
     let mut existing_t: Option<String> = None;
     let shared_string_idx = patch.shared_string_idx;
