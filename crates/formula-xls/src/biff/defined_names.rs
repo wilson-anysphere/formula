@@ -621,4 +621,55 @@ mod tests {
         let decoded = rgce::decode_defined_name_rgce(&names[0].rgce, 1252);
         assert_eq!(decoded.text.as_deref(), Some("\"ABCDE\""));
     }
+
+    #[test]
+    fn parses_defined_name_with_continued_description_string() {
+        let name = "DescName";
+        // rgce for `1` (PtgInt 1).
+        let rgce: Vec<u8> = vec![0x1E, 0x01, 0x00];
+
+        let description = "ABCDE";
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        header.push(0); // chKey
+        header.push(name.len() as u8); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        header.push(0); // cchCustMenu
+        header.push(description.len() as u8); // cchDescription
+        header.push(0); // cchHelpTopic
+        header.push(0); // cchStatusText
+
+        let mut name_str = Vec::new();
+        name_str.push(0); // flags (compressed)
+        name_str.extend_from_slice(name.as_bytes());
+
+        // Description string (XLUnicodeStringNoCch) split across fragments after "AB".
+        let mut desc_part1 = Vec::new();
+        desc_part1.push(0); // flags (compressed)
+        desc_part1.extend_from_slice(&description.as_bytes()[..2]); // "AB"
+
+        let mut desc_part2 = Vec::new();
+        desc_part2.push(0); // continued segment option flags (fHighByte=0)
+        desc_part2.extend_from_slice(&description.as_bytes()[2..]); // "CDE"
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(
+                RECORD_NAME,
+                &[header, name_str, rgce.clone(), desc_part1].concat(),
+            ),
+            record(records::RECORD_CONTINUE, &desc_part2),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let names =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252).expect("parse names");
+        assert_eq!(names.len(), 1);
+        assert_eq!(names[0].name, name);
+        assert_eq!(names[0].rgce, rgce);
+    }
 }
