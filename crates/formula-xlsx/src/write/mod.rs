@@ -4334,6 +4334,54 @@ fn patch_workbook_rels_for_sheet_edits(
                 }
                 writer.write_event(Event::Start(e.to_owned()))?;
             }
+            Event::Empty(ref e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") =>
+            {
+                // Some producers emit an empty relationships part as `<Relationships .../>`.
+                // If we're adding new sheets, expand that root element so we can insert children.
+                if root_prefix.is_none() {
+                    root_prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                }
+                if !root_has_default_ns {
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        if attr.key.as_ref() == b"xmlns" {
+                            root_has_default_ns = true;
+                            break;
+                        }
+                    }
+                }
+
+                if added.is_empty() {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                } else {
+                    writer.write_event(Event::Start(e.to_owned()))?;
+
+                    let prefix = relationship_prefix.as_deref().or_else(|| {
+                        if root_has_default_ns {
+                            None
+                        } else {
+                            root_prefix.as_deref()
+                        }
+                    });
+                    let relationship_tag = prefixed_tag(prefix, "Relationship");
+                    for sheet in added {
+                        let target = relationship_target_from_workbook(&sheet.path);
+                        let mut rel = quick_xml::events::BytesStart::new(relationship_tag.as_str());
+                        rel.push_attribute(("Id", sheet.relationship_id.as_str()));
+                        rel.push_attribute(("Type", WORKSHEET_REL_TYPE));
+                        rel.push_attribute(("Target", target.as_str()));
+                        writer.write_event(Event::Empty(rel))?;
+                    }
+
+                    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    writer.get_mut().extend_from_slice(b"</");
+                    writer.get_mut().extend_from_slice(tag.as_bytes());
+                    writer.get_mut().extend_from_slice(b">");
+                }
+            }
             Event::Start(ref e)
                 if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
             {
@@ -4457,6 +4505,51 @@ fn patch_content_types_for_sheet_edits(
                     has_default_ns = content_types_has_default_ns(e)?;
                 }
                 writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Empty(ref e) if local_name(e.name().as_ref()) == b"Types" => {
+                // Some producers emit an empty content-types part as `<Types .../>`.
+                // If we're adding new sheets, expand that root element so we can insert children.
+                if types_prefix.is_none() {
+                    types_prefix = element_prefix(e.name().as_ref())
+                        .map(|p| String::from_utf8_lossy(p).into_owned());
+                }
+                if !has_default_ns {
+                    has_default_ns = content_types_has_default_ns(e)?;
+                }
+
+                if added.is_empty() {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                } else {
+                    writer.write_event(Event::Start(e.to_owned()))?;
+
+                    let prefix = override_prefix.as_deref().or_else(|| {
+                        if !has_default_ns {
+                            types_prefix.as_deref()
+                        } else {
+                            None
+                        }
+                    });
+                    for sheet in added {
+                        let part_name = if sheet.path.starts_with('/') {
+                            sheet.path.clone()
+                        } else {
+                            format!("/{}", sheet.path)
+                        };
+                        if existing_overrides.contains(&part_name) {
+                            continue;
+                        }
+                        let tag = prefixed_tag(prefix, "Override");
+                        let mut override_el = quick_xml::events::BytesStart::new(tag.as_str());
+                        override_el.push_attribute(("PartName", part_name.as_str()));
+                        override_el.push_attribute(("ContentType", WORKSHEET_CONTENT_TYPE));
+                        writer.write_event(Event::Empty(override_el))?;
+                    }
+
+                    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    writer.get_mut().extend_from_slice(b"</");
+                    writer.get_mut().extend_from_slice(tag.as_bytes());
+                    writer.get_mut().extend_from_slice(b">");
+                }
             }
             Event::Start(ref e) if local_name(e.name().as_ref()) == b"Override" => {
                 if override_prefix.is_none() {

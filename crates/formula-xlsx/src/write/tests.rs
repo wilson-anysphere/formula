@@ -400,6 +400,26 @@ fn override_element_names(xml: &str) -> Vec<Vec<u8>> {
     out
 }
 
+fn relationship_element_names(xml: &str) -> Vec<Vec<u8>> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf).expect("xml parse") {
+            Event::Start(e) | Event::Empty(e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+            {
+                out.push(e.name().as_ref().to_vec());
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
+}
+
 fn default_element_names(xml: &str) -> Vec<Vec<u8>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
@@ -416,6 +436,20 @@ fn default_element_names(xml: &str) -> Vec<Vec<u8>> {
         buf.clear();
     }
     out
+}
+
+fn assert_parses_xml(xml: &str) {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(err) => panic!("xml parse error: {err}\nxml:\n{xml}"),
+        }
+        buf.clear();
+    }
 }
 
 #[test]
@@ -500,6 +534,7 @@ fn patch_content_types_for_sheet_edits_preserves_prefix_only_content_types() {
         );
     }
 }
+
 #[test]
 fn relationship_target_by_type_handles_prefixed_relationship_elements() {
     let rels = format!(
@@ -637,4 +672,76 @@ fn patch_workbook_xml_infers_relationships_prefix_from_sheets_namespace() {
         !patched.contains(" r:id="),
         "must not introduce undeclared r:id attributes; got:\n{patched}"
     );
+}
+
+#[test]
+fn sheet_structure_patchers_expand_self_closing_prefix_only_roots() {
+    let workbook_rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pr:Relationships xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships"/>"#;
+    let content_types_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types"/>"#;
+
+    let mut parts = BTreeMap::new();
+    parts.insert(WORKBOOK_RELS_PART.to_string(), workbook_rels_xml.as_bytes().to_vec());
+    parts.insert("[Content_Types].xml".to_string(), content_types_xml.as_bytes().to_vec());
+
+    let added = vec![SheetMeta {
+        worksheet_id: 1,
+        sheet_id: 1,
+        relationship_id: "rId1".to_string(),
+        state: None,
+        path: "xl/worksheets/sheet2.xml".to_string(),
+    }];
+
+    patch_workbook_rels_for_sheet_edits(&mut parts, &[], &added).expect("patch workbook rels");
+    patch_content_types_for_sheet_edits(&mut parts, &[], &added).expect("patch content types");
+
+    let updated_rels = std::str::from_utf8(parts.get(WORKBOOK_RELS_PART).expect("rels part"))
+        .expect("utf8 rels");
+    assert_parses_xml(updated_rels);
+    assert!(
+        updated_rels.contains(r#"<pr:Relationships xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships">"#)
+            && updated_rels.contains("</pr:Relationships>"),
+        "expected expanded Relationships root; got:\n{updated_rels}"
+    );
+    assert!(
+        updated_rels.contains("<pr:Relationship"),
+        "expected prefixed pr:Relationship; got:\n{updated_rels}"
+    );
+    assert!(
+        !updated_rels.contains("<Relationship"),
+        "must not introduce namespace-less <Relationship> elements; got:\n{updated_rels}"
+    );
+    let rel_names = relationship_element_names(updated_rels);
+    assert_eq!(rel_names.len(), 1, "expected one inserted Relationship");
+    for name in rel_names {
+        assert!(
+            name.starts_with(b"pr:"),
+            "expected only prefixed Relationship elements; saw {:?} in:\n{updated_rels}",
+            String::from_utf8_lossy(&name)
+        );
+    }
+
+    let updated_ct =
+        std::str::from_utf8(parts.get("[Content_Types].xml").expect("ct part")).expect("utf8 ct");
+    assert_parses_xml(updated_ct);
+    assert!(
+        updated_ct.contains(
+            r#"<ct:Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>"#
+        ),
+        "expected inserted ct:Override for worksheet; got:\n{updated_ct}"
+    );
+    assert!(
+        !updated_ct.contains("<Override"),
+        "must not introduce namespace-less <Override> elements; got:\n{updated_ct}"
+    );
+    let override_names = override_element_names(updated_ct);
+    assert_eq!(override_names.len(), 1, "expected one inserted Override");
+    for name in override_names {
+        assert!(
+            name.starts_with(b"ct:"),
+            "expected only prefixed Override elements; saw {:?} in:\n{updated_ct}",
+            String::from_utf8_lossy(&name)
+        );
+    }
 }
