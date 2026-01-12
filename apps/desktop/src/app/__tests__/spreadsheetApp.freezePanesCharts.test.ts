@@ -85,6 +85,16 @@ describe("SpreadsheetApp charts + frozen panes", () => {
     Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
     storage.clear();
 
+    // CanvasGridRenderer schedules renders via requestAnimationFrame; ensure it exists in jsdom.
+    Object.defineProperty(globalThis, "requestAnimationFrame", {
+      configurable: true,
+      value: (cb: FrameRequestCallback) => {
+        cb(0);
+        return 0;
+      },
+    });
+    Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
+
     Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
       configurable: true,
       value: () => createMockCanvasContext(),
@@ -132,5 +142,51 @@ describe("SpreadsheetApp charts + frozen panes", () => {
     app.destroy();
     root.remove();
   });
-});
 
+  it("routes charts into pane quadrants in shared-grid mode", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect(app.getGridMode()).toBe("shared");
+
+      const doc = app.getDocument();
+      doc.setFrozen(app.getCurrentSheetId(), 1, 1, { label: "Freeze" });
+
+      // Anchor in A1 so it should belong to the top-left frozen pane.
+      const result = app.addChart({
+        chart_type: "bar",
+        data_range: "Sheet1!A2:B5",
+        title: "Frozen Chart",
+        position: "Sheet1!A1",
+      });
+
+      const panes = (app as any).sharedChartPanes as
+        | { topLeft: HTMLElement; topRight: HTMLElement; bottomLeft: HTMLElement; bottomRight: HTMLElement }
+        | null;
+      expect(panes).not.toBeNull();
+
+      const host = ((app as any).chartElements as Map<string, HTMLElement>).get(result.chart_id);
+      expect(host).toBeTruthy();
+      expect(host?.parentElement).toBe(panes!.topLeft);
+
+      // The outer layer should stay pinned under headers (not under user frozen panes).
+      const chartLayer = (app as any).chartLayer as HTMLElement;
+      expect(chartLayer.style.left).toBe("48px");
+      expect(chartLayer.style.top).toBe("24px");
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+});

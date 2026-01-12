@@ -53,7 +53,7 @@ import { colToName as colToNameA1, fromA1 as fromA1A1 } from "@formula/spreadshe
 import { shiftA1References } from "@formula/spreadsheet-frontend";
 import { InlineEditController, type InlineEditLLMClient } from "../ai/inline-edit/inlineEditController";
 import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
-import type { CellRange as GridCellRange, GridAxisSizeChange } from "@formula/grid";
+import type { CellRange as GridCellRange, GridAxisSizeChange, GridViewportState } from "@formula/grid";
 import { resolveDesktopGridMode, type DesktopGridMode } from "../grid/shared/desktopGridMode.js";
 import { DocumentCellProvider } from "../grid/shared/documentCellProvider.js";
 import { DesktopSharedGrid } from "../grid/shared/desktopSharedGrid.js";
@@ -286,6 +286,15 @@ export class SpreadsheetApp {
 
   private gridCanvas: HTMLCanvasElement;
   private chartLayer: HTMLDivElement;
+  private sharedChartPanes:
+    | {
+        topLeft: HTMLDivElement;
+        topRight: HTMLDivElement;
+        bottomLeft: HTMLDivElement;
+        bottomRight: HTMLDivElement;
+      }
+    | null = null;
+  private sharedChartPaneLayout: { frozenContentWidth: number; frozenContentHeight: number } | null = null;
   private referenceCanvas: HTMLCanvasElement;
   private auditingCanvas: HTMLCanvasElement;
   private selectionCanvas: HTMLCanvasElement;
@@ -687,10 +696,7 @@ export class SpreadsheetApp {
           onScroll: (scroll, viewport) => {
             this.scrollX = scroll.x;
             this.scrollY = scroll.y;
-            const frozenWidth = Math.min(viewport.frozenWidth, viewport.width);
-            const frozenHeight = Math.min(viewport.frozenHeight, viewport.height);
-            this.chartLayer.style.left = `${frozenWidth}px`;
-            this.chartLayer.style.top = `${frozenHeight}px`;
+            this.syncSharedChartPanes(viewport);
             this.hideCommentTooltip();
             this.renderCharts(false);
             this.renderAuditing();
@@ -725,6 +731,8 @@ export class SpreadsheetApp {
       // Keep legacy overlay ordering: charts above cells, selection above charts.
       this.chartLayer.style.zIndex = "2";
       this.selectionCanvas.style.zIndex = "3";
+
+      this.initSharedChartPanes();
     }
 
     if (this.gridMode === "shared") {
@@ -2180,17 +2188,9 @@ export class SpreadsheetApp {
       this.auditingCtx.setTransform(1, 0, 0, 1, 0, 0);
       this.auditingCtx.scale(this.dpr, this.dpr);
 
-      this.sharedGrid.resize(this.width, this.height, this.dpr);
-      const viewport = this.sharedGrid.renderer.scroll.getViewportState();
-      const frozenWidth = Math.min(viewport.frozenWidth, viewport.width);
-      const frozenHeight = Math.min(viewport.frozenHeight, viewport.height);
-
-      // Charts should scroll with the grid but stay clipped under headers.
-      this.chartLayer.style.left = `${frozenWidth}px`;
-      this.chartLayer.style.top = `${frozenHeight}px`;
-      this.chartLayer.style.right = "0";
-      this.chartLayer.style.bottom = "0";
-      this.chartLayer.style.overflow = "hidden";
+       this.sharedGrid.resize(this.width, this.height, this.dpr);
+       const viewport = this.sharedGrid.renderer.scroll.getViewportState();
+      this.syncSharedChartPanes(viewport);
 
       // Keep our legacy scroll coordinates in sync for chart positioning helpers.
       const scroll = this.sharedGrid.getScroll();
@@ -2561,6 +2561,97 @@ export class SpreadsheetApp {
     return this.lowerBound(this.colIndexByVisual, col);
   }
 
+  private initSharedChartPanes(): void {
+    if (!this.sharedGrid) return;
+    if (this.sharedChartPanes) return;
+
+    const createPane = (testId: string) => {
+      const pane = document.createElement("div");
+      pane.dataset.testid = testId;
+      pane.style.position = "absolute";
+      pane.style.pointerEvents = "none";
+      pane.style.overflow = "hidden";
+      pane.style.left = "0";
+      pane.style.top = "0";
+      pane.style.width = "0";
+      pane.style.height = "0";
+      return pane;
+    };
+
+    const topLeft = createPane("chart-pane-top-left");
+    const topRight = createPane("chart-pane-top-right");
+    const bottomLeft = createPane("chart-pane-bottom-left");
+    const bottomRight = createPane("chart-pane-bottom-right");
+
+    this.chartLayer.appendChild(topLeft);
+    this.chartLayer.appendChild(topRight);
+    this.chartLayer.appendChild(bottomLeft);
+    this.chartLayer.appendChild(bottomRight);
+
+    this.sharedChartPanes = { topLeft, topRight, bottomLeft, bottomRight };
+
+    // Establish an initial pane layout before the first render pass.
+    this.syncSharedChartPanes(this.sharedGrid.renderer.scroll.getViewportState());
+  }
+
+  private syncSharedChartPanes(viewport: GridViewportState): void {
+    if (!this.sharedGrid) return;
+    if (!this.sharedChartPanes) return;
+
+    const headerRows = this.sharedHeaderRows();
+    const headerCols = this.sharedHeaderCols();
+    const headerWidth =
+      headerCols > 0 ? this.sharedGrid.renderer.scroll.cols.totalSize(headerCols) : 0;
+    const headerHeight =
+      headerRows > 0 ? this.sharedGrid.renderer.scroll.rows.totalSize(headerRows) : 0;
+
+    const headerWidthClamped = Math.min(headerWidth, viewport.width);
+    const headerHeightClamped = Math.min(headerHeight, viewport.height);
+
+    const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
+    const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
+
+    const frozenContentWidth = Math.max(0, frozenWidthClamped - headerWidthClamped);
+    const frozenContentHeight = Math.max(0, frozenHeightClamped - headerHeightClamped);
+
+    const cellAreaWidth = Math.max(0, viewport.width - headerWidthClamped);
+    const cellAreaHeight = Math.max(0, viewport.height - headerHeightClamped);
+
+    const scrollableWidth = Math.max(0, cellAreaWidth - frozenContentWidth);
+    const scrollableHeight = Math.max(0, cellAreaHeight - frozenContentHeight);
+
+    // Charts are rendered as DOM overlays. In shared-grid mode, the column/row
+    // headers are implemented as frozen panes, so we position the outer chart
+    // layer just under those headers, then clip charts into the four pane
+    // quadrants to mimic Excel behavior (objects are constrained to their pane).
+    this.chartLayer.style.left = `${headerWidthClamped}px`;
+    this.chartLayer.style.top = `${headerHeightClamped}px`;
+    this.chartLayer.style.right = "0";
+    this.chartLayer.style.bottom = "0";
+    this.chartLayer.style.overflow = "hidden";
+
+    const applyPaneRect = (pane: HTMLDivElement, rect: { x: number; y: number; width: number; height: number }) => {
+      pane.style.left = `${rect.x}px`;
+      pane.style.top = `${rect.y}px`;
+      pane.style.width = `${rect.width}px`;
+      pane.style.height = `${rect.height}px`;
+      pane.style.display = rect.width > 0 && rect.height > 0 ? "block" : "none";
+    };
+
+    const { topLeft, topRight, bottomLeft, bottomRight } = this.sharedChartPanes;
+    applyPaneRect(topLeft, { x: 0, y: 0, width: frozenContentWidth, height: frozenContentHeight });
+    applyPaneRect(topRight, { x: frozenContentWidth, y: 0, width: scrollableWidth, height: frozenContentHeight });
+    applyPaneRect(bottomLeft, { x: 0, y: frozenContentHeight, width: frozenContentWidth, height: scrollableHeight });
+    applyPaneRect(bottomRight, {
+      x: frozenContentWidth,
+      y: frozenContentHeight,
+      width: scrollableWidth,
+      height: scrollableHeight,
+    });
+
+    this.sharedChartPaneLayout = { frozenContentWidth, frozenContentHeight };
+  }
+
   private chartAnchorToViewportRect(anchor: ChartRecord["anchor"]): { left: number; top: number; width: number; height: number } | null {
     if (!anchor || !("kind" in anchor)) return null;
 
@@ -2576,9 +2667,10 @@ export class SpreadsheetApp {
       height = emuToPx(anchor.cyEmu);
     } else if (anchor.kind === "oneCell") {
       if (this.sharedGrid) {
-        const viewport = this.sharedGrid.renderer.scroll.getViewportState();
         const headerRows = this.sharedHeaderRows();
         const headerCols = this.sharedHeaderCols();
+        const headerWidth = headerCols > 0 ? this.sharedGrid.renderer.scroll.cols.totalSize(headerCols) : 0;
+        const headerHeight = headerRows > 0 ? this.sharedGrid.renderer.scroll.rows.totalSize(headerRows) : 0;
         const gridRow = anchor.fromRow + headerRows;
         const gridCol = anchor.fromCol + headerCols;
         const { rowCount, colCount } = this.sharedGrid.renderer.scroll.getCounts();
@@ -2586,11 +2678,11 @@ export class SpreadsheetApp {
 
         left =
           this.sharedGrid.renderer.scroll.cols.positionOf(gridCol) -
-          viewport.frozenWidth +
+          headerWidth +
           emuToPx(anchor.fromColOffEmu ?? 0);
         top =
           this.sharedGrid.renderer.scroll.rows.positionOf(gridRow) -
-          viewport.frozenHeight +
+          headerHeight +
           emuToPx(anchor.fromRowOffEmu ?? 0);
         width = emuToPx(anchor.cxEmu ?? 0);
         height = emuToPx(anchor.cyEmu ?? 0);
@@ -2602,9 +2694,10 @@ export class SpreadsheetApp {
       }
     } else if (anchor.kind === "twoCell") {
       if (this.sharedGrid) {
-        const viewport = this.sharedGrid.renderer.scroll.getViewportState();
         const headerRows = this.sharedHeaderRows();
         const headerCols = this.sharedHeaderCols();
+        const headerWidth = headerCols > 0 ? this.sharedGrid.renderer.scroll.cols.totalSize(headerCols) : 0;
+        const headerHeight = headerRows > 0 ? this.sharedGrid.renderer.scroll.rows.totalSize(headerRows) : 0;
         const fromRow = anchor.fromRow + headerRows;
         const fromCol = anchor.fromCol + headerCols;
         const toRow = anchor.toRow + headerRows;
@@ -2615,19 +2708,19 @@ export class SpreadsheetApp {
 
         left =
           this.sharedGrid.renderer.scroll.cols.positionOf(fromCol) -
-          viewport.frozenWidth +
+          headerWidth +
           emuToPx(anchor.fromColOffEmu ?? 0);
         top =
           this.sharedGrid.renderer.scroll.rows.positionOf(fromRow) -
-          viewport.frozenHeight +
+          headerHeight +
           emuToPx(anchor.fromRowOffEmu ?? 0);
         const right =
           this.sharedGrid.renderer.scroll.cols.positionOf(toCol) -
-          viewport.frozenWidth +
+          headerWidth +
           emuToPx(anchor.toColOffEmu ?? 0);
         const bottom =
           this.sharedGrid.renderer.scroll.rows.positionOf(toRow) -
-          viewport.frozenHeight +
+          headerHeight +
           emuToPx(anchor.toRowOffEmu ?? 0);
 
         width = Math.max(0, right - left);
@@ -2662,6 +2755,26 @@ export class SpreadsheetApp {
     const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
     const keep = new Set<string>();
 
+    const sharedPanes = this.sharedGrid ? this.sharedChartPanes : null;
+    const sharedLayout = this.sharedGrid ? this.sharedChartPaneLayout : null;
+
+    const resolveHostContainer = (anchor: ChartRecord["anchor"]): { container: HTMLDivElement; originX: number; originY: number } => {
+      if (!sharedPanes || !sharedLayout) return { container: this.chartLayer, originX: 0, originY: 0 };
+
+      const { frozenRows, frozenCols } = this.getFrozen();
+      const fromRow = anchor.kind === "oneCell" || anchor.kind === "twoCell" ? anchor.fromRow : Number.POSITIVE_INFINITY;
+      const fromCol = anchor.kind === "oneCell" || anchor.kind === "twoCell" ? anchor.fromCol : Number.POSITIVE_INFINITY;
+      const inFrozenRows = fromRow < frozenRows;
+      const inFrozenCols = fromCol < frozenCols;
+
+      const { frozenContentWidth, frozenContentHeight } = sharedLayout;
+
+      if (inFrozenRows && inFrozenCols) return { container: sharedPanes.topLeft, originX: 0, originY: 0 };
+      if (inFrozenRows && !inFrozenCols) return { container: sharedPanes.topRight, originX: frozenContentWidth, originY: 0 };
+      if (!inFrozenRows && inFrozenCols) return { container: sharedPanes.bottomLeft, originX: 0, originY: frozenContentHeight };
+      return { container: sharedPanes.bottomRight, originX: frozenContentWidth, originY: frozenContentHeight };
+    };
+
     const createProvider = () => ({
       getRange: (rangeRef: string) => {
         const parsed = parseA1Range(rangeRef);
@@ -2694,18 +2807,22 @@ export class SpreadsheetApp {
 
       let host = this.chartElements.get(chart.id);
       const shouldRenderContent = renderContent || !host;
+      const { container, originX, originY } = resolveHostContainer(chart.anchor);
       if (!host) {
         host = document.createElement("div");
         host.setAttribute("data-testid", "chart-object");
+        host.dataset.chartId = chart.id;
         host.style.position = "absolute";
         host.style.pointerEvents = "none";
         host.style.overflow = "hidden";
         this.chartElements.set(chart.id, host);
-        this.chartLayer.appendChild(host);
+        container.appendChild(host);
+      } else if (host.parentElement !== container) {
+        container.appendChild(host);
       }
 
-      host.style.left = `${rect.left}px`;
-      host.style.top = `${rect.top}px`;
+      host.style.left = `${rect.left - originX}px`;
+      host.style.top = `${rect.top - originY}px`;
       host.style.width = `${rect.width}px`;
       host.style.height = `${rect.height}px`;
 
