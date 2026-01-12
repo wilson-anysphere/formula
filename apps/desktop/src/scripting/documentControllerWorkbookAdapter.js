@@ -1,6 +1,12 @@
 import { formatCellAddress, formatRangeAddress, parseRangeAddress } from "../../../../packages/scripting/src/a1.js";
 import { TypedEventEmitter } from "../../../../packages/scripting/src/events.js";
 
+// Excel limits used by the scripting A1 address helpers and macro recorder.
+// - Rows: 1..1048576 (0-based: 0..1048575)
+// - Cols: A..XFD (0-based: 0..16383)
+const EXCEL_MAX_ROW = 1048575;
+const EXCEL_MAX_COL = 16383;
+
 function valueEquals(a, b) {
   if (a === b) return true;
   if (a == null || b == null) return false;
@@ -270,6 +276,47 @@ function scriptFormatPatchFromDocStylePatch(patch) {
 }
 
 /**
+ * Resolve a DocumentController style reference into a concrete style object.
+ *
+ * Layered formatting APIs may expose style ids directly (`number`) or via objects
+ * containing a `styleId` property, while older paths only expose per-cell style
+ * ids on the cell state.
+ *
+ * @param {any} styleTable
+ * @param {any} ref
+ * @returns {any}
+ */
+function resolveDocStyle(styleTable, ref) {
+  if (!styleTable) return isPlainObject(ref) ? ref : {};
+  if (ref == null) return {};
+  if (typeof ref === "number") return styleTable.get(ref);
+  if (isPlainObject(ref) && typeof ref.styleId === "number") return styleTable.get(ref.styleId);
+  // Assume it's already a style object.
+  return ref;
+}
+
+/**
+ * @param {any} delta
+ * @param {"before" | "after"} which
+ */
+function deltaStyleRef(delta, which) {
+  if (!delta) return null;
+  const suffix = which === "before" ? "before" : "after";
+  // Common shapes: `{ beforeStyleId, afterStyleId }`, `{ before, after }`.
+  if (hasOwn(delta, `${suffix}StyleId`)) return delta[`${suffix}StyleId`];
+  if (hasOwn(delta, suffix)) return delta[suffix];
+  // Fallbacks for alternative naming schemes.
+  if (which === "before") {
+    if (hasOwn(delta, "oldStyleId")) return delta.oldStyleId;
+    if (hasOwn(delta, "prevStyleId")) return delta.prevStyleId;
+  } else {
+    if (hasOwn(delta, "newStyleId")) return delta.newStyleId;
+    if (hasOwn(delta, "nextStyleId")) return delta.nextStyleId;
+  }
+  return null;
+}
+
+/**
  * Exposes a `DocumentController` instance through the `@formula/scripting` Workbook/Sheet/Range
  * surface area.
  *
@@ -395,6 +442,7 @@ export class DocumentControllerWorkbookAdapter {
    */
   #handleDocumentChange(payload) {
     const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
+    const styleTable = this.documentController.styleTable;
     /** @type {Map<string, { value: any[], format: any[] }>} */
     const bySheet = new Map();
 
@@ -473,8 +521,8 @@ export class DocumentControllerWorkbookAdapter {
         /** @type {Map<string, { patch: any, deltas: any[] }>} */
         const groups = new Map();
         for (const delta of bucket.format) {
-          const beforeStyle = this.documentController.styleTable.get(delta.before?.styleId ?? 0);
-          const afterStyle = this.documentController.styleTable.get(delta.after?.styleId ?? 0);
+          const beforeStyle = styleTable.get(delta.before?.styleId ?? 0);
+          const afterStyle = styleTable.get(delta.after?.styleId ?? 0);
           const docPatch = diffStylePatch(beforeStyle, afterStyle);
           const patch = scriptFormatPatchFromDocStylePatch(docPatch);
           if (patch !== null && isPlainObject(patch) && Object.keys(patch).length === 0) continue;
@@ -511,6 +559,163 @@ export class DocumentControllerWorkbookAdapter {
           }
         }
       }
+    }
+
+    // Layered formatting deltas (row/col/sheet) may not produce any per-cell styleId changes,
+    // so we must also listen for those explicit delta streams (when present) and synthesize
+    // macro recorder format events.
+    /** @type {any[]} */
+    const rawColStyleDeltas = [];
+    /** @type {any[]} */
+    const rawRowStyleDeltas = [];
+    /** @type {any[]} */
+    const rawSheetStyleDeltas = [];
+
+    const addAll = (target, value) => {
+      if (Array.isArray(value)) {
+        target.push(...value);
+      } else if (value && typeof value === "object") {
+        target.push(value);
+      }
+    };
+
+    // Common payload keys (preferred).
+    addAll(rawColStyleDeltas, payload?.colStyleIdDeltas);
+    addAll(rawColStyleDeltas, payload?.colStyleDeltas);
+    addAll(rawColStyleDeltas, payload?.columnStyleIdDeltas);
+    addAll(rawColStyleDeltas, payload?.columnStyleDeltas);
+    addAll(rawRowStyleDeltas, payload?.rowStyleIdDeltas);
+    addAll(rawRowStyleDeltas, payload?.rowStyleDeltas);
+    addAll(rawSheetStyleDeltas, payload?.sheetStyleIdDeltas);
+    addAll(rawSheetStyleDeltas, payload?.sheetDefaultStyleIdDeltas);
+    addAll(rawSheetStyleDeltas, payload?.sheetStyleDeltas);
+    addAll(rawSheetStyleDeltas, payload?.sheetDefaultStyleDeltas);
+
+    // Some integrations may bundle all format deltas into a `formatDeltas` object/array.
+    const formatDeltas = payload?.formatDeltas;
+    if (Array.isArray(formatDeltas)) {
+      for (const delta of formatDeltas) {
+        if (!delta) continue;
+        const hasRow = delta.row != null;
+        const hasCol = delta.col != null;
+        if (hasCol && !hasRow) rawColStyleDeltas.push(delta);
+        else if (hasRow && !hasCol) rawRowStyleDeltas.push(delta);
+        else if (!hasRow && !hasCol) rawSheetStyleDeltas.push(delta);
+      }
+    } else if (formatDeltas && typeof formatDeltas === "object") {
+      addAll(rawColStyleDeltas, formatDeltas.colStyleIdDeltas);
+      addAll(rawColStyleDeltas, formatDeltas.colStyleDeltas);
+      addAll(rawColStyleDeltas, formatDeltas.columnStyleIdDeltas);
+      addAll(rawRowStyleDeltas, formatDeltas.rowStyleIdDeltas);
+      addAll(rawRowStyleDeltas, formatDeltas.rowStyleDeltas);
+      addAll(rawSheetStyleDeltas, formatDeltas.sheetStyleIdDeltas);
+      addAll(rawSheetStyleDeltas, formatDeltas.sheetDefaultStyleIdDeltas);
+      addAll(rawSheetStyleDeltas, formatDeltas.sheetStyleDeltas);
+    }
+
+    /** @type {Map<string, Map<string, { patch: any, cols: number[] }>>} */
+    const colGroupsBySheet = new Map();
+    for (const delta of rawColStyleDeltas) {
+      const sheetName = typeof delta?.sheetId === "string" ? delta.sheetId : typeof delta?.sheetName === "string" ? delta.sheetName : null;
+      if (!sheetName) continue;
+      const col = Number(delta.col ?? delta.column ?? delta.colIndex ?? delta.columnIndex);
+      if (!Number.isInteger(col) || col < 0) continue;
+
+      const beforeStyle = resolveDocStyle(styleTable, deltaStyleRef(delta, "before"));
+      const afterStyle = resolveDocStyle(styleTable, deltaStyleRef(delta, "after"));
+      const docPatch = diffStylePatch(beforeStyle, afterStyle);
+      const patch = scriptFormatPatchFromDocStylePatch(docPatch);
+      if (patch !== null && isPlainObject(patch) && Object.keys(patch).length === 0) continue;
+
+      const key = patch === null ? "null" : stableStringify(patch);
+      let groups = colGroupsBySheet.get(sheetName);
+      if (!groups) {
+        groups = new Map();
+        colGroupsBySheet.set(sheetName, groups);
+      }
+      const entry = groups.get(key) ?? { patch, cols: [] };
+      entry.cols.push(col);
+      groups.set(key, entry);
+    }
+
+    for (const [sheetName, groups] of colGroupsBySheet.entries()) {
+      for (const entry of groups.values()) {
+        entry.cols.sort((a, b) => a - b);
+        let i = 0;
+        while (i < entry.cols.length) {
+          let j = i + 1;
+          while (j < entry.cols.length && entry.cols[j] === entry.cols[j - 1] + 1) j += 1;
+          const startCol = entry.cols[i];
+          const endCol = entry.cols[j - 1];
+          this.events.emit("formatChanged", {
+            sheetName,
+            address: formatRangeAddress({ startRow: 0, startCol, endRow: EXCEL_MAX_ROW, endCol }),
+            format: entry.patch,
+          });
+          i = j;
+        }
+      }
+    }
+
+    /** @type {Map<string, Map<string, { patch: any, rows: number[] }>>} */
+    const rowGroupsBySheet = new Map();
+    for (const delta of rawRowStyleDeltas) {
+      const sheetName = typeof delta?.sheetId === "string" ? delta.sheetId : typeof delta?.sheetName === "string" ? delta.sheetName : null;
+      if (!sheetName) continue;
+      const row = Number(delta.row ?? delta.rowIndex);
+      if (!Number.isInteger(row) || row < 0) continue;
+
+      const beforeStyle = resolveDocStyle(styleTable, deltaStyleRef(delta, "before"));
+      const afterStyle = resolveDocStyle(styleTable, deltaStyleRef(delta, "after"));
+      const docPatch = diffStylePatch(beforeStyle, afterStyle);
+      const patch = scriptFormatPatchFromDocStylePatch(docPatch);
+      if (patch !== null && isPlainObject(patch) && Object.keys(patch).length === 0) continue;
+
+      const key = patch === null ? "null" : stableStringify(patch);
+      let groups = rowGroupsBySheet.get(sheetName);
+      if (!groups) {
+        groups = new Map();
+        rowGroupsBySheet.set(sheetName, groups);
+      }
+      const entry = groups.get(key) ?? { patch, rows: [] };
+      entry.rows.push(row);
+      groups.set(key, entry);
+    }
+
+    for (const [sheetName, groups] of rowGroupsBySheet.entries()) {
+      for (const entry of groups.values()) {
+        entry.rows.sort((a, b) => a - b);
+        let i = 0;
+        while (i < entry.rows.length) {
+          let j = i + 1;
+          while (j < entry.rows.length && entry.rows[j] === entry.rows[j - 1] + 1) j += 1;
+          const startRow = entry.rows[i];
+          const endRow = entry.rows[j - 1];
+          this.events.emit("formatChanged", {
+            sheetName,
+            address: formatRangeAddress({ startRow, startCol: 0, endRow, endCol: EXCEL_MAX_COL }),
+            format: entry.patch,
+          });
+          i = j;
+        }
+      }
+    }
+
+    for (const delta of rawSheetStyleDeltas) {
+      const sheetName = typeof delta?.sheetId === "string" ? delta.sheetId : typeof delta?.sheetName === "string" ? delta.sheetName : null;
+      if (!sheetName) continue;
+
+      const beforeStyle = resolveDocStyle(styleTable, deltaStyleRef(delta, "before"));
+      const afterStyle = resolveDocStyle(styleTable, deltaStyleRef(delta, "after"));
+      const docPatch = diffStylePatch(beforeStyle, afterStyle);
+      const patch = scriptFormatPatchFromDocStylePatch(docPatch);
+      if (patch !== null && isPlainObject(patch) && Object.keys(patch).length === 0) continue;
+
+      this.events.emit("formatChanged", {
+        sheetName,
+        address: formatRangeAddress({ startRow: 0, startCol: 0, endRow: EXCEL_MAX_ROW, endCol: EXCEL_MAX_COL }),
+        format: patch,
+      });
     }
   }
 }
@@ -677,11 +882,25 @@ class DocumentControllerRangeAdapter {
   }
 
   getFormat() {
-    const cell = this.sheet.workbook.documentController.getCell(this.sheet.name, {
-      row: this.coords.startRow,
-      col: this.coords.startCol,
-    });
-    const style = this.sheet.workbook.documentController.styleTable.get(cell.styleId);
+    const doc = this.sheet.workbook.documentController;
+    const coord = { row: this.coords.startRow, col: this.coords.startCol };
+
+    // Prefer DocumentController's effective/layered formatting API when available so
+    // scripts observe inherited row/col/sheet formats (not just cell-level overrides).
+    if (typeof doc.getCellFormat === "function") {
+      const effective = doc.getCellFormat(this.sheet.name, coord);
+      // Some implementations may return a styleId instead of a style object.
+      if (typeof effective === "number") {
+        return scriptFormatFromDocStyle(doc.styleTable?.get(effective) ?? {});
+      }
+      if (isPlainObject(effective) && typeof effective.styleId === "number") {
+        return scriptFormatFromDocStyle(doc.styleTable?.get(effective.styleId) ?? {});
+      }
+      return scriptFormatFromDocStyle(effective);
+    }
+
+    const cell = doc.getCell(this.sheet.name, coord);
+    const style = doc.styleTable.get(cell.styleId);
     return scriptFormatFromDocStyle(style);
   }
 
