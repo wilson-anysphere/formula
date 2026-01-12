@@ -12,6 +12,7 @@ import { renderRichText } from "../grid/text/rich-text/render.js";
 import {
   copyRangeToClipboardPayload,
   createClipboardProvider,
+  clipboardFormatToDocStyle,
   parseClipboardContentToCellGrid,
 } from "../clipboard/index.js";
 import { cellToA1, rangeToA1 } from "../selection/a1";
@@ -5991,7 +5992,7 @@ export class SpreadsheetApp {
           )
         : externalGrid!.map((row) =>
             row.map((cell: any) => {
-              const format = cell.format ?? null;
+              const format = clipboardFormatToDocStyle(cell.format ?? null);
               const rawFormula = cell.formula;
               const formula =
                 rawFormula != null && (deltaRow !== 0 || deltaCol !== 0)

@@ -10,6 +10,8 @@ export function createClipboardProvider(): Promise<ClipboardProvider>;
 
 export function parseClipboardContentToCellGrid(content: ClipboardContent): any[] | null;
 
+export function clipboardFormatToDocStyle(format: any): any | null;
+
 export function copyRangeToClipboardPayload(
   doc: any,
   sheetId: string,

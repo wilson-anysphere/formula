@@ -64,6 +64,213 @@ function stableStringify(value) {
   return `{${entries.join(",")}}`;
 }
 
+function clampByte(value) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function toHex2(value) {
+  return clampByte(value).toString(16).padStart(2, "0").toUpperCase();
+}
+
+function parseCssRgbChannel(value) {
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+
+  const percent = /^([+-]?\d*\.?\d+)%$/.exec(trimmed);
+  if (percent) {
+    const p = Number(percent[1]);
+    if (!Number.isFinite(p)) return null;
+    return clampByte((p / 100) * 255);
+  }
+
+  const num = Number(trimmed);
+  if (!Number.isFinite(num)) return null;
+  return clampByte(num);
+}
+
+function parseCssAlphaChannel(value) {
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+
+  const percent = /^([+-]?\d*\.?\d+)%$/.exec(trimmed);
+  if (percent) {
+    const p = Number(percent[1]);
+    if (!Number.isFinite(p)) return null;
+    const a = Math.max(0, Math.min(1, p / 100));
+    return clampByte(a * 255);
+  }
+
+  const num = Number(trimmed);
+  if (!Number.isFinite(num)) return null;
+  const a = Math.max(0, Math.min(1, num));
+  return clampByte(a * 255);
+}
+
+function parseCssRgbFunction(value) {
+  const trimmed = String(value).trim();
+  const match = /^(rgb|rgba)\(\s*([\s\S]+)\s*\)$/i.exec(trimmed);
+  if (!match) return null;
+  const args = match[2]?.trim() ?? "";
+  if (!args) return null;
+
+  let rgbPart = args;
+  let alphaPart = null;
+
+  // Support modern slash syntax: rgb(1 2 3 / 0.5).
+  if (args.includes("/")) {
+    const parts = args.split("/");
+    if (parts.length !== 2) return null;
+    rgbPart = parts[0].trim();
+    alphaPart = parts[1].trim();
+  }
+
+  let parts = [];
+  if (rgbPart.includes(",")) {
+    parts = rgbPart
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean);
+  } else {
+    parts = rgbPart
+      .split(/\s+/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+  }
+
+  if (alphaPart == null && parts.length === 4) {
+    alphaPart = parts[3];
+    parts = parts.slice(0, 3);
+  }
+
+  if (parts.length < 3) return null;
+
+  const r = parseCssRgbChannel(parts[0]);
+  const g = parseCssRgbChannel(parts[1]);
+  const b = parseCssRgbChannel(parts[2]);
+  if (r == null || g == null || b == null) return null;
+
+  const a = alphaPart != null ? parseCssAlphaChannel(alphaPart) : 255;
+  if (a == null) return null;
+
+  return { a, r, g, b };
+}
+
+function normalizeCssColorViaDom(color) {
+  try {
+    // eslint-disable-next-line no-undef
+    const doc = typeof document !== "undefined" ? document : null;
+    // eslint-disable-next-line no-undef
+    const compute = typeof getComputedStyle === "function" ? getComputedStyle : null;
+    if (!doc || typeof doc.createElement !== "function" || !compute) return null;
+
+    const el = doc.createElement("span");
+    el.style.color = "";
+    el.style.color = color;
+    // Invalid colors yield an empty string.
+    if (!el.style.color) return null;
+
+    const parent = doc.body ?? doc.documentElement;
+    if (parent && typeof parent.appendChild === "function") {
+      parent.appendChild(el);
+    }
+    const computed = compute(el).color;
+    el.remove();
+    return typeof computed === "string" && computed.trim() ? computed.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Convert a CSS color string into the DocumentController's ARGB color format (`#AARRGGBB`).
+ *
+ * This intentionally supports:
+ * - `#RRGGBB`
+ * - `#AARRGGBB` (Excel/OOXML style)
+ * - `rgb(r,g,b)` / `rgb(r g b)`
+ * - `rgba(r,g,b,a)`
+ *
+ * For other CSS color syntaxes (named colors, `hsl()`, etc.), we attempt a DOM-based
+ * normalization when running in a browser/WebView. In non-DOM environments (node tests),
+ * unsupported strings return `null`.
+ *
+ * @param {any} value
+ * @returns {string | null}
+ */
+function cssColorToArgb(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const lower = trimmed.toLowerCase();
+  if (lower === "transparent") return "#00000000";
+  if (lower === "none") return null;
+
+  const hex = trimmed.replace(/^#/, "");
+  if (/^[0-9a-fA-F]{6}$/.test(hex)) return `#FF${hex.toUpperCase()}`;
+  if (/^[0-9a-fA-F]{8}$/.test(hex)) return `#${hex.toUpperCase()}`;
+
+  const rgb = parseCssRgbFunction(trimmed);
+  if (rgb) return `#${toHex2(rgb.a)}${toHex2(rgb.r)}${toHex2(rgb.g)}${toHex2(rgb.b)}`;
+
+  const normalized = normalizeCssColorViaDom(trimmed);
+  if (normalized) {
+    const parsed = parseCssRgbFunction(normalized);
+    if (parsed) return `#${toHex2(parsed.a)}${toHex2(parsed.r)}${toHex2(parsed.g)}${toHex2(parsed.b)}`;
+  }
+
+  return null;
+}
+
+/**
+ * Convert a clipboard cell `format` object into a DocumentController style object.
+ *
+ * Clipboard HTML parsing currently produces a flat format object:
+ * `{ bold, italic, underline, textColor, backgroundColor, numberFormat }`.
+ *
+ * The DocumentController stores canonical styles in an OOXML-ish schema:
+ * `{ font: { bold, italic, underline, color }, fill: { pattern, fgColor }, numberFormat }`
+ *
+ * @param {any} format
+ * @returns {any | null}
+ */
+export function clipboardFormatToDocStyle(format) {
+  if (!format || typeof format !== "object") return null;
+
+  /** @type {any} */
+  const out = {};
+
+  const setFont = (key, value) => {
+    out.font ??= {};
+    out.font[key] = value;
+  };
+
+  if (typeof format.bold === "boolean") setFont("bold", format.bold);
+  if (typeof format.italic === "boolean") setFont("italic", format.italic);
+
+  if (typeof format.underline === "boolean") {
+    setFont("underline", format.underline);
+  } else if (typeof format.underline === "string") {
+    setFont("underline", format.underline !== "none");
+  }
+
+  const textColor = cssColorToArgb(format.textColor);
+  if (textColor) setFont("color", textColor);
+
+  const backgroundColor = cssColorToArgb(format.backgroundColor);
+  if (backgroundColor) {
+    out.fill = { pattern: "solid", fgColor: backgroundColor };
+  }
+
+  const numberFormat = format.numberFormat;
+  if (typeof numberFormat === "string" && numberFormat.trim() !== "") {
+    out.numberFormat = numberFormat;
+  }
+
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 /**
  * Convert a DocumentController style table entry to the clipboard's lightweight format.
  *
@@ -453,11 +660,12 @@ export function pasteClipboardContent(doc, sheetId, start, content, options = {}
     row.map((cell) => {
       if (mode === "values") return cell.value ?? null;
       if (mode === "formulas") return cell.formula != null ? { formula: cell.formula } : cell.value ?? null;
-      if (mode === "formats") return { format: cell.format ?? null };
+      if (mode === "formats") return { format: clipboardFormatToDocStyle(cell.format ?? null) };
 
       // mode === "all"
-      if (cell.formula != null) return { formula: cell.formula, value: null, format: cell.format ?? null };
-      return { value: cell.value ?? null, format: cell.format ?? null };
+      const format = clipboardFormatToDocStyle(cell.format ?? null);
+      if (cell.formula != null) return { formula: cell.formula, value: null, format };
+      return { value: cell.value ?? null, format };
     })
   );
 
