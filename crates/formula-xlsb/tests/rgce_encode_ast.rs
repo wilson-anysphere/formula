@@ -259,3 +259,68 @@ fn ast_encoder_encodes_cell_lambda_call() {
     let decoded = decode_rgce(&encoded.rgce).expect("decode");
     assert_eq!(decoded, "A1(1)");
 }
+
+#[test]
+fn ast_encoder_encodes_column_range_as_area() {
+    let ctx = WorkbookContext::default();
+
+    let encoded =
+        encode_rgce_with_context_ast("=A:C", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    // `A:C` encodes as a single `PtgArea` spanning all rows.
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x25, // PtgArea
+            0x00, 0x00, 0x00, 0x00, // rowFirst=0
+            0xFF, 0xFF, 0x0F, 0x00, // rowLast=1048575
+            0x00, 0x80, // colFirst=A (relative column, absolute row)
+            0x02, 0x80, // colLast=C (relative column, absolute row)
+        ]
+    );
+}
+
+#[test]
+fn ast_encoder_encodes_row_range_as_area() {
+    let ctx = WorkbookContext::default();
+
+    let encoded =
+        encode_rgce_with_context_ast("=1:3", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    // `1:3` encodes as a single `PtgArea` spanning all columns.
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x25, // PtgArea
+            0x00, 0x00, 0x00, 0x00, // rowFirst=0 (row 1)
+            0x02, 0x00, 0x00, 0x00, // rowLast=2 (row 3)
+            0x00, 0x40, // colFirst=A (absolute column, relative row)
+            0xFF, 0x7F, // colLast=XFD (absolute column, relative row)
+        ]
+    );
+}
+
+#[test]
+fn ast_encoder_encodes_sheet_range_column_ref_as_area3d() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet1", "Sheet3", 1);
+
+    let encoded =
+        encode_rgce_with_context_ast("=Sheet1:Sheet3!A:A", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x3B, // PtgArea3d
+            0x01, 0x00, // ixti=1
+            0x00, 0x00, 0x00, 0x00, // rowFirst=0
+            0xFF, 0xFF, 0x0F, 0x00, // rowLast=1048575
+            0x00, 0x80, // colFirst=A (relative column, absolute row)
+            0x00, 0x80, // colLast=A (relative column, absolute row)
+        ]
+    );
+}

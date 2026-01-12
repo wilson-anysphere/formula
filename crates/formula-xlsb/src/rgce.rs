@@ -1906,8 +1906,12 @@ mod encode_ast {
                     });
                 }
             },
-            fe::Expr::ColRef(_) => return Err(EncodeError::Unsupported("column references")),
-            fe::Expr::RowRef(_) => return Err(EncodeError::Unsupported("row references")),
+            fe::Expr::ColRef(r) => {
+                emit_col_ref(r, ctx, base, rgce, PtgClass::Ref)?;
+            }
+            fe::Expr::RowRef(r) => {
+                emit_row_ref(r, ctx, base, rgce, PtgClass::Ref)?;
+            }
             fe::Expr::StructuredRef(_) => {
                 return Err(EncodeError::Unsupported("structured references"))
             }
@@ -1936,6 +1940,8 @@ mod encode_ast {
     ) -> Result<(), EncodeError> {
         match expr {
             fe::Expr::CellRef(r) => emit_cell_ref(r, ctx, base, rgce, class),
+            fe::Expr::ColRef(r) => emit_col_ref(r, ctx, base, rgce, class),
+            fe::Expr::RowRef(r) => emit_row_ref(r, ctx, base, rgce, class),
             fe::Expr::NameRef(name) => emit_defined_name(name, ctx, rgce, class),
             fe::Expr::Binary(b) if b.op == fe::BinaryOp::Range => {
                 if let Some(area) = area_ref_from_range_operands(&b.left, &b.right, ctx, base)? {
@@ -1974,30 +1980,74 @@ mod encode_ast {
     fn area_ref_from_range_operands(
         left: &fe::Expr,
         right: &fe::Expr,
-        ctx: &WorkbookContext,
-        base: CellCoord,
-    ) -> Result<Option<(CellRefInfo, CellRefInfo, SheetSpec)>, EncodeError> {
-        let Some(a) = cell_ref_info(left, ctx, base)? else {
-            return Ok(None);
-        };
-        let Some(b) = cell_ref_info(right, ctx, base)? else {
-            return Ok(None);
-        };
-
-        let merged = merge_sheets(&a.sheet, &b.sheet).ok_or_else(|| {
-            EncodeError::Parse("range operands refer to different sheets".to_string())
-        })?;
-
-        Ok(Some((a, b, merged)))
-    }
-
-    fn cell_ref_info(
-        expr: &fe::Expr,
         _ctx: &WorkbookContext,
         base: CellCoord,
-    ) -> Result<Option<CellRefInfo>, EncodeError> {
-        match expr {
-            fe::Expr::CellRef(r) => Ok(Some(cell_ref_info_from_cell_ref(r, base)?)),
+    ) -> Result<Option<(CellRefInfo, CellRefInfo, SheetSpec)>, EncodeError> {
+        match (left, right) {
+            (fe::Expr::CellRef(a_ref), fe::Expr::CellRef(b_ref)) => {
+                let a = cell_ref_info_from_cell_ref(a_ref, base)?;
+                let b = cell_ref_info_from_cell_ref(b_ref, base)?;
+                let merged = merge_sheets(&a.sheet, &b.sheet).ok_or_else(|| {
+                    EncodeError::Parse("range operands refer to different sheets".to_string())
+                })?;
+                Ok(Some((a, b, merged)))
+            }
+            (fe::Expr::ColRef(a_ref), fe::Expr::ColRef(b_ref)) => {
+                // Column ranges like `A:C` / `A:A`.
+                const MAX_ROW: u32 = 1_048_575;
+                let (col_a, abs_col_a) = coord_to_a1_index(&a_ref.col, base.col)?;
+                let (col_b, abs_col_b) = coord_to_a1_index(&b_ref.col, base.col)?;
+
+                let sheet_a = sheet_spec_from_ref_prefix(&a_ref.workbook, &a_ref.sheet);
+                let sheet_b = sheet_spec_from_ref_prefix(&b_ref.workbook, &b_ref.sheet);
+                let merged = merge_sheets(&sheet_a, &sheet_b).ok_or_else(|| {
+                    EncodeError::Parse("range operands refer to different sheets".to_string())
+                })?;
+
+                let a = CellRefInfo {
+                    sheet: sheet_a,
+                    row: 0,
+                    col: col_a,
+                    abs_row: true,
+                    abs_col: abs_col_a,
+                };
+                let b = CellRefInfo {
+                    sheet: sheet_b,
+                    row: MAX_ROW,
+                    col: col_b,
+                    abs_row: true,
+                    abs_col: abs_col_b,
+                };
+                Ok(Some((a, b, merged)))
+            }
+            (fe::Expr::RowRef(a_ref), fe::Expr::RowRef(b_ref)) => {
+                // Row ranges like `1:3` / `1:1`.
+                const MAX_COL: u32 = COL_INDEX_MASK as u32;
+                let (row_a, abs_row_a) = coord_to_a1_index(&a_ref.row, base.row)?;
+                let (row_b, abs_row_b) = coord_to_a1_index(&b_ref.row, base.row)?;
+
+                let sheet_a = sheet_spec_from_ref_prefix(&a_ref.workbook, &a_ref.sheet);
+                let sheet_b = sheet_spec_from_ref_prefix(&b_ref.workbook, &b_ref.sheet);
+                let merged = merge_sheets(&sheet_a, &sheet_b).ok_or_else(|| {
+                    EncodeError::Parse("range operands refer to different sheets".to_string())
+                })?;
+
+                let a = CellRefInfo {
+                    sheet: sheet_a,
+                    row: row_a,
+                    col: 0,
+                    abs_row: abs_row_a,
+                    abs_col: true,
+                };
+                let b = CellRefInfo {
+                    sheet: sheet_b,
+                    row: row_b,
+                    col: MAX_COL,
+                    abs_row: abs_row_b,
+                    abs_col: true,
+                };
+                Ok(Some((a, b, merged)))
+            }
             _ => Ok(None),
         }
     }
@@ -2063,6 +2113,66 @@ mod encode_ast {
     ) -> Result<(), EncodeError> {
         let info = cell_ref_info_from_cell_ref(r, base)?;
         emit_cell_ref_info(&info, ctx, rgce, class)
+    }
+
+    fn emit_col_ref(
+        r: &fe::ColRef,
+        ctx: &WorkbookContext,
+        base: CellCoord,
+        rgce: &mut Vec<u8>,
+        class: PtgClass,
+    ) -> Result<(), EncodeError> {
+        // Column references like `A:A` are represented in BIFF as areas spanning the entire row
+        // range for the given column.
+        const MAX_ROW: u32 = 1_048_575;
+        let (col, abs_col) = coord_to_a1_index(&r.col, base.col)?;
+        let sheet = sheet_spec_from_ref_prefix(&r.workbook, &r.sheet);
+
+        let a = CellRefInfo {
+            sheet: sheet.clone(),
+            row: 0,
+            col,
+            abs_row: true,
+            abs_col,
+        };
+        let b = CellRefInfo {
+            sheet: sheet.clone(),
+            row: MAX_ROW,
+            col,
+            abs_row: true,
+            abs_col,
+        };
+        emit_area_ref_info(&a, &b, &sheet, ctx, rgce, class)
+    }
+
+    fn emit_row_ref(
+        r: &fe::RowRef,
+        ctx: &WorkbookContext,
+        base: CellCoord,
+        rgce: &mut Vec<u8>,
+        class: PtgClass,
+    ) -> Result<(), EncodeError> {
+        // Row references like `1:1` are represented in BIFF as areas spanning the entire column
+        // range for the given row.
+        const MAX_COL: u32 = COL_INDEX_MASK as u32;
+        let (row, abs_row) = coord_to_a1_index(&r.row, base.row)?;
+        let sheet = sheet_spec_from_ref_prefix(&r.workbook, &r.sheet);
+
+        let a = CellRefInfo {
+            sheet: sheet.clone(),
+            row,
+            col: 0,
+            abs_row,
+            abs_col: true,
+        };
+        let b = CellRefInfo {
+            sheet: sheet.clone(),
+            row,
+            col: MAX_COL,
+            abs_row,
+            abs_col: true,
+        };
+        emit_area_ref_info(&a, &b, &sheet, ctx, rgce, class)
     }
 
     fn emit_cell_ref_info(
