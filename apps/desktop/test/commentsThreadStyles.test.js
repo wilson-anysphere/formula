@@ -42,5 +42,20 @@ test("SpreadsheetApp.renderCommentThread is styled via CSS classes (no inline st
     /comment-thread/.test(fn),
     "renderCommentThread should apply a .comment-thread* class so styling lives in comments.css",
   );
-});
 
+  // E2E tests rely on these data-testid hooks.
+  for (const testId of ["comment-thread", "resolve-comment", "reply-input", "submit-reply"]) {
+    assert.ok(
+      new RegExp(`dataset\\.testid\\s*=\\s*["']${testId}["']`).test(fn),
+      `renderCommentThread should preserve data-testid=\"${testId}\" for Playwright`,
+    );
+  }
+
+  // Resolved visual state should be driven by CSS (data-resolved selector), not JS inline styles.
+  const cssPath = path.join(__dirname, "..", "src", "styles", "comments.css");
+  const css = fs.readFileSync(cssPath, "utf8");
+  assert.ok(
+    css.includes('.comment-thread[data-resolved="true"]'),
+    "comments.css should style resolved threads via .comment-thread[data-resolved=\"true\"]",
+  );
+});
