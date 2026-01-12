@@ -378,6 +378,12 @@ fn expr_to_key(expr: &Expr, out: &mut String) {
                 }
                 out.push(')');
             }
+            // Rich value variants (e.g. entity / record types) can be carried through the bytecode
+            // runtime for pass-through semantics, but are not currently produced by
+            // parsing/lowering as literals. Encode them as an opaque marker so cache keys stay
+            // deterministic without needing to serialize the rich payload.
+            #[allow(unreachable_patterns)]
+            _ => out.push_str("RICH"),
         },
         Expr::CellRef(r) => {
             out.push_str("CELL(");
@@ -467,4 +473,24 @@ fn sheet_range_to_key(r: SheetRangeRef, out: &mut String) {
     ref_to_key(r.range.start, out);
     out.push(',');
     ref_to_key(r.range.end, out);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalized_key_is_stable_for_common_expressions() {
+        let a1 = super::super::value::CellCoord::new(0, 0);
+        let a2 = super::super::value::CellCoord::new(1, 0);
+
+        // Same relative pattern filled down a row should hit the same cache key.
+        let expr1 = super::super::ast::parse_formula("=B1+1", a1).expect("parse");
+        let expr2 = super::super::ast::parse_formula("=B2+1", a2).expect("parse");
+        assert_eq!(normalized_key(&expr1), normalized_key(&expr2));
+
+        // Literal/text/function encoding should remain deterministic.
+        let expr = super::super::ast::parse_formula("=CONCAT(\"a\",\"b\")", a1).expect("parse");
+        assert_eq!(normalized_key(&expr).as_ref(), "FN(CONCAT,2:Sa\0,Sb\0,)");
+    }
 }
