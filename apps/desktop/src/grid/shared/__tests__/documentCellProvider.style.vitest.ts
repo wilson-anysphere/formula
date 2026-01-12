@@ -159,6 +159,33 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     expect((cell as any).style?.verticalAlign).toBe("middle");
   });
 
+  it("allows UI patches to clear an imported snake_case alignment.vertical_alignment", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    doc.setCellValue(sheetId, "A1", "Aligned");
+    // Imported formula-model style (snake_case).
+    doc.setRangeFormat(sheetId, "A1", { alignment: { vertical_alignment: "top" }, font: { bold: true } });
+    // User clears back to default/general.
+    doc.setRangeFormat(sheetId, "A1", { alignment: { vertical: null } });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell).not.toBeNull();
+    expect((cell as any).style?.fontWeight).toBe("700");
+    expect((cell as any).style?.verticalAlign).toBeUndefined();
+  });
+
   it("allows modern fill:null patches to clear legacy flat backgroundColor fills", () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";
