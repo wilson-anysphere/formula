@@ -33,3 +33,13 @@ test('cargo_agent can run cargo clean (subcommand does not accept -j)', { skip: 
   assert.ok(!stderr.includes("unexpected argument '-j'"), stderr);
 });
 
+test(
+  'cargo_agent uses CARGO_BUILD_JOBS when FORMULA_CARGO_JOBS is unset',
+  { skip: !hasBash },
+  () => {
+    const { stderr } = runBash(
+      'unset FORMULA_CARGO_JOBS && export CARGO_BUILD_JOBS=7 && bash scripts/cargo_agent.sh check -h',
+    );
+    assert.ok(stderr.includes('jobs=7'), stderr);
+  },
+);
