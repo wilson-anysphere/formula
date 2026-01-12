@@ -32,6 +32,26 @@ test("formula bar F4 cycles absolute/relative A1 references", async ({ page }) =
   await expect(input).toHaveJSProperty("selectionEnd", 2);
 });
 
+test("formula bar F4 expands full-token selections to cover the toggled token", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByTestId("engine-status")).toContainText("ready", { timeout: 30_000 });
+
+  const input = page.getByTestId("formula-input");
+  await input.click();
+  await input.fill("=A1+B1");
+
+  await input.evaluate((el) => {
+    const inputEl = el as HTMLInputElement;
+    inputEl.focus();
+    inputEl.setSelectionRange(1, 3);
+  });
+
+  await input.press("F4");
+  await expect(input).toHaveValue("=$A$1+B1");
+  await expect(input).toHaveJSProperty("selectionStart", 1);
+  await expect(input).toHaveJSProperty("selectionEnd", 5);
+});
+
 test("formula bar F4 preserves sheet qualifiers and toggles range endpoints", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("engine-status")).toContainText("ready", { timeout: 30_000 });

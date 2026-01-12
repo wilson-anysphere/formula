@@ -62,6 +62,32 @@ test.describe("formula bar F4 toggles absolute/relative references", () => {
       ).toEqual({ start: 2, end: 2 });
     });
 
+    test(`F4 expands full-token selections to cover the toggled token (${mode})`, async ({ page }) => {
+      await gotoDesktop(page, `/?grid=${mode}`);
+      await waitForIdle(page);
+
+      await page.getByTestId("formula-highlight").click();
+      const input = page.getByTestId("formula-input");
+      await expect(input).toBeVisible();
+      await input.fill("=A1+B1");
+
+      // Select the full first reference token (A1).
+      await input.evaluate((el) => {
+        const textarea = el as HTMLTextAreaElement;
+        textarea.focus();
+        textarea.setSelectionRange(1, 3);
+      });
+
+      await page.keyboard.press("F4");
+      await expect(input).toHaveValue("=$A$1+B1");
+      expect(
+        await input.evaluate((el) => ({
+          start: (el as HTMLTextAreaElement).selectionStart,
+          end: (el as HTMLTextAreaElement).selectionEnd,
+        }))
+      ).toEqual({ start: 1, end: 5 });
+    });
+
     test(`preserves sheet qualifiers + toggles both endpoints of a range (${mode})`, async ({ page }) => {
       await gotoDesktop(page, `/?grid=${mode}`);
       await waitForIdle(page);
