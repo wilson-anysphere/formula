@@ -190,6 +190,19 @@ Notes:
 - If `persistence` is provided, `connection.docId` (or `options.docId`) must be set; otherwise the session throws.
 - When `presence` is enabled, `session.presence` is a `PresenceManager` instance.
 
+### Sync provider connection + “ready” signals
+
+When you pass `connection: { wsUrl, docId, token }`, `@formula/collab-session` constructs a `y-websocket` `WebsocketProvider` internally and exposes it as `session.provider`.
+
+Useful lifecycle helpers:
+
+- `await session.whenLocalPersistenceLoaded()` — resolves when `options.persistence` has loaded any saved updates into the doc
+- `await session.whenSynced()` — resolves when the sync provider reports `sync=true`
+
+If you use `persistence` or offline auto-connect gating, the initial WebSocket connection may be delayed until hydration completes (so offline edits are present before syncing).
+
+Implementation: see `scheduleProviderConnectAfterHydration()` in [`packages/collab/session/src/index.ts`](../packages/collab/session/src/index.ts).
+
 ### Schema initialization (default sheet + root normalization)
 
 By default, `createCollabSession` will keep the shared workbook schema well-formed by calling `ensureWorkbookSchema(session.doc, ...)` (from `@formula/collab-workbook`):
