@@ -505,7 +505,7 @@ A 1M-row spreadsheet could exceed 100M tokens if naively serialized. We need int
 
 ```typescript
 interface ContextBudget {
-  totalTokens: number;       // e.g., 128K for Claude
+  totalTokens: number;       // e.g., 128K for a long-context model
   systemPrompt: number;      // ~2K
   schema: number;            // ~1K
   sampleData: number;        // ~5K
