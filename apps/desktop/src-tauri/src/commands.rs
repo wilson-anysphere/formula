@@ -3984,7 +3984,7 @@ pub async fn write_clipboard(
 //
 // Desktop extensions and the in-webview marketplace client run inside the Tauri WebView, which is
 // governed by the app CSP (including `connect-src`). The production CSP is intentionally
-// restrictive (TLS-only outbound networking via `https:`/`wss:`; no `http:`/`ws:`).
+// restrictive (HTTPS + WebSockets via `https:`/`ws:`/`wss:`; no `http:`).
 //
 // Network access for extensions is primarily enforced by Formula's permission model + extension
 // worker guardrails (which replace `fetch`/`WebSocket` inside the worker); CSP is defense-in-depth.

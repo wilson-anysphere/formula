@@ -367,8 +367,8 @@ cannot reliably resolve relative imports, the browser entrypoint (`manifest.brow
   - origin-only values (e.g. `https://marketplace.formula.app`) are normalized to `.../api` for convenience
   - default: `"/api"` in dev/e2e, `https://marketplace.formula.app/api` in production builds
 - **Desktop/Tauri network behavior:** in packaged desktop builds, the app CSP is configured in
-  `apps/desktop/src-tauri/tauri.conf.json` and currently allows `connect-src 'self' https: wss: blob: data:` (TLS-only
-  outbound network from the WebView; no `http:` / `ws:`).
+  `apps/desktop/src-tauri/tauri.conf.json` and currently allows `connect-src 'self' https: ws: wss: blob: data:` (HTTPS +
+  WebSockets; no `http:`).
   - `MarketplaceClient` prefers making HTTP requests via the Rust backend (Tauri IPC:
     `marketplace_search`, `marketplace_get_extension`, `marketplace_download_package`) when running under Tauri with an
     absolute `http(s)` marketplace base URL; otherwise it falls back to `fetch()`.
@@ -378,7 +378,7 @@ cannot reliably resolve relative imports, the browser entrypoint (`manifest.brow
   - Note: because `network_fetch` / `marketplace_*` run in the Rust backend (reqwest), they are not governed by the WebView
     CSP and can still reach `http:` URLs (useful for local dev servers) even though `connect-src` does not include `http:`.
   - Note: WebSocket connections are not proxied via Tauri IPC. Extension WebSockets are permission-gated in the extension
-    worker and are subject to the app CSP (`connect-src`), so the URL must be allowed (notably `wss:` under the default CSP).
+    worker and are subject to the app CSP (`connect-src`), so the URL must be allowed (notably `ws:`/`wss:` under the default CSP).
 
 In Desktop/Tauri, the CSP lives in `apps/desktop/src-tauri/tauri.conf.json` (`app.security.csp`).
 
