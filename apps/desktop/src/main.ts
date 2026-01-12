@@ -48,7 +48,6 @@ import {
 } from "./power-query/service.js";
 import { createPowerQueryRefreshStateStore } from "./power-query/refreshStateStore.js";
 import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
-import { mountRibbon } from "./ribbon/mountRibbon.js";
 import { DesktopExtensionHostManager } from "./extensions/extensionHostManager.js";
 import { ExtensionPanelBridge } from "./extensions/extensionPanelBridge.js";
 import { ContextKeyService } from "./extensions/contextKeys.js";
@@ -57,7 +56,20 @@ import { matchesKeybinding, parseKeybinding, platformKeybinding, type Contribute
 import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js";
 import { evaluateWhenClause } from "./extensions/whenClause.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
-import type { SelectionState } from "./selection/types";
+import type { Range, SelectionState } from "./selection/types";
+import {
+  applyAllBorders,
+  applyNumberFormatPreset,
+  setFillColor,
+  setFontColor,
+  setFontSize,
+  setHorizontalAlign,
+  toggleBold,
+  toggleItalic,
+  toggleUnderline,
+  toggleWrap,
+  type CellRange,
+} from "./formatting/toolbar.js";
 
 import sampleHelloManifest from "../../../extensions/sample-hello/package.json";
 
@@ -147,20 +159,11 @@ const ribbonRoot = document.getElementById("ribbon");
 if (!ribbonRoot) {
   throw new Error("Missing #ribbon container");
 }
-mountRibbon(ribbonRoot, {
-  onCommand: (commandId) => {
-    showToast(`Ribbon: ${commandId}`);
-  },
-});
 
 const formulaBarRoot = document.getElementById("formula-bar");
 if (!formulaBarRoot) {
   throw new Error("Missing #formula-bar container");
 }
-
-const ribbonRoot = document.createElement("div");
-const formulaBarContainer = document.createElement("div");
-formulaBarRoot.replaceChildren(ribbonRoot, formulaBarContainer);
 
 const activeCell = document.querySelector<HTMLElement>('[data-testid="active-cell"]');
 const selectionRange = document.querySelector<HTMLElement>('[data-testid="selection-range"]');
@@ -192,8 +195,79 @@ const workbookId = "local-workbook";
 const app = new SpreadsheetApp(
   gridRoot,
   { activeCell, selectionRange, activeValue },
-  { formulaBar: formulaBarContainer, workbookId },
+  { formulaBar: formulaBarRoot, workbookId },
 );
+
+function normalizeSelectionRange(range: Range): CellRange {
+  const startRow = Math.min(range.startRow, range.endRow);
+  const endRow = Math.max(range.startRow, range.endRow);
+  const startCol = Math.min(range.startCol, range.endCol);
+  const endCol = Math.max(range.startCol, range.endCol);
+  return { start: { row: startRow, col: startCol }, end: { row: endRow, col: endCol } };
+}
+
+function selectionRangesForFormatting(): CellRange[] {
+  const ranges = app.getSelectionRanges();
+  if (ranges.length === 0) {
+    const cell = app.getActiveCell();
+    return [{ start: { row: cell.row, col: cell.col }, end: { row: cell.row, col: cell.col } }];
+  }
+  return ranges.map(normalizeSelectionRange);
+}
+
+function rgbHexToArgb(rgb: string): string | null {
+  if (!/^#[0-9A-Fa-f]{6}$/.test(rgb)) return null;
+  // DocumentController formatting expects #AARRGGBB.
+  return ["#", "FF", rgb.slice(1)].join("");
+}
+
+function applyToSelection(label: string, fn: (sheetId: string, ranges: CellRange[]) => void): void {
+  const doc = app.getDocument();
+  const sheetId = app.getCurrentSheetId();
+  const ranges = selectionRangesForFormatting();
+  const shouldBatch = ranges.length > 1;
+
+  if (shouldBatch) doc.beginBatch({ label });
+  try {
+    fn(sheetId, ranges);
+  } finally {
+    if (shouldBatch) doc.endBatch();
+  }
+  app.focus();
+}
+
+function createHiddenColorInput(): HTMLInputElement {
+  const input = document.createElement("input");
+  input.type = "color";
+  input.tabIndex = -1;
+  input.style.position = "fixed";
+  input.style.left = "-1000px";
+  input.style.top = "-1000px";
+  input.style.opacity = "0";
+  document.body.appendChild(input);
+  return input;
+}
+
+const fontColorPicker = createHiddenColorInput();
+const fillColorPicker = createHiddenColorInput();
+
+function openColorPicker(
+  input: HTMLInputElement,
+  label: string,
+  apply: (sheetId: string, ranges: CellRange[], argb: string) => void,
+): void {
+  input.addEventListener(
+    "change",
+    () => {
+      const argb = rgbHexToArgb(input.value);
+      if (!argb) return;
+      applyToSelection(label, (sheetId, ranges) => apply(sheetId, ranges, argb));
+    },
+    { once: true },
+  );
+  input.click();
+}
+
 // Panels persist state keyed by a workbook/document identifier. For file-backed workbooks we use
 // their on-disk path; for unsaved sessions we generate a random session id so distinct new
 // workbooks don't collide.
@@ -2086,6 +2160,84 @@ function showDialogAndFocus(dialog: HTMLDialogElement): void {
 mountRibbon(ribbonRoot, {
   onCommand: (commandId) => {
     switch (commandId) {
+      case "home.font.bold":
+        applyToSelection("Bold", (sheetId, ranges) => toggleBold(app.getDocument(), sheetId, ranges));
+        return;
+      case "home.font.italic":
+        applyToSelection("Italic", (sheetId, ranges) => toggleItalic(app.getDocument(), sheetId, ranges));
+        return;
+      case "home.font.underline":
+        applyToSelection("Underline", (sheetId, ranges) => toggleUnderline(app.getDocument(), sheetId, ranges));
+        return;
+      case "home.font.borders":
+        applyToSelection("Borders", (sheetId, ranges) => applyAllBorders(app.getDocument(), sheetId, ranges));
+        return;
+      case "home.font.fontColor":
+        openColorPicker(fontColorPicker, "Font color", (sheetId, ranges, argb) =>
+          setFontColor(app.getDocument(), sheetId, ranges, argb),
+        );
+        return;
+      case "home.font.fillColor":
+        openColorPicker(fillColorPicker, "Fill color", (sheetId, ranges, argb) =>
+          setFillColor(app.getDocument(), sheetId, ranges, argb),
+        );
+        return;
+      case "home.font.fontSize":
+        void (async () => {
+          const picked = await showQuickPick(
+            [
+              { label: "8", value: 8 },
+              { label: "9", value: 9 },
+              { label: "10", value: 10 },
+              { label: "11", value: 11 },
+              { label: "12", value: 12 },
+              { label: "14", value: 14 },
+              { label: "16", value: 16 },
+              { label: "18", value: 18 },
+              { label: "20", value: 20 },
+              { label: "24", value: 24 },
+              { label: "28", value: 28 },
+              { label: "36", value: 36 },
+              { label: "48", value: 48 },
+              { label: "72", value: 72 },
+            ],
+            { placeHolder: "Font size" },
+          );
+          if (picked == null) return;
+          applyToSelection("Font size", (sheetId, ranges) => setFontSize(app.getDocument(), sheetId, ranges, picked));
+        })();
+        return;
+
+      case "home.alignment.alignLeft":
+        applyToSelection("Align left", (sheetId, ranges) => setHorizontalAlign(app.getDocument(), sheetId, ranges, "left"));
+        return;
+      case "home.alignment.center":
+        applyToSelection("Align center", (sheetId, ranges) =>
+          setHorizontalAlign(app.getDocument(), sheetId, ranges, "center"),
+        );
+        return;
+      case "home.alignment.alignRight":
+        applyToSelection("Align right", (sheetId, ranges) =>
+          setHorizontalAlign(app.getDocument(), sheetId, ranges, "right"),
+        );
+        return;
+      case "home.alignment.wrapText":
+        applyToSelection("Wrap", (sheetId, ranges) => toggleWrap(app.getDocument(), sheetId, ranges));
+        return;
+
+      case "home.number.percent":
+        applyToSelection("Number format", (sheetId, ranges) =>
+          applyNumberFormatPreset(app.getDocument(), sheetId, ranges, "percent"),
+        );
+        return;
+      case "home.number.accounting":
+        applyToSelection("Number format", (sheetId, ranges) =>
+          applyNumberFormatPreset(app.getDocument(), sheetId, ranges, "currency"),
+        );
+        return;
+      case "home.number.date":
+        applyToSelection("Number format", (sheetId, ranges) => applyNumberFormatPreset(app.getDocument(), sheetId, ranges, "date"));
+        return;
       case "home.editing.findSelect.find":
         showDialogAndFocus(findDialog);
         return;

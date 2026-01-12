@@ -71,6 +71,26 @@ test("toolbar commands produce expected style rendering (snapshot)", () => {
   );
 });
 
+test("toggle commands accept multiple ranges and apply consistently", () => {
+  const doc = new DocumentController();
+  doc.setRangeValues("Sheet1", "A1", [["x", "y"]]);
+
+  // Seed mixed formatting: A1 bold, B1 not bold.
+  doc.setRangeFormat("Sheet1", "A1", { font: { bold: true } });
+
+  toggleBold(doc, "Sheet1", ["A1", "B1"]);
+  const a1 = doc.styleTable.get(doc.getCell("Sheet1", "A1").styleId);
+  const b1 = doc.styleTable.get(doc.getCell("Sheet1", "B1").styleId);
+  assert.equal(Boolean(a1.font?.bold), true);
+  assert.equal(Boolean(b1.font?.bold), true);
+
+  toggleBold(doc, "Sheet1", ["A1", "B1"]);
+  const a1After = doc.styleTable.get(doc.getCell("Sheet1", "A1").styleId);
+  const b1After = doc.styleTable.get(doc.getCell("Sheet1", "B1").styleId);
+  assert.equal(Boolean(a1After.font?.bold), false);
+  assert.equal(Boolean(b1After.font?.bold), false);
+});
+
 test("Ctrl/Cmd+1 triggers Format Cells shortcut", () => {
   const target = new FakeEventTarget();
   let count = 0;
@@ -92,4 +112,3 @@ test("Ctrl/Cmd+1 triggers Format Cells shortcut", () => {
   assert.equal(count, 1);
   assert.equal(prevented, true);
 });
-

@@ -228,6 +228,7 @@ export const defaultRibbonSchema: RibbonSchema = {
             { id: "home.number.numberFormat", label: "General", ariaLabel: "Number Format", icon: "123", kind: "dropdown", size: "small" },
             { id: "home.number.accounting", label: "Accounting", ariaLabel: "Accounting Number Format", icon: "$", kind: "dropdown", size: "icon" },
             { id: "home.number.percent", label: "Percent", ariaLabel: "Percent Style", icon: "%", size: "icon" },
+            { id: "home.number.date", label: "Date", ariaLabel: "Date", icon: "📅", size: "icon" },
             { id: "home.number.comma", label: "Comma", ariaLabel: "Comma Style", icon: ",", size: "icon" },
             { id: "home.number.increaseDecimal", label: "Inc Decimal", ariaLabel: "Increase Decimal", icon: ".0→", size: "icon" },
             { id: "home.number.decreaseDecimal", label: "Dec Decimal", ariaLabel: "Decrease Decimal", icon: "←.0", size: "icon" },
