@@ -1029,6 +1029,12 @@ export async function activate(context: formula.ExtensionContext) {
 
 ### Process Isolation
 
+The following is **illustrative pseudocode** for how an application might manage extension workers and IPC. For the real
+implementations in this repo, see:
+
+- Node host (test harness): `ExtensionHost` in `packages/extension-host/src/index.js`
+- Browser/WebView host (Desktop/Tauri): `BrowserExtensionHost` in `packages/extension-host/src/browser/index.mjs`
+
 ```typescript
 class ExtensionHostManager {
   private hosts: Map<string, ExtensionHost> = new Map();
