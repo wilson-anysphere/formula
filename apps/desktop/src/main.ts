@@ -5404,7 +5404,8 @@ try {
 
   // Tauri v2 event permissions are scoped in `apps/desktop/src-tauri/capabilities/main.json`.
   // If you add a new `listen(...)` (Rust -> JS) or `emit(...)` (JS -> Rust) call here, you MUST
-  // update the corresponding allowlist there or the call will fail with a permissions error.
+  // update the corresponding allowlist there (and the `eventPermissions.vitest.ts` guardrail test)
+  // or the call will fail with a permissions error.
   const listen = getTauriListen();
   const emit = getTauriEmit();
   let pendingOpenFiles: Promise<void> = Promise.resolve();
