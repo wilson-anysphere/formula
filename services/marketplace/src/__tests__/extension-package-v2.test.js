@@ -668,7 +668,7 @@ test("marketplace store rejects manifests with activationEvents referencing unkn
   }
 });
 
-test("marketplace store rejects manifests with activationEvents referencing unknown panels", async (t) => {
+test("marketplace store rejects manifests with activationEvents referencing empty view/panel ids", async (t) => {
   try {
     requireFromHere.resolve("sql.js");
   } catch {
@@ -685,7 +685,7 @@ test("marketplace store rejects manifests with activationEvents referencing unkn
 
     const packageJsonPath = path.join(dir, "package.json");
     const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
-    packageJson.activationEvents = ["onView:missing.panel"];
+    packageJson.activationEvents = ["onView:"];
     packageJson.contributes = { panels: [] };
     await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
 
@@ -707,7 +707,7 @@ test("marketplace store rejects manifests with activationEvents referencing unkn
           packageBytes: pkgBytes,
           signatureBase64: null,
         }),
-      /unknown view\/panel/i
+      /empty view\/panel id/i
     );
   } finally {
     await fs.rm(tmpRoot, { recursive: true, force: true });
