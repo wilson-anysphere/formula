@@ -93,6 +93,31 @@ test.describe("Grid context menus", () => {
     await expect(menu.getByRole("button", { name: "Column Width…" })).toBeVisible();
   });
 
+  test("right-clicking a cell shows a Paste Special… submenu with expected modes", async ({ page }) => {
+    await gotoDesktop(page);
+    await waitForIdle(page);
+
+    await expect(page.locator("#grid")).toBeVisible();
+    // Click away from the row/column headers so we get the normal cell context menu.
+    await page.click("#grid", { button: "right", position: { x: 80, y: 40 } });
+
+    const menu = page.getByTestId("context-menu");
+    await expect(menu).toBeVisible();
+
+    const pasteSpecial = menu.getByRole("button", { name: "Paste Special…" });
+    await expect(pasteSpecial).toBeVisible();
+
+    // Keyboard navigation should open the submenu (ArrowRight).
+    await pasteSpecial.focus();
+    await page.keyboard.press("ArrowRight");
+
+    const submenu = menu.locator(".context-menu__submenu");
+    await expect(submenu).toBeVisible();
+    await expect(submenu.getByRole("button", { name: "Paste Values" })).toBeVisible();
+    await expect(submenu.getByRole("button", { name: "Paste Formulas" })).toBeVisible();
+    await expect(submenu.getByRole("button", { name: "Paste Formats" })).toBeVisible();
+  });
+
   test("right-clicking a row header in split-view secondary pane opens a menu with Row Height…", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await waitForIdle(page);

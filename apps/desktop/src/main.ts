@@ -5288,12 +5288,13 @@ if (
         },
         { type: "separator" },
         {
-          type: "item",
+          type: "submenu",
           label: t("clipboard.pasteSpecial.title"),
-          shortcut:
-            getPrimaryCommandKeybindingDisplay("clipboard.pasteSpecial", commandKeybindingDisplayIndex) ??
-            (isMac ? "⇧⌘V" : "Ctrl+Shift+V"),
-          onSelect: () => executeBuiltinCommand("clipboard.pasteSpecial"),
+          items: getPasteSpecialMenuItems().map((item) => ({
+            type: "item",
+            label: item.label,
+            onSelect: () => executeBuiltinCommand(`clipboard.pasteSpecial.${item.mode}`),
+          })),
         },
         { type: "separator" },
         {
