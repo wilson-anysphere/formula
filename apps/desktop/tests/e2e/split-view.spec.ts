@@ -121,6 +121,7 @@ test.describe("split view", () => {
     await secondary.click({ position: { x: 48 + 100 + 12, y: 24 + 24 + 12 } });
 
     await expect(page.getByTestId("active-cell")).toHaveText("B2");
+    await expect(page.getByTestId("formula-address")).toHaveValue("B2");
     const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
     expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThan(0.1);
   });
@@ -150,6 +151,7 @@ test.describe("split view", () => {
     await page.locator("#grid").click({ position: { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 } });
 
     await expect(page.getByTestId("active-cell")).toHaveText("B2");
+    await expect(page.getByTestId("formula-address")).toHaveValue("B2");
     const secondaryScrollAfter = Number((await secondary.getAttribute("data-scroll-y")) ?? 0);
     expect(Math.abs(secondaryScrollAfter - secondaryScrollBefore)).toBeLessThan(0.1);
   });
@@ -195,6 +197,7 @@ test.describe("split view", () => {
     // Shared-grid mouse drag keeps the *anchor* cell active (D4 here) even though the range normalizes to B2:D4.
     await expect(page.getByTestId("selection-range")).toHaveText("B2:D4");
     await expect(page.getByTestId("active-cell")).toHaveText("D4");
+    await expect(page.getByTestId("formula-address")).toHaveValue("D4");
 
     const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
     expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThan(0.1);
