@@ -239,10 +239,6 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
                 }
             }
 
-            if !record.display_value.is_empty() {
-                return CellValue::Text(record.display_value.clone());
-            }
-
             CellValue::Blank
         }
         ModelCellValue::Array(_) => CellValue::Blank,
@@ -503,7 +499,8 @@ mod tests {
             CellValue::Blank
         );
 
-        // Records can carry a legacy display string without a display field.
+        // Records without a display field are treated as blank, even if they carry a legacy
+        // display string.
         let Some(record_display_fallback) = from_json_or_skip_unknown_variant(json!({
             "type": "record",
             "value": {
@@ -514,7 +511,7 @@ mod tests {
         };
         assert_eq!(
             model_cell_value_to_sort_value(&record_display_fallback),
-            CellValue::Text("Record display".to_string())
+            CellValue::Blank
         );
     }
 }
