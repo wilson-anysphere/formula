@@ -80,6 +80,21 @@ function sqlScopeKey(scope: any): string {
   return `${server}|${database}|${user}`;
 }
 
+function httpScopeKey(scope: any): string {
+  if (!scope || typeof scope !== "object") return "<unknown>";
+  const origin = typeof (scope as any).origin === "string" ? String((scope as any).origin) : "";
+  const realm = typeof (scope as any).realm === "string" ? String((scope as any).realm) : "";
+  return `${origin}|${realm}`;
+}
+
+function safeHttpScope(url: string): any | null {
+  try {
+    return httpScope({ url, realm: null }) as any;
+  } catch {
+    return null;
+  }
+}
+
 function inferSqlUser(connection: unknown): string {
   if (typeof connection === "string") {
     try {
@@ -393,11 +408,13 @@ export function DataQueriesPanelContainer(props: Props) {
 
   const [oauthSignedInByKey, setOauthSignedInByKey] = useState<Record<string, boolean>>({});
   const [sqlCredentialPresentByKey, setSqlCredentialPresentByKey] = useState<Record<string, boolean>>({});
+  const [httpHeadersPresentByKey, setHttpHeadersPresentByKey] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!credentialStore) {
       setOauthSignedInByKey({});
       setSqlCredentialPresentByKey({});
+      setHttpHeadersPresentByKey({});
       return;
     }
 
@@ -405,6 +422,7 @@ export function DataQueriesPanelContainer(props: Props) {
     const run = async () => {
       const updates: Record<string, boolean> = {};
       const sqlUpdates: Record<string, boolean> = {};
+      const httpUpdates: Record<string, boolean> = {};
       for (const query of queries) {
         const source = query.source as any;
         if (source?.type !== "api" || source?.auth?.type !== "oauth2") continue;
@@ -426,8 +444,24 @@ export function DataQueriesPanelContainer(props: Props) {
           sqlUpdates[key] = false;
         }
       }
+      for (const query of queries) {
+        const source = query.source as any;
+        if (source?.type !== "api" || typeof source?.url !== "string") continue;
+        const scope = safeHttpScope(source.url);
+        if (!scope) continue;
+        const key = httpScopeKey(scope);
+        try {
+          const entry = await credentialStore.get(scope as any);
+          const secret = entry?.secret as any;
+          const headers = secret && typeof secret === "object" && !Array.isArray(secret) ? (secret as any).headers : null;
+          httpUpdates[key] = Boolean(headers && typeof headers === "object" && Object.keys(headers).length > 0);
+        } catch {
+          httpUpdates[key] = false;
+        }
+      }
       if (!cancelled) setOauthSignedInByKey(updates);
       if (!cancelled) setSqlCredentialPresentByKey(sqlUpdates);
+      if (!cancelled) setHttpHeadersPresentByKey(httpUpdates);
     };
 
     void run();
@@ -466,8 +500,20 @@ export function DataQueriesPanelContainer(props: Props) {
       const headerValue = window.prompt(`Value for header '${headerName}'`, "") ?? "";
       if (!headerValue.trim()) return;
       try {
-        const scope = httpScope({ url, realm: null });
-        await credentialStore.set(scope as any, { headers: { [headerName]: headerValue } });
+        const scope = safeHttpScope(url);
+        if (!scope) throw new Error("Invalid URL");
+        const key = httpScopeKey(scope);
+        const existing = await credentialStore.get(scope as any);
+        const existingSecret = existing?.secret as any;
+        const nextSecret: any =
+          existingSecret && typeof existingSecret === "object" && !Array.isArray(existingSecret) ? { ...existingSecret } : {};
+        const existingHeaders =
+          nextSecret.headers && typeof nextSecret.headers === "object" && !Array.isArray(nextSecret.headers)
+            ? nextSecret.headers
+            : {};
+        nextSecret.headers = { ...existingHeaders, [headerName]: headerValue };
+        await credentialStore.set(scope as any, nextSecret);
+        setHttpHeadersPresentByKey((prev) => ({ ...prev, [key]: true }));
       } catch (err) {
         setGlobalError(err instanceof Error ? err.message : String(err));
       }
@@ -480,8 +526,27 @@ export function DataQueriesPanelContainer(props: Props) {
       if (!credentialStore) return;
       setGlobalError(null);
       try {
-        const scope = httpScope({ url, realm: null });
-        await credentialStore.delete(scope as any);
+        const scope = safeHttpScope(url);
+        if (!scope) return;
+        const key = httpScopeKey(scope);
+        const existing = await credentialStore.get(scope as any);
+        const existingSecret = existing?.secret as any;
+        if (existingSecret && typeof existingSecret === "object" && !Array.isArray(existingSecret)) {
+          const nextSecret: any = { ...existingSecret };
+          delete nextSecret.headers;
+          if (Object.keys(nextSecret).length > 0) {
+            await credentialStore.set(scope as any, nextSecret);
+          } else {
+            await credentialStore.delete(scope as any);
+          }
+        } else {
+          await credentialStore.delete(scope as any);
+        }
+        setHttpHeadersPresentByKey((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
       } catch (err) {
         setGlobalError(err instanceof Error ? err.message : String(err));
       }
@@ -804,6 +869,9 @@ export function DataQueriesPanelContainer(props: Props) {
                 const query = queries.find((q) => q.id === row.id) as Query | undefined;
                 const source = query?.source as any;
                 const apiUrl = source?.type === "api" && typeof source?.url === "string" ? String(source.url) : null;
+                const httpScopeObj = apiUrl ? safeHttpScope(apiUrl) : null;
+                const httpKey = httpScopeObj ? httpScopeKey(httpScopeObj) : null;
+                const httpHasHeaders = httpKey ? Boolean(httpHeadersPresentByKey[httpKey]) : false;
                 const databaseConnection = source?.type === "database" ? source.connection : null;
                 const databaseScope = databaseConnection != null ? resolveSqlScope(databaseConnection) : null;
                 const databaseKey = databaseScope ? sqlScopeKey(databaseScope) : null;
@@ -853,9 +921,9 @@ export function DataQueriesPanelContainer(props: Props) {
                            <div style={{ color: "var(--text-muted)" }}>HTTP headers</div>
                            <div style={{ display: "flex", gap: 6 }}>
                             <button type="button" onClick={() => void setHttpHeaderCredential(apiUrl)}>
-                              Set…
+                              {httpHasHeaders ? "Edit…" : "Set…"}
                             </button>
-                            <button type="button" onClick={() => void clearHttpHeaderCredential(apiUrl)}>
+                            <button type="button" onClick={() => void clearHttpHeaderCredential(apiUrl)} disabled={!httpHasHeaders}>
                                Clear
                              </button>
                            </div>
