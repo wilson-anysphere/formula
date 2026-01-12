@@ -1012,7 +1012,7 @@ The desktop app implements a minimal "Trust Center" policy layer for VBA macro e
 - `blocked`: macros never run.
 - `trusted_once` / `trusted_always`: macros run based on a workbook fingerprint allow-list.
 - `trusted_signed_only`: macros run **only** when the workbook's VBA project signature is
-  **cryptographically verified and bound** to the VBA project contents (MS-OVBA §2.4.2 project hash).
+  **cryptographically verified and bound** to the VBA project contents (MS-OVBA §2.4.2 + MS-OSHARED §4.3).
 
 Important notes:
 
@@ -1020,18 +1020,20 @@ Important notes:
   `\x05DigitalSignature*` OLE stream(s). This is intended to prevent treating "has a signature blob"
   as "is signed".
 - Signature verification includes *binding* the signature to the VBA project contents by extracting
-  the signed digest (`SpcIndirectDataContent` → `DigestInfo`) and comparing it to a freshly computed
-  MS-OVBA-style digest:
+  the signed digest (`SpcIndirectDataContent` → `DigestInfo.digest`) and comparing it to a freshly
+  computed MS-OVBA-style digest:
   - `Content Hash` (MS-OVBA §2.4.2.3), computed over `ContentNormalizedData` (normalized module
     source and select metadata), and
   - `Agile Content Hash` (MS-OVBA §2.4.2.4), which extends the hash transcript with
     `FormsNormalizedData` (designer/UserForm storages).
   
   Per MS-OSHARED §4.3, the digest bytes embedded in the signature are always **MD5 (16 bytes)** even
-  when the `DigestInfo` algorithm OID indicates SHA-256. This binding check is
-  exposed via `formula-vba` as `VbaDigitalSignature::binding`. The desktop Trust Center treats a VBA
-  project as "signed" only when the PKCS#7/CMS signature verifies **and** the digest binding check
-  reports `Bound`.
+  when the PKCS#7/CMS signature uses SHA-256 and even when `DigestInfo.digestAlgorithm.algorithm`
+  indicates SHA-256; we treat the `DigestInfo` algorithm OID as informational only.
+  
+  This binding check is exposed via `formula-vba` as `VbaDigitalSignature::binding`. The desktop
+  Trust Center treats a VBA project as "signed" only when the PKCS#7/CMS signature verifies **and**
+  the digest binding check reports `Bound`.
   - For callers that need more detail (hash algorithm OID/name, signed digest bytes, computed digest
     bytes), use `formula_vba::verify_vba_digital_signature_bound`.
 - Unknown/unparseable digest structures are treated conservatively as unverified (`binding == Unknown`).
@@ -1077,14 +1079,14 @@ How to obtain the signed digest for MS-OVBA signature binding:
     as `eContent`.
 - Decode the `SpcIndirectDataContent` / `SpcIndirectDataContentV2` structure and extract its
   `messageDigest: DigestInfo`:
-  - digest algorithm (hash OID; informational for VBA signatures)
+  - digest algorithm (OID; informational for VBA signatures, often SHA-256 in the wild)
   - digest bytes (expected to be 16-byte MD5 for VBA per MS-OSHARED §4.3)
 
 Binding (best-effort; see MS-OVBA):
 
 1. Compute the MS-OVBA `Content Hash` = `MD5(ContentNormalizedData)` (MS-OVBA §2.4.2.3).
 2. Compute the MS-OVBA `Agile Content Hash` = `MD5(ContentNormalizedData || FormsNormalizedData)`
-   (MS-OVBA §2.4.2.4).
+   (MS-OVBA §2.4.2.4), if the project contains designer storages/streams.
 3. Compare the signed `DigestInfo.digest` bytes to **either** digest.
 4. `trusted_signed_only` is treated as satisfied only when:
      - the PKCS#7/CMS signature verifies (`SignedVerified`), **and**
@@ -1100,6 +1102,7 @@ Relevant specs:
 
 - MS-OVBA (VBA project storage + Contents Hash / Agile Content Hash): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/
 - MS-OFFCRYPTO (`DigSigInfoSerialized` wrapper): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/
+- MS-OSHARED (MD5 VBA project hash rule): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/
 
 ### Script Sandboxing
 

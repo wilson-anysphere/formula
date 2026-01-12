@@ -7,8 +7,9 @@ In this repo, `crates/formula-vba` implements best-effort:
 
 - signature stream parsing + PKCS#7/CMS internal verification (`verify_vba_digital_signature`)
 - extraction of the signed digest (`SpcIndirectDataContent` → `DigestInfo`)
-- MS-OVBA-style project digest binding verification (signature is bound to the VBA project OLE
-  streams), exposed via `VbaDigitalSignature::binding`
+- MS-OVBA §2.4.2 “Contents Hash” binding verification (signature is bound to the normalized VBA
+  project content: `ContentNormalizedData` + optional `FormsNormalizedData`), exposed via
+  `VbaDigitalSignature::binding`
 
 API notes:
 
@@ -176,6 +177,7 @@ For VBA binding, we ignore `SpcIndirectDataContent.data` and use only `messageDi
 |---|---|
 | CMS `signedData` | `1.2.840.113549.1.7.2` |
 | Authenticode `SpcIndirectDataContent` | `1.3.6.1.4.1.311.2.1.4` |
+| Digest algorithm: MD5 | `1.2.840.113549.2.5` |
 | Digest algorithm: SHA-1 | `1.3.14.3.2.26` |
 | Digest algorithm: SHA-256 | `2.16.840.1.101.3.4.2.1` |
 
@@ -186,11 +188,15 @@ does not, by itself, prove that the signature is bound to the rest of the VBA pr
 
 To bind the signature to the VBA project contents, `formula-vba`:
 
-1. Extracts `DigestInfo` from `SpcIndirectDataContent` (hash algorithm OID + digest bytes).
-2. Computes a deterministic **project digest** over the VBA project's OLE streams, excluding any
-   `\x05DigitalSignature*` streams/storages.
-3. Uses the hash algorithm indicated by the extracted `DigestInfo` when computing the digest.
-4. Compares the computed digest bytes to the `DigestInfo` digest bytes.
+1. Extracts the signed digest bytes from `SpcIndirectDataContent.messageDigest: DigestInfo`.
+   - The `DigestInfo.digestAlgorithm.algorithm` OID is kept for debug display, but is not used to
+     select the VBA project digest algorithm.
+2. Recomputes the MS-OVBA §2.4.2 “Contents Hash” transcript over the VBA project:
+   - `ContentNormalizedData` (MS-OVBA §2.4.2.1), and
+   - `FormsNormalizedData` (MS-OVBA §2.4.2.2), if the project contains designer storages/streams.
+3. Computes the VBA project digest as **MD5(ContentNormalizedData || FormsNormalizedData)** (16
+   bytes), per MS-OSHARED §4.3.
+4. Compares the computed digest bytes to the signed digest bytes from `DigestInfo.digest`.
 
 Result interpretation (current behavior):
 
@@ -201,18 +207,18 @@ Result interpretation (current behavior):
 
 ### Implementation notes / caveats
 
-- The binding implementation currently supports SHA-1 and SHA-256 digests (based on the `DigestInfo`
-  algorithm OID). If an unknown digest OID is encountered, binding is reported as
-  `VbaSignatureBinding::Unknown`.
-- Current project digest transcript (implementation detail; `compute_vba_project_digest`):
-  1. Enumerate all OLE streams.
-  2. Exclude any `DigitalSignature*` stream/storage.
-  3. Sort remaining stream paths case-insensitively.
-  4. Hash each stream as: `UTF-16LE(path) || 0x0000 || u32_le(len(bytes)) || bytes`.
-- The project digest computation is currently **best-effort** and deterministic (to support stable
-  tests and predictable behavior), but may not match Excel's exact MS-OVBA transcript for all
-  real-world files (e.g. if Excel hashes decompressed module source, only parts of module streams,
-  etc.).
+- Per MS-OSHARED §4.3, the VBA project digest used for binding is always **MD5 (16 bytes)**, even if
+  the PKCS#7/CMS signature uses SHA-1/SHA-256 and even if `DigestInfo.digestAlgorithm.algorithm`
+  indicates SHA-256. The digest algorithm OID is treated as informational only.
+- The project digest transcript (implementation detail; `compute_vba_project_digest`) follows the
+  MS-OVBA §2.4.2 “Contents Hash” rules:
+  - `ContentNormalizedData` is derived from the `VBA/dir` stream and the module streams referenced
+    by it (including module ordering and module source normalization).
+  - `FormsNormalizedData` is derived from streams inside root-level “designer” storages (for
+    example UserForms), with per-stream padding to 1023-byte blocks.
+- The project digest computation is **best-effort** and deterministic (to support stable tests and
+  predictable behavior), but may not match Excel's exact transcript for all real-world files. This
+  can produce false negatives (a valid signature treated as not bound).
 - Callers should treat `VbaSignatureBinding::Unknown` as "could not verify binding", not as "bound".
 - Treat `binding == Bound` as a strong signal, but validate against Excel fixtures before relying on
   it as a hard security boundary.
@@ -229,7 +235,7 @@ If you need to update or extend signature handling, start with:
 - `crates/formula-vba/src/authenticode.rs`
   - `SignedData.encapContentInfo.eContent` parsing and `SpcIndirectDataContent` → `DigestInfo`
 - `crates/formula-vba/src/project_digest.rs`
-  - best-effort MS-OVBA-style project digest transcript over OLE streams
+  - MS-OVBA §2.4.2 digest transcript (`ContentNormalizedData` + `FormsNormalizedData`) + MD5 digest
 
 ## Tests / examples in this repo
 
@@ -252,5 +258,7 @@ and binding behavior:
   - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/
 - **MS-OFFCRYPTO**: Office cryptography structures, including `DigSigInfoSerialized`.
   - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/
+- **MS-OSHARED**: Office shared structures, including the MD5 “VBA project hash” rule (MS-OSHARED §4.3).
+  - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/
 - **RFC 5652**: Cryptographic Message Syntax (CMS) (PKCS#7 `SignedData`).
   - https://www.rfc-editor.org/rfc/rfc5652
