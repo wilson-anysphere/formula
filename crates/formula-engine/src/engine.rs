@@ -727,22 +727,31 @@ impl Engine {
 
         // Structured reference resolution can change which cells a formula depends on, so refresh
         // dependencies for all formulas.
-        let mut formulas: Vec<(CellKey, CompiledExpr)> = Vec::new();
+        //
+        // Table changes can also change how bytecode compilation lowers structured references
+        // (e.g. `Table1[Col]` expands/shrinks as the table grows), so rebuild the compiled
+        // variant (AST vs bytecode) for all formula cells.
+        let mut formulas: Vec<(CellKey, String, CompiledExpr)> = Vec::new();
         for (sheet_id, sheet) in self.workbook.sheets.iter().enumerate() {
             for (addr, cell) in &sheet.cells {
-                if let Some(compiled) = cell.compiled.as_ref() {
-                    formulas.push((
-                        CellKey {
-                            sheet: sheet_id,
-                            addr: *addr,
-                        },
-                        compiled.ast().clone(),
-                    ));
-                }
+                let Some(formula) = cell.formula.as_deref() else {
+                    continue;
+                };
+                let Some(compiled) = cell.compiled.as_ref() else {
+                    continue;
+                };
+                formulas.push((
+                    CellKey {
+                        sheet: sheet_id,
+                        addr: *addr,
+                    },
+                    formula.to_string(),
+                    compiled.ast().clone(),
+                ));
             }
         }
 
-        for (key, ast) in formulas {
+        for (key, formula, ast) in formulas {
             let cell_id = cell_id_from_key(key);
             let (names, volatile, thread_safe, dynamic_deps) =
                 analyze_expr_flags(&ast, key, &tables_by_sheet, &self.workbook);
@@ -765,7 +774,44 @@ impl Engine {
             let deps = CellDeps::new(calc_vec).volatile(volatile);
             self.calc_graph.update_cell_dependencies(cell_id, deps);
 
+            let (compiled_formula, bytecode_compile_reason) = if !self.bytecode_enabled {
+                (CompiledFormula::Ast(ast.clone()), Some(BytecodeCompileReason::Disabled))
+            } else {
+                let origin = crate::CellAddr::new(key.addr.row, key.addr.col);
+                let parsed = crate::parse_formula(
+                    &formula,
+                    crate::ParseOptions {
+                        locale: crate::LocaleConfig::en_us(),
+                        reference_style: crate::ReferenceStyle::A1,
+                        normalize_relative_to: Some(origin),
+                    },
+                );
+                match parsed {
+                    Ok(parsed) => match self.try_compile_bytecode(
+                        &parsed.expr,
+                        key,
+                        volatile,
+                        thread_safe,
+                    ) {
+                        Ok(program) => (
+                            CompiledFormula::Bytecode(BytecodeFormula {
+                                ast: ast.clone(),
+                                program,
+                            }),
+                            None,
+                        ),
+                        Err(reason) => (CompiledFormula::Ast(ast.clone()), Some(reason)),
+                    },
+                    Err(_) => (
+                        CompiledFormula::Ast(ast.clone()),
+                        Some(BytecodeCompileReason::IneligibleExpr),
+                    ),
+                }
+            };
+
             let cell = self.workbook.get_or_create_cell_mut(key);
+            cell.compiled = Some(compiled_formula);
+            cell.bytecode_compile_reason = bytecode_compile_reason;
             cell.volatile = volatile;
             cell.thread_safe = thread_safe;
             cell.dynamic_deps = dynamic_deps;
@@ -2569,11 +2615,34 @@ impl Engine {
             row: key.addr.row as i32,
             col: key.addr.col as i32,
         };
+
+        // Inline any defined names that resolve to static expressions/values before lowering.
+        // This improves bytecode eligibility and keeps the bytecode backend deterministic.
         let expr = self.inline_static_defined_names_for_bytecode(expr, key.sheet);
+
+        // Structured references depend on table metadata. Resolve them against the current
+        // workbook tables at compile time and rewrite into concrete cell/range references that
+        // the bytecode lowering step understands.
+        let maybe_structured_rewritten = if canonical_expr_contains_structured_refs(&expr) {
+            let tables_by_sheet: Vec<Vec<Table>> = self
+                .workbook
+                .sheets
+                .iter()
+                .map(|s| s.tables.clone())
+                .collect();
+            Some(
+                rewrite_structured_refs_for_bytecode(&expr, key.sheet, key.addr, &tables_by_sheet)
+                    .ok_or(BytecodeCompileReason::IneligibleExpr)?,
+            )
+        } else {
+            None
+        };
+
+        let expr_after_structured = maybe_structured_rewritten.as_ref().unwrap_or(&expr);
         let mut resolve_sheet = |name: &str| self.workbook.sheet_id(name);
-        let rewritten =
-            rewrite_defined_name_constants_for_bytecode(&expr, key.sheet, &self.workbook);
-        let expr_to_lower = rewritten.as_ref().unwrap_or(&expr);
+        let rewritten_names =
+            rewrite_defined_name_constants_for_bytecode(expr_after_structured, key.sheet, &self.workbook);
+        let expr_to_lower = rewritten_names.as_ref().unwrap_or(expr_after_structured);
         let expr = bytecode::lower_canonical_expr(
             expr_to_lower,
             origin_ast,
@@ -4376,6 +4445,194 @@ fn expand_nodes_to_cells(nodes: &[PrecedentNode], limit: usize) -> Vec<(SheetId,
     }
 
     out
+}
+
+fn canonical_expr_contains_structured_refs(expr: &crate::Expr) -> bool {
+    match expr {
+        crate::Expr::StructuredRef(_) => true,
+        crate::Expr::FunctionCall(call) => call
+            .args
+            .iter()
+            .any(|arg| canonical_expr_contains_structured_refs(arg)),
+        crate::Expr::Call(call) => {
+            canonical_expr_contains_structured_refs(call.callee.as_ref())
+                || call
+                    .args
+                    .iter()
+                    .any(|arg| canonical_expr_contains_structured_refs(arg))
+        }
+        crate::Expr::Unary(u) => canonical_expr_contains_structured_refs(&u.expr),
+        crate::Expr::Postfix(p) => canonical_expr_contains_structured_refs(&p.expr),
+        crate::Expr::Binary(b) => {
+            canonical_expr_contains_structured_refs(&b.left)
+                || canonical_expr_contains_structured_refs(&b.right)
+        }
+        crate::Expr::Array(arr) => arr
+            .rows
+            .iter()
+            .flat_map(|row| row.iter())
+            .any(|el| canonical_expr_contains_structured_refs(el)),
+        crate::Expr::Number(_)
+        | crate::Expr::String(_)
+        | crate::Expr::Boolean(_)
+        | crate::Expr::Error(_)
+        | crate::Expr::NameRef(_)
+        | crate::Expr::CellRef(_)
+        | crate::Expr::ColRef(_)
+        | crate::Expr::RowRef(_)
+        | crate::Expr::Missing => false,
+    }
+}
+
+fn rewrite_structured_refs_for_bytecode(
+    expr: &crate::Expr,
+    origin_sheet: usize,
+    origin_cell: CellAddr,
+    tables_by_sheet: &[Vec<Table>],
+) -> Option<crate::Expr> {
+    fn abs_cell_ref(addr: CellAddr) -> crate::Expr {
+        crate::Expr::CellRef(crate::CellRef {
+            workbook: None,
+            sheet: None,
+            col: crate::Coord::A1 {
+                index: addr.col,
+                abs: true,
+            },
+            row: crate::Coord::A1 {
+                index: addr.row,
+                abs: true,
+            },
+        })
+    }
+
+    match expr {
+        crate::Expr::StructuredRef(r) => {
+            // External workbook structured references are accepted syntactically but not supported.
+            if r.workbook.is_some() {
+                return None;
+            }
+
+            // The structured-ref resolver is table-name driven when available, so ignore any
+            // explicit sheet prefix (matching the evaluation compiler behavior).
+            let mut text = String::new();
+            if let Some(table) = &r.table {
+                text.push_str(table);
+            }
+            text.push('[');
+            text.push_str(&r.spec);
+            text.push(']');
+
+            let (sref, end) = crate::structured_refs::parse_structured_ref(&text, 0)?;
+            if end != text.len() {
+                return None;
+            }
+
+            let ranges = crate::structured_refs::resolve_structured_ref(
+                tables_by_sheet,
+                origin_sheet,
+                origin_cell,
+                &sref,
+            )
+            .ok()?;
+
+            // Bytecode lowering currently only supports single-area references on the current sheet.
+            let [(sheet_id, start, end)] = ranges.as_slice() else {
+                return None;
+            };
+            if *sheet_id != origin_sheet {
+                return None;
+            }
+
+            if start == end {
+                return Some(abs_cell_ref(*start));
+            }
+
+            Some(crate::Expr::Binary(crate::BinaryExpr {
+                op: crate::BinaryOp::Range,
+                left: Box::new(abs_cell_ref(*start)),
+                right: Box::new(abs_cell_ref(*end)),
+            }))
+        }
+        crate::Expr::FunctionCall(call) => Some(crate::Expr::FunctionCall(crate::FunctionCall {
+            name: call.name.clone(),
+            args: call
+                .args
+                .iter()
+                .map(|arg| rewrite_structured_refs_for_bytecode(arg, origin_sheet, origin_cell, tables_by_sheet))
+                .collect::<Option<Vec<_>>>()?,
+        })),
+        crate::Expr::Call(call) => Some(crate::Expr::Call(crate::CallExpr {
+            callee: Box::new(rewrite_structured_refs_for_bytecode(
+                call.callee.as_ref(),
+                origin_sheet,
+                origin_cell,
+                tables_by_sheet,
+            )?),
+            args: call
+                .args
+                .iter()
+                .map(|arg| rewrite_structured_refs_for_bytecode(arg, origin_sheet, origin_cell, tables_by_sheet))
+                .collect::<Option<Vec<_>>>()?,
+        })),
+        crate::Expr::Unary(u) => Some(crate::Expr::Unary(crate::UnaryExpr {
+            op: u.op,
+            expr: Box::new(rewrite_structured_refs_for_bytecode(
+                &u.expr,
+                origin_sheet,
+                origin_cell,
+                tables_by_sheet,
+            )?),
+        })),
+        crate::Expr::Postfix(p) => Some(crate::Expr::Postfix(crate::PostfixExpr {
+            op: p.op,
+            expr: Box::new(rewrite_structured_refs_for_bytecode(
+                &p.expr,
+                origin_sheet,
+                origin_cell,
+                tables_by_sheet,
+            )?),
+        })),
+        crate::Expr::Binary(b) => Some(crate::Expr::Binary(crate::BinaryExpr {
+            op: b.op,
+            left: Box::new(rewrite_structured_refs_for_bytecode(
+                &b.left,
+                origin_sheet,
+                origin_cell,
+                tables_by_sheet,
+            )?),
+            right: Box::new(rewrite_structured_refs_for_bytecode(
+                &b.right,
+                origin_sheet,
+                origin_cell,
+                tables_by_sheet,
+            )?),
+        })),
+        crate::Expr::Array(arr) => {
+            let mut rows: Vec<Vec<crate::Expr>> = Vec::with_capacity(arr.rows.len());
+            for row in &arr.rows {
+                let mut out_row = Vec::with_capacity(row.len());
+                for el in row {
+                    out_row.push(rewrite_structured_refs_for_bytecode(
+                        el,
+                        origin_sheet,
+                        origin_cell,
+                        tables_by_sheet,
+                    )?);
+                }
+                rows.push(out_row);
+            }
+            Some(crate::Expr::Array(crate::ArrayLiteral { rows }))
+        }
+        crate::Expr::Number(_)
+        | crate::Expr::String(_)
+        | crate::Expr::Boolean(_)
+        | crate::Expr::Error(_)
+        | crate::Expr::NameRef(_)
+        | crate::Expr::CellRef(_)
+        | crate::Expr::ColRef(_)
+        | crate::Expr::RowRef(_)
+        | crate::Expr::Missing => Some(expr.clone()),
+    }
 }
 
 struct Snapshot {

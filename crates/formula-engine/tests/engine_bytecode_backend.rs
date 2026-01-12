@@ -8,6 +8,8 @@ use formula_engine::{
     bytecode, BytecodeCompileReason, Engine, ErrorKind, ExternalValueProvider, NameDefinition,
     NameScope, ParseOptions, ReferenceStyle, Value,
 };
+use formula_model::table::TableColumn;
+use formula_model::{Range, Table};
 use proptest::prelude::*;
 use std::sync::Arc;
 
@@ -119,6 +121,94 @@ fn bytecode_value_to_engine(value: formula_engine::bytecode::Value) -> Value {
     }
 }
 
+fn table_fixture_multi_col(range_a1: &str) -> Table {
+    Table {
+        id: 1,
+        name: "Table1".into(),
+        display_name: "Table1".into(),
+        range: Range::from_a1(range_a1).unwrap(),
+        header_row_count: 1,
+        totals_row_count: 0,
+        columns: vec![
+            TableColumn {
+                id: 1,
+                name: "Col1".into(),
+                formula: None,
+                totals_formula: None,
+            },
+            TableColumn {
+                id: 2,
+                name: "Col2".into(),
+                formula: None,
+                totals_formula: None,
+            },
+            TableColumn {
+                id: 3,
+                name: "Col3".into(),
+                formula: None,
+                totals_formula: None,
+            },
+            TableColumn {
+                id: 4,
+                name: "Col4".into(),
+                formula: None,
+                totals_formula: None,
+            },
+        ],
+        style: None,
+        auto_filter: None,
+        relationship_id: None,
+        part_path: None,
+    }
+}
+
+#[test]
+fn bytecode_backend_compiles_structured_refs_and_recompiles_on_table_changes() {
+    let mut engine = Engine::new();
+
+    // Create a table and some values in Col1.
+    engine.set_sheet_tables("Sheet1", vec![table_fixture_multi_col("A1:D4")]);
+    engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A4", 3.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "E1", "=SUM(Table1[Col1])")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    // Structured ref should take the bytecode path.
+    assert_eq!(engine.bytecode_program_count(), 1);
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(6.0));
+
+    // Compare to AST-only evaluation.
+    let mut engine_ast = Engine::new();
+    engine_ast.set_bytecode_enabled(false);
+    engine_ast.set_sheet_tables("Sheet1", vec![table_fixture_multi_col("A1:D4")]);
+    engine_ast.set_cell_value("Sheet1", "A2", 1.0).unwrap();
+    engine_ast.set_cell_value("Sheet1", "A3", 2.0).unwrap();
+    engine_ast.set_cell_value("Sheet1", "A4", 3.0).unwrap();
+    engine_ast
+        .set_cell_formula("Sheet1", "E1", "=SUM(Table1[Col1])")
+        .unwrap();
+    engine_ast.recalculate_single_threaded();
+    assert_eq!(engine_ast.bytecode_program_count(), 0);
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), engine_ast.get_cell_value("Sheet1", "E1"));
+
+    // Expand the table range to include another data row; Col1 sum should grow accordingly.
+    let before_programs = engine.bytecode_program_count();
+    engine.set_sheet_tables("Sheet1", vec![table_fixture_multi_col("A1:D5")]);
+    engine.set_cell_value("Sheet1", "A5", 4.0).unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(10.0));
+    assert_eq!(engine.bytecode_program_count(), before_programs + 1);
+
+    engine_ast.set_sheet_tables("Sheet1", vec![table_fixture_multi_col("A1:D5")]);
+    engine_ast.set_cell_value("Sheet1", "A5", 4.0).unwrap();
+    engine_ast.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), engine_ast.get_cell_value("Sheet1", "E1"));
+}
 #[test]
 fn bytecode_backend_matches_ast_for_sum_and_countif() {
     let mut engine = Engine::new();
