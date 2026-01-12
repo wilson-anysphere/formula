@@ -367,6 +367,25 @@ fn migrate_to_v8(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     //
     // We allocate ids per workbook, preserving the current sheet order, and ensuring they fit
     // within the `u32` domain used by `formula_model::WorksheetId`.
+    //
+    // Corrupted databases can also contain sheet rows whose `workbook_id` is not a valid TEXT
+    // foreign key into `workbooks` (e.g. written with foreign keys disabled, or containing BLOB
+    // values). Those rows are not addressable via the public storage APIs, but they can still
+    // prevent the unique `(workbook_id, model_sheet_id)` index from being created. We clear their
+    // `model_sheet_id` values preemptively so the migration can complete.
+    tx.execute(
+        r#"
+        UPDATE sheets
+        SET model_sheet_id = NULL
+        WHERE model_sheet_id IS NOT NULL
+          AND (
+            typeof(workbook_id) != 'text'
+            OR NOT EXISTS (SELECT 1 FROM workbooks w WHERE w.id = sheets.workbook_id)
+          )
+        "#,
+        [],
+    )?;
+
     let mut workbook_stmt = tx.prepare("SELECT id FROM workbooks")?;
     let workbook_ids = workbook_stmt
         .query_map([], |row| Ok(row.get::<_, Option<String>>(0).ok().flatten()))?;

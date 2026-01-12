@@ -150,3 +150,77 @@ fn migration_v8_tolerates_invalid_workbook_and_sheet_id_types() {
     );
     assert!(result.is_err(), "expected unique index to reject duplicates");
 }
+
+#[test]
+fn migration_v8_ignores_orphaned_sheets_when_creating_unique_index() {
+    let tmp = NamedTempFile::new().expect("tmp file");
+    let path = tmp.path();
+
+    let storage = Storage::open_path(path).expect("open storage");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
+    let sheet_a = storage
+        .create_sheet(workbook.id, "SheetA", 0, None)
+        .expect("create sheet a");
+    let sheet_b = storage
+        .create_sheet(workbook.id, "SheetB", 1, None)
+        .expect("create sheet b");
+    drop(storage);
+
+    let conn = Connection::open(path).expect("open raw db");
+    conn.execute_batch("DROP INDEX IF EXISTS idx_sheets_workbook_model_sheet_id;")
+        .expect("drop unique index");
+    conn.execute("UPDATE schema_version SET version = 7 WHERE id = 1", [])
+        .expect("downgrade schema version");
+    conn.execute_batch("PRAGMA foreign_keys = OFF;")
+        .expect("disable foreign keys");
+
+    // Insert orphaned sheet rows with an invalid workbook_id type and duplicate model_sheet_id
+    // values. These rows are not addressable via the public API, but they must not prevent the v8
+    // unique index from being created.
+    conn.execute(
+        "INSERT INTO sheets (id, workbook_id, name, model_sheet_id) VALUES ('orphan1', X'00', 'Orphan', 1)",
+        [],
+    )
+    .expect("insert orphan sheet 1");
+    conn.execute(
+        "INSERT INTO sheets (id, workbook_id, name, model_sheet_id) VALUES ('orphan2', X'00', 'Orphan', 1)",
+        [],
+    )
+    .expect("insert orphan sheet 2");
+    drop(conn);
+
+    let storage = Storage::open_path(path).expect("open with v8 migration");
+    drop(storage);
+
+    let conn = Connection::open(path).expect("reopen raw db");
+    let version: i64 = conn
+        .query_row("SELECT version FROM schema_version WHERE id = 1", [], |r| r.get(0))
+        .expect("schema version");
+    assert_eq!(version, 8);
+
+    let orphan_ids_with_model_id: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sheets WHERE typeof(workbook_id) != 'text' AND model_sheet_id IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )
+        .expect("count orphan sheet ids");
+    assert_eq!(orphan_ids_with_model_id, 0);
+
+    let sheet_a_model_id: i64 = conn
+        .query_row(
+            "SELECT model_sheet_id FROM sheets WHERE id = ?1",
+            params![sheet_a.id.to_string()],
+            |r| r.get(0),
+        )
+        .expect("fetch sheet a model id");
+
+    // Ensure the unique index is active by attempting to introduce a duplicate.
+    let result = conn.execute(
+        "UPDATE sheets SET model_sheet_id = ?1 WHERE id = ?2",
+        params![sheet_a_model_id, sheet_b.id.to_string()],
+    );
+    assert!(result.is_err(), "expected unique index to reject duplicates");
+}
