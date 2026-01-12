@@ -2119,6 +2119,17 @@ export class SpreadsheetApp {
     return Boolean(this.formulaBar?.isEditing() || this.formulaEditCell);
   }
 
+  /**
+   * Returns true when the formula bar is actively editing a formula (draft text starts with `=`).
+   *
+   * This is intentionally narrower than `isFormulaBarEditing()`: we only want to treat the formula
+   * bar as a special case for shortcuts like Ctrl/Cmd+PgUp/PgDn when the user is in Excel-like range
+   * selection mode while building a formula.
+   */
+  isFormulaBarFormulaEditing(): boolean {
+    return Boolean(this.formulaBar?.isFormulaEditing());
+  }
+
   isEditing(): boolean {
     return this.isCellEditorOpen() || this.isFormulaBarEditing() || this.inlineEditController.isOpen();
   }

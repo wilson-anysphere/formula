@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ContextMenu, type ContextMenuItem } from "../menus/contextMenu.js";
 import { normalizeExcelColorToCss } from "../shared/colors.js";
 import { resolveCssVar } from "../theme/cssVars.js";
+import { showInputBox } from "../extensions/ui.js";
 import * as nativeDialogs from "../tauri/nativeDialogs";
 import { validateSheetName, type SheetMeta, type TabColor, type WorkbookSheetStore } from "./workbookSheetStore";
 import { computeWorkbookSheetMoveIndex } from "./sheetReorder";
@@ -297,9 +298,50 @@ export function SheetTabStrip({
       if (!ok) return;
     }
 
-    setEditingSheetId(sheet.id);
-    setDraftName(sheet.name);
-    setRenameError(null);
+    // Excel-style rename is triggered by double click / context menu.
+    // Desktop UX uses the lightweight `showInputBox` dialog.
+    const currentName = store.getName(sheet.id) ?? sheet.name;
+    const nextRaw = await showInputBox({
+      prompt: "Rename sheet",
+      value: currentName,
+      placeHolder: "Sheet name",
+    });
+    if (nextRaw === null) return;
+
+    const oldName = store.getName(sheet.id) ?? sheet.name;
+    try {
+      store.rename(sheet.id, nextRaw);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      onError?.(message);
+      return;
+    }
+
+    const newName = store.getName(sheet.id) ?? "";
+    // Treat no-op renames as a simple exit.
+    if (oldName && newName && oldName === newName) return;
+
+    try {
+      await onPersistSheetRename?.(sheet.id, newName);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Best-effort rollback if the desktop host rejects the rename.
+      try {
+        store.rename(sheet.id, oldName);
+      } catch {
+        // ignore
+      }
+      onError?.(message);
+      return;
+    }
+
+    if (oldName && newName && oldName !== newName) {
+      try {
+        onSheetRenamed?.({ sheetId: sheet.id, oldName, newName });
+      } catch (err) {
+        onError?.(err instanceof Error ? err.message : String(err));
+      }
+    }
   };
 
   const openSheetPicker = useCallback(async () => {

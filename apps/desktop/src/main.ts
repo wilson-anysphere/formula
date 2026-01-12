@@ -2254,6 +2254,9 @@ function renderSheetTabs(): void {
         } catch (err) {
           showToast(`Failed to update formulas after rename: ${String((err as any)?.message ?? err)}`, "error");
         }
+        // Renaming sheets affects workbook metadata but does not produce cell deltas, so
+        // mark the document dirty explicitly for unsaved-changes prompts.
+        app.getDocument().markDirty();
       },
       onSheetDeleted: ({ sheetId, name }) => {
         const doc = app.getDocument() as any;
@@ -2592,10 +2595,10 @@ window.addEventListener(
     if (e.shiftKey || e.altKey) return;
     if (e.key !== "PageUp" && e.key !== "PageDown") return;
     // Ctrl/Cmd+PgUp/PgDn should generally not switch sheets while editing (cell editor,
-    // inline AI edit, etc). Exception: when the formula bar is actively editing we still
-    // allow sheet navigation so users can build cross-sheet references (Excel behavior).
-    const formulaBarEditing = app.isFormulaBarEditing();
-    if (isSpreadsheetEditing() && !formulaBarEditing) {
+    // inline AI edit, etc). Exception: when the formula bar is actively editing a *formula*
+    // we still allow sheet navigation so users can build cross-sheet references (Excel behavior).
+    const formulaBarFormulaEditing = app.isFormulaBarFormulaEditing();
+    if (isSpreadsheetEditing() && !formulaBarFormulaEditing) {
       // Prevent browser tab switching / other defaults while editing spreadsheet content.
       e.preventDefault();
       e.stopPropagation();
@@ -2622,7 +2625,7 @@ window.addEventListener(
       const tag = target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) {
         // Exception: allow sheet navigation while the formula bar is editing (range selection).
-        if (!formulaBarEditing || !formulaBarRoot.contains(target)) return;
+        if (!formulaBarFormulaEditing || !formulaBarRoot.contains(target)) return;
       }
     }
 

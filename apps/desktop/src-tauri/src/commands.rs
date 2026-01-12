@@ -624,7 +624,6 @@ pub async fn delete_sheet(sheet_id: String, state: State<'_, SharedAppState>) ->
     .await
     .map_err(|e| e.to_string())?
 }
-
 #[cfg(any(feature = "desktop", test))]
 fn read_text_file_blocking(path: &std::path::Path) -> Result<String, String> {
     use std::io::Read;
