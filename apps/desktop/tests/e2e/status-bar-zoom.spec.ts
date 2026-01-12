@@ -38,5 +38,24 @@ test.describe("status bar zoom", () => {
     expect(after.width).toBeGreaterThan(before.width * 1.5);
     expect(after.height).toBeGreaterThan(before.height * 1.5);
   });
-});
 
+  test("ctrl+wheel zoom gesture updates status bar zoom", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await waitForIdle(page);
+
+    const zoomControl = page.getByTestId("zoom-control");
+    await expect(zoomControl).toHaveValue("100");
+
+    const gridBox = await page.locator("#grid").boundingBox();
+    if (!gridBox) throw new Error("Missing grid bounding box");
+    await page.mouse.move(gridBox.x + gridBox.width / 2, gridBox.y + gridBox.height / 2);
+
+    await page.keyboard.down("Control");
+    // Large delta to ensure a visible zoom change regardless of platform wheel scale.
+    await page.mouse.wheel(0, -600);
+    await page.keyboard.up("Control");
+
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getZoom())).toBeGreaterThan(1.2);
+    await expect(zoomControl).not.toHaveValue("100");
+  });
+});
