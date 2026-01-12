@@ -114,5 +114,75 @@ describe("DesktopExtensionHostManager clipboard wiring", () => {
 
     await manager.host.dispose();
   });
-});
 
+  it("invokes clipboardWriteGuard before delegating to clipboardApi.writeText", async () => {
+    const steps: string[] = [];
+    let resolveGuard!: () => void;
+    const guardCalled = new Promise<void>((resolve) => {
+      resolveGuard = resolve;
+    });
+
+    const clipboardWriteGuard = vi.fn(async () => {
+      steps.push("guard");
+      resolveGuard();
+    });
+
+    let resolveWrite!: () => void;
+    const writeCalled = new Promise<void>((resolve) => {
+      resolveWrite = resolve;
+    });
+
+    const clipboardApi = {
+      readText: vi.fn(async () => ""),
+      writeText: vi.fn(async () => {
+        steps.push("write");
+        resolveWrite();
+      }),
+    };
+
+    const manager = new DesktopExtensionHostManager({
+      engineVersion: "1.0.0",
+      spreadsheetApi: {},
+      uiApi: {},
+      permissionPrompt: async () => true,
+      clipboardApi,
+      clipboardWriteGuard,
+    });
+
+    const extensionId = "test.clipboard-guard";
+    await manager.host.loadExtension({
+      extensionId,
+      extensionPath: "memory://clipboard-guard/",
+      manifest: {
+        name: "clipboard-guard",
+        publisher: "test",
+        version: "1.0.0",
+        engines: { formula: "^1.0.0" },
+        main: "./dist/extension.mjs",
+        activationEvents: [],
+        permissions: ["clipboard"],
+        contributes: {},
+      },
+      mainUrl: "memory://clipboard-guard/main.mjs",
+    });
+
+    const worker = workerInstances[0];
+    expect(worker).toBeTruthy();
+
+    worker.emitMessage({
+      type: "api_call",
+      id: "req-guard",
+      namespace: "clipboard",
+      method: "writeText",
+      args: ["guarded"],
+    });
+
+    await guardCalled;
+    await writeCalled;
+    expect(clipboardWriteGuard).toHaveBeenCalledWith({ extensionId, taintedRanges: [] });
+    expect(clipboardApi.writeText).toHaveBeenCalledWith("guarded");
+    expect(steps).toEqual(["guard", "write"]);
+
+    await manager.host.dispose();
+  });
+});
