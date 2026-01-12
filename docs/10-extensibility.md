@@ -782,8 +782,10 @@ declare namespace formula {
   }
 
   export namespace events {
-    function onSelectionChanged(callback: (e: { selection: Range }) => void): Disposable;
-    function onCellChanged(callback: (e: { row: number; col: number; value: CellValue }) => void): Disposable;
+    function onSelectionChanged(callback: (e: { sheetId?: string; selection: Range }) => void): Disposable;
+    function onCellChanged(
+      callback: (e: { sheetId?: string; row: number; col: number; value: CellValue }) => void
+    ): Disposable;
     function onSheetActivated(callback: (e: { sheet: Sheet }) => void): Disposable;
     function onWorkbookOpened(callback: (e: { workbook: Workbook }) => void): Disposable;
     function onBeforeSave(callback: (e: { workbook: Workbook }) => void): Disposable;
@@ -808,6 +810,8 @@ To minimize false positives, the host enforces clipboard policy based on the spr
 *read* during the current session:
 
 - Any successful calls to `cells.getSelection`, `cells.getRange`, or `cells.getCell` will “taint” the accessed ranges.
+- Any spreadsheet values received via `events.onSelectionChanged` and `events.onCellChanged` will also “taint” the
+  corresponding ranges/cells (best-effort).
 - Before allowing `clipboard.writeText`, the host evaluates DLP policy over those tainted ranges.
 - If any tainted range is classified above the allowed threshold (e.g. `Restricted`), the clipboard write throws.
 
