@@ -1646,6 +1646,15 @@ function syncSheetUi(): void {
 function installSheetStoreSubscription(): void {
   stopSheetStoreListener?.();
   stopSheetStoreListener = workbookSheetStore.subscribe(() => {
+    // Sheet tab operations (rename/reorder/hide/tab color/etc) are workbook metadata changes
+    // that may not touch any cells. Mark the DocumentController dirty so the unsaved-changes
+    // prompt stays accurate.
+    //
+    // Guard against marking dirty during internal UI sync transactions.
+    if (!syncingSheetUi) {
+      app.getDocument().markDirty();
+    }
+
     syncWorkbookSheetNamesFromSheetStore();
     const sheets = listSheetsForUi();
     const activeId = app.getCurrentSheetId();

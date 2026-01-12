@@ -225,4 +225,22 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
   });
   });
+
+  test("renaming a sheet marks the document dirty", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Demo workbook is treated as an initial saved baseline.
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
+
+    const tab = page.getByTestId("sheet-tab-Sheet1");
+    await tab.dblclick();
+    const input = tab.locator("input");
+    await expect(input).toBeVisible();
+    await input.fill("RenamedSheet1");
+    await input.press("Enter");
+
+    await expect(tab.locator(".sheet-tab__name")).toHaveText("RenamedSheet1");
+
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
+  });
 });
