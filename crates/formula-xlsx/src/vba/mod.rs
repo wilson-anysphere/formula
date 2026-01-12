@@ -31,12 +31,7 @@ impl XlsxPackage {
     /// (`xl/vbaProjectSignature.bin`, or another part referenced from
     /// `xl/_rels/vbaProject.bin.rels`). We prefer that part when present, but fall back to
     /// inspecting `xl/vbaProject.bin`.
-    ///
-    /// Returns `Ok(None)` when `xl/vbaProject.bin` is missing.
     pub fn parse_vba_digital_signature(&self) -> Result<Option<VbaDigitalSignature>, SignatureError> {
-        if self.vba_project_bin().is_none() {
-            return Ok(None);
-        }
         parse_vba_digital_signature_from_parts(self.parts_map())
     }
 
@@ -47,12 +42,7 @@ impl XlsxPackage {
     ///
     /// Some producers store `xl/vbaProjectSignature.bin` as raw PKCS#7/CMS bytes (not an OLE
     /// compound file). In that case we fall back to verifying it as a raw signature blob.
-    ///
-    /// Returns `Ok(None)` when `xl/vbaProject.bin` is missing.
     pub fn verify_vba_digital_signature(&self) -> Result<Option<VbaDigitalSignature>, SignatureError> {
-        if self.vba_project_bin().is_none() {
-            return Ok(None);
-        }
         verify_vba_digital_signature_from_parts(self.parts_map())
     }
 
@@ -103,22 +93,12 @@ impl XlsxDocument {
     }
 
     /// Inspect the workbook's VBA project for a digital signature stream.
-    ///
-    /// Returns `Ok(None)` when `xl/vbaProject.bin` is missing.
     pub fn parse_vba_digital_signature(&self) -> Result<Option<VbaDigitalSignature>, SignatureError> {
-        if self.parts().get(VBA_PROJECT_BIN).is_none() {
-            return Ok(None);
-        }
         parse_vba_digital_signature_from_parts(self.parts())
     }
 
     /// Inspect and (best-effort) cryptographically verify the VBA project digital signature.
-    ///
-    /// Returns `Ok(None)` when `xl/vbaProject.bin` is missing.
     pub fn verify_vba_digital_signature(&self) -> Result<Option<VbaDigitalSignature>, SignatureError> {
-        if self.parts().get(VBA_PROJECT_BIN).is_none() {
-            return Ok(None);
-        }
         verify_vba_digital_signature_from_parts(self.parts())
     }
 

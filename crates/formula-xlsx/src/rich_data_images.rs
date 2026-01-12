@@ -277,10 +277,22 @@ fn parse_value_metadata_using_future_metadata(
             let Ok(type_idx) = t.parse::<usize>() else {
                 continue;
             };
-            let Some(ty) = metadata_types.get(type_idx) else {
-                continue;
-            };
-            if !ty.name.eq_ignore_ascii_case(XLRICHVALUE_TYPE_NAME) {
+            // Excel's `t` appears in the wild as both 0-based and 1-based.
+            // Prefer 1-based (spec-ish), but fall back to 0-based for compatibility.
+            let mut is_rich_type = false;
+            for idx in if type_idx == 0 {
+                [type_idx, type_idx]
+            } else {
+                [type_idx - 1, type_idx]
+            } {
+                if let Some(ty) = metadata_types.get(idx) {
+                    if ty.name.eq_ignore_ascii_case(XLRICHVALUE_TYPE_NAME) {
+                        is_rich_type = true;
+                        break;
+                    }
+                }
+            }
+            if !is_rich_type {
                 continue;
             }
 

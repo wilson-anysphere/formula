@@ -42,8 +42,16 @@ fn build_rich_data_package(metadata_xml: &str) -> Vec<u8> {
     let rich_value_rel_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <rv:richValueRel xmlns:rv="http://schemas.microsoft.com/office/spreadsheetml/2017/richvalue"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <rv:rel r:id="rId1"/>
+   <rv:rel r:id="rId1"/>
 </rv:richValueRel>"#;
+
+    // Minimal rich value table with one record pointing at relationship index 0.
+    let rich_value_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <rv><v>0</v></rv>
+  </values>
+</rvData>"#;
 
     let rich_value_rel_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -59,6 +67,7 @@ fn build_rich_data_package(metadata_xml: &str) -> Vec<u8> {
         ("xl/_rels/workbook.xml.rels", workbook_rels.as_bytes()),
         ("xl/worksheets/sheet1.xml", sheet_xml.as_bytes()),
         ("xl/metadata.xml", metadata_xml.as_bytes()),
+        ("xl/richData/richValue.xml", rich_value_xml.as_bytes()),
         (
             "xl/richData/richValueRel.xml",
             rich_value_rel_xml.as_bytes(),
@@ -110,23 +119,23 @@ fn extracts_in_cell_images_with_future_metadata_indirection() {
     let metadata_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
-  <metadataTypes>
-    <metadataType name="XLRICHVALUE"/>
-  </metadataTypes>
-  <futureMetadata name="XLRICHVALUE">
-    <bk>
-      <extLst>
-        <ext uri="{DUMMY}">
-          <xlrd:rvb i="0"/>
-        </ext>
-      </extLst>
-    </bk>
-  </futureMetadata>
-  <valueMetadata>
-    <bk>
-      <rc t="0" v="0"/>
-    </bk>
-  </valueMetadata>
+   <metadataTypes>
+     <metadataType name="XLRICHVALUE"/>
+   </metadataTypes>
+   <futureMetadata name="XLRICHVALUE">
+     <bk>
+       <extLst>
+         <ext uri="{DUMMY}">
+           <xlrd:rvb i="0"/>
+         </ext>
+       </extLst>
+     </bk>
+   </futureMetadata>
+   <valueMetadata>
+     <bk>
+       <rc t="1" v="0"/>
+     </bk>
+   </valueMetadata>
 </metadata>"#;
 
     let bytes = build_rich_data_package(metadata_xml);

@@ -2,6 +2,7 @@ use thiserror::Error;
 
 use crate::{
     authenticode::extract_vba_signature_signed_digest,
+    compute_vba_project_digest,
     compute_vba_project_digest_v3,
     contents_hash::content_normalized_data,
     DigestAlg,
@@ -9,6 +10,7 @@ use crate::{
     OleError,
     OleFile,
 };
+
 use md5::{Digest as _, Md5};
 
 /// Identifies which `\x05DigitalSignature*` stream/storage variant a signature was loaded from.
