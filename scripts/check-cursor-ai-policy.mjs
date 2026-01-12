@@ -280,7 +280,12 @@ function gitGrepMatches(rootDir, needles) {
     for (const needle of needles) {
       args.push("-e", needle);
     }
-    args.push("--", ".");
+    // Exclude docs/instructions/mockups from the grep itself. These paths are
+    // intentionally excluded from policy enforcement (and may contain provider
+    // names for documentation/competitive analysis). Excluding them here avoids
+    // ballooning `git grep` output and hitting maxBuffer when those files contain
+    // many matches.
+    args.push("--", ".", ":(exclude)docs", ":(exclude)instructions", ":(exclude)mockups");
     const proc = spawnSync("git", args, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
