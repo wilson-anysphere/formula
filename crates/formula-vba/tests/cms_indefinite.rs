@@ -1,5 +1,42 @@
 use formula_vba::extract_vba_signature_signed_digest;
 
+fn wrap_in_digsig_info_serialized(pkcs7: &[u8]) -> Vec<u8> {
+    // Synthetic DigSigInfoSerialized-like blob:
+    // [cbSignature, cbSigningCertStore, cchProjectName] (LE u32)
+    // [projectName UTF-16LE] [certStore bytes] [signature bytes]
+    let project_name_utf16: Vec<u16> = "VBAProject\0".encode_utf16().collect();
+    let mut project_name_bytes = Vec::new();
+    for ch in &project_name_utf16 {
+        project_name_bytes.extend_from_slice(&ch.to_le_bytes());
+    }
+    let cert_store = vec![0xAA, 0xBB, 0xCC, 0xDD];
+
+    let cb_signature = pkcs7.len() as u32;
+    let cb_cert_store = cert_store.len() as u32;
+    let cch_project = project_name_utf16.len() as u32;
+
+    let mut out = Vec::new();
+    out.extend_from_slice(&cb_signature.to_le_bytes());
+    out.extend_from_slice(&cb_cert_store.to_le_bytes());
+    out.extend_from_slice(&cch_project.to_le_bytes());
+    out.extend_from_slice(&project_name_bytes);
+    out.extend_from_slice(&cert_store);
+    out.extend_from_slice(pkcs7);
+    out
+}
+
+#[test]
+fn extracts_spc_indirect_data_digest_from_ber_indefinite_cms_at_offset_0() {
+    let cms = include_bytes!("fixtures/cms_indefinite.der");
+
+    let digest_info = extract_vba_signature_signed_digest(cms)
+        .expect("extract should succeed")
+        .expect("digest info should be present");
+
+    assert_eq!(digest_info.digest_algorithm_oid, "2.16.840.1.101.3.4.2.1"); // SHA-256
+    assert_eq!(digest_info.digest, (0u8..0x20).collect::<Vec<_>>());
+}
+
 #[test]
 fn extracts_spc_indirect_data_digest_from_ber_indefinite_cms() {
     let cms = include_bytes!("fixtures/cms_indefinite.der");
@@ -7,6 +44,19 @@ fn extracts_spc_indirect_data_digest_from_ber_indefinite_cms() {
     // Real-world VBA signature streams sometimes include a small prefix/header before the CMS blob.
     let mut stream = b"VBA\0SIG\0".to_vec();
     stream.extend_from_slice(cms);
+
+    let digest_info = extract_vba_signature_signed_digest(&stream)
+        .expect("extract should succeed")
+        .expect("digest info should be present");
+
+    assert_eq!(digest_info.digest_algorithm_oid, "2.16.840.1.101.3.4.2.1"); // SHA-256
+    assert_eq!(digest_info.digest, (0u8..0x20).collect::<Vec<_>>());
+}
+
+#[test]
+fn extracts_spc_indirect_data_digest_from_ber_indefinite_cms_wrapped_in_digsig_info_serialized() {
+    let cms = include_bytes!("fixtures/cms_indefinite.der");
+    let stream = wrap_in_digsig_info_serialized(cms);
 
     let digest_info = extract_vba_signature_signed_digest(&stream)
         .expect("extract should succeed")
