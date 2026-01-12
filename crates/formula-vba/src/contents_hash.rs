@@ -2516,6 +2516,17 @@ fn trim_u32_len_prefix_unicode_string(bytes: &[u8]) -> &[u8] {
     if rest.len().is_multiple_of(2) && n.saturating_mul(2) == rest.len() {
         return rest;
     }
+    // Some producers include a trailing UTF-16 NUL terminator but do not count it in the internal
+    // length prefix. Accept that form too, but only when an actual terminator is present (to avoid
+    // misclassifying random leading u32 values).
+    if rest.len() >= 2 && rest.ends_with(&[0x00, 0x00]) {
+        if n.saturating_add(2) == rest.len() {
+            return rest;
+        }
+        if rest.len().is_multiple_of(2) && n.saturating_mul(2).saturating_add(2) == rest.len() {
+            return rest;
+        }
+    }
     bytes
 }
 

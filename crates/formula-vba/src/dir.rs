@@ -277,25 +277,7 @@ impl DirStream {
                     // Some real-world `VBA/dir` streams provide a UTF-16LE module stream name in a
                     // separate record (ID 0x0032). Prefer it for OLE stream lookup.
                     if let Some(m) = current_module.as_mut() {
-                        let mut utf16_bytes = data;
-
-                        // Some producers include an internal u32 length prefix. Accept both:
-                        // - length == remaining bytes (byte count), or
-                        // - length*2 == remaining bytes (UTF-16 code units).
-                        if data.len() >= 4 {
-                            let n =
-                                u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
-                            let remaining = data.len() - 4;
-                            if n == remaining || n.saturating_mul(2) == remaining {
-                                utf16_bytes = &data[4..];
-                            }
-                        }
-
-                        let (cow, _) = UTF_16LE.decode_without_bom_handling(utf16_bytes);
-                        let mut s = cow.into_owned();
-                        // Stream names should not contain NULs; strip defensively.
-                        s.retain(|c| c != '\u{0000}');
-                        m.stream_name = s;
+                        m.stream_name = decode_unicode_bytes(data);
                     }
                     expect_stream_name_unicode = false;
                 }
@@ -452,9 +434,17 @@ fn decode_unicode_bytes(bytes: &[u8]) -> String {
     // - length*2 == remaining bytes (UTF-16 code units).
     if bytes.len() >= 4 {
         let n = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
-        let remaining = bytes.len() - 4;
-        if n == remaining || n.saturating_mul(2) == remaining {
-            utf16_bytes = &bytes[4..];
+        let rest = &bytes[4..];
+        if n == rest.len() || n.saturating_mul(2) == rest.len() {
+            utf16_bytes = rest;
+        } else if rest.len() >= 2 && rest.ends_with(&[0x00, 0x00]) {
+            // Some producers include a trailing UTF-16 NUL terminator but do not count it in the
+            // internal length prefix.
+            if n.saturating_add(2) == rest.len()
+                || n.saturating_mul(2).saturating_add(2) == rest.len()
+            {
+                utf16_bytes = rest;
+            }
         }
     }
 

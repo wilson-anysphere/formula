@@ -285,6 +285,68 @@ fn forms_normalized_data_uses_modulestreamnameunicode_to_find_designer_storage()
 }
 
 #[test]
+fn forms_normalized_data_handles_modulestreamnameunicode_len_prefix_excluding_nul() {
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
+
+    // Root-level designer storage named by MODULESTREAMNAMEUNICODE, with an internal length prefix
+    // that excludes the trailing NUL terminator.
+    let storage_name = "Форма1";
+    ole.create_storage(storage_name)
+        .expect("create designer storage");
+    {
+        let mut s = ole
+            .create_stream(format!("{storage_name}/Payload"))
+            .expect("create stream");
+        s.write_all(b"ABC").expect("write stream bytes");
+    }
+
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"BaseClass=NiceName\r\n")
+            .expect("write PROJECT");
+    }
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        // Provide an incorrect MODULESTREAMNAME but a correct MODULESTREAMNAMEUNICODE with an
+        // internal length prefix.
+        let mut dir_decompressed = Vec::new();
+        push_record(&mut dir_decompressed, 0x0003, &1252u16.to_le_bytes());
+        push_record(&mut dir_decompressed, 0x0019, b"NiceName");
+
+        let mut wrong_stream_name = Vec::new();
+        wrong_stream_name.extend_from_slice(b"Wrong");
+        wrong_stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut dir_decompressed, 0x001A, &wrong_stream_name);
+
+        // StreamNameUnicode payload: `u32 byte_len_without_nul || utf16le_bytes || trailing_nul`.
+        let mut unicode_name = utf16le_bytes(storage_name);
+        unicode_name.extend_from_slice(&0u16.to_le_bytes());
+        let byte_len_without_nul = (unicode_name.len() - 2) as u32;
+        let mut payload = byte_len_without_nul.to_le_bytes().to_vec();
+        payload.extend_from_slice(&unicode_name);
+        push_record(&mut dir_decompressed, 0x0032, &payload);
+
+        push_record(&mut dir_decompressed, 0x0021, &3u16.to_le_bytes());
+        push_record(&mut dir_decompressed, 0x0031, &0u32.to_le_bytes());
+
+        let dir_container = compress_container(&dir_decompressed);
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized = forms_normalized_data(&vba_project_bin).expect("compute FormsNormalizedData");
+
+    let mut expected = Vec::new();
+    expected.extend_from_slice(b"ABC");
+    expected.extend(std::iter::repeat(0u8).take(1020));
+
+    assert_eq!(normalized.len(), 1023);
+    assert_eq!(normalized, expected);
+}
+
+#[test]
 fn forms_normalized_data_matches_baseclass_case_insensitively() {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");

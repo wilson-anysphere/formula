@@ -376,11 +376,20 @@ fn unicode_record_payload(data: &[u8]) -> Result<&[u8], DirParseError> {
     }
 
     let n = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
-    let remaining = data.len() - 4;
+    let rest = &data[4..];
 
     // Treat the leading u32 as a length prefix only when it is consistent with the remaining bytes.
-    if n == remaining || n.saturating_mul(2) == remaining {
-        return Ok(&data[4..]);
+    if n == rest.len() || n.saturating_mul(2) == rest.len() {
+        return Ok(rest);
+    }
+    // Some producers include a trailing UTF-16 NUL terminator but do not count it in the internal
+    // length prefix.
+    if rest.len() >= 2 && rest.ends_with(&[0x00, 0x00]) {
+        if n.saturating_add(2) == rest.len()
+            || n.saturating_mul(2).saturating_add(2) == rest.len()
+        {
+            return Ok(rest);
+        }
     }
 
     // Otherwise assume the record is raw UTF-16LE bytes.
