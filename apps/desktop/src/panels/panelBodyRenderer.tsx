@@ -130,15 +130,15 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
                 key={item.id}
                 style={{
                   display: "flex",
-                   gap: 8,
-                   padding: "6px 0",
-                   borderBottom: "1px solid var(--border)",
-                   cursor: "pointer",
-                   // Use theme tokens only (no hardcoded colors).
-                   background: selected ? "var(--bg-hover)" : "transparent",
-                 }}
-                 onClick={() => setSelectedId(item.id)}
-               >
+                  gap: 8,
+                  padding: "6px 0",
+                  borderBottom: "1px solid var(--border)",
+                  cursor: "pointer",
+                  // Use theme tokens only (no hardcoded colors).
+                  background: selected ? "var(--bg-hover)" : "transparent",
+                }}
+                onClick={() => setSelectedId(item.id)}
+              >
                 <input type="radio" checked={selected} onChange={() => setSelectedId(item.id)} />
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontWeight: 600 }}>{item.title}</div>

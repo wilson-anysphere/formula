@@ -2,6 +2,7 @@ import { SpreadsheetApp } from "./app/spreadsheetApp";
 import "./styles/tokens.css";
 import "./styles/ui.css";
 import "./styles/command-palette.css";
+import "./styles/dialogs.css";
 import "./styles/workspace.css";
 import "./styles/charts-overlay.css";
 import "./styles/scrollbars.css";

@@ -42,21 +42,13 @@ export async function showInputBox(options: InputBoxOptions = {}): Promise<strin
 
   const input = document.createElement("input");
   input.type = "text";
+  input.className = "dialog__field";
   input.value = options.value ?? "";
   if (options.placeHolder) input.placeholder = options.placeHolder;
-  input.style.width = "100%";
-  input.style.padding = "10px 12px";
-  input.style.borderRadius = "10px";
-  input.style.border = "1px solid var(--border)";
-  input.style.background = "var(--bg-primary)";
-  input.style.color = "var(--text-primary)";
   input.dataset.testid = "input-box-field";
 
   const controls = document.createElement("div");
-  controls.style.display = "flex";
-  controls.style.justifyContent = "flex-end";
-  controls.style.gap = "8px";
-  controls.style.marginTop = "12px";
+  controls.className = "dialog__controls";
 
   const cancelBtn = document.createElement("button");
   cancelBtn.type = "button";
@@ -127,10 +119,7 @@ export async function showQuickPick<T>(
   title.textContent = options.placeHolder ?? "Select an item";
 
   const list = document.createElement("div");
-  list.style.display = "flex";
-  list.style.flexDirection = "column";
-  list.style.gap = "6px";
-  list.style.marginTop = "10px";
+  list.className = "quick-pick__list";
 
   dialog.appendChild(title);
   dialog.appendChild(list);
@@ -161,25 +150,19 @@ export async function showQuickPick<T>(
     for (const [idx, item] of items.entries()) {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.style.textAlign = "left";
-      btn.style.padding = "10px 12px";
-      btn.style.borderRadius = "10px";
-      btn.style.border = "1px solid var(--border)";
-      btn.style.background = "var(--bg-primary)";
-      btn.style.color = "var(--text-primary)";
+      btn.className = "quick-pick__item";
       btn.dataset.testid = `quick-pick-item-${idx}`;
 
       const label = document.createElement("div");
       label.textContent = item.label;
-      label.style.fontWeight = "600";
+      label.className = "quick-pick__label";
       btn.appendChild(label);
 
       const secondary = item.description ?? item.detail ?? null;
       if (secondary) {
         const sub = document.createElement("div");
         sub.textContent = secondary;
-        sub.style.color = "var(--text-secondary)";
-        sub.style.fontSize = "12px";
+        sub.className = "quick-pick__subtext";
         btn.appendChild(sub);
       }
 
@@ -193,4 +176,3 @@ export async function showQuickPick<T>(
     dialog.showModal();
   });
 }
-
