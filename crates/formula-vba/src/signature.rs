@@ -5,8 +5,7 @@ use crate::{
     contents_hash::content_normalized_data,
     normalized_data::forms_normalized_data,
     project_digest::DigestAlg,
-    OleError,
-    OleFile,
+    OleError, OleFile,
 };
 use md5::{Digest as _, Md5};
 
@@ -738,6 +737,10 @@ fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
         DigestAlg::Sha256 => "SHA-256",
     })
 }
+<<<<<<< HEAD
+=======
+
+>>>>>>> cd3e7a16 (fix(formula-vba): tighten V2 digest parsing and fix signature.rs build)
 fn is_signature_component(component: &str) -> bool {
     let trimmed = component.trim_start_matches(|c: char| c <= '\u{001F}');
     matches!(

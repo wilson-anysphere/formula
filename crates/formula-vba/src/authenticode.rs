@@ -424,8 +424,18 @@ fn parse_spc_indirect_data_content_v2(
     }
     let content = slice_constructed_contents(rest, len)?;
 
-    // Prefer extracting via SigData parsing (binary or nested ASN.1), then fall back to a raw
-    // 16-byte OCTET STRING if present.
+    // The spec indicates the source hash is carried in `SigDataV1Serialized.sourceHash`. Try a
+    // structure-ish parse first (skip `data`, parse the next element as SigDataV1Serialized),
+    // then fall back to more permissive scanning.
+    if let Some(hash) = try_parse_sigdata_source_hash_from_spc_v2_contents(content)? {
+        return Ok(VbaSignedDigest {
+            digest_algorithm_oid: OID_MD5_STR.to_owned(),
+            digest: hash,
+        });
+    }
+
+    // Fallbacks: permissive scanning for a SigDataV1Serialized blob and then (last resort) any
+    // 16-byte OCTET STRING.
     if let Some(hash) = scan_asn1_for_sigdata_source_hash(content)? {
         return Ok(VbaSignedDigest {
             digest_algorithm_oid: OID_MD5_STR.to_owned(),
@@ -446,6 +456,37 @@ fn parse_spc_indirect_data_content_v2(
 
 fn is_eoc(bytes: &[u8]) -> bool {
     bytes.len() >= 2 && bytes[0] == 0x00 && bytes[1] == 0x00
+}
+
+fn try_parse_sigdata_source_hash_from_spc_v2_contents(
+    spc_v2_contents: &[u8],
+) -> Result<Option<Vec<u8>>, VbaSignatureSignedDigestError> {
+    // SpcIndirectDataContentV2 is expected to be:
+    //   SEQUENCE { data ANY, sigData SigDataV1Serialized, ... }
+    //
+    // We intentionally only parse what we need:
+    // - Skip the first element (`data`)
+    // - Treat the next element as SigDataV1Serialized (either an OCTET STRING wrapping a binary
+    //   blob, or an embedded ASN.1 element).
+    let mut cur = spc_v2_contents;
+    cur = skip_element(cur)?;
+    if cur.is_empty() || is_eoc(cur) {
+        return Ok(None);
+    }
+
+    let after = skip_element(cur)?;
+    let consumed = cur.len().saturating_sub(after.len());
+    let sigdata_tlv = &cur[..consumed];
+
+    let (tag, _len, _rest) = parse_tag_and_length(sigdata_tlv)?;
+    if tag.class == Asn1Class::Universal && tag.number == 4 {
+        // SigDataV1Serialized stored as an OCTET STRING (common).
+        let (octets, _after) = parse_octet_string(sigdata_tlv)?;
+        return extract_source_hash_from_sig_data_v1_serialized(&octets);
+    }
+
+    // Otherwise, treat the element itself as a container and look for an inner 16-byte sourceHash.
+    scan_asn1_for_octet_string_len(sigdata_tlv, 16)
 }
 
 fn scan_asn1_for_sigdata_source_hash(
@@ -540,18 +581,39 @@ fn extract_source_hash_from_sig_data_v1_serialized_binary(bytes: &[u8]) -> Optio
         Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
 
-    // Common BLOB pattern: [u32 len][len bytes]
-    for offset in [0usize, 4, 8, 12, 16] {
-        let Some(len) = read_u32_le(bytes, offset).map(|n| n as usize) else {
-            continue;
-        };
-        if len != 16 {
-            continue;
+    // Common (test + observed) pattern:
+    //   [version u32][cbSourceHash u32][sourceHash bytes]
+    if bytes.len() >= 8 {
+        if let Some(len) = read_u32_le(bytes, 4).map(|n| n as usize) {
+            if len == 16 && bytes.len() >= 8 + 16 {
+                return Some(bytes[8..8 + 16].to_vec());
+            }
         }
-        let start = offset + 4;
-        let end = start + 16;
-        if end <= bytes.len() {
-            return Some(bytes[start..end].to_vec());
+    }
+
+    // Generic length-prefixed blob scan:
+    // try interpreting the payload as a sequence of `[u32 len][len bytes]` blobs, optionally
+    // preceded by a 4-byte version field.
+    for start in [0usize, 4] {
+        let mut offset = start;
+        let mut candidate = None;
+        let mut steps = 0usize;
+        while offset + 4 <= bytes.len() && steps < 64 {
+            let Some(len) = read_u32_le(bytes, offset).map(|n| n as usize) else {
+                break;
+            };
+            offset += 4;
+            if offset + len > bytes.len() {
+                break;
+            }
+            if len == 16 {
+                candidate = Some(bytes[offset..offset + 16].to_vec());
+            }
+            offset += len;
+            steps += 1;
+        }
+        if candidate.is_some() {
+            return candidate;
         }
     }
 

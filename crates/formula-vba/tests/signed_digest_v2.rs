@@ -2,7 +2,10 @@
 
 use std::io::{Cursor, Write};
 
-use formula_vba::{extract_vba_signature_signed_digest, OleFile};
+use formula_vba::{
+    compute_vba_project_digest, extract_vba_signature_signed_digest, verify_vba_digital_signature,
+    DigestAlg, OleFile, VbaSignatureBinding, VbaSignatureVerification,
+};
 
 mod signature_test_utils;
 
@@ -102,3 +105,53 @@ fn extracts_signed_digest_from_spc_indirect_data_content_v2_source_hash() {
     assert_eq!(got.digest, source_hash);
 }
 
+fn build_minimal_vba_project_bin(module1: &[u8], signature_blob: Option<&[u8]>) -> Vec<u8> {
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"Name=\"VBAProject\"\r\nModule=Module1\r\n")
+            .expect("write PROJECT");
+    }
+
+    ole.create_storage("VBA").expect("VBA storage");
+
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(b"dir-stream").expect("write dir");
+    }
+
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(module1).expect("write module");
+    }
+
+    if let Some(sig) = signature_blob {
+        let mut s = ole
+            .create_stream("\u{0005}DigitalSignature")
+            .expect("signature stream");
+        s.write_all(sig).expect("write signature");
+    }
+
+    ole.into_inner().into_inner()
+}
+
+#[test]
+fn v2_signed_digest_is_used_for_signature_binding() {
+    let module1 = b"module1-bytes";
+    let unsigned = build_minimal_vba_project_bin(module1, None);
+    let digest = compute_vba_project_digest(&unsigned, DigestAlg::Md5).expect("digest");
+    assert_eq!(digest.len(), 16, "VBA project digest must be MD5 (16 bytes)");
+
+    let spc_v2 = build_spc_indirect_data_content_v2(&digest);
+    let pkcs7 = make_pkcs7_signed_message(&spc_v2);
+
+    let signed = build_minimal_vba_project_bin(module1, Some(&pkcs7));
+    let sig = verify_vba_digital_signature(&signed)
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+}
