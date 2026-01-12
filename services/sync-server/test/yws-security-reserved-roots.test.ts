@@ -450,8 +450,16 @@ test("reservedRootGuard: truncates large keyPath segments in logs", () => {
     },
   });
 
+  // installYwsSecurity guards messages by wrapping websocket "message" listeners.
+  // Attach a listener to ensure the guard runs when we emit below.
+  let delivered = 0;
+  ws.on("message", () => {
+    delivered += 1;
+  });
+
   ws.emit("message", message, true);
 
+  assert.equal(delivered, 0);
   assert.ok((ws as any).closeCalls.length >= 1);
   assert.equal((ws as any).closeCalls[0].code, 1008);
   assert.equal((ws as any).closeCalls[0].reason, "reserved root mutation");

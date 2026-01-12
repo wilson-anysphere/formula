@@ -364,6 +364,23 @@ export function loadConfigFromEnv(): SyncServerConfig {
     };
   }
 
+  // Reserved history quota defaults:
+  //
+  // The sync-server can optionally store versioning/branching metadata directly in the Y.Doc
+  // (roots like `versions` and `branching:commits`). When operators disable the reserved-root
+  // guard (see `SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED` in `src/server.ts`), clients are allowed
+  // to write to those roots.
+  //
+  // In development/test, default these limits to 0 (disabled) for convenience.
+  // In production, default to conservative non-zero limits to prevent unbounded history growth
+  // if the reserved-root guard is disabled.
+  //
+  // Tune (or disable by setting to 0) via:
+  // - SYNC_SERVER_MAX_VERSIONS_PER_DOC
+  // - SYNC_SERVER_MAX_BRANCHING_COMMITS_PER_DOC
+  const defaultMaxVersionsPerDoc = nodeEnv === "production" ? 500 : 0;
+  const defaultMaxBranchingCommitsPerDoc = nodeEnv === "production" ? 5_000 : 0;
+
   return {
     host,
     port,
@@ -432,11 +449,14 @@ export function loadConfigFromEnv(): SyncServerConfig {
       ),
       maxBranchingCommitsPerDoc: Math.max(
         0,
-        envInt(process.env.SYNC_SERVER_MAX_BRANCHING_COMMITS_PER_DOC, 0)
+        envInt(
+          process.env.SYNC_SERVER_MAX_BRANCHING_COMMITS_PER_DOC,
+          defaultMaxBranchingCommitsPerDoc
+        )
       ),
       maxVersionsPerDoc: Math.max(
         0,
-        envInt(process.env.SYNC_SERVER_MAX_VERSIONS_PER_DOC, 0)
+        envInt(process.env.SYNC_SERVER_MAX_VERSIONS_PER_DOC, defaultMaxVersionsPerDoc)
       ),
     },
     logLevel: process.env.LOG_LEVEL ?? "info",

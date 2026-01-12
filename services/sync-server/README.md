@@ -391,3 +391,25 @@ If you deploy without a reverse proxy and want the server to terminate TLS itsel
 - `SYNC_SERVER_TLS_KEY_PATH`
 
 When set, the server listens with HTTPS (and accepts WSS websocket upgrades).
+
+## Reserved roots (versions / branching metadata)
+
+The sync-server treats some Yjs roots as "reserved" (`versions`, `versionsMeta`, `branching:*`) so
+untrusted clients cannot write unbounded metadata into the shared document.
+
+By default, the reserved-root guard is:
+
+- **enabled in production**
+- **disabled in dev/test** (to keep local workflows compatible)
+
+Override with:
+
+- `SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED` (`true|false`)
+
+If you disable the reserved-root guard (e.g. to allow Yjs-based versioning/branching stores),
+sync-server can enforce per-document quotas to prevent unbounded growth:
+
+- `SYNC_SERVER_MAX_VERSIONS_PER_DOC` (default: `500` in production; `0` otherwise)
+- `SYNC_SERVER_MAX_BRANCHING_COMMITS_PER_DOC` (default: `5000` in production; `0` otherwise)
+
+Set either value to `0` to disable that limit.
