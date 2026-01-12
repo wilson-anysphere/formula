@@ -303,6 +303,12 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   input.className = "command-palette__input";
   input.dataset.testid = "command-palette-input";
   input.placeholder = placeholder;
+  // Treat the palette input as a combobox controlling the listbox so assistive
+  // tech can follow `aria-activedescendant` updates while focus stays in the input.
+  input.setAttribute("role", "combobox");
+  input.setAttribute("aria-autocomplete", "list");
+  input.setAttribute("aria-expanded", "false");
+  input.setAttribute("aria-label", placeholder);
 
   const hint = document.createElement("div");
   hint.className = "command-palette__hint";
@@ -312,10 +318,13 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   const list = document.createElement("ul");
   list.className = "command-palette__list";
   list.dataset.testid = "command-palette-list";
+  list.id = "command-palette-listbox";
   list.setAttribute("role", "listbox");
   list.setAttribute("aria-label", t("commandPalette.aria.commandsList"));
   // Ensure there's always a second tabbable target for the focus trap.
   list.tabIndex = 0;
+  input.setAttribute("aria-controls", list.id);
+  input.setAttribute("aria-haspopup", "listbox");
 
   palette.appendChild(input);
   palette.appendChild(hint);
@@ -390,6 +399,16 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     chunkSearchController = null;
   };
 
+  const setActiveDescendant = (id: string | null): void => {
+    if (!id) {
+      list.removeAttribute("aria-activedescendant");
+      input.removeAttribute("aria-activedescendant");
+      return;
+    }
+    list.setAttribute("aria-activedescendant", id);
+    input.setAttribute("aria-activedescendant", id);
+  };
+
   function close(): void {
     if (!isOpen) return;
     isOpen = false;
@@ -397,6 +416,8 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     abortChunkedSearch();
     overlay.hidden = true;
     document.removeEventListener("focusin", handleDocumentFocusIn);
+    input.setAttribute("aria-expanded", "false");
+    setActiveDescendant(null);
     query = "";
     selectedIndex = 0;
     visibleItems = [];
@@ -439,6 +460,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     input.value = "";
     overlay.hidden = false;
     isOpen = true;
+    input.setAttribute("aria-expanded", "true");
     document.addEventListener("focusin", handleDocumentFocusIn);
 
     renderResults("sync");
@@ -565,7 +587,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
     list.replaceChildren();
     visibleItemEls = [];
-    list.removeAttribute("aria-activedescendant");
+    setActiveDescendant(null);
 
     if (visibleItems.length === 0) {
       const empty = document.createElement("li");
@@ -820,11 +842,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
     // Keep selection in view after re-render.
     const selectedEl = visibleItemEls[selectedIndex];
-    if (selectedEl) {
-      list.setAttribute("aria-activedescendant", selectedEl.id);
-    } else {
-      list.removeAttribute("aria-activedescendant");
-    }
+    setActiveDescendant(selectedEl?.id ?? null);
     queueMicrotask(() => {
       const el = visibleItemEls[selectedIndex];
       if (el && typeof el.scrollIntoView === "function") {
@@ -1052,12 +1070,12 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     const nextEl = visibleItemEls[selectedIndex];
     if (nextEl) {
       nextEl.setAttribute("aria-selected", "true");
-      list.setAttribute("aria-activedescendant", nextEl.id);
+      setActiveDescendant(nextEl.id);
       if (typeof nextEl.scrollIntoView === "function") {
         nextEl.scrollIntoView({ block: "nearest" });
       }
     } else {
-      list.removeAttribute("aria-activedescendant");
+      setActiveDescendant(null);
     }
   }
 
