@@ -392,6 +392,12 @@ export class WorkbookContextBuilder {
       maxCols: this.options.maxSchemaCols,
     });
 
+    // If we couldn't read the sheet sample (DLP denied, runtime error, etc), do not attempt
+    // schema extraction from placeholder values (it would create misleading fake tables).
+    if (block.error) {
+      return { sheetId, analyzedRange, schema: { name: sheetId, tables: [], namedRanges: [], dataRegions: [] } };
+    }
+
     const schemaValues: unknown[][] = block.values;
     const schema = extractSheetSchema({
       name: sheetId,
@@ -459,6 +465,16 @@ export class WorkbookContextBuilder {
   }
 
   private buildPromptContext(params: { payload: WorkbookContextPayload; ragResult: any; maxTokens: number }): string {
+    const priorities =
+      this.options.mode === "inline_edit"
+        ? // Selection-first: prioritize data blocks over schemas for inline edit.
+          { workbook_summary: 4, sheet_schemas: 3, data_blocks: 5, retrieved: 2, attachments: 1 }
+        : this.options.mode === "agent"
+          ? // Agents can benefit from deeper schemas + tables overview.
+            { workbook_summary: 4, sheet_schemas: 5, data_blocks: 3, retrieved: 2, attachments: 1 }
+          : // Chat default.
+            { workbook_summary: 5, sheet_schemas: 4, data_blocks: 3, retrieved: 2, attachments: 1 };
+
     const sheets = params.payload.sheets.map((s) => ({ sheetId: s.sheetId, schema: s.schema }));
     const blocks = params.payload.blocks;
 
@@ -482,27 +498,27 @@ export class WorkbookContextBuilder {
     const sections = [
       {
         key: "workbook_summary",
-        priority: 5,
+        priority: priorities.workbook_summary,
         text: `Workbook summary:\n${JSON.stringify(workbookSummary, null, 2)}`,
       },
       {
         key: "sheet_schemas",
-        priority: 4,
+        priority: priorities.sheet_schemas,
         text: `Sheet schemas (schema-first):\n${JSON.stringify(sheets, null, 2)}`,
       },
       {
         key: "data_blocks",
-        priority: 3,
+        priority: priorities.data_blocks,
         text: blocks.length ? `Sampled data blocks:\n${JSON.stringify(blocks, null, 2)}` : "",
       },
       {
         key: "retrieved",
-        priority: 2,
+        priority: priorities.retrieved,
         text: retrievedText ? `Retrieved workbook context:\n${retrievedText}` : "",
       },
       {
         key: "attachments",
-        priority: 1,
+        priority: priorities.attachments,
         text:
           Array.isArray(params.ragResult?.attachments) && params.ragResult.attachments.length
             ? `Attachments:\n${JSON.stringify(params.ragResult.attachments, null, 2)}`

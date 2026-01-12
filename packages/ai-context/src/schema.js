@@ -279,6 +279,27 @@ export function extractSheetSchema(sheet) {
         col: Number.isInteger(sheet.origin.col) && sheet.origin.col >= 0 ? sheet.origin.col : 0,
       }
     : { row: 0, col: 0 };
+  const matrixRowCount = sheet.values.length;
+  const matrixColCount = sheet.values.reduce((max, row) => Math.max(max, row?.length ?? 0), 0);
+
+  /**
+   * Clamp a rect (0-based) to the bounds of `sheet.values`.
+   *
+   * Returns null when the rect does not intersect the provided matrix at all.
+   *
+   * @param {{ startRow: number, startCol: number, endRow: number, endCol: number }} rect
+   */
+  function clampRectToMatrix(rect) {
+    if (matrixRowCount === 0 || matrixColCount === 0) return null;
+    if (rect.endRow < 0 || rect.endCol < 0) return null;
+    if (rect.startRow >= matrixRowCount || rect.startCol >= matrixColCount) return null;
+
+    const startRow = Math.max(0, Math.min(rect.startRow, matrixRowCount - 1));
+    const endRow = Math.max(0, Math.min(rect.endRow, matrixRowCount - 1));
+    const startCol = Math.max(0, Math.min(rect.startCol, matrixColCount - 1));
+    const endCol = Math.max(0, Math.min(rect.endCol, matrixColCount - 1));
+    return { startRow, startCol, endRow, endCol };
+  }
   const regions = detectDataRegions(sheet.values);
 
   /** @type {DataRegionSchema[]} */
@@ -376,7 +397,7 @@ export function extractSheetSchema(sheet) {
     tableEntries.push(...implicitUncovered);
 
     for (const explicit of explicitDefs) {
-      const rect =
+      const localRect =
         origin.row === 0 && origin.col === 0
           ? explicit.rect
           : {
@@ -385,7 +406,8 @@ export function extractSheetSchema(sheet) {
               startCol: explicit.rect.startCol - origin.col,
               endCol: explicit.rect.endCol - origin.col,
             };
-      const analyzed = analyzeRegion(sheet.values, rect);
+      const clamped = clampRectToMatrix(localRect);
+      const analyzed = clamped ? analyzeRegion(sheet.values, clamped) : { columns: [], rowCount: 0 };
       tableEntries.push({
         table: {
           name: explicit.name,
