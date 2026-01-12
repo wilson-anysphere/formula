@@ -279,8 +279,11 @@ fn import_xls_path_with_biff_reader(
         Some(stream) => {
             // Calamine's continued-NAME panic workaround only applies to BIFF8 NAME records. Avoid
             // patching BIFF5 streams (different NAME layout) to keep `.xls` import best-effort.
-            let sanitized = match biff_version.unwrap_or_else(|| biff::detect_biff_version(stream)) {
-                biff::BiffVersion::Biff8 => sanitize_biff8_continued_name_records_for_calamine(stream),
+            let sanitized = match biff_version.unwrap_or_else(|| biff::detect_biff_version(stream))
+            {
+                biff::BiffVersion::Biff8 => {
+                    sanitize_biff8_continued_name_records_for_calamine(stream)
+                }
                 biff::BiffVersion::Biff5 => None,
             };
             let xls_bytes = build_in_memory_xls(sanitized.as_deref().unwrap_or(stream))?;
@@ -677,11 +680,15 @@ fn import_xls_path_with_biff_reader(
                 .copied();
 
             let mut sheet_stream_autofilter_range: Option<Range> = None;
+            let mut sheet_stream_filter_mode = false;
+            let mut sheet_row_col_props: Option<&biff::SheetRowColProperties> = None;
 
             if let Some(props) = row_col_props
                 .as_ref()
                 .and_then(|props_by_sheet| props_by_sheet.get(biff_idx))
             {
+                sheet_stream_filter_mode = props.filter_mode;
+                sheet_row_col_props = Some(props);
                 apply_row_col_properties(sheet, props);
                 apply_outline_properties(sheet, props);
 
@@ -708,6 +715,31 @@ fn import_xls_path_with_biff_reader(
                         sort_state: None,
                         raw_xml: Vec::new(),
                     });
+                }
+            }
+
+            // Best-effort: when `FILTERMODE` is present, Excel indicates that some rows are hidden by
+            // an active filter. We do not currently import filter criteria or filtered-row
+            // visibility, so clear any BIFF row hidden flags that fall inside the filter range to
+            // avoid preserving "mystery hidden rows" without the corresponding filter state.
+            //
+            // This intentionally only clears user-hidden rows (outline-hidden rows remain hidden).
+            if sheet_stream_filter_mode {
+                if let (Some(props), Some(af)) = (sheet_row_col_props, sheet.auto_filter.as_ref()) {
+                    let start_row = af.range.start.row;
+                    let end_row = af.range.end.row;
+                    if end_row > start_row {
+                        for (&row, row_props) in &props.rows {
+                            if !row_props.hidden {
+                                continue;
+                            }
+                            // Skip the header row: Excel filters apply to data rows below the
+                            // header.
+                            if row > start_row && row <= end_row {
+                                sheet.set_row_hidden(row, false);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1963,12 +1995,11 @@ fn populate_print_settings_from_defined_names(
                 (0, DefinedNameScope::Sheet(sheet_id)) => {
                     workbook.sheet(*sheet_id).map(|s| s.name.clone())
                 }
-                (1, DefinedNameScope::Workbook) => infer_sheet_name_from_workbook_scoped_defined_name(
-                    workbook,
-                    name,
-                    refers_to,
-                    warnings,
-                ),
+                (1, DefinedNameScope::Workbook) => {
+                    infer_sheet_name_from_workbook_scoped_defined_name(
+                        workbook, name, refers_to, warnings,
+                    )
+                }
                 _ => None,
             };
 
@@ -2723,8 +2754,7 @@ fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<V
                     if id != RECORD_CONTINUE {
                         break;
                     }
-                    let cont_len =
-                        u16::from_le_bytes([out[cursor + 2], out[cursor + 3]]) as usize;
+                    let cont_len = u16::from_le_bytes([out[cursor + 2], out[cursor + 3]]) as usize;
                     let total = 4usize.saturating_add(cont_len);
                     if cursor.saturating_add(total) > out.len() {
                         break;
@@ -3180,7 +3210,11 @@ mod tests {
         dims.extend_from_slice(&0u16.to_le_bytes());
         push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
         push_record(&mut sheet, RECORD_WINDOW2, &window2());
-        push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_general, 0.0));
+        push_record(
+            &mut sheet,
+            RECORD_NUMBER,
+            &number_cell(0, 0, xf_general, 0.0),
+        );
         push_record(&mut sheet, RECORD_EOF, &[]);
 
         // Patch BoundSheet offset.
@@ -3348,7 +3382,11 @@ mod tests {
         dims.extend_from_slice(&0u16.to_le_bytes());
         push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
         push_record(&mut sheet, RECORD_WINDOW2, &window2());
-        push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_general, 0.0));
+        push_record(
+            &mut sheet,
+            RECORD_NUMBER,
+            &number_cell(0, 0, xf_general, 0.0),
+        );
         push_record(&mut sheet, RECORD_EOF, &[]);
 
         // Patch BoundSheet offset.
@@ -3413,7 +3451,11 @@ mod tests {
         dims.extend_from_slice(&0u16.to_le_bytes());
         push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
         push_record(&mut sheet, RECORD_WINDOW2, &window2());
-        push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_general, 0.0));
+        push_record(
+            &mut sheet,
+            RECORD_NUMBER,
+            &number_cell(0, 0, xf_general, 0.0),
+        );
         push_record(&mut sheet, RECORD_EOF, &[]);
 
         // Patch BoundSheet offset.
@@ -3437,7 +3479,10 @@ mod tests {
             RECORD_NAME
         );
         assert_eq!(
-            u16::from_le_bytes([stream[name_header_offset + 2], stream[name_header_offset + 3]]),
+            u16::from_le_bytes([
+                stream[name_header_offset + 2],
+                stream[name_header_offset + 3]
+            ]),
             10
         );
 
@@ -3473,7 +3518,10 @@ mod tests {
             RECORD_NAME
         );
         assert_eq!(
-            u16::from_le_bytes([stream[name_header_offset + 2], stream[name_header_offset + 3]]),
+            u16::from_le_bytes([
+                stream[name_header_offset + 2],
+                stream[name_header_offset + 3]
+            ]),
             10
         );
 

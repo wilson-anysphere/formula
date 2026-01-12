@@ -43,6 +43,32 @@ fn warns_on_filtermode_and_preserves_autofilter_dropdown_range() {
 }
 
 #[test]
+fn filtermode_does_not_preserve_filtered_row_hidden_flags() {
+    let bytes = xls_fixture_builder::build_autofilter_filtermode_hidden_rows_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("FilteredHiddenRows")
+        .expect("FilteredHiddenRows missing");
+
+    let af = sheet
+        .auto_filter
+        .as_ref()
+        .expect("expected sheet.auto_filter to be set");
+    assert_eq!(af.range, Range::from_a1("A1:B3").expect("valid range"));
+
+    // Row 2 (1-based) is hidden in the BIFF row metadata, but when FILTERMODE is present we do not
+    // preserve filtered-row visibility as user-hidden rows.
+    assert!(
+        !sheet.is_row_hidden_effective(2),
+        "expected row 2 to be visible; row_props={:?}; warnings={:?}",
+        sheet.row_properties(1),
+        result.warnings
+    );
+}
+
+#[test]
 fn warns_on_filtermode_and_sets_autofilter_from_sheet_stream_when_filterdatabase_missing() {
     let bytes = xls_fixture_builder::build_autofilter_filtermode_no_filterdatabase_fixture_xls();
     let result = import_fixture(&bytes);
