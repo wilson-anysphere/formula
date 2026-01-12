@@ -82,19 +82,16 @@ function parseFormulaPowerQueryXml(xml: string): Query[] | null {
 
 function sanitizeForWorkbookPersistence<T>(value: T): T {
   // Best-effort redaction. Credentials should live in the credential store, not the workbook file.
-  const redactedKeys = new Set([
-    "credentials",
-    "password",
-    "secret",
-    "apiKey",
-    "token",
-    "accessToken",
-    "refreshToken",
-    "clientSecret",
-  ]);
+  //
+  // We use a broad, case-insensitive substring match so we catch variants like:
+  // - access_token / refresh_token
+  // - client_secret
+  // - api_key / apikey
+  // - Authorization headers embedded in query configs
+  const sensitiveKeyRe = /(credentials|password|secret|token|api[-_]?key|authorization|client[-_]?secret)/i;
   return JSON.parse(
     JSON.stringify(value, (key, v) => {
-      if (redactedKeys.has(key)) return undefined;
+      if (key && sensitiveKeyRe.test(key)) return undefined;
       return v;
     }),
   ) as T;
