@@ -66,14 +66,14 @@ Built-in keys (desktop UI):
 | `isSingleCell` | boolean | Convenience key: `true` when `selectionType == "cell"`. |
 | `isMultiRange` | boolean | Convenience key: `true` when `selectionType == "multi"`. |
 | `activeCellA1` | string | Active cell address in A1 notation (e.g. `"C3"`). |
+| `commentsPanelVisible` | boolean | Whether the comments panel is currently open. |
+| `cellHasComment` | boolean | Whether the active cell currently has at least one comment thread. |
 
 Planned / reserved keys (not yet exposed in the desktop UI):
 
 | Key | Type | Meaning |
 | --- | --- | --- |
 | `gridArea` | `"cell" \| "rowHeader" \| "colHeader" \| "corner"` | Where the interaction happened (cell grid vs row/col header vs corner). |
-| `commentsPanelVisible` | boolean | Whether the comments panel is open. |
-| `cellHasComment` | boolean | Whether the active cell has a comment. |
 
 Examples:
 
@@ -96,7 +96,7 @@ sheetName == "Sheet1" && activeCellA1 == "A1"
 # (Planned) Separate header context menus
 gridArea == "rowHeader"
 
-# (Planned) Only enable when a comment exists and the comments panel is visible
+# Only enable when a comment exists and the comments panel is visible
 commentsPanelVisible && cellHasComment
 ```
 
