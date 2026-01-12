@@ -74,7 +74,19 @@ fn build_recalc_thread_pool() -> Option<ThreadPool> {
     let available = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1);
-    let mut threads = available.min(8).max(1);
+
+    // Respect `RAYON_NUM_THREADS` if provided, but keep a conservative default otherwise.
+    // This matches user expectations (and `scripts/cargo_agent.sh`) while still preventing
+    // accidental "one pool per core" blowups on high-core CI hosts.
+    let requested = std::env::var("RAYON_NUM_THREADS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| *n > 0);
+
+    let mut threads = match requested {
+        Some(n) => n.min(available).max(1),
+        None => available.min(8).max(1),
+    };
 
     loop {
         match ThreadPoolBuilder::new().num_threads(threads).build() {
