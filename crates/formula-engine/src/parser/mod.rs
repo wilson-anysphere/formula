@@ -1403,6 +1403,7 @@ struct Parser<'a> {
     group_depth: usize,
     unary_depth: usize,
     pow_depth: usize,
+    array_depth: usize,
     first_error: Option<ParseError>,
 }
 
@@ -1417,6 +1418,7 @@ impl<'a> Parser<'a> {
             group_depth: 0,
             unary_depth: 0,
             pow_depth: 0,
+            array_depth: 0,
             first_error: None,
         }
     }
@@ -2078,10 +2080,25 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_array_literal_best_effort(&mut self) -> Expr {
+        if self.array_depth >= EXCEL_MAX_NESTED_CALLS {
+            self.record_error(ParseError::new(
+                format!(
+                    "Expression nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"
+                ),
+                self.current_span(),
+            ));
+            // Consume the `{` (if present) to avoid infinite loops.
+            if matches!(self.peek_kind(), TokenKind::LBrace) {
+                self.next();
+            }
+            return Expr::Missing;
+        }
+
         if let Err(e) = self.expect(TokenKind::LBrace) {
             self.record_error(e);
             return Expr::Missing;
         }
+        self.array_depth += 1;
         let mut rows: Vec<Vec<Expr>> = Vec::new();
         let mut current_row: Vec<Expr> = Vec::new();
         let mut expecting_value = true;
@@ -2157,6 +2174,7 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+        self.array_depth = self.array_depth.saturating_sub(1);
         Expr::Array(ArrayLiteral { rows })
     }
 
@@ -2624,69 +2642,83 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_array_literal(&mut self) -> Result<Expr, ParseError> {
-        self.expect(TokenKind::LBrace)?;
-        let mut rows: Vec<Vec<Expr>> = Vec::new();
-        let mut current_row: Vec<Expr> = Vec::new();
-        let mut expecting_value = true;
-        loop {
-            self.skip_trivia();
-            match self.peek_kind() {
-                TokenKind::RBrace => {
-                    self.next();
-                    if expecting_value && (!current_row.is_empty() || !rows.is_empty()) {
-                        current_row.push(Expr::Missing);
-                    }
-                    if !current_row.is_empty() || !rows.is_empty() {
-                        rows.push(current_row);
-                    }
-                    break;
-                }
-                TokenKind::ArrayColSep => {
-                    // Blank element, e.g. `{1,,3}`.
-                    current_row.push(Expr::Missing);
-                    self.next();
-                    expecting_value = true;
-                    continue;
-                }
-                TokenKind::ArrayRowSep => {
-                    // Blank element at the end of a row, e.g. `{1,;2,3}`.
-                    current_row.push(Expr::Missing);
-                    self.next();
-                    rows.push(current_row);
-                    current_row = Vec::new();
-                    expecting_value = true;
-                    continue;
-                }
-                _ => {}
-            }
-
-            let el = self.parse_expression(0)?;
-            current_row.push(el);
-            expecting_value = false;
-            self.skip_trivia();
-            match self.peek_kind() {
-                TokenKind::ArrayColSep => {
-                    self.next();
-                    expecting_value = true;
-                }
-                TokenKind::ArrayRowSep => {
-                    self.next();
-                    rows.push(current_row);
-                    current_row = Vec::new();
-                    expecting_value = true;
-                }
-                TokenKind::RBrace => {
-                    // loop will close
-                }
-                _ => {
-                    return Err(ParseError::new(
-                        "Expected array separator or `}`",
-                        self.current_span(),
-                    ));
-                }
-            }
+        if self.array_depth >= EXCEL_MAX_NESTED_CALLS {
+            return Err(ParseError::new(
+                format!(
+                    "Expression nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"
+                ),
+                self.current_span(),
+            ));
         }
-        Ok(Expr::Array(ArrayLiteral { rows }))
+
+        self.expect(TokenKind::LBrace)?;
+        self.array_depth += 1;
+        let result = (|| {
+            let mut rows: Vec<Vec<Expr>> = Vec::new();
+            let mut current_row: Vec<Expr> = Vec::new();
+            let mut expecting_value = true;
+            loop {
+                self.skip_trivia();
+                match self.peek_kind() {
+                    TokenKind::RBrace => {
+                        self.next();
+                        if expecting_value && (!current_row.is_empty() || !rows.is_empty()) {
+                            current_row.push(Expr::Missing);
+                        }
+                        if !current_row.is_empty() || !rows.is_empty() {
+                            rows.push(current_row);
+                        }
+                        break;
+                    }
+                    TokenKind::ArrayColSep => {
+                        // Blank element, e.g. `{1,,3}`.
+                        current_row.push(Expr::Missing);
+                        self.next();
+                        expecting_value = true;
+                        continue;
+                    }
+                    TokenKind::ArrayRowSep => {
+                        // Blank element at the end of a row, e.g. `{1,;2,3}`.
+                        current_row.push(Expr::Missing);
+                        self.next();
+                        rows.push(current_row);
+                        current_row = Vec::new();
+                        expecting_value = true;
+                        continue;
+                    }
+                    _ => {}
+                }
+
+                let el = self.parse_expression(0)?;
+                current_row.push(el);
+                expecting_value = false;
+                self.skip_trivia();
+                match self.peek_kind() {
+                    TokenKind::ArrayColSep => {
+                        self.next();
+                        expecting_value = true;
+                    }
+                    TokenKind::ArrayRowSep => {
+                        self.next();
+                        rows.push(current_row);
+                        current_row = Vec::new();
+                        expecting_value = true;
+                    }
+                    TokenKind::RBrace => {
+                        // loop will close
+                    }
+                    _ => {
+                        return Err(ParseError::new(
+                            "Expected array separator or `}`",
+                            self.current_span(),
+                        ));
+                    }
+                }
+            }
+            Ok(Expr::Array(ArrayLiteral { rows }))
+        })();
+        self.array_depth = self.array_depth.saturating_sub(1);
+        result
     }
 
     fn parse_bracket_start(&mut self) -> Result<Expr, ParseError> {

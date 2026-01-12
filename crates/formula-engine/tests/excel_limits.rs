@@ -29,6 +29,14 @@ fn pow_chain(ops: usize) -> String {
     out
 }
 
+fn nested_array_literals(depth: usize) -> String {
+    let mut out = String::from("=");
+    out.extend(std::iter::repeat('{').take(depth));
+    out.push('1');
+    out.extend(std::iter::repeat('}').take(depth));
+    out
+}
+
 #[test]
 fn parse_rejects_formula_over_8192_chars() {
     // `="aaaa..."` (includes the leading `=`).
@@ -77,6 +85,18 @@ fn parse_rejects_pow_nesting_over_64() {
 #[test]
 fn parse_allows_pow_nesting_at_64() {
     let formula = pow_chain(64);
+    assert!(parse_formula(&formula, ParseOptions::default()).is_ok());
+}
+
+#[test]
+fn parse_rejects_array_literal_nesting_over_64() {
+    let formula = nested_array_literals(65);
+    assert!(parse_formula(&formula, ParseOptions::default()).is_err());
+}
+
+#[test]
+fn parse_allows_array_literal_nesting_at_64() {
+    let formula = nested_array_literals(64);
     assert!(parse_formula(&formula, ParseOptions::default()).is_ok());
 }
 
