@@ -21,11 +21,17 @@
   white-space: pre-wrap;
   padding: 8px;
   border: 1px solid var(--panel-border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-primary);
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 16px;
+}
+
+.macros-runner__security-banner[data-blocked="true"] {
+  border-color: var(--warning);
+  background: var(--warning-bg);
+  color: var(--text-primary);
 }
 
 .macros-runner__controls {
@@ -40,7 +46,7 @@
   min-width: 0;
   padding: 6px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-primary);
   color: var(--text-primary);
 }
@@ -55,7 +61,7 @@
   flex: 0 0 auto;
   padding: 6px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-primary);
   color: var(--text-primary);
   cursor: pointer;
@@ -85,7 +91,7 @@
   margin: 0;
   padding: 8px;
   border: 1px solid var(--panel-border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-primary);
   color: var(--text-primary);
   font:
@@ -100,4 +106,3 @@
   white-space: pre-wrap;
   overflow: auto;
 }
-
