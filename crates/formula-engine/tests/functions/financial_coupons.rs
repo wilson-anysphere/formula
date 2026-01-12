@@ -187,7 +187,7 @@ fn coup_schedule_eom_maturity_clamps_previous_coupon_date() {
     let expected_pcd = ymd_to_serial(ExcelDate::new(2023, 9, 30), system).unwrap();
     let expected_ncd = maturity;
 
-    for basis in [0, 1] {
+    for basis in [0, 1, 2, 3, 4] {
         assert_eq!(
             couppcd(settlement, maturity, 2, basis, system).unwrap(),
             expected_pcd
@@ -230,7 +230,7 @@ fn coup_schedule_leap_day_clamps_previous_coupon_date() {
     let expected_pcd = ymd_to_serial(ExcelDate::new(2024, 2, 29), system).unwrap();
     let expected_ncd = maturity;
 
-    for basis in [0, 1] {
+    for basis in [0, 1, 2, 3, 4] {
         assert_eq!(
             couppcd(settlement, maturity, 4, basis, system).unwrap(),
             expected_pcd
@@ -278,18 +278,51 @@ fn builtins_coup_dates_handle_eom_and_leap_day_schedules() {
         ymd_to_serial(ExcelDate::new(2023, 9, 30), system).unwrap() as f64;
     let expected_ncd_a =
         ymd_to_serial(ExcelDate::new(2024, 3, 31), system).unwrap() as f64;
-    assert_number(&sheet.eval("=COUPPCD(A1,A2,2,0)"), expected_pcd_a);
-    assert_number(&sheet.eval("=COUPNCD(A1,A2,2,0)"), expected_ncd_a);
-    assert_number(&sheet.eval("=COUPPCD(A1,A2,2,1)"), expected_pcd_a);
-    assert_number(&sheet.eval("=COUPNCD(A1,A2,2,1)"), expected_ncd_a);
+    for basis in [0, 1, 2, 3, 4] {
+        assert_number(&sheet.eval(&format!("=COUPPCD(A1,A2,2,{basis})")), expected_pcd_a);
+        assert_number(&sheet.eval(&format!("=COUPNCD(A1,A2,2,{basis})")), expected_ncd_a);
+    }
 
     // Leap-day clamping (May 31 -> Feb 29).
     let expected_pcd_b =
         ymd_to_serial(ExcelDate::new(2024, 2, 29), system).unwrap() as f64;
     let expected_ncd_b =
         ymd_to_serial(ExcelDate::new(2024, 5, 31), system).unwrap() as f64;
-    assert_number(&sheet.eval("=COUPPCD(B1,B2,4,0)"), expected_pcd_b);
-    assert_number(&sheet.eval("=COUPNCD(B1,B2,4,0)"), expected_ncd_b);
-    assert_number(&sheet.eval("=COUPPCD(B1,B2,4,1)"), expected_pcd_b);
-    assert_number(&sheet.eval("=COUPNCD(B1,B2,4,1)"), expected_ncd_b);
+    for basis in [0, 1, 2, 3, 4] {
+        assert_number(&sheet.eval(&format!("=COUPPCD(B1,B2,4,{basis})")), expected_pcd_b);
+        assert_number(&sheet.eval(&format!("=COUPNCD(B1,B2,4,{basis})")), expected_ncd_b);
+    }
+}
+
+#[test]
+fn builtins_coup_day_counts_handle_eom_and_leap_day_schedules() {
+    let _system = ExcelDateSystem::EXCEL_1900;
+    let mut sheet = TestSheet::new();
+
+    sheet.set("A1", "2023-10-01");
+    sheet.set("A2", "2024-03-31");
+    sheet.set("B1", "2024-03-01");
+    sheet.set("B2", "2024-05-31");
+
+    // EOM maturity clamping (Mar 31 -> Sep 30).
+    assert_number(&sheet.eval("=COUPDAYBS(A1,A2,2,0)"), 1.0);
+    assert_number(&sheet.eval("=COUPDAYSNC(A1,A2,2,0)"), 179.0);
+    assert_number(&sheet.eval("=COUPDAYS(A1,A2,2,0)"), 180.0);
+    assert_number(&sheet.eval("=COUPNUM(A1,A2,2,0)"), 1.0);
+
+    assert_number(&sheet.eval("=COUPDAYBS(A1,A2,2,1)"), 1.0);
+    assert_number(&sheet.eval("=COUPDAYSNC(A1,A2,2,1)"), 182.0);
+    assert_number(&sheet.eval("=COUPDAYS(A1,A2,2,1)"), 183.0);
+    assert_number(&sheet.eval("=COUPNUM(A1,A2,2,1)"), 1.0);
+
+    // Leap-day clamping (May 31 -> Feb 29).
+    assert_number(&sheet.eval("=COUPDAYBS(B1,B2,4,0)"), 1.0);
+    assert_number(&sheet.eval("=COUPDAYSNC(B1,B2,4,0)"), 89.0);
+    assert_number(&sheet.eval("=COUPDAYS(B1,B2,4,0)"), 90.0);
+    assert_number(&sheet.eval("=COUPNUM(B1,B2,4,0)"), 1.0);
+
+    assert_number(&sheet.eval("=COUPDAYBS(B1,B2,4,1)"), 1.0);
+    assert_number(&sheet.eval("=COUPDAYSNC(B1,B2,4,1)"), 91.0);
+    assert_number(&sheet.eval("=COUPDAYS(B1,B2,4,1)"), 92.0);
+    assert_number(&sheet.eval("=COUPNUM(B1,B2,4,1)"), 1.0);
 }
