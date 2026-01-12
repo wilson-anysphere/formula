@@ -16,7 +16,9 @@ This document is a “what’s real in the repo” reference for contributors.
   - Tauri config: `apps/desktop/src-tauri/tauri.conf.json`
   - Entry point: `apps/desktop/src-tauri/src/main.rs`
   - IPC commands: `apps/desktop/src-tauri/src/commands.rs`
+  - Custom asset protocol handler (COEP-friendly headers): `apps/desktop/src-tauri/src/asset_protocol.rs`
   - “Open file” path normalization: `apps/desktop/src-tauri/src/open_file.rs`
+  - Native menu bar: `apps/desktop/src-tauri/src/menu.rs`
   - Tray: `apps/desktop/src-tauri/src/tray.rs`
   - Tray status (icon + tooltip updates): `apps/desktop/src-tauri/src/tray_status.rs`
   - Global shortcuts: `apps/desktop/src-tauri/src/shortcuts.rs`
@@ -253,6 +255,8 @@ delete prior release assets.
   - `tauri_plugin_global_shortcut` (registers accelerators + emits app events)
   - `tauri_plugin_updater` (update checks)
   - `tauri_plugin_single_instance` (forward argv/cwd from subsequent launches into the running instance)
+  - `tauri_plugin_shell` (open external URLs in the OS browser)
+  - `tauri_plugin_notification` (native system notifications)
 - `invoke_handler(...)` mapping commands in `commands.rs`
 - window/tray event forwarding to the frontend via `app.emit(...)` / `window.emit(...)`
 
@@ -516,7 +520,7 @@ Where it’s defined:
 - `apps/desktop/src-tauri/Cargo.toml`
   - The desktop binary (`[[bin]]`) has `required-features = ["desktop"]`.
   - The `desktop` feature enables the optional deps: `tauri`, `tauri-build`, and the desktop-only Tauri plugins
-    (currently `tauri-plugin-global-shortcut`, `tauri-plugin-updater`, `tauri-plugin-single-instance`).
+    (currently `tauri-plugin-global-shortcut`, `tauri-plugin-updater`, `tauri-plugin-single-instance`, `tauri-plugin-shell`, `tauri-plugin-notification`).
 - `apps/desktop/src-tauri/tauri.conf.json`
   - `build.features: ["desktop"]` ensures `tauri dev` / `tauri build` compiles the real desktop binary with the correct feature set.
 
