@@ -153,6 +153,10 @@ FUNCTIONALITY (# of Excel buttons/features)
 | `F2` | Edit cell |
 | `Shift+F2` | Add comment (open comments panel and focus new comment input) |
 | `F4` | Toggle absolute/relative reference |
+| `Tab` | Move selection right (wrap within selection) / commit edit and move right |
+| `Shift+Tab` | Move selection left (wrap within selection) / commit edit and move left |
+| `Enter` | Move selection down (wrap within selection) / commit edit and move down |
+| `Shift+Enter` | Move selection up (wrap within selection) / commit edit and move up |
 | `Ctrl+D` | Fill down |
 | `Ctrl+;` | Insert date |
 | `Alt+=` | AutoSum |
@@ -169,6 +173,7 @@ FUNCTIONALITY (# of Excel buttons/features)
 |----------|--------|
 | `Cmd/Ctrl+Shift+P` | Open command palette |
 | `Cmd/Ctrl+Shift+M` | Toggle comments panel |
+| `F6` / `Shift+F6` | Cycle keyboard focus between ribbon, formula bar, grid, sheet tabs, and status bar |
 | `/` (in command palette) | Search shortcuts/keybindings |
 
 ### AI Shortcuts
@@ -177,7 +182,7 @@ FUNCTIONALITY (# of Excel buttons/features)
 |----------|--------|
 | `Cmd/Ctrl+K` | Inline AI edit |
 | `Cmd+I` (macOS) / `Ctrl+Shift+A` (Windows/Linux) | Toggle AI chat sidebar |
-| `Tab` | Accept AI suggestion |
+| `Tab` (in formula bar, when an AI suggestion is shown) | Accept AI suggestion |
 
 ---
 
