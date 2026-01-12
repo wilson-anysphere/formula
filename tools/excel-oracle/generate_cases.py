@@ -2074,6 +2074,97 @@ def generate_cases() -> dict[str, Any]:
         description="ODDLYIELD with ISO date text arguments (date coercion + roundtrip via ODDLPRICE)",
     )
 
+    # Boundary-date equality behavior (Excel quirks).
+    #
+    # These are intentionally simple and vary only one boundary at a time to confirm Excel's
+    # strictness/leniency for equality cases.
+    #
+    # Locked by `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`.
+    _add_case(
+        cases,
+        prefix="oddfprice_issue_eq_settlement",
+        tags=["financial", "odd_coupon", "boundary", "ODDFPRICE"],
+        formula="=ODDFPRICE(DATE(2020,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
+        description="ODDFPRICE boundary: issue == settlement",
+    )
+    _add_case(
+        cases,
+        prefix="oddfyield_issue_eq_settlement",
+        tags=["financial", "odd_coupon", "boundary", "ODDFYIELD"],
+        formula="=ODDFYIELD(DATE(2020,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,ODDFPRICE(DATE(2020,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0),100,2,0)",
+        description="ODDFYIELD boundary: issue == settlement",
+    )
+    _add_case(
+        cases,
+        prefix="oddfprice_settlement_eq_first_coupon",
+        tags=["financial", "odd_coupon", "boundary", "ODDFPRICE"],
+        formula="=ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
+        description="ODDFPRICE boundary: settlement == first_coupon",
+    )
+    _add_case(
+        cases,
+        prefix="oddfyield_settlement_eq_first_coupon",
+        tags=["financial", "odd_coupon", "boundary", "ODDFYIELD"],
+        formula="=ODDFYIELD(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0),100,2,0)",
+        description="ODDFYIELD boundary: settlement == first_coupon",
+    )
+    _add_case(
+        cases,
+        prefix="oddfprice_first_coupon_eq_maturity",
+        tags=["financial", "odd_coupon", "boundary", "ODDFPRICE"],
+        formula="=ODDFPRICE(DATE(2020,3,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
+        description="ODDFPRICE boundary: first_coupon == maturity",
+    )
+    _add_case(
+        cases,
+        prefix="oddfyield_first_coupon_eq_maturity",
+        tags=["financial", "odd_coupon", "boundary", "ODDFYIELD"],
+        formula="=ODDFYIELD(DATE(2020,3,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,ODDFPRICE(DATE(2020,3,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0),100,2,0)",
+        description="ODDFYIELD boundary: first_coupon == maturity",
+    )
+    _add_case(
+        cases,
+        prefix="oddfprice_issue_eq_first_coupon",
+        tags=["financial", "odd_coupon", "boundary", "ODDFPRICE", "error"],
+        formula="=ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,7,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
+        description="ODDFPRICE boundary: issue == first_coupon (expected #NUM!)",
+    )
+    _add_case(
+        cases,
+        prefix="oddfyield_issue_eq_first_coupon",
+        tags=["financial", "odd_coupon", "boundary", "ODDFYIELD", "error"],
+        formula="=ODDFYIELD(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,7,1),DATE(2020,7,1),0.05,99,100,2,0)",
+        description="ODDFYIELD boundary: issue == first_coupon (expected #NUM!)",
+    )
+    _add_case(
+        cases,
+        prefix="oddlprice_settlement_eq_last_interest",
+        tags=["financial", "odd_coupon", "boundary", "ODDLPRICE"],
+        formula="=ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,0.04,100,2,0)",
+        description="ODDLPRICE boundary: settlement == last_interest",
+    )
+    _add_case(
+        cases,
+        prefix="oddlyield_settlement_eq_last_interest",
+        tags=["financial", "odd_coupon", "boundary", "ODDLYIELD"],
+        formula="=ODDLYIELD(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,0.04,100,2,0),100,2,0)",
+        description="ODDLYIELD boundary: settlement == last_interest",
+    )
+    _add_case(
+        cases,
+        prefix="oddlprice_last_interest_eq_maturity",
+        tags=["financial", "odd_coupon", "boundary", "ODDLPRICE", "error"],
+        formula="=ODDLPRICE(DATE(2025,1,1),DATE(2025,1,1),DATE(2025,1,1),0.05,0.04,100,2,0)",
+        description="ODDLPRICE boundary: last_interest == maturity (expected #NUM!)",
+    )
+    _add_case(
+        cases,
+        prefix="oddlyield_last_interest_eq_maturity",
+        tags=["financial", "odd_coupon", "boundary", "ODDLYIELD", "error"],
+        formula="=ODDLYIELD(DATE(2025,1,1),DATE(2025,1,1),DATE(2025,1,1),0.05,99,100,2,0)",
+        description="ODDLYIELD boundary: last_interest == maturity (expected #NUM!)",
+    )
+
     # Range-based cashflow functions.
     cashflows = [-100.0, 30.0, 40.0, 50.0]
     cf_inputs = [CellInput(f"A{i+1}", v) for i, v in enumerate(cashflows)]
