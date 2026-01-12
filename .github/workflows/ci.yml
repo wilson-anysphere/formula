@@ -32,7 +32,15 @@ jobs:
         # NOTE: Do NOT enable the `desktop` feature here. That feature pulls in
         # the system WebView toolchain (gtk/webkit2gtk) on Linux, which is not
         # required for backend unit/integration tests.
-        run: cargo test -p desktop
+        run: |
+          # The desktop backend crate was historically named `formula-desktop-tauri`;
+          # it has since been renamed to `desktop`. Run whichever exists so CI
+          # keeps covering backend logic without requiring the WebView toolchain.
+          if cargo metadata --no-deps --format-version=1 | grep -q '"name":"formula-desktop-tauri"'; then
+            cargo test -p formula-desktop-tauri
+          else
+            cargo test -p desktop
+          fi
 
   excel-oracle-compat:
     name: Excel oracle compatibility (pinned)
