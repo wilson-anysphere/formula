@@ -45,7 +45,7 @@ async function atomicWriteJson(filePath, data) {
  * Desktop runtime shim that keeps a single `ExtensionHost` instance alive and
  * loads marketplace-installed extensions into it.
  *
- * - Extensions are installed/extracted by `apps/desktop/src/marketplace/extensionManager.js`
+ * - Extensions are installed/extracted by `apps/desktop/tools/marketplace/extensionManager.js`
  * - The installed list is stored in `ExtensionManager.statePath`
  * - This manager reads that state file at startup and calls `ExtensionHost.loadExtension(...)`
  *

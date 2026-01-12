@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 
-import { ExtensionHostManager } from "../apps/desktop/src/extensions/ExtensionHostManager.js";
+import { ExtensionHostManager } from "../apps/desktop/tools/extensions/ExtensionHostManager.js";
 
 const EXTENSION_TIMEOUT_MS = 20_000;
 
@@ -127,4 +127,3 @@ test("ExtensionHostManager serializes command execution vs sync/unload operation
 
   await assert.rejects(() => runtime.executeCommand("slow.wait", 1), /Unknown command/i);
 });
-

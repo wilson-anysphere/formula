@@ -106,8 +106,36 @@ APIs in the WebView):
 
 The repo still contains a Node-only marketplace installer/runtime used by integration tests and legacy tooling:
 
-- Installer: `apps/desktop/src/marketplace/extensionManager.js`
-- Runtime: `apps/desktop/src/extensions/ExtensionHostManager.js` (wraps the Node `ExtensionHost`)
+- Installer: `apps/desktop/tools/marketplace/extensionManager.js`
+- Runtime: `apps/desktop/tools/extensions/ExtensionHostManager.js` (wraps the Node `ExtensionHost`)
+
+This legacy path extracts extensions to disk and loads them into the Node extension host:
+
+1. **Filesystem + state** via `ExtensionManager`
+   - Packages are extracted to `extensionsDir/<publisher>.<name>/`
+   - The installed set is tracked in `ExtensionManager.statePath` (JSON)
+2. **Runtime loading** via `ExtensionHostManager`
+     - Reads `statePath` and calls `ExtensionHost.loadExtension(...)` for each installed extension
+     - Exposes `executeCommand`, `invokeCustomFunction`, and `listContributions` for the app to route UI actions
+     - Verifies extracted extension integrity using the file manifest stored in `statePath` both on startup
+       and during subsequent syncs; corrupted/tampered installs are quarantined and require reinstall
+     - Emits `onDidChangeContributions()` events after reload/unload/sync so the app can refresh command palettes,
+       menus, and panels in response to extension changes
+3. **Execution + contributions** via `ExtensionHost` (`packages/extension-host`)
+     - Spawns an isolated worker per extension
+     - Registers contributions (commands, panels, menus, keybindings, custom functions, data connectors)
+4. **Hot reload + runtime syncing**
+     - `ExtensionHostManager.syncInstalledExtensions()` reconciles the runtime with `statePath`:
+       loads new installs, reloads updated versions, and unloads removed extensions.
+     - The runtime can **bind to installer change events** (`ExtensionManager.onDidChange`) so installs outside
+       the marketplace panel still hot-reload automatically.
+    - For out-of-process changes (another process writing `statePath`), the runtime can also watch the state file
+      on disk via `ExtensionHostManager.watchStateFile()`.
+    - `ExtensionHostManager` serializes host operations so `syncInstalledExtensions()`, reload/unload, and command
+      execution do not race each other.
+     - `syncInstalledExtensions()` is serialized/coalesced so multiple rapid install/update events coalesce into a
+       single sync run.
+     - Uninstall removes contributions and terminates the worker (via `ExtensionHost.unloadExtension`).
 
 ---
 

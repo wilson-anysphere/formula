@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 
-import { ExtensionManager } from "../apps/desktop/src/marketplace/extensionManager.js";
+import { ExtensionManager } from "../apps/desktop/tools/marketplace/extensionManager.js";
 import extensionPackagePkg from "../shared/extension-package/index.js";
 
 const { createExtensionPackageV2 } = extensionPackagePkg;
@@ -88,4 +88,3 @@ test("ExtensionManager.install rejects mismatched filesSha256 and cleans up extr
   assert.equal(await pathExists(installDir), false, "installDir should be removed after failed install");
   assert.equal(await pathExists(statePath), false, "state file should not be created for failed install");
 });
-

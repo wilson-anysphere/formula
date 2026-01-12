@@ -106,8 +106,8 @@ Note: permission grants and per-extension storage are persisted separately in `l
 These Node-only modules are kept for legacy tooling + integration tests and are **not** used by the Tauri/WebView
 runtime:
 
-- `apps/desktop/src/marketplace/extensionManager.js`
-- `apps/desktop/src/extensions/ExtensionHostManager.js`
+- `apps/desktop/tools/marketplace/extensionManager.js`
+- `apps/desktop/tools/extensions/ExtensionHostManager.js`
 
 See `docs/10-extensibility.md` for the end-to-end flow.
 

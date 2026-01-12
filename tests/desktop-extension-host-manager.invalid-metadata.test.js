@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 
-import { ExtensionHostManager } from "../apps/desktop/src/extensions/ExtensionHostManager.js";
+import { ExtensionHostManager } from "../apps/desktop/tools/extensions/ExtensionHostManager.js";
 
 const EXTENSION_TIMEOUT_MS = 20_000;
 
@@ -124,4 +124,3 @@ test("ExtensionHostManager.startup quarantines invalid integrity metadata instea
   assert.equal(updated.installed[badId].corrupted, true);
   assert.match(String(updated.installed[badId].corruptedReason ?? ""), /invalid path/i);
 });
-

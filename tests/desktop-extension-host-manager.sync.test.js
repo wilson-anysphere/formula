@@ -7,7 +7,7 @@ import os from "node:os";
 
 import { fileURLToPath } from "node:url";
 
-import { ExtensionHostManager } from "../apps/desktop/src/extensions/ExtensionHostManager.js";
+import { ExtensionHostManager } from "../apps/desktop/tools/extensions/ExtensionHostManager.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

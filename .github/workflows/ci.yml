@@ -119,6 +119,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Lint (Node-free desktop renderer guard)
+        run: pnpm -w lint
+
       - name: Build web
         run: pnpm build:web
 

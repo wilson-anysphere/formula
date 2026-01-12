@@ -6,7 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 
-import { ExtensionHostManager } from "../apps/desktop/src/extensions/ExtensionHostManager.js";
+import { ExtensionHostManager } from "../apps/desktop/tools/extensions/ExtensionHostManager.js";
 
 const EXTENSION_TIMEOUT_MS = 20_000;
 
@@ -129,4 +129,3 @@ test("ExtensionHostManager.reloadExtension emits contribution changes even when 
 
   await assert.rejects(() => runtime.executeCommand("sampleHello.sumSelection"), /Unknown command/i);
 });
-

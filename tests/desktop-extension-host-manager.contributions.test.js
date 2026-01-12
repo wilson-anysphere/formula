@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 
-import { ExtensionHostManager } from "../apps/desktop/src/extensions/ExtensionHostManager.js";
+import { ExtensionHostManager } from "../apps/desktop/tools/extensions/ExtensionHostManager.js";
 
 const EXTENSION_TIMEOUT_MS = 20_000;
 
@@ -131,4 +131,3 @@ test("ExtensionHostManager emits contribution snapshots after sync load/unload",
   assert.equal(snapshots.length, 2);
   assert.ok(!snapshots[1].commands.some((cmd) => cmd.command === "good.hello"));
 });
-

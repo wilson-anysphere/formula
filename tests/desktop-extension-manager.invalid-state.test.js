@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 
-import { ExtensionManager } from "../apps/desktop/src/marketplace/extensionManager.js";
+import { ExtensionManager } from "../apps/desktop/tools/marketplace/extensionManager.js";
 import extensionPackagePkg from "../shared/extension-package/index.js";
 
 const { createExtensionPackageV2 } = extensionPackagePkg;
@@ -101,4 +101,3 @@ test("ExtensionManager.install tolerates invalid JSON state file", async (t) => 
   const state = JSON.parse(await fs.readFile(statePath, "utf8"));
   assert.ok(state.installed?.[extensionId]);
 });
-
