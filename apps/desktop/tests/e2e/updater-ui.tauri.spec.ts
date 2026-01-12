@@ -147,17 +147,17 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     await waitForTauriListeners(page, "update-check-started");
     await dispatchTauriEvent(page, "update-check-started", { source: "manual" });
 
-    await expect(page.locator("#toast-root")).toContainText("Checking for updates…");
+    await expect(lastToast(page)).toHaveText("Checking for updates…");
     await page.waitForFunction(() => (window as any).__tauriShowCalls >= 1);
     await page.waitForFunction(() => (window as any).__tauriFocusCalls >= 1);
 
     await waitForTauriListeners(page, "update-check-error");
     await dispatchTauriEvent(page, "update-check-error", { source: "manual", error: "network down" });
-    await expect(page.locator("#toast-root")).toContainText("Error: network down");
+    await expect(lastToast(page)).toHaveText("Error: network down");
 
     await waitForTauriListeners(page, "update-check-already-running");
     await dispatchTauriEvent(page, "update-check-already-running", { source: "manual" });
-    await expect(page.locator("#toast-root")).toContainText("Already checking for updates…");
+    await expect(lastToast(page)).toHaveText("Already checking for updates…");
 
     await waitForTauriListeners(page, "update-available");
     await dispatchTauriEvent(page, "update-available", {
@@ -201,7 +201,7 @@ test.describe("desktop updater UI wiring (tauri)", () => {
 
     await waitForTauriListeners(page, "update-not-available");
     await dispatchTauriEvent(page, "update-not-available", { source: "manual" });
-    await expect(page.locator("#toast-root")).toContainText("You're up to date.");
+    await expect(lastToast(page)).toHaveText("You're up to date.");
   });
 
   test("can download an update and trigger restart from the updater dialog", async ({ page }) => {
@@ -393,7 +393,7 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     // User clicks "Check for Updates" while a startup check is already in flight.
     await waitForTauriListeners(page, "update-check-already-running");
     await dispatchTauriEvent(page, "update-check-already-running", { source: "manual" });
-    await expect(page.locator("#toast-root")).toContainText("Already checking for updates…");
+    await expect(lastToast(page)).toHaveText("Already checking for updates…");
     await page.waitForFunction(() => (window as any).__tauriShowCalls >= 1);
     await page.waitForFunction(() => (window as any).__tauriFocusCalls >= 1);
 
