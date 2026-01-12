@@ -270,3 +270,82 @@ fn sheet_metadata_edits_preserve_unknown_origin_parts_on_patch_save() {
         Some("FFFF0000")
     );
 }
+
+#[test]
+fn sheet_metadata_restores_from_on_disk_autosave_db() {
+    let dir = tempdir().expect("tempdir");
+    let db_path = dir.path().join("autosave.sqlite");
+    let location = WorkbookPersistenceLocation::OnDisk(db_path.clone());
+
+    // First session: load a workbook into on-disk persistence and mutate sheet metadata.
+    {
+        let mut state = AppState::new();
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        workbook.add_sheet("Sheet3".to_string());
+
+        state
+            .load_workbook_persistent(workbook, location.clone())
+            .expect("load workbook");
+
+        state
+            .set_sheet_visibility("Sheet2", SheetVisibility::Hidden)
+            .expect("set sheet2 hidden");
+        state
+            .set_sheet_tab_color("Sheet2", Some(TabColor::rgb("FF00FF00")))
+            .expect("set sheet2 tab color");
+
+        // `veryHidden` is not settable via the desktop UI, but the backend should be able to
+        // persist + restore it for crash recovery / round-tripping.
+        state
+            .set_sheet_visibility("Sheet3", SheetVisibility::VeryHidden)
+            .expect("set sheet3 veryHidden");
+        state
+            .set_sheet_tab_color(
+                "Sheet3",
+                Some(TabColor {
+                    theme: Some(1),
+                    tint: Some(0.5),
+                    ..Default::default()
+                }),
+            )
+            .expect("set sheet3 theme tab color");
+    }
+
+    // Second session: load the same workbook against the existing autosave DB and verify the
+    // metadata is restored from SQLite (not from the newly provided workbook template).
+    let mut state = AppState::new();
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("Sheet1".to_string());
+    workbook.add_sheet("Sheet2".to_string());
+    workbook.add_sheet("Sheet3".to_string());
+
+    state
+        .load_workbook_persistent(workbook, location)
+        .expect("load workbook (restore)");
+
+    let info = state.workbook_info().expect("workbook_info");
+    let sheet2 = info
+        .sheets
+        .iter()
+        .find(|s| s.id == "Sheet2")
+        .expect("sheet2 in workbook_info");
+    assert_eq!(sheet2.visibility, SheetVisibility::Hidden);
+    assert_eq!(sheet2.tab_color, Some(TabColor::rgb("FF00FF00")));
+
+    let sheet3 = info
+        .sheets
+        .iter()
+        .find(|s| s.id == "Sheet3")
+        .expect("sheet3 in workbook_info");
+    assert_eq!(sheet3.visibility, SheetVisibility::VeryHidden);
+    assert_eq!(
+        sheet3.tab_color,
+        Some(TabColor {
+            theme: Some(1),
+            tint: Some(0.5),
+            ..Default::default()
+        })
+    );
+}
