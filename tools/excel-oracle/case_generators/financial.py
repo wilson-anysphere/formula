@@ -511,6 +511,30 @@ def generate(
             CellInput("A3", excel_serial_1900(2020, 8, 15)),
         ],
     )
+    add_case(
+        cases,
+        prefix="accrint_stub_default",
+        tags=["financial", "ACCRINT"],
+        formula="=ACCRINT(A1,A2,A3,0.1,1000,2,0)",
+        inputs=[
+            CellInput("A1", excel_serial_1900(2020, 2, 15)),
+            CellInput("A2", excel_serial_1900(2020, 5, 15)),
+            CellInput("A3", excel_serial_1900(2020, 4, 15)),
+        ],
+        description="Settlement before first_interest; exercises default calc_method behavior.",
+    )
+    add_case(
+        cases,
+        prefix="accrint_stub_true",
+        tags=["financial", "ACCRINT"],
+        formula="=ACCRINT(A1,A2,A3,0.1,1000,2,0,TRUE)",
+        inputs=[
+            CellInput("A1", excel_serial_1900(2020, 2, 15)),
+            CellInput("A2", excel_serial_1900(2020, 5, 15)),
+            CellInput("A3", excel_serial_1900(2020, 4, 15)),
+        ],
+        description="Settlement before first_interest; calc_method TRUE accrues from the start of the regular coupon period.",
+    )
 
     # Odd-coupon bond functions (ODDF*/ODDL*)
     #

@@ -32226,6 +32226,54 @@
       "id": "accrint_07705eb064f2"
     },
     {
+      "formula": "=ACCRINT(A1,A2,A3,0.1,1000,2,0)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 43876
+        },
+        {
+          "cell": "A2",
+          "value": 43966
+        },
+        {
+          "cell": "A3",
+          "value": 43936
+        }
+      ],
+      "tags": [
+        "financial",
+        "ACCRINT"
+      ],
+      "description": "Settlement before first_interest; exercises default calc_method behavior.",
+      "id": "accrint_stub_default_b05115a0a863"
+    },
+    {
+      "formula": "=ACCRINT(A1,A2,A3,0.1,1000,2,0,TRUE)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 43876
+        },
+        {
+          "cell": "A2",
+          "value": 43966
+        },
+        {
+          "cell": "A3",
+          "value": 43936
+        }
+      ],
+      "tags": [
+        "financial",
+        "ACCRINT"
+      ],
+      "description": "Settlement before first_interest; calc_method TRUE accrues from the start of the regular coupon period.",
+      "id": "accrint_stub_true_cf10adfda266"
+    },
+    {
       "formula": "=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,29),0.08,0.075,100,2,0)",
       "outputCell": "C1",
       "inputs": [],
