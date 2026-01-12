@@ -4,7 +4,6 @@ use crate::{
     authenticode::extract_vba_signature_signed_digest,
     compute_vba_project_digest,
     contents_hash::content_normalized_data,
-    compute_vba_project_digest,
     compute_vba_project_digest_v3,
     DigestAlg,
     normalized_data::forms_normalized_data,
@@ -12,9 +11,6 @@ use crate::{
     OleFile,
 };
 use md5::{Digest as _, Md5};
-
-#[cfg(not(target_arch = "wasm32"))]
-use crate::project_digest::compute_vba_project_digest;
 
 /// Identifies which `\x05DigitalSignature*` stream/storage variant a signature was loaded from.
 ///
