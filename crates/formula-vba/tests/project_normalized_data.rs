@@ -341,6 +341,67 @@ fn project_normalized_data_v3_minimal_project_concatenates_selected_records() {
 }
 
 #[test]
+fn project_normalized_data_v3_dir_records_skips_projectcompatversion_record() {
+    // `project_normalized_data_v3_dir_records` is used as a v3 building block and should be robust
+    // to PROJECTCOMPATVERSION (0x004A) appearing in the project information record list.
+    //
+    // Note: 0x004A is also used for a *module-level* Unicode string record ID
+    // (MODULEHELPFILEPATHUNICODE), so this test ensures we don't misinterpret the project-level
+    // record as a Unicode string.
+    let compat_version = 0xDEADBEEFu32.to_le_bytes();
+
+    fn build_dir(include_compat: bool, compat_version: &[u8; 4]) -> Vec<u8> {
+        let mut out = Vec::new();
+
+        push_record(&mut out, 0x0001, &1u32.to_le_bytes()); // PROJECTSYSKIND
+        if include_compat {
+            push_record(&mut out, 0x004A, compat_version); // PROJECTCOMPATVERSION
+        }
+        push_record(&mut out, 0x0002, &0x0409u32.to_le_bytes()); // PROJECTLCID
+        push_record(&mut out, 0x0003, &1252u16.to_le_bytes()); // PROJECTCODEPAGE
+
+        push_record(&mut out, 0x0004, b"VBAProject"); // PROJECTNAME
+        push_record(&mut out, 0x000C, b"Constants"); // PROJECTCONSTANTS
+
+        // Minimal module group.
+        push_record(&mut out, 0x0019, b"Module1"); // MODULENAME
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name); // MODULESTREAMNAME (+ reserved u16)
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE
+
+        out
+    }
+
+    let dir_without = build_dir(false, &compat_version);
+    let dir_with = build_dir(true, &compat_version);
+
+    let vba_without = build_vba_bin_with_dir_decompressed(&dir_without);
+    let vba_with = build_vba_bin_with_dir_decompressed(&dir_with);
+
+    let normalized_without = project_normalized_data_v3_dir_records(&vba_without)
+        .expect("ProjectNormalizedDataV3 dir-records without compat");
+    let normalized_with = project_normalized_data_v3_dir_records(&vba_with)
+        .expect("ProjectNormalizedDataV3 dir-records with compat");
+
+    assert_eq!(
+        normalized_without, normalized_with,
+        "PROJECTCOMPATVERSION (0x004A) must not affect ProjectNormalizedDataV3 dir-record transcript"
+    );
+    assert!(
+        find_subslice(&normalized_without, b"VBAProject").is_some(),
+        "expected ProjectNormalizedDataV3 to include PROJECTNAME bytes"
+    );
+    assert!(
+        !normalized_without
+            .windows(compat_version.len())
+            .any(|w| w == compat_version),
+        "ProjectNormalizedDataV3 must skip PROJECTCOMPATVERSION payload bytes"
+    );
+}
+
+#[test]
 fn project_normalized_data_v3_prefers_unicode_over_ansi_for_strings() {
     let dir_decompressed = {
         let mut out = Vec::new();

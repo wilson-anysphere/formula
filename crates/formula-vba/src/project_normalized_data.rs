@@ -123,8 +123,22 @@ pub fn project_normalized_data_v3_dir_records(vba_project_bin: &[u8]) -> Result<
             }
 
             // Unicode module string record variants.
-            0x0047 | 0x0048 | 0x0049 | 0x004A => {
+            0x0047 | 0x0048 | 0x0049 => {
                 out.extend_from_slice(unicode_record_payload(data)?);
+            }
+
+            // 0x004A is an unfortunate ID collision between:
+            // - PROJECTCOMPATVERSION (project-level, optional), and
+            // - MODULEHELPFILEPATHUNICODE (module-level Unicode string variant).
+            //
+            // For our TLV-style dir-record fixtures, PROJECTCOMPATVERSION appears in the project
+            // information section before any module record groups; it MUST be ignored for hashing.
+            //
+            // If we've already encountered a module group, treat it as the module Unicode variant.
+            0x004A => {
+                if module_idx != 0 {
+                    out.extend_from_slice(unicode_record_payload(data)?);
+                }
             }
 
             // All other records (references, module offsets, etc.) are excluded from V3
