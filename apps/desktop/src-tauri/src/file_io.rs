@@ -367,7 +367,10 @@ impl Workbook {
         let idx = self
             .sheets
             .iter()
-            .position(|s| s.id.eq_ignore_ascii_case(sheet_id) || s.name.eq_ignore_ascii_case(sheet_id))?;
+            .position(|s| {
+                s.id.eq_ignore_ascii_case(sheet_id)
+                    || crate::sheet_name::sheet_name_eq_case_insensitive(&s.name, sheet_id)
+            })?;
         let removed = self.sheets.remove(idx);
         self.cell_input_baseline
             .retain(|(id, _, _), _| id != &removed.id);
