@@ -15,7 +15,7 @@ devtools:
   contributed commands, and contributed panels. (Opening the panel triggers the lazy extension host boot.)
 - **Marketplace panel**: installs and updates marketplace extensions via `WebExtensionManager` (IndexedDB-backed).
   - Panel id: `"marketplace"` (`PanelIds.MARKETPLACE`)
-  - In dev builds you can open it via the ribbon (**View → Panels → Marketplace**) or via DevTools:
+  - Open via the ribbon (**View → Panels → Marketplace**) or via DevTools:
     ```js
     window.dispatchEvent(new CustomEvent("formula:open-panel", { detail: { panelId: "marketplace" } }));
     ```
