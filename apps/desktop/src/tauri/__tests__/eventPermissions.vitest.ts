@@ -266,7 +266,11 @@ describe("tauri capability event permissions", () => {
     const runtimeText = runtimeFiles.map((p) => readFileSync(p, "utf8")).join("\n");
 
     for (const event of allowlistedEvents) {
-      expect(runtimeText.includes(String(event))).toBe(true);
+      // Only treat an allowlisted event as "used" if it appears as a string literal in runtime
+      // source. This intentionally avoids counting documentation comments as usage (see the
+      // canonical event lists near the desktop event wiring).
+      const quoted = [`"${String(event)}"`, `'${String(event)}'`];
+      expect(quoted.some((q) => runtimeText.includes(q))).toBe(true);
     }
   });
 });
