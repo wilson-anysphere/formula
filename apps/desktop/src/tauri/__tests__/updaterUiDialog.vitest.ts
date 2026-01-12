@@ -4,6 +4,26 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+function createInMemoryLocalStorage(): Storage {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+    setItem: (key: string, value: string) => {
+      store.set(String(key), String(value));
+    },
+    removeItem: (key: string) => {
+      store.delete(String(key));
+    },
+    clear: () => {
+      store.clear();
+    },
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+    get length() {
+      return store.size;
+    },
+  } as Storage;
+}
+
 async function flushMicrotasks(times = 6): Promise<void> {
   for (let i = 0; i < times; i++) {
     await new Promise<void>((resolve) => queueMicrotask(resolve));
@@ -11,14 +31,18 @@ async function flushMicrotasks(times = 6): Promise<void> {
 }
 
 describe("updaterUi (dialog + download)", () => {
+  const originalGlobalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const originalWindowLocalStorage = Object.getOwnPropertyDescriptor(window, "localStorage");
+
   beforeEach(() => {
     document.body.innerHTML = '<div id="toast-root"></div>';
-    try {
-      window.localStorage.removeItem("formula.updater.dismissedVersion");
-      window.localStorage.removeItem("formula.updater.dismissedAt");
-    } catch {
-      // ignore
-    }
+
+    // Node 25 ships an experimental `globalThis.localStorage` accessor that throws unless
+    // started with `--localstorage-file`. Provide a stable in-memory implementation for tests.
+    const storage = createInMemoryLocalStorage();
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
+
     vi.resetModules();
   });
 
@@ -26,6 +50,20 @@ describe("updaterUi (dialog + download)", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     document.body.replaceChildren();
+
+    if (originalGlobalLocalStorage) {
+      Object.defineProperty(globalThis, "localStorage", originalGlobalLocalStorage);
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (globalThis as any).localStorage;
+    }
+
+    if (originalWindowLocalStorage) {
+      Object.defineProperty(window, "localStorage", originalWindowLocalStorage);
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (window as any).localStorage;
+    }
   });
 
   it("does not open a dialog when update-available is received during startup checks", async () => {
