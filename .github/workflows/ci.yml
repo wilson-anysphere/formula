@@ -145,6 +145,9 @@ jobs:
       - name: Check formula-engine builds for wasm32 (no default features)
         run: cargo check -p formula-engine --target wasm32-unknown-unknown --no-default-features --all-targets
 
+      - name: Check formula-wasm builds for wasm32
+        run: cargo check -p formula-wasm --target wasm32-unknown-unknown --all-targets
+
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
 
