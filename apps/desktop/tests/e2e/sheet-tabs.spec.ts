@@ -75,6 +75,28 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("active-value")).toHaveText(`Hello from ${nextSheetId}`);
   });
 
+  test("sheet overflow menu activates the selected sheet", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Create Sheet2..Sheet5 via the UI.
+    for (const sheetId of ["Sheet2", "Sheet3", "Sheet4", "Sheet5"]) {
+      await page.getByTestId("sheet-add").click();
+      await expect(page.getByTestId(`sheet-tab-${sheetId}`)).toBeVisible();
+    }
+
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 5 of 5");
+
+    await page.getByTestId("sheet-overflow").click();
+
+    const quickPick = page.getByTestId("quick-pick");
+    await expect(quickPick).toBeVisible();
+    await quickPick.getByRole("button", { name: "Sheet4" }).click();
+
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet4");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 4 of 5");
+    await expect(page.getByTestId("sheet-tab-Sheet4")).toHaveAttribute("data-active", "true");
+  });
+
   test("keyboard navigation activates the focused sheet tab", async ({ page }) => {
     await gotoDesktop(page);
 

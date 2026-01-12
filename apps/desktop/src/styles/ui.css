@@ -683,7 +683,8 @@
 }
 
 #sheet-tabs.sheet-bar .sheet-nav-btn,
-#sheet-tabs.sheet-bar .sheet-add {
+#sheet-tabs.sheet-bar .sheet-add,
+#sheet-tabs.sheet-bar .sheet-overflow {
   width: 22px;
   height: 22px;
   padding: 0;
@@ -699,7 +700,8 @@
 }
 
 #sheet-tabs.sheet-bar .sheet-nav-btn:hover,
-#sheet-tabs.sheet-bar .sheet-add:hover {
+#sheet-tabs.sheet-bar .sheet-add:hover,
+#sheet-tabs.sheet-bar .sheet-overflow:hover {
   background: var(--bg-tertiary);
   color: var(--text-primary);
 }

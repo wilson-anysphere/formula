@@ -6,6 +6,7 @@ import { resolveCssVar } from "../theme/cssVars.js";
 import * as nativeDialogs from "../tauri/nativeDialogs";
 import { validateSheetName, type SheetMeta, type TabColor, type WorkbookSheetStore } from "./workbookSheetStore";
 import { computeWorkbookSheetMoveIndex } from "./sheetReorder";
+import { showQuickPick } from "../extensions/ui.js";
 
 const SHEET_TAB_COLOR_PALETTE: Array<{ label: string; token: string; fallbackCss: string }> = [
   { label: "Red", token: "--sheet-tab-red", fallbackCss: "red" },
@@ -264,6 +265,26 @@ export function SheetTabStrip({
     setDraftName(sheet.name);
     setRenameError(null);
   };
+
+  const openSheetPicker = useCallback(async () => {
+    // Match the "Add sheet" behavior: if the user is mid-rename and the rename is invalid,
+    // keep them in the rename flow instead of navigating away.
+    if (editingSheetId) {
+      const ok = commitRename(editingSheetId);
+      if (!ok) return;
+    }
+
+    const selected = await showQuickPick(
+      visibleSheets.map((sheet) => ({
+        label: sheet.name,
+        value: sheet.id,
+      })),
+      { placeHolder: "Sheets" },
+    );
+
+    if (!selected) return;
+    activateSheetWithRenameGuard(selected);
+  }, [activateSheetWithRenameGuard, commitRename, editingSheetId, visibleSheets]);
 
   const openSheetTabContextMenu = (sheetId: string, anchor: { x: number; y: number }) => {
     const sheet = store.getById(sheetId);
@@ -681,6 +702,16 @@ export function SheetTabStrip({
         aria-label="Add sheet"
       >
         +
+      </button>
+
+      <button
+        type="button"
+        className="sheet-overflow"
+        data-testid="sheet-overflow"
+        aria-label="Show sheet list"
+        onClick={() => void openSheetPicker()}
+      >
+        ⋯
       </button>
     </>
   );
