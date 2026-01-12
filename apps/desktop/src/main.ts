@@ -1795,6 +1795,9 @@ if (
       if (!sheetName) {
         throw new Error("Sheet name must be a non-empty string");
       }
+      if (workbookSheetStore.resolveIdByName(sheetName)) {
+        throw new Error(`Sheet already exists: ${sheetName}`);
+      }
 
       const activeId = app.getCurrentSheetId();
       const doc = app.getDocument();
