@@ -8133,13 +8133,18 @@ export class SpreadsheetApp {
       return true;
     }
 
-    // When the UI selection is a full row/column/sheet *within the current grid limits*,
-    // expand it to the canonical Excel bounds so DocumentController can use fast layered
-    // formatting paths (sheet/row/col style ids) without enumerating every cell.
+    // When the UI selection is a full row/column/sheet *within the current grid limits* (or
+    // within the legacy 10k×200 bounds used by the old renderer), expand it to the canonical
+    // Excel bounds so DocumentController can use fast layered formatting paths (sheet/row/col
+    // style ids) without enumerating every cell.
     const ranges = selectionRanges.map((range) => {
       const r = normalizeSelectionRange(range);
-      const isFullColBand = r.startRow === 0 && r.endRow === this.limits.maxRows - 1;
-      const isFullRowBand = r.startCol === 0 && r.endCol === this.limits.maxCols - 1;
+      const LEGACY_MAX_ROWS = 10_000;
+      const LEGACY_MAX_COLS = 200;
+      const isFullColBand =
+        r.startRow === 0 && (r.endRow === this.limits.maxRows - 1 || r.endRow === LEGACY_MAX_ROWS - 1);
+      const isFullRowBand =
+        r.startCol === 0 && (r.endCol === this.limits.maxCols - 1 || r.endCol === LEGACY_MAX_COLS - 1);
       return {
         startRow: r.startRow,
         startCol: r.startCol,

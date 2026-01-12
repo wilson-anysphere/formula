@@ -1,6 +1,6 @@
 import type { CellCoord } from "../selection/types";
 import type { Rect } from "../selection/renderer";
-import { toggleA1AbsoluteAtCursor } from "@formula/spreadsheet-frontend";
+import { extractFormulaReferences, toggleA1AbsoluteAtCursor } from "@formula/spreadsheet-frontend";
 
 export type EditorCommitReason = "enter" | "tab" | "command";
 
@@ -134,11 +134,27 @@ export class CellEditorOverlay {
       const cursorStart = this.element.selectionStart ?? prevText.length;
       const cursorEnd = this.element.selectionEnd ?? prevText.length;
 
+      const { references, activeIndex } = extractFormulaReferences(prevText, cursorStart, cursorEnd);
+      const active = activeIndex == null ? null : references.find((ref) => ref.index === activeIndex) ?? null;
+      if (!active) return;
+
       const toggled = toggleA1AbsoluteAtCursor(prevText, cursorStart, cursorEnd);
       if (!toggled) return;
 
       this.element.value = toggled.text;
-      this.element.setSelectionRange(toggled.cursorStart, toggled.cursorEnd);
+      const selectionIsCaret = cursorStart === cursorEnd;
+      const caretAtTokenEnd = selectionIsCaret && cursorStart === active.end;
+
+      if (selectionIsCaret && !caretAtTokenEnd) {
+        // Excel UX: keep the toggled token selected so repeated F4 presses keep cycling it.
+        const delta = toggled.text.length - prevText.length;
+        const tokenStart = active.start;
+        const tokenEnd = Math.max(tokenStart, Math.min(active.end + delta, toggled.text.length));
+        this.element.setSelectionRange(tokenStart, tokenEnd);
+      } else {
+        // Preserve the caret/selection mapping (including end-of-token caret behavior).
+        this.element.setSelectionRange(toggled.cursorStart, toggled.cursorEnd);
+      }
       this.adjustSize();
       return;
     }
