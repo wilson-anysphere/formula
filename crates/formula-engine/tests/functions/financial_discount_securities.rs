@@ -26,9 +26,16 @@ fn pricemat_matches_excel_example() {
     let yld = 0.061;
     let basis = 0;
 
-    let price =
-        pricemat(settlement, maturity, issue, rate, yld, basis, ExcelDateSystem::EXCEL_1900)
-            .unwrap();
+    let price = pricemat(
+        settlement,
+        maturity,
+        issue,
+        rate,
+        yld,
+        basis,
+        ExcelDateSystem::EXCEL_1900,
+    )
+    .unwrap();
     assert_close(price, 99.98, 0.02);
 }
 
@@ -42,9 +49,16 @@ fn yieldmat_matches_excel_example() {
     let pr = 100.0123;
     let basis = 0;
 
-    let yld =
-        yieldmat(settlement, maturity, issue, rate, pr, basis, ExcelDateSystem::EXCEL_1900)
-            .unwrap();
+    let yld = yieldmat(
+        settlement,
+        maturity,
+        issue,
+        rate,
+        pr,
+        basis,
+        ExcelDateSystem::EXCEL_1900,
+    )
+    .unwrap();
     assert_close(yld, 0.061, 1e-4);
 }
 
@@ -274,6 +288,41 @@ fn tbillyield_tbillprice_roundtrip_via_discount_conversion() {
 }
 
 #[test]
+fn pricemat_yieldmat_roundtrip() {
+    // Pick dates where YEARFRAC(.,.,0) yields integer values so the two functions
+    // should be consistent up to floating-point roundoff.
+    let settlement = serial_1900(2020, 1, 1);
+    let maturity = serial_1900(2021, 1, 1);
+    let issue = serial_1900(2019, 1, 1);
+    let rate = 0.05;
+    let yld = 0.04;
+    let basis = 0;
+
+    let price = pricemat(
+        settlement,
+        maturity,
+        issue,
+        rate,
+        yld,
+        basis,
+        ExcelDateSystem::EXCEL_1900,
+    )
+    .unwrap();
+    let yld_back = yieldmat(
+        settlement,
+        maturity,
+        issue,
+        rate,
+        price,
+        basis,
+        ExcelDateSystem::EXCEL_1900,
+    )
+    .unwrap();
+
+    assert_close(yld_back, yld, 1e-12);
+}
+
+#[test]
 fn error_cases() {
     let system = ExcelDateSystem::EXCEL_1900;
     let settlement = serial_1900(2024, 1, 1);
@@ -293,7 +342,14 @@ fn error_cases() {
     );
 
     assert_eq!(
-        intrate(settlement, serial_1900(2024, 2, 1), 100.0, 101.0, 99, system),
+        intrate(
+            settlement,
+            serial_1900(2024, 2, 1),
+            100.0,
+            101.0,
+            99,
+            system
+        ),
         Err(ExcelError::Num)
     );
 
