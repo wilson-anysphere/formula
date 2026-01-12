@@ -264,8 +264,6 @@ fn t_value(v: &Value) -> Value {
         Value::Number(_)
         | Value::Bool(_)
         | Value::Blank
-        | Value::Record(_)
-        | Value::Entity(_)
         | Value::Reference(_)
         | Value::ReferenceUnion(_)
         | Value::Array(_)

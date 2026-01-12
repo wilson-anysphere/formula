@@ -369,9 +369,7 @@ impl Value {
             Value::Text(s) => coerce_text_to_number(s, ctx.value_locale(), ctx.now_utc(), ctx.date_system()),
             Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
-            Value::Record(_)
-            | Value::Entity(_)
-            | Value::Reference(_)
+            Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
             | Value::Lambda(_)
@@ -392,9 +390,7 @@ impl Value {
             ),
             Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
-            Value::Record(_)
-            | Value::Entity(_)
-            | Value::Reference(_)
+            Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
             | Value::Lambda(_)
@@ -410,9 +406,7 @@ impl Value {
             Value::Text(s) => parse_number(s, locale).map_err(map_excel_error),
             Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
-            Value::Record(_)
-            | Value::Entity(_)
-            | Value::Reference(_)
+            Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
             | Value::Lambda(_)
@@ -450,9 +444,7 @@ impl Value {
             }
             Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
-            Value::Record(_)
-            | Value::Entity(_)
-            | Value::Reference(_)
+            Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
             | Value::Lambda(_)
@@ -485,9 +477,7 @@ impl Value {
             }
             Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
-            Value::Record(_)
-            | Value::Entity(_)
-            | Value::Reference(_)
+            Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
             | Value::Lambda(_)
@@ -516,9 +506,7 @@ impl Value {
             }
             Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
-            Value::Record(_)
-            | Value::Entity(_)
-            | Value::Reference(_)
+            Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
             | Value::Lambda(_)
@@ -720,10 +708,7 @@ impl fmt::Display for Value {
             Value::Bool(b) => write!(f, "{b}"),
             Value::Blank => f.write_str(""),
             Value::Error(e) => write!(f, "{e}"),
-            Value::Record(_)
-            | Value::Entity(_)
-            | Value::Reference(_)
-            | Value::ReferenceUnion(_) => {
+            Value::Reference(_) | Value::ReferenceUnion(_) => {
                 f.write_str(ErrorKind::Value.as_code())
             }
             Value::Array(arr) => write!(f, "{}", arr.top_left()),

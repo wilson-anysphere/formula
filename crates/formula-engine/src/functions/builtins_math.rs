@@ -170,8 +170,6 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Entity(_)
                             | Value::Record(_)
                             | Value::Blank
-                            | Value::Record(_)
-                            | Value::Entity(_)
                             | Value::Array(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
@@ -223,8 +221,6 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Entity(_)
                         | Value::Record(_)
                         | Value::Blank
-                        | Value::Record(_)
-                        | Value::Entity(_)
                         | Value::Array(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
@@ -274,8 +270,6 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Entity(_)
                             | Value::Record(_)
                             | Value::Blank
-                            | Value::Record(_)
-                            | Value::Entity(_)
                             | Value::Array(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
@@ -382,8 +376,6 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Entity(_)
                             | Value::Record(_)
                             | Value::Blank
-                            | Value::Record(_)
-                            | Value::Entity(_)
                             | Value::Array(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
@@ -433,8 +425,6 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Entity(_)
                         | Value::Record(_)
                         | Value::Blank
-                        | Value::Record(_)
-                        | Value::Entity(_)
                         | Value::Array(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
@@ -483,8 +473,6 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Entity(_)
                             | Value::Record(_)
                             | Value::Blank
-                            | Value::Record(_)
-                            | Value::Entity(_)
                             | Value::Array(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
@@ -563,8 +551,6 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Entity(_)
                             | Value::Record(_)
                             | Value::Blank
-                            | Value::Record(_)
-                            | Value::Entity(_)
                             | Value::Array(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
@@ -623,8 +609,6 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Entity(_)
                         | Value::Record(_)
                         | Value::Blank
-                        | Value::Record(_)
-                        | Value::Entity(_)
                         | Value::Array(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
@@ -675,8 +659,6 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Entity(_)
                             | Value::Record(_)
                             | Value::Blank
-                            | Value::Record(_)
-                            | Value::Entity(_)
                             | Value::Array(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
@@ -754,8 +736,6 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Entity(_)
                             | Value::Record(_)
                             | Value::Blank
-                            | Value::Record(_)
-                            | Value::Entity(_)
                             | Value::Array(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
@@ -814,8 +794,6 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Entity(_)
                         | Value::Record(_)
                         | Value::Blank
-                        | Value::Record(_)
-                        | Value::Entity(_)
                         | Value::Array(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
@@ -866,8 +844,6 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Entity(_)
                             | Value::Record(_)
                             | Value::Blank
-                            | Value::Record(_)
-                            | Value::Entity(_)
                             | Value::Array(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)

@@ -473,7 +473,6 @@ fn coerce_to_text(value: &Value, value_locale: ValueLocaleConfig) -> Option<Stri
             };
             Some(formula_format::format_value(FmtValue::Number(*n), None, &options).text)
         }
-        Value::Record(_) | Value::Entity(_) => None,
         Value::Error(_)
         | Value::Reference(_)
         | Value::ReferenceUnion(_)

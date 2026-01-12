@@ -656,8 +656,6 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Entity(_)
                             | Value::Record(_)
                             | Value::Blank
-                            | Value::Record(_)
-                            | Value::Entity(_)
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_)
                             | Value::Array(_)
@@ -680,8 +678,6 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Entity(_)
                         | Value::Record(_)
                         | Value::Blank
-                        | Value::Record(_)
-                        | Value::Entity(_)
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_)
                         | Value::Array(_)
@@ -705,8 +701,6 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Entity(_)
                             | Value::Record(_)
                             | Value::Blank
-                            | Value::Record(_)
-                            | Value::Entity(_)
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_)
                             | Value::Array(_)

@@ -385,7 +385,6 @@ pub(super) fn sort_key(value: &Value) -> SortKeyValue {
         Value::Bool(b) => SortKeyValue::Bool(*b),
         Value::Blank => SortKeyValue::Blank,
         Value::Error(e) => SortKeyValue::Error(*e),
-        Value::Record(_) | Value::Entity(_) => SortKeyValue::Error(ErrorKind::Value),
         Value::Reference(_)
         | Value::ReferenceUnion(_)
         | Value::Array(_)
@@ -488,7 +487,6 @@ fn unique_key_cell(value: &Value) -> UniqueKeyCell {
         Value::Record(v) if v.display.is_empty() => UniqueKeyCell::Blank,
         Value::Record(v) => UniqueKeyCell::Text(v.display.to_lowercase()),
         Value::Error(e) => UniqueKeyCell::Error(*e),
-        Value::Record(_) | Value::Entity(_) => UniqueKeyCell::Error(ErrorKind::Value),
         Value::Reference(_)
         | Value::ReferenceUnion(_)
         | Value::Array(_)

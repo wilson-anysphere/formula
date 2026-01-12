@@ -52,9 +52,7 @@ fn coerce_to_string_with_format_options(value: &Value, options: &FormatOptions) 
         Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
         Value::Blank => Ok(String::new()),
         Value::Error(e) => Err(*e),
-        Value::Record(_)
-        | Value::Entity(_)
-        | Value::Reference(_)
+        Value::Reference(_)
         | Value::ReferenceUnion(_)
         | Value::Array(_)
         | Value::Lambda(_)
@@ -261,9 +259,7 @@ fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
             Value::Bool(_) => 2,
             Value::Blank => 3,
             Value::Error(_) => 4,
-            Value::Record(_)
-            | Value::Entity(_)
-            | Value::Reference(_)
+            Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
             | Value::Lambda(_)
