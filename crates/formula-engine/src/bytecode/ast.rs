@@ -337,6 +337,20 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
+            // Postfix spill-range operator (`expr#`).
+            //
+            // Like the full engine parser, treat this as a postfix operator that binds tighter
+            // than exponentiation. The bytecode runtime expects the operand to be evaluated in a
+            // "reference context", so lower a direct cell reference to a single-cell range here.
+            if self.peek_byte() == Some(b'#') && postfix_bp >= min_bp {
+                self.pos += 1;
+                lhs = match lhs {
+                    Expr::CellRef(r) => Expr::SpillRange(Box::new(Expr::RangeRef(RangeRef::new(r, r)))),
+                    other => Expr::SpillRange(Box::new(other)),
+                };
+                continue;
+            }
+
             let op_pos = self.pos;
             let (op, l_bp, r_bp) = match self.peek_infix_op() {
                 Some(v) => v,
@@ -797,6 +811,19 @@ mod tests {
                 Expr::Binary { op: BinaryOp::Div, .. }
             ),
             "expected RHS to be lowered as division by 100"
+        );
+    }
+
+    #[test]
+    fn parses_spill_range_operator_on_cell_ref_as_reference_context_range() {
+        let origin = CellCoord::new(0, 0);
+        let expr = parse_formula("=A1#", origin).expect("parse");
+        assert_eq!(
+            expr,
+            Expr::SpillRange(Box::new(Expr::RangeRef(RangeRef::new(
+                Ref::new(0, 0, false, false),
+                Ref::new(0, 0, false, false),
+            ))))
         );
     }
 
