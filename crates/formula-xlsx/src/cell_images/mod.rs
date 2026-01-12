@@ -99,7 +99,6 @@ impl CellImages {
         })
     }
 }
-
 impl CellImagesPart {
     /// Parse the canonical workbook-level `xl/cellImages.xml` part (if present).
     ///
