@@ -257,6 +257,7 @@ These pieces are connected via OPC relationships:
 - Preserve `vm` / `cm` attributes on `<c>` elements when editing cell values.
 - Preserve `xl/metadata.xml`, `xl/richData/**`, and their relationship parts byte-for-byte whenever possible.
 - Treat linked-data-type metadata as **opaque** until the calculation engine and data model grow first-class rich/linked value support.
+- (Implementation sanity) This preservation behavior is covered by XLSX round-trip / patch tests (e.g. `crates/formula-xlsx/tests/sheetdata_row_col_attrs.rs`).
 
 Further reading:
 - [20-images-in-cells.md](./20-images-in-cells.md) (images-in-cell are implemented using the same rich-value + metadata mechanism).
