@@ -156,6 +156,45 @@ describe("mountTitlebar", () => {
     });
   }, TEST_TIMEOUT_MS);
 
+  it("disables window controls when callbacks are not functions", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    let handle: ReturnType<typeof mountTitlebar> | null = null;
+    await act(async () => {
+      handle = mountTitlebar(container, {
+        actions: [],
+        // Simulate a runtime misuse where callbacks are non-functions (e.g. from plain JS callers).
+        // The Titlebar should treat these as unavailable and disable the controls.
+        windowControls: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onClose: true as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onMinimize: "nope" as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onToggleMaximize: 123 as any,
+        },
+      } as any);
+    });
+
+    const closeButton = container.querySelector<HTMLButtonElement>('[data-testid="titlebar-window-close"]');
+    const minimizeButton = container.querySelector<HTMLButtonElement>('[data-testid="titlebar-window-minimize"]');
+    const maximizeButton = container.querySelector<HTMLButtonElement>('[data-testid="titlebar-window-maximize"]');
+
+    expect(closeButton?.disabled).toBe(true);
+    expect(minimizeButton?.disabled).toBe(true);
+    expect(maximizeButton?.disabled).toBe(true);
+
+    // Clicking should be a no-op and must not throw.
+    closeButton?.click();
+    minimizeButton?.click();
+    maximizeButton?.click();
+
+    act(() => {
+      handle?.dispose();
+    });
+  }, TEST_TIMEOUT_MS);
+
   it("omits document name span when documentName is empty/separator-only", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
