@@ -292,7 +292,7 @@ mod tests {
             "expected inserted <pr:Relationship>, got:\n{updated_str}"
         );
         assert!(
-            !updated_str.contains("<Relationship "),
+            !updated_str.contains("<Relationship"),
             "should not introduce unprefixed <Relationship> tags in prefix-only .rels, got:\n{updated_str}"
         );
     }
@@ -318,6 +318,14 @@ mod tests {
         assert!(
             updated_str.contains("</pr:Relationships>"),
             "expected expanded end tag, got: {updated_str}"
+        );
+        assert!(
+            updated_str.contains(r#"<pr:Relationship Id="rId1""#),
+            "expected inserted <pr:Relationship>, got:\n{updated_str}"
+        );
+        assert!(
+            !updated_str.contains("<Relationship"),
+            "should not introduce unprefixed <Relationship> tags in prefix-only .rels, got:\n{updated_str}"
         );
 
         let doc = roxmltree::Document::parse(updated_str).unwrap();
