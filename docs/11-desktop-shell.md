@@ -184,6 +184,7 @@ Implementation notes:
 - `main.rs` uses a small in-memory queue (`OpenFileState`) so open-file requests received *before* the frontend installs its listeners aren’t lost.
   - Backend emits: `open-file` (payload: `string[]` paths)
   - Frontend emits: `open-file-ready` once its `listen("open-file", ...)` handler is installed, which flushes any queued paths.
+- When an open-file request is handled, `main.rs` **shows + focuses** the main window before emitting `open-file` so the request is visible to the user.
 - On macOS, `tauri::RunEvent::Opened { urls, .. }` is routed through the same pipeline so opening a document in Finder reaches the running instance.
 
 #### Tray + global shortcuts
