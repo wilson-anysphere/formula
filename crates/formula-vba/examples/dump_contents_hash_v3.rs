@@ -126,9 +126,10 @@ fn parse_args(
         }
 
         if arg_str == "--alg" {
-            // Optional value. If omitted, default to MD5 (the spec binding digest length).
+            // Optional value. If omitted, default to SHA-256 (the spec-defined v3 binding digest:
+            // `ContentsHashV3`).
             //
-            // This allows `--alg <input-path>` as shorthand for printing only the MD5 digest.
+            // This allows `--alg <input-path>` as shorthand for printing only the SHA-256 digest.
             if let Some(value) = args.peek() {
                 if let Some(parsed) = parse_alg(value) {
                     // Consume the value.
@@ -148,7 +149,7 @@ fn parse_args(
                 }
             }
 
-            alg = Some(Alg::Md5);
+            alg = Some(Alg::Sha256);
             continue;
         }
 
