@@ -152,6 +152,45 @@ test("cursor AI policy guard scans .txt files for provider strings", async () =>
   }
 });
 
+test("cursor AI policy guard scans PowerShell scripts for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-ps1-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "tools/example/run.ps1", "Write-Host OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans XML files for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-xml-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "crates/example/tests/fixtures/example.xml", "<!-- OpenAI -->\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans TSV files for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-tsv-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "crates/example/src/data.tsv", "OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("cursor AI policy guard scans lockfiles (Cargo.lock) for provider strings", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-cargo-lock-fail-"));
   try {
