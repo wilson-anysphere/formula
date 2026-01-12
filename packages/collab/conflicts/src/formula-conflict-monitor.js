@@ -337,6 +337,10 @@ export class FormulaConflictMonitor {
           const newItemOriginId = getItemOriginId(cellMap, "value");
           const itemLeftId = getItemLeftId(cellMap, "value");
           const currentFormula = (cellMap.get("formula") ?? "").toString();
+          // When the formula key changes in the same transaction, use its oldValue to
+          // reconstruct what the cell formula looked like before this remote overwrite.
+          // Otherwise, the formula key is unchanged, so the current value is also the old value.
+          const oldFormula = formulaChange ? (formulaChange.oldValue ?? "").toString() : currentFormula;
 
           this._handleValueChange({
             cellKey,
@@ -349,7 +353,8 @@ export class FormulaConflictMonitor {
             itemId,
             newItemOriginId,
             itemLeftId,
-            currentFormula
+            currentFormula,
+            oldFormula
           });
         }
       }
@@ -678,6 +683,7 @@ export class FormulaConflictMonitor {
    * @param {{ client: number, clock: number } | null} input.newItemOriginId
    * @param {{ client: number, clock: number } | null} [input.itemLeftId]
    * @param {string} [input.currentFormula]
+   * @param {string} [input.oldFormula]
    */
   _handleValueChange(input) {
     const {
@@ -691,7 +697,8 @@ export class FormulaConflictMonitor {
       itemId,
       newItemOriginId,
       itemLeftId = null,
-      currentFormula = ""
+      currentFormula = "",
+      oldFormula = ""
     } = input;
 
     const isLocal = this.localOrigins.has(origin);
@@ -799,11 +806,12 @@ export class FormulaConflictMonitor {
     const lastLocal = this._lastLocalValueEditByCellKey.get(cellKey);
     if (!lastLocal) {
       // Restart fallback: infer "this was my local value" from the previous `modifiedBy`
-      // and the overwritten value itself. We intentionally only do this when the old
-      // value is non-null; `null` is ambiguous (it could be from a formula edit or a clear).
+      // and the overwritten value itself.
       if (oldModifiedBy !== this.localUserId) return;
-      if (oldValue === null) return;
       if (action === "delete") return;
+      // If the overwritten state had a formula, this is a content conflict
+      // (formula vs value), not a value-vs-value conflict.
+      if (oldFormula.trim()) return;
 
       // Sequential overwrite (remote saw our write) - ignore.
       if (itemLeftId && idsEqual(newItemOriginId, itemLeftId)) return;

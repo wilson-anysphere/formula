@@ -598,6 +598,30 @@ test("value conflicts are still detected after restarting the monitor", () => {
   assert.equal(conflict.remoteValue, "alice");
 });
 
+test("value conflicts are still detected for cleared values after restarting the monitor", () => {
+  // Ensure deterministic tie-breaking for concurrent map-entry overwrites:
+  // higher clientID wins in Yjs.
+  const alice = createClient("alice", { clientID: 2, mode: "formula+value" });
+  const bob = createClient("bob", { clientID: 1, mode: "formula+value" });
+
+  // Establish a shared base cell map.
+  alice.monitor.setLocalValue("s:0:0", "base");
+  syncDocs(alice.doc, bob.doc);
+
+  // Offline concurrent edits: bob clears; alice writes a literal value.
+  // Alice wins, so bob should see a value conflict where the local value is null.
+  bob.monitor.setLocalValue("s:0:0", null);
+  alice.monitor.setLocalValue("s:0:0", "alice");
+
+  restartMonitor(bob, { mode: "formula+value" });
+  syncDocs(alice.doc, bob.doc);
+
+  const conflict = bob.conflicts.find((c) => c.kind === "value") ?? null;
+  assert.ok(conflict, "expected a value conflict on bob after restart");
+  assert.equal(conflict.localValue, null);
+  assert.equal(conflict.remoteValue, "alice");
+});
+
 test("legacy content conflicts are still detected after restarting the monitor", () => {
   // Ensure deterministic tie-breaking for concurrent map-entry overwrites:
   // higher clientID wins in Yjs.
