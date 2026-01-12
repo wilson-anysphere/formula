@@ -1216,6 +1216,22 @@ fn guess_image_extension(bytes: &[u8]) -> Option<&'static str> {
     if bytes.starts_with(b"II*\0") || bytes.starts_with(b"MM\0*") {
         return Some("tiff");
     }
+    // Windows Metafile (placeable WMF) signature.
+    if bytes.starts_with(b"\xD7\xCD\xC6\x9A") {
+        return Some("wmf");
+    }
+    // Enhanced Metafile: ENHMETAHEADER signature at offset 0x28 (40 bytes): 0x464D4520 (" EMF").
+    if bytes.len() >= 44 && &bytes[40..44] == b" EMF" {
+        return Some("emf");
+    }
+    // SVG (common for Office 365 / modern sources).
+    let prefix = bytes.get(..512).unwrap_or(bytes);
+    if let Ok(s) = std::str::from_utf8(prefix) {
+        let lower = s.to_ascii_lowercase();
+        if lower.contains("<svg") {
+            return Some("svg");
+        }
+    }
     None
 }
 
