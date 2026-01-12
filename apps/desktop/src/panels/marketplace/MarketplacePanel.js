@@ -78,6 +78,12 @@ function badge(text, { tone = "neutral", title = null } = {}) {
     warn: "var(--warning)",
     bad: "var(--error)",
   };
+  const borderByTone = {
+    neutral: "var(--border)",
+    good: "var(--success)",
+    warn: "var(--warning)",
+    bad: "var(--error)",
+  };
   const span = el(
     "span",
     {
@@ -90,6 +96,7 @@ function badge(text, { tone = "neutral", title = null } = {}) {
         "font-size:11px",
         "font-weight:600",
         `background:${bgByTone[tone] || bgByTone.neutral}`,
+        `border:1px solid ${borderByTone[tone] || borderByTone.neutral}`,
         `color:${fgByTone[tone] || fgByTone.neutral}`,
       ].join(";"),
       title: title || undefined,

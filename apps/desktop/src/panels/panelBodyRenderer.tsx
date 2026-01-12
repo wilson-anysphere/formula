@@ -136,7 +136,7 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
                   borderBottom: "1px solid var(--border)",
                   cursor: "pointer",
                   // Use theme tokens only (no hardcoded colors).
-                  background: selected ? "var(--bg-hover)" : "transparent",
+                  background: selected ? "var(--panel-highlight, var(--bg-hover))" : "transparent",
                 }}
                 onClick={() => setSelectedId(item.id)}
               >
