@@ -4962,7 +4962,6 @@ mountRibbon(ribbonRoot, {
         const service = powerQueryService;
         if (!service) {
           showToast("Queries service not available");
-          app.focus();
           return;
         }
 
@@ -4971,14 +4970,12 @@ mountRibbon(ribbonRoot, {
         } catch (err) {
           console.error("Power Query service failed to initialize:", err);
           showToast("Queries service not available", "error");
-          app.focus();
           return;
         }
 
         const queries = service.getQueries();
         if (!queries.length) {
           showToast("No queries to refresh");
-          app.focus();
           return;
         }
 
@@ -4988,10 +4985,11 @@ mountRibbon(ribbonRoot, {
         } catch (err) {
           console.error("Failed to refresh all queries:", err);
           showToast(`Failed to refresh queries: ${String(err)}`, "error");
-        } finally {
-          app.focus();
         }
       })();
+      // Don't wait for the refresh to complete; return focus immediately so long-running
+      // refresh jobs don't steal focus later when their promise settles.
+      app.focus();
       return;
     }
     const openRibbonPanel = (panelId: string): void => {
