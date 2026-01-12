@@ -5,7 +5,9 @@
  * set of helpers that depend on Node built-ins (e.g. `node:crypto`).
  */
 
-export * from "./index.d.ts";
+import type { CacheCryptoProvider, CacheEntry, CacheStore, CredentialStore } from "./index.js";
+
+export * from "./index.js";
 
 export class EncryptedFileSystemCacheStore implements CacheStore {
   constructor(options: any);
