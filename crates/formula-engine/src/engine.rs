@@ -7768,26 +7768,14 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() < 3 || (args.len() - 1) % 2 != 0 {
                     return false;
                 }
-                let first_range_ok = match &args[0] {
-                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) => true,
-                    bytecode::Expr::NameRef(name) => matches!(
-                        local_binding_kind(lexical_scopes, name),
-                        Some(BytecodeLocalBindingKind::Range)
-                    ),
-                    _ => false,
-                };
-                if !first_range_ok {
+                let value_range_ok =
+                    bytecode_expr_is_eligible_inner(&args[0], true, true, lexical_scopes);
+                if !value_range_ok {
                     return false;
                 }
                 for pair in args[1..].chunks_exact(2) {
-                    let range_ok = match &pair[0] {
-                        bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) => true,
-                        bytecode::Expr::NameRef(name) => matches!(
-                            local_binding_kind(lexical_scopes, name),
-                            Some(BytecodeLocalBindingKind::Range)
-                        ),
-                        _ => false,
-                    };
+                    let range_ok =
+                        bytecode_expr_is_eligible_inner(&pair[0], true, true, lexical_scopes);
                     let criteria_ok =
                         bytecode_expr_is_eligible_inner(&pair[1], false, false, lexical_scopes);
                     if !range_ok || !criteria_ok {
@@ -7822,21 +7810,7 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 2 {
                     return false;
                 }
-                let range_ok = match &args[0] {
-                    bytecode::Expr::RangeRef(_)
-                    | bytecode::Expr::MultiRangeRef(_)
-                    | bytecode::Expr::CellRef(_)
-                    | bytecode::Expr::SpillRange(_) => true,
-                    bytecode::Expr::Literal(bytecode::Value::Array(_)) => true,
-                    bytecode::Expr::NameRef(name) => matches!(
-                        local_binding_kind(lexical_scopes, name),
-                        Some(
-                            BytecodeLocalBindingKind::Range
-                                | BytecodeLocalBindingKind::ArrayLiteral
-                        )
-                    ),
-                    _ => false,
-                };
+                let range_ok = bytecode_expr_is_eligible_inner(&args[0], true, true, lexical_scopes);
                 let criteria_ok =
                     bytecode_expr_is_eligible_inner(&args[1], false, false, lexical_scopes);
 
@@ -7847,17 +7821,8 @@ fn bytecode_expr_is_eligible_inner(
                     return false;
                 }
                 for pair in args.chunks_exact(2) {
-                    let range_ok = match &pair[0] {
-                        bytecode::Expr::RangeRef(_)
-                        | bytecode::Expr::CellRef(_)
-                        | bytecode::Expr::SpillRange(_) => true,
-                        bytecode::Expr::Literal(bytecode::Value::Array(_)) => true,
-                        bytecode::Expr::NameRef(name) => matches!(
-                            local_binding_kind(lexical_scopes, name),
-                            Some(BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::ArrayLiteral)
-                        ),
-                        _ => false,
-                    };
+                    let range_ok =
+                        bytecode_expr_is_eligible_inner(&pair[0], true, true, lexical_scopes);
                     let criteria_ok =
                         bytecode_expr_is_eligible_inner(&pair[1], false, false, lexical_scopes);
                     if !range_ok || !criteria_ok {

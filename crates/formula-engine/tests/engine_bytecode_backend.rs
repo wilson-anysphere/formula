@@ -6430,6 +6430,107 @@ fn bytecode_backend_matches_ast_for_sumifs_countifs_and_averageifs() {
 }
 
 #[test]
+fn bytecode_backend_supports_array_ranges_for_ifs_family() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            r#"=SUMIFS({10,20,30,40},{"A","A","B","B"},"A",{1,2,3,4},">1")"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            r#"=AVERAGEIFS({10,20,30,40},{"A","A","B","B"},"A",{1,2,3,4},">1")"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            r#"=COUNTIFS({"A","A","B","B"},"A",{1,2,3,4},">1")"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A4",
+            r#"=MINIFS({10,20,30,40},{1,2,3,4},">2")"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A5",
+            r#"=MAXIFS({10,20,30,40},{1,2,3,4},">2")"#,
+        )
+        .unwrap();
+
+    // Array expression used as the criteria_range / criteria_range1.
+    engine.set_cell_value("Sheet1", "D1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "D2", -2.0).unwrap();
+    engine.set_cell_value("Sheet1", "D3", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "E1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "E2", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "E3", 30.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUMIFS(E1:E3,D1:D3>0,TRUE)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=AVERAGEIFS(E1:E3,D1:D3>0,TRUE)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=COUNTIFS(D1:D3>0,TRUE)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B4", "=COUNTIF(D1:D3>0,TRUE)")
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        9,
+        "expected IFS family array-range formulas to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(20.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(20.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Number(30.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A5"), Value::Number(40.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(40.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(20.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B3"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B4"), Value::Number(2.0));
+
+    for (formula, cell) in [
+        (
+            r#"=SUMIFS({10,20,30,40},{"A","A","B","B"},"A",{1,2,3,4},">1")"#,
+            "A1",
+        ),
+        (
+            r#"=AVERAGEIFS({10,20,30,40},{"A","A","B","B"},"A",{1,2,3,4},">1")"#,
+            "A2",
+        ),
+        (
+            r#"=COUNTIFS({"A","A","B","B"},"A",{1,2,3,4},">1")"#,
+            "A3",
+        ),
+        (r#"=MINIFS({10,20,30,40},{1,2,3,4},">2")"#, "A4"),
+        (r#"=MAXIFS({10,20,30,40},{1,2,3,4},">2")"#, "A5"),
+        ("=SUMIFS(E1:E3,D1:D3>0,TRUE)", "B1"),
+        ("=AVERAGEIFS(E1:E3,D1:D3>0,TRUE)", "B2"),
+        ("=COUNTIFS(D1:D3>0,TRUE)", "B3"),
+        ("=COUNTIF(D1:D3>0,TRUE)", "B4"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_averageif_minifs_and_maxifs() {
     let mut engine = Engine::new();
 

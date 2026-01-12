@@ -5197,6 +5197,17 @@ fn fn_sumifs(
         return Value::Error(ErrorKind::Value);
     }
 
+    // Generic path: support array arguments and mixed array/range cases (matching the AST
+    // evaluator's Range2D semantics). Preserve the existing optimized implementation as a fast
+    // path for range-only inputs.
+    if !matches!(args[0], Value::Range(_))
+        || args[1..]
+            .chunks_exact(2)
+            .any(|pair| !matches!(pair[0], Value::Range(_)))
+    {
+        return sumifs_with_array_ranges(args, grid, base, locale);
+    }
+
     let sum_range_ref = match &args[0] {
         Value::Range(r) => *r,
         _ => return Value::Error(ErrorKind::Value),
@@ -5408,6 +5419,73 @@ fn fn_sumifs(
                 row: sum_range.row_start + row_off,
                 col: sum_range.col_start + col_off,
             }) {
+                Value::Number(v) => sum += v,
+                Value::Error(e) => return Value::Error(e),
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
+                | Value::Empty
+                | Value::Missing
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
+            }
+        }
+    }
+
+    Value::Number(sum)
+}
+
+fn sumifs_with_array_ranges(
+    args: &[Value],
+    grid: &dyn Grid,
+    base: CellCoord,
+    locale: &crate::LocaleConfig,
+) -> Value {
+    let sum_range = match range2d_from_value(&args[0], grid, base) {
+        Ok(r) => r,
+        Err(e) => return Value::Error(e),
+    };
+    let rows = sum_range.rows();
+    let cols = sum_range.cols();
+    if rows <= 0 || cols <= 0 {
+        return Value::Number(0.0);
+    }
+
+    let mut crit_ranges: Vec<Range2DArg<'_>> = Vec::with_capacity((args.len() - 1) / 2);
+    let mut crits: Vec<EngineCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+
+    for pair in args[1..].chunks_exact(2) {
+        let range = match range2d_from_value(&pair[0], grid, base) {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
+        if range.rows() != rows || range.cols() != cols {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let crit = match parse_countif_criteria(&pair[1], locale) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        };
+
+        crit_ranges.push(range);
+        crits.push(crit);
+    }
+
+    let mut sum = 0.0;
+    for row_off in 0..rows {
+        'cell: for col_off in 0..cols {
+            for (range, crit) in crit_ranges.iter().copied().zip(crits.iter()) {
+                let crit_v = range.get_value_at(grid, row_off, col_off);
+                let engine_value = bytecode_value_to_engine_ref(&crit_v);
+                if !crit.matches(&engine_value) {
+                    continue 'cell;
+                }
+            }
+
+            match sum_range.get_value_at(grid, row_off, col_off) {
                 Value::Number(v) => sum += v,
                 Value::Error(e) => return Value::Error(e),
                 Value::Bool(_)
@@ -5978,6 +6056,17 @@ fn fn_averageifs(
         return Value::Error(ErrorKind::Value);
     }
 
+    // Generic path: support array arguments and mixed array/range cases (matching the AST
+    // evaluator's Range2D semantics). Preserve the existing optimized implementation as a fast
+    // path for range-only inputs.
+    if !matches!(args[0], Value::Range(_))
+        || args[1..]
+            .chunks_exact(2)
+            .any(|pair| !matches!(pair[0], Value::Range(_)))
+    {
+        return averageifs_with_array_ranges(args, grid, base, locale);
+    }
+
     let avg_range_ref = match &args[0] {
         Value::Range(r) => *r,
         _ => return Value::Error(ErrorKind::Value),
@@ -6230,6 +6319,80 @@ fn fn_averageifs(
     Value::Number(sum / count as f64)
 }
 
+fn averageifs_with_array_ranges(
+    args: &[Value],
+    grid: &dyn Grid,
+    base: CellCoord,
+    locale: &crate::LocaleConfig,
+) -> Value {
+    let avg_range = match range2d_from_value(&args[0], grid, base) {
+        Ok(r) => r,
+        Err(e) => return Value::Error(e),
+    };
+    let rows = avg_range.rows();
+    let cols = avg_range.cols();
+    if rows <= 0 || cols <= 0 {
+        return Value::Error(ErrorKind::Div0);
+    }
+
+    let mut crit_ranges: Vec<Range2DArg<'_>> = Vec::with_capacity((args.len() - 1) / 2);
+    let mut crits: Vec<EngineCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+
+    for pair in args[1..].chunks_exact(2) {
+        let range = match range2d_from_value(&pair[0], grid, base) {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
+        if range.rows() != rows || range.cols() != cols {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let crit = match parse_countif_criteria(&pair[1], locale) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        };
+
+        crit_ranges.push(range);
+        crits.push(crit);
+    }
+
+    let mut sum = 0.0;
+    let mut count = 0usize;
+    for row_off in 0..rows {
+        'cell: for col_off in 0..cols {
+            for (range, crit) in crit_ranges.iter().copied().zip(crits.iter()) {
+                let crit_v = range.get_value_at(grid, row_off, col_off);
+                let engine_value = bytecode_value_to_engine_ref(&crit_v);
+                if !crit.matches(&engine_value) {
+                    continue 'cell;
+                }
+            }
+
+            match avg_range.get_value_at(grid, row_off, col_off) {
+                Value::Number(v) => {
+                    sum += v;
+                    count += 1;
+                }
+                Value::Error(e) => return Value::Error(e),
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
+                | Value::Empty
+                | Value::Missing
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
+            }
+        }
+    }
+
+    if count == 0 {
+        return Value::Error(ErrorKind::Div0);
+    }
+    Value::Number(sum / count as f64)
+}
+
 fn fn_minifs(
     args: &[Value],
     grid: &dyn Grid,
@@ -6238,6 +6401,17 @@ fn fn_minifs(
 ) -> Value {
     if args.len() < 3 || (args.len() - 1) % 2 != 0 {
         return Value::Error(ErrorKind::Value);
+    }
+
+    // Generic path: support array arguments and mixed array/range cases (matching the AST
+    // evaluator's Range2D semantics). Preserve the existing optimized implementation as a fast
+    // path for range-only inputs.
+    if !matches!(args[0], Value::Range(_))
+        || args[1..]
+            .chunks_exact(2)
+            .any(|pair| !matches!(pair[0], Value::Range(_)))
+    {
+        return minifs_with_array_ranges(args, grid, base, locale);
     }
 
     let min_range_ref = match &args[0] {
@@ -6446,6 +6620,73 @@ fn fn_minifs(
     Value::Number(best.unwrap_or(0.0))
 }
 
+fn minifs_with_array_ranges(
+    args: &[Value],
+    grid: &dyn Grid,
+    base: CellCoord,
+    locale: &crate::LocaleConfig,
+) -> Value {
+    let min_range = match range2d_from_value(&args[0], grid, base) {
+        Ok(r) => r,
+        Err(e) => return Value::Error(e),
+    };
+    let rows = min_range.rows();
+    let cols = min_range.cols();
+    if rows <= 0 || cols <= 0 {
+        return Value::Number(0.0);
+    }
+
+    let mut crit_ranges: Vec<Range2DArg<'_>> = Vec::with_capacity((args.len() - 1) / 2);
+    let mut crits: Vec<EngineCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+
+    for pair in args[1..].chunks_exact(2) {
+        let range = match range2d_from_value(&pair[0], grid, base) {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
+        if range.rows() != rows || range.cols() != cols {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let crit = match parse_countif_criteria(&pair[1], locale) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        };
+
+        crit_ranges.push(range);
+        crits.push(crit);
+    }
+
+    let mut best: Option<f64> = None;
+    for row_off in 0..rows {
+        'cell: for col_off in 0..cols {
+            for (range, crit) in crit_ranges.iter().copied().zip(crits.iter()) {
+                let crit_v = range.get_value_at(grid, row_off, col_off);
+                let engine_value = bytecode_value_to_engine_ref(&crit_v);
+                if !crit.matches(&engine_value) {
+                    continue 'cell;
+                }
+            }
+
+            match min_range.get_value_at(grid, row_off, col_off) {
+                Value::Number(v) => best = Some(best.map_or(v, |b| b.min(v))),
+                Value::Error(e) => return Value::Error(e),
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
+                | Value::Empty
+                | Value::Missing
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
+            }
+        }
+    }
+
+    Value::Number(best.unwrap_or(0.0))
+}
+
 fn fn_maxifs(
     args: &[Value],
     grid: &dyn Grid,
@@ -6454,6 +6695,17 @@ fn fn_maxifs(
 ) -> Value {
     if args.len() < 3 || (args.len() - 1) % 2 != 0 {
         return Value::Error(ErrorKind::Value);
+    }
+
+    // Generic path: support array arguments and mixed array/range cases (matching the AST
+    // evaluator's Range2D semantics). Preserve the existing optimized implementation as a fast
+    // path for range-only inputs.
+    if !matches!(args[0], Value::Range(_))
+        || args[1..]
+            .chunks_exact(2)
+            .any(|pair| !matches!(pair[0], Value::Range(_)))
+    {
+        return maxifs_with_array_ranges(args, grid, base, locale);
     }
 
     let max_range_ref = match &args[0] {
@@ -6659,6 +6911,73 @@ fn fn_maxifs(
     if let Some((_, _, e)) = earliest_error {
         return Value::Error(e);
     }
+    Value::Number(best.unwrap_or(0.0))
+}
+
+fn maxifs_with_array_ranges(
+    args: &[Value],
+    grid: &dyn Grid,
+    base: CellCoord,
+    locale: &crate::LocaleConfig,
+) -> Value {
+    let max_range = match range2d_from_value(&args[0], grid, base) {
+        Ok(r) => r,
+        Err(e) => return Value::Error(e),
+    };
+    let rows = max_range.rows();
+    let cols = max_range.cols();
+    if rows <= 0 || cols <= 0 {
+        return Value::Number(0.0);
+    }
+
+    let mut crit_ranges: Vec<Range2DArg<'_>> = Vec::with_capacity((args.len() - 1) / 2);
+    let mut crits: Vec<EngineCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+
+    for pair in args[1..].chunks_exact(2) {
+        let range = match range2d_from_value(&pair[0], grid, base) {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
+        if range.rows() != rows || range.cols() != cols {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let crit = match parse_countif_criteria(&pair[1], locale) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        };
+
+        crit_ranges.push(range);
+        crits.push(crit);
+    }
+
+    let mut best: Option<f64> = None;
+    for row_off in 0..rows {
+        'cell: for col_off in 0..cols {
+            for (range, crit) in crit_ranges.iter().copied().zip(crits.iter()) {
+                let crit_v = range.get_value_at(grid, row_off, col_off);
+                let engine_value = bytecode_value_to_engine_ref(&crit_v);
+                if !crit.matches(&engine_value) {
+                    continue 'cell;
+                }
+            }
+
+            match max_range.get_value_at(grid, row_off, col_off) {
+                Value::Number(v) => best = Some(best.map_or(v, |b| b.max(v))),
+                Value::Error(e) => return Value::Error(e),
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
+                | Value::Empty
+                | Value::Missing
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
+            }
+        }
+    }
+
     Value::Number(best.unwrap_or(0.0))
 }
 
