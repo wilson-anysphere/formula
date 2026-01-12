@@ -2644,12 +2644,15 @@ fn parse_typescript_value_prefix(input: &str) -> Result<(Option<JsonValue>, &str
 
 #[cfg(any(feature = "desktop", test))]
 fn parse_typescript_value_matrix(expr: &str) -> Result<Vec<Vec<Option<JsonValue>>>, String> {
+    use crate::resource_limits::{MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM};
+
     let mut rest = expr.trim_start();
     rest = rest
         .strip_prefix('[')
         .ok_or_else(|| "expected matrix literal like [[1,2],[3,4]]".to_string())?;
 
     let mut rows: Vec<Vec<Option<JsonValue>>> = Vec::new();
+    let mut total_cells = 0usize;
     loop {
         rest = rest.trim_start();
         if let Some(next) = rest.strip_prefix(']') {
@@ -2660,12 +2663,31 @@ fn parse_typescript_value_matrix(expr: &str) -> Result<Vec<Vec<Option<JsonValue>
             .strip_prefix('[')
             .ok_or_else(|| "expected row literal like [1,2]".to_string())?;
 
+        if rows.len() >= MAX_RANGE_DIM {
+            return Err(format!(
+                "matrix literal is too large (max {MAX_RANGE_DIM} rows)"
+            ));
+        }
+
         let mut row: Vec<Option<JsonValue>> = Vec::new();
         loop {
             rest = rest.trim_start();
             if let Some(next) = rest.strip_prefix(']') {
                 rest = next;
                 break;
+            }
+
+            if row.len() >= MAX_RANGE_DIM {
+                return Err(format!(
+                    "matrix literal row is too large (max {MAX_RANGE_DIM} columns)"
+                ));
+            }
+
+            total_cells = total_cells.saturating_add(1);
+            if total_cells > MAX_RANGE_CELLS_PER_CALL {
+                return Err(format!(
+                    "matrix literal is too large (max {MAX_RANGE_CELLS_PER_CALL} cells)"
+                ));
             }
             let (value, remainder) = parse_typescript_value_prefix(rest)?;
             row.push(value);
@@ -2818,6 +2840,8 @@ fn parse_typescript_array_from_fill_matrix(
     expr: &str,
     bindings: &std::collections::HashMap<String, TypeScriptBinding>,
 ) -> Result<Vec<Vec<Option<JsonValue>>>, String> {
+    use crate::resource_limits::{MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM};
+
     let trimmed = expr.trim().trim_end_matches(';').trim();
     let after = trimmed
         .strip_prefix("Array.from")
@@ -2889,6 +2913,18 @@ fn parse_typescript_array_from_fill_matrix(
         .map_err(|_| format!("invalid Array(...) length: {digits}"))?;
     if cols == 0 {
         return Err("Array(...) length must be > 0".to_string());
+    }
+
+    if rows > MAX_RANGE_DIM || cols > MAX_RANGE_DIM {
+        return Err(format!(
+            "Array.from matrix is too large ({rows}x{cols}; max dimension {MAX_RANGE_DIM})"
+        ));
+    }
+    let cell_count = (rows as u128) * (cols as u128);
+    if cell_count > MAX_RANGE_CELLS_PER_CALL as u128 {
+        return Err(format!(
+            "Array.from matrix is too large ({rows}x{cols}; max {MAX_RANGE_CELLS_PER_CALL} cells)"
+        ));
     }
 
     let mut rest = after_array[digits.len()..].trim_start();
@@ -4263,6 +4299,36 @@ export default async function main(ctx) {
         let e1 = state.get_cell("Sheet1", 0, 4).expect("E1 exists");
         assert_eq!(e1.formula.as_deref(), Some("=A1+B1"));
         assert_eq!(e1.value.display(), "14");
+    }
+
+    #[test]
+    fn typescript_migration_interpreter_rejects_oversized_fill_matrices() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+
+        let mut state = crate::state::AppState::new();
+        state.load_workbook(workbook);
+
+        let dim = crate::resource_limits::MAX_RANGE_DIM;
+        let code = format!(
+            r#"
+export default async function main(ctx) {{
+  const sheet = ctx.activeSheet;
+  await sheet.getRange("A1").setValues(Array.from({{ length: {dim} }}, () => Array({dim}).fill(1)));
+}}
+"#
+        );
+
+        let result = run_typescript_migration_script(&mut state, &code);
+        assert!(
+            !result.ok,
+            "expected script to fail due to size limits"
+        );
+        let err = result.error.unwrap_or_default();
+        assert!(
+            err.contains("too large") || err.contains("max"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
