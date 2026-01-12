@@ -29,17 +29,34 @@
   height: 0;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Shared-grid overlay stacking                                                */
+/* -------------------------------------------------------------------------- */
+
+/*
+  z-index ordering is controlled via CSS variables so the relative ordering is
+  easy to reason about and can be overridden per grid root if needed.
+
+  Keep these below the scrollbar layer (z-index: 5 in scrollbars.css) and below
+  any floating UI (comments, tooltips, conflicts, etc).
+*/
+.grid-root {
+  --grid-z-chart-overlay: 2;
+  --grid-z-selection-overlay: 3;
+  --grid-z-outline-overlay: 4;
+}
+
 /* Shared-grid overlay stacking: charts above cells, selection above charts. */
 .chart-layer--shared {
-  z-index: 2;
+  z-index: var(--grid-z-chart-overlay, 2);
 }
 
 .grid-canvas--shared-selection {
-  z-index: 3;
+  z-index: var(--grid-z-selection-overlay, 3);
 }
 
 .outline-layer--shared {
-  z-index: 4;
+  z-index: var(--grid-z-outline-overlay, 4);
 }
 
 /* Modifier classes exist for debugging hooks / future styling extensions. */
