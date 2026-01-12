@@ -3418,7 +3418,9 @@ if (
   function renderSplitView() {
     const split = layoutController.layout.splitView;
     const ratio = typeof split.ratio === "number" ? split.ratio : 0.5;
-    gridSplitEl.dataset.splitDirection = split.direction;
+    if (gridSplitEl.dataset.splitDirection !== split.direction) {
+      gridSplitEl.dataset.splitDirection = split.direction;
+    }
     applySplitRatioCss(ratio);
 
     if (split.direction === "none") {
