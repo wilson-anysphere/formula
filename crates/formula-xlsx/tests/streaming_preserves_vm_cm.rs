@@ -92,7 +92,7 @@ fn patch_xlsx_streaming_drops_vm_but_preserves_cm_on_existing_cells(
     assert_eq!(
         cell.attribute("cm"),
         Some("2"),
-        "expected cell to preserve cm attribute, got: {sheet_xml}"
+        "expected patched cell to preserve cm attribute, got: {sheet_xml}"
     );
 
     let v = cell
