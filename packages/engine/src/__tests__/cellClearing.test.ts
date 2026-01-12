@@ -62,7 +62,7 @@ async function loadFormulaWasm() {
   // The Node-compatible wasm-bindgen build lives under `crates/formula-wasm/pkg-node/`.
   // It's a generated (gitignored) directory. Vitest's global setup (`scripts/vitest.global-setup.mjs`)
   // builds/refreshes it for CI runs. If a test run skips that setup (e.g. by setting
-  // `FORMULA_SKIP_WASM_BUILD=1`), fail fast with a helpful error instead of trying to
+  // `FORMULA_SKIP_WASM_BUILD=1` or `FORMULA_SKIP_WASM_BUILD=true`), fail fast with a helpful error instead of trying to
   // run a slow build inside a Vitest worker thread (which can trigger RPC timeouts).
   const entry = formulaWasmNodeEntryUrl();
 
@@ -76,7 +76,7 @@ async function loadFormulaWasm() {
   } catch (err) {
     throw new Error(
       `Failed to import formula-wasm Node build (${entry}). ` +
-        `Run \`node scripts/build-formula-wasm-node.mjs\` (or rerun vitest without FORMULA_SKIP_WASM_BUILD=1).\n\n` +
+        `Run \`node scripts/build-formula-wasm-node.mjs\` (or rerun vitest without FORMULA_SKIP_WASM_BUILD).\n\n` +
         `Original error: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
