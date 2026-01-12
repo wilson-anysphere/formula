@@ -270,6 +270,12 @@ Simplified relationship sketch (type URIs vary across Excel builds; targets are 
               Target="richData/richValue.xml"/>
 ```
 
+Packaging note:
+- Workbooks that include these parts also typically add `[Content_Types].xml` `<Override>` entries for
+  `/xl/metadata.xml` and the `xl/richData/*.xml` parts. For round-trip safety, preserve those
+  declarations byte-for-byte when possible (Excel may warn/repair if content types are missing or
+  mismatched).
+
 **Formula’s current strategy:**
 
 - Preserve `vm` / `cm` attributes on `<c>` elements when editing cell values.
