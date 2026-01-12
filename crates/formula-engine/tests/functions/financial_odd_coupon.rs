@@ -63,16 +63,14 @@ fn coupon_period_e(
 ) -> f64 {
     let freq = frequency as f64;
     match basis {
+        1 => (ncd - pcd) as f64,
         0 | 2 => 360.0 / freq,
-        // NOTE: For the regular COUP*/PRICE schedule, Excel models basis 4 (30E/360) coupon
-        // periods as a constant `360/frequency`.
+        // basis 4: European 30/360 day-count between coupon dates (DAYS360(..., TRUE)).
         //
-        // For odd-coupon bonds (ODDF*/ODDL*), Excel instead uses `DAYS360(PCD, NCD, TRUE)` between
-        // the coupon dates as the coupon-period length `E`. This matters for end-of-month
-        // schedules involving February (e.g. Feb 28 -> Aug 31 yields 182, not 180).
+        // This can differ from `360/frequency` for some end-of-month schedules involving
+        // February (e.g. Feb 28 -> Aug 31 yields 182, not 180).
         4 => days_between(pcd, ncd, 4, system),
         3 => 365.0 / freq,
-        1 => (ncd - pcd) as f64,
         _ => panic!("invalid basis {basis}"),
     }
 }
