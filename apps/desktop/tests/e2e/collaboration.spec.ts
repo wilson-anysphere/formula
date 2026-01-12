@@ -51,8 +51,8 @@ test.describe("collaboration", () => {
       // Load each client in its own browser context so sync must travel through the
       // websocket server (not BroadcastChannel).
       await Promise.all([
-        gotoDesktop(pageA, makeUrl({ id: "u-a", name: "User A", color: "#ff0000" }), { idleTimeoutMs: 10_000 }),
-        gotoDesktop(pageB, makeUrl({ id: "u-b", name: "User B", color: "#0000ff" }), { idleTimeoutMs: 10_000 }),
+        gotoDesktop(pageA, makeUrl({ id: "u-a", name: "User A", color: "#ff0000" }), { idleTimeoutMs: 10_000, appReadyTimeoutMs: 120_000 }),
+        gotoDesktop(pageB, makeUrl({ id: "u-b", name: "User B", color: "#0000ff" }), { idleTimeoutMs: 10_000, appReadyTimeoutMs: 120_000 }),
       ]);
 
       // Wait for the websocket providers to complete initial sync before applying edits.

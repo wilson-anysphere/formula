@@ -42,7 +42,7 @@ test.describe("collaboration: local persistence", () => {
     const pageA = await context.newPage();
 
     try {
-      await gotoDesktop(pageA, makeUrl(), { idleTimeoutMs: 10_000 });
+      await gotoDesktop(pageA, makeUrl(), { idleTimeoutMs: 10_000, appReadyTimeoutMs: 120_000 });
 
       // Wait for the provider to fully sync once so the session schema is initialized.
       await pageA.waitForFunction(() => {

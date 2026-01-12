@@ -64,8 +64,8 @@ test.describe("collaboration: sheet metadata", () => {
       };
 
       await Promise.all([
-        gotoDesktop(pageA, makeUrl({ id: "u-a", name: "User A" }), { idleTimeoutMs: 10_000 }),
-        gotoDesktop(pageB, makeUrl({ id: "u-b", name: "User B" }), { idleTimeoutMs: 10_000 }),
+        gotoDesktop(pageA, makeUrl({ id: "u-a", name: "User A" }), { idleTimeoutMs: 10_000, appReadyTimeoutMs: 120_000 }),
+        gotoDesktop(pageB, makeUrl({ id: "u-b", name: "User B" }), { idleTimeoutMs: 10_000, appReadyTimeoutMs: 120_000 }),
       ]);
 
       // Wait for providers to complete initial sync before applying edits.

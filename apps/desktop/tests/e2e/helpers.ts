@@ -14,6 +14,13 @@ type DesktopReadyOptions = {
    * where the app may never become fully idle.
    */
   idleTimeoutMs?: number;
+  /**
+   * Optional cap on how long we'll wait for `window.__formulaApp` after navigation.
+   *
+   * Collaboration tests can be slower on first-run (WASM, python runtime, Vite optimize),
+   * and should pass a larger value.
+   */
+  appReadyTimeoutMs?: number;
 };
 
 /**
@@ -23,9 +30,10 @@ type DesktopReadyOptions = {
  * so make tests wait for `window.__formulaApp` before interacting with the grid.
  */
 export async function gotoDesktop(page: Page, path: string = "/", options: DesktopReadyOptions = {}): Promise<void> {
-  const { waitForIdle = true, idleTimeoutMs } = options;
+  const { waitForIdle = true, idleTimeoutMs, appReadyTimeoutMs } = options;
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
+  const requestFailures: string[] = [];
 
   const onConsole = (msg: any): void => {
     try {
@@ -44,18 +52,32 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
     pageErrors.push(message);
   };
 
+  const onRequestFailed = (req: any): void => {
+    try {
+      const method = typeof req?.method === "function" ? req.method() : "REQUEST";
+      const url = typeof req?.url === "function" ? req.url() : String(req?.url ?? "");
+      const failure = typeof req?.failure === "function" ? req.failure() : null;
+      const suffix = failure?.errorText ? ` (${failure.errorText})` : "";
+      requestFailures.push(`${method} ${url}${suffix}`.trim());
+    } catch {
+      // ignore listener failures
+    }
+  };
+
   page.on("console", onConsole);
   page.on("pageerror", onPageError);
+  page.on("requestfailed", onRequestFailed);
 
   const formatStartupDiagnostics = async (): Promise<string> => {
     const uniqueConsole = [...new Set(consoleErrors)];
     const uniquePage = [...new Set(pageErrors)];
+    const uniqueRequests = [...new Set(requestFailures)];
 
     let appProbe: { present: boolean; truthy: boolean; type: string; nullish: boolean; ctor: string | null } | null = null;
     try {
       appProbe = await page.evaluate(() => {
         const present = "__formulaApp" in window;
-        const value = (window as any).__formulaApp;
+        const value = window.__formulaApp;
         return {
           present,
           truthy: Boolean(value),
@@ -82,6 +104,7 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
     const parts: string[] = [];
     if (uniqueConsole.length > 0) parts.push(`Console errors:\n${uniqueConsole.join("\n")}`);
     if (uniquePage.length > 0) parts.push(`Page errors:\n${uniquePage.join("\n")}`);
+    if (uniqueRequests.length > 0) parts.push(`Request failures:\n${uniqueRequests.join("\n")}`);
     if (appProbe) parts.push(`window.__formulaApp probe:\n${JSON.stringify(appProbe, null, 2)}`);
     if (viteOverlayText) parts.push(`Vite error overlay:\n${viteOverlayText}`);
     return parts.length > 0 ? `\n\n${parts.join("\n\n")}` : "";
@@ -95,7 +118,9 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
       // window `load` event. Under heavy load, waiting for `load` can occasionally hang
       // (e.g. if a long-lived request prevents the event from firing).
       await page.goto(path, { waitUntil: "domcontentloaded" });
-      await page.waitForFunction(() => Boolean(window.__formulaApp), undefined, { timeout: 60_000 });
+      await page.waitForFunction(() => Boolean(window.__formulaApp), undefined, {
+        timeout: typeof appReadyTimeoutMs === "number" && appReadyTimeoutMs > 0 ? appReadyTimeoutMs : 60_000,
+      });
       // `__formulaApp` is assigned early in `main.ts` so tests can still introspect failures,
       // but that means we need to explicitly wait for the app to settle before interacting.
       await page.evaluate(async ({ waitForIdle, idleTimeoutMs }) => {
@@ -146,6 +171,7 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
 
       page.off("console", onConsole);
       page.off("pageerror", onPageError);
+      page.off("requestfailed", onRequestFailed);
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -161,12 +187,14 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
       const diag = await formatStartupDiagnostics();
       page.off("console", onConsole);
       page.off("pageerror", onPageError);
+      page.off("requestfailed", onRequestFailed);
       throw new Error(`${message}${diag}`);
     }
   }
 
   page.off("console", onConsole);
   page.off("pageerror", onPageError);
+  page.off("requestfailed", onRequestFailed);
 }
 
 export async function waitForDesktopReady(page: Page): Promise<void> {
