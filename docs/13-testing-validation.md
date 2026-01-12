@@ -509,7 +509,7 @@ test.describe("User Flows", () => {
     
     // Open AI panel
     const isMac = process.platform === "darwin";
-    await page.keyboard.press(isMac ? "Meta+I" : "Control+Shift+A");
+    await page.keyboard.press(isMac ? "Meta+Shift+A" : "Control+Shift+A");
     
     // Ask AI
     await page.fill('[data-testid="ai-input"]', "Sum the sales");

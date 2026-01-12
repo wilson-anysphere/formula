@@ -107,8 +107,8 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealInlineAI", key: "cmd+k", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealInlineAI", key: "ctrl+cmd+k", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealAIChat", key: "ctrl+shift+a", mac: null, when: null },
-      { extensionId: "ext", command: "ext.stealAIChat", key: "cmd+i", mac: null, when: null },
-      { extensionId: "ext", command: "ext.stealAIChat", key: "ctrl+cmd+i", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealAIChat", key: "cmd+shift+a", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealAIChat", key: "ctrl+cmd+shift+a", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealCopy", key: "cmd+h", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+cmd+h", mac: null, when: null },
     ]);
@@ -178,21 +178,21 @@ describe("KeybindingService", () => {
     expect(event10.defaultPrevented).toBe(false);
     expect(extRun).not.toHaveBeenCalled();
 
-    // AI Chat toggle: Ctrl+Shift+A / Cmd+I.
+    // AI Chat toggle: Ctrl+Shift+A / Cmd+Shift+A.
     const event11 = makeKeydownEvent({ key: "A", ctrlKey: true, shiftKey: true });
     const handled11 = await service.dispatchKeydown(event11);
     expect(handled11).toBe(false);
     expect(event11.defaultPrevented).toBe(false);
     expect(extRun).not.toHaveBeenCalled();
 
-    const event12 = makeKeydownEvent({ key: "i", metaKey: true });
+    const event12 = makeKeydownEvent({ key: "A", metaKey: true, shiftKey: true });
     const handled12 = await service.dispatchKeydown(event12);
     expect(handled12).toBe(false);
     expect(event12.defaultPrevented).toBe(false);
     expect(extRun).not.toHaveBeenCalled();
 
     // Some environments emit both Ctrl+Meta for a single chord.
-    const event13 = makeKeydownEvent({ key: "i", ctrlKey: true, metaKey: true });
+    const event13 = makeKeydownEvent({ key: "A", ctrlKey: true, metaKey: true, shiftKey: true });
     const handled13 = await service.dispatchKeydown(event13);
     expect(handled13).toBe(false);
     expect(event13.defaultPrevented).toBe(false);
