@@ -8,8 +8,10 @@
 /// - Some Unicode/alternate record IDs are "canonical" per MS-OVBA, while others are observed
 ///   non-canonical variants. This table includes both, with a bias toward the IDs used by our
 ///   hashing implementation/tests:
-///   - Project strings: `PROJECTDOCSTRINGUNICODE` (0x0040), `PROJECTCONSTANTSUNICODE` (0x003C),
-///     `PROJECTHELPFILEPATH2` (0x003D)
+///   - Project strings:
+///     - `PROJECTDOCSTRINGUNICODE` (0x0040) and an observed non-canonical variant (0x0041)
+///     - `PROJECTHELPFILEPATH2` (0x003D) and an observed non-canonical variant (0x0042)
+///     - `PROJECTCONSTANTSUNICODE` (0x003C) and an observed non-canonical variant (0x0043)
 ///   - Module strings: `MODULENAMEUNICODE` (0x0047), `MODULESTREAMNAMEUNICODE` (0x0032),
 ///     `MODULEDOCSTRINGUNICODE` (0x0048), `MODULEHELPFILEPATHUNICODE` (0x0049)
 /// - `0x004A` is `PROJECTCOMPATVERSION`.
@@ -22,8 +24,10 @@ pub fn record_name(id: u16) -> Option<&'static str> {
         0x0004 => "PROJECTNAME",
         0x0005 => "PROJECTDOCSTRING",
         0x0040 => "PROJECTDOCSTRINGUNICODE",
+        0x0041 => "PROJECTDOCSTRINGUNICODE (alt id 0x0041)",
         0x0006 => "PROJECTHELPFILEPATH",
         0x003D => "PROJECTHELPFILEPATH2",
+        0x0042 => "PROJECTHELPFILEPATH2 (alt id 0x0042)",
 
         0x0007 => "PROJECTHELPCONTEXT",
         0x0008 => "PROJECTLIBFLAGS",
@@ -31,6 +35,7 @@ pub fn record_name(id: u16) -> Option<&'static str> {
 
         0x000C => "PROJECTCONSTANTS",
         0x003C => "PROJECTCONSTANTSUNICODE",
+        0x0043 => "PROJECTCONSTANTSUNICODE (alt id 0x0043)",
 
         0x0014 => "PROJECTLCIDINVOKE",
         0x004A => "PROJECTCOMPATVERSION",

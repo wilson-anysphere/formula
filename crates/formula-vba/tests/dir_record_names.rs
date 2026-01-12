@@ -10,12 +10,24 @@ fn unicode_dir_record_ids_match_ms_ovba_table() {
         Some("PROJECTDOCSTRINGUNICODE")
     );
     assert_eq!(
+        dir_record_names::record_name(0x0041),
+        Some("PROJECTDOCSTRINGUNICODE (alt id 0x0041)")
+    );
+    assert_eq!(
         dir_record_names::record_name(0x003D),
         Some("PROJECTHELPFILEPATH2")
     );
     assert_eq!(
+        dir_record_names::record_name(0x0042),
+        Some("PROJECTHELPFILEPATH2 (alt id 0x0042)")
+    );
+    assert_eq!(
         dir_record_names::record_name(0x003C),
         Some("PROJECTCONSTANTSUNICODE")
+    );
+    assert_eq!(
+        dir_record_names::record_name(0x0043),
+        Some("PROJECTCONSTANTSUNICODE (alt id 0x0043)")
     );
 
     assert_eq!(dir_record_names::record_name(0x0047), Some("MODULENAMEUNICODE"));

@@ -93,10 +93,13 @@ pub fn project_normalized_data_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
             // u32 length prefix when present, and appending only the UTF-16LE payload bytes.
             //
             // Observed record IDs:
-            // - 0x0040: PROJECTDOCSTRING (Unicode)
-            // - 0x003D: PROJECTHELPFILEPATH (second form / commonly Unicode)
-            // - 0x003C: PROJECTCONSTANTS (Unicode)
-            0x0040 | 0x003D | 0x003C => {
+            // - 0x0040: PROJECTDOCSTRING (Unicode; canonical)
+            // - 0x0041: PROJECTDOCSTRING (Unicode; non-canonical variant)
+            // - 0x003D: PROJECTHELPFILEPATH (second form / commonly Unicode; canonical)
+            // - 0x0042: PROJECTHELPFILEPATH (non-canonical variant)
+            // - 0x003C: PROJECTCONSTANTS (Unicode; canonical)
+            // - 0x0043: PROJECTCONSTANTS (Unicode; non-canonical variant)
+            0x0040 | 0x0041 | 0x003D | 0x0042 | 0x003C | 0x0043 => {
                 out.extend_from_slice(unicode_record_payload(data)?);
             }
 
@@ -218,9 +221,9 @@ fn scan_unicode_presence(
             }
 
             // Project-level Unicode/alternate string variants.
-            0x0040 => project_unicode.project_docstring = true,
-            0x003D => project_unicode.project_help_filepath = true,
-            0x003C => project_unicode.project_constants = true,
+            0x0040 | 0x0041 => project_unicode.project_docstring = true,
+            0x003D | 0x0042 => project_unicode.project_help_filepath = true,
+            0x003C | 0x0043 => project_unicode.project_constants = true,
 
             // Module-level Unicode string variants.
             0x0047 => {

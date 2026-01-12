@@ -958,6 +958,51 @@ fn project_normalized_data_v3_accepts_unicode_records_without_length_prefix() {
 }
 
 #[test]
+fn project_normalized_data_v3_prefers_unicode_for_noncanonical_project_record_ids() {
+    // Some producers use non-canonical record ids for the Unicode project string variants. Our v3
+    // dir-record helper should still prefer them over the ANSI records.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // PROJECTNAME
+        push_record(&mut out, 0x0004, b"MyProject");
+
+        // PROJECTDOCSTRING (ANSI) + non-canonical Unicode variant.
+        push_record(&mut out, 0x0005, b"AnsiDoc");
+        push_record(&mut out, 0x0041, &unicode_record_data("UniDoc"));
+
+        // PROJECTCONSTANTS (ANSI) + non-canonical Unicode variant.
+        push_record(&mut out, 0x000C, b"AnsiConst");
+        push_record(&mut out, 0x0043, &unicode_record_data("UniConst"));
+
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let normalized =
+        project_normalized_data_v3_dir_records(&vba_bin).expect("ProjectNormalizedDataV3");
+
+    let expected = [
+        b"MyProject".as_slice(),
+        utf16le_bytes("UniDoc").as_slice(),
+        utf16le_bytes("UniConst").as_slice(),
+    ]
+    .concat();
+
+    assert_eq!(normalized, expected);
+    assert!(
+        !normalized.windows(b"AnsiDoc".len()).any(|w| w == b"AnsiDoc"),
+        "expected ANSI PROJECTDOCSTRING bytes to be omitted when Unicode variant is present"
+    );
+    assert!(
+        !normalized
+            .windows(b"AnsiConst".len())
+            .any(|w| w == b"AnsiConst"),
+        "expected ANSI PROJECTCONSTANTS bytes to be omitted when Unicode variant is present"
+    );
+}
+
+#[test]
 fn project_normalized_data_v3_handles_unicode_only_modulename_group_start() {
     // Some real-world (non-spec) dir encodings omit MODULENAME (0x0019) entirely and emit only
     // MODULENAMEUNICODE (0x0047). Ensure the metadata transcript still treats this as the start of a
