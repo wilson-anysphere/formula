@@ -4029,6 +4029,16 @@ mod tests {
             "expected .xls saves to coerce to .xlsx"
         );
         assert_eq!(
+            coerce_save_path_to_xlsx("/tmp/foo.txt"),
+            "/tmp/foo.xlsx",
+            "expected .txt saves to coerce to .xlsx"
+        );
+        assert_eq!(
+            coerce_save_path_to_xlsx("/tmp/foo.ods"),
+            "/tmp/foo.xlsx",
+            "expected .ods saves to coerce to .xlsx"
+        );
+        assert_eq!(
             coerce_save_path_to_xlsx("/tmp/foo.parquet"),
             "/tmp/foo.xlsx",
             "expected .parquet saves to coerce to .xlsx"
