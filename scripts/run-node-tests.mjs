@@ -59,8 +59,20 @@ testFiles.sort();
 const tsLoaderArgs = resolveTypeScriptLoaderArgs();
 const builtInTypeScript = getBuiltInTypeScriptSupport();
 const canExecuteTypeScript = builtInTypeScript.enabled || tsLoaderArgs.length > 0;
-let runnableTestFiles = canExecuteTypeScript ? testFiles : await filterTypeScriptImportTests(testFiles);
-const typeScriptFilteredCount = testFiles.length - runnableTestFiles.length;
+// Node's built-in "strip types" support can execute `.ts` modules, but does not support
+// `.tsx` (JSX) without a real transpile loader.
+const canExecuteTsx = tsLoaderArgs.length > 0;
+
+let runnableTestFiles = testFiles;
+let typeScriptFilteredCount = 0;
+let typeScriptTsxFilteredCount = 0;
+if (!canExecuteTypeScript) {
+  runnableTestFiles = await filterTypeScriptImportTests(testFiles, ["ts", "tsx"]);
+  typeScriptFilteredCount = testFiles.length - runnableTestFiles.length;
+} else if (!canExecuteTsx) {
+  runnableTestFiles = await filterTypeScriptImportTests(testFiles, ["tsx"]);
+  typeScriptTsxFilteredCount = testFiles.length - runnableTestFiles.length;
+}
 
 const hasDeps = await hasNodeModules();
 let externalDepsFilteredCount = 0;
@@ -69,11 +81,12 @@ if (!hasDeps) {
   const before = runnableTestFiles.length;
   runnableTestFiles = await filterExternalDependencyTests(runnableTestFiles, {
     canStripTypes: canExecuteTypeScript,
+    canExecuteTsx,
   });
   externalDepsFilteredCount = before - runnableTestFiles.length;
 } else {
   const before = runnableTestFiles.length;
-  runnableTestFiles = await filterMissingWorkspaceDependencyTests(runnableTestFiles, { canStripTypes: canExecuteTypeScript });
+  runnableTestFiles = await filterMissingWorkspaceDependencyTests(runnableTestFiles, { canStripTypes: canExecuteTypeScript, canExecuteTsx });
   missingWorkspaceDepsFilteredCount = before - runnableTestFiles.length;
 }
 
@@ -82,7 +95,10 @@ if (runnableTestFiles.length !== testFiles.length) {
   /** @type {string[]} */
   const reasons = [];
   if (typeScriptFilteredCount > 0) {
-    reasons.push(`${typeScriptFilteredCount} import .ts modules (TypeScript execution not available)`);
+    reasons.push(`${typeScriptFilteredCount} import TypeScript modules (TypeScript execution not available)`);
+  }
+  if (typeScriptTsxFilteredCount > 0) {
+    reasons.push(`${typeScriptTsxFilteredCount} import .tsx modules (TSX execution not available)`);
   }
   if (externalDepsFilteredCount > 0) {
     reasons.push(`${externalDepsFilteredCount} depend on external packages (dependencies not installed)`);
@@ -309,13 +325,20 @@ async function hasNodeModules() {
   }
 }
 
-async function filterTypeScriptImportTests(files) {
+/**
+ * @param {string[]} files
+ * @param {("ts" | "tsx")[]} extensions
+ */
+async function filterTypeScriptImportTests(files, extensions = ["ts", "tsx"]) {
   /** @type {string[]} */
   const out = [];
-  const tsImportRe = /from\s+["'][^"']+\.(ts|tsx)["']|import\(\s*["'][^"']+\.(ts|tsx)["']\s*\)/;
+  const extGroup = extensions.join("|");
+  const tsImportRe = new RegExp(
+    `from\\s+["'][^"']+\\.(${extGroup})["']|import\\(\\s*["'][^"']+\\.(${extGroup})["']\\s*\\)`,
+  );
   for (const file of files) {
     const text = await readFile(file, "utf8").catch(() => "");
-    // Heuristic: skip tests that import .ts modules when the runtime can't strip types.
+    // Heuristic: skip tests that import TypeScript modules when the runtime can't execute them.
     if (tsImportRe.test(text)) continue;
     out.push(file);
   }
@@ -327,7 +350,7 @@ async function filterTypeScriptImportTests(files) {
  * is not installed.
  *
  * @param {string[]} files
- * @param {{ canStripTypes: boolean }} opts
+ * @param {{ canStripTypes: boolean, canExecuteTsx: boolean }} opts
  */
 async function filterExternalDependencyTests(files, opts) {
   /** @type {Map<string, boolean>} */
@@ -360,7 +383,9 @@ async function filterExternalDependencyTests(files, opts) {
   // without `node_modules` installed.
   const importMetaUrlRe = /\bnew\s+URL\(\s*["']([^"']+)["']\s*,\s*import\.meta\.url\s*\)/g;
 
-  const candidateExtensions = [".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".json"];
+  const candidateExtensions = opts.canExecuteTsx
+    ? [".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".json"]
+    : [".js", ".ts", ".mjs", ".cjs", ".jsx", ".json"];
 
   function isBuiltin(specifier) {
     if (specifier.startsWith("node:")) return true;
@@ -495,7 +520,17 @@ async function filterExternalDependencyTests(files, opts) {
         // for dependency analysis too.
         if (opts.canStripTypes && (ext === ".js" || ext === ".jsx")) {
           const baseNoExt = base.slice(0, -ext.length);
-          const fallbacks = ext === ".jsx" ? [".tsx", ".ts"] : [".ts", ".tsx"];
+          /** @type {string[]} */
+          const fallbacks = [];
+          if (ext === ".jsx") {
+            // `.jsx` specifiers are treated as a TSX convention when running with a
+            // TypeScript transpile loader.
+            if (opts.canExecuteTsx) fallbacks.push(".tsx");
+          } else {
+            fallbacks.push(".ts");
+            if (opts.canExecuteTsx) fallbacks.push(".tsx");
+          }
+
           for (const fallbackExt of fallbacks) {
             const candidate = `${baseNoExt}${fallbackExt}`;
             try {
@@ -644,7 +679,7 @@ async function filterExternalDependencyTests(files, opts) {
  * We conservatively skip tests that depend on missing `@formula/*` imports.
  *
  * @param {string[]} files
- * @param {{ canStripTypes: boolean }} opts
+ * @param {{ canStripTypes: boolean, canExecuteTsx: boolean }} opts
  */
 async function filterMissingWorkspaceDependencyTests(files, opts) {
   /** @type {Map<string, boolean>} */
@@ -664,7 +699,9 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
 
   const importFromRe = /\b(?:import|export)\s+(type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
   const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
-  const candidateExtensions = [".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".json"];
+  const candidateExtensions = opts.canExecuteTsx
+    ? [".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".json"]
+    : [".js", ".ts", ".mjs", ".cjs", ".jsx", ".json"];
 
   function isBuiltin(specifier) {
     if (specifier.startsWith("node:")) return true;
@@ -729,7 +766,14 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
         // often point at `.ts`/`.tsx` sources.
         if (opts.canStripTypes && (ext === ".js" || ext === ".jsx")) {
           const baseNoExt = base.slice(0, -ext.length);
-          const fallbacks = ext === ".jsx" ? [".tsx", ".ts"] : [".ts", ".tsx"];
+          /** @type {string[]} */
+          const fallbacks = [];
+          if (ext === ".jsx") {
+            if (opts.canExecuteTsx) fallbacks.push(".tsx");
+          } else {
+            fallbacks.push(".ts");
+            if (opts.canExecuteTsx) fallbacks.push(".tsx");
+          }
           for (const fallbackExt of fallbacks) {
             const candidate = `${baseNoExt}${fallbackExt}`;
             try {

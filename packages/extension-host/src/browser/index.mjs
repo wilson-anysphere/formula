@@ -2903,6 +2903,11 @@ class BrowserExtensionHost {
       const selection = data.selection;
       if (!selection || typeof selection !== "object") return data;
 
+      // If the host already marked the payload as truncated, preserve whatever partial
+      // matrices it included. Some hosts send "huge range + small values matrix" events
+      // (with `truncated: true`) to avoid allocating the full selection.
+      if (selection.truncated === true) return data;
+
       // Prefer numeric coords, but fall back to parsing A1 address when needed.
       let coords = null;
       const looksLikeRange =

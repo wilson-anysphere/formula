@@ -5,7 +5,7 @@
  * -------
  * Many TS sources in this repo follow the "TS source imports .js specifiers" pattern:
  *   import { foo } from "./foo.js";
- * while the source file on disk is `foo.ts` (or `foo.tsx`).
+ * while the source file on disk is `foo.ts`.
  *
  * Bundlers (and TypeScript's `moduleResolution: "Bundler"`) understand this, but
  * Node's default ESM resolver does not. When we run `.test.js` files directly via
@@ -23,7 +23,9 @@
  *
  * Notes
  * -----
- * - We rely on Node's `--experimental-strip-types` to execute the `.ts`/`.tsx` files.
+ * - This loader is only used when `scripts/run-node-tests.mjs` is running via Node's
+ *   built-in TypeScript "strip types" support. That mode only supports `.ts` files
+ *   (Node does not execute `.tsx`/JSX without an additional transpile loader).
  * - The loader is intentionally dependency-free (no `typescript` package) so it can
  *   run in constrained environments.
  */
@@ -81,9 +83,8 @@ export async function resolve(specifier, context, defaultResolve) {
   }
 
   const isJs = base.endsWith(".js");
-  const isJsx = base.endsWith(".jsx");
   const isExtensionless = !hasExtension(base);
-  if (!isJs && !isJsx && !isExtensionless) {
+  if (!isJs && !isExtensionless) {
     return defaultResolve(specifier, context, defaultResolve);
   }
 
@@ -92,20 +93,17 @@ export async function resolve(specifier, context, defaultResolve) {
   } catch (err) {
     if (!isResolutionMiss(err)) throw err;
 
-    if (isJs || isJsx) {
-      const baseNoExt = isJs ? base.slice(0, -3) : base.slice(0, -4);
-      const candidates = isJs ? [".ts", ".tsx"] : [".tsx", ".ts"];
-      for (const ext of candidates) {
-        try {
-          return await defaultResolve(`${baseNoExt}${ext}${suffix}`, context, defaultResolve);
-        } catch (candidateErr) {
-          if (!isResolutionMiss(candidateErr)) throw candidateErr;
-        }
+    if (isJs) {
+      const baseNoExt = base.slice(0, -3);
+      try {
+        return await defaultResolve(`${baseNoExt}.ts${suffix}`, context, defaultResolve);
+      } catch (candidateErr) {
+        if (!isResolutionMiss(candidateErr)) throw candidateErr;
       }
     }
 
     if (isExtensionless) {
-      for (const ext of [".ts", ".tsx", ".js"]) {
+      for (const ext of [".ts", ".js"]) {
         try {
           return await defaultResolve(`${base}${ext}${suffix}`, context, defaultResolve);
         } catch (candidateErr) {
@@ -114,7 +112,7 @@ export async function resolve(specifier, context, defaultResolve) {
       }
 
       // Directory imports: `./foo` -> `./foo/index.ts` (bundler-style resolution).
-      for (const idx of ["index.ts", "index.tsx", "index.js"]) {
+      for (const idx of ["index.ts", "index.js"]) {
         try {
           return await defaultResolve(`${base}/${idx}${suffix}`, context, defaultResolve);
         } catch (candidateErr) {
