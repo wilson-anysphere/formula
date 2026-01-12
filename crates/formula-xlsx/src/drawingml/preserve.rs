@@ -490,7 +490,7 @@ impl XlsxPackage {
 
             let sheet_xml_str = std::str::from_utf8(&sheet_xml)
                 .map_err(|e| ChartExtractionError::XmlNonUtf8(sheet.part_name.clone(), e))?;
-            if sheet_xml_str.contains("<drawingHF") {
+            if xml_contains_local_element(sheet_xml_str, "drawingHF") {
                 continue;
             }
 
@@ -548,7 +548,7 @@ impl XlsxPackage {
 
             let sheet_xml_str = std::str::from_utf8(&sheet_xml)
                 .map_err(|e| ChartExtractionError::XmlNonUtf8(sheet.part_name.clone(), e))?;
-            if sheet_xml_str.contains("<picture") {
+            if xml_contains_local_element(sheet_xml_str, "picture") {
                 continue;
             }
 
@@ -589,7 +589,7 @@ impl XlsxPackage {
 
             let sheet_xml_str = std::str::from_utf8(&sheet_xml)
                 .map_err(|e| ChartExtractionError::XmlNonUtf8(sheet.part_name.clone(), e))?;
-            if sheet_xml_str.contains("<oleObjects") {
+            if xml_contains_local_element(sheet_xml_str, "oleObjects") {
                 continue;
             }
 
@@ -634,7 +634,7 @@ impl XlsxPackage {
 
             let sheet_xml_str = std::str::from_utf8(&sheet_xml)
                 .map_err(|e| ChartExtractionError::XmlNonUtf8(sheet.part_name.clone(), e))?;
-            if sheet_xml_str.contains("<controls") {
+            if xml_contains_local_element(sheet_xml_str, "controls") {
                 continue;
             }
 
@@ -771,6 +771,60 @@ fn is_drawing_adjacent_relationship(rel_type: &str, resolved_target: &str) -> bo
     PREFIXES
         .iter()
         .any(|prefix| resolved_target.starts_with(prefix))
+}
+
+fn xml_contains_local_element(xml: &str, local: &str) -> bool {
+    let bytes = xml.as_bytes();
+    let local = local.as_bytes();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+        i += 1;
+        if i >= bytes.len() {
+            break;
+        }
+
+        // Skip processing instructions (`<? ... ?>`) and directives/comments (`<! ... >`).
+        if bytes[i] == b'?' || bytes[i] == b'!' {
+            continue;
+        }
+
+        let mut j = i;
+        if bytes[j] == b'/' {
+            j += 1;
+        }
+        if j >= bytes.len() {
+            break;
+        }
+        if bytes[j] == b'?' || bytes[j] == b'!' {
+            continue;
+        }
+
+        let name_start = j;
+        while j < bytes.len() {
+            match bytes[j] {
+                b' ' | b'\n' | b'\t' | b'\r' | b'>' | b'/' => break,
+                _ => j += 1,
+            }
+        }
+        if name_start == j {
+            continue;
+        }
+
+        let name = &bytes[name_start..j];
+        let local_name = name.rsplit(|b| *b == b':').next().unwrap_or(name);
+        if local_name == local {
+            return true;
+        }
+
+        i = j;
+    }
+
+    false
 }
 
 fn extract_relationship_ids(node: roxmltree::Node<'_, '_>) -> Vec<String> {
