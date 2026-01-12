@@ -2032,6 +2032,22 @@ fn bytecode_backend_matches_ast_for_concatenate_function() {
 }
 
 #[test]
+fn bytecode_backend_concat_function_uses_engine_value_locale_for_number_to_text() {
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+    engine.set_cell_value("Sheet1", "A1", 1.5).unwrap();
+    engine.set_cell_formula("Sheet1", "B1", r#"=CONCAT(A1,"x")"#).unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("1,5x".to_string())
+    );
+    assert_engine_matches_ast(&engine, r#"=CONCAT(A1,"x")"#, "B1");
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_concat_operator_with_numeric_literals() {
     let mut engine = Engine::new();
     engine.set_cell_formula("Sheet1", "A1", "=1&2").unwrap();
@@ -2053,6 +2069,22 @@ fn bytecode_backend_matches_ast_for_concat_operator_with_cell_and_string_literal
     assert_eq!(engine.bytecode_program_count(), 1);
 
     engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, r#"=A1&"x""#, "B1");
+}
+
+#[test]
+fn bytecode_backend_concat_operator_uses_engine_value_locale_for_number_to_text() {
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+    engine.set_cell_value("Sheet1", "A1", 1.5).unwrap();
+    engine.set_cell_formula("Sheet1", "B1", r#"=A1&"x""#).unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("1,5x".to_string())
+    );
     assert_engine_matches_ast(&engine, r#"=A1&"x""#, "B1");
 }
 
