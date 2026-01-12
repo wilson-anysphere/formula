@@ -355,7 +355,7 @@ test.describe("Desktop extension spreadsheet API", () => {
     // Create a second sheet in the underlying DocumentController model so we can activate it.
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
+      const app: any = window.__formulaApp as any;
       if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
       const doc = app.getDocument();
       doc.setCellValue("Sheet2", { row: 0, col: 0 }, "Hello");
@@ -426,7 +426,7 @@ test.describe("Desktop extension spreadsheet API", () => {
 
     const activeSheetId = await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
+      const app: any = window.__formulaApp as any;
       if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
       return app.getCurrentSheetId();
     });
@@ -440,7 +440,7 @@ test.describe("Desktop extension spreadsheet API", () => {
 
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
+      const app: any = window.__formulaApp as any;
       if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
       const doc = app.getDocument();
       doc.setCellValue("Sheet2", { row: 0, col: 0 }, "Hello");
