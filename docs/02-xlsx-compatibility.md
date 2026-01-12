@@ -371,6 +371,7 @@ From a **packaging / round-trip** perspective, the important thing is the relati
    - **Detection strategy**: treat any relationship whose `Target` resolves to `/xl/cellimages.xml` as authoritative, rather than hardcoding a single `Type` URI.
 2. `xl/_rels/cellimages.xml.rels` contains relationships of type `…/relationships/image` pointing at `xl/media/*` files.
    - The relationship `Id` values (e.g. `rId1`) are referenced from within `xl/cellimages.xml` via `r:embed`, so they must be preserved (or updated consistently if rewriting).
+   - Targets are typically relative paths like `media/image1.png` (resolving to `/xl/media/image1.png`), but should be preserved as-is.
 
 #### `[Content_Types].xml` requirements
 
@@ -379,6 +380,10 @@ If `xl/cellimages.xml` is present, the package typically includes an override:
 - `<Override PartName="/xl/cellimages.xml" ContentType="…"/>`
 
 Excel uses a **Microsoft-specific** content type string for this part (the exact string may vary between versions).
+
+Observed in the ecosystem (non-exhaustive; do not hardcode):
+- `application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml`
+- `application/vnd.ms-excel.cellimages+xml`
 
 **Preservation/detection strategy:**
 - Treat any `[Content_Types].xml` `<Override>` with `PartName="/xl/cellimages.xml"` as authoritative.
@@ -419,12 +424,16 @@ Cellimages part referencing an image by relationship id (in `xl/cellimages.xml`)
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<cellImages xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
-            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <cellImage>
-    <a:blip r:embed="rId1"/>
-  </cellImage>
-</cellImages>
+<cx:cellImages xmlns:cx="http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages"
+               xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+               xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <xdr:pic>
+    <xdr:blipFill>
+      <a:blip r:embed="rId1"/>
+    </xdr:blipFill>
+  </xdr:pic>
+</cx:cellImages>
 ```
 
 ---
