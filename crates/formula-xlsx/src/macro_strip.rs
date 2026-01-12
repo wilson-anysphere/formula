@@ -10,6 +10,8 @@ const CUSTOM_UI_REL_TYPES: [&str; 2] = [
     "http://schemas.microsoft.com/office/2007/relationships/ui/extensibility",
 ];
 
+const RELATIONSHIPS_NS: &[u8] = b"http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
 pub(crate) fn strip_macros(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<(), XlsxError> {
     let delete_parts = compute_macro_delete_set(parts)?;
 
@@ -484,6 +486,7 @@ fn strip_relationship_id_references(
     let mut buf = Vec::new();
     let mut changed = false;
     let mut skip_depth = 0usize;
+    let mut namespace_context = NamespaceContext::default();
 
     loop {
         let ev = reader.read_event_into(&mut buf)?;
@@ -502,21 +505,31 @@ fn strip_relationship_id_references(
         match ev {
             Event::Eof => break,
             Event::Start(e) => {
-                if element_has_removed_relationship_id(&e, removed_ids)? {
+                let changes = namespace_context.apply_namespace_decls(&e)?;
+                if element_has_removed_relationship_id(&e, &namespace_context, removed_ids)? {
                     changed = true;
+                    namespace_context.rollback(changes);
                     skip_depth = 1;
                     buf.clear();
                     continue;
                 }
+                namespace_context.push(changes);
                 writer.write_event(Event::Start(e.to_owned()))?;
             }
             Event::Empty(e) => {
-                if element_has_removed_relationship_id(&e, removed_ids)? {
+                let changes = namespace_context.apply_namespace_decls(&e)?;
+                if element_has_removed_relationship_id(&e, &namespace_context, removed_ids)? {
                     changed = true;
+                    namespace_context.rollback(changes);
                     buf.clear();
                     continue;
                 }
+                namespace_context.rollback(changes);
                 writer.write_event(Event::Empty(e.to_owned()))?;
+            }
+            Event::End(e) => {
+                namespace_context.pop();
+                writer.write_event(Event::End(e.to_owned()))?;
             }
             other => writer.write_event(other.into_owned())?,
         }
@@ -533,20 +546,21 @@ fn strip_relationship_id_references(
 
 fn element_has_removed_relationship_id(
     e: &BytesStart<'_>,
+    namespace_context: &NamespaceContext,
     removed_ids: &BTreeSet<String>,
 ) -> Result<bool, XlsxError> {
     for attr in e.attributes().with_checks(false) {
         let attr = attr?;
         let key = attr.key.as_ref();
-        if !key.contains(&b':') {
+
+        if key == b"xmlns" || key.starts_with(b"xmlns:") {
             continue;
         }
-        let local = crate::openxml::local_name(key);
-        if !local.eq_ignore_ascii_case(b"id")
-            && !local.eq_ignore_ascii_case(b"embed")
-            && !local.eq_ignore_ascii_case(b"relid")
-            && !local.eq_ignore_ascii_case(b"link")
-        {
+
+        let (prefix, local) = split_prefixed_name(key);
+        let namespace_uri = prefix.and_then(|p| namespace_context.namespace_for_prefix(p));
+
+        if !is_relationship_id_attribute(namespace_uri, local) {
             continue;
         }
         let value = attr.unescape_value()?;
@@ -555,6 +569,31 @@ fn element_has_removed_relationship_id(
         }
     }
     Ok(false)
+}
+
+fn split_prefixed_name(name: &[u8]) -> (Option<&[u8]>, &[u8]) {
+    match name.iter().position(|b| *b == b':') {
+        Some(idx) => (Some(&name[..idx]), &name[idx + 1..]),
+        None => (None, name),
+    }
+}
+
+fn is_relationship_id_attribute(namespace_uri: Option<&[u8]>, local_name: &[u8]) -> bool {
+    // Be defensive: VML/Office markup commonly uses `o:relid`, but some documents use other
+    // prefixes or even no prefix at all. If the local-name is `relid` we treat it as a
+    // relationship pointer regardless of namespace.
+    if local_name.eq_ignore_ascii_case(b"relid") {
+        return true;
+    }
+
+    match namespace_uri {
+        Some(ns) if ns == RELATIONSHIPS_NS => {
+            local_name.eq_ignore_ascii_case(b"id")
+                || local_name.eq_ignore_ascii_case(b"embed")
+                || local_name.eq_ignore_ascii_case(b"link")
+        }
+        _ => false,
+    }
 }
 
 fn source_part_from_rels_part(rels_part: &str) -> Option<String> {
@@ -580,6 +619,67 @@ fn source_part_from_rels_part(rels_part: &str) -> Option<String> {
 struct RelationshipGraph {
     outgoing: BTreeMap<String, BTreeSet<String>>,
     inbound: BTreeMap<String, BTreeSet<String>>,
+}
+
+#[derive(Debug, Default)]
+struct NamespaceContext {
+    /// prefix -> namespace URI
+    prefixes: BTreeMap<Vec<u8>, Vec<u8>>,
+    /// Stack of prefix changes for each started element that was written.
+    stack: Vec<Vec<(Vec<u8>, Option<Vec<u8>>)>>,
+}
+
+impl NamespaceContext {
+    fn apply_namespace_decls(&mut self, e: &BytesStart<'_>) -> Result<Vec<(Vec<u8>, Option<Vec<u8>>)>, XlsxError> {
+        let mut changes = Vec::new();
+
+        for attr in e.attributes().with_checks(false) {
+            let attr = attr?;
+            let key = attr.key.as_ref();
+
+            // Default namespace (`xmlns="..."`) affects element names, but not attributes.
+            if key == b"xmlns" {
+                continue;
+            }
+
+            let Some(prefix) = key.strip_prefix(b"xmlns:") else {
+                continue;
+            };
+
+            let uri = attr.unescape_value()?.into_owned().into_bytes();
+            let old = self.prefixes.insert(prefix.to_vec(), uri);
+            changes.push((prefix.to_vec(), old));
+        }
+
+        Ok(changes)
+    }
+
+    fn rollback(&mut self, changes: Vec<(Vec<u8>, Option<Vec<u8>>)>) {
+        for (prefix, old) in changes.into_iter().rev() {
+            match old {
+                Some(uri) => {
+                    self.prefixes.insert(prefix, uri);
+                }
+                None => {
+                    self.prefixes.remove(&prefix);
+                }
+            }
+        }
+    }
+
+    fn push(&mut self, changes: Vec<(Vec<u8>, Option<Vec<u8>>)>) {
+        self.stack.push(changes);
+    }
+
+    fn pop(&mut self) {
+        if let Some(changes) = self.stack.pop() {
+            self.rollback(changes);
+        }
+    }
+
+    fn namespace_for_prefix(&self, prefix: &[u8]) -> Option<&[u8]> {
+        self.prefixes.get(prefix).map(Vec::as_slice)
+    }
 }
 
 impl RelationshipGraph {
@@ -693,32 +793,51 @@ fn parse_relationship_id_references(xml: &[u8]) -> Result<BTreeSet<String>, Xlsx
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
     let mut out = BTreeSet::new();
+    let mut namespace_context = NamespaceContext::default();
 
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Eof => break,
-            Event::Start(ref e) | Event::Empty(ref e) => {
-                for attr in e.attributes().with_checks(false) {
-                    let attr = attr?;
-                    let key = attr.key.as_ref();
-                    if !key.contains(&b':') {
-                        continue;
-                    }
-                    let local = crate::openxml::local_name(key);
-                    if !local.eq_ignore_ascii_case(b"id")
-                        && !local.eq_ignore_ascii_case(b"embed")
-                        && !local.eq_ignore_ascii_case(b"relid")
-                        && !local.eq_ignore_ascii_case(b"link")
-                    {
-                        continue;
-                    }
-                    out.insert(attr.unescape_value()?.into_owned());
-                }
+            Event::Start(ref e) => {
+                let changes = namespace_context.apply_namespace_decls(e)?;
+                collect_relationship_id_attrs(e, &namespace_context, &mut out)?;
+                namespace_context.push(changes);
             }
+            Event::Empty(ref e) => {
+                let changes = namespace_context.apply_namespace_decls(e)?;
+                collect_relationship_id_attrs(e, &namespace_context, &mut out)?;
+                namespace_context.rollback(changes);
+            }
+            Event::End(_) => namespace_context.pop(),
             _ => {}
         }
         buf.clear();
     }
 
     Ok(out)
+}
+
+#[cfg(test)]
+fn collect_relationship_id_attrs(
+    e: &BytesStart<'_>,
+    namespace_context: &NamespaceContext,
+    out: &mut BTreeSet<String>,
+) -> Result<(), XlsxError> {
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        let key = attr.key.as_ref();
+
+        if key == b"xmlns" || key.starts_with(b"xmlns:") {
+            continue;
+        }
+
+        let (prefix, local) = split_prefixed_name(key);
+        let namespace_uri = prefix.and_then(|p| namespace_context.namespace_for_prefix(p));
+        if !is_relationship_id_attribute(namespace_uri, local) {
+            continue;
+        }
+        out.insert(attr.unescape_value()?.into_owned());
+    }
+
+    Ok(())
 }
