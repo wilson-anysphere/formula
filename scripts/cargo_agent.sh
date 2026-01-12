@@ -157,6 +157,9 @@ if [[ -z "${CI:-}" && -z "${OPENSSL_NO_VENDOR:-}" && -z "${FORMULA_OPENSSL_VENDO
     allow_system_openssl=0
   else
     for arg in "$@"; do
+      if [[ "${arg}" == "--" ]]; then
+        break
+      fi
       case "${arg}" in
         --target|--target=*)
           allow_system_openssl=0
