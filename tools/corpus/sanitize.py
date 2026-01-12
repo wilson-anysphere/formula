@@ -566,6 +566,8 @@ def _sanitize_relationships(
     if root.tag != qn(NS_REL, "Relationships"):
         return xml
 
+    removed_lower = {p.lower() for p in removed_parts}
+
     to_remove: list[ET.Element] = []
     for rel in list(root):
         if rel.tag != qn(NS_REL, "Relationship"):
@@ -582,7 +584,10 @@ def _sanitize_relationships(
             continue
 
         resolved = _resolve_rel_target(rels_part_name, target)
-        if resolved in removed_parts:
+        # Be best-effort about part name casing. OOXML part names are case-sensitive in ZIPs,
+        # but Excel's writers/readers are not always consistent. If the sanitizer removed a
+        # part, drop relationships to any case variant of that part name.
+        if resolved in removed_parts or resolved.lower() in removed_lower:
             to_remove.append(rel)
 
     for rel in to_remove:
@@ -596,6 +601,8 @@ def _sanitize_content_types(xml: bytes, *, removed_parts: set[str]) -> bytes:
     if root.tag != qn(NS_CT, "Types"):
         return xml
 
+    removed_lower = {p.lower() for p in removed_parts}
+
     to_remove: list[ET.Element] = []
     for child in list(root):
         if child.tag != qn(NS_CT, "Override"):
@@ -603,7 +610,7 @@ def _sanitize_content_types(xml: bytes, *, removed_parts: set[str]) -> bytes:
         part_name = child.attrib.get("PartName", "")
         if not part_name.startswith("/"):
             continue
-        if part_name.lstrip("/") in removed_parts:
+        if part_name.lstrip("/") in removed_parts or part_name.lstrip("/").lower() in removed_lower:
             to_remove.append(child)
 
     for child in to_remove:

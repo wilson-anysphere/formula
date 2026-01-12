@@ -435,7 +435,7 @@ def _make_minimal_xlsx_with_cell_images() -> bytes:
   <Default Extension="png" ContentType="image/png"/>
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-  <Override PartName="/xl/cellimages.xml" ContentType="application/vnd.ms-excel.cellimages+xml"/>
+  <Override PartName="/xl/cellImages.xml" ContentType="application/vnd.ms-excel.cellimages+xml"/>
 </Types>
 """,
         )
@@ -463,7 +463,7 @@ def _make_minimal_xlsx_with_cell_images() -> bytes:
             """<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.microsoft.com/office/2022/relationships/cellImages" Target="cellimages.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.microsoft.com/office/2022/relationships/cellImages" Target="cellImages.xml"/>
 </Relationships>
 """,
         )
