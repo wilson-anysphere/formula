@@ -11,6 +11,11 @@ class TriageFeatureScanTests(unittest.TestCase):
         self.assertIn("has_cell_images", features)
         self.assertTrue(features["has_cell_images"])
 
+    def test_scan_features_detects_cell_images_case_insensitively(self) -> None:
+        features = _scan_features(["XL/CellImages1.XML"])
+        self.assertIn("has_cell_images", features)
+        self.assertTrue(features["has_cell_images"])
+
     def test_scan_features_detects_cell_images_in_folder_layout(self) -> None:
         features = _scan_features(["xl/cellImages/cellImages.xml"])
         self.assertIn("has_cell_images", features)
