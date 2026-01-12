@@ -112,7 +112,7 @@ test.describe("ribbon File save (tauri)", () => {
     });
 
     await page.waitForFunction(() => (window as any).__tauriDialogOpenCalls === 1);
-    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+    await page.waitForFunction(async () => (await (window.__formulaApp as any).getCellValueA1("A1")) === "Hello");
 
     // Start editing A1 but do not commit (no Enter).
     // In the Tauri-stubbed environment, pointer events may be contended by async
@@ -142,7 +142,7 @@ test.describe("ribbon File save (tauri)", () => {
     await expect(editor).toBeHidden();
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
-    const value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    const value = await page.evaluate(() => (window.__formulaApp as any).getCellValueA1("A1"));
     expect(value).toBe("Unsaved");
 
     const invokes = await page.evaluate(() => (window as any).__tauriInvokes as Array<{ cmd: string; args: any }>);

@@ -164,7 +164,9 @@ test.describe("tauri native menu integration", () => {
     await page.waitForFunction(() => (window as any).__tauriDialogOpenCalls === 1);
     // `menu-open` triggers an async workbook load; wait for the value to be materialized
     // in the app state (not just for the menu handler to be invoked).
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1")), { timeout: 20_000 }).toBe("Hello");
+    await expect
+      .poll(() => page.evaluate(() => (window.__formulaApp as any).getCellValueA1("A1")), { timeout: 20_000 })
+      .toBe("Hello");
     await expect(page.getByTestId("active-value")).toHaveText("Hello");
 
     // Menu Edit items should work while editing text (formula bar).

@@ -63,6 +63,29 @@ test.describe("sheet reorder", () => {
                 return null;
               }
 
+              case "reorder_sheets": {
+                const desiredRaw = args?.sheet_ids;
+                const desired = Array.isArray(desiredRaw) ? desiredRaw.map((id) => String(id ?? "")) : [];
+                const existing = readOrder();
+                const existingSet = new Set(existing);
+                const seen = new Set<string>();
+                const next: string[] = [];
+                for (const id of desired) {
+                  const trimmed = id.trim();
+                  if (!trimmed) continue;
+                  if (!existingSet.has(trimmed)) continue;
+                  if (seen.has(trimmed)) continue;
+                  seen.add(trimmed);
+                  next.push(trimmed);
+                }
+                for (const id of existing) {
+                  if (seen.has(id)) continue;
+                  next.push(id);
+                }
+                writeOrder(next);
+                return null;
+              }
+
               case "set_macro_ui_context":
                 return null;
 
@@ -118,7 +141,7 @@ test.describe("sheet reorder", () => {
     const expectSheetPositionMatchesTabOrder = async () => {
       const [order, activeSheetId] = await Promise.all([
         tabOrder(),
-        page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId()),
+        page.evaluate(() => (window.__formulaApp as any).getCurrentSheetId()),
       ]);
       const idx = order.indexOf(activeSheetId);
       expect(idx).toBeGreaterThanOrEqual(0);
@@ -246,6 +269,29 @@ test.describe("sheet reorder", () => {
                 return null;
               }
 
+              case "reorder_sheets": {
+                const desiredRaw = args?.sheet_ids;
+                const desired = Array.isArray(desiredRaw) ? desiredRaw.map((id) => String(id ?? "")) : [];
+                const existing = readOrder();
+                const existingSet = new Set(existing);
+                const seen = new Set<string>();
+                const next: string[] = [];
+                for (const id of desired) {
+                  const trimmed = id.trim();
+                  if (!trimmed) continue;
+                  if (!existingSet.has(trimmed)) continue;
+                  if (seen.has(trimmed)) continue;
+                  seen.add(trimmed);
+                  next.push(trimmed);
+                }
+                for (const id of existing) {
+                  if (seen.has(id)) continue;
+                  next.push(id);
+                }
+                writeOrder(next);
+                return null;
+              }
+
               case "set_macro_ui_context":
                 return null;
 
@@ -340,7 +386,7 @@ test.describe("sheet reorder", () => {
 
     // Undo the reorder (doc-driven, store sync runs with syncingSheetUi=true).
     await page.evaluate(() => {
-      (window as any).__formulaApp.undo();
+      (window.__formulaApp as any).undo();
     });
 
     await page.waitForFunction(() => {

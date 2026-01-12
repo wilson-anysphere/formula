@@ -146,7 +146,7 @@ test.describe("Desktop Marketplace (browser/IndexedDB install)", () => {
     // Seed a selection so sumSelection has something to operate on.
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
+      const app: any = window.__formulaApp as any;
       if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
       const doc = app.getDocument();
       const sheetId = app.getCurrentSheetId();
@@ -184,7 +184,7 @@ test.describe("Desktop Marketplace (browser/IndexedDB install)", () => {
     await page.getByTestId("run-command-sampleHello.sumSelection").dispatchEvent("click");
 
     await expect
-      .poll(async () => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A3")), { timeout: 60_000 })
+      .poll(async () => page.evaluate(() => (window.__formulaApp as any).getCellValueA1("A3")), { timeout: 60_000 })
       .toBe("10");
   });
 });

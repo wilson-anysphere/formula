@@ -192,7 +192,7 @@ test.describe("extension workbook events (tauri UI flows)", () => {
     await page.evaluate(() => {
       (window as any).__tauriListeners["menu-open"]({ payload: null });
     });
-    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+    await page.waitForFunction(async () => (await (window.__formulaApp as any).getCellValueA1("A1")) === "Hello");
 
     // Trigger save-as -> save_workbook.
     await page.evaluate(() => {

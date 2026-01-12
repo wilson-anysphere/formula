@@ -107,7 +107,7 @@ test.describe("sheet tab context menu (tauri persistence)", () => {
     // Create a second sheet (Sheet2) via the DocumentController so we can exercise
     // hide/unhide + tab color persistence hooks.
     await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
     });
 

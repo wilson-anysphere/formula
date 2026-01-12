@@ -40,10 +40,10 @@ print("Hello from Python")
         await expect(panel.getByTestId("python-panel-output")).toContainText("Hello from Python", { timeout: 120_000 });
 
         await expect
-          .poll(async () => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1")))
+          .poll(async () => page.evaluate(() => (window.__formulaApp as any).getCellValueA1("A1")))
           .toBe("777");
         await expect
-          .poll(async () => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A2")))
+          .poll(async () => page.evaluate(() => (window.__formulaApp as any).getCellValueA1("A2")))
           .toBe("1554");
         break;
       } catch (err) {
