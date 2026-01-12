@@ -77,6 +77,10 @@ pub fn write_workbook_sheets(
     workbook_xml: &str,
     sheets: &[WorkbookSheetInfo],
 ) -> Result<String, XlsxError> {
+    let (sheet_tag, rel_id_attr) = detect_workbook_sheet_qnames(workbook_xml)?;
+    let sheet_tag = sheet_tag.unwrap_or_else(|| "sheet".to_string());
+    let rel_id_attr = rel_id_attr.unwrap_or_else(|| "r:id".to_string());
+
     let mut reader = Reader::from_str(workbook_xml);
     reader.config_mut().trim_text(false);
 
@@ -96,7 +100,11 @@ pub fn write_workbook_sheets(
                 replaced_sheets = true;
                 writer.write_event(Event::Start(e.to_owned()))?;
                 for sheet in sheets {
-                    writer.write_event(Event::Empty(build_sheet_element(sheet)))?;
+                    writer.write_event(Event::Empty(build_sheet_element(
+                        sheet_tag.as_str(),
+                        rel_id_attr.as_str(),
+                        sheet,
+                    )))?;
                 }
             }
             Event::Empty(ref e) if in_sheets && e.local_name().as_ref() == b"sheet" => {}
@@ -128,17 +136,88 @@ pub fn write_workbook_sheets(
     Ok(String::from_utf8(writer.into_inner())?)
 }
 
-fn build_sheet_element(sheet: &WorkbookSheetInfo) -> BytesStart<'static> {
-    let mut elem = BytesStart::new("sheet");
+fn build_sheet_element(
+    tag: &str,
+    rel_id_attr: &str,
+    sheet: &WorkbookSheetInfo,
+) -> BytesStart<'static> {
+    let mut elem = BytesStart::new(tag).into_owned();
     elem.push_attribute(("name", sheet.name.as_str()));
     elem.push_attribute(("sheetId", sheet.sheet_id.to_string().as_str()));
-    elem.push_attribute(("r:id", sheet.rel_id.as_str()));
+    elem.push_attribute((rel_id_attr, sheet.rel_id.as_str()));
     match sheet.visibility {
         SheetVisibility::Visible => {}
         SheetVisibility::Hidden => elem.push_attribute(("state", "hidden")),
         SheetVisibility::VeryHidden => elem.push_attribute(("state", "veryHidden")),
     }
     elem
+}
+
+fn detect_workbook_sheet_qnames(
+    workbook_xml: &str,
+) -> Result<(Option<String>, Option<String>), XlsxError> {
+    let mut reader = Reader::from_str(workbook_xml);
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    let mut sheets_prefix: Option<String> = None;
+    let mut sheet_tag: Option<String> = None;
+    let mut rel_id_attr: Option<String> = None;
+    let mut in_sheets = false;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(ref e) if e.local_name().as_ref() == b"sheets" => {
+                if sheets_prefix.is_none() {
+                    sheets_prefix = name_prefix(e.name().as_ref());
+                }
+                in_sheets = true;
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"sheets" => {
+                if sheets_prefix.is_none() {
+                    sheets_prefix = name_prefix(e.name().as_ref());
+                }
+            }
+            Event::End(ref e) if e.local_name().as_ref() == b"sheets" => {
+                in_sheets = false;
+            }
+            Event::Start(ref e) | Event::Empty(ref e)
+                if in_sheets && e.local_name().as_ref() == b"sheet" =>
+            {
+                if sheet_tag.is_none() {
+                    sheet_tag = Some(String::from_utf8_lossy(e.name().as_ref()).into_owned());
+                }
+                if rel_id_attr.is_none() {
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        let key = attr.key.as_ref();
+                        if key == b"id" || key.ends_with(b":id") {
+                            rel_id_attr = std::str::from_utf8(key).ok().map(|s| s.to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        if sheet_tag.is_some() && rel_id_attr.is_some() {
+            break;
+        }
+        buf.clear();
+    }
+
+    let sheet_tag =
+        sheet_tag.or_else(|| Some(crate::xml::prefixed_tag(sheets_prefix.as_deref(), "sheet")));
+
+    Ok((sheet_tag, rel_id_attr))
+}
+
+fn name_prefix(name: &[u8]) -> Option<String> {
+    name.iter()
+        .rposition(|b| *b == b':')
+        .and_then(|idx| std::str::from_utf8(&name[..idx]).ok())
+        .map(|s| s.to_string())
 }
 
 pub fn parse_sheet_tab_color(worksheet_xml: &str) -> Result<Option<TabColor>, XlsxError> {
@@ -438,6 +517,47 @@ mod tests {
         let rewritten = write_workbook_sheets(workbook_xml, &updated).unwrap();
         let reparsed = parse_workbook_sheets(&rewritten).unwrap();
         assert_eq!(reparsed, updated);
+    }
+
+    #[test]
+    fn workbook_sheets_rewrite_preserves_prefix_only_namespaces() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+            xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:sheets>
+    <x:sheet name="Sheet1" sheetId="1" rel:id="rId1"/>
+    <x:sheet name="Sheet2" sheetId="2" rel:id="rId2"/>
+  </x:sheets>
+</x:workbook>
+"#;
+
+        let sheets = vec![
+            WorkbookSheetInfo {
+                name: "Sheet1".to_string(),
+                sheet_id: 1,
+                rel_id: "rId1".to_string(),
+                visibility: SheetVisibility::Visible,
+            },
+            WorkbookSheetInfo {
+                name: "Sheet2".to_string(),
+                sheet_id: 2,
+                rel_id: "rId2".to_string(),
+                visibility: SheetVisibility::Visible,
+            },
+        ];
+
+        let mut updated = sheets.clone();
+        updated.swap(0, 1);
+        updated[0].name = "Renamed".to_string();
+        updated[0].visibility = SheetVisibility::Hidden;
+
+        let rewritten = write_workbook_sheets(workbook_xml, &updated).unwrap();
+
+        roxmltree::Document::parse(&rewritten).expect("rewritten workbook.xml should be valid XML");
+        assert!(rewritten.contains("<x:sheet name="));
+        assert!(!rewritten.contains("<sheet name="));
+        assert!(rewritten.contains("rel:id="));
+        assert!(!rewritten.contains(" r:id="));
     }
 
     #[test]
