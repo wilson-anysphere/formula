@@ -28,8 +28,9 @@ fn build_partial_zip_with_vm_cell() -> Vec<u8> {
 
 fn build_minimal_xlsx() -> Vec<u8> {
     // The low-level streaming patcher preserves `vm` when patching "partial" ZIPs that only
-    // contain worksheet XML. Include a minimal `[Content_Types].xml` so this fixture exercises
-    // the full workbook behavior where patched cells drop `vm`.
+    // contain worksheet XML (no `xl/workbook.xml`). Include `xl/workbook.xml` (and a minimal
+    // `[Content_Types].xml`) so this fixture exercises the full-workbook behavior where patched
+    // cells drop `vm`.
     let content_types_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="xml" ContentType="application/xml"/>

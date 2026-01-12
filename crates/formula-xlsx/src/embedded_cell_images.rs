@@ -25,7 +25,10 @@ pub struct EmbeddedCellImage {
     pub image_part: String,
     /// Raw bytes for the image file.
     pub image_bytes: Vec<u8>,
-    /// Rich value CalcOrigin (observed values: `5` normal, `6` decorative).
+    /// Rich value `CalcOrigin` flag (Excel-specific; observed values include `5` and `6`).
+    ///
+    /// The exact meaning of this field is not publicly documented; treat it as opaque metadata and
+    /// preserve it when round-tripping.
     pub calc_origin: u32,
     /// Optional alternative text.
     pub alt_text: Option<String>,

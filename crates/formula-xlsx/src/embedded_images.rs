@@ -45,10 +45,11 @@ pub struct EmbeddedImageCell {
     pub image_target: String,
     pub bytes: Vec<u8>,
     pub alt_text: Option<String>,
-    /// Whether the image is marked as decorative.
+    /// Whether the image appears to be marked as decorative.
     ///
-    /// Derived from the `CalcOrigin` field in rich value data (`5` for decorative, `6` for
-    /// informative images with alt text).
+    /// This is derived from the rich value `CalcOrigin` field using observed workbook behavior
+    /// (`CalcOrigin == 5` is treated as decorative in this codebase's fixtures). The full enum is
+    /// not publicly documented; treat this as best-effort.
     pub decorative: bool,
 }
 
