@@ -347,6 +347,12 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
             if !has_workbook_stream {
                 return Ok(WorkbookFormat::Unknown);
             }
+            // Some arbitrary OLE containers can contain a stream named `Workbook`/`Book`. Only
+            // treat the file as a legacy Excel workbook when that stream actually looks like a
+            // BIFF workbook stream (starts with a BOF record).
+            if matches!(ole_workbook_stream_starts_with_biff_bof(&mut ole), Some(false)) {
+                return Ok(WorkbookFormat::Unknown);
+            }
 
             if ole_workbook_has_biff_filepass_record(&mut ole) {
                 return Err(Error::EncryptedWorkbook {
@@ -517,6 +523,18 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
                 // Not an Excel BIFF workbook. Fall back to extension-based dispatch so callers get
                 // the most specific open error (e.g. `OpenXlsx` for a `.xlsx` file that is actually
                 // some other OLE container).
+                if let Some(fmt) = ext_format {
+                    return Ok(fmt);
+                }
+                return Err(Error::UnsupportedExtension {
+                    path: path.to_path_buf(),
+                    extension: ext,
+                });
+            }
+            // Some arbitrary OLE containers can contain a stream named `Workbook`/`Book`. Only
+            // treat the file as a legacy Excel workbook when that stream actually looks like a
+            // BIFF workbook stream (starts with a BOF record).
+            if matches!(ole_workbook_stream_starts_with_biff_bof(&mut ole), Some(false)) {
                 if let Some(fmt) = ext_format {
                     return Ok(fmt);
                 }
@@ -727,6 +745,39 @@ fn stream_exists<R: std::io::Read + std::io::Write + std::io::Seek>(
     }
     let with_leading_slash = format!("/{name}");
     ole.open_stream(&with_leading_slash).is_ok()
+}
+
+/// Return `Some(true)` when the OLE `Workbook`/`Book` stream starts with a BIFF `BOF` record.
+///
+/// Returns:
+/// - `Some(true)`  => stream looks like BIFF (starts with BOF)
+/// - `Some(false)` => stream is present but does *not* look like BIFF
+/// - `None`        => stream couldn't be opened or read (treat as "unknown"; callers should be
+///   conservative and avoid rejecting potentially-corrupt but otherwise valid `.xls` files)
+fn ole_workbook_stream_starts_with_biff_bof<R: std::io::Read + std::io::Write + std::io::Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+) -> Option<bool> {
+    use std::io::Read as _;
+
+    let mut stream = None;
+    for candidate in ["Workbook", "/Workbook", "Book", "/Book"] {
+        if let Ok(s) = ole.open_stream(candidate) {
+            stream = Some(s);
+            break;
+        }
+    }
+    let mut stream = stream?;
+
+    let mut header = [0u8; 4];
+    if stream.read_exact(&mut header).is_err() {
+        return None;
+    }
+
+    let record_id = u16::from_le_bytes([header[0], header[1]]);
+    Some(matches!(
+        record_id,
+        BIFF_RECORD_BOF_BIFF8 | BIFF_RECORD_BOF_BIFF5
+    ))
 }
 
 fn ole_workbook_has_biff_filepass_record<R: std::io::Read + std::io::Write + std::io::Seek>(

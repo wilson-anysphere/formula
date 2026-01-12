@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 
 use formula_io::{detect_workbook_format, open_workbook, open_workbook_model, Error, WorkbookFormat};
 
@@ -12,6 +12,28 @@ fn non_xls_ole_bytes() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+fn non_biff_workbook_stream_ole_bytes() -> Vec<u8> {
+    // OLE container with a stream named `Workbook`, but where the stream bytes do *not* start with
+    // a BIFF BOF record.
+    //
+    // This guards against false-positive `.xls` classification for arbitrary OLE containers that
+    // happen to contain a similarly named stream.
+    const RECORD_FILEPASS: u16 = 0x002F;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        // BIFF-like header that is *not* a BOF record:
+        // [record_id=FILEPASS][len=0]
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&RECORD_FILEPASS.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        stream.write_all(&bytes).expect("write Workbook bytes");
+    }
+    ole.into_inner().into_inner()
+}
+
 #[test]
 fn ole_container_without_workbook_stream_is_not_classified_as_xls() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -21,6 +43,29 @@ fn ole_container_without_workbook_stream_is_not_classified_as_xls() {
     let fmt = detect_workbook_format(&path).expect("detect format");
     assert_eq!(fmt, WorkbookFormat::Unknown);
 
+    let err = open_workbook(&path).expect_err("expected open_workbook to fail");
+    assert!(
+        matches!(err, Error::UnsupportedExtension { .. }),
+        "expected UnsupportedExtension, got {err:?}"
+    );
+
+    let err = open_workbook_model(&path).expect_err("expected open_workbook_model to fail");
+    assert!(
+        matches!(err, Error::UnsupportedExtension { .. }),
+        "expected UnsupportedExtension, got {err:?}"
+    );
+}
+
+#[test]
+fn ole_container_with_workbook_stream_but_not_biff_is_not_classified_as_xls() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("document.doc");
+    std::fs::write(&path, non_biff_workbook_stream_ole_bytes()).expect("write ole bytes");
+
+    let fmt = detect_workbook_format(&path).expect("detect format");
+    assert_eq!(fmt, WorkbookFormat::Unknown);
+
+    // Content sniffing should not route this through the `.xls` importer.
     let err = open_workbook(&path).expect_err("expected open_workbook to fail");
     assert!(
         matches!(err, Error::UnsupportedExtension { .. }),
