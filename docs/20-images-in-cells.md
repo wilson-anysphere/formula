@@ -422,7 +422,7 @@ See also:
 Because the exact file set and schemas vary across Excel builds, Formula’s short-term strategy is:
 
 - **preserve all `xl/richData/*` parts and their `*.rels`**, and
-- treat them as an **atomic bundle** with `xl/metadata.xml` + `xl/cellImages.xml` during round-trip.
+- treat them as an **atomic bundle** with `xl/metadata.xml` (and `xl/cellImages.xml` if present) during round-trip.
 
 Common file names (Excel version-dependent; treat as “expected shape”, not a strict schema):
 
@@ -594,7 +594,7 @@ Checklist:
 
 Until Formula implements a full semantic model for images-in-cells, the compatibility requirement is:
 
-1. **Preserve the parts**:
+1. **Preserve the parts (if present)**:
    - `xl/cellImages.xml` (or `xl/cellimages.xml`)
    - `xl/_rels/cellImages.xml.rels` (or `xl/_rels/cellimages.xml.rels`)
    - `xl/media/*` images referenced by those relationships
