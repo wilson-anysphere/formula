@@ -263,6 +263,7 @@ export const enUS = {
   "commandPalette.empty.noCommands": "No commands",
   "commandPalette.empty.noMatchingShortcuts": "No matching shortcuts",
   "commandPalette.empty.noShortcuts": "No shortcuts",
+  "commandPalette.searching": "Searching…",
   "commandPalette.shortcutSearch.hint": "Shortcut search",
   "commandPalette.extensions.loading": "Loading extensions…",
   "commandPalette.extensions.failedToLoad": "Failed to load extensions: {message}",

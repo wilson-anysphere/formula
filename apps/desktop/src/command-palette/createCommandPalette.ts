@@ -609,6 +609,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     chunkSearchController = controller;
     const { signal } = controller;
     const emptyText = t("commandPalette.empty.noMatchingCommands");
+    const searchingText = t("commandPalette.searching");
 
     if (limits.maxResults <= 0) {
       renderGroups([], emptyText);
@@ -685,8 +686,15 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     processChunk(initialEnd);
     cursor = initialEnd;
 
+    let hasRenderedAnyMatches = top.length > 0;
     if (!signal.aborted && isOpen && input.value === querySnapshot) {
-      renderGroups(makeGroupsFromTop(), emptyText);
+      if (hasRenderedAnyMatches) {
+        renderGroups(makeGroupsFromTop(), emptyText);
+      } else {
+        // Don't show a "no results" empty state until the scan completes. If the first
+        // chunk doesn't contain matches, later chunks still might.
+        renderGroups([], searchingText);
+      }
     }
 
     void (async () => {
@@ -701,13 +709,22 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
           const end = Math.min(cachedCommands.length, cursor + CHUNK_SEARCH_CHUNK_SIZE);
           processChunk(end);
           cursor = end;
+
+          if (!hasRenderedAnyMatches && top.length > 0) {
+            hasRenderedAnyMatches = true;
+            renderGroups(makeGroupsFromTop(), emptyText);
+          }
         }
 
         if (signal.aborted) return;
         if (!isOpen) return;
         if (input.value !== querySnapshot) return;
         // Render final results.
-        renderGroups(makeGroupsFromTop(), emptyText);
+        if (top.length === 0) {
+          renderGroups([], emptyText);
+        } else {
+          renderGroups(makeGroupsFromTop(), emptyText);
+        }
       } finally {
         if (chunkSearchController === controller) {
           chunkSearchController = null;
