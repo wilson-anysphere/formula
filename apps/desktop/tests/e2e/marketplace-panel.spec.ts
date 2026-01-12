@@ -77,6 +77,14 @@ test.describe("marketplace panel", () => {
     await gotoDesktop(page);
     await waitForDesktopReady(page);
 
+    // The Marketplace panel should be usable without eagerly loading the extension host.
+    // (Loading extensions spins up Workers; keep that work lazy until the user opens the
+    // Extensions panel or runs a command.)
+    await page.waitForFunction(() => Boolean((window as any).__formulaExtensionHostManager), undefined, {
+      timeout: 30_000,
+    });
+    expect(await page.evaluate(() => (window as any).__formulaExtensionHostManager?.ready)).toBe(false);
+
     await page.getByRole("tab", { name: "View", exact: true }).click();
     await page.getByTestId("ribbon-root").getByTestId("open-marketplace-panel").click();
 
@@ -87,5 +95,7 @@ test.describe("marketplace panel", () => {
     await panel.getByRole("button", { name: "Search", exact: true }).click();
 
     await expect(panel).toContainText("Hello Extension (acme.hello)");
+
+    expect(await page.evaluate(() => (window as any).__formulaExtensionHostManager?.ready)).toBe(false);
   });
 });
