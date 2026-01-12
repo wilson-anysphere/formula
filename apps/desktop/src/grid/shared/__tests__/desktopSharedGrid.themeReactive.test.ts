@@ -213,4 +213,90 @@ describe("DesktopSharedGrid theme reactivity", () => {
       expect(listenersByQuery.get(query)?.size ?? 0).toBe(0);
     }
   });
+
+  it("disconnects MutationObservers on destroy and uses them to refresh theme vars", () => {
+    type ObserverRecord = {
+      target: Element | null;
+      options: MutationObserverInit | undefined;
+      callback: MutationCallback;
+      observe: ReturnType<typeof vi.fn>;
+      disconnect: ReturnType<typeof vi.fn>;
+    };
+
+    const records: ObserverRecord[] = [];
+
+    class MockMutationObserver {
+      target: Element | null = null;
+      options: MutationObserverInit | undefined;
+      observe = vi.fn((target: Element, options?: MutationObserverInit) => {
+        this.target = target;
+        this.options = options;
+      });
+      disconnect = vi.fn();
+
+      constructor(public callback: MutationCallback) {
+        records.push({
+          target: null,
+          options: undefined,
+          callback,
+          observe: this.observe,
+          disconnect: this.disconnect
+        });
+      }
+    }
+
+    vi.stubGlobal("MutationObserver", MockMutationObserver as unknown as typeof MutationObserver);
+
+    const container = document.createElement("div");
+    container.style.setProperty("--formula-grid-bg", "rgb(10, 20, 30)");
+    document.body.appendChild(container);
+
+    const provider = new MockCellProvider({ rowCount: 10, colCount: 10 });
+
+    const canvases = {
+      grid: document.createElement("canvas"),
+      content: document.createElement("canvas"),
+      selection: document.createElement("canvas")
+    };
+
+    const scrollbars = {
+      vTrack: document.createElement("div"),
+      vThumb: document.createElement("div"),
+      hTrack: document.createElement("div"),
+      hThumb: document.createElement("div")
+    };
+
+    const grid = new DesktopSharedGrid({
+      container,
+      provider,
+      rowCount: 10,
+      colCount: 10,
+      canvases,
+      scrollbars
+    });
+
+    expect(grid.renderer.getTheme().gridBg).toBe("rgb(10, 20, 30)");
+
+    // Should observe the container + root + body.
+    expect(records.length).toBeGreaterThanOrEqual(1);
+    const observedTargets = records.map((r) => (r.observe.mock.calls[0]?.[0] as Element | undefined) ?? null);
+    expect(observedTargets).toEqual(expect.arrayContaining([container, document.documentElement, document.body]));
+
+    // Simulate a CSS var change on the container.
+    container.style.setProperty("--formula-grid-bg", "rgb(40, 50, 60)");
+
+    // Trigger whichever observer was installed for the container.
+    const containerObserverIndex = observedTargets.findIndex((t) => t === container);
+    expect(containerObserverIndex).toBeGreaterThanOrEqual(0);
+    const containerRecord = records[containerObserverIndex]!;
+    containerRecord.callback([], {} as any);
+
+    expect(grid.renderer.getTheme().gridBg).toBe("rgb(40, 50, 60)");
+
+    grid.destroy();
+
+    for (const record of records) {
+      expect(record.disconnect).toHaveBeenCalledTimes(1);
+    }
+  });
 });
