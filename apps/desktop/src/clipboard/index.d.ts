@@ -12,6 +12,12 @@ export function parseClipboardContentToCellGrid(content: ClipboardContent): any[
 
 export function clipboardFormatToDocStyle(format: any): any | null;
 
+export function getCellGridFromRange(doc: any, sheetId: string, range: any): any[][];
+
+export function serializeCellGridToClipboardPayload(grid: any[][]): ClipboardWritePayload;
+
+export function serializeCellGridToRtf(grid: any[][]): string;
+
 export function copyRangeToClipboardPayload(
   doc: any,
   sheetId: string,
