@@ -18,8 +18,12 @@ const REL_TYPE_METADATA: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata";
 const REL_TYPE_RD_RICH_VALUE: &str =
     "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue";
+const REL_TYPE_RD_RICH_VALUE_2017: &str =
+    "http://schemas.microsoft.com/office/2017/relationships/rdRichValue";
 const REL_TYPE_RD_RICH_VALUE_STRUCTURE: &str =
     "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure";
+const REL_TYPE_RD_RICH_VALUE_STRUCTURE_2017: &str =
+    "http://schemas.microsoft.com/office/2017/relationships/rdRichValueStructure";
 const REL_TYPE_RICH_VALUE: &str = "http://schemas.microsoft.com/office/2017/06/relationships/richValue";
 const REL_TYPE_RICH_VALUE_2017: &str = "http://schemas.microsoft.com/office/2017/relationships/richValue";
 const REL_TYPE_RICH_VALUE_REL: &str =
@@ -210,14 +214,19 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
         {
             let target = path::resolve_target("xl/workbook.xml", &rel.target);
             rich_value_part = Some(target);
-        } else if rdrichvalue_part.is_none() && rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE)
+        } else if rdrichvalue_part.is_none()
+            && (rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE)
+                || rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE_2017))
         {
             let target = path::resolve_target("xl/workbook.xml", &rel.target);
             rdrichvalue_part = Some(target);
         } else if rdrichvaluestructure_part.is_none()
-            && rel
+            && (rel
                 .type_uri
                 .eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE_STRUCTURE)
+                || rel
+                    .type_uri
+                    .eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE_STRUCTURE_2017))
         {
             let target = path::resolve_target("xl/workbook.xml", &rel.target);
             rdrichvaluestructure_part = Some(target);
@@ -283,16 +292,20 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
                     }
 
                     if rdrichvalue_part.is_none()
-                        && rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE)
+                        && (rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE)
+                            || rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE_2017))
                     {
                         rdrichvalue_part = Some(target);
                         continue;
                     }
 
                     if rdrichvaluestructure_part.is_none()
-                        && rel
+                        && (rel
                             .type_uri
                             .eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE_STRUCTURE)
+                            || rel
+                                .type_uri
+                                .eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE_STRUCTURE_2017))
                     {
                         rdrichvaluestructure_part = Some(target);
                         continue;
