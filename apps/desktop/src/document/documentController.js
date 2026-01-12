@@ -196,6 +196,60 @@ function normalizeFormula(formula) {
  */
 
 /**
+ * Excel-style worksheet visibility.
+ *
+ * @typedef {"visible" | "hidden" | "veryHidden"} SheetVisibility
+ */
+
+/**
+ * Excel-style tab color, round-trippable through XLSX.
+ *
+ * Keep in sync with `apps/desktop/src/sheets/workbookSheetStore.ts` and
+ * `apps/desktop/src/workbook/workbook.ts`.
+ *
+ * @typedef {{
+ *   rgb?: string,
+ *   theme?: number,
+ *   indexed?: number,
+ *   tint?: number,
+ *   auto?: boolean,
+ * }} TabColor
+ */
+
+/**
+ * Sheet metadata tracked by the controller and persisted through `encodeState`.
+ *
+ * Note: the sheet id is stored separately (as the key in `DocumentController.sheetMeta`).
+ *
+ * @typedef {{
+ *   name: string,
+ *   visibility: SheetVisibility,
+ *   tabColor?: TabColor,
+ * }} SheetMetaState
+ */
+
+/**
+ * Sheet metadata delta (undoable).
+ *
+ * `before`/`after` are `null` for add/delete operations respectively.
+ *
+ * @typedef {{
+ *   sheetId: string,
+ *   before: SheetMetaState | null,
+ *   after: SheetMetaState | null,
+ * }} SheetMetaDelta
+ */
+
+/**
+ * Sheet order delta (undoable).
+ *
+ * @typedef {{
+ *   before: string[],
+ *   after: string[],
+ * }} SheetOrderDelta
+ */
+
+/**
  * @param {any} value
  * @returns {number}
  */
@@ -396,6 +450,8 @@ function sheetViewStateEquals(a, b) {
  *   deltasBySheetView: Map<string, SheetViewDelta>,
  *   deltasByFormat: Map<string, FormatDelta>,
  *   deltasByRangeRun: Map<string, RangeRunDelta>,
+ *   deltasBySheetMeta: Map<string, SheetMetaDelta>,
+ *   sheetOrderDelta: SheetOrderDelta | null,
  * }} HistoryEntry
  */
 
@@ -464,6 +520,46 @@ function cloneRangeRunDelta(delta) {
 }
 
 /**
+ * @param {TabColor | undefined | null} color
+ * @returns {TabColor | undefined}
+ */
+function cloneTabColor(color) {
+  if (!color) return undefined;
+  return { ...color };
+}
+
+/**
+ * @param {SheetMetaState} meta
+ * @returns {SheetMetaState}
+ */
+function cloneSheetMetaState(meta) {
+  const out = { name: meta.name, visibility: meta.visibility };
+  if (meta.tabColor) out.tabColor = cloneTabColor(meta.tabColor);
+  return out;
+}
+
+/**
+ * @param {SheetMetaDelta} delta
+ * @returns {SheetMetaDelta}
+ */
+function cloneSheetMetaDelta(delta) {
+  return {
+    sheetId: delta.sheetId,
+    before: delta.before ? cloneSheetMetaState(delta.before) : null,
+    after: delta.after ? cloneSheetMetaState(delta.after) : null,
+  };
+}
+
+/**
+ * @param {SheetOrderDelta | null | undefined} delta
+ * @returns {SheetOrderDelta | null}
+ */
+function cloneSheetOrderDelta(delta) {
+  if (!delta) return null;
+  return { before: Array.isArray(delta.before) ? delta.before.slice() : [], after: Array.isArray(delta.after) ? delta.after.slice() : [] };
+}
+
+/**
  * @param {HistoryEntry} entry
  * @returns {CellDelta[]}
  */
@@ -516,6 +612,16 @@ function entryRangeRunDeltas(entry) {
     if (a.startRow !== b.startRow) return a.startRow - b.startRow;
     return a.endRowExclusive - b.endRowExclusive;
   });
+  return deltas;
+}
+
+/**
+ * @param {HistoryEntry} entry
+ * @returns {SheetMetaDelta[]}
+ */
+function entrySheetMetaDeltas(entry) {
+  const deltas = Array.from(entry.deltasBySheetMeta.values()).map(cloneSheetMetaDelta);
+  deltas.sort((a, b) => (a.sheetId < b.sheetId ? -1 : a.sheetId > b.sheetId ? 1 : 0));
   return deltas;
 }
 
@@ -576,6 +682,49 @@ function cellDeltasAffectRecalc(deltas) {
 }
 
 /**
+ * @param {TabColor | undefined | null} a
+ * @param {TabColor | undefined | null} b
+ * @returns {boolean}
+ */
+function tabColorEquals(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return a == null && b == null;
+  return (
+    (a.rgb ?? null) === (b.rgb ?? null) &&
+    (a.theme ?? null) === (b.theme ?? null) &&
+    (a.indexed ?? null) === (b.indexed ?? null) &&
+    (a.tint ?? null) === (b.tint ?? null) &&
+    (a.auto ?? null) === (b.auto ?? null)
+  );
+}
+
+/**
+ * @param {SheetMetaState | null | undefined} a
+ * @param {SheetMetaState | null | undefined} b
+ * @returns {boolean}
+ */
+function sheetMetaStateEquals(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return a == null && b == null;
+  return a.name === b.name && a.visibility === b.visibility && tabColorEquals(a.tabColor, b.tabColor);
+}
+
+/**
+ * `SheetMetaDelta`s can affect recalculation when they add/remove sheets, since formulas
+ * may refer to a sheet that now exists/doesn't exist.
+ *
+ * @param {SheetMetaDelta[]} deltas
+ * @returns {boolean}
+ */
+function sheetMetaDeltasAffectRecalc(deltas) {
+  for (const d of deltas) {
+    if (!d) continue;
+    if (d.before == null || d.after == null) return true;
+  }
+  return false;
+}
+
+/**
  * @param {RangeRunDelta[]} deltas
  * @returns {RangeRunDelta[]}
  */
@@ -588,6 +737,27 @@ function invertRangeRunDeltas(deltas) {
     beforeRuns: Array.isArray(d.afterRuns) ? d.afterRuns.map(cloneFormatRun) : [],
     afterRuns: Array.isArray(d.beforeRuns) ? d.beforeRuns.map(cloneFormatRun) : [],
   }));
+}
+
+/**
+ * @param {SheetMetaDelta[]} deltas
+ * @returns {SheetMetaDelta[]}
+ */
+function invertSheetMetaDeltas(deltas) {
+  return deltas.map((d) => ({
+    sheetId: d.sheetId,
+    before: d.after ? cloneSheetMetaState(d.after) : null,
+    after: d.before ? cloneSheetMetaState(d.before) : null,
+  }));
+}
+
+/**
+ * @param {SheetOrderDelta | null | undefined} delta
+ * @returns {SheetOrderDelta | null}
+ */
+function invertSheetOrderDelta(delta) {
+  if (!delta) return null;
+  return { before: Array.isArray(delta.after) ? delta.after.slice() : [], after: Array.isArray(delta.before) ? delta.before.slice() : [] };
 }
 
 /**
@@ -1442,6 +1612,9 @@ export class DocumentController {
     this.model = new WorkbookModel();
     this.styleTable = new StyleTable();
 
+    /** @type {Map<string, SheetMetaState>} */
+    this.sheetMeta = new Map();
+
     /** @type {HistoryEntry[]} */
     this.history = [];
     this.cursor = 0;
@@ -1567,7 +1740,9 @@ export class DocumentController {
       (this.activeBatch.deltasByCell.size > 0 ||
         this.activeBatch.deltasBySheetView.size > 0 ||
         this.activeBatch.deltasByFormat.size > 0 ||
-        this.activeBatch.deltasByRangeRun.size > 0)
+        this.activeBatch.deltasByRangeRun.size > 0 ||
+        this.activeBatch.deltasBySheetMeta.size > 0 ||
+        this.activeBatch.sheetOrderDelta != null)
     ) {
       return true;
     }
@@ -1802,57 +1977,338 @@ export class DocumentController {
   }
 
   /**
-   * Reorder sheets to match a desired ordering.
+   * Return sheet metadata (name/visibility/tab color).
    *
-   * This updates the iteration order returned by `getSheetIds()` and therefore the sheet
-   * ordering encoded into `encodeState()` snapshots.
+   * Note: DocumentController historically created sheets lazily. If a sheet has no explicit
+   * metadata entry, we treat it as `{ name: sheetId, visibility: "visible" }`.
    *
-   * Note: DocumentController does not currently model richer sheet metadata (names/visibility/etc).
-   * This only affects ordering of sheet ids.
+   * @param {string} sheetId
+   * @returns {SheetMetaState | null}
+   */
+  getSheetMeta(sheetId) {
+    const id = String(sheetId ?? "").trim();
+    if (!id) return null;
+    if (!this.model.sheets.has(id) && !this.sheetMeta.has(id)) return null;
+    const meta = this.sheetMeta.get(id) ?? { name: id, visibility: "visible" };
+    return cloneSheetMetaState(meta);
+  }
+
+  /**
+   * Return sheet ids whose visibility is "visible", in the current sheet order.
+   *
+   * @returns {string[]}
+   */
+  getVisibleSheetIds() {
+    const ids = this.getSheetIds();
+    const out = [];
+    for (const id of ids) {
+      const meta = this.getSheetMeta(id);
+      const visibility = meta?.visibility ?? "visible";
+      if (visibility === "visible") out.push(id);
+    }
+    return out;
+  }
+
+  /**
+   * @param {string} sheetId
+   * @returns {SheetMetaState}
+   */
+  #defaultSheetMeta(sheetId) {
+    return { name: sheetId, visibility: "visible" };
+  }
+
+  /**
+   * Normalize + validate a sheet name using Excel-like constraints.
+   *
+   * This intentionally mirrors `WorkbookSheetStore.validateSheetName` so callers that mutate
+   * metadata via DocumentController (scripts, future UI wiring) get consistent behavior.
+   *
+   * @param {string} name
+   * @param {{ ignoreSheetId?: string | null }} [options]
+   * @returns {string}
+   */
+  #validateSheetName(name, options = {}) {
+    const normalized = String(name ?? "").trim();
+    if (!normalized) throw new Error("Sheet name cannot be empty");
+    if (normalized.length > 31) {
+      throw new Error("Sheet name cannot exceed 31 characters");
+    }
+    if (/[:\\\/\?\*\[\]]/.test(normalized)) {
+      throw new Error("Sheet name cannot contain: : \\\\ / ? * [ ]");
+    }
+
+    const ignore = options.ignoreSheetId ?? null;
+    const candidateCi = normalized.toLowerCase();
+    for (const id of this.getSheetIds()) {
+      if (ignore && id === ignore) continue;
+      const meta = this.getSheetMeta(id) ?? this.#defaultSheetMeta(id);
+      if (meta.name.toLowerCase() === candidateCi) {
+        throw new Error("Duplicate sheet name");
+      }
+    }
+
+    return normalized;
+  }
+
+  /**
+   * Rename a sheet (metadata-only; does not rewrite formulas by itself).
+   *
+   * Callers that also rewrite formulas should wrap the rename + cell edits in `beginBatch/endBatch`
+   * so undo/redo treats them as a single action.
+   *
+   * @param {string} sheetId
+   * @param {string} newName
+   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   */
+  renameSheet(sheetId, newName, options = {}) {
+    const id = String(sheetId ?? "").trim();
+    if (!id) throw new Error("Sheet id cannot be empty");
+    // Ensure the sheet exists (DocumentController historically materializes sheets lazily).
+    this.model.getCell(id, 0, 0);
+
+    const validated = this.#validateSheetName(newName, { ignoreSheetId: id });
+    const before = this.getSheetMeta(id) ?? this.#defaultSheetMeta(id);
+    const after = { ...before, name: validated };
+    if (sheetMetaStateEquals(before, after)) return;
+
+    this.#applyUserWorkbookEdits(
+      { sheetMetaDeltas: [{ sheetId: id, before, after }] },
+      { ...options, label: options.label ?? "Rename Sheet" },
+    );
+  }
+
+  /**
+   * @param {string} sheetId
+   * @param {SheetVisibility} visibility
+   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   */
+  setSheetVisibility(sheetId, visibility, options = {}) {
+    const id = String(sheetId ?? "").trim();
+    if (!id) throw new Error("Sheet id cannot be empty");
+    this.model.getCell(id, 0, 0);
+
+    const before = this.getSheetMeta(id) ?? this.#defaultSheetMeta(id);
+    const after = { ...before, visibility: visibility ?? "visible" };
+    if (sheetMetaStateEquals(before, after)) return;
+
+    this.#applyUserWorkbookEdits(
+      { sheetMetaDeltas: [{ sheetId: id, before, after }] },
+      { ...options, label: options.label ?? "Set Sheet Visibility" },
+    );
+  }
+
+  /**
+   * @param {string} sheetId
+   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   */
+  hideSheet(sheetId, options = {}) {
+    this.setSheetVisibility(sheetId, "hidden", { ...options, label: options.label ?? "Hide Sheet" });
+  }
+
+  /**
+   * @param {string} sheetId
+   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   */
+  unhideSheet(sheetId, options = {}) {
+    this.setSheetVisibility(sheetId, "visible", { ...options, label: options.label ?? "Unhide Sheet" });
+  }
+
+  /**
+   * @param {string} sheetId
+   * @param {TabColor | undefined | null} tabColor
+   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   */
+  setSheetTabColor(sheetId, tabColor, options = {}) {
+    const id = String(sheetId ?? "").trim();
+    if (!id) throw new Error("Sheet id cannot be empty");
+    this.model.getCell(id, 0, 0);
+
+    const before = this.getSheetMeta(id) ?? this.#defaultSheetMeta(id);
+    const after = { ...before, tabColor: tabColor ? cloneTabColor(tabColor) : undefined };
+    if (sheetMetaStateEquals(before, after)) return;
+
+    this.#applyUserWorkbookEdits(
+      { sheetMetaDeltas: [{ sheetId: id, before, after }] },
+      { ...options, label: options.label ?? "Set Tab Color" },
+    );
+  }
+
+  /**
+   * Reorder sheet ids by changing the workbook sheet iteration order.
    *
    * @param {string[]} sheetIdsInOrder
+   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
    */
-  reorderSheets(sheetIdsInOrder) {
+  reorderSheets(sheetIdsInOrder, options = {}) {
     if (!Array.isArray(sheetIdsInOrder) || sheetIdsInOrder.length === 0) return;
 
     // Ensure all ids are materialized (DocumentController is lazily sheet-creating).
     for (const id of sheetIdsInOrder) {
-      if (typeof id !== "string" || id.length === 0) continue;
-      this.model.getCell(id, 0, 0);
+      const trimmed = typeof id === "string" ? id.trim() : "";
+      if (!trimmed) continue;
+      this.model.getCell(trimmed, 0, 0);
     }
 
-    const existing = Array.from(this.model.sheets.keys());
+    const before = this.getSheetIds();
     const seen = new Set();
     /** @type {string[]} */
     const desired = [];
+
     for (const raw of sheetIdsInOrder) {
-      if (typeof raw !== "string") continue;
-      const id = raw;
+      const id = typeof raw === "string" ? raw.trim() : "";
+      if (!id) continue;
       if (seen.has(id)) continue;
       if (!this.model.sheets.has(id)) continue;
       seen.add(id);
       desired.push(id);
     }
-    for (const id of existing) {
+
+    for (const id of before) {
       if (seen.has(id)) continue;
       seen.add(id);
       desired.push(id);
     }
 
     if (desired.length === 0) return;
-    if (desired.length === existing.length && desired.every((id, idx) => id === existing[idx])) return;
+    if (desired.length === before.length && desired.every((id, i) => id === before[i])) return;
 
-    for (const id of desired) {
-      const sheet = this.model.sheets.get(id);
-      if (!sheet) continue;
-      this.model.sheets.delete(id);
-      this.model.sheets.set(id, sheet);
+    this.#applyUserWorkbookEdits(
+      { sheetOrderDelta: { before, after: desired } },
+      { ...options, label: options.label ?? "Reorder Sheets" },
+    );
+  }
+
+  /**
+   * Add a new sheet.
+   *
+   * When `sheetId` is omitted, a random stable id is generated and the default visible name
+   * ("Sheet1", "Sheet2", ...) is used.
+   *
+   * @param {{
+   *   sheetId?: string,
+   *   name?: string,
+   *   insertAfterId?: string | null,
+   * }} [params]
+   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   * @returns {string} The new sheet id
+   */
+  addSheet(params = {}, options = {}) {
+    const randomUuid = (globalThis?.crypto?.randomUUID ?? null);
+    const generateId = () => {
+      if (typeof randomUuid === "function") return `sheet_${randomUuid.call(globalThis.crypto)}`;
+      return `sheet_${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`;
+    };
+
+    const beforeOrder = this.getSheetIds();
+
+    let sheetId = String(params.sheetId ?? "").trim();
+    if (!sheetId) sheetId = generateId();
+    if (this.model.sheets.has(sheetId)) throw new Error(`Duplicate sheet id: ${sheetId}`);
+
+    const existingNames = beforeOrder.map((id) => (this.getSheetMeta(id) ?? this.#defaultSheetMeta(id)).name.toLowerCase());
+    const defaultName = (() => {
+      if (params.name != null) return this.#validateSheetName(params.name, { ignoreSheetId: null });
+      for (let n = 1; ; n += 1) {
+        const candidate = `Sheet${n}`;
+        if (!existingNames.includes(candidate.toLowerCase())) return candidate;
+      }
+    })();
+
+    const insertAfterId = params.insertAfterId ?? null;
+    const afterOrder = beforeOrder.slice();
+    const insertIdx = insertAfterId ? afterOrder.indexOf(insertAfterId) + 1 : afterOrder.length;
+    const clampedIdx = insertIdx >= 0 && insertIdx <= afterOrder.length ? insertIdx : afterOrder.length;
+    afterOrder.splice(clampedIdx, 0, sheetId);
+
+    const meta = { name: defaultName, visibility: "visible" };
+
+    this.#applyUserWorkbookEdits(
+      {
+        sheetMetaDeltas: [{ sheetId, before: null, after: meta }],
+        sheetOrderDelta: { before: beforeOrder, after: afterOrder },
+      },
+      { ...options, label: options.label ?? "Add Sheet" },
+    );
+
+    return sheetId;
+  }
+
+  /**
+   * Delete a sheet (cells + view + formatting + metadata).
+   *
+   * @param {string} sheetId
+   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   */
+  deleteSheet(sheetId, options = {}) {
+    const id = String(sheetId ?? "").trim();
+    if (!id) throw new Error("Sheet id cannot be empty");
+
+    const beforeOrder = this.getSheetIds();
+    if (!this.model.sheets.has(id)) throw new Error(`Sheet not found: ${id}`);
+    if (beforeOrder.length <= 1) throw new Error("Cannot delete the last sheet");
+
+    const sheet = this.model.sheets.get(id);
+    if (!sheet) throw new Error(`Sheet not found: ${id}`);
+
+    const beforeMeta = this.getSheetMeta(id) ?? this.#defaultSheetMeta(id);
+    const afterOrder = beforeOrder.filter((s) => s !== id);
+
+    /** @type {CellDelta[]} */
+    const cellDeltas = [];
+    for (const [key] of sheet.cells.entries()) {
+      const { row, col } = parseRowColKey(key);
+      const before = this.model.getCell(id, row, col);
+      const after = emptyCellState();
+      cellDeltas.push({ sheetId: id, row, col, before, after: cloneCellState(after) });
     }
 
-    // Treat sheet order changes as an "update" so downstream snapshot/versioning layers can observe it,
-    // but do not bump `contentVersion` since the cell grid content is unchanged.
-    this._updateVersion += 1;
-    this.#emit("update", {});
+    /** @type {SheetViewDelta[]} */
+    const sheetViewDeltas = [];
+    const beforeView = this.model.getSheetView(id);
+    const afterView = emptySheetViewState();
+    if (!sheetViewStateEquals(beforeView, afterView)) {
+      sheetViewDeltas.push({ sheetId: id, before: beforeView, after: afterView });
+    }
+
+    /** @type {FormatDelta[]} */
+    const formatDeltas = [];
+    if (sheet.defaultStyleId !== 0) {
+      formatDeltas.push({ sheetId: id, layer: "sheet", beforeStyleId: sheet.defaultStyleId, afterStyleId: 0 });
+    }
+    for (const [row, styleId] of sheet.rowStyleIds.entries()) {
+      if (styleId === 0) continue;
+      formatDeltas.push({ sheetId: id, layer: "row", index: row, beforeStyleId: styleId, afterStyleId: 0 });
+    }
+    for (const [col, styleId] of sheet.colStyleIds.entries()) {
+      if (styleId === 0) continue;
+      formatDeltas.push({ sheetId: id, layer: "col", index: col, beforeStyleId: styleId, afterStyleId: 0 });
+    }
+
+    /** @type {RangeRunDelta[]} */
+    const rangeRunDeltas = [];
+    for (const [col, runs] of sheet.formatRunsByCol.entries()) {
+      if (!runs || runs.length === 0) continue;
+      rangeRunDeltas.push({
+        sheetId: id,
+        col,
+        startRow: 0,
+        endRowExclusive: EXCEL_MAX_ROWS,
+        beforeRuns: runs.map(cloneFormatRun),
+        afterRuns: [],
+      });
+    }
+
+    this.#applyUserWorkbookEdits(
+      {
+        cellDeltas,
+        sheetViewDeltas,
+        formatDeltas,
+        rangeRunDeltas,
+        sheetMetaDeltas: [{ sheetId: id, before: beforeMeta, after: null }],
+        sheetOrderDelta: { before: beforeOrder, after: afterOrder },
+      },
+      { ...options, label: options.label ?? "Delete Sheet" },
+    );
   }
 
   /**
@@ -2667,8 +3123,12 @@ export class DocumentController {
         };
       });
       cells.sort((a, b) => (a.row - b.row === 0 ? a.col - b.col : a.row - b.row));
+      const meta = this.getSheetMeta(id) ?? this.#defaultSheetMeta(id);
       /** @type {any} */
       const out = { id, frozenRows: view.frozenRows, frozenCols: view.frozenCols, cells };
+      out.name = meta.name;
+      out.visibility = meta.visibility;
+      if (meta.tabColor) out.tabColor = cloneTabColor(meta.tabColor);
       if (view.colWidths && Object.keys(view.colWidths).length > 0) out.colWidths = view.colWidths;
       if (view.rowHeights && Object.keys(view.rowHeights).length > 0) out.rowHeights = view.rowHeights;
 
@@ -2732,6 +3192,8 @@ export class DocumentController {
     let nextFormats = new Map();
     /** @type {Map<string, Map<number, FormatRun[]>>} */
     let nextRangeRuns = new Map();
+    /** @type {Map<string, SheetMetaState>} */
+    const nextSheetMeta = new Map();
 
     const normalizeFormatOverrides = (raw, axisKey) => {
       /** @type {Map<number, number>} */
@@ -2813,6 +3275,14 @@ export class DocumentController {
     };
     for (const sheet of sheets) {
       if (!sheet?.id) continue;
+      const rawName = typeof sheet?.name === "string" ? sheet.name : null;
+      const name = rawName && rawName.trim() ? rawName.trim() : sheet.id;
+      const visibilityRaw = sheet?.visibility;
+      const visibility =
+        visibilityRaw === "hidden" || visibilityRaw === "veryHidden" || visibilityRaw === "visible" ? visibilityRaw : "visible";
+      const tabColor = isPlainObject(sheet?.tabColor) ? cloneTabColor(sheet.tabColor) : undefined;
+      nextSheetMeta.set(sheet.id, { name, visibility, ...(tabColor ? { tabColor } : {}) });
+
       const cellList = Array.isArray(sheet.cells) ? sheet.cells : [];
       const view = normalizeSheetViewState({
         frozenRows: sheet?.frozenRows,
@@ -3007,6 +3477,14 @@ export class DocumentController {
       this.model.sheets.set(sheetId, sheet);
     }
 
+    // Apply sheet metadata (name/visibility/tabColor) before emitting the `applyState` change event.
+    // This lets UI layers read the restored sheet display names synchronously during the event.
+    this.sheetMeta.clear();
+    for (const sheetId of nextSheets.keys()) {
+      const meta = nextSheetMeta.get(sheetId) ?? this.#defaultSheetMeta(sheetId);
+      this.sheetMeta.set(sheetId, cloneSheetMetaState(meta));
+    }
+
     // Clear history first: restoring content is not itself undoable.
     this.history = [];
     this.cursor = 0;
@@ -3018,7 +3496,7 @@ export class DocumentController {
 
     // Apply changes as a single engine batch.
     this.engine?.beginBatch?.();
-    this.#applyEdits(deltas, sheetViewDeltas, formatDeltas, rangeRunDeltas, {
+    this.#applyEdits(deltas, sheetViewDeltas, formatDeltas, rangeRunDeltas, [], null, {
       recalc: false,
       emitChange: true,
       source: "applyState",
@@ -3070,7 +3548,7 @@ export class DocumentController {
 
     const recalc = options.recalc ?? true;
     const source = typeof options.source === "string" ? options.source : undefined;
-    this.#applyEdits(deltas, [], [], [], { recalc, emitChange: true, source });
+    this.#applyEdits(deltas, [], [], [], [], null, { recalc, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
     //
@@ -3102,7 +3580,7 @@ export class DocumentController {
     this.lastMergeTime = 0;
 
     const source = typeof options.source === "string" ? options.source : undefined;
-    this.#applyEdits([], deltas, [], [], { recalc: false, emitChange: true, source });
+    this.#applyEdits([], deltas, [], [], [], null, { recalc: false, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
     if (options.markDirty !== false) {
@@ -3131,7 +3609,7 @@ export class DocumentController {
     this.lastMergeTime = 0;
 
     const source = typeof options.source === "string" ? options.source : undefined;
-    this.#applyEdits([], [], deltas, [], { recalc: false, emitChange: true, source });
+    this.#applyEdits([], [], deltas, [], [], null, { recalc: false, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
     if (options.markDirty !== false) {
@@ -3257,6 +3735,8 @@ export class DocumentController {
         deltasBySheetView: new Map(),
         deltasByFormat: new Map(),
         deltasByRangeRun: new Map(),
+        deltasBySheetMeta: new Map(),
+        sheetOrderDelta: null,
       };
       this.engine?.beginBatch?.();
       this.#emitHistory();
@@ -3280,7 +3760,9 @@ export class DocumentController {
       (batch.deltasByCell.size === 0 &&
         batch.deltasBySheetView.size === 0 &&
         batch.deltasByFormat.size === 0 &&
-        batch.deltasByRangeRun.size === 0)
+        batch.deltasByRangeRun.size === 0 &&
+        batch.deltasBySheetMeta.size === 0 &&
+        batch.sheetOrderDelta == null)
     ) {
       this.#emitHistory();
       this.#emitDirty();
@@ -3291,7 +3773,9 @@ export class DocumentController {
 
     // Only recalculate for batches that included cell input edits. Sheet view changes
     // (frozen panes, row/col sizes, etc.) do not affect formula results.
-    const shouldRecalc = cellDeltasAffectRecalc(Array.from(batch.deltasByCell.values()));
+    const shouldRecalc =
+      cellDeltasAffectRecalc(Array.from(batch.deltasByCell.values())) ||
+      sheetMetaDeltasAffectRecalc(Array.from(batch.deltasBySheetMeta.values()));
     if (shouldRecalc) {
       this.engine?.recalculate();
       // Emit a follow-up change so observers know formula results may have changed.
@@ -3303,6 +3787,8 @@ export class DocumentController {
         colStyleDeltas: [],
         sheetStyleDeltas: [],
         rangeRunDeltas: [],
+        sheetMetaDeltas: [],
+        sheetOrderDelta: null,
         source: "endBatch",
         recalc: true,
       });
@@ -3326,7 +3812,9 @@ export class DocumentController {
         (batch.deltasByCell.size > 0 ||
           batch.deltasBySheetView.size > 0 ||
           batch.deltasByFormat.size > 0 ||
-          batch.deltasByRangeRun.size > 0),
+          batch.deltasByRangeRun.size > 0 ||
+          batch.deltasBySheetMeta.size > 0 ||
+          batch.sheetOrderDelta != null),
     );
 
     // Reset batching state first so observers see consistent canUndo/canRedo.
@@ -3340,17 +3828,25 @@ export class DocumentController {
       const inverseViews = invertSheetViewDeltas(entrySheetViewDeltas(batch));
       const inverseFormats = invertFormatDeltas(entryFormatDeltas(batch));
       const inverseRangeRuns = invertRangeRunDeltas(entryRangeRunDeltas(batch));
-      this.#applyEdits(inverseCells, inverseViews, inverseFormats, inverseRangeRuns, {
+      const inverseSheetMeta = invertSheetMetaDeltas(entrySheetMetaDeltas(batch));
+      const inverseSheetOrder = invertSheetOrderDelta(batch.sheetOrderDelta);
+      const sheetStructureChanged = sheetMetaDeltasAffectRecalc(inverseSheetMeta);
+      this.#applyEdits(inverseCells, inverseViews, inverseFormats, inverseRangeRuns, inverseSheetMeta, inverseSheetOrder, {
         recalc: false,
         emitChange: true,
         source: "cancelBatch",
+        sheetStructureChanged,
       });
     }
 
     this.engine?.endBatch?.();
 
-    // Only recalculate when canceling a batch that mutated cell inputs.
-    const shouldRecalc = Boolean(batch && cellDeltasAffectRecalc(Array.from(batch.deltasByCell.values())));
+    // Only recalculate when canceling a batch that mutated cell inputs or sheet structure.
+    const shouldRecalc = Boolean(
+      batch &&
+        (cellDeltasAffectRecalc(Array.from(batch.deltasByCell.values())) ||
+          sheetMetaDeltasAffectRecalc(Array.from(batch.deltasBySheetMeta.values()))),
+    );
     if (shouldRecalc) {
       this.engine?.recalculate();
       this.#emit("change", {
@@ -3361,6 +3857,8 @@ export class DocumentController {
         colStyleDeltas: [],
         sheetStyleDeltas: [],
         rangeRunDeltas: [],
+        sheetMetaDeltas: [],
+        sheetOrderDelta: null,
         source: "cancelBatch",
         recalc: true,
       });
@@ -3382,20 +3880,26 @@ export class DocumentController {
     const viewDeltas = entrySheetViewDeltas(entry);
     const formatDeltas = entryFormatDeltas(entry);
     const rangeRunDeltas = entryRangeRunDeltas(entry);
+    const sheetMetaDeltas = entrySheetMetaDeltas(entry);
+    const sheetOrderDelta = cloneSheetOrderDelta(entry.sheetOrderDelta);
     const inverseCells = invertDeltas(cellDeltas);
     const inverseViews = invertSheetViewDeltas(viewDeltas);
     const inverseFormats = invertFormatDeltas(formatDeltas);
     const inverseRangeRuns = invertRangeRunDeltas(rangeRunDeltas);
+    const inverseSheetMeta = invertSheetMetaDeltas(sheetMetaDeltas);
+    const inverseSheetOrder = invertSheetOrderDelta(sheetOrderDelta);
     this.cursor -= 1;
 
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
-    const shouldRecalc = cellDeltasAffectRecalc(cellDeltas);
-    this.#applyEdits(inverseCells, inverseViews, inverseFormats, inverseRangeRuns, {
+    const sheetStructureChanged = sheetMetaDeltasAffectRecalc(sheetMetaDeltas);
+    const shouldRecalc = cellDeltasAffectRecalc(cellDeltas) || sheetStructureChanged;
+    this.#applyEdits(inverseCells, inverseViews, inverseFormats, inverseRangeRuns, inverseSheetMeta, inverseSheetOrder, {
       recalc: shouldRecalc,
       emitChange: true,
       source: "undo",
+      sheetStructureChanged,
     });
     this.#emitHistory();
     this.#emitDirty();
@@ -3413,16 +3917,20 @@ export class DocumentController {
     const viewDeltas = entrySheetViewDeltas(entry);
     const formatDeltas = entryFormatDeltas(entry);
     const rangeRunDeltas = entryRangeRunDeltas(entry);
+    const sheetMetaDeltas = entrySheetMetaDeltas(entry);
+    const sheetOrderDelta = cloneSheetOrderDelta(entry.sheetOrderDelta);
     this.cursor += 1;
 
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
-    const shouldRecalc = cellDeltasAffectRecalc(cellDeltas);
-    this.#applyEdits(cellDeltas, viewDeltas, formatDeltas, rangeRunDeltas, {
+    const sheetStructureChanged = sheetMetaDeltasAffectRecalc(sheetMetaDeltas);
+    const shouldRecalc = cellDeltasAffectRecalc(cellDeltas) || sheetStructureChanged;
+    this.#applyEdits(cellDeltas, viewDeltas, formatDeltas, rangeRunDeltas, sheetMetaDeltas, sheetOrderDelta, {
       recalc: shouldRecalc,
       emitChange: true,
       source: "redo",
+      sheetStructureChanged,
     });
     this.#emitHistory();
     this.#emitDirty();
@@ -3445,7 +3953,7 @@ export class DocumentController {
 
     const source = typeof options?.source === "string" ? options.source : undefined;
     const shouldRecalc = this.batchDepth === 0 && cellDeltasAffectRecalc(deltas);
-    this.#applyEdits(deltas, [], [], [], { recalc: shouldRecalc, emitChange: true, source });
+    this.#applyEdits(deltas, [], [], [], [], null, { recalc: shouldRecalc, emitChange: true, source });
 
     if (this.batchDepth > 0) {
       this.#mergeIntoBatch(deltas);
@@ -3453,7 +3961,7 @@ export class DocumentController {
       return;
     }
 
-    this.#commitOrMergeHistoryEntry(deltas, [], [], [], options);
+    this.#commitOrMergeHistoryEntry(deltas, [], [], [], [], null, options);
   }
 
   /**
@@ -3468,6 +3976,8 @@ export class DocumentController {
         deltasBySheetView: new Map(),
         deltasByFormat: new Map(),
         deltasByRangeRun: new Map(),
+        deltasBySheetMeta: new Map(),
+        sheetOrderDelta: null,
       };
     }
     for (const delta of deltas) {
@@ -3492,6 +4002,8 @@ export class DocumentController {
         deltasBySheetView: new Map(),
         deltasByFormat: new Map(),
         deltasByRangeRun: new Map(),
+        deltasBySheetMeta: new Map(),
+        sheetOrderDelta: null,
       };
     }
     for (const delta of deltas) {
@@ -3515,6 +4027,8 @@ export class DocumentController {
         deltasBySheetView: new Map(),
         deltasByFormat: new Map(),
         deltasByRangeRun: new Map(),
+        deltasBySheetMeta: new Map(),
+        sheetOrderDelta: null,
       };
     }
     for (const delta of deltas) {
@@ -3539,6 +4053,8 @@ export class DocumentController {
         deltasBySheetView: new Map(),
         deltasByFormat: new Map(),
         deltasByRangeRun: new Map(),
+        deltasBySheetMeta: new Map(),
+        sheetOrderDelta: null,
       };
     }
     for (const delta of deltas) {
@@ -3555,6 +4071,55 @@ export class DocumentController {
   }
 
   /**
+   * @param {SheetMetaDelta[]} deltas
+   */
+  #mergeSheetMetaIntoBatch(deltas) {
+    if (!this.activeBatch) {
+      this.activeBatch = {
+        timestamp: Date.now(),
+        deltasByCell: new Map(),
+        deltasBySheetView: new Map(),
+        deltasByFormat: new Map(),
+        deltasByRangeRun: new Map(),
+        deltasBySheetMeta: new Map(),
+        sheetOrderDelta: null,
+      };
+    }
+    for (const delta of deltas) {
+      const existing = this.activeBatch.deltasBySheetMeta.get(delta.sheetId);
+      if (!existing) {
+        this.activeBatch.deltasBySheetMeta.set(delta.sheetId, cloneSheetMetaDelta(delta));
+      } else {
+        existing.after = delta.after ? cloneSheetMetaState(delta.after) : null;
+      }
+    }
+  }
+
+  /**
+   * @param {SheetOrderDelta | null | undefined} delta
+   */
+  #mergeSheetOrderIntoBatch(delta) {
+    if (!delta) return;
+    if (!this.activeBatch) {
+      this.activeBatch = {
+        timestamp: Date.now(),
+        deltasByCell: new Map(),
+        deltasBySheetView: new Map(),
+        deltasByFormat: new Map(),
+        deltasByRangeRun: new Map(),
+        deltasBySheetMeta: new Map(),
+        sheetOrderDelta: null,
+      };
+    }
+
+    if (!this.activeBatch.sheetOrderDelta) {
+      this.activeBatch.sheetOrderDelta = cloneSheetOrderDelta(delta);
+      return;
+    }
+    this.activeBatch.sheetOrderDelta.after = Array.isArray(delta.after) ? delta.after.slice() : [];
+  }
+
+  /**
    * @param {SheetViewDelta[]} deltas
    * @param {{ label?: string, mergeKey?: string, source?: string }} options
    */
@@ -3562,7 +4127,7 @@ export class DocumentController {
     if (!deltas || deltas.length === 0) return;
 
     const source = typeof options?.source === "string" ? options.source : undefined;
-    this.#applyEdits([], deltas, [], [], { recalc: false, emitChange: true, source });
+    this.#applyEdits([], deltas, [], [], [], null, { recalc: false, emitChange: true, source });
 
     if (this.batchDepth > 0) {
       this.#mergeSheetViewIntoBatch(deltas);
@@ -3570,7 +4135,7 @@ export class DocumentController {
       return;
     }
 
-    this.#commitOrMergeHistoryEntry([], deltas, [], [], options);
+    this.#commitOrMergeHistoryEntry([], deltas, [], [], [], null, options);
   }
 
   /**
@@ -3581,7 +4146,7 @@ export class DocumentController {
     if (!deltas || deltas.length === 0) return;
 
     const source = typeof options?.source === "string" ? options.source : undefined;
-    this.#applyEdits([], [], deltas, [], { recalc: false, emitChange: true, source });
+    this.#applyEdits([], [], deltas, [], [], null, { recalc: false, emitChange: true, source });
 
     if (this.batchDepth > 0) {
       this.#mergeFormatIntoBatch(deltas);
@@ -3589,7 +4154,7 @@ export class DocumentController {
       return;
     }
 
-    this.#commitOrMergeHistoryEntry([], [], deltas, [], options);
+    this.#commitOrMergeHistoryEntry([], [], deltas, [], [], null, options);
   }
 
   /**
@@ -3619,7 +4184,7 @@ export class DocumentController {
     const source = typeof options?.source === "string" ? options.source : undefined;
 
     // Formatting changes should never trigger formula recalc.
-    this.#applyEdits(cellDeltas ?? [], [], [], rangeRunDeltas ?? [], { recalc: false, emitChange: true, source });
+    this.#applyEdits(cellDeltas ?? [], [], [], rangeRunDeltas ?? [], [], null, { recalc: false, emitChange: true, source });
 
     if (this.batchDepth > 0) {
       if (filteredHasCells) this.#mergeIntoBatch(cellDeltas);
@@ -3628,7 +4193,7 @@ export class DocumentController {
       return;
     }
 
-    this.#commitOrMergeHistoryEntry(cellDeltas ?? [], [], [], rangeRunDeltas ?? [], options);
+    this.#commitOrMergeHistoryEntry(cellDeltas ?? [], [], [], rangeRunDeltas ?? [], [], null, options);
   }
 
   /**
@@ -3659,7 +4224,11 @@ export class DocumentController {
 
     const source = typeof options?.source === "string" ? options.source : undefined;
     const shouldRecalc = this.batchDepth === 0 && cellDeltasAffectRecalc(cellDeltas);
-    this.#applyEdits(cellDeltas, [], formatDeltas, rangeRunDeltas, { recalc: shouldRecalc, emitChange: true, source });
+    this.#applyEdits(cellDeltas, [], formatDeltas, rangeRunDeltas, [], null, {
+      recalc: shouldRecalc,
+      emitChange: true,
+      source,
+    });
 
     if (this.batchDepth > 0) {
       if (cellDeltas.length > 0) this.#mergeIntoBatch(cellDeltas);
@@ -3669,7 +4238,80 @@ export class DocumentController {
       return;
     }
 
-    this.#commitOrMergeHistoryEntry(cellDeltas, [], formatDeltas, rangeRunDeltas, options);
+    this.#commitOrMergeHistoryEntry(cellDeltas, [], formatDeltas, rangeRunDeltas, [], null, options);
+  }
+
+  /**
+   * Apply an arbitrary mix of workbook deltas as a single undoable user edit.
+   *
+   * This is the common plumbing used by sheet metadata operations (rename/reorder/hide/tab color/add/delete)
+   * so they participate in the same history batching + merge logic as cell edits.
+   *
+   * @param {{
+   *   cellDeltas?: CellDelta[],
+   *   sheetViewDeltas?: SheetViewDelta[],
+   *   formatDeltas?: FormatDelta[],
+   *   rangeRunDeltas?: RangeRunDelta[],
+   *   sheetMetaDeltas?: SheetMetaDelta[],
+   *   sheetOrderDelta?: SheetOrderDelta | null,
+   * }} deltas
+   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   */
+  #applyUserWorkbookEdits(deltas, options = {}) {
+    const cellDeltas = Array.isArray(deltas?.cellDeltas) ? deltas.cellDeltas : [];
+    const sheetViewDeltas = Array.isArray(deltas?.sheetViewDeltas) ? deltas.sheetViewDeltas : [];
+    const formatDeltas = Array.isArray(deltas?.formatDeltas) ? deltas.formatDeltas : [];
+    const rangeRunDeltas = Array.isArray(deltas?.rangeRunDeltas) ? deltas.rangeRunDeltas : [];
+    const sheetMetaDeltas = Array.isArray(deltas?.sheetMetaDeltas) ? deltas.sheetMetaDeltas : [];
+    const sheetOrderDelta = deltas?.sheetOrderDelta ? cloneSheetOrderDelta(deltas.sheetOrderDelta) : null;
+
+    let filteredCells = cellDeltas;
+    if (filteredCells.length > 0 && this.canEditCell) {
+      filteredCells = filteredCells.filter((delta) =>
+        this.canEditCell({ sheetId: delta.sheetId, row: delta.row, col: delta.col })
+      );
+    }
+
+    const hasCells = filteredCells.length > 0;
+    const hasViews = sheetViewDeltas.length > 0;
+    const hasFormats = formatDeltas.length > 0;
+    const hasRangeRuns = rangeRunDeltas.length > 0;
+    const hasSheetMeta = sheetMetaDeltas.length > 0;
+    const hasSheetOrder = Boolean(sheetOrderDelta);
+    if (!hasCells && !hasViews && !hasFormats && !hasRangeRuns && !hasSheetMeta && !hasSheetOrder) return;
+
+    const source = typeof options?.source === "string" ? options.source : undefined;
+    const sheetStructureChanged = sheetMetaDeltasAffectRecalc(sheetMetaDeltas);
+    const shouldRecalc =
+      this.batchDepth === 0 && (cellDeltasAffectRecalc(filteredCells) || sheetStructureChanged);
+
+    this.#applyEdits(filteredCells, sheetViewDeltas, formatDeltas, rangeRunDeltas, sheetMetaDeltas, sheetOrderDelta, {
+      recalc: shouldRecalc,
+      emitChange: true,
+      source,
+      sheetStructureChanged,
+    });
+
+    if (this.batchDepth > 0) {
+      if (hasCells) this.#mergeIntoBatch(filteredCells);
+      if (hasViews) this.#mergeSheetViewIntoBatch(sheetViewDeltas);
+      if (hasFormats) this.#mergeFormatIntoBatch(formatDeltas);
+      if (hasRangeRuns) this.#mergeRangeRunIntoBatch(rangeRunDeltas);
+      if (hasSheetMeta) this.#mergeSheetMetaIntoBatch(sheetMetaDeltas);
+      if (hasSheetOrder) this.#mergeSheetOrderIntoBatch(sheetOrderDelta);
+      this.#emitDirty();
+      return;
+    }
+
+    this.#commitOrMergeHistoryEntry(
+      filteredCells,
+      sheetViewDeltas,
+      formatDeltas,
+      rangeRunDeltas,
+      sheetMetaDeltas,
+      sheetOrderDelta,
+      options,
+    );
   }
 
   /**
@@ -3677,9 +4319,13 @@ export class DocumentController {
    * @param {SheetViewDelta[]} sheetViewDeltas
    * @param {FormatDelta[]} formatDeltas
    * @param {RangeRunDelta[]} rangeRunDeltas
+   * @param {SheetMetaDelta[]} sheetMetaDeltas
+   * @param {SheetOrderDelta | null} sheetOrderDelta
    * @param {{ label?: string, mergeKey?: string }} options
    */
-  #commitOrMergeHistoryEntry(cellDeltas, sheetViewDeltas, formatDeltas, rangeRunDeltas, options) {
+  #commitOrMergeHistoryEntry(cellDeltas, sheetViewDeltas, formatDeltas, rangeRunDeltas, sheetMetaDeltas, sheetOrderDelta, options) {
+    sheetMetaDeltas = Array.isArray(sheetMetaDeltas) ? sheetMetaDeltas : [];
+    sheetOrderDelta = sheetOrderDelta ? cloneSheetOrderDelta(sheetOrderDelta) : null;
     // If we have redo history, truncate it before pushing a new edit.
     if (this.cursor < this.history.length) {
       if (this.savedCursor != null && this.savedCursor > this.cursor) {
@@ -3744,6 +4390,23 @@ export class DocumentController {
           existing.endRowExclusive = Math.max(existing.endRowExclusive, delta.endRowExclusive);
         }
       }
+
+      for (const delta of sheetMetaDeltas) {
+        const existing = entry.deltasBySheetMeta.get(delta.sheetId);
+        if (!existing) {
+          entry.deltasBySheetMeta.set(delta.sheetId, cloneSheetMetaDelta(delta));
+        } else {
+          existing.after = delta.after ? cloneSheetMetaState(delta.after) : null;
+        }
+      }
+
+      if (sheetOrderDelta) {
+        if (!entry.sheetOrderDelta) {
+          entry.sheetOrderDelta = cloneSheetOrderDelta(sheetOrderDelta);
+        } else {
+          entry.sheetOrderDelta.after = sheetOrderDelta.after.slice();
+        }
+      }
       entry.timestamp = now;
       entry.mergeKey = mergeKey;
       entry.label = options.label ?? entry.label;
@@ -3764,6 +4427,8 @@ export class DocumentController {
       deltasBySheetView: new Map(),
       deltasByFormat: new Map(),
       deltasByRangeRun: new Map(),
+      deltasBySheetMeta: new Map(),
+      sheetOrderDelta: null,
     };
 
     for (const delta of cellDeltas) {
@@ -3780,6 +4445,14 @@ export class DocumentController {
 
     for (const delta of rangeRunDeltas) {
       entry.deltasByRangeRun.set(rangeRunKey(delta.sheetId, delta.col), cloneRangeRunDelta(delta));
+    }
+
+    for (const delta of sheetMetaDeltas) {
+      entry.deltasBySheetMeta.set(delta.sheetId, cloneSheetMetaDelta(delta));
+    }
+
+    if (sheetOrderDelta) {
+      entry.sheetOrderDelta = cloneSheetOrderDelta(sheetOrderDelta);
     }
 
     this.#commitHistoryEntry(entry);
@@ -3801,7 +4474,9 @@ export class DocumentController {
       entry.deltasByCell.size === 0 &&
       entry.deltasBySheetView.size === 0 &&
       entry.deltasByFormat.size === 0 &&
-      entry.deltasByRangeRun.size === 0
+      entry.deltasByRangeRun.size === 0 &&
+      entry.deltasBySheetMeta.size === 0 &&
+      entry.sheetOrderDelta == null
     ) {
       return;
     }
@@ -3818,9 +4493,11 @@ export class DocumentController {
    * @param {SheetViewDelta[]} sheetViewDeltas
    * @param {FormatDelta[]} formatDeltas
    * @param {RangeRunDelta[]} rangeRunDeltas
+   * @param {SheetMetaDelta[]} sheetMetaDeltas
+   * @param {SheetOrderDelta | null} sheetOrderDelta
    * @param {{ recalc: boolean, emitChange: boolean, source?: string, sheetStructureChanged?: boolean }} options
    */
-  #applyEdits(cellDeltas, sheetViewDeltas, formatDeltas, rangeRunDeltas, options) {
+  #applyEdits(cellDeltas, sheetViewDeltas, formatDeltas, rangeRunDeltas, sheetMetaDeltas, sheetOrderDelta, options) {
     const contentChangedSheetIds = new Set();
     // Apply to the canonical model first.
     for (const delta of formatDeltas) {
@@ -3860,6 +4537,44 @@ export class DocumentController {
       if (!cellContentEquals(delta.before, delta.after)) contentChangedSheetIds.add(delta.sheetId);
     }
 
+    for (const delta of sheetMetaDeltas) {
+      if (!delta) continue;
+      if (delta.after == null) {
+        // Sheet deletion.
+        this.sheetMeta.delete(delta.sheetId);
+        this.model.sheets.delete(delta.sheetId);
+        continue;
+      }
+
+      // Sheet add / metadata update.
+      this.model.getCell(delta.sheetId, 0, 0);
+      this.sheetMeta.set(delta.sheetId, cloneSheetMetaState(delta.after));
+    }
+
+    if (sheetOrderDelta) {
+      const desired = Array.isArray(sheetOrderDelta.after) ? sheetOrderDelta.after : [];
+      const existing = this.model.sheets;
+      const snapshot = new Map(existing);
+      const seen = new Set();
+      existing.clear();
+      for (const id of desired) {
+        if (!id || seen.has(id)) continue;
+        const sheet = snapshot.get(id);
+        if (!sheet) continue;
+        existing.set(id, sheet);
+        seen.add(id);
+      }
+      // Preserve any sheets that were omitted from the order delta (defensive).
+      for (const [id, sheet] of snapshot.entries()) {
+        if (seen.has(id)) continue;
+        existing.set(id, sheet);
+      }
+    }
+
+    // Sheet metadata changes should not bump contentVersion unless they add/remove sheets.
+    // `sheetStructureChanged` covers:
+    // - applyState sheet add/remove
+    // - undoable sheet add/delete operations
     const shouldBumpContentVersion = Boolean(options?.sheetStructureChanged) || contentChangedSheetIds.size > 0;
 
     /** @type {CellChange[] | null} */
@@ -3910,6 +4625,36 @@ export class DocumentController {
       }
       for (const delta of cellDeltas) {
         this.model.setCell(delta.sheetId, delta.row, delta.col, delta.before);
+      }
+
+      for (const delta of sheetMetaDeltas) {
+        if (!delta) continue;
+        if (delta.before == null) {
+          this.sheetMeta.delete(delta.sheetId);
+          this.model.sheets.delete(delta.sheetId);
+          continue;
+        }
+        this.model.getCell(delta.sheetId, 0, 0);
+        this.sheetMeta.set(delta.sheetId, cloneSheetMetaState(delta.before));
+      }
+
+      if (sheetOrderDelta) {
+        const desired = Array.isArray(sheetOrderDelta.before) ? sheetOrderDelta.before : [];
+        const existing = this.model.sheets;
+        const snapshot = new Map(existing);
+        const seen = new Set();
+        existing.clear();
+        for (const id of desired) {
+          if (!id || seen.has(id)) continue;
+          const sheet = snapshot.get(id);
+          if (!sheet) continue;
+          existing.set(id, sheet);
+          seen.add(id);
+        }
+        for (const [id, sheet] of snapshot.entries()) {
+          if (seen.has(id)) continue;
+          existing.set(id, sheet);
+        }
       }
       throw err;
     }
@@ -3964,6 +4709,8 @@ export class DocumentController {
         colStyleDeltas,
         sheetStyleDeltas,
         rangeRunDeltas: rangeRunDeltas.map(cloneRangeRunDelta),
+        sheetMetaDeltas: sheetMetaDeltas.map(cloneSheetMetaDelta),
+        sheetOrderDelta: sheetOrderDelta ? cloneSheetOrderDelta(sheetOrderDelta) : null,
         recalc: options.recalc,
       };
       if (options.source) payload.source = options.source;

@@ -5048,6 +5048,25 @@ export class SpreadsheetApp {
     if (!did) return false;
 
     this.syncEngineNow();
+
+    // Undo/redo can add/remove/hide sheets. Ensure the app doesn't keep rendering
+    // a sheet that no longer exists (DocumentController lazily materializes sheets
+    // on access, which would otherwise resurrect deleted sheets).
+    const sheetIds = this.document.getSheetIds();
+    const visibleSheetIds =
+      typeof (this.document as any).getVisibleSheetIds === "function"
+        ? ((this.document as any).getVisibleSheetIds() as string[])
+        : sheetIds;
+
+    const hasSheet = sheetIds.includes(this.sheetId);
+    const isVisible = visibleSheetIds.includes(this.sheetId);
+    if ((!hasSheet || !isVisible) && sheetIds.length > 0) {
+      const fallback = visibleSheetIds[0] ?? sheetIds[0];
+      if (fallback && fallback !== this.sheetId) {
+        this.activateSheet(fallback);
+      }
+    }
+
     // Undo/redo can affect sheet view state (e.g. frozen panes). Keep renderer + scrollbars in sync.
     this.syncFrozenPanes();
     if (this.sharedGrid) {
