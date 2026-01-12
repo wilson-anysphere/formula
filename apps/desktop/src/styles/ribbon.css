@@ -391,7 +391,7 @@
   min-height: 20px;
 }
 
-.ribbon[data-density="compact"] .ribbon-button__label {
+.ribbon[data-density="compact"] .ribbon-button--has-icon .ribbon-button__label {
   display: none;
 }
 

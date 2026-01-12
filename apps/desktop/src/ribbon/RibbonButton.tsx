@@ -44,6 +44,7 @@ export const RibbonButton = React.memo(function RibbonButton({
   const kind = button.kind ?? "button";
   const size = button.size ?? "small";
   const isPressed = Boolean(pressed);
+  const hasIcon = Boolean(button.icon);
   const ariaPressed = kind === "toggle" ? isPressed : undefined;
   const ariaHaspopup = kind === "dropdown" ? ("menu" as const) : undefined;
   const hasMenu = kind === "dropdown" && Boolean(button.menuItems?.length);
@@ -113,6 +114,7 @@ export const RibbonButton = React.memo(function RibbonButton({
         "ribbon-button",
         classForKind(kind),
         classForSize(size),
+        hasIcon ? "ribbon-button--has-icon" : null,
         isPressed ? "is-pressed" : null,
         hasMenu && menuOpen ? "is-open" : null,
       ]
