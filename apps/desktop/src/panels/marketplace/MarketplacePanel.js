@@ -5,6 +5,13 @@
  * (Tauri/WebView). This module focuses on wiring: search → install/update/uninstall.
  */
 
+import {
+  getDefaultSeedStoreStorage,
+  removeSeedPanelsForExtension,
+  setSeedPanelsForExtension,
+} from "../../extensions/contributedPanelsSeedStore.js";
+import { showToast } from "../../extensions/ui.js";
+
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
@@ -14,6 +21,40 @@ function el(tag, attrs = {}, children = []) {
   }
   for (const child of children) node.append(child);
   return node;
+}
+
+function updateContributedPanelSeedsFromHost(extensionHostManager, extensionId) {
+  const storage = getDefaultSeedStoreStorage();
+  if (!storage) return;
+
+  if (!extensionHostManager || typeof extensionHostManager.listContributions !== "function") return;
+
+  try {
+    const contributed = extensionHostManager.listContributions()?.panels ?? [];
+    const panels = contributed
+      .filter((p) => p && typeof p === "object" && p.extensionId === extensionId)
+      .map((p) => ({ id: p.id, title: p.title, icon: p.icon ?? null }));
+
+    const ok = setSeedPanelsForExtension(storage, extensionId, panels, {
+      onError: (message) => {
+        // eslint-disable-next-line no-console
+        console.error(message);
+        try {
+          showToast(message, "error");
+        } catch {
+          // ignore missing toast root
+        }
+      },
+    });
+
+    if (!ok) {
+      // setSeedPanelsForExtension already surfaced the error.
+      return;
+    }
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error("Failed to update contributed panel seed store:", error);
+  }
 }
 
 async function renderSearchResults({ container, marketplaceClient, extensionManager, extensionHostManager, query }) {
@@ -42,6 +83,7 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
               } else if (extensionHostManager) {
                 await extensionHostManager.reloadExtension(item.id);
               }
+              updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
               actions.textContent = "Installed";
             } catch (error) {
               // eslint-disable-next-line no-console
@@ -64,6 +106,8 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
               if (extensionHostManager?.syncInstalledExtensions) {
                 await extensionHostManager.syncInstalledExtensions();
               }
+              const storage = getDefaultSeedStoreStorage();
+              if (storage) removeSeedPanelsForExtension(storage, item.id);
               actions.textContent = "Uninstalled";
             } catch (error) {
               // eslint-disable-next-line no-console
@@ -97,6 +141,7 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
               } else if (extensionHostManager) {
                 await extensionHostManager.reloadExtension(item.id);
               }
+              updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
               actions.textContent = "Updated";
             } catch (error) {
               // eslint-disable-next-line no-console
