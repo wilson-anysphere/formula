@@ -39,6 +39,8 @@ test("workspace.css defines panel body container/fill helpers (class-driven moun
   }
 
   const containerBlock = extractBlock(css, ".panel-body__container");
+  assert.match(containerBlock, /\bmin-width\s*:\s*0\b/, "panel-body__container should set min-width: 0");
+  assert.match(containerBlock, /\bmin-height\s*:\s*0\b/, "panel-body__container should set min-height: 0");
   assert.match(containerBlock, /\bheight\s*:\s*100%/, "panel-body__container should set height: 100%");
   assert.match(containerBlock, /\bdisplay\s*:\s*flex\b/, "panel-body__container should set display: flex");
   assert.match(containerBlock, /\bflex-direction\s*:\s*column\b/, "panel-body__container should set flex-direction: column");
