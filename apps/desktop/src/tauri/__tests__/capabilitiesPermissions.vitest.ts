@@ -28,6 +28,28 @@ describe("Tauri capabilities", () => {
     expect(hasAllowInvoke).toBe(false);
   });
 
+  it("defines an explicit invoke command allowlist (no wildcards)", () => {
+    const permissionPath = fileURLToPath(new URL("../../../src-tauri/permissions/allow-invoke.json", import.meta.url));
+    const permissionFile = JSON.parse(readFileSync(permissionPath, "utf8")) as any;
+    expect(Array.isArray(permissionFile?.permission)).toBe(true);
+
+    const entry = (permissionFile.permission as any[]).find((p) => p?.identifier === "allow-invoke") as any;
+    expect(entry).toBeTruthy();
+
+    const allow = entry?.commands?.allow as unknown;
+    expect(Array.isArray(allow)).toBe(true);
+    expect((allow as unknown[]).length).toBeGreaterThan(0);
+
+    const commands = (allow as unknown[]).filter((command): command is string => typeof command === "string");
+    expect(commands.length).toBe((allow as unknown[]).length);
+    expect(new Set(commands).size).toBe(commands.length);
+
+    for (const command of commands) {
+      expect(command.trim()).not.toBe("");
+      expect(command).not.toContain("*");
+    }
+  });
+
   it("grants the dialog + clipboard permissions required by the frontend", () => {
     const permissions = readPermissions();
 
