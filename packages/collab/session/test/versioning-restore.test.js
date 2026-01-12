@@ -73,6 +73,13 @@ test("CollabVersioning integration: restore syncs + persists (sync-server)", asy
   const docId = "collab-versioning-test-doc";
   const wsUrl = server.wsUrl;
 
+  // Create sessions sequentially. This test is about versioning + restore behavior,
+  // not concurrent schema initialization (covered separately in
+  // `workbook-schema.concurrent-init.sync-server.test.js`).
+  //
+  // Starting both sessions at the same time can lead to rare flakiness under heavy
+  // load where the default-sheet schema converges more slowly, which then causes
+  // downstream waits to time out.
   sessionA = createCollabSession({
     connection: {
       wsUrl,
@@ -82,6 +89,7 @@ test("CollabVersioning integration: restore syncs + persists (sync-server)", asy
       disableBc: true,
     },
   });
+  await sessionA.whenSynced();
 
   sessionB = createCollabSession({
     connection: {
@@ -92,8 +100,11 @@ test("CollabVersioning integration: restore syncs + persists (sync-server)", asy
       disableBc: true,
     },
   });
+  await sessionB.whenSynced();
 
-  await Promise.all([sessionA.whenSynced(), sessionB.whenSynced()]);
+  // Ensure both sessions have converged to a stable schema before applying edits.
+  await waitForCondition(() => snapshotSheets(sessionA).length === 1, TIMEOUT_MS);
+  await waitForCondition(() => snapshotSheets(sessionB).length === 1, TIMEOUT_MS);
 
   store = new SQLiteVersionStore({ filePath: versionDbPath });
   versioning = createCollabVersioning({

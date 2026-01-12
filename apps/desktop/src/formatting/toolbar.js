@@ -6,10 +6,16 @@ import { applyStylePatch } from "./styleTable.js";
 const EXCEL_MAX_ROW = 1_048_576 - 1;
 const EXCEL_MAX_COL = 16_384 - 1;
 // Keep aligned with `apps/desktop/src/formatting/selectionSizeGuard.ts` default UI limit.
+// This guard exists to prevent *per-cell* enumeration from exploding (e.g. multi-range
+// selections of many medium rectangles).
 const MAX_RANGE_FORMATTING_CELLS = 100_000;
 // Full-width row formatting still requires enumerating each row in the selection
 // (DocumentController row formatting layer). Align with `DEFAULT_FORMATTING_BAND_ROW_LIMIT`.
 const MAX_RANGE_FORMATTING_BAND_ROWS = 50_000;
+// Keep aligned with `DocumentController.setRangeFormat` (range-run fast path threshold).
+// Above this size, formatting is stored as compressed per-column range runs rather than
+// enumerating each cell in the rectangle.
+const RANGE_RUN_FORMAT_THRESHOLD = 50_000;
 
 function rangeCellCount(range) {
   const rows = Math.max(0, range.end.row - range.start.row + 1);
@@ -29,12 +35,12 @@ function isLayeredFormatRange(range) {
 }
 
 function ensureSafeFormattingRange(rangeOrRanges) {
-  let totalCells = 0;
+  let totalEnumeratedCells = 0;
 
   const showTooLargeToast = () => {
     try {
       showToast(
-        `Selection too large to apply formatting (>${MAX_RANGE_FORMATTING_CELLS} cells). Select fewer cells and try again.`,
+        `Selection too large to apply formatting (>${MAX_RANGE_FORMATTING_CELLS.toLocaleString()} cells). Select fewer cells and try again.`,
         "warning",
       );
     } catch {
@@ -59,24 +65,20 @@ function ensureSafeFormattingRange(rangeOrRanges) {
           } catch {
             // ignore (e.g. toast root missing in tests)
           }
-          // Avoid calling into DocumentController for extremely large full-width row selections.
-          // Formatting full-width rows requires enumerating each row to update the row formatting
-          // layer; above this threshold it can freeze the UI and allocate enormous delta arrays.
           return false;
         }
       }
       continue;
     }
+
     const cellCount = rangeCellCount(r);
-    // Block extremely large non-band rectangles (and align with the UI selection-size guard).
-    // Even though DocumentController can represent large rectangles efficiently via range runs,
-    // we keep formatting operations bounded to avoid accidental multi-million-cell changes.
-    if (cellCount > MAX_RANGE_FORMATTING_CELLS) {
-      showTooLargeToast();
-      return false;
-    }
-    totalCells += cellCount;
-    if (totalCells > MAX_RANGE_FORMATTING_CELLS) {
+
+    // Large rectangles are stored as compressed range runs, not per-cell overrides.
+    // Do not count these towards the "enumerated cell" safety cap.
+    if (cellCount > RANGE_RUN_FORMAT_THRESHOLD) continue;
+
+    totalEnumeratedCells += cellCount;
+    if (totalEnumeratedCells > MAX_RANGE_FORMATTING_CELLS) {
       showTooLargeToast();
       return false;
     }
