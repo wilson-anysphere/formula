@@ -30,6 +30,29 @@ const METADATA_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="y
 </metadata>
 "#;
 
+const METADATA_XML_RICH_VALUE_INDEX_ONE: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+  <futureMetadata name="XLRICHVALUE" count="1">
+    <bk>
+      <extLst>
+        <ext uri="{00000000-0000-0000-0000-000000000000}">
+          <xlrd:rvb i="1"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+  <valueMetadata count="1">
+    <bk>
+      <rc t="1" v="0"/>
+    </bk>
+  </valueMetadata>
+</metadata>
+"#;
+
 const METADATA_XML_T_ZERO_BASED: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
           xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
@@ -366,6 +389,76 @@ fn preserves_rich_value_rel_placeholders_to_avoid_index_shifts() {
     pkg.set_part(rels_part, rels_xml.into_bytes());
 
     // Round-trip through ZIP writer to ensure the extractor works on a real package.
+    let bytes = pkg.write_to_bytes().unwrap();
+    let pkg = XlsxPackage::from_bytes(&bytes).unwrap();
+
+    let images = extract_embedded_images(&pkg).unwrap();
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].image_target, "xl/media/image1.png");
+    assert_eq!(images[0].bytes, png_bytes);
+}
+
+#[test]
+fn extracts_from_multi_part_rich_value_tables() {
+    // Some workbooks split the rich value table across multiple `richValue*.xml` parts. Ensure we
+    // concatenate and index them correctly.
+    let png_bytes = STANDARD
+        .decode(PNG_1X1_TRANSPARENT_B64)
+        .expect("decode png base64");
+
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet.write_number(1, 1, 1.0).unwrap(); // B2
+    let xlsx_bytes = workbook.save_to_buffer().unwrap();
+
+    let mut pkg = XlsxPackage::from_bytes(&xlsx_bytes).unwrap();
+
+    let sheet_part = "xl/worksheets/sheet1.xml";
+    let mut sheet_xml = String::from_utf8(pkg.part(sheet_part).unwrap().to_vec()).unwrap();
+    sheet_xml = sheet_xml.replacen(r#"r="B2""#, r#"r="B2" vm="1""#, 1);
+    pkg.set_part(sheet_part, sheet_xml.into_bytes());
+
+    // vm=1 maps to richValue index 1 (second record globally).
+    pkg.set_part(
+        "xl/metadata.xml",
+        METADATA_XML_RICH_VALUE_INDEX_ONE.as_bytes().to_vec(),
+    );
+    // Two rich value parts: richValue1.xml -> global idx 0, richValue2.xml -> global idx 1.
+    pkg.set_part(
+        "xl/richData/richValue1.xml",
+        RICH_VALUE_XML_MINIMAL.as_bytes().to_vec(),
+    );
+    pkg.set_part(
+        "xl/richData/richValue2.xml",
+        RICH_VALUE_XML_MINIMAL.as_bytes().to_vec(),
+    );
+    pkg.set_part(
+        "xl/richData/richValueRel.xml",
+        RICH_VALUE_REL_XML.as_bytes().to_vec(),
+    );
+    pkg.set_part(
+        "xl/richData/_rels/richValueRel.xml.rels",
+        RICH_VALUE_REL_RELS_XML.as_bytes().to_vec(),
+    );
+    pkg.set_part("xl/media/image1.png", png_bytes.clone());
+
+    // Wire up workbook relationships. Point the `richValue` relationship at `richValue1.xml`, but
+    // the extractor should still load and concatenate all `richValue*.xml` parts.
+    let rels_part = "xl/_rels/workbook.xml.rels";
+    let mut rels_xml = String::from_utf8(pkg.part(rels_part).unwrap().to_vec()).unwrap();
+    let insert_idx = rels_xml
+        .rfind("</Relationships>")
+        .expect("closing Relationships tag");
+    rels_xml.insert_str(
+        insert_idx,
+        r#"
+  <Relationship Id="rId1000" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata" Target="metadata.xml"/>
+  <Relationship Id="rId1001" Type="http://schemas.microsoft.com/office/2017/06/relationships/richValue" Target="richData/richValue1.xml"/>
+  <Relationship Id="rId1002" Type="http://schemas.microsoft.com/office/2022/10/relationships/richValueRel" Target="richData/richValueRel.xml"/>
+"#,
+    );
+    pkg.set_part(rels_part, rels_xml.into_bytes());
+
     let bytes = pkg.write_to_bytes().unwrap();
     let pkg = XlsxPackage::from_bytes(&bytes).unwrap();
 

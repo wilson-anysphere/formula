@@ -219,12 +219,47 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
         None => HashMap::new(),
     };
 
-    let rich_value_rel_indices = match rich_value_part
-        .as_deref()
-        .and_then(|part| pkg.part(part).map(|bytes| (part, bytes)))
-    {
-        Some((_part, bytes)) => parse_rich_value_relationship_indices(bytes)?,
-        None => Vec::new(),
+    // Prefer parsing all `xl/richData/richValue*.xml` parts (concatenated in numeric-suffix order),
+    // since some workbooks split the rich value table across multiple parts (e.g. `richValue1.xml`,
+    // `richValue2.xml`, ...).
+    //
+    // Only do this when:
+    // - we have not explicitly discovered a custom/nonstandard rich value part name, AND
+    // - there is at least one standard `richValue*.xml` part present in the package.
+    //
+    // This preserves the ability to read synthetic/custom packages while also matching the rich
+    // data extraction behavior in `crate::rich_data`.
+    let rich_value_rel_indices = {
+        let mut rich_value_parts: Vec<String> = pkg
+            .part_names()
+            .filter(|name| rich_value_part_suffix_index(name).is_some())
+            .map(str::to_string)
+            .collect();
+
+        let should_use_multi_part = !rich_value_parts.is_empty()
+            && (rich_value_part.is_none()
+                || rich_value_part
+                    .as_deref()
+                    .is_some_and(|p| rich_value_part_suffix_index(p).is_some()));
+
+        if should_use_multi_part {
+            rich_value_parts.sort_by(|a, b| {
+                let a_idx = rich_value_part_suffix_index(a).unwrap_or(u32::MAX);
+                let b_idx = rich_value_part_suffix_index(b).unwrap_or(u32::MAX);
+                a_idx.cmp(&b_idx).then_with(|| a.cmp(b))
+            });
+
+            let mut out: Vec<Option<usize>> = Vec::new();
+            for part in rich_value_parts {
+                let Some(bytes) = pkg.part(&part) else { continue };
+                out.extend(parse_rich_value_relationship_indices(bytes)?);
+            }
+            out
+        } else if let Some(bytes) = rich_value_part.as_deref().and_then(|part| pkg.part(part)) {
+            parse_rich_value_relationship_indices(bytes)?
+        } else {
+            Vec::new()
+        }
     };
 
     let local_image_identifier_to_rid = match rich_value_rel_part
@@ -611,6 +646,27 @@ fn parse_rdrichvalue(
     }
 
     Ok(out)
+}
+
+fn rich_value_part_suffix_index(part_path: &str) -> Option<u32> {
+    if !part_path.starts_with("xl/richData/") {
+        return None;
+    }
+    let file_name = part_path.rsplit('/').next()?;
+    let file_name_lower = file_name.to_ascii_lowercase();
+    if !file_name_lower.ends_with(".xml") {
+        return None;
+    }
+
+    let stem = &file_name_lower[..file_name_lower.len() - ".xml".len()];
+    let suffix = stem.strip_prefix("richvalue")?;
+    if suffix.is_empty() {
+        return Some(0);
+    }
+    if !suffix.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    suffix.parse::<u32>().ok()
 }
 
 fn parse_rich_value_rel_ids(xml: &[u8]) -> Result<Vec<String>, XlsxError> {
