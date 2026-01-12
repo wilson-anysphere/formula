@@ -226,11 +226,65 @@ function deleteAllPackagesForExtension(packagesStore: IDBObjectStore, extensionI
   const prefix = `${id}@`;
   return new Promise((resolve, reject) => {
     type AnyCursor = IDBCursor | IDBCursorWithValue;
-    let req: IDBRequest<AnyCursor | null>;
 
-    // All package keys are `${extensionId}@${version}`, so we can delete all packages for the
-    // extension via a key-prefix range without needing schema indexes or loading large `bytes`
-    // values into memory.
+    const deleteCursorKey = (cursor: AnyCursor) => {
+      try {
+        // Some IndexedDB implementations/polyfills do not support `cursor.delete()` on key cursors.
+        // Deleting via the object store is universally supported.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        packagesStore.delete((cursor as any).primaryKey ?? (cursor as any).key);
+      } catch {
+        // ignore
+      }
+    };
+
+    const isExactPackageKeyForId = (key: string): boolean => {
+      if (!key.startsWith(prefix)) return false;
+      // Defensive: if extension ids ever include "@", prefix-matching alone could include other ids
+      // like `${id}@something`. Use the last "@" (semver doesn't contain "@") to extract the id
+      // portion and ensure we only delete exact matches.
+      const lastAt = key.lastIndexOf("@");
+      if (lastAt <= 0) return false;
+      return key.slice(0, lastAt) === id;
+    };
+
+    const iterate = (
+      req: IDBRequest<AnyCursor | null>,
+      shouldDelete: (cursor: AnyCursor) => boolean
+    ) => {
+      req.onerror = () => reject(req.error ?? new Error("Failed to iterate extension packages"));
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (!cursor) {
+          resolve();
+          return;
+        }
+        if (shouldDelete(cursor)) {
+          deleteCursorKey(cursor);
+        }
+        cursor.continue();
+      };
+    };
+
+    // Prefer using the `byId` index when available: it avoids key prefix ambiguity and doesn't
+    // require scanning the full store.
+    try {
+      const index = packagesStore.index("byId");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const openKeyCursor = (index as any)?.openKeyCursor as
+        | ((query?: IDBValidKey | IDBKeyRange | null) => IDBRequest<IDBCursor | null>)
+        | undefined;
+      if (typeof openKeyCursor === "function") {
+        const req = openKeyCursor.call(index, id) as unknown as IDBRequest<AnyCursor | null>;
+        iterate(req, () => true);
+        return;
+      }
+    } catch {
+      // fall through
+    }
+
+    // Fallback: delete by `${extensionId}@` key prefix range (no schema/index required).
+    let req: IDBRequest<AnyCursor | null>;
     try {
       let range: IDBKeyRange | undefined;
       if (typeof IDBKeyRange !== "undefined" && typeof IDBKeyRange.bound === "function") {
@@ -245,7 +299,7 @@ function deleteAllPackagesForExtension(packagesStore: IDBObjectStore, extensionI
         | undefined;
 
       if (typeof openKeyCursor === "function") {
-        req = openKeyCursor.call(packagesStore, range);
+        req = openKeyCursor.call(packagesStore, range) as unknown as IDBRequest<AnyCursor | null>;
       } else {
         req = packagesStore.openCursor(range);
       }
@@ -254,27 +308,7 @@ function deleteAllPackagesForExtension(packagesStore: IDBObjectStore, extensionI
       return;
     }
 
-    req.onerror = () => reject(req.error ?? new Error("Failed to iterate extension packages"));
-    req.onsuccess = () => {
-      const cursor = req.result;
-      if (!cursor) {
-        resolve();
-        return;
-      }
-
-      // If the runtime doesn't support IDBKeyRange, we had to iterate the full store; filter by key prefix.
-      const key = String((cursor as any).key ?? "");
-      if (key.startsWith(prefix)) {
-        try {
-          // Some IndexedDB implementations/polyfills do not support `cursor.delete()` on key cursors.
-          // Deleting via the object store is universally supported.
-          packagesStore.delete((cursor as any).primaryKey ?? (cursor as any).key);
-        } catch {
-          // ignore
-        }
-      }
-      cursor.continue();
-    };
+    iterate(req, (cursor) => isExactPackageKeyForId(String((cursor as any).key ?? "")));
   });
 }
 
