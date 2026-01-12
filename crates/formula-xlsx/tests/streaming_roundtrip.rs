@@ -205,15 +205,35 @@ fn streaming_patch_expands_dimension_when_writing_out_of_range_cell(
 fn streaming_patch_normalizes_formula_with_xlfn_prefixes() -> Result<(), Box<dyn std::error::Error>> {
     let bytes = include_bytes!("fixtures/rt_simple.xlsx");
 
-    let patch = WorksheetCellPatch::new(
-        "xl/worksheets/sheet1.xml",
-        CellRef::from_a1("C1")?,
-        CellValue::Number(1.0),
-        Some("=SEQUENCE(3)".to_string()),
-    );
+    let patches = [
+        WorksheetCellPatch::new(
+            "xl/worksheets/sheet1.xml",
+            CellRef::from_a1("C1")?,
+            CellValue::Number(1.0),
+            Some("=SEQUENCE(3)".to_string()),
+        ),
+        WorksheetCellPatch::new(
+            "xl/worksheets/sheet1.xml",
+            CellRef::from_a1("C2")?,
+            CellValue::Number(1.0),
+            Some(r#"=TEXTAFTER("a_b","_")"#.to_string()),
+        ),
+        WorksheetCellPatch::new(
+            "xl/worksheets/sheet1.xml",
+            CellRef::from_a1("C3")?,
+            CellValue::Number(1.0),
+            Some(r#"=TEXTBEFORE("a_b","_")"#.to_string()),
+        ),
+        WorksheetCellPatch::new(
+            "xl/worksheets/sheet1.xml",
+            CellRef::from_a1("C4")?,
+            CellValue::Number(1.0),
+            Some("=VALUETOTEXT(1)".to_string()),
+        ),
+    ];
 
     let mut out = Cursor::new(Vec::new());
-    patch_xlsx_streaming(Cursor::new(bytes.as_slice()), &mut out, &[patch])?;
+    patch_xlsx_streaming(Cursor::new(bytes.as_slice()), &mut out, &patches)?;
 
     // Ensure the stored formula uses the _xlfn prefix.
     let mut archive = ZipArchive::new(Cursor::new(out.get_ref()))?;
@@ -221,17 +241,41 @@ fn streaming_patch_normalizes_formula_with_xlfn_prefixes() -> Result<(), Box<dyn
     archive
         .by_name("xl/worksheets/sheet1.xml")?
         .read_to_string(&mut sheet_xml)?;
-    assert!(
-        sheet_xml.contains("<c r=\"C1\"><f>_xlfn.SEQUENCE(3)</f>"),
-        "expected patched formula to be stored with _xlfn prefix"
-    );
+    let xml_doc = roxmltree::Document::parse(&sheet_xml)?;
+    for (cell_ref, expected_file_text) in [
+        ("C1", "_xlfn.SEQUENCE(3)"),
+        ("C2", r#"_xlfn.TEXTAFTER("a_b","_")"#),
+        ("C3", r#"_xlfn.TEXTBEFORE("a_b","_")"#),
+        ("C4", "_xlfn.VALUETOTEXT(1)"),
+    ] {
+        let cell = xml_doc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some(cell_ref))
+            .unwrap_or_else(|| panic!("{cell_ref} cell should exist"));
+        let f = cell
+            .children()
+            .find(|n| n.is_element() && n.tag_name().name() == "f")
+            .and_then(|n| n.text())
+            .unwrap_or_default();
+        assert_eq!(
+            f, expected_file_text,
+            "expected {cell_ref} formula to be stored with _xlfn prefix"
+        );
+    }
 
     // Ensure the parsed model uses the display formula without the prefix.
     let doc = load_from_bytes(out.get_ref())?;
     let sheet_id = doc.workbook.sheets[0].id;
     let sheet = doc.workbook.sheet(sheet_id).unwrap();
-    let cell = sheet.cell(CellRef::from_a1("C1")?).unwrap();
-    assert_eq!(cell.formula.as_deref(), Some("SEQUENCE(3)"));
+    for (cell_ref, expected_display) in [
+        ("C1", "SEQUENCE(3)"),
+        ("C2", r#"TEXTAFTER("a_b","_")"#),
+        ("C3", r#"TEXTBEFORE("a_b","_")"#),
+        ("C4", "VALUETOTEXT(1)"),
+    ] {
+        let cell = sheet.cell(CellRef::from_a1(cell_ref)?).unwrap();
+        assert_eq!(cell.formula.as_deref(), Some(expected_display));
+    }
 
     Ok(())
 }
