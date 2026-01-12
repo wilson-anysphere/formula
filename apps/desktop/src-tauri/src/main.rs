@@ -7,7 +7,6 @@ mod shortcuts;
 mod asset_protocol;
 mod menu;
 mod tray;
-mod updater;
 
 use desktop::commands;
 use desktop::macro_trust::{compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore};
@@ -15,6 +14,7 @@ use desktop::macros::MacroExecutionOptions;
 use desktop::open_file;
 use desktop::state::{AppState, CellUpdateData, SharedAppState};
 use desktop::tray_status::{self, TrayStatusState};
+use desktop::updater;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -479,6 +479,7 @@ fn main() {
             commands::run_macro,
             commands::validate_vba_migration,
             commands::run_python_script,
+            commands::check_for_updates,
             commands::quit_app,
             commands::exit_process,
             commands::report_cross_origin_isolation,

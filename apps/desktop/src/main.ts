@@ -53,6 +53,7 @@ import { setTrayStatus } from "./tauri/trayStatus";
 import { installUpdaterUi } from "./tauri/updaterUi";
 import { notify } from "./tauri/notifications";
 import { registerAppQuitHandlers, requestAppQuit } from "./tauri/appQuit";
+import { checkForUpdatesFromCommandPalette } from "./tauri/updater.js";
 import type { WorkbookInfo } from "@formula/workbook-backend";
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
 import { parseA1Range, splitSheetQualifier } from "../../../packages/search/index.js";
@@ -2661,6 +2662,17 @@ if (
       app.focus();
     },
     { category: "View" },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "checkForUpdates",
+    "Check for Updates",
+    () => {
+      void checkForUpdatesFromCommandPalette().catch((err) => {
+        console.error("Failed to check for updates:", err);
+      });
+    },
+    { category: "Help" },
   );
 
   if (import.meta.env.DEV) {

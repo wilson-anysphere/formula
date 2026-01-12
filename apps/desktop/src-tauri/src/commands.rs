@@ -3518,6 +3518,16 @@ pub async fn fire_selection_change(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
+pub fn check_for_updates(
+    app: tauri::AppHandle,
+    source: crate::updater::UpdateCheckSource,
+) -> Result<(), String> {
+    crate::updater::spawn_update_check(&app, source);
+    Ok(())
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
 pub fn quit_app() {
     // We intentionally use a hard process exit here. The desktop shell already delegates
     // "should we quit?" decisions (event macros + unsaved prompts) to the frontend.
