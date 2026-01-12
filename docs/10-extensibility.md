@@ -236,7 +236,11 @@ cannot reliably resolve relative imports, the browser entrypoint (`manifest.brow
 ### Marketplace base URL + CSP / network constraints (Desktop)
 
 - `MarketplaceClient` (used by `WebExtensionManager`) takes `{ baseUrl }` (defaults to `"/api"`).
-  - In desktop builds, this is typically a full HTTPS URL like `https://marketplace.example.com/api`.
+- In the desktop app, the base URL is chosen by `getMarketplaceBaseUrl()`
+  (`apps/desktop/src/panels/marketplace/getMarketplaceBaseUrl.ts`):
+  - override via `localStorage["formula:marketplace:baseUrl"]`
+  - override via `VITE_FORMULA_MARKETPLACE_BASE_URL`
+  - default: `"/api"` in dev/e2e, `https://marketplace.formula.app/api` in production builds
 - The WebView CSP must allow outbound connections to:
   - the marketplace origin (for installs/updates), and
   - any origins extensions need for `formula.network.fetch` / WebSocket connections.
@@ -1150,7 +1154,16 @@ Because `blob:`/`data:` module URLs cannot resolve relative imports, `manifest.b
 ### Marketplace base URL configuration (Desktop)
 
 The browser/WebView marketplace client is `MarketplaceClient` (`packages/extension-marketplace/src/MarketplaceClient.ts`).
-It defaults to a same-origin API at `"/api"`, but Desktop/Tauri builds typically point at an HTTPS marketplace origin:
+It defaults to a same-origin API at `"/api"`.
+
+In Formula Desktop, the effective base URL comes from `getMarketplaceBaseUrl()`
+(`apps/desktop/src/panels/marketplace/getMarketplaceBaseUrl.ts`):
+
+- override via `localStorage["formula:marketplace:baseUrl"]`
+- override via `VITE_FORMULA_MARKETPLACE_BASE_URL`
+- default: `"/api"` in dev/e2e, `https://marketplace.formula.app/api` in production builds
+
+If you’re wiring up a custom host, you can pass a fully-qualified HTTPS base URL directly:
 
 ```ts
 // See packages/extension-marketplace/src/MarketplaceClient.ts and WebExtensionManager.ts
