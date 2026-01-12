@@ -2318,7 +2318,9 @@ export class CanvasGridRenderer {
 
       const cell = getCellCached(row, col);
       const value = cell?.value ?? null;
-      const blocked = value !== null && value !== "";
+      const richTextText = cell?.richText?.text;
+      const blocked =
+        (value !== null && value !== "") || (typeof richTextText === "string" && richTextText !== "");
       rowCache.set(col, blocked);
       return blocked;
     };
