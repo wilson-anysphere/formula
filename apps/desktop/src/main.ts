@@ -5843,6 +5843,12 @@ if (
         {
           type: "submenu",
           label: t("clipboard.pasteSpecial.title"),
+          // Retain the shortcut hint for the Paste Special command (still available via
+          // keybinding/command palette), even though the context menu now exposes direct
+          // paste-special modes via a submenu.
+          shortcut:
+            getPrimaryCommandKeybindingDisplay("clipboard.pasteSpecial", commandKeybindingDisplayIndex) ??
+            (isMac ? "⇧⌘V" : "Ctrl+Shift+V"),
           items: getPasteSpecialMenuItems().map((item) => ({
             type: "item",
             label: item.label,

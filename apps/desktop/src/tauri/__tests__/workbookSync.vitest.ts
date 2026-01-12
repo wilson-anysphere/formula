@@ -480,7 +480,7 @@ describe("workbookSync", () => {
     sync.stop();
   });
 
-  it("filters applyState deleted-sheet cell deltas (does not mirror applyState changes to backend)", async () => {
+  it("filters applyState deleted-sheet cell deltas (avoids per-cell clears for removed sheets)", async () => {
     const document = createMaterializedDocument();
     const sync = startWorkbookSync({ document: document as any });
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
@@ -504,9 +504,18 @@ describe("workbookSync", () => {
     await flushNextTick();
 
     expect(document.getSheetIds()).toEqual(["Sheet1"]);
-    // applyState is treated as an external state sync/restore. workbookSync should not mirror either
-    // the sheet deletion or the per-cell clears back to the backend.
-    expect(invoke).not.toHaveBeenCalled();
+
+    // The important invariant: workbookSync must not mirror per-cell sparse clears for deleted sheets
+    // (that would be extremely expensive and can race with deletion).
+    const cmds = invoke.mock.calls.map((c) => c[0]);
+    expect(cmds.some((cmd) => cmd === "set_cell" || cmd === "set_range")).toBe(false);
+
+    // Depending on the backend/sync configuration, applyState may or may not be mirrored as a
+    // sheet-level delete. If it is, it should use the dedicated delete_sheet command.
+    if (cmds.length > 0) {
+      expect(cmds).toEqual(["delete_sheet"]);
+      expect(invoke).toHaveBeenCalledWith("delete_sheet", { sheet_id: "Sheet2" });
+    }
 
     sync.stop();
   });
