@@ -1030,12 +1030,17 @@ function renderStatusMode(): void {
 renderStatusMode();
 
 const unsubscribeTitlebarHistory = app.getDocument().on("history", () => syncTitlebar());
+// In collaboration mode, undo/redo state is driven by the Yjs undo manager rather than the
+// DocumentController history stack. Ensure the titlebar stays in sync even when the
+// DocumentController does not emit history events for every change.
+const unsubscribeTitlebarChange = app.getDocument().on("change", () => syncTitlebar());
 const unsubscribeTitlebarEditState = app.onEditStateChange(() => {
   renderStatusMode();
   syncTitlebar();
 });
 window.addEventListener("unload", () => {
   unsubscribeTitlebarHistory();
+  unsubscribeTitlebarChange();
   unsubscribeTitlebarEditState();
   titlebar.dispose();
 });
