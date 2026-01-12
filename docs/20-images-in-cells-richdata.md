@@ -278,16 +278,29 @@ Notes:
 
 ## OPC relationships and `[Content_Types].xml`
 
-### Workbook → richData parts
+### Relationship graph (where Excel puts the links)
 
-Excel must relate the workbook to the richData parts via `xl/_rels/workbook.xml.rels`. Relationship *targets* are typically:
+Excel uses OPC relationships to connect:
+
+* `xl/workbook.xml` → `xl/metadata.xml` (worksheet cells only carry `vm`/`cm` indices; the actual mapping tables live in metadata).
+* `xl/metadata.xml` → `xl/richData/*` (the rich value tables).
+* `xl/richData/richValueRel.xml` → external OPC targets (commonly `xl/media/*` images) via `xl/richData/_rels/richValueRel.xml.rels`.
+
+In many Excel-generated workbooks, the richData parts are not related directly from `workbook.xml.rels`, but instead via a separate relationships part:
+
+* `xl/_rels/metadata.xml.rels` (for `xl/metadata.xml`)
+
+Relationship *targets* for the richData tables are typically:
 
 * `richData/richValue.xml`
 * `richData/richValueRel.xml`
 * `richData/richValueTypes.xml`
 * `richData/richValueStructure.xml`
 
-Relationship **Type URIs** are Microsoft-specific and not yet verified in this repo. Likely patterns include:
+Some Excel builds may additionally include direct relationships from `xl/workbook.xml.rels` to `xl/richData/*`.
+For parsing and round-trip safety, treat both layouts as valid.
+
+Relationship **Type URIs** for these parts are Microsoft-specific and not yet verified in this repo. Likely patterns include:
 
 * `http://schemas.microsoft.com/office/.../relationships/richValue`
 * `http://schemas.microsoft.com/office/.../relationships/richValueRel`
@@ -296,8 +309,8 @@ Relationship **Type URIs** are Microsoft-specific and not yet verified in this r
 
 Implementation guidance:
 
-* When parsing, do not hardcode exact Type URIs; match by `Target` path when necessary and preserve unknown relationship types.
-* When writing new files, choose a single consistent set of Type URIs and keep them stable (but be prepared that Excel may rewrite them).
+* When parsing, do not hardcode exact Type URIs; match by resolved `Target` path when necessary and preserve unknown relationship types.
+* When writing new files, prefer the Excel-like layering (`workbook.xml` → `metadata.xml` → `richData/*`) and keep Type URIs stable (but be prepared that Excel may rewrite them).
 
 ### `[Content_Types].xml` overrides (likely)
 
@@ -321,14 +334,15 @@ Implementation guidance:
 
 For images-in-cell, the minimum viable read path usually looks like:
 
-1. Parse workbook relationships to locate the four `xl/richData/*` parts (if present).
-2. Parse `richValueTypes.xml` into `type_id -> structure_id`.
-3. Parse `richValueStructure.xml` into `structure_id -> ordered member schema`.
-4. Parse `richValueRel.xml` into `rel_index -> rId`.
-5. Parse `xl/richData/_rels/richValueRel.xml.rels` into `rId -> target` (image path).
-6. Parse `richValue.xml` into a table of `rich_value_index -> {type_id, payload...}`.
-7. Parse `xl/metadata.xml` to resolve `vm` (cell attribute) → `rich_value_index` (`xlrd:rvb/@i`).
-8. Use worksheet cell `vm` values to map cells → `rich_value_index`.
+1. Locate `xl/metadata.xml` (typically via `xl/_rels/workbook.xml.rels`, but fall back to part existence).
+2. Locate the four `xl/richData/*` parts (often via `xl/_rels/metadata.xml.rels`, but fall back to part existence).
+3. Parse `richValueTypes.xml` into `type_id -> structure_id`.
+4. Parse `richValueStructure.xml` into `structure_id -> ordered member schema`.
+5. Parse `richValueRel.xml` into `rel_index -> rId`.
+6. Parse `xl/richData/_rels/richValueRel.xml.rels` into `rId -> target` (image path).
+7. Parse `richValue.xml` into a table of `rich_value_index -> {type_id, payload...}`.
+8. Parse `xl/metadata.xml` to resolve `vm` (cell attribute) → `rich_value_index` (`xlrd:rvb/@i`).
+9. Use worksheet cell `vm` values to map cells → `rich_value_index`.
 
 For writing, the safest approach is typically “append-only”:
 
