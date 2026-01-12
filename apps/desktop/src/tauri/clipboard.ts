@@ -40,6 +40,44 @@ type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unkn
 // NOTE: Keep this in sync with the clipboard platform provider's guardrails.
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
 
+const isTrimChar = (code: number) => code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d; // space, tab, lf, cr
+
+function hasDataUrlPrefixAt(str: string, start: number): boolean {
+  if (start + 5 > str.length) return false;
+  // ASCII case-insensitive match for "data:" without allocating.
+  return (
+    ((str.charCodeAt(start) | 32) === 0x64) && // d
+    ((str.charCodeAt(start + 1) | 32) === 0x61) && // a
+    ((str.charCodeAt(start + 2) | 32) === 0x74) && // t
+    ((str.charCodeAt(start + 3) | 32) === 0x61) && // a
+    str.charCodeAt(start + 4) === 0x3a // :
+  );
+}
+
+function base64Bounds(base64: string): { start: number; end: number } {
+  let start = 0;
+  while (start < base64.length && isTrimChar(base64.charCodeAt(start))) start += 1;
+
+  if (hasDataUrlPrefixAt(base64, start)) {
+    // Scan only a small prefix for the comma separator so malformed inputs like
+    // `data:AAAAA...` don't force an O(n) search over huge payload strings.
+    let comma = -1;
+    const maxHeaderScan = Math.min(base64.length, start + 1024);
+    for (let i = start; i < maxHeaderScan; i += 1) {
+      if (base64.charCodeAt(i) === 0x2c) {
+        comma = i;
+        break;
+      }
+    }
+    if (comma >= 0) start = comma + 1;
+    while (start < base64.length && isTrimChar(base64.charCodeAt(start))) start += 1;
+  }
+
+  let end = base64.length;
+  while (end > start && isTrimChar(base64.charCodeAt(end - 1))) end -= 1;
+  return { start, end };
+}
+
 function getTauriInvoke(): TauriInvoke {
   const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
   if (!invoke) {
@@ -50,38 +88,21 @@ function getTauriInvoke(): TauriInvoke {
 
 function normalizeBase64String(base64: string): string {
   if (!base64) return "";
-  if (base64.slice(0, 5).toLowerCase() === "data:") {
-    const comma = base64.indexOf(",");
-    if (comma === -1) return "";
-    return base64.slice(comma + 1).trim();
-  }
-  return base64.trim();
+  const { start, end } = base64Bounds(base64);
+  if (end <= start) return "";
+  return base64.slice(start, end);
 }
 
 function estimateBase64Bytes(base64: string): number {
   if (!base64) return 0;
-
-  const isTrimChar = (code: number) => code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d; // space, tab, lf, cr
-
-  let start = 0;
-  if (base64.slice(0, 5).toLowerCase() === "data:") {
-    const comma = base64.indexOf(",");
-    if (comma === -1) return 0;
-    start = comma + 1;
-  }
-
-  while (start < base64.length && isTrimChar(base64.charCodeAt(start))) start += 1;
-
-  let end = base64.length - 1;
-  while (end >= start && isTrimChar(base64.charCodeAt(end))) end -= 1;
-
-  const len = end - start + 1;
+  const { start, end } = base64Bounds(base64);
+  const len = end - start;
   if (len <= 0) return 0;
 
   let padding = 0;
-  if (base64.charCodeAt(end) === 0x3d) {
+  if (base64.charCodeAt(end - 1) === 0x3d) {
     padding = 1;
-    if (end - 1 >= start && base64.charCodeAt(end - 1) === 0x3d) padding = 2;
+    if (end - 2 >= start && base64.charCodeAt(end - 2) === 0x3d) padding = 2;
   }
 
   const bytes = Math.floor((len * 3) / 4) - padding;

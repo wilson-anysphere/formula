@@ -32,6 +32,21 @@ describe("tauri/clipboard base64 normalization", () => {
     expect(content.pngBase64).toBeUndefined();
   });
 
+  it("readClipboard treats DATA: URL prefix case-insensitively", async () => {
+    const invoke = vi.fn(async (cmd: string) => {
+      if (cmd !== "clipboard_read") throw new Error(`Unexpected invoke: ${cmd}`);
+      return {
+        pngBase64: ` \n DATA:image/png;base64,${base64} \n`,
+      };
+    });
+
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const content = await readClipboard();
+    expect(Array.from(content.imagePng ?? [])).toEqual([1, 2, 3]);
+    expect(content.pngBase64).toBeUndefined();
+  });
+
   it("readClipboard falls back to legacy read_clipboard", async () => {
     const invoke = vi.fn(async (cmd: string) => {
       if (cmd === "clipboard_read") throw new Error("unsupported");
@@ -86,6 +101,19 @@ describe("tauri/clipboard base64 normalization", () => {
     (globalThis as any).__TAURI__ = { core: { invoke } };
 
     await writeClipboard({ text: "hello", pngBase64: "data:image/png;base64," });
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("writeClipboard treats DATA: URL prefix case-insensitively", async () => {
+    const invoke = vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd !== "clipboard_write") throw new Error(`Unexpected invoke: ${cmd}`);
+      expect(args).toEqual({ payload: { pngBase64: base64 } });
+      return null;
+    });
+
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    await writeClipboard({ pngBase64: ` \n DATA:image/png;base64,${base64} \n` });
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
