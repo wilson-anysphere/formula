@@ -51,6 +51,7 @@ enum CellInfoType {
     Row,
     Contents,
     Type,
+    Filename,
     Unsupported,
 }
 
@@ -61,8 +62,11 @@ fn parse_cell_info_type(key: &str) -> Option<CellInfoType> {
         "row" => Some(CellInfoType::Row),
         "contents" => Some(CellInfoType::Contents),
         "type" => Some(CellInfoType::Type),
+        // Excel returns an empty string for `CELL("filename")` until the workbook is saved.
+        // This engine does not currently track workbook file metadata, so always return "".
+        "filename" => Some(CellInfoType::Filename),
         // Valid Excel keys that are not implemented yet.
-        "color" | "filename" | "format" | "parentheses" | "prefix" | "protect" | "width" => {
+        "color" | "format" | "parentheses" | "prefix" | "protect" | "width" => {
             Some(CellInfoType::Unsupported)
         }
         _ => None,
@@ -192,7 +196,7 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             };
             Value::Text(code.to_string())
         }
+        CellInfoType::Filename => Value::Text(String::new()),
         CellInfoType::Unsupported => Value::Error(ErrorKind::NA),
     }
 }
-

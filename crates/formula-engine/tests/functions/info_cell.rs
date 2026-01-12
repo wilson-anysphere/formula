@@ -66,3 +66,10 @@ fn cell_errors_for_unknown_info_types() {
     );
 }
 
+#[test]
+fn cell_filename_is_empty_for_unsaved_workbooks() {
+    let mut sheet = TestSheet::new();
+
+    // Excel returns "" until the workbook has been saved.
+    assert_eq!(sheet.eval("=CELL(\"filename\")"), Value::Text(String::new()));
+}
