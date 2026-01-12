@@ -765,15 +765,49 @@ fn import_xls_path_with_biff_reader(
                                     "failed to import `.xls` note comment in sheet `{sheet_name}`: {w}"
                                 ))
                             }));
-                            let notes: Vec<biff::BiffNote> = parsed.notes;
-                            let mut used_note_ids: HashSet<String> = HashSet::new();
+                            let notes = parsed.notes;
+
+                            // Generate deterministic comment ids for BIFF NOTE comments so repeated
+                            // imports of the same `.xls` file yield stable ids.
+                            //
+                            // NOTE records are linked to TXO text payloads via `obj_id`, but some
+                            // files contain duplicate object ids or other collisions. In those
+                            // cases, fall back to `Worksheet::add_comment`'s UUID generation by
+                            // leaving the id empty and surface a warning.
+                            let mut seen_obj_ids: HashMap<u16, CellRef> = HashMap::new();
+                            let mut seen_ids: HashSet<String> = HashSet::new();
                             for note in notes {
                                 let anchor = sheet.merged_regions.resolve_cell(note.cell);
-                                let base_id =
+                                let candidate_id =
                                     format!("xls-note:{}:{}", anchor.to_a1(), note.obj_id);
 
+                                let mut collision = false;
+                                if let Some(prev_cell) = seen_obj_ids.get(&note.obj_id).copied() {
+                                    collision = true;
+                                    warnings.push(ImportWarning::new(format!(
+                                        "duplicate `.xls` NOTE obj_id {} in sheet `{sheet_name}` (index {sheet_idx}) (cell {} already used at {}); generating random comment id",
+                                        note.obj_id,
+                                        anchor.to_a1(),
+                                        prev_cell.to_a1(),
+                                    )));
+                                }
+                                if seen_ids.contains(&candidate_id) {
+                                    collision = true;
+                                    warnings.push(ImportWarning::new(format!(
+                                        "duplicate `.xls` NOTE id `{candidate_id}` in sheet `{sheet_name}` (index {sheet_idx}); generating random comment id",
+                                    )));
+                                }
+
+                                let id = if collision {
+                                    String::new()
+                                } else {
+                                    seen_obj_ids.insert(note.obj_id, anchor);
+                                    seen_ids.insert(candidate_id.clone());
+                                    candidate_id
+                                };
+
                                 let mut comment = Comment {
-                                    id: base_id.clone(),
+                                    id,
                                     kind: CommentKind::Note,
                                     content: note.text,
                                     author: CommentAuthor {
@@ -783,57 +817,24 @@ fn import_xls_path_with_biff_reader(
                                     ..Default::default()
                                 };
 
-                                // Deterministic comment ids are important for stability across
-                                // repeated imports of the same `.xls` file.
-                                //
-                                // Handle collisions best-effort by trying deterministic suffixes
-                                // (`...:{n}`), then falling back to an auto-generated UUID and
-                                // emitting a warning.
-                                let mut added = false;
-                                for n in 1u32..=100 {
-                                    if n > 1 {
-                                        comment.id = format!("{base_id}:{n}");
-                                    }
-
-                                    // Keep ids deterministic within this import even if there are
-                                    // duplicate NOTE records.
-                                    if !used_note_ids.insert(comment.id.clone()) {
-                                        continue;
-                                    }
-
-                                    match sheet.add_comment(note.cell, comment.clone()) {
-                                        Ok(_) => {
-                                            added = true;
-                                            break;
-                                        }
-                                        Err(formula_model::CommentError::DuplicateCommentId(_)) => {
-                                            // Collision with an existing comment id in the sheet:
-                                            // try a suffix.
-                                            continue;
-                                        }
-                                        Err(err) => {
-                                            warnings.push(ImportWarning::new(format!(
-                                                "failed to import `.xls` note comment for sheet `{sheet_name}` (index {sheet_idx}) at {}: {err}",
-                                                note.cell.to_a1(),
-                                            )));
-                                            added = true;
-                                            break;
-                                        }
-                                    }
-                                }
-
-                                if !added {
-                                    warnings.push(ImportWarning::new(format!(
-                                        "duplicate comment id `{base_id}` while importing `.xls` note comment at {} in sheet `{sheet_name}` (index {sheet_idx}); falling back to auto-generated id",
-                                        note.cell.to_a1(),
-                                    )));
+                                match sheet.add_comment(anchor, comment.clone()) {
+                                    Ok(_) => {}
+                                    Err(formula_model::CommentError::DuplicateCommentId(dup_id)) => {
+                                        warnings.push(ImportWarning::new(format!(
+                                            "duplicate `.xls` comment id `{dup_id}` in sheet `{sheet_name}` (index {sheet_idx}); generating random comment id",
+                                        )));
                                     comment.id.clear();
-                                    if let Err(err) = sheet.add_comment(note.cell, comment) {
+                                        if let Err(err) = sheet.add_comment(anchor, comment) {
                                         warnings.push(ImportWarning::new(format!(
                                             "failed to import `.xls` note comment for sheet `{sheet_name}` (index {sheet_idx}) at {}: {err}",
-                                            note.cell.to_a1(),
+                                                anchor.to_a1(),
                                         )));
                                     }
+                                }
+                                    Err(err) => warnings.push(ImportWarning::new(format!(
+                                        "failed to import `.xls` note comment for sheet `{sheet_name}` (index {sheet_idx}) at {}: {err}",
+                                        anchor.to_a1(),
+                                    ))),
                                 }
                             }
                         }
