@@ -12,8 +12,11 @@ For a **concrete, confirmed** “Place in Cell” (embedded local image) package
 
 - [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md)
 
-> Status: best-effort reverse engineering. This repo contains a **real Excel** “Place in Cell” fixture
-> (`rdRichValue*` variant) plus **synthetic** fixtures used by tests for the `richValue*` variant — see
+> Status: best-effort reverse engineering. This repo contains **real Excel** “Place in Cell” fixtures for
+> both the `rdRichValue*` variant (`fixtures/xlsx/basic/image-in-cell.xlsx`) and the `richValue*` variant
+> (`fixtures/xlsx/rich-data/images-in-cell.xlsx`, which also includes `xl/cellimages.xml`), plus
+> **synthetic** fixtures used by tests (`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`,
+> `fixtures/xlsx/rich-data/richdata-minimal.xlsx`) — see
 > [Observed in fixtures](#observed-in-fixtures-in-repo). Exact namespaces / relationship-type URIs may
 > still vary by Excel version; preserve unknown attributes and namespaces when round-tripping.
 
@@ -58,8 +61,8 @@ Notes:
 
 ## Observed in fixtures (in-repo)
 
-This repo includes **real Excel fixtures** for multiple "image in cell" / rich-data encodings (plus a
-minimal synthetic fixture used for regression tests):
+This repo includes **real Excel fixtures** for multiple "image in cell" / rich-data encodings, plus
+**synthetic** fixtures used for regression tests:
 
 * **Real Excel**: `fixtures/xlsx/rich-data/images-in-cell.xlsx` — full `richValue*` part set **plus**
   `xl/cellimages.xml`.
@@ -67,6 +70,8 @@ minimal synthetic fixture used for regression tests):
   **structure table** (`rdrichvaluestructure.xml`) to assign meanings to positional `<v>` fields.
 * **Synthetic (Formula fixture)**: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` — minimal
   `richValue.xml` + `richValueRel.xml` variant (no `richValueTypes.xml` / `richValueStructure.xml`).
+* **Synthetic (Formula fixture)**: `fixtures/xlsx/rich-data/richdata-minimal.xlsx` — minimal full
+  `richValue*` part set (includes `richValueTypes.xml` / `richValueStructure.xml`) used by tests.
 
 ### Fixture: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (`richValue.xml` + `richValueRel.xml` 2017 variant)
 
@@ -984,7 +989,8 @@ The richValue relationships are Microsoft-specific. Observed in this repo:
   * `http://schemas.microsoft.com/office/2017/relationships/richValueRel` → `xl/richData/richValueRel.xml`
   * `http://schemas.microsoft.com/office/2017/relationships/richValueTypes` → `xl/richData/richValueTypes.xml`
   * `http://schemas.microsoft.com/office/2017/relationships/richValueStructure` → `xl/richData/richValueStructure.xml`
-    * Observed in `fixtures/xlsx/rich-data/images-in-cell.xlsx` and `fixtures/xlsx/rich-data/richdata-minimal.xlsx`
+    * Observed in the real Excel fixture `fixtures/xlsx/rich-data/images-in-cell.xlsx` and the synthetic fixture
+      `fixtures/xlsx/rich-data/richdata-minimal.xlsx`
 * `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue` → `xl/richData/rdrichvalue.xml`
    * Observed in `fixtures/xlsx/basic/image-in-cell.xlsx`
 * `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure` → `xl/richData/rdrichvaluestructure.xml`
@@ -1005,7 +1011,10 @@ Implementation guidance:
 
 #### Observed values summary (from in-repo fixtures/tests)
 
-These values are copied from fixtures/tests in this repo and are safe to treat as “known in the wild”:
+These values are copied from fixtures/tests in this repo. Sources include both real Excel workbooks and
+synthetic fixtures (tagged `Application=Formula Fixtures`). Values that are only observed in synthetic
+fixtures should not be treated as “confirmed Excel output”; preserve unknown URIs/content types rather than
+hardcoding assumptions.
 
 | Kind | Value | Source |
 |------|-------|--------|
@@ -1061,8 +1070,9 @@ These values are copied from fixtures/tests in this repo and are safe to treat a
 </Relationships>
 ```
 
-`xl/_rels/metadata.xml.rels` (optional; metadata → richData tables; observed in
-`fixtures/xlsx/rich-data/richdata-minimal.xlsx` and `fixtures/xlsx/rich-data/images-in-cell.xlsx`):
+`xl/_rels/metadata.xml.rels` (optional; metadata → richData tables; observed in the real Excel fixture
+`fixtures/xlsx/rich-data/images-in-cell.xlsx` and the synthetic regression fixture
+`fixtures/xlsx/rich-data/richdata-minimal.xlsx`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -1102,9 +1112,9 @@ Observed patterns in this repo:
 * Some tests construct workbooks that use:
   * `application/vnd.openxmlformats-officedocument.spreadsheetml.metadata+xml` for `/xl/metadata.xml`
 
-For the richData tables themselves, Excel may emit Microsoft-specific content types. Observed in
-`fixtures/xlsx/rich-data/images-in-cell.xlsx` and `fixtures/xlsx/rich-data/richdata-minimal.xlsx` (overrides
-may be absent in other workbooks):
+For the richData tables themselves, Excel may emit Microsoft-specific content types. Observed in the real
+Excel fixture `fixtures/xlsx/rich-data/images-in-cell.xlsx` and the synthetic regression fixture
+`fixtures/xlsx/rich-data/richdata-minimal.xlsx` (overrides may be absent in other workbooks):
 
 ```xml
 <Override PartName="/xl/richData/richValue.xml"          ContentType="application/vnd.ms-excel.richvalue+xml"/>

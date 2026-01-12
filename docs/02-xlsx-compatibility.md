@@ -484,10 +484,16 @@ Some online discussions reference `xl/cellImages.xml` (sometimes `xl/cellimages.
 pictures.
 
 In the “Place in Cell” fixtures we inspected, in-cell images were represented using
-`xl/metadata.xml` + `xl/richData/*` + `xl/media/*` and **no `cellImages` part** was present.
+`xl/metadata.xml` + `xl/richData/*` + `xl/media/*` and **no `cellImages` part** (e.g.
+`fixtures/xlsx/basic/image-in-cell.xlsx`).
 
-However, other producers (and some synthetic fixtures/tests in this repo) do include a `cellImages`
-part; for round-trip safety we should treat it as optional and preserve it if present.
+However, other real Excel workbooks do include a `cellimages` store part in addition to RichData
+(e.g. `fixtures/xlsx/rich-data/images-in-cell.xlsx` contains `xl/cellimages.xml` +
+`xl/_rels/cellimages.xml.rels`). Other producers and synthetic fixtures/tests may also include a
+standalone `cellImages` part.
+
+So for round-trip safety we should treat `xl/cellImages*.xml` / `xl/cellimages*.xml` as optional and
+preserve it byte-for-byte if present.
 
 ### Linked data types / Rich values (Stocks, Geography, etc.)
 

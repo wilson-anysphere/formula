@@ -701,8 +701,8 @@ fixture `fixtures/xlsx/rich-data/richdata-minimal.xlsx` (used by tests) uses the
   <Override PartName="/xl/metadata.xml"
             ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
 
-  <!-- Unprefixed “richValue*” naming (observed in `fixtures/xlsx/rich-data/richdata-minimal.xlsx` and
-       `fixtures/xlsx/rich-data/images-in-cell.xlsx`; overrides may be absent in other workbooks). -->
+  <!-- Unprefixed “richValue*” naming (observed in the synthetic fixture `fixtures/xlsx/rich-data/richdata-minimal.xlsx`
+       and the real Excel fixture `fixtures/xlsx/rich-data/images-in-cell.xlsx`; overrides may be absent in other workbooks). -->
   <Override PartName="/xl/richData/richValueTypes.xml" ContentType="application/vnd.ms-excel.richvaluetypes+xml"/>
   <Override PartName="/xl/richData/richValueStructure.xml" ContentType="application/vnd.ms-excel.richvaluestructure+xml"/>
   <Override PartName="/xl/richData/richValue.xml" ContentType="application/vnd.ms-excel.richvalue+xml"/>
@@ -751,7 +751,8 @@ Partially known (fixture-driven details still recommended):
     - `Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueRel"`
       - `Target="richData/richValueRel.xml"`
 - Metadata → richData parts (when linked indirectly via `xl/_rels/metadata.xml.rels`):
-  - Observed in `fixtures/xlsx/rich-data/richdata-minimal.xlsx` and [`fixtures/xlsx/rich-data/images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx):
+  - Observed in the synthetic fixture `fixtures/xlsx/rich-data/richdata-minimal.xlsx` and the real Excel fixture
+    [`fixtures/xlsx/rich-data/images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx):
     - `Type="http://schemas.microsoft.com/office/2017/relationships/richValueTypes"`
       - `Target="richData/richValueTypes.xml"`
     - `Type="http://schemas.microsoft.com/office/2017/relationships/richValueStructure"`
