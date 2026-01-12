@@ -31,11 +31,10 @@ pub fn numbervalue(
     group_separator: Option<char>,
 ) -> ExcelResult<f64> {
     let decimal_separator = decimal_separator.unwrap_or('.');
-    let group_separator = group_separator.unwrap_or(',');
 
-    if decimal_separator == group_separator {
+    if group_separator == Some(decimal_separator) {
         return Err(ExcelError::Value);
     }
 
-    parse_number_strict(number_text, decimal_separator, Some(group_separator))
+    parse_number_strict(number_text, decimal_separator, group_separator)
 }

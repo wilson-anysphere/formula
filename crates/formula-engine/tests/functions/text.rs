@@ -1,5 +1,6 @@
 use formula_engine::eval::parse_a1;
 use formula_engine::functions::text;
+use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::{Engine, ErrorKind, ExcelError, Value};
 
 use super::harness::TestSheet;
@@ -241,6 +242,44 @@ fn value_and_numbervalue_worksheet_functions_parse_common_inputs() {
         sheet.eval(r#"=NUMBERVALUE("1.234,5", ",", ".")"#),
         Value::Number(1234.5)
     );
+}
+
+#[test]
+fn numbervalue_worksheet_function_separator_semantics() {
+    let mut sheet = TestSheet::new();
+
+    assert_eq!(
+        sheet.eval(r#"=NUMBERVALUE("1 234,5", ",", " ")"#),
+        Value::Number(1234.5)
+    );
+    assert_eq!(
+        sheet.eval(r#"=NUMBERVALUE("1234,5", ",", "")"#),
+        Value::Number(1234.5)
+    );
+
+    assert_eq!(
+        sheet.eval(r#"=NUMBERVALUE("1,23", ",", ",")"#),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval(r#"=NUMBERVALUE("1", "", ",")"#),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval(r#"=NUMBERVALUE("1", "..", ",")"#),
+        Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
+fn numbervalue_defaults_to_engine_value_locale_separators() {
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=NUMBERVALUE("1.234,5")"#)
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1234.5));
 }
 
 #[test]

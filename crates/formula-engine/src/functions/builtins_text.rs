@@ -466,13 +466,15 @@ fn numbervalue_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
+    let separators = ctx.value_locale().separators;
+
     let decimal_sep = if args.len() >= 2 {
         match eval_matrix_arg(ctx, &args[1]) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         }
     } else {
-        MatrixArg::Scalar(Value::Text(".".to_string()))
+        MatrixArg::Scalar(Value::Text(separators.decimal_sep.to_string()))
     };
 
     let group_sep = if args.len() >= 3 {
@@ -481,7 +483,7 @@ fn numbervalue_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             Err(e) => return Value::Error(e),
         }
     } else {
-        MatrixArg::Scalar(Value::Text(",".to_string()))
+        MatrixArg::Scalar(Value::Text(separators.thousands_sep.to_string()))
     };
 
     elementwise_ternary(number_text, decimal_sep, group_sep, |raw, dec, group| {
@@ -504,12 +506,16 @@ fn numbervalue_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             Ok(ch) => ch,
             Err(e) => return Value::Error(e),
         };
-        let group = match coerce_single_char(group) {
+        let group = match coerce_optional_single_char(group) {
             Ok(ch) => ch,
             Err(e) => return Value::Error(e),
         };
 
-        match crate::functions::text::numbervalue(&text, Some(decimal), Some(group)) {
+        if group == Some(decimal) {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        match crate::functions::text::numbervalue(&text, Some(decimal), group) {
             Ok(n) => Value::Number(n),
             Err(e) => Value::Error(excel_error_to_kind(e)),
         }
@@ -1187,6 +1193,17 @@ fn coerce_single_char(value: &Value) -> Result<char, ErrorKind> {
     let s = value.coerce_to_string()?;
     match s.chars().collect::<Vec<_>>().as_slice() {
         [ch] => Ok(*ch),
+        _ => Err(ErrorKind::Value),
+    }
+}
+
+fn coerce_optional_single_char(value: &Value) -> Result<Option<char>, ErrorKind> {
+    let s = value.coerce_to_string()?;
+    if s.is_empty() {
+        return Ok(None);
+    }
+    match s.chars().collect::<Vec<_>>().as_slice() {
+        [ch] => Ok(Some(*ch)),
         _ => Err(ErrorKind::Value),
     }
 }
