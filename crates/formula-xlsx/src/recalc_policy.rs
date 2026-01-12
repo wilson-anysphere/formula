@@ -232,9 +232,13 @@ fn relationship_is_calc_chain(e: &BytesStart<'_>, expected_type: &str) -> Result
         return Ok(true);
     }
 
-    Ok(target
-        .as_deref()
-        .is_some_and(|t| t.ends_with("calcChain.xml")))
+    // Relationship targets are URIs; some producers include a fragment (e.g. `calcChain.xml#foo`).
+    // OPC part names do not include fragments, so strip them before matching.
+    Ok(target.as_deref().is_some_and(|t| {
+        let t = t.trim();
+        let base = t.split_once('#').map(|(base, _)| base).unwrap_or(t);
+        base.ends_with("calcChain.xml")
+    }))
 }
 
 pub(crate) fn content_types_remove_calc_chain(ct_xml: &[u8]) -> Result<Vec<u8>, RecalcPolicyError> {
@@ -288,7 +292,12 @@ fn override_part_name_is_calc_chain(e: &BytesStart<'_>) -> Result<bool, RecalcPo
         let key = crate::openxml::local_name(attr.key.as_ref());
         if key.eq_ignore_ascii_case(b"PartName") {
             let value = attr.unescape_value()?;
-            return Ok(value.as_ref().ends_with("calcChain.xml"));
+            let value = value.as_ref().trim();
+            let base = value
+                .split_once('#')
+                .map(|(base, _)| base)
+                .unwrap_or(value);
+            return Ok(base.ends_with("calcChain.xml"));
         }
     }
     Ok(false)
@@ -428,6 +437,30 @@ mod tests {
     }
 
     #[test]
+    fn content_types_remove_calc_chain_removes_override_with_fragment_partname() {
+        // Relationship targets can have fragments; PartName shouldn't, but be permissive and remove
+        // calcChain overrides even if a fragment is present.
+        let input = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/calcChain.xml#foo" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml"/>
+  <Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
+</Types>"#;
+
+        let updated =
+            content_types_remove_calc_chain(input.as_bytes()).expect("rewrite content types");
+        let updated = std::str::from_utf8(&updated).expect("utf8 updated content types");
+
+        assert!(
+            !updated.contains("calcChain.xml"),
+            "calcChain override should be removed, got: {updated}"
+        );
+        assert!(
+            updated.contains("/xl/metadata.xml"),
+            "metadata override should be preserved, got: {updated}"
+        );
+    }
+
+    #[test]
     fn workbook_xml_force_full_calc_on_load_patches_prefixed_calc_pr() {
         let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -523,6 +556,29 @@ mod tests {
         let rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId2" Type="http://example.com/not-calc-chain" Target="calcChain.xml"/>
+  <Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"/>
+</Relationships>
+"#;
+
+        let updated = workbook_rels_remove_calc_chain(rels_xml.as_bytes())
+            .expect("remove calc chain relationship from workbook.xml.rels");
+        let updated = std::str::from_utf8(&updated).expect("utf8 workbook rels");
+
+        assert!(
+            !updated.contains("calcChain.xml"),
+            "expected calc chain relationship to be removed, got: {updated}"
+        );
+        assert!(
+            updated.contains("metadata.xml"),
+            "expected metadata relationship to be preserved, got: {updated}"
+        );
+    }
+
+    #[test]
+    fn workbook_rels_remove_calc_chain_removes_relationship_target_with_fragment() {
+        let rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId2" Type="http://example.com/not-calc-chain" Target="calcChain.xml#foo"/>
   <Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"/>
 </Relationships>
 "#;
