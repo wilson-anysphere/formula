@@ -400,7 +400,7 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
                 Ok(Expr::Unary {
                     op: UnaryOp::ImplicitIntersection,
-                    expr: Box::new(self.parse_bp(10)?),
+                    expr: Box::new(self.parse_bp(9)?),
                 })
             }
             Some(b'(') => {

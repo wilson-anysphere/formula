@@ -89,8 +89,7 @@ impl Vm {
                 }
                 OpCode::ImplicitIntersection => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
-                    self.stack
-                        .push(apply_implicit_intersection(v, grid, base));
+                    self.stack.push(apply_implicit_intersection(v, grid, base));
                 }
                 OpCode::Add
                 | OpCode::Sub

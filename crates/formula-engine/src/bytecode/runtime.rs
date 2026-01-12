@@ -549,6 +549,9 @@ pub fn apply_implicit_intersection(v: Value, grid: &dyn Grid, base: CellCoord) -
         Value::Error(e) => Value::Error(e),
         Value::Range(r) => {
             let range = r.resolve(base);
+            if !range_in_bounds(grid, range) {
+                return Value::Error(ErrorKind::Ref);
+            }
 
             // Single-cell ranges return that cell.
             if range.row_start == range.row_end && range.col_start == range.col_end {
