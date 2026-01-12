@@ -107,6 +107,40 @@ describe("LayoutController persistence", () => {
     expect(parsed.splitView.ratio).toBeCloseTo(0.1, 5);
   });
 
+  test("setSplitPaneZoom can be applied without persisting/emitting, then flushed with persistNow()", () => {
+    const storage = new MemoryStorage();
+    const keyPrefix = "test.layout";
+    const workspaceManager = new LayoutWorkspaceManager({ storage, keyPrefix });
+    const workbookId = "workbook-split-zoom";
+    const controller = new LayoutController({ workbookId, workspaceManager });
+    const key = `${keyPrefix}.workbook.${encodeURIComponent(workbookId)}.v1`;
+
+    let changeCount = 0;
+    controller.on("change", () => {
+      changeCount += 1;
+    });
+
+    // Seed initial persisted state.
+    controller.setSplitDirection("vertical");
+    const persistedBefore = storage.getItem(key);
+    expect(persistedBefore).not.toBeNull();
+    expect(changeCount).toBe(1);
+
+    controller.setSplitPaneZoom("secondary", 10, { persist: false, emit: false });
+    // Should clamp to [0.25, 4] even for silent updates.
+    expect(controller.layout.splitView.panes.secondary.zoom).toBe(4);
+    expect(storage.getItem(key)).toBe(persistedBefore);
+    expect(changeCount).toBe(1);
+
+    controller.persistNow();
+    expect(changeCount).toBe(1);
+    const after = storage.getItem(key);
+    expect(after).not.toBe(persistedBefore);
+    expect(after).not.toBeNull();
+    const parsed = JSON.parse(after!);
+    expect(parsed.splitView.panes.secondary.zoom).toBe(4);
+  });
+
   test("switching workspaces persists pending ephemeral updates before reloading", () => {
     const storage = new MemoryStorage();
     const keyPrefix = "test.layout";

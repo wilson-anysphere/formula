@@ -267,10 +267,49 @@ export class LayoutController {
   }
 
   setSplitPaneScroll(pane, scroll, options) {
+    const persist = options?.persist ?? true;
+    const emit = options?.emit ?? true;
+
+    if (!persist && !emit) {
+      if (pane !== "primary" && pane !== "secondary") {
+        throw new Error(`Invalid split pane: ${pane}`);
+      }
+      const existing = this.layout?.splitView?.panes?.[pane];
+      if (!existing) return;
+
+      const nextX = typeof scroll?.scrollX === "number" && Number.isFinite(scroll.scrollX) ? scroll.scrollX : existing.scrollX;
+      const nextY = typeof scroll?.scrollY === "number" && Number.isFinite(scroll.scrollY) ? scroll.scrollY : existing.scrollY;
+      if (existing.scrollX === nextX && existing.scrollY === nextY) return;
+
+      existing.scrollX = nextX;
+      existing.scrollY = nextY;
+      this.#needsPersist = true;
+      return;
+    }
+
     this.#commit(setSplitPaneScroll(this.layout, pane, scroll), options);
   }
 
   setSplitPaneZoom(pane, zoom, options) {
+    const persist = options?.persist ?? true;
+    const emit = options?.emit ?? true;
+
+    if (!persist && !emit) {
+      if (pane !== "primary" && pane !== "secondary") {
+        throw new Error(`Invalid split pane: ${pane}`);
+      }
+      const existing = this.layout?.splitView?.panes?.[pane];
+      if (!existing) return;
+
+      const rawZoom = typeof zoom === "number" && Number.isFinite(zoom) ? zoom : 1;
+      const clamped = Math.max(0.25, Math.min(4, rawZoom));
+      if (existing.zoom === clamped) return;
+
+      existing.zoom = clamped;
+      this.#needsPersist = true;
+      return;
+    }
+
     this.#commit(setSplitPaneZoom(this.layout, pane, zoom), options);
   }
 

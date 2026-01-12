@@ -361,10 +361,20 @@ export function setSplitPaneSheet(layout, pane, sheetId) {
  */
 export function setSplitPaneScroll(layout, pane, scroll) {
   ensureSplitPane(pane);
-
-  const next = clone(layout);
-  next.splitView.panes[pane] = { ...next.splitView.panes[pane], scrollX: scroll.scrollX, scrollY: scroll.scrollY };
-  return next;
+  const existing = layout.splitView.panes[pane];
+  const scrollX = scroll.scrollX;
+  const scrollY = scroll.scrollY;
+  if (existing.scrollX === scrollX && existing.scrollY === scrollY) return layout;
+  return {
+    ...layout,
+    splitView: {
+      ...layout.splitView,
+      panes: {
+        ...layout.splitView.panes,
+        [pane]: { ...existing, scrollX, scrollY },
+      },
+    },
+  };
 }
 
 /**
@@ -374,10 +384,18 @@ export function setSplitPaneScroll(layout, pane, scroll) {
  */
 export function setSplitPaneZoom(layout, pane, zoom) {
   ensureSplitPane(pane);
-
-  const next = clone(layout);
+  const existing = layout.splitView.panes[pane];
   const value = typeof zoom === "number" && Number.isFinite(zoom) ? zoom : DEFAULT_PANE_ZOOM;
   const clamped = clamp(value, 0.25, 4);
-  next.splitView.panes[pane] = { ...next.splitView.panes[pane], zoom: clamped };
-  return next;
+  if (existing.zoom === clamped) return layout;
+  return {
+    ...layout,
+    splitView: {
+      ...layout.splitView,
+      panes: {
+        ...layout.splitView.panes,
+        [pane]: { ...existing, zoom: clamped },
+      },
+    },
+  };
 }
