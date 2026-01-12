@@ -20,7 +20,7 @@ fn build_fixture_xlsx() -> Vec<u8> {
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
   <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
-  <Relationship Id="rId9" Type="http://schemas.microsoft.com/office/2020/relationships/metadata" Target="metadata.xml"/>
+  <Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"/>
 </Relationships>
 "#;
 
@@ -150,6 +150,27 @@ fn sheet_edits_preserve_richdata_parts_and_relationships() {
     doc.workbook.add_sheet("Added").expect("add sheet");
 
     let saved = doc.save_to_vec().expect("save");
+
+    // Sanity: ensure we actually exercised the sheet-structure rewrite path.
+    let workbook_xml = String::from_utf8(zip_part(&saved, "xl/workbook.xml")).expect("utf8");
+    assert!(
+        !workbook_xml.contains("Sheet2"),
+        "expected deleted sheet to be removed from xl/workbook.xml"
+    );
+    assert!(
+        workbook_xml.contains("Added"),
+        "expected newly-added sheet to be present in xl/workbook.xml"
+    );
+    let cursor = Cursor::new(&saved);
+    let mut archive = ZipArchive::new(cursor).expect("open zip");
+    assert!(
+        archive.by_name("xl/worksheets/sheet2.xml").is_err(),
+        "expected deleted sheet2 part to be removed from output package"
+    );
+    assert!(
+        archive.by_name("xl/worksheets/sheet3.xml").is_ok(),
+        "expected newly-added sheet to be materialized as sheet3.xml"
+    );
 
     assert_eq!(
         zip_part(&saved, "xl/metadata.xml"),
