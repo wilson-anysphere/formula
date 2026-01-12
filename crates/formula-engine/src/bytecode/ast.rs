@@ -1,4 +1,4 @@
-use super::value::{CellCoord, RangeRef, Ref, Value};
+use super::value::{CellCoord, ErrorKind, RangeRef, Ref, Value};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -245,10 +245,61 @@ impl<'a> Parser<'a> {
                 Ok(expr)
             }
             Some(b'"') => self.parse_string(),
+            Some(b'#') => self.parse_error_literal(),
             Some(b'0'..=b'9') | Some(b'.') => self.parse_number(),
             Some(_) => self.parse_ident_like(),
             None => Err(ParseError::UnexpectedEof),
         }
+    }
+
+    fn parse_error_literal(&mut self) -> Result<Expr, ParseError> {
+        debug_assert_eq!(self.peek_byte(), Some(b'#'));
+        let start = self.pos;
+
+        const ERROR_LITERALS: &[(&str, ErrorKind)] = &[
+            ("#NULL!", ErrorKind::Null),
+            ("#DIV/0!", ErrorKind::Div0),
+            ("#VALUE!", ErrorKind::Value),
+            ("#REF!", ErrorKind::Ref),
+            ("#NAME?", ErrorKind::Name),
+            ("#NUM!", ErrorKind::Num),
+            ("#N/A", ErrorKind::NA),
+            ("#SPILL!", ErrorKind::Spill),
+            ("#CALC!", ErrorKind::Calc),
+        ];
+
+        for &(lit, kind) in ERROR_LITERALS {
+            let end = start.saturating_add(lit.len());
+            if self
+                .input
+                .get(start..end)
+                .is_some_and(|slice| slice.eq_ignore_ascii_case(lit.as_bytes()))
+            {
+                self.pos = end;
+                return Ok(Expr::Literal(Value::Error(kind)));
+            }
+        }
+
+        // Fallback: accept unknown `#...` sequences as error tokens and coerce them to `#VALUE!`,
+        // mirroring the canonical parser + compiler behavior.
+        self.pos += 1; // '#'
+        while let Some(b) = self.peek_byte() {
+            if matches!(b, b'_' | b'/' | b'.' | b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z') {
+                self.pos += 1;
+            } else {
+                break;
+            }
+        }
+
+        if self.pos == start + 1 {
+            return Err(ParseError::UnexpectedToken(start));
+        }
+
+        if matches!(self.peek_byte(), Some(b'!' | b'?')) {
+            self.pos += 1;
+        }
+
+        Ok(Expr::Literal(Value::Error(ErrorKind::Value)))
     }
 
     fn parse_number(&mut self) -> Result<Expr, ParseError> {
@@ -486,4 +537,33 @@ fn col_letters_to_index(col: &str) -> Option<usize> {
         acc = acc.checked_mul(26)?.checked_add(u)?;
     }
     Some(acc - 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_error_literals_as_scalar_values() {
+        let origin = CellCoord::new(0, 0);
+
+        assert_eq!(
+            parse_formula("=#N/A", origin).expect("parse"),
+            Expr::Literal(Value::Error(ErrorKind::NA))
+        );
+        assert_eq!(
+            parse_formula("=#DIV/0!", origin).expect("parse"),
+            Expr::Literal(Value::Error(ErrorKind::Div0))
+        );
+    }
+
+    #[test]
+    fn parses_unknown_error_literals_as_value_error() {
+        let origin = CellCoord::new(0, 0);
+
+        assert_eq!(
+            parse_formula("=#GETTING_DATA", origin).expect("parse"),
+            Expr::Literal(Value::Error(ErrorKind::Value))
+        );
+    }
 }
