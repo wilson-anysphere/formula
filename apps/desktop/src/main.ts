@@ -7005,6 +7005,10 @@ async function handleRibbonExportPdf(): Promise<void> {
   if (!invoke) return;
 
   try {
+    // Export should reflect the latest user input. If a cell edit is in progress, it may not yet
+    // have been committed into the DocumentController / backend sync pipeline.
+    commitAllPendingEditsForCommand();
+
     // Best-effort: ensure any pending workbook sync changes are flushed before exporting.
     await new Promise<void>((resolve) => queueMicrotask(resolve));
     await drainBackendSync();

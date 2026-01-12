@@ -8,15 +8,15 @@ import * as nativeDialogs from "../tauri/nativeDialogs";
 import type { SheetMeta, SheetVisibility, TabColor, WorkbookSheetStore } from "./workbookSheetStore";
 import { computeWorkbookSheetMoveIndex } from "./sheetReorder";
 
-const SHEET_TAB_COLOR_PALETTE: Array<{ label: string; token: string; fallbackCss: string }> = [
-  { label: "Red", token: "--sheet-tab-red", fallbackCss: "red" },
-  { label: "Orange", token: "--sheet-tab-orange", fallbackCss: "orange" },
-  { label: "Yellow", token: "--sheet-tab-yellow", fallbackCss: "yellow" },
-  { label: "Green", token: "--sheet-tab-green", fallbackCss: "green" },
-  { label: "Teal", token: "--sheet-tab-teal", fallbackCss: "teal" },
-  { label: "Blue", token: "--sheet-tab-blue", fallbackCss: "blue" },
-  { label: "Purple", token: "--sheet-tab-purple", fallbackCss: "purple" },
-  { label: "Gray", token: "--sheet-tab-gray", fallbackCss: "gray" },
+const SHEET_TAB_COLOR_PALETTE: Array<{ label: string; token: string }> = [
+  { label: "Red", token: "--sheet-tab-red" },
+  { label: "Orange", token: "--sheet-tab-orange" },
+  { label: "Yellow", token: "--sheet-tab-yellow" },
+  { label: "Green", token: "--sheet-tab-green" },
+  { label: "Teal", token: "--sheet-tab-teal" },
+  { label: "Blue", token: "--sheet-tab-blue" },
+  { label: "Purple", token: "--sheet-tab-purple" },
+  { label: "Gray", token: "--sheet-tab-gray" },
 ];
 
 function normalizeCssHexToExcelArgb(cssColor: string): string | null {
@@ -485,7 +485,8 @@ export function SheetTabStrip({
           },
           { type: "separator" },
           ...SHEET_TAB_COLOR_PALETTE.map((entry) => {
-            const rgb = resolveCssVar(entry.token, { fallback: entry.fallbackCss });
+            const gray = resolveCssVar("--sheet-tab-gray", { fallback: "currentColor" });
+            const rgb = resolveCssVar(entry.token, { fallback: gray });
             return {
               type: "item" as const,
               label: entry.label,
