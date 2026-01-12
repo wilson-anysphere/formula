@@ -474,5 +474,7 @@ and binding behavior:
   - `DigSigInfoSerialized`: MS-OSHARED §2.3.2.1
   - `DigSigBlob`: MS-OSHARED §2.3.2.2
   - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/
+  - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/30a00273-dbee-422f-b488-f4b8430ae046
+  - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/bc21c922-b7ae-4736-90aa-86afb6403462
 - **RFC 5652**: Cryptographic Message Syntax (CMS) (PKCS#7 `SignedData`).
   - https://www.rfc-editor.org/rfc/rfc5652
