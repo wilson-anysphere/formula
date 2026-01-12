@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createRequire } from "node:module";
 
 import * as Y from "yjs";
 
@@ -14,6 +15,21 @@ async function waitForCondition(predicate, timeoutMs = 2_000, intervalMs = 5) {
     await new Promise((r) => setTimeout(r, intervalMs));
   }
   throw new Error("Timed out waiting for condition");
+}
+
+function requireYjsCjs() {
+  const require = createRequire(import.meta.url);
+  const prevError = console.error;
+  console.error = (...args) => {
+    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
+    prevError(...args);
+  };
+  try {
+    // eslint-disable-next-line import/no-named-as-default-member
+    return require("yjs");
+  } finally {
+    console.error = prevError;
+  }
 }
 
 function findSheetEntry(ydoc, sheetId) {
@@ -218,6 +234,72 @@ test("binder: hydrates sheet view state from legacy top-level frozenRows/frozenC
   } finally {
     binder.destroy();
     ydoc.destroy();
+  }
+});
+
+test("binder: hydrates sheet view state from sheets created by a different Yjs instance (CJS applyUpdate)", async () => {
+  const Ycjs = requireYjsCjs();
+
+  const remote = new Ycjs.Doc();
+  remote.transact(() => {
+    const sheets = remote.getArray("sheets");
+    const sheet = new Ycjs.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+
+    const view = new Ycjs.Map();
+    view.set("frozenRows", 1);
+    view.set("frozenCols", 2);
+    const colWidths = new Ycjs.Map();
+    colWidths.set("0", 111);
+    view.set("colWidths", colWidths);
+    sheet.set("view", view);
+
+    sheets.push([sheet]);
+  });
+
+  const ydoc = new Y.Doc();
+  // Apply update via the CJS build to simulate y-websocket/provider behavior.
+  const update = Ycjs.encodeStateAsUpdate(remote);
+  Ycjs.applyUpdate(ydoc, update);
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({ ydoc, documentController, defaultSheetId: "Sheet1" });
+
+  try {
+    await waitForCondition(() => {
+      const view = documentController.getSheetView("Sheet1");
+      return view.frozenRows === 1 && view.frozenCols === 2 && view.colWidths?.["0"] === 111;
+    });
+
+    assert.deepEqual(documentController.getSheetView("Sheet1"), {
+      frozenRows: 1,
+      frozenCols: 2,
+      colWidths: { "0": 111 },
+    });
+
+    // Remote collaborator updates nested map.
+    remote.transact(() => {
+      const sheets = remote.getArray("sheets");
+      const sheet = sheets.get(0);
+      const view = sheet.get("view");
+      const colWidths = view.get("colWidths");
+      colWidths.set("1", 222);
+    });
+
+    const remoteOrigin = { type: "remote-test" };
+    Ycjs.applyUpdate(ydoc, Ycjs.encodeStateAsUpdate(remote), remoteOrigin);
+
+    await waitForCondition(() => documentController.getSheetView("Sheet1").colWidths?.["1"] === 222);
+    assert.deepEqual(documentController.getSheetView("Sheet1"), {
+      frozenRows: 1,
+      frozenCols: 2,
+      colWidths: { "0": 111, "1": 222 },
+    });
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+    remote.destroy();
   }
 });
 
