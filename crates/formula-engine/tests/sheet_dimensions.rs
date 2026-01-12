@@ -1,4 +1,4 @@
-use formula_engine::{Engine, NameDefinition, NameScope, Value};
+use formula_engine::{Engine, ErrorKind, NameDefinition, NameScope, Value};
 use formula_model::EXCEL_MAX_COLS;
 
 #[test]
@@ -145,4 +145,27 @@ fn indirect_whole_row_and_column_respect_sheet_dimensions() {
         Value::Number(2_000_000.0)
     );
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(10.0));
+}
+
+#[test]
+fn shrinking_sheet_dimensions_invalidates_bytecode_compiled_references() {
+    let mut engine = Engine::new();
+    engine.set_cell_formula("Sheet1", "A1", "=J1").unwrap();
+
+    // The bytecode backend should be active for simple in-bounds formulas by default.
+    assert!(
+        engine.bytecode_program_count() > 0,
+        "expected bytecode to compile for a simple cell ref"
+    );
+
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Blank);
+
+    // Shrink the sheet so column J is out of bounds; the formula should now evaluate to #REF!.
+    engine.set_sheet_dimensions("Sheet1", 10, 5).unwrap();
+    engine.recalculate();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Ref)
+    );
 }
