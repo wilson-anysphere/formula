@@ -217,13 +217,16 @@ describe("SpreadsheetApp formatting keyboard shortcuts", () => {
 
     // Cmd+I should *not* be captured (reserved for the AI sidebar).
     app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 1, endCol: 1 } }); // B1
+    const beforeCell = doc.getCell(sheetId, { row: 0, col: 1 }) as any;
+    const beforeStyleId = beforeCell.styleId;
     const cmdEvent = new KeyboardEvent("keydown", { key: "i", metaKey: true, cancelable: true });
     root.dispatchEvent(cmdEvent);
     expect(cmdEvent.defaultPrevented).toBe(false);
     {
       const cell = doc.getCell(sheetId, { row: 0, col: 1 }) as any;
+      expect(cell.styleId).toBe(beforeStyleId);
       const style = doc.styleTable.get(cell.styleId) as any;
-      expect(style.font?.italic).not.toBe(true);
+      expect(style?.font?.italic).not.toBe(true);
     }
 
     app.destroy();
