@@ -761,7 +761,15 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     if (!Array.isArray(deltas) || deltas.length === 0) return;
     if (eventsDisabled) return;
     if (applyingMacroUpdates) return;
-    if (source === "applyState" || source === "macro" || source === "python") return;
+    if (
+      source === "applyState" ||
+      source === "macro" ||
+      source === "python" ||
+      source === "undo" ||
+      source === "redo" ||
+      source === "cancelBatch"
+    )
+      return;
 
     // Only run Worksheet_Change when macros are already trusted.
     if (!eventsAllowed) return;

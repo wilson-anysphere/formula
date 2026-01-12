@@ -1046,7 +1046,7 @@ export class DocumentController {
     if (hadDeltas && batch) {
       const inverseCells = invertDeltas(entryCellDeltas(batch));
       const inverseViews = invertSheetViewDeltas(entrySheetViewDeltas(batch));
-      this.#applyEdits(inverseCells, inverseViews, { recalc: false, emitChange: true });
+      this.#applyEdits(inverseCells, inverseViews, { recalc: false, emitChange: true, source: "cancelBatch" });
     }
 
     this.engine?.endBatch?.();
@@ -1076,7 +1076,7 @@ export class DocumentController {
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
-    this.#applyEdits(inverseCells, inverseViews, { recalc: true, emitChange: true });
+    this.#applyEdits(inverseCells, inverseViews, { recalc: true, emitChange: true, source: "undo" });
     this.#emitHistory();
     this.#emitDirty();
     return true;
@@ -1096,7 +1096,7 @@ export class DocumentController {
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
-    this.#applyEdits(cellDeltas, viewDeltas, { recalc: true, emitChange: true });
+    this.#applyEdits(cellDeltas, viewDeltas, { recalc: true, emitChange: true, source: "redo" });
     this.#emitHistory();
     this.#emitDirty();
     return true;

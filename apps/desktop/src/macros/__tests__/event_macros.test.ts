@@ -524,6 +524,57 @@ describe("VBA event macros wiring", () => {
     wiring.dispose();
   });
 
+  it("ignores undo/redo deltas when firing Worksheet_Change", async () => {
+    const calls: Array<{ cmd: string; args?: any }> = [];
+
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
+      calls.push({ cmd, args });
+      if (cmd === "get_macro_security_status") {
+        return {
+          has_macros: true,
+          origin_path: null,
+          workbook_fingerprint: null,
+          signature: null,
+          trust: "trusted_always",
+        };
+      }
+      if (cmd === "set_macro_ui_context") return null;
+      if (cmd === "fire_workbook_open") return { ok: true, output: [], updates: [] };
+      if (cmd === "fire_worksheet_change") return { ok: true, output: [], updates: [] };
+      throw new Error(`Unexpected invoke: ${cmd}`);
+    });
+
+    const doc = new DocumentController();
+    const app = new FakeApp(doc);
+
+    const wiring = installVbaEventMacros({
+      app,
+      workbookId: "workbook-1",
+      invoke,
+      drainBackendSync: vi.fn(async () => undefined),
+    });
+
+    await flushAsync(); // let Workbook_Open settle
+    calls.length = 0;
+
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, "X");
+    await flushAsync();
+
+    expect(calls.filter((c) => c.cmd === "fire_worksheet_change")).toHaveLength(1);
+
+    calls.length = 0;
+    expect(doc.undo()).toBe(true);
+    await flushAsync();
+    expect(calls.filter((c) => c.cmd === "fire_worksheet_change")).toHaveLength(0);
+
+    calls.length = 0;
+    expect(doc.redo()).toBe(true);
+    await flushAsync();
+    expect(calls.filter((c) => c.cmd === "fire_worksheet_change")).toHaveLength(0);
+
+    wiring.dispose();
+  });
+
   it("does not re-trigger Worksheet_Change when applying macro updates", async () => {
     const calls: Array<{ cmd: string; args?: any }> = [];
 
