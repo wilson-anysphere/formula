@@ -321,6 +321,17 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
     }
 }
 
+fn image_payload_to_sort_value(value: Option<&serde_json::Value>) -> CellValue {
+    let alt_text = value.and_then(|value| {
+        value
+            .get("altText")
+            .or_else(|| value.get("alt_text"))
+            .and_then(|v| v.as_str())
+    });
+    let display = alt_text.filter(|s| !s.is_empty()).unwrap_or("[Image]");
+    CellValue::Text(display.to_string())
+}
+
 fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellValue> {
     let serialized = serde_json::to_value(value).ok()?;
     let value_type = serialized.get("type")?.as_str()?;
@@ -339,13 +350,7 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
             Some(CellValue::Text(display_value.to_string()))
         }
         "image" => {
-            let value = serialized.get("value")?;
-            let alt_text = value
-                .get("altText")
-                .or_else(|| value.get("alt_text"))
-                .and_then(|v| v.as_str());
-            let display = alt_text.filter(|s| !s.is_empty()).unwrap_or("[Image]");
-            Some(CellValue::Text(display.to_string()))
+            Some(image_payload_to_sort_value(serialized.get("value")))
         }
         "record" => {
             let record = serialized.get("value")?;
@@ -399,16 +404,7 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                     .and_then(|v| v.as_str())
                                     .map(|s| CellValue::Text(s.to_string())),
                                 "image" => {
-                                    let alt_text = display_value
-                                        .get("value")
-                                        .and_then(|v| {
-                                            v.get("altText")
-                                                .or_else(|| v.get("alt_text"))
-                                                .and_then(|v| v.as_str())
-                                    });
-                                    let display =
-                                        alt_text.filter(|s| !s.is_empty()).unwrap_or("[Image]");
-                                    Some(CellValue::Text(display.to_string()))
+                                    Some(image_payload_to_sort_value(display_value.get("value")))
                                 }
                                 // Degrade nested rich values (e.g. records whose display field is
                                 // an entity/record) using the same logic as the main conversion.
