@@ -297,10 +297,30 @@ describe("security hardening", () => {
         PUBLIC_BASE_URL: "https://api.example.com",
         COOKIE_SECURE: "true",
         SYNC_TOKEN_SECRET: "prod-sync-token-secret",
+        SECRET_STORE_KEYS: `k1:${Buffer.alloc(32, 0x11).toString("base64")}`
+      })
+    ).not.toThrow();
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        PUBLIC_BASE_URL: "https://api.example.com",
+        COOKIE_SECURE: "true",
+        SYNC_TOKEN_SECRET: "prod-sync-token-secret",
         SECRET_STORE_KEYS_JSON: JSON.stringify({
           currentKeyId: "dev",
           keys: { dev: deriveSecretStoreKey("dev-secret-store-key-change-me").toString("base64") }
         })
+      })
+    ).toThrow(/default development secrets/i);
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        PUBLIC_BASE_URL: "https://api.example.com",
+        COOKIE_SECURE: "true",
+        SYNC_TOKEN_SECRET: "prod-sync-token-secret",
+        SECRET_STORE_KEYS: `dev:${deriveSecretStoreKey("dev-secret-store-key-change-me").toString("base64")}`
       })
     ).toThrow(/default development secrets/i);
 
