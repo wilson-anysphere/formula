@@ -177,3 +177,125 @@ fn inserts_workbook_and_sheet_protection_when_missing() -> Result<(), Box<dyn st
 
     Ok(())
 }
+
+#[test]
+fn inserts_workbook_and_sheet_protection_when_missing_with_default_namespace(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <workbookPr/>
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData/>
+  <autoFilter ref="A1:A1"/>
+</worksheet>"#;
+
+    let bytes = build_minimal_xlsx(workbook_xml, sheet_xml);
+    let mut doc = load_from_bytes(&bytes)?;
+
+    doc.workbook.workbook_protection.lock_structure = true;
+    doc.workbook.workbook_protection.password_hash = Some(0x1234);
+
+    let sheet = &mut doc.workbook.sheets[0];
+    sheet.sheet_protection.enabled = true;
+    sheet.sheet_protection.password_hash = Some(0xABCD);
+    sheet.sheet_protection.select_locked_cells = false;
+
+    let expected_workbook_protection = doc.workbook.workbook_protection.clone();
+    let expected_sheet_protection = doc.workbook.sheets[0].sheet_protection.clone();
+
+    let out = doc.save_to_vec()?;
+    let roundtrip = read_workbook_model_from_bytes(&out)?;
+
+    assert_eq!(roundtrip.workbook_protection, expected_workbook_protection);
+    assert_eq!(roundtrip.sheets[0].sheet_protection, expected_sheet_protection);
+
+    let workbook_xml = read_part(&out, "xl/workbook.xml")?;
+    roxmltree::Document::parse(&workbook_xml)?;
+    assert!(
+        workbook_xml.contains("<workbookProtection"),
+        "expected unprefixed `<workbookProtection>` insertion, got:\n{workbook_xml}"
+    );
+    assert!(
+        !workbook_xml.contains("<x:workbookProtection"),
+        "should not introduce a SpreadsheetML prefix in a default-namespace workbook, got:\n{workbook_xml}"
+    );
+
+    let wb_prot = workbook_xml
+        .find("<workbookProtection")
+        .expect("workbookProtection inserted");
+    let sheets = workbook_xml.find("<sheets").expect("sheets exists");
+    assert!(wb_prot < sheets, "expected workbookProtection before sheets");
+
+    let sheet_xml = read_part(&out, "xl/worksheets/sheet1.xml")?;
+    roxmltree::Document::parse(&sheet_xml)?;
+    assert!(
+        sheet_xml.contains("<sheetProtection"),
+        "expected unprefixed `<sheetProtection>` insertion, got:\n{sheet_xml}"
+    );
+    assert!(
+        !sheet_xml.contains("<x:sheetProtection"),
+        "should not introduce a SpreadsheetML prefix in a default-namespace worksheet, got:\n{sheet_xml}"
+    );
+
+    let sheet_prot = sheet_xml
+        .find("<sheetProtection")
+        .expect("sheetProtection inserted");
+    let sheet_data = sheet_xml.find("<sheetData").expect("sheetData exists");
+    let auto_filter = sheet_xml.find("<autoFilter").expect("autoFilter exists");
+    assert!(
+        sheet_data < sheet_prot && sheet_prot < auto_filter,
+        "expected sheetProtection after sheetData and before autoFilter, got:\n{sheet_xml}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn preserves_unmodeled_workbook_protection_attributes() -> Result<(), Box<dyn std::error::Error>> {
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+ xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac">
+  <workbookPr/>
+  <workbookProtection lockStructure="1" workbookPassword="83AF" x14ac:dummy="1"/>
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData/>
+</worksheet>"#;
+
+    let bytes = build_minimal_xlsx(workbook_xml, sheet_xml);
+    let mut doc = load_from_bytes(&bytes)?;
+
+    doc.workbook.workbook_protection.lock_structure = false;
+    doc.workbook.workbook_protection.lock_windows = true;
+    doc.workbook.workbook_protection.password_hash = Some(0x1234);
+
+    let expected = doc.workbook.workbook_protection.clone();
+    let out = doc.save_to_vec()?;
+
+    let roundtrip = read_workbook_model_from_bytes(&out)?;
+    assert_eq!(roundtrip.workbook_protection, expected);
+
+    let workbook_xml = read_part(&out, "xl/workbook.xml")?;
+    roxmltree::Document::parse(&workbook_xml)?;
+    assert!(
+        workbook_xml.contains(r#"x14ac:dummy="1""#),
+        "expected unmodeled workbookProtection attributes to be preserved, got:\n{workbook_xml}"
+    );
+
+    Ok(())
+}
