@@ -667,6 +667,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
     await expect(page.locator("#grid")).toHaveCount(1);
+    await page.waitForFunction(() => Boolean((window as any).__formulaExtensionHost), undefined, { timeout: 60_000 });
 
     const manifestUrl = viteFsUrl(path.join(repoRoot, "extensions/sample-hello/package.json"));
 
