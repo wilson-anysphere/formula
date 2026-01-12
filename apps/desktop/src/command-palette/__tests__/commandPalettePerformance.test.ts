@@ -91,4 +91,63 @@ describe("command palette performance safeguards", () => {
     palette.dispose();
     vi.useRealTimers();
   });
+
+  it("shows a searching placeholder during chunked search until the scan completes", async () => {
+    vi.useFakeTimers();
+
+    const rafCallbacks: Array<() => void> = [];
+    const prevRaf = (globalThis as any).requestAnimationFrame as ((cb: () => void) => any) | undefined;
+    (globalThis as any).requestAnimationFrame = (cb: () => void) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    };
+
+    try {
+      const registry = new CommandRegistry();
+      for (let i = 0; i < 5_001; i += 1) {
+        registry.registerBuiltinCommand(`test.cmd.${i}`, `Command ${i}`, () => {}, { category: "Test" });
+      }
+
+      const palette = createCommandPalette({
+        commandRegistry: registry,
+        contextKeys: {} as any,
+        keybindingIndex: new Map(),
+        ensureExtensionsLoaded: async () => {},
+        onCloseFocus: () => {},
+        maxResults: 20,
+        maxResultsPerGroup: 20,
+        // 0ms debounce so the test doesn't need to advance time.
+        inputDebounceMs: 0,
+        extensionLoadDelayMs: 60_000,
+      });
+
+      palette.open();
+
+      const input = document.querySelector<HTMLInputElement>('[data-testid="command-palette-input"]')!;
+      input.value = "zzzz";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+
+      // Run the debounce timer to kick off chunked search.
+      vi.runOnlyPendingTimers();
+
+      const list = document.querySelector<HTMLElement>('[data-testid="command-palette-list"]')!;
+      expect(list.querySelector(".command-palette__empty")?.textContent).toBe("Searching…");
+
+      // Drive the chunked search loop to completion by manually firing rAF callbacks.
+      for (let i = 0; i < 50; i += 1) {
+        const cb = rafCallbacks.shift();
+        if (!cb) break;
+        cb();
+        // Allow the async loop continuation to run and enqueue the next frame callback.
+        await Promise.resolve();
+      }
+
+      expect(list.querySelector(".command-palette__empty")?.textContent).toBe("No matching commands");
+
+      palette.dispose();
+    } finally {
+      (globalThis as any).requestAnimationFrame = prevRaf;
+      vi.useRealTimers();
+    }
+  });
 });
