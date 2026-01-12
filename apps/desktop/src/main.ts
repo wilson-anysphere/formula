@@ -846,6 +846,9 @@ const statusZoom = document.querySelector<HTMLElement>('[data-testid="status-zoo
 const sheetPosition = document.querySelector<HTMLElement>('[data-testid="sheet-position"]');
 const openVersionHistoryPanelButton = document.querySelector<HTMLButtonElement>('[data-testid="open-version-history-panel"]');
 const openBranchManagerPanelButton = document.querySelector<HTMLButtonElement>('[data-testid="open-branch-manager-panel"]');
+const openMarketplacePanelButton = document.querySelector<HTMLButtonElement>(
+  '[data-testid="open-marketplace-panel-statusbar"]',
+);
 if (
   !activeCell ||
   !selectionRange ||
@@ -859,7 +862,8 @@ if (
   !statusZoom ||
   !sheetPosition ||
   !openVersionHistoryPanelButton ||
-  !openBranchManagerPanelButton
+  !openBranchManagerPanelButton ||
+  !openMarketplacePanelButton
 ) {
   throw new Error("Missing status bar elements");
 }
@@ -869,6 +873,7 @@ const statusZoomEl = statusZoom;
 const sheetPositionEl = sheetPosition;
 const openVersionHistoryPanelButtonEl = openVersionHistoryPanelButton;
 const openBranchManagerPanelButtonEl = openBranchManagerPanelButton;
+const openMarketplacePanelButtonEl = openMarketplacePanelButton;
 
 // Collaboration panels should be accessible via always-visible status bar buttons.
 openVersionHistoryPanelButtonEl.addEventListener("click", (e) => {
@@ -878,6 +883,10 @@ openVersionHistoryPanelButtonEl.addEventListener("click", (e) => {
 openBranchManagerPanelButtonEl.addEventListener("click", (e) => {
   e.preventDefault();
   toggleDockPanel(PanelIds.BRANCH_MANAGER);
+});
+openMarketplacePanelButtonEl.addEventListener("click", (e) => {
+  e.preventDefault();
+  toggleDockPanel(PanelIds.MARKETPLACE);
 });
 
 const docIdParam = new URL(window.location.href).searchParams.get("docId");
