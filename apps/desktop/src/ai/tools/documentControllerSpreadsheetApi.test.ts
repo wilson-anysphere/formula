@@ -456,6 +456,38 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(api.getCell({ sheet: "Sheet1", row: 3, col: 1 }).format).toBeUndefined();
   });
 
+  it("sort_range does not bake inherited column formatting into per-cell styles", async () => {
+    const controller = new DocumentController();
+    controller.setRangeValues("Sheet1", "A1", [[3], [1], [2]]);
+    controller.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } }, { label: "Bold column A" });
+
+    // Sanity: cell-level style ids remain default; formatting is inherited from the column layer.
+    expect(controller.getCell("Sheet1", "A1").styleId).toBe(0);
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const executor = new ToolExecutor(api, { default_sheet: "Sheet1" });
+
+    const result = await executor.execute({
+      name: "sort_range",
+      parameters: {
+        range: "A1:A3",
+        sort_by: [{ column: "A", order: "asc" }],
+        has_header: false
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(controller.getCell("Sheet1", "A1").value).toBe(1);
+    expect(controller.getCell("Sheet1", "A2").value).toBe(2);
+    expect(controller.getCell("Sheet1", "A3").value).toBe(3);
+
+    // Formatting should remain effective but should stay in the column formatting layer (styleId stays 0).
+    expect(api.getCell({ sheet: "Sheet1", row: 1, col: 1 }).format).toEqual({ bold: true });
+    expect(controller.getCell("Sheet1", "A1").styleId).toBe(0);
+    expect(controller.getCell("Sheet1", "A2").styleId).toBe(0);
+    expect(controller.getCell("Sheet1", "A3").styleId).toBe(0);
+  });
+
   it("validates writeRange dimensions like the ai-tools InMemoryWorkbook", () => {
     const controller = new DocumentController();
     const api = new DocumentControllerSpreadsheetApi(controller);
