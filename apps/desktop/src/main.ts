@@ -188,6 +188,9 @@ try {
   // ignore
 }
 
+// Exposed to Playwright tests via `window.__formulaExtensionHostManager`.
+let extensionHostManagerForE2e: DesktopExtensionHostManager | null = null;
+
 // Seed contributed panels early so layout persistence doesn't drop their ids before the
 // extension host finishes loading installed extensions.
 const contributedPanelsSeedStorage = getDefaultSeedStoreStorage();
@@ -1286,6 +1289,8 @@ if (
       onPanelDisposed: (panelId: string) => extensionPanelBridge?.onPanelDisposed(panelId),
     },
   });
+
+  extensionHostManagerForE2e = extensionHostManager;
 
   const commandRegistry = new CommandRegistry();
   // Built-in spreadsheet commands. These must be registered in the CommandRegistry so
@@ -4515,6 +4520,8 @@ try {
 // Expose a small API for Playwright assertions.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (window as any).__formulaApp = app;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(window as any).__formulaExtensionHostManager = extensionHostManagerForE2e;
 
 // Time-to-interactive instrumentation (best-effort, no-op for web builds).
 void markStartupTimeToInteractive({ whenIdle: () => app.whenIdle() });

@@ -131,13 +131,26 @@ export class DesktopExtensionHostManager {
     uiApi: ExtensionHostUiApi;
     permissionPrompt?: any;
   }) {
+    const basePrompt = createDesktopPermissionPrompt();
+    const permissionPrompt =
+      params.permissionPrompt ??
+      (async (req: unknown) => {
+        // E2E / debugging hook: allow tests to override permission decisions without
+        // threading a prompt implementation through the whole app.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const override = (globalThis as any).__formulaPermissionPrompt;
+        if (typeof override === "function") {
+          return await override(req);
+        }
+        // Fall back to the real desktop prompt UI (persists via PermissionManager).
+        return await basePrompt(req as any);
+      });
+
     this.host = new BrowserExtensionHost({
       engineVersion: params.engineVersion,
       spreadsheetApi: params.spreadsheetApi,
       uiApi: params.uiApi,
-      // Default to a real UI permission prompt (persisted by PermissionManager
-      // in localStorage). Tests can override via the `permissionPrompt` param.
-      permissionPrompt: params.permissionPrompt ?? createDesktopPermissionPrompt(),
+      permissionPrompt,
       clipboardApi: createDesktopClipboardApi(params.uiApi),
     });
   }
