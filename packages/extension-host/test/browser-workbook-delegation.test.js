@@ -465,6 +465,80 @@ test("BrowserExtensionHost: workbook.saveAs rejects empty paths", async (t) => {
   assert.equal(apiError?.message, "Workbook path must be a non-empty string");
 });
 
+test("BrowserExtensionHost: workbook.saveAs rejects missing path arguments", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let promptCalls = 0;
+
+  /** @type {any} */
+  let apiError;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "api_error" && msg.id === "req1") {
+          apiError = msg.error;
+          resolveDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => {
+      promptCalls += 1;
+      return true;
+    },
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.workbook-saveas-missing";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-saveas-missing/",
+    mainUrl: "memory://workbook-saveas-missing/main.mjs",
+    manifest: {
+      name: "workbook-saveas-missing",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+  extension.active = true;
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "saveAs",
+    args: [],
+  });
+
+  await done;
+
+  assert.equal(promptCalls, 0);
+  assert.equal(apiError?.message, "Workbook path must be a non-empty string");
+});
+
 test("BrowserExtensionHost: workbook.saveAs rejects non-string paths", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
@@ -818,6 +892,80 @@ test("BrowserExtensionHost: workbook.openWorkbook rejects empty paths", async (t
     namespace: "workbook",
     method: "openWorkbook",
     args: [""]
+  });
+
+  await done;
+
+  assert.equal(promptCalls, 0);
+  assert.equal(apiError?.message, "Workbook path must be a non-empty string");
+});
+
+test("BrowserExtensionHost: workbook.openWorkbook rejects missing path arguments", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let promptCalls = 0;
+
+  /** @type {any} */
+  let apiError;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "api_error" && msg.id === "req1") {
+          apiError = msg.error;
+          resolveDone();
+        }
+      }
+    }
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => {
+      promptCalls += 1;
+      return true;
+    }
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.workbook-open-missing";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-open-missing/",
+    mainUrl: "memory://workbook-open-missing/main.mjs",
+    manifest: {
+      name: "workbook-open-missing",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"]
+    }
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+  extension.active = true;
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "openWorkbook",
+    args: []
   });
 
   await done;
