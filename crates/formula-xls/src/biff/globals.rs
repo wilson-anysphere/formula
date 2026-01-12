@@ -24,7 +24,7 @@ fn biff_codepage(workbook_stream: &[u8]) -> u16 {
                 }
             }
             // EOF terminates the workbook global substream.
-            0x000A => break,
+            records::RECORD_EOF => break,
             _ => {}
         }
     }
@@ -65,7 +65,7 @@ pub(crate) fn parse_biff_bound_sheets(
                 });
             }
             // EOF terminates the workbook global substream.
-            0x000A => break,
+            records::RECORD_EOF => break,
             _ => {}
         }
     }
@@ -209,7 +209,7 @@ pub(crate) fn parse_biff_workbook_globals(
                 }
             }
             // EOF terminates the workbook global substream.
-            0x000A => {
+            records::RECORD_EOF => {
                 saw_eof = true;
                 break;
             }

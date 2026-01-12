@@ -2,9 +2,15 @@ use std::borrow::Cow;
 
 /// BIFF `CONTINUE` record id.
 pub(crate) const RECORD_CONTINUE: u16 = 0x003C;
+/// BIFF `EOF` record id.
+pub(crate) const RECORD_EOF: u16 = 0x000A;
+/// BIFF8 `BOF` record id.
+pub(crate) const RECORD_BOF_BIFF8: u16 = 0x0809;
+/// BIFF5 `BOF` record id.
+pub(crate) const RECORD_BOF_BIFF5: u16 = 0x0009;
 
 pub(crate) fn is_bof_record(record_id: u16) -> bool {
-    record_id == 0x0809 || record_id == 0x0009
+    record_id == RECORD_BOF_BIFF8 || record_id == RECORD_BOF_BIFF5
 }
 
 /// Read a single physical BIFF record at `offset`.

@@ -71,7 +71,7 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                 }
             }
             // EOF terminates the sheet substream.
-            0x000A => break,
+            records::RECORD_EOF => break,
             _ => {}
         }
     }
@@ -172,7 +172,7 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
                 }
             }
             // EOF terminates the sheet substream.
-            0x000A => break,
+            records::RECORD_EOF => break,
             _ => {}
         }
     }
