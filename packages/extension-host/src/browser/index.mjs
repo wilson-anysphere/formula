@@ -1964,7 +1964,10 @@ class BrowserExtensionHost {
         const sheet = await this._spreadsheet.getActiveSheet();
         const id =
           sheet && typeof sheet === "object" && sheet.id != null ? String(sheet.id).trim() : "";
-        if (id) return id;
+        if (id) {
+          this._activeSheetId = id;
+          return id;
+        }
       } catch {
         // ignore
       }
@@ -2276,6 +2279,7 @@ class BrowserExtensionHost {
           (typeof this._activeSheetId === "string" && this._activeSheetId.trim()) ||
           null;
         if (!sheetId) return;
+        this._activeSheetId = sheetId;
 
         this._taintExtensionRange(extension, {
           sheetId,
@@ -2297,6 +2301,7 @@ class BrowserExtensionHost {
           (typeof this._activeSheetId === "string" && this._activeSheetId.trim()) ||
           null;
         if (!sheetId) return;
+        this._activeSheetId = sheetId;
 
         this._taintExtensionRange(extension, {
           sheetId,
@@ -2313,6 +2318,23 @@ class BrowserExtensionHost {
 
   _sendEventToExtension(extension, event, data) {
     try {
+      // Keep internal active-sheet tracking best-effort synced even when events are delivered
+      // to a single extension (e.g. startupExtension sends workbookOpened only to the newly
+      // activated extension).
+      try {
+        const evt = String(event ?? "");
+        if (evt === "sheetActivated") {
+          const id = data?.sheet?.id;
+          if (typeof id === "string" && id.trim()) this._activeSheetId = id.trim();
+        }
+        if (evt === "workbookOpened") {
+          const id = data?.workbook?.activeSheet?.id;
+          if (typeof id === "string" && id.trim()) this._activeSheetId = id.trim();
+        }
+      } catch {
+        // ignore
+      }
+
       this._maybeTaintEventPayload(extension, event, data);
       extension.worker.postMessage({ type: "event", event, data });
     } catch {
@@ -2325,8 +2347,15 @@ class BrowserExtensionHost {
     // (including event-based clipboard taint tracking) can fall back to it when
     // payloads omit `sheetId`.
     try {
-      if (String(event ?? "") === "sheetActivated") {
+      const evt = String(event ?? "");
+      if (evt === "sheetActivated") {
         const id = data?.sheet?.id;
+        if (typeof id === "string" && id.trim()) {
+          this._activeSheetId = id.trim();
+        }
+      }
+      if (evt === "workbookOpened") {
+        const id = data?.workbook?.activeSheet?.id;
         if (typeof id === "string" && id.trim()) {
           this._activeSheetId = id.trim();
         }
