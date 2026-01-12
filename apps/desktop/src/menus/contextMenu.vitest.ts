@@ -22,6 +22,7 @@ describe("ContextMenu (DOM)", () => {
 
       const overlay = document.querySelector('[data-testid="context-menu"]');
       expect(overlay, "expected context menu overlay to be attached").toBeTruthy();
+      expect(overlay?.getAttribute("data-keybinding-barrier")).toBe("true");
 
       const container = overlay?.querySelector('[role="menu"]');
       expect(container, "expected menu container to have role=menu").toBeTruthy();

@@ -87,6 +87,7 @@ describe("createCommandPalette context keys", () => {
     expect(contextKeys.get("workbench.commandPaletteOpen")).toBe(true);
     const overlay = document.querySelector<HTMLDivElement>(".command-palette-overlay");
     expect(overlay).toBeTruthy();
+    expect(overlay?.getAttribute("data-keybinding-barrier")).toBe("true");
     overlay!.dispatchEvent(
       new MouseEvent("click", {
         bubbles: true,
