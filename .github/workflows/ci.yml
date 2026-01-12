@@ -17,6 +17,23 @@ jobs:
       - name: Run formula-xlsx tests
         run: cargo test -p formula-xlsx
 
+  desktop-backend-tests:
+    name: Desktop backend (Rust) tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
+      # contention on shared ~/.cargo. In GitHub Actions we prefer the default
+      # CARGO_HOME so cargo installs and builds share the same cache.
+      - name: Use shared Cargo home for CI caching
+        run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
+      - name: Run formula-desktop-tauri tests (backend only; no WebView toolchain)
+        # NOTE: Do NOT enable the `desktop` feature here. That feature pulls in
+        # the system WebView toolchain (gtk/webkit2gtk) on Linux, which is not
+        # required for backend unit/integration tests.
+        run: cargo test -p formula-desktop-tauri
+
   excel-oracle-compat:
     name: Excel oracle compatibility (pinned)
     runs-on: ubuntu-latest
