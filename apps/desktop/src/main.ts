@@ -4284,35 +4284,6 @@ if (
         return text ?? "";
       },
       writeText: async (text: string) => {
-        // Extensions can write arbitrary text to the system clipboard via `formula.clipboard.writeText()`.
-        // Enforce clipboard-copy DLP against the current UI selection (active-cell fallback) so
-        // extensions cannot bypass SpreadsheetApp's `clipboard.copy` policy enforcement.
-        try {
-          const sheetId = app.getCurrentSheetId();
-          const active = app.getActiveCell();
-          const selection = app.getSelectionRanges()[0];
-          const range = normalizeSelectionRange(
-            selection ?? { startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col },
-          );
-          enforceExtensionClipboardDlpForRange({ sheetId, range });
-        } catch (err) {
-          const isDlpViolation = err instanceof DlpViolationError || (err as any)?.name === "DlpViolationError";
-          if (isDlpViolation) {
-            const message =
-              typeof (err as any)?.message === "string" && (err as any).message.trim()
-                ? String((err as any).message)
-                : "Clipboard copy blocked by data loss prevention policy.";
-            try {
-              showToast(message, "error");
-            } catch {
-              // `showToast` requires a #toast-root; unit tests don't always include it.
-            }
-            // Convert to a generic Error so the extension command fails without relying
-            // on the host-side DlpViolationError type.
-            throw new Error(message);
-          }
-          throw err;
-        }
         const provider = await clipboardProviderPromise;
         await provider.write({ text: String(text ?? "") });
       },
