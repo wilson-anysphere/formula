@@ -1528,7 +1528,10 @@ class BrowserExtensionHost {
         return null;
       case "sheets.getActiveSheet":
         if (typeof this._spreadsheet.getActiveSheet === "function") {
-          return this._spreadsheet.getActiveSheet();
+          const sheet = await this._spreadsheet.getActiveSheet();
+          const id = sheet && typeof sheet === "object" && sheet.id != null ? String(sheet.id).trim() : "";
+          if (id) this._activeSheetId = id;
+          return sheet;
         }
         return this._sheets.find((s) => s.id === this._activeSheetId) ?? { id: "sheet1", name: "Sheet1" };
 
@@ -1626,12 +1629,18 @@ class BrowserExtensionHost {
         return this._defaultGetSheet(args[0]);
       case "sheets.activateSheet":
         if (typeof this._spreadsheet.activateSheet === "function") {
-          return this._spreadsheet.activateSheet(args[0]);
+          const sheet = await this._spreadsheet.activateSheet(args[0]);
+          const id = sheet && typeof sheet === "object" && sheet.id != null ? String(sheet.id).trim() : "";
+          if (id) this._activeSheetId = id;
+          return sheet;
         }
         return this._defaultActivateSheet(args[0]);
       case "sheets.createSheet":
         if (typeof this._spreadsheet.createSheet === "function") {
-          return this._spreadsheet.createSheet(args[0]);
+          const sheet = await this._spreadsheet.createSheet(args[0]);
+          const id = sheet && typeof sheet === "object" && sheet.id != null ? String(sheet.id).trim() : "";
+          if (id) this._activeSheetId = id;
+          return sheet;
         }
         return this._defaultCreateSheet(args[0]);
       case "sheets.renameSheet":

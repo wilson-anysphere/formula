@@ -238,6 +238,63 @@ test("BrowserExtensionHost: cellChanged taints using active-sheet fallback when 
   ]);
 });
 
+test("BrowserExtensionHost: sheets.activateSheet updates active-sheet id for event taint fallback", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  let activeSheetId = "sheet1";
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async activateSheet(name) {
+        if (String(name) === "Sheet2") {
+          activeSheetId = "sheet2";
+          return { id: "sheet2", name: "Sheet2" };
+        }
+        return { id: activeSheetId, name: "Sheet1" };
+      },
+      async getActiveSheet() {
+        return { id: activeSheetId, name: activeSheetId === "sheet2" ? "Sheet2" : "Sheet1" };
+      },
+      async setCell() {},
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.activate-sheet-taint-fallback";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "activate-sheet-taint-fallback",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: [],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+
+  await host._executeApi("sheets", "activateSheet", ["Sheet2"], extension);
+  host._broadcastEvent("selectionChanged", {
+    selection: { startRow: 0, startCol: 0, endRow: 0, endCol: 0, values: [[null]] },
+  });
+
+  assert.deepEqual(sortRanges(extension.taintedRanges), [
+    { sheetId: "sheet2", startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
+  ]);
+});
+
 test("BrowserExtensionHost: records taint for cellChanged events (and passes it to clipboard guard)", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
