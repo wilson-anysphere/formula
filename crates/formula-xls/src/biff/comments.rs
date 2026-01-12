@@ -842,6 +842,8 @@ fn parse_txo_text_biff8(
     let mut ansi_bytes: Vec<u8> = Vec::new();
     let mut utf16_bytes: Vec<u8> = Vec::new();
     let mut pending_unicode_byte: Option<u8> = None;
+    let mut current_is_unicode: Option<bool> = None;
+    let mut warned_missing_flags = false;
     let mut remaining = cch_text;
     let mut remaining_bytes = text_continue_bytes;
     for frag in continues {
@@ -855,10 +857,30 @@ fn parse_txo_text_biff8(
         if looks_like_txo_formatting_runs(frag) {
             break;
         }
-        let Some((&flags, bytes)) = frag.split_first() else {
+        let Some((&first, rest)) = frag.split_first() else {
             continue;
         };
-        let is_unicode = (flags & 0x01) != 0;
+        let (bytes, is_unicode, has_flags) = if matches!(first, 0 | 1) {
+            let is_unicode = (first & 0x01) != 0;
+            (rest, is_unicode, true)
+        } else {
+            // Nonstandard fragment: missing the 1-byte "high-byte" flag. Assume this fragment
+            // continues using the same encoding as the previous fragment (default: compressed).
+            let is_unicode = current_is_unicode.unwrap_or(false);
+            (frag, is_unicode, false)
+        };
+        if has_flags {
+            current_is_unicode = Some(is_unicode);
+        } else if !warned_missing_flags {
+            warned_missing_flags = true;
+            push_warning(
+                warnings,
+                format!(
+                    "TXO record at offset {} has CONTINUE fragment missing BIFF8 flags byte; assuming the previous fragment encoding",
+                    record.offset
+                ),
+            );
+        }
         if is_unicode {
             // Flush any buffered ANSI bytes so multi-byte sequences can span CONTINUE fragments.
             if !ansi_bytes.is_empty() {
@@ -1495,6 +1517,35 @@ mod tests {
             warnings
                 .iter()
                 .any(|w| w.contains("missing BIFF8 flags byte") || w.contains("decoding as BIFF5")),
+            "expected missing-flags warning; warnings={warnings:?}"
+        );
+    }
+
+    #[test]
+    fn parses_biff8_txo_text_when_a_later_continue_fragment_is_missing_flags_byte() {
+        // Similar to `parses_biff8_txo_text_when_continue_payload_is_missing_flags_byte`, but
+        // only the *second* fragment omits the flags byte. We should keep decoding and treat the
+        // fragment as using the previous encoding (compressed ANSI in this fixture).
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text_and_cb_runs(5, 4),
+            continue_text_compressed_bytes(b"He"),
+            // Second fragment omits the flags byte.
+            record(records::RECORD_CONTINUE, b"llo"),
+            // Formatting runs CONTINUE payload (dummy bytes, no leading flags byte).
+            record(records::RECORD_CONTINUE, &[0u8; 4]),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
+        assert!(
+            warnings.iter().any(|w| w.contains("missing BIFF8 flags byte")),
             "expected missing-flags warning; warnings={warnings:?}"
         );
     }
