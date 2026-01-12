@@ -197,6 +197,25 @@ fn sumifs_multiple_criteria_and_shape_mismatch() {
 }
 
 #[test]
+fn sumifs_propagates_sum_range_errors_only_when_included() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1);
+    sheet.set("A2", 2);
+
+    sheet.set("B1", Value::Error(ErrorKind::Div0));
+    sheet.set("B2", 5);
+
+    // Error is not included (criteria doesn't match A1), so it is ignored.
+    assert_number(&sheet.eval(r#"=SUMIFS(B1:B2,A1:A2,2)"#), 5.0);
+
+    // Error is included (criteria matches both), so it propagates.
+    assert_eq!(
+        sheet.eval(r#"=SUMIFS(B1:B2,A1:A2,">0")"#),
+        Value::Error(ErrorKind::Div0)
+    );
+}
+
+#[test]
 fn averageif_and_averageifs_return_div0_when_no_numeric_cells_included() {
     let mut sheet = TestSheet::new();
 
@@ -420,4 +439,44 @@ fn maxifs_and_minifs_require_matching_shapes() {
         sheet.eval(r#"=MINIFS(B1:B4,A1:B2,">0")"#),
         Value::Error(ErrorKind::Value)
     );
+}
+
+#[test]
+fn maxifs_and_minifs_propagate_errors_only_when_included() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1);
+    sheet.set("A2", 2);
+
+    sheet.set("B1", Value::Error(ErrorKind::Div0));
+    sheet.set("B2", 5);
+
+    // Error is excluded by criteria, so it is ignored.
+    assert_number(&sheet.eval(r#"=MAXIFS(B1:B2,A1:A2,2)"#), 5.0);
+    assert_number(&sheet.eval(r#"=MINIFS(B1:B2,A1:A2,2)"#), 5.0);
+
+    // Error is included, so it propagates.
+    assert_eq!(
+        sheet.eval(r#"=MAXIFS(B1:B2,A1:A2,">0")"#),
+        Value::Error(ErrorKind::Div0)
+    );
+    assert_eq!(
+        sheet.eval(r#"=MINIFS(B1:B2,A1:A2,">0")"#),
+        Value::Error(ErrorKind::Div0)
+    );
+}
+
+#[test]
+fn maxifs_and_minifs_parse_date_criteria_strings() {
+    let mut sheet = TestSheet::new();
+
+    sheet.set_formula("A1", "=DATE(2019,12,31)");
+    sheet.set_formula("A2", "=DATE(2020,1,1)");
+    sheet.set_formula("A3", "=DATE(2020,1,2)");
+
+    sheet.set("B1", 1);
+    sheet.set("B2", 2);
+    sheet.set("B3", 3);
+
+    assert_number(&sheet.eval(r#"=MAXIFS(B1:B3,A1:A3,">12/31/2019")"#), 3.0);
+    assert_number(&sheet.eval(r#"=MINIFS(B1:B3,A1:A3,">12/31/2019")"#), 2.0);
 }
