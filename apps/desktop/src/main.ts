@@ -377,10 +377,6 @@ let activePanelWorkbookId = workbookId;
 // and Playwright tests aren't blocked by unsaved-changes prompts.
 app.getDocument().markSaved();
 
-app.onEditStateChange((isEditing) => {
-  statusMode.textContent = isEditing ? "Edit" : "Ready";
-});
-
 app.focus();
 
 function openFormatCells(): void {
@@ -395,43 +391,39 @@ function openFormatCells(): void {
 }
 
 installFormattingShortcuts(window, { openFormatCells });
+const onUndo = () => {
+  app.undo();
+  app.focus();
+};
 
-const titlebar = mountTitlebar(titlebarRootEl, {
+const onRedo = () => {
+  app.redo();
+  app.focus();
+};
+
+const buildTitlebarProps = () => ({
   actions: [],
   undoRedo: {
     ...app.getUndoRedoState(),
-    onUndo: () => {
-      app.undo();
-      app.focus();
-    },
-    onRedo: () => {
-      app.redo();
-      app.focus();
-    },
+    onUndo,
+    onRedo,
   },
 });
 
+const titlebar = mountTitlebar(titlebarRootEl, buildTitlebarProps());
+
 const syncTitlebarUndoRedo = () => {
-  titlebar.update({
-    actions: [],
-    undoRedo: {
-      ...app.getUndoRedoState(),
-      onUndo: () => {
-        app.undo();
-        app.focus();
-      },
-      onRedo: () => {
-        app.redo();
-        app.focus();
-      },
-    },
-  });
+  titlebar.update(buildTitlebarProps());
 };
 
-syncTitlebarUndoRedo();
 const unsubscribeTitlebarHistory = app.getDocument().on("history", () => syncTitlebarUndoRedo());
+const unsubscribeTitlebarEditState = app.onEditStateChange((isEditing) => {
+  statusMode.textContent = isEditing ? "Edit" : "Ready";
+  syncTitlebarUndoRedo();
+});
 window.addEventListener("unload", () => {
   unsubscribeTitlebarHistory();
+  unsubscribeTitlebarEditState();
   titlebar.dispose();
 });
 

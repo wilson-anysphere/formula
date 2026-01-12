@@ -1260,9 +1260,10 @@ export class SpreadsheetApp {
   }
 
   getUndoRedoState(): UndoRedoState {
+    const editing = this.isEditing();
     return {
-      canUndo: Boolean(this.document.canUndo),
-      canRedo: Boolean(this.document.canRedo),
+      canUndo: !editing && Boolean(this.document.canUndo),
+      canRedo: !editing && Boolean(this.document.canRedo),
       undoLabel: (this.document.undoLabel as string | null) ?? null,
       redoLabel: (this.document.redoLabel as string | null) ?? null,
     };
