@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { gotoDesktop, openSheetTabContextMenu } from "./helpers";
+import { expectSheetPosition, gotoDesktop, openSheetTabContextMenu } from "./helpers";
 
 function installTauriStubForTests(
   options: {
@@ -237,7 +237,7 @@ test.describe("tauri workbook integration", () => {
     // show exactly one sheet (prefer the active sheet) so users can reach the Unhide… menu.
     await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 1");
+    await expectSheetPosition(page, { position: 1, total: 1 });
 
     const switcher = page.getByTestId("sheet-switcher");
     await expect(switcher.locator("option")).toHaveText(["Sheet1"]);

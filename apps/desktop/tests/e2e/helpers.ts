@@ -1,4 +1,4 @@
-import type { Locator, Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 type DesktopReadyOptions = {
   /**
@@ -296,4 +296,29 @@ export async function openSheetTabContextMenu(page: Page, sheetId: string): Prom
   const menu = page.getByTestId("sheet-tab-context-menu");
   await menu.waitFor({ state: "visible", timeout: 10_000 });
   return menu;
+}
+
+export async function expectSheetPosition(
+  page: Page,
+  { position, total }: { position: number; total: number },
+  { timeoutMs = 10_000 }: { timeoutMs?: number } = {},
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        try {
+          return await page.evaluate(() => {
+            const el = document.querySelector('[data-testid="sheet-position"]');
+            const raw = (el?.textContent ?? "").trim();
+            const nums = raw.match(/\d+/g) ?? [];
+            if (nums.length < 2) return null;
+            return { position: Number(nums[0]), total: Number(nums[1]) };
+          });
+        } catch {
+          return null;
+        }
+      },
+      { timeout: timeoutMs },
+    )
+    .toEqual({ position, total });
 }

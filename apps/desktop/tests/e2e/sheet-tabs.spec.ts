@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { gotoDesktop, openSheetTabContextMenu } from "./helpers";
+import { expectSheetPosition, gotoDesktop, openSheetTabContextMenu } from "./helpers";
 
 function installTauriStubForSheetTabDelete() {
   const listeners: Record<string, any> = {};
@@ -68,7 +68,7 @@ test.describe("sheet tabs", () => {
       app.activateCell({ row: 0, col: 0 });
     });
     await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 1");
+    await expectSheetPosition(page, { position: 1, total: 1 });
 
     // Lazily create Sheet2 by writing a value into it.
     await page.evaluate(() => {
@@ -77,17 +77,17 @@ test.describe("sheet tabs", () => {
     });
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
+    await expectSheetPosition(page, { position: 1, total: 2 });
 
     await page.getByTestId("sheet-tab-Sheet2").click();
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
     await expect(page.getByTestId("active-value")).toHaveText("Hello from Sheet2");
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
+    await expectSheetPosition(page, { position: 2, total: 2 });
 
     // Switching back restores the original Sheet1 value.
     await page.getByTestId("sheet-tab-Sheet1").click();
     await expect(page.getByTestId("active-value")).toHaveText("Seed");
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
+    await expectSheetPosition(page, { position: 1, total: 2 });
   });
 
   test("add sheet button creates and activates the next SheetN tab", async ({ page }) => {
@@ -214,7 +214,7 @@ test.describe("sheet tabs", () => {
     await page.getByTestId("sheet-add").click();
     await expect(page.getByTestId(`sheet-tab-${nextSheetId}`)).toBeVisible();
     // New sheets are activated on creation; sheet position should reflect that.
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
+    await expectSheetPosition(page, { position: 2, total: 2 });
 
     const initialSheetIds = await page.evaluate(() => {
       const app = (window as any).__formulaApp;
@@ -234,7 +234,7 @@ test.describe("sheet tabs", () => {
 
     await expect(page.getByTestId(`sheet-tab-${nextSheetId}`)).toHaveCount(0);
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 1");
+    await expectSheetPosition(page, { position: 1, total: 1 });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
 
     // Undo should restore the deleted sheet and return to the last-saved dirty state.
@@ -259,7 +259,7 @@ test.describe("sheet tabs", () => {
       await expect(page.getByTestId(`sheet-tab-${sheetId}`)).toBeVisible();
     }
 
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 5 of 5");
+    await expectSheetPosition(page, { position: 5, total: 5 });
 
     await page.getByTestId("sheet-overflow").click();
 
@@ -268,7 +268,7 @@ test.describe("sheet tabs", () => {
     await quickPick.getByRole("button", { name: "Sheet4" }).click();
 
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet4");
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 4 of 5");
+    await expectSheetPosition(page, { position: 4, total: 5 });
     await expect(page.getByTestId("sheet-tab-Sheet4")).toHaveAttribute("data-active", "true");
 
     // Sheet activation via the overflow/quick-pick UI should return focus to the grid so
@@ -455,16 +455,16 @@ test.describe("sheet tabs", () => {
       app.getDocument().setCellValue("Sheet3", "A1", "Hello from Sheet3");
     });
 
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
+    await expectSheetPosition(page, { position: 1, total: 3 });
 
     const switcher = page.getByTestId("sheet-switcher");
     await switcher.selectOption("Sheet3", { force: true });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet3");
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
+    await expectSheetPosition(page, { position: 3, total: 3 });
 
     await switcher.selectOption("Sheet2", { force: true });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 3");
+    await expectSheetPosition(page, { position: 2, total: 3 });
   });
 
   test("renaming a sheet rewrites formulas that reference it", async ({ page }) => {
@@ -894,7 +894,7 @@ test.describe("sheet tabs", () => {
     await page.getByTestId("sheet-add").click();
     await expect(page.getByTestId("sheet-tab-Sheet3")).toBeVisible();
     await expect(page.getByTestId("sheet-tab-Sheet3")).toHaveAttribute("data-active", "true");
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
+    await expectSheetPosition(page, { position: 3, total: 3 });
 
     // Move Sheet3 before Sheet1 (new order: Sheet3, Sheet1, Sheet2).
     // Use a synthetic HTML5 drop event for determinism (Playwright drag/drop can be flaky).
@@ -927,7 +927,7 @@ test.describe("sheet tabs", () => {
       ),
     ).toEqual(desiredOrder);
     // Active sheet is still Sheet3, but its position is now 1st.
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
+    await expectSheetPosition(page, { position: 1, total: 3 });
 
     // Focus the grid: Ctrl/Cmd+PgUp/PgDn must work when the grid is focused (real workflow).
     await page.locator("#grid").focus();
@@ -949,7 +949,7 @@ test.describe("sheet tabs", () => {
       grid.dispatchEvent(evt);
     });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 3");
+    await expectSheetPosition(page, { position: 2, total: 3 });
 
     await page.evaluate(() => {
       const grid = document.getElementById("grid");
@@ -963,7 +963,7 @@ test.describe("sheet tabs", () => {
       grid.dispatchEvent(evt);
     });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
+    await expectSheetPosition(page, { position: 3, total: 3 });
 
     // Wrap around to Sheet3.
     await page.evaluate(() => {
@@ -978,7 +978,7 @@ test.describe("sheet tabs", () => {
       grid.dispatchEvent(evt);
     });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet3");
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
+    await expectSheetPosition(page, { position: 1, total: 3 });
   });
 
   test("dragging Sheet2 before Sheet1 reorders the tab strip, updates the sheet switcher, and marks the document dirty", async ({ page }) => {
@@ -1139,10 +1139,10 @@ test.describe("sheet tabs", () => {
       app.getDocument().setCellValue("Sheet3", "A1", "Hello from Sheet3");
     });
 
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
+    await expectSheetPosition(page, { position: 1, total: 3 });
 
     await page.getByTestId("sheet-tab-Sheet3").click();
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
+    await expectSheetPosition(page, { position: 3, total: 3 });
 
     // Hide Sheet2 so the position indicator reflects visible sheets (Excel-like behavior).
     {
@@ -1152,7 +1152,7 @@ test.describe("sheet tabs", () => {
       await expect(menu).toBeHidden();
     }
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
+    await expectSheetPosition(page, { position: 2, total: 2 });
 
     // Unhide Sheet2 and ensure position updates.
     {
@@ -1166,7 +1166,7 @@ test.describe("sheet tabs", () => {
     }
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
+    await expectSheetPosition(page, { position: 3, total: 3 });
 
     // Set a tab color via the sheet tab context menu and verify it renders.
     {
@@ -1382,13 +1382,13 @@ test.describe("sheet tabs", () => {
 
     const sheet2Tab = page.getByTestId("sheet-tab-Sheet2");
     await expect(sheet2Tab).toBeVisible();
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
+    await expectSheetPosition(page, { position: 1, total: 2 });
 
     // Tab Color palette sets underline visible.
     const tabMenu = page.getByTestId("sheet-tab-context-menu");
     await sheet2Tab.click();
     await expect(sheet2Tab).toHaveAttribute("data-active", "true");
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
+    await expectSheetPosition(page, { position: 2, total: 2 });
 
     await openSheetTabContextMenu(page, "Sheet2");
     await tabMenu.getByRole("button", { name: "Tab Color", exact: true }).click();
@@ -1403,7 +1403,7 @@ test.describe("sheet tabs", () => {
 
     await expect(sheet2Tab).toHaveCount(0);
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 1");
+    await expectSheetPosition(page, { position: 1, total: 1 });
     await expect(page.getByTestId("active-value")).toHaveText("Seed");
 
     // Unhide via background menu restores Sheet2.
@@ -1433,7 +1433,7 @@ test.describe("sheet tabs", () => {
     await quickPick.getByRole("button", { name: "Sheet2" }).click();
 
     await expect(sheet2Tab).toBeVisible();
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
+    await expectSheetPosition(page, { position: 1, total: 2 });
 
     // Tab color should persist after hide/unhide.
     await expect(sheet2Tab.locator(".sheet-tab__color")).toBeVisible();
@@ -1452,7 +1452,7 @@ test.describe("sheet tabs", () => {
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
     await page.getByTestId("sheet-tab-Sheet2").click();
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
+    await expectSheetPosition(page, { position: 2, total: 2 });
 
     const tabMenu = page.getByTestId("sheet-tab-context-menu");
 
@@ -1463,7 +1463,7 @@ test.describe("sheet tabs", () => {
     await tabMenu.getByRole("button", { name: "Delete", exact: true }).click();
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 1");
+    await expectSheetPosition(page, { position: 1, total: 1 });
 
     await expect
       .poll(() =>

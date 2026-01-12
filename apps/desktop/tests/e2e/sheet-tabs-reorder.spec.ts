@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { gotoDesktop } from "./helpers";
+import { expectSheetPosition, gotoDesktop } from "./helpers";
 
 async function getVisibleSheetTabOrder(page: Page): Promise<string[]> {
   return await page.evaluate(() => {
@@ -47,7 +47,7 @@ test.describe("sheet tabs", () => {
       .toEqual(["Sheet1", "Sheet2", "Sheet3"]);
 
     // Status bar should reflect the active sheet (new sheets are activated on creation).
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
+    await expectSheetPosition(page, { position: 3, total: 3 });
 
     // Ensure the dirty assertion is specifically caused by sheet reordering.
     await page.evaluate(() => {
@@ -101,7 +101,7 @@ test.describe("sheet tabs", () => {
       .toEqual(["Sheet3", "Sheet1", "Sheet2"]);
 
     // Status bar should update to match the new position of the active sheet.
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
+    await expectSheetPosition(page, { position: 1, total: 3 });
 
     // Reordering should not switch the active sheet; the dragged sheet remains active.
     await expect(page.getByTestId("sheet-tab-Sheet3")).toHaveAttribute("data-active", "true");

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { gotoDesktop, waitForDesktopReady } from "./helpers";
+import { expectSheetPosition, gotoDesktop, waitForDesktopReady } from "./helpers";
 
 test.describe("sheet reorder", () => {
   test("dragging a sheet tab persists the order through reopen", async ({ page }) => {
@@ -145,7 +145,7 @@ test.describe("sheet reorder", () => {
       ]);
       const idx = order.indexOf(activeSheetId);
       expect(idx).toBeGreaterThanOrEqual(0);
-      await expect(page.getByTestId("sheet-position")).toHaveText(`Sheet ${idx + 1} of ${order.length}`);
+      await expectSheetPosition(page, { position: idx + 1, total: order.length });
     };
 
     expect(await tabOrder()).toEqual(["Sheet1", "Sheet2", "Sheet3"]);
