@@ -54,11 +54,17 @@ export function registerBuiltinCommands(params: {
       }
     }
 
-    const doc: any = app.getDocument() as any;
-    const ids =
-      typeof doc.getVisibleSheetIds === "function"
-        ? (doc.getVisibleSheetIds() as string[])
-        : ((doc.getSheetIds?.() as string[]) ?? []);
+    let ids: string[] = [];
+    try {
+      const doc = app.getDocument();
+      ids = doc.getVisibleSheetIds();
+    } catch {
+      try {
+        ids = app.getDocument().getSheetIds();
+      } catch {
+        ids = [];
+      }
+    }
     // DocumentController materializes sheets lazily; mimic the UI fallback behavior so
     // navigation commands are stable even before any edits occur.
     return ids.length > 0 ? ids : ["Sheet1"];

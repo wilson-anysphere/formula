@@ -5507,10 +5507,7 @@ export class SpreadsheetApp {
     // a sheet that no longer exists (DocumentController lazily materializes sheets
     // on access, which would otherwise resurrect deleted sheets).
     const sheetIds = this.document.getSheetIds();
-    const visibleSheetIds =
-      typeof (this.document as any).getVisibleSheetIds === "function"
-        ? ((this.document as any).getVisibleSheetIds() as string[])
-        : sheetIds;
+    const visibleSheetIds = this.document.getVisibleSheetIds();
 
     const hasSheet = sheetIds.includes(this.sheetId);
     const isVisible = visibleSheetIds.includes(this.sheetId);
