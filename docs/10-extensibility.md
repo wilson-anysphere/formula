@@ -56,6 +56,8 @@ Extension panels are rendered as a sandboxed `<iframe>` (currently via a `blob:`
   extension host permission model (no network / remote scripts).
 - The desktop also injects a hardening script that scrubs Tauri IPC globals (`__TAURI__`, `__TAURI_IPC__`, etc) from the
   iframe context (best-effort defense-in-depth).
+  - The injected script also leaves a marker object at `window.__formulaWebviewSandbox` (used by e2e tests) so you can
+    sanity-check that the hardening ran inside the iframe.
 - Communication is **postMessage-only**:
   - Webview → extension: `window.parent.postMessage(message, "*")`
   - Extension → webview: `panel.webview.postMessage(message)` delivered to the iframe via `postMessage`
