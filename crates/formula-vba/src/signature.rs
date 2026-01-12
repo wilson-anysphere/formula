@@ -1557,3 +1557,60 @@ fn signature_payload_candidates(signature_bytes: &[u8]) -> Vec<SignaturePayloadC
         bytes: signature_bytes.to_vec(),
     }]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{digest_alg_from_oid_str, digest_name_from_oid_str, DigestAlg};
+
+    #[test]
+    fn digest_alg_from_oid_str_maps_known_digest_oids() {
+        assert_eq!(
+            digest_alg_from_oid_str("1.2.840.113549.2.5"),
+            Some(DigestAlg::Md5)
+        );
+        assert_eq!(
+            digest_alg_from_oid_str("1.3.14.3.2.26"),
+            Some(DigestAlg::Sha1)
+        );
+        assert_eq!(
+            digest_alg_from_oid_str("2.16.840.1.101.3.4.2.1"),
+            Some(DigestAlg::Sha256)
+        );
+
+        // Be permissive about surrounding whitespace.
+        assert_eq!(
+            digest_alg_from_oid_str("  1.2.840.113549.2.5  "),
+            Some(DigestAlg::Md5)
+        );
+    }
+
+    #[test]
+    fn digest_alg_from_oid_str_maps_common_signature_oids() {
+        // Some signatures incorrectly use signature algorithm OIDs where a digest algorithm OID
+        // would normally appear; we accept a small set of these in best-effort mode.
+        assert_eq!(
+            digest_alg_from_oid_str("1.2.840.113549.1.1.4"),
+            Some(DigestAlg::Md5)
+        ); // md5WithRSAEncryption
+        assert_eq!(
+            digest_alg_from_oid_str("1.2.840.113549.1.1.5"),
+            Some(DigestAlg::Sha1)
+        ); // sha1WithRSAEncryption
+        assert_eq!(
+            digest_alg_from_oid_str("1.2.840.113549.1.1.11"),
+            Some(DigestAlg::Sha256)
+        ); // sha256WithRSAEncryption
+    }
+
+    #[test]
+    fn digest_name_from_oid_str_is_exhaustive_for_supported_algs() {
+        assert_eq!(digest_name_from_oid_str("1.2.840.113549.2.5"), Some("MD5"));
+        assert_eq!(digest_name_from_oid_str("1.3.14.3.2.26"), Some("SHA-1"));
+        assert_eq!(
+            digest_name_from_oid_str("2.16.840.1.101.3.4.2.1"),
+            Some("SHA-256")
+        );
+
+        assert_eq!(digest_name_from_oid_str("0.0"), None);
+    }
+}
