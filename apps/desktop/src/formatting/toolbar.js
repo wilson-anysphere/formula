@@ -5,6 +5,10 @@ import { applyStylePatch } from "./styleTable.js";
 // Excel grid limits (used by the selection model and layered formatting fast paths).
 const EXCEL_MAX_ROW = 1_048_576 - 1;
 const EXCEL_MAX_COL = 16_384 - 1;
+// Keep aligned with `RANGE_RUN_FORMAT_THRESHOLD` in `DocumentController.setRangeFormat`.
+// Above this area, formatting is stored in compressed range runs rather than enumerating
+// every cell in the rectangle.
+const RANGE_RUN_FORMAT_THRESHOLD = 50_000;
 // Keep aligned with `apps/desktop/src/formatting/selectionSizeGuard.ts` default UI limit.
 // This guard blocks extremely large non-band selections so toolbar actions remain
 // predictable (and consistent with the UI selection-size guard).
@@ -72,6 +76,10 @@ function ensureSafeFormattingRange(rangeOrRanges) {
     }
 
     const cellCount = rangeCellCount(r);
+    // Large rectangles use DocumentController's range-run formatting layer, which scales with
+    // columns rather than O(rows * cols) cell enumeration. Only count ranges that will
+    // actually enumerate cells toward the safety cap.
+    if (cellCount > RANGE_RUN_FORMAT_THRESHOLD) continue;
 
     // Even though large rectangles can use the DocumentController's compressed range-run formatting,
     // we still guard against formatting *enormous* selections that would be surprising (and expensive
