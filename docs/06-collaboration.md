@@ -329,7 +329,10 @@ It synchronizes **cell value/formula/format** between:
 - `Y.Doc` → `cells` root (`Y.Map`)
 - Desktop `DocumentController` (see [`apps/desktop/src/document/documentController.js`](../apps/desktop/src/document/documentController.js))
 
-> Note: the binder currently **does not** sync the `sheets` array (sheet creation/order/rename) or per-sheet `view` state. Those are stored in Yjs (see below) and are used by branching/versioning, but desktop live-binding is currently cell-focused.
+> Note: the binder syncs **cell contents** (`cells`) *and* **sheet view state**
+> (`sheets[].view`), but it does **not** implement full sheet list semantics
+> (create/delete/rename/reorder). If the desktop UI needs live sheet list syncing,
+> it should observe the Yjs `sheets` array directly (or use a dedicated binder).
 
 ### End-to-end wiring example
 
@@ -463,6 +466,17 @@ Compatibility note:
 
 Because `sheets` is part of the shared Y.Doc, any edits to `view` will sync like any other Yjs update (subject to your provider/persistence).
 
+### Desktop binder integration (`bindYjsToDocumentController`)
+
+When the desktop binder is in use, `bindYjsToDocumentController` also keeps the
+desktop projection in sync with the shared view state:
+
+- **Yjs → desktop:** observes `sheets` changes and applies them into
+  `DocumentController` via `applyExternalSheetViewDeltas` (or best-effort via
+  `setFrozen`/`setColWidth`/`setRowHeight` for older controllers).
+- **Desktop → Yjs:** listens for `sheetViewDeltas` emitted by `DocumentController`
+  and writes normalized state back into `sheets[i].view`.
+
 Semantics note:
 
 - `sheets[].view` is **shared workbook state** (similar to formatting), not per-user transient UI state.
@@ -504,7 +518,10 @@ metadata.set("locale", "en-US");
 namedRanges.set("Revenue", { sheetId: "Sheet1", startRow: 0, startCol: 0, endRow: 9, endCol: 0 });
 ```
 
-Note: the desktop `bindYjsToDocumentController` binder is currently cell-focused and does not project sheet list changes into `DocumentController`. If the desktop UI needs live sheet list syncing, it should observe the Yjs `sheets` array directly (or via a dedicated binder).
+Note: the desktop `bindYjsToDocumentController` binder syncs **cells + sheet
+view state**, but does not project sheet list changes (add/delete/rename/order)
+into `DocumentController`. If the desktop UI needs live sheet list syncing, it
+should observe the Yjs `sheets` array directly (or via a dedicated binder).
 
 ---
 
@@ -690,7 +707,7 @@ Source: [`packages/versioning/branches/src/store/YjsBranchStore.js`](../packages
 
 ```ts
 import { CollabBranchingWorkflow } from "../packages/collab/branching/index.js";
-import { BranchService, YjsBranchStore } from "../packages/versioning/branches/src/index.js";
+import { BranchService, YjsBranchStore, yjsDocToDocumentState } from "../packages/versioning/branches/src/index.js";
 
 const store = new YjsBranchStore({ ydoc: session.doc }); // writes under branching:*
 const branchService = new BranchService({ docId, store });
@@ -699,7 +716,7 @@ const branchService = new BranchService({ docId, store });
 const workflow = new CollabBranchingWorkflow({ session, branchService });
 
 // Initialize (creates main branch if needed).
-await branchService.init({ userId, role: "owner" }, /* initialState */ { sheets: {} });
+await branchService.init({ userId, role: "owner" }, yjsDocToDocumentState(session.doc));
 
 await workflow.createBranch({ userId, role: "owner" }, { name: "scenario-a" });
 await workflow.checkoutBranch({ userId, role: "owner" }, { name: "scenario-a" });
