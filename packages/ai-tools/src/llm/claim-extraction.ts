@@ -108,12 +108,17 @@ const RANGE_STAT_WITH_REF_RE_2 = new RegExp(
 
 // Support implicit count claims like "There are 99 values in A1:A10" or "A1:A10 has 99 values".
 const COUNT_WITH_REF_RE_1 = new RegExp(
-  `\\bthere\\s+(?:are|were)\\s+(?<num>${NUMBER_PATTERN})\\s+(?:values|entries|cells|numbers|observations|rows|records)\\b\\s+(?:in|within|for)\\s+(?:the\\s+)?(?:range\\s+)?\\(?\\s*(?<ref>${A1_REFERENCE_PATTERN})\\s*\\)?`,
+  `\\bthere\\s+(?:are|were)\\s+(?<num>${NUMBER_PATTERN})\\s+(?:values|numbers|observations|data\\s+points|datapoints)\\b\\s+(?:in|within|for)\\s+(?:the\\s+)?(?:range\\s+)?\\(?\\s*(?<ref>${A1_REFERENCE_PATTERN})\\s*\\)?`,
   "gi"
 );
 
 const COUNT_WITH_REF_RE_2 = new RegExp(
-  `\\(?\\s*(?<ref>${A1_REFERENCE_PATTERN})\\s*\\)?\\s+(?:has|contains)\\s+(?<num>${NUMBER_PATTERN})\\s+(?:values|entries|cells|numbers|observations|rows|records)\\b`,
+  `\\(?\\s*(?<ref>${A1_REFERENCE_PATTERN})\\s*\\)?\\s+(?:has|contains)\\s+(?<num>${NUMBER_PATTERN})\\s+(?:values|numbers|observations|data\\s+points|datapoints)\\b`,
+  "gi"
+);
+
+const COUNT_WITH_REF_RE_3 = new RegExp(
+  `\\b(?:the\\s+)?(?:number|no\\.)\\s+of\\s+(?:values|numbers|observations|data\\s+points|datapoints)\\b\\s+(?:in|within|for)\\s+(?:the\\s+)?(?:range\\s+)?\\(?\\s*(?<ref>${A1_REFERENCE_PATTERN})\\s*\\)?\\s*(?:is|was|=|:|equals)?\\s*(?<num>${NUMBER_PATTERN})`,
   "gi"
 );
 
@@ -151,6 +156,7 @@ export function extractVerifiableClaims(params: ExtractVerifiableClaimsParams): 
   spans.push(...collectRangeStatWithRef(RANGE_STAT_WITH_REF_RE_2, assistantText));
   spans.push(...collectCountWithRef(COUNT_WITH_REF_RE_1, assistantText));
   spans.push(...collectCountWithRef(COUNT_WITH_REF_RE_2, assistantText));
+  spans.push(...collectCountWithRef(COUNT_WITH_REF_RE_3, assistantText));
   spans.push(...collectCellValueClaims(assistantText));
 
   const occupied = spans.map(({ start, end }) => ({ start, end }));

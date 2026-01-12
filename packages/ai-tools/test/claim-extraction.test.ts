@@ -122,6 +122,23 @@ describe("extractVerifiableClaims", () => {
     ]);
   });
 
+  it("extracts implicit count claims (number of values in range ...)", () => {
+    const claims = extractVerifiableClaims({
+      assistantText: "The number of values in Sheet1!A1:A10 is 99.",
+      userText: ""
+    });
+
+    expect(claims).toEqual([
+      {
+        kind: "range_stat",
+        measure: "count",
+        reference: "Sheet1!A1:A10",
+        expected: 99,
+        source: "The number of values in Sheet1!A1:A10 is 99"
+      }
+    ]);
+  });
+
   it("parses parenthesized negative numbers", () => {
     const claims = extractVerifiableClaims({
       assistantText: "Total for range Sheet1!B1:B2 = (1,200).",
