@@ -27,6 +27,13 @@ fn range_b1_b2() -> Expr {
     ))
 }
 
+fn range_a1_b2() -> Expr {
+    Expr::RangeRef(RangeRef::new(
+        Ref::new(0, 0, false, false),
+        Ref::new(1, 1, false, false),
+    ))
+}
+
 #[test]
 fn bytecode_match_rejects_lambda_lookup_value() {
     let origin = CellCoord::new(0, 0);
@@ -71,6 +78,48 @@ fn bytecode_xlookup_rejects_lambda_lookup_value() {
         args: vec![identity_lambda(), range_a1_a2(), range_b1_b2()],
     };
     let program = bytecode::Compiler::compile(Arc::from("xlookup_lambda_lookup_value"), &expr);
+
+    let grid = ColumnarGrid::new(10, 10);
+    let locale = formula_engine::LocaleConfig::en_us();
+    let mut vm = Vm::with_capacity(32);
+    let value = vm.eval(&program, &grid, 0, origin, &locale);
+    assert_eq!(value, Value::Error(ErrorKind::Value));
+}
+
+#[test]
+fn bytecode_vlookup_rejects_lambda_lookup_value() {
+    let origin = CellCoord::new(0, 0);
+    let expr = Expr::FuncCall {
+        func: Function::VLookup,
+        args: vec![
+            identity_lambda(),
+            range_a1_b2(),
+            Expr::Literal(Value::Number(1.0)),
+            Expr::Literal(Value::Bool(false)),
+        ],
+    };
+    let program = bytecode::Compiler::compile(Arc::from("vlookup_lambda_lookup_value"), &expr);
+
+    let grid = ColumnarGrid::new(10, 10);
+    let locale = formula_engine::LocaleConfig::en_us();
+    let mut vm = Vm::with_capacity(32);
+    let value = vm.eval(&program, &grid, 0, origin, &locale);
+    assert_eq!(value, Value::Error(ErrorKind::Value));
+}
+
+#[test]
+fn bytecode_hlookup_rejects_lambda_lookup_value() {
+    let origin = CellCoord::new(0, 0);
+    let expr = Expr::FuncCall {
+        func: Function::HLookup,
+        args: vec![
+            identity_lambda(),
+            range_a1_b2(),
+            Expr::Literal(Value::Number(1.0)),
+            Expr::Literal(Value::Bool(false)),
+        ],
+    };
+    let program = bytecode::Compiler::compile(Arc::from("hlookup_lambda_lookup_value"), &expr);
 
     let grid = ColumnarGrid::new(10, 10);
     let locale = formula_engine::LocaleConfig::en_us();
