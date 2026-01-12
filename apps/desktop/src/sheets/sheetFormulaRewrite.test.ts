@@ -82,6 +82,38 @@ describe("sheetFormulaRewrite", () => {
 
       expect(doc.getCell("S1", { row: 0, col: 0 }).formula).toBe("=Budget!A1");
     });
+
+    it("quotes reserved / ambiguous sheet names in output (e.g. TRUE, A1, R1C1)", () => {
+      {
+        const doc = new DocumentController();
+        doc.setCellFormula("S1", { row: 0, col: 0 }, "=Sheet1!A1");
+        rewriteDocumentFormulasForSheetRename(doc, "Sheet1", "TRUE");
+        expect(doc.getCell("S1", { row: 0, col: 0 }).formula).toBe("='TRUE'!A1");
+      }
+
+      {
+        const doc = new DocumentController();
+        doc.setCellFormula("S1", { row: 0, col: 0 }, "=Sheet1!A1");
+        rewriteDocumentFormulasForSheetRename(doc, "Sheet1", "A1");
+        expect(doc.getCell("S1", { row: 0, col: 0 }).formula).toBe("='A1'!A1");
+      }
+
+      {
+        const doc = new DocumentController();
+        doc.setCellFormula("S1", { row: 0, col: 0 }, "=Sheet1!A1");
+        rewriteDocumentFormulasForSheetRename(doc, "Sheet1", "R1C1");
+        expect(doc.getCell("S1", { row: 0, col: 0 }).formula).toBe("='R1C1'!A1");
+      }
+    });
+
+    it("rewrites unquoted Unicode sheet refs (e.g. résumé)", () => {
+      const doc = new DocumentController();
+      doc.setCellFormula("S1", { row: 0, col: 0 }, "=résumé!A1+1");
+
+      rewriteDocumentFormulasForSheetRename(doc, "Résumé", "Data");
+
+      expect(doc.getCell("S1", { row: 0, col: 0 }).formula).toBe("=Data!A1+1");
+    });
   });
 
   describe("rewriteDocumentFormulasForSheetDelete", () => {

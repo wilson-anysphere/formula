@@ -203,17 +203,46 @@ function parseUnquotedSheetSpec(
   formula: string,
   startIndex: number,
 ): { nextIndex: number; sheetSpec: string } | null {
-  const first = formula[startIndex];
-  if (!first || !(isAsciiLetter(first) || first === "_")) return null;
+  const first = codePointAt(formula, startIndex);
+  if (!first) return null;
 
-  let i = startIndex;
-  while (i < formula.length) {
-    const ch = formula[i];
-    if (ch === "!") {
-      return { nextIndex: i + 1, sheetSpec: formula.slice(startIndex, i) };
+  // Match the Rust backend's behavior:
+  // - Accept Unicode letters (not just ASCII) for unquoted sheet names.
+  // - Support external workbook prefixes like `[Book.xlsx]Sheet1!A1`.
+  if (first.ch !== "[" && first.ch !== "_" && !isUnicodeAlphabetic(first.ch)) return null;
+
+  let i = first.nextIndex;
+
+  // External workbook prefix: `[Book1.xlsx]Sheet1!A1`
+  if (first.ch === "[") {
+    while (i < formula.length) {
+      const next = codePointAt(formula, i);
+      if (!next) return null;
+      if (next.ch === "]") {
+        i = next.nextIndex;
+        break;
+      }
+      i = next.nextIndex;
     }
-    if (isAsciiAlphaNum(ch) || ch === "_" || ch === "." || ch === ":") {
-      i += 1;
+
+    if (i >= formula.length) return null;
+
+    const after = codePointAt(formula, i);
+    if (!after) return null;
+    if (after.ch !== "_" && !isUnicodeAlphabetic(after.ch)) {
+      // Likely a structured reference rather than an external workbook reference.
+      return null;
+    }
+  }
+
+  while (i < formula.length) {
+    const next = codePointAt(formula, i);
+    if (!next) return null;
+    if (next.ch === "!") {
+      return { nextIndex: next.nextIndex, sheetSpec: formula.slice(startIndex, i) };
+    }
+    if (next.ch === "_" || next.ch === "." || next.ch === ":" || isUnicodeAlphanumeric(next.ch)) {
+      i = next.nextIndex;
       continue;
     }
     break;
@@ -267,8 +296,10 @@ function isValidUnquotedSheetName(name: string): boolean {
   if (!(isAsciiLetter(first) || first === "_")) return false;
   for (let i = 1; i < name.length; i += 1) {
     const ch = name[i];
-    if (!(isAsciiAlphaNum(ch) || ch === "_")) return false;
+    if (!(isAsciiAlphaNum(ch) || ch === "_" || ch === ".")) return false;
   }
+  if (isReservedUnquotedSheetName(name)) return false;
+  if (looksLikeA1CellReference(name) || looksLikeR1C1CellReference(name)) return false;
   return true;
 }
 
@@ -299,6 +330,98 @@ function isAsciiDigit(ch: string): boolean {
 
 function isAsciiAlphaNum(ch: string): boolean {
   return isAsciiLetter(ch) || isAsciiDigit(ch);
+}
+
+function isReservedUnquotedSheetName(name: string): boolean {
+  // Excel boolean literals (`TRUE`/`FALSE`) are tokenized as keywords; quoting avoids ambiguity.
+  // Match the Rust backend's `is_reserved_unquoted_sheet_name`.
+  return name.toLowerCase() === "true" || name.toLowerCase() === "false";
+}
+
+function looksLikeA1CellReference(name: string): boolean {
+  // If an unquoted sheet name looks like a cell reference (e.g. "A1" or "XFD1048576"),
+  // Excel requires quoting to disambiguate.
+  //
+  // Match the Rust backend's `looks_like_a1_cell_reference`.
+  let i = 0;
+  let letters = "";
+  while (i < name.length) {
+    const ch = name[i];
+    if (!ch || !isAsciiLetter(ch)) break;
+    if (letters.length >= 3) return false;
+    letters += ch;
+    i += 1;
+  }
+
+  if (letters.length === 0) return false;
+
+  let digits = "";
+  while (i < name.length) {
+    const ch = name[i];
+    if (!ch || !isAsciiDigit(ch)) break;
+    digits += ch;
+    i += 1;
+  }
+
+  if (digits.length === 0) return false;
+  if (i !== name.length) return false;
+
+  const col = letters
+    .split("")
+    .reduce((acc, c) => acc * 26 + (c.toUpperCase().charCodeAt(0) - "A".charCodeAt(0) + 1), 0);
+  return col <= 16_384;
+}
+
+function looksLikeR1C1CellReference(name: string): boolean {
+  // In R1C1 notation, `R`/`C` are valid relative references. Excel may also treat
+  // `R123C456` as a cell reference even when the workbook is in A1 mode.
+  //
+  // Match the Rust backend's `looks_like_r1c1_cell_reference`.
+  const upper = name.toUpperCase();
+  if (upper === "R" || upper === "C") return true;
+  if (!upper.startsWith("R")) return false;
+
+  let i = 1;
+  while (i < upper.length && isAsciiDigit(upper[i] ?? "")) i += 1;
+  if (i >= upper.length) return false;
+  if (upper[i] !== "C") return false;
+
+  i += 1;
+  while (i < upper.length && isAsciiDigit(upper[i] ?? "")) i += 1;
+  return i === upper.length;
+}
+
+const UNICODE_LETTER_RE: RegExp | null = (() => {
+  try {
+    return new RegExp("^\\p{L}$", "u");
+  } catch {
+    return null;
+  }
+})();
+
+const UNICODE_ALNUM_RE: RegExp | null = (() => {
+  try {
+    return new RegExp("^[\\p{L}\\p{N}]$", "u");
+  } catch {
+    return null;
+  }
+})();
+
+function isUnicodeAlphabetic(ch: string): boolean {
+  if (UNICODE_LETTER_RE) return UNICODE_LETTER_RE.test(ch);
+  return isAsciiLetter(ch);
+}
+
+function isUnicodeAlphanumeric(ch: string): boolean {
+  if (UNICODE_ALNUM_RE) return UNICODE_ALNUM_RE.test(ch);
+  return isAsciiAlphaNum(ch);
+}
+
+function codePointAt(str: string, index: number): { ch: string; nextIndex: number } | null {
+  if (index < 0 || index >= str.length) return null;
+  const cp = str.codePointAt(index);
+  if (cp == null) return null;
+  return { ch: String.fromCodePoint(cp), nextIndex: index + (cp > 0xffff ? 2 : 1) };
 }
 
 type DeleteSheetSpecRewrite =
