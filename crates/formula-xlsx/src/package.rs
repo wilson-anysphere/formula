@@ -1322,6 +1322,43 @@ mod tests {
         );
     }
 
+    #[test]
+    fn extract_cell_images_discovers_cell_images_part_without_workbook_rels() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets/>
+</workbook>"#;
+
+        // Use a numeric suffix to ensure we discover parts beyond the canonical `cellImages.xml`.
+        let cell_images_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cellImages xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <cellImage r:id="rId1"/>
+</cellImages>"#;
+
+        let cell_images_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>"#;
+
+        let image_bytes = b"known-image-bytes";
+
+        let bytes = build_package(&[
+            ("xl/workbook.xml", workbook_xml.as_bytes()),
+            ("xl/cellImages1.xml", cell_images_xml.as_bytes()),
+            ("xl/_rels/cellImages1.xml.rels", cell_images_rels.as_bytes()),
+            ("xl/media/image1.png", image_bytes.as_slice()),
+        ]);
+
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read test pkg");
+        let extracted = pkg.extract_cell_images().expect("extract cell images");
+
+        assert_eq!(
+            extracted,
+            vec![("xl/media/image1.png".to_string(), image_bytes.to_vec())]
+        );
+    }
+
     fn build_minimal_package() -> Vec<u8> {
         let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"

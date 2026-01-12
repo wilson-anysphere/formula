@@ -46,8 +46,8 @@ impl XlsxPackage {
     ///
     /// This implementation intentionally does *not* rely on a fixed relationship type URI for the
     /// workbook -> cellimages relationship. Instead it prefers scanning
-    /// `xl/_rels/workbook.xml.rels` for any relationship whose `Target` ends with `cellimages.xml`
-    /// (case-insensitive).
+    /// `xl/_rels/workbook.xml.rels` for any relationship whose `Target` resolves to a
+    /// `xl/cellimages*.xml` part (case-insensitive).
     pub fn cell_images_part_info(&self) -> Result<Option<super::CellImagesPartInfo>> {
         let Some(part_path) = discover_cell_images_part(self)? else {
             return Ok(None);
@@ -96,8 +96,8 @@ impl XlsxPackage {
 }
 
 fn discover_cell_images_part(pkg: &XlsxPackage) -> Result<Option<String>> {
-    // Preferred heuristic: scan workbook.xml.rels for a relationship target ending with
-    // cellimages.xml (case-insensitive). Do not assume a specific relationship type.
+    // Preferred heuristic: scan workbook.xml.rels for a relationship target that resolves to a
+    // `xl/cellimages*.xml` part (case-insensitive). Do not assume a specific relationship type.
     if let Some(rels_bytes) = pkg.part(WORKBOOK_RELS_PART) {
         // Best-effort: if workbook rels are malformed, fall back to direct part existence checks.
         if let Ok(relationships) = parse_relationships(rels_bytes) {
@@ -110,14 +110,9 @@ fn discover_cell_images_part(pkg: &XlsxPackage) -> Result<Option<String>> {
                     continue;
                 }
 
-                // Relationship targets are URIs; some producers include a fragment (e.g.
-                // `cellimages.xml#something`). OPC part names do not include fragments.
-                let target = rel.target.split('#').next().unwrap_or(rel.target.as_str());
-                if target.to_ascii_lowercase().ends_with("cellimages.xml") {
-                    let candidate = resolve_target(WORKBOOK_PART, target);
-                    if pkg.part(&candidate).is_some() {
-                        return Ok(Some(candidate));
-                    }
+                let candidate = resolve_target(WORKBOOK_PART, &rel.target);
+                if super::is_cell_images_part(&candidate) && pkg.part(&candidate).is_some() {
+                    return Ok(Some(candidate));
                 }
             }
         }
@@ -126,6 +121,14 @@ fn discover_cell_images_part(pkg: &XlsxPackage) -> Result<Option<String>> {
     // Fallback: accept a well-known canonical part name if present.
     if pkg.part(FALLBACK_CELL_IMAGES_PART).is_some() {
         return Ok(Some(FALLBACK_CELL_IMAGES_PART.to_string()));
+    }
+
+    // Fallback: scan for any `xl/cellimages*.xml` part when workbook rels are missing or do not
+    // reference the part.
+    for name in pkg.part_names() {
+        if super::is_cell_images_part(name) {
+            return Ok(Some(name.to_string()));
+        }
     }
 
     Ok(None)
