@@ -49,6 +49,8 @@ export function serializeCellGridToClipboardPayload(grid: any[][]): ClipboardWri
 
 export function serializeCellGridToRtf(grid: any[][]): string;
 
+export function extractPlainTextFromRtf(rtf: string): string;
+
 export function pasteClipboardContent(
   doc: any,
   sheetId: string,
