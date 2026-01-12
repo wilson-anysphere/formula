@@ -171,7 +171,8 @@ class WasmBackedWorker implements WorkerLike {
   }
 }
 
-const describeWasm = process.env.FORMULA_SKIP_WASM_BUILD === "1" ? describe.skip : describe;
+const skipWasmBuild = process.env.FORMULA_SKIP_WASM_BUILD === "1" || process.env.FORMULA_SKIP_WASM_BUILD === "true";
+const describeWasm = skipWasmBuild ? describe.skip : describe;
 
 describeWasm("EngineWorker null clear semantics", () => {
   it("normalizes formula input text using formula-model display semantics", async () => {
