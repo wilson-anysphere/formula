@@ -605,16 +605,14 @@ export function registerDocRoutes(app: FastifyInstance): void {
 
     await withTransaction(app.db, async (client) => {
       // Ensure org membership for invited user.
-      const orgMembership = await client.query(
-        "SELECT 1 FROM org_members WHERE org_id = $1 AND user_id = $2",
+      await client.query(
+        `
+          INSERT INTO org_members (org_id, user_id, role)
+          VALUES ($1, $2, 'member')
+          ON CONFLICT (org_id, user_id) DO NOTHING
+        `,
         [membership.orgId, invitedUserId]
       );
-      if (orgMembership.rowCount !== 1) {
-        await client.query(
-          "INSERT INTO org_members (org_id, user_id, role) VALUES ($1, $2, 'member')",
-          [membership.orgId, invitedUserId]
-        );
-      }
 
       // Upsert document membership.
       await client.query(
