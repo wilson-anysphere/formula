@@ -51,8 +51,10 @@ import { ExtensionPanelBridge } from "./extensions/extensionPanelBridge.js";
 import { ContextKeyService } from "./extensions/contextKeys.js";
 import { resolveMenuItems } from "./extensions/contextMenus.js";
 import { matchesKeybinding, parseKeybinding, platformKeybinding, type ContributedKeybinding } from "./extensions/keybindings.js";
+import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js";
 import { evaluateWhenClause } from "./extensions/whenClause.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
+import type { SelectionState } from "./selection/types";
 
 import sampleHelloManifest from "../../../extensions/sample-hello/package.json";
 
@@ -606,29 +608,30 @@ if (
 
   const contextKeys = new ContextKeyService();
 
-  const updateContextKeys = () => {
+  let lastSelection: SelectionState | null = null;
+
+  const updateContextKeys = (selection: SelectionState | null = lastSelection) => {
+    if (!selection) return;
     const sheetId = app.getCurrentSheetId();
     const sheetName = workbookSheetNames.get(sheetId) ?? sheetId;
-    const active = app.getActiveCell();
+    const active = selection.active;
     const cell = app.getDocument().getCell(sheetId, { row: active.row, col: active.col }) as any;
     const value = normalizeExtensionCellValue(cell?.value ?? null);
     const formula = typeof cell?.formula === "string" ? cell.formula : null;
-    const hasSelection = (() => {
-      const range = app.getSelectionRanges()[0];
-      if (!range) return false;
-      return range.startRow !== range.endRow || range.startCol !== range.endCol;
-    })();
+    const selectionKeys = deriveSelectionContextKeys(selection);
 
     contextKeys.batch({
       sheetName,
-      hasSelection,
+      ...selectionKeys,
       cellHasValue: (value != null && String(value).trim().length > 0) || (formula != null && formula.trim().length > 0),
     });
   };
 
-  app.subscribeSelection(() => updateContextKeys());
+  app.subscribeSelection((selection) => {
+    lastSelection = selection;
+    updateContextKeys(selection);
+  });
   app.getDocument().on("change", () => updateContextKeys());
-  updateContextKeys();
 
   let extensionPanelBridge: ExtensionPanelBridge | null = null;
 
