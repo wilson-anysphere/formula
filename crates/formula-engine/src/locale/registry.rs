@@ -209,6 +209,10 @@ pub static DE_DE: FormulaLocale = FormulaLocale {
     boolean_false: "FALSCH",
     // Error literal spellings verified against Microsoft Excel function/error localization
     // (see locale TSV sources + `tests/locale_parsing.rs`).
+    //
+    // Note: At time of writing we only have a confirmed localized spelling for
+    // `#GETTING_DATA`. Newer external-data errors (`#CONNECT!`, `#FIELD!`, `#BLOCKED!`,
+    // `#UNKNOWN!`) are left canonical until we have a verified de-DE localization list.
     error_literal_map: &[
         ("#VALUE!", "#WERT!"),
         ("#REF!", "#BEZUG!"),
@@ -233,6 +237,10 @@ pub static FR_FR: FormulaLocale = FormulaLocale {
     boolean_false: "FAUX",
     // Error literal spellings verified against Microsoft Excel function/error localization
     // (see locale TSV sources + `tests/locale_parsing.rs`).
+    //
+    // Note: At time of writing we only have a confirmed localized spelling for
+    // `#GETTING_DATA`. Newer external-data errors (`#CONNECT!`, `#FIELD!`, `#BLOCKED!`,
+    // `#UNKNOWN!`) are left canonical until we have a verified fr-FR localization list.
     error_literal_map: &[
         ("#VALUE!", "#VALEUR!"),
         ("#NAME?", "#NOM?"),
@@ -261,6 +269,10 @@ pub static ES_ES: FormulaLocale = FormulaLocale {
     // (`#¡VALOR!`, `#¿NOMBRE?`, ...). Those are not covered yet; this table currently
     // includes only spellings that use plain ASCII and therefore round-trip through
     // the lexer unchanged.
+    //
+    // Newer external-data errors like `#CONNECT!`/`#FIELD!`/`#BLOCKED!`/`#UNKNOWN!` are
+    // also kept canonical until we add full Spanish error literal support (including
+    // the inverted punctuation variants that Excel uses in some locales).
     error_literal_map: &[("#GETTING_DATA", "#OBTENIENDO_DATOS")],
     functions: &ES_ES_FUNCTIONS,
 };

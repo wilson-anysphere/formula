@@ -170,6 +170,15 @@ fn canonicalize_and_localize_external_data_functions_and_errors_for_de_de() {
         locale::localize_formula(&canonical_err, &locale::DE_DE).unwrap(),
         localized_err
     );
+
+    // Newer external-data errors appear to be canonical (English) in Excel's formula language.
+    // Keep these round-tripping unchanged until we have confirmed locale-specific spellings.
+    for err in ["#CONNECT!", "#FIELD!", "#BLOCKED!", "#UNKNOWN!"] {
+        let src = format!("={err}");
+        let canon = locale::canonicalize_formula(&src, &locale::DE_DE).unwrap();
+        assert_eq!(canon, src);
+        assert_eq!(locale::localize_formula(&canon, &locale::DE_DE).unwrap(), src);
+    }
 }
 
 #[test]
@@ -197,6 +206,15 @@ fn canonicalize_and_localize_external_data_functions_and_errors_for_fr_fr() {
         locale::localize_formula(&canonical_err, &locale::FR_FR).unwrap(),
         localized_err
     );
+
+    // Newer external-data errors appear to be canonical (English) in Excel's formula language.
+    // Keep these round-tripping unchanged until we have confirmed locale-specific spellings.
+    for err in ["#CONNECT!", "#FIELD!", "#BLOCKED!", "#UNKNOWN!"] {
+        let src = format!("={err}");
+        let canon = locale::canonicalize_formula(&src, &locale::FR_FR).unwrap();
+        assert_eq!(canon, src);
+        assert_eq!(locale::localize_formula(&canon, &locale::FR_FR).unwrap(), src);
+    }
 }
 
 #[test]
@@ -224,6 +242,16 @@ fn canonicalize_and_localize_external_data_functions_and_errors_for_es_es() {
         locale::localize_formula(&canonical_err, &locale::ES_ES).unwrap(),
         localized_err
     );
+
+    // Newer external-data errors are currently treated as canonical (English) for es-ES.
+    // Spanish Excel often uses inverted punctuation for some errors (e.g. `#¡VALOR!`),
+    // which we do not support yet.
+    for err in ["#CONNECT!", "#FIELD!", "#BLOCKED!", "#UNKNOWN!"] {
+        let src = format!("={err}");
+        let canon = locale::canonicalize_formula(&src, &locale::ES_ES).unwrap();
+        assert_eq!(canon, src);
+        assert_eq!(locale::localize_formula(&canon, &locale::ES_ES).unwrap(), src);
+    }
 }
 
 #[test]
