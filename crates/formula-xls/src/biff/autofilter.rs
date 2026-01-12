@@ -23,6 +23,10 @@ const BUILTIN_NAME_FILTER_DATABASE: u8 = 0x0D;
 // Some writers appear to store the FilterDatabase name as a normal string rather than as a
 // built-in id. Excel's visible built-in name omits the `_xlnm.` prefix used in XLSX.
 const FILTER_DATABASE_NAME_ALIAS: &str = "_FilterDatabase";
+// Some decoders (notably calamine) have been observed to surface `_FilterDatabase` missing the
+// trailing `e`. This is likely due to quirks in some BIFF NAME encodings; accept it as a
+// best-effort alias so we can still recover the filter range.
+const FILTER_DATABASE_NAME_ALIAS_TRUNCATED: &str = "_FilterDatabas";
 
 // BIFF8 string flags (mirrors `strings.rs`).
 const STR_FLAG_HIGH_BYTE: u8 = 0x01;
@@ -190,6 +194,7 @@ pub(crate) fn parse_biff_filter_database_ranges(
 fn is_filter_database_name(name: &str) -> bool {
     name.eq_ignore_ascii_case(XLNM_FILTER_DATABASE)
         || name.eq_ignore_ascii_case(FILTER_DATABASE_NAME_ALIAS)
+        || name.eq_ignore_ascii_case(FILTER_DATABASE_NAME_ALIAS_TRUNCATED)
 }
 
 fn supbook_record_is_internal(data: &[u8], codepage: u16) -> bool {
@@ -857,6 +862,48 @@ mod tests {
         rgce.extend_from_slice(&2u16.to_le_bytes()); // colLast
 
         let name_str = "_FilterDatabase\0";
+        let cch = name_str.len() as u8;
+
+        let mut name_data = Vec::new();
+        name_data.extend_from_slice(&0u16.to_le_bytes()); // grbit (not builtin)
+        name_data.push(0); // chKey
+        name_data.push(cch); // cch
+        name_data.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        name_data.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        name_data.extend_from_slice(&1u16.to_le_bytes()); // itab (sheet 1)
+        name_data.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu..cchStatusText
+        name_data.push(0); // flags (compressed XLUnicodeStringNoCch)
+        name_data.extend_from_slice(name_str.as_bytes());
+        name_data.extend_from_slice(&rgce);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_globals()),
+            record(RECORD_NAME, &name_data),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_filter_database_ranges(&stream, BiffVersion::Biff8, 1252, Some(1))
+            .expect("parse");
+
+        assert_eq!(
+            parsed.by_sheet.get(&0).copied(),
+            Some(Range::new(CellRef::new(0, 0), CellRef::new(4, 2)))
+        );
+    }
+
+    #[test]
+    fn decodes_filter_database_from_truncated_filterdatabase_alias() {
+        // Some BIFF NAME encodings (or decoders) can lose the final `e` in `_FilterDatabase`.
+        // Accept the truncated alias so the AutoFilter range is still recovered.
+        let mut rgce = Vec::new();
+        rgce.push(0x25); // PtgArea
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        rgce.extend_from_slice(&4u16.to_le_bytes()); // rwLast
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        rgce.extend_from_slice(&2u16.to_le_bytes()); // colLast
+
+        let name_str = FILTER_DATABASE_NAME_ALIAS_TRUNCATED;
         let cch = name_str.len() as u8;
 
         let mut name_data = Vec::new();
