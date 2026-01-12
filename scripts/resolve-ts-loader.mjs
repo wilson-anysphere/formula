@@ -56,13 +56,15 @@ export async function resolve(specifier, context, defaultResolve) {
     if (base.endsWith(".js")) {
       try {
         return await defaultResolve(base.slice(0, -3) + ".ts" + suffix, context, defaultResolve);
-      } catch {
-        // continue
+      } catch (candidateErr) {
+        const candidateCode = /** @type {any} */ (candidateErr)?.code;
+        if (candidateCode !== "ERR_MODULE_NOT_FOUND") throw candidateErr;
       }
       try {
         return await defaultResolve(base.slice(0, -3) + ".tsx" + suffix, context, defaultResolve);
-      } catch {
-        // continue
+      } catch (candidateErr) {
+        const candidateCode = /** @type {any} */ (candidateErr)?.code;
+        if (candidateCode !== "ERR_MODULE_NOT_FOUND") throw candidateErr;
       }
     }
 
@@ -70,8 +72,9 @@ export async function resolve(specifier, context, defaultResolve) {
     if (base.endsWith(".jsx")) {
       try {
         return await defaultResolve(base.slice(0, -4) + ".tsx" + suffix, context, defaultResolve);
-      } catch {
-        // continue
+      } catch (candidateErr) {
+        const candidateCode = /** @type {any} */ (candidateErr)?.code;
+        if (candidateCode !== "ERR_MODULE_NOT_FOUND") throw candidateErr;
       }
     }
 
@@ -79,18 +82,21 @@ export async function resolve(specifier, context, defaultResolve) {
     if (!hasExtension(base)) {
       try {
         return await defaultResolve(base + ".ts" + suffix, context, defaultResolve);
-      } catch {
-        // continue
+      } catch (candidateErr) {
+        const candidateCode = /** @type {any} */ (candidateErr)?.code;
+        if (candidateCode !== "ERR_MODULE_NOT_FOUND") throw candidateErr;
       }
       try {
         return await defaultResolve(base + ".tsx" + suffix, context, defaultResolve);
-      } catch {
-        // continue
+      } catch (candidateErr) {
+        const candidateCode = /** @type {any} */ (candidateErr)?.code;
+        if (candidateCode !== "ERR_MODULE_NOT_FOUND") throw candidateErr;
       }
       try {
         return await defaultResolve(base + ".js" + suffix, context, defaultResolve);
-      } catch {
-        // continue
+      } catch (candidateErr) {
+        const candidateCode = /** @type {any} */ (candidateErr)?.code;
+        if (candidateCode !== "ERR_MODULE_NOT_FOUND") throw candidateErr;
       }
     }
 
