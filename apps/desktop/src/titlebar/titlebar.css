@@ -1,0 +1,135 @@
+/*
+  Desktop titlebar mock UI.
+
+  This file intentionally uses only design tokens from `src/styles/tokens.css`
+  for colors, and avoids hardcoded hex values.
+*/
+
+.formula-titlebar {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 10px;
+  gap: 10px;
+
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+
+  font-size: 12px;
+  line-height: 1;
+  user-select: none;
+}
+
+.formula-titlebar__window-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.formula-titlebar__window-button {
+  width: 11px;
+  height: 11px;
+  padding: 0;
+  border-radius: 999px;
+
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  cursor: pointer;
+}
+
+.formula-titlebar__window-button:focus-visible {
+  outline: 2px solid var(--selection-border);
+  outline-offset: 2px;
+}
+
+.formula-titlebar__window-button--close {
+  background: var(--error);
+}
+
+.formula-titlebar__window-button--minimize {
+  background: var(--warning);
+}
+
+.formula-titlebar__window-button--maximize {
+  background: var(--success);
+}
+
+.formula-titlebar__drag-region {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.formula-titlebar__titles {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.formula-titlebar__app-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.formula-titlebar__document-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.formula-titlebar__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.formula-titlebar__action-button {
+  height: 22px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 11px;
+
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    filter var(--motion-duration-fast) var(--motion-ease);
+}
+
+.formula-titlebar__action-button:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.formula-titlebar__action-button:focus-visible {
+  outline: 2px solid var(--selection-border);
+  outline-offset: 2px;
+}
+
+.formula-titlebar__action-button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.formula-titlebar__action-button--primary:hover {
+  filter: brightness(1.05);
+}
+
