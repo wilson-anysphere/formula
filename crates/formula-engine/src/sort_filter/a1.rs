@@ -1,4 +1,5 @@
 use crate::sort_filter::types::RangeRef;
+use formula_model::CellRef;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -95,7 +96,17 @@ fn parse_a1_cell(a1: &str) -> Result<(usize, usize), A1ParseError> {
 }
 
 fn to_a1_cell(col_index: usize, row_index: usize) -> String {
-    format!("{}{}", index_to_column_letters(col_index), row_index + 1)
+    // Prefer the shared CellRef formatter for consistency and to avoid overflow in `row + 1`
+    // arithmetic for large row indices.
+    match (u32::try_from(row_index), u32::try_from(col_index)) {
+        (Ok(row), Ok(col)) => CellRef::new(row, col).to_a1(),
+        _ => {
+            let row_1_based = u64::try_from(row_index)
+                .unwrap_or(u64::MAX)
+                .saturating_add(1);
+            format!("{}{}", index_to_column_letters(col_index), row_1_based)
+        }
+    }
 }
 
 fn column_letters_to_index(letters: &str) -> Option<usize> {
@@ -111,16 +122,20 @@ fn column_letters_to_index(letters: &str) -> Option<usize> {
     Some(col - 1)
 }
 
-fn index_to_column_letters(mut index: usize) -> String {
+fn index_to_column_letters(index: usize) -> String {
     // 0 -> A, 25 -> Z, 26 -> AA
-    let mut out = String::new();
-    index += 1;
-    while index > 0 {
-        let rem = (index - 1) % 26;
-        out.push((b'A' + rem as u8) as char);
-        index = (index - 1) / 26;
+    //
+    // Do arithmetic in u64 so we don't overflow on large `usize` indices (e.g. wasm32 where
+    // `usize == u32` and callers may use `u32::MAX`).
+    let mut n = u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1);
+    let mut out = Vec::<u8>::new();
+    while n > 0 {
+        let rem = (n - 1) % 26;
+        out.push(b'A' + rem as u8);
+        n = (n - 1) / 26;
     }
-    out.chars().rev().collect()
+    out.reverse();
+    String::from_utf8(out).expect("column letters are always valid UTF-8")
 }
 
 #[cfg(test)]
@@ -169,5 +184,17 @@ mod tests {
                 end_col: 1
             }
         );
+    }
+
+    #[test]
+    fn formats_large_rows_without_overflow() {
+        let row = u32::MAX as usize;
+        let range = RangeRef {
+            start_row: row,
+            start_col: 0,
+            end_row: row,
+            end_col: 0,
+        };
+        assert_eq!(to_a1_range(range), "A4294967296");
     }
 }
