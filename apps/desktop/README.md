@@ -94,23 +94,8 @@ All of this is encrypted-at-rest in production builds:
 - Credential + refresh-state stores are encrypted blobs on disk with key material in
   the OS keychain (Rust/Tauri storage layer).
 
-## Formula bar AI tab-completion (local model)
+## AI
 
-The formula bar has an “AI-native” tab completion layer that combines:
+Formula is a **Cursor product**: AI features are powered by Cursor’s backend (no local models, no API keys, no provider configuration).
 
-- fast rule-based suggestions (function names, ranges, named ranges, sheet-qualified ranges, tables/structured refs)
-- **optional** local-model suggestions via [Ollama](https://ollama.com/)
-- optional inline preview values (when the lightweight evaluator supports the suggested formula)
-
-### Enabling the local model
-
-Local model completions are controlled via `localStorage` flags (use DevTools in the WebView):
-
-- `formula:aiCompletion:localModelEnabled` = `true`
-- `formula:aiCompletion:localModelName` = model name (default: `formula-completion`)
-- `formula:aiCompletion:localModelBaseUrl` = Ollama base URL (default: `http://localhost:11434`)
-
-Notes:
-
-- Completions are time-bounded (defaults to a ~200ms budget) so the formula bar stays responsive even if Ollama is slow/unavailable.
-- Structured-reference preview is evaluated for simple table column refs (`Table[Column]` / `Table[[#All],[Column]]`) when table range metadata is available. More complex structured refs still fall back to `(preview unavailable)`.
+The formula bar’s tab-completion includes fast heuristic suggestions (functions, ranges, named ranges, etc.). Any AI-driven completions are backend-driven.
