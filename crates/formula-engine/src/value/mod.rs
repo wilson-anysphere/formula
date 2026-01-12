@@ -8,6 +8,7 @@ use crate::eval::CompiledExpr;
 use crate::functions::{FunctionContext, Reference};
 use crate::locale::ValueLocaleConfig;
 use formula_model::CellRef;
+use formula_format::{DateSystem, FormatOptions, Value as FmtValue};
 
 mod number_parse;
 
@@ -348,6 +349,32 @@ impl Value {
         match self {
             Value::Text(s) => Ok(s.clone()),
             Value::Number(n) => Ok(format_number_general(*n)),
+            Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
+            Value::Blank => Ok(String::new()),
+            Value::Error(e) => Err(*e),
+            Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => Err(ErrorKind::Value),
+        }
+    }
+
+    pub fn coerce_to_string_with_ctx(&self, ctx: &dyn FunctionContext) -> Result<String, ErrorKind> {
+        match self {
+            Value::Text(s) => Ok(s.clone()),
+            Value::Number(n) => {
+                let options = FormatOptions {
+                    locale: ctx.value_locale().separators,
+                    date_system: match ctx.date_system() {
+                        // `formula-format` always uses the Lotus 1-2-3 leap-year bug behavior
+                        // for the 1900 date system (Excel compatibility).
+                        ExcelDateSystem::Excel1900 { .. } => DateSystem::Excel1900,
+                        ExcelDateSystem::Excel1904 => DateSystem::Excel1904,
+                    },
+                };
+                Ok(formula_format::format_value(FmtValue::Number(*n), None, &options).text)
+            }
             Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
             Value::Blank => Ok(String::new()),
             Value::Error(e) => Err(*e),

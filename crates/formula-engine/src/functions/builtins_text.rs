@@ -28,13 +28,13 @@ fn concat_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             ArgValue::Scalar(v) => match v {
                 Value::Array(arr) => {
                     for v in arr.iter() {
-                        match v.coerce_to_string() {
+                        match v.coerce_to_string_with_ctx(ctx) {
                             Ok(s) => out.push_str(&s),
                             Err(e) => return Value::Error(e),
                         }
                     }
                 }
-                other => match other.coerce_to_string() {
+                other => match other.coerce_to_string_with_ctx(ctx) {
                     Ok(s) => out.push_str(&s),
                     Err(e) => return Value::Error(e),
                 },
@@ -44,7 +44,7 @@ fn concat_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 ctx.record_reference(&r);
                 for addr in r.iter_cells() {
                     let v = ctx.get_cell_value(&r.sheet_id, addr);
-                    match v.coerce_to_string() {
+                    match v.coerce_to_string_with_ctx(ctx) {
                         Ok(s) => out.push_str(&s),
                         Err(e) => return Value::Error(e),
                     }
@@ -56,7 +56,7 @@ fn concat_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     ctx.record_reference(&r);
                     for addr in r.iter_cells() {
                         let v = ctx.get_cell_value(&r.sheet_id, addr);
-                        match v.coerce_to_string() {
+                        match v.coerce_to_string_with_ctx(ctx) {
                             Ok(s) => out.push_str(&s),
                             Err(e) => return Value::Error(e),
                         }
@@ -86,7 +86,7 @@ fn concatenate_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut out = String::new();
     for arg in args {
         let v = eval_scalar_arg(ctx, arg);
-        match v.coerce_to_string() {
+        match v.coerce_to_string_with_ctx(ctx) {
             Ok(s) => out.push_str(&s),
             Err(e) => return Value::Error(e),
         }
@@ -116,7 +116,7 @@ fn left_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Value::Number(1.0)
     };
     array_lift::lift2(text, n, |text, n| {
-        let text = text.coerce_to_string()?;
+        let text = text.coerce_to_string_with_ctx(ctx)?;
         let n = n.coerce_to_i64_with_ctx(ctx)?;
         if n < 0 {
             return Err(ErrorKind::Value);
@@ -147,7 +147,7 @@ fn right_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Value::Number(1.0)
     };
     array_lift::lift2(text, n, |text, n| {
-        let text = text.coerce_to_string()?;
+        let text = text.coerce_to_string_with_ctx(ctx)?;
         let n = n.coerce_to_i64_with_ctx(ctx)?;
         if n < 0 {
             return Err(ErrorKind::Value);
@@ -178,7 +178,7 @@ fn mid_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let start = array_lift::eval_arg(ctx, &args[1]);
     let len = array_lift::eval_arg(ctx, &args[2]);
     array_lift::lift3(text, start, len, |text, start, len| {
-        let text = text.coerce_to_string()?;
+        let text = text.coerce_to_string_with_ctx(ctx)?;
         let start = start.coerce_to_i64_with_ctx(ctx)?;
         let len = len.coerce_to_i64_with_ctx(ctx)?;
         if start < 1 || len < 0 {
@@ -206,7 +206,7 @@ inventory::submit! {
 fn len_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(text, |text| {
-        let text = text.coerce_to_string()?;
+        let text = text.coerce_to_string_with_ctx(ctx)?;
         Ok(Value::Number(text.chars().count() as f64))
     })
 }
@@ -228,7 +228,7 @@ inventory::submit! {
 fn trim_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(text, |text| {
-        let text = text.coerce_to_string()?;
+        let text = text.coerce_to_string_with_ctx(ctx)?;
         Ok(Value::Text(excel_trim(&text)))
     })
 }
@@ -250,7 +250,7 @@ inventory::submit! {
 fn upper_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(text, |text| {
-        Ok(Value::Text(text.coerce_to_string()?.to_uppercase()))
+        Ok(Value::Text(text.coerce_to_string_with_ctx(ctx)?.to_uppercase()))
     })
 }
 
@@ -271,7 +271,7 @@ inventory::submit! {
 fn lower_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(text, |text| {
-        Ok(Value::Text(text.coerce_to_string()?.to_lowercase()))
+        Ok(Value::Text(text.coerce_to_string_with_ctx(ctx)?.to_lowercase()))
     })
 }
 
@@ -298,8 +298,8 @@ fn find_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Value::Number(1.0)
     };
     array_lift::lift3(needle, haystack, start, |needle, haystack, start| {
-        let needle = needle.coerce_to_string()?;
-        let haystack = haystack.coerce_to_string()?;
+        let needle = needle.coerce_to_string_with_ctx(ctx)?;
+        let haystack = haystack.coerce_to_string_with_ctx(ctx)?;
         let start = start.coerce_to_i64_with_ctx(ctx)?;
         Ok(find_impl(&needle, &haystack, start, false))
     })
@@ -328,8 +328,8 @@ fn search_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Value::Number(1.0)
     };
     array_lift::lift3(needle, haystack, start, |needle, haystack, start| {
-        let needle = needle.coerce_to_string()?;
-        let haystack = haystack.coerce_to_string()?;
+        let needle = needle.coerce_to_string_with_ctx(ctx)?;
+        let haystack = haystack.coerce_to_string_with_ctx(ctx)?;
         let start = start.coerce_to_i64_with_ctx(ctx)?;
         Ok(find_impl(&needle, &haystack, start, true))
     })
@@ -362,9 +362,9 @@ fn substitute_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             new_text,
             instance_num,
             |text, old_text, new_text, instance_num| {
-                let text = text.coerce_to_string()?;
-                let old_text = old_text.coerce_to_string()?;
-                let new_text = new_text.coerce_to_string()?;
+                let text = text.coerce_to_string_with_ctx(ctx)?;
+                let old_text = old_text.coerce_to_string_with_ctx(ctx)?;
+                let new_text = new_text.coerce_to_string_with_ctx(ctx)?;
                 let raw = instance_num.coerce_to_i64_with_ctx(ctx)?;
                 let instance_num = i32::try_from(raw).map_err(|_| ErrorKind::Value)?;
 
@@ -386,9 +386,9 @@ fn substitute_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     array_lift::lift3(text, old_text, new_text, |text, old_text, new_text| {
-        let text = text.coerce_to_string()?;
-        let old_text = old_text.coerce_to_string()?;
-        let new_text = new_text.coerce_to_string()?;
+        let text = text.coerce_to_string_with_ctx(ctx)?;
+        let old_text = old_text.coerce_to_string_with_ctx(ctx)?;
+        let new_text = new_text.coerce_to_string_with_ctx(ctx)?;
         match crate::functions::text::substitute(&text, &old_text, &new_text, None) {
             Ok(s) => Ok(Value::Text(s)),
             Err(e) => Err(match e {
@@ -434,7 +434,7 @@ fn value_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             }
         }
         other => {
-            let text = match other.coerce_to_string() {
+            let text = match other.coerce_to_string_with_ctx(ctx) {
                 Ok(s) => s,
                 Err(e) => return Value::Error(e),
             };
@@ -548,11 +548,11 @@ fn text_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let date_system = ctx.date_system();
     elementwise_binary(value, format_text, |value, fmt| {
-        let fmt = match fmt.coerce_to_string() {
+        let fmt = match fmt.coerce_to_string_with_ctx(ctx) {
             Ok(s) => s,
             Err(e) => return Value::Error(e),
         };
-        match crate::functions::text::text(value, &fmt, date_system) {
+        match crate::functions::text::text(value, &fmt, date_system, ctx.value_locale()) {
             Ok(s) => Value::Text(s),
             Err(e) => Value::Error(e),
         }
@@ -606,7 +606,7 @@ fn dollar_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             Err(_) => return Value::Error(ErrorKind::Num),
         };
 
-        match crate::functions::text::dollar(number, Some(decimals)) {
+        match crate::functions::text::dollar(number, Some(decimals), ctx.value_locale()) {
             Ok(s) => Value::Text(s),
             Err(e) => Value::Error(excel_error_to_kind(e)),
         }
@@ -628,7 +628,7 @@ inventory::submit! {
 }
 
 fn textjoin_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let delimiter = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
+    let delimiter = match eval_scalar_arg(ctx, &args[0]).coerce_to_string_with_ctx(ctx) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
@@ -648,7 +648,7 @@ fn textjoin_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
     }
 
-    match crate::functions::text::textjoin(&delimiter, ignore_empty, &values) {
+    match crate::functions::text::textjoin(&delimiter, ignore_empty, &values, ctx.date_system(), ctx.value_locale()) {
         Ok(s) => Value::Text(s),
         Err(e) => Value::Error(e),
     }
@@ -675,7 +675,7 @@ fn clean_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     elementwise_unary(text, |v| {
-        let text = match v.coerce_to_string() {
+        let text = match v.coerce_to_string_with_ctx(ctx) {
             Ok(s) => s,
             Err(e) => return Value::Error(e),
         };
@@ -708,11 +708,11 @@ fn exact_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     elementwise_binary(text1, text2, |left, right| {
-        let left = match left.coerce_to_string() {
+        let left = match left.coerce_to_string_with_ctx(ctx) {
             Ok(s) => s,
             Err(e) => return Value::Error(e),
         };
-        let right = match right.coerce_to_string() {
+        let right = match right.coerce_to_string_with_ctx(ctx) {
             Ok(s) => s,
             Err(e) => return Value::Error(e),
         };
@@ -741,7 +741,7 @@ fn proper_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     elementwise_unary(text, |v| {
-        let text = match v.coerce_to_string() {
+        let text = match v.coerce_to_string_with_ctx(ctx) {
             Ok(s) => s,
             Err(e) => return Value::Error(e),
         };
@@ -787,7 +787,7 @@ fn replace_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         num_chars,
         new_text,
         |old, start, num, new| {
-            let old = match old.coerce_to_string() {
+            let old = match old.coerce_to_string_with_ctx(ctx) {
                 Ok(s) => s,
                 Err(e) => return Value::Error(e),
             };
@@ -805,7 +805,7 @@ fn replace_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Ok(n) => n,
                 Err(e) => return Value::Error(e),
             };
-            let new = match new.coerce_to_string() {
+            let new = match new.coerce_to_string_with_ctx(ctx) {
                 Ok(s) => s,
                 Err(e) => return Value::Error(e),
             };

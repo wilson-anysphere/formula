@@ -501,7 +501,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 BinaryOp::Concat => {
                     let l = self.deref_eval_value_dynamic(self.eval_value(left));
                     let r = self.deref_eval_value_dynamic(self.eval_value(right));
-                    let out = elementwise_binary(&l, &r, concat_binary);
+                    let out = elementwise_binary(&l, &r, |a, b| concat_binary(self, a, b));
                     EvalValue::Scalar(out)
                 }
                 BinaryOp::Pow | BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
@@ -1547,7 +1547,7 @@ fn numeric_percent(ctx: &dyn FunctionContext, value: &Value) -> Value {
     }
 }
 
-fn concat_binary(left: &Value, right: &Value) -> Value {
+fn concat_binary(ctx: &dyn FunctionContext, left: &Value, right: &Value) -> Value {
     if let Value::Error(e) = left {
         return Value::Error(*e);
     }
@@ -1555,11 +1555,11 @@ fn concat_binary(left: &Value, right: &Value) -> Value {
         return Value::Error(*e);
     }
 
-    let ls = match left.coerce_to_string() {
+    let ls = match left.coerce_to_string_with_ctx(ctx) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
-    let rs = match right.coerce_to_string() {
+    let rs = match right.coerce_to_string_with_ctx(ctx) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };

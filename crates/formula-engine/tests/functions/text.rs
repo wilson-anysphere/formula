@@ -54,8 +54,14 @@ fn textjoin_concatenates_and_can_ignore_empty() {
         Value::from(""),
         Value::Number(1.0),
     ];
-    assert_eq!(text::textjoin(",", true, &values).unwrap(), "a,1");
-    assert_eq!(text::textjoin(",", false, &values).unwrap(), "a,,,1");
+    assert_eq!(
+        text::textjoin(",", true, &values, ExcelDateSystem::EXCEL_1900, ValueLocaleConfig::en_us()).unwrap(),
+        "a,1"
+    );
+    assert_eq!(
+        text::textjoin(",", false, &values, ExcelDateSystem::EXCEL_1900, ValueLocaleConfig::en_us()).unwrap(),
+        "a,,,1"
+    );
 }
 
 #[test]
@@ -82,27 +88,60 @@ fn value_and_numbervalue_parse_common_inputs() {
 
 #[test]
 fn dollar_formats_currency() {
-    assert_eq!(text::dollar(1234.567, Some(2)).unwrap(), "$1,234.57");
-    assert_eq!(text::dollar(-1234.567, Some(2)).unwrap(), "($1,234.57)");
-    assert_eq!(text::dollar(1234.0, Some(-1)).unwrap(), "$1,230");
+    assert_eq!(
+        text::dollar(1234.567, Some(2), ValueLocaleConfig::en_us()).unwrap(),
+        "$1,234.57"
+    );
+    assert_eq!(
+        text::dollar(-1234.567, Some(2), ValueLocaleConfig::en_us()).unwrap(),
+        "($1,234.57)"
+    );
+    assert_eq!(
+        text::dollar(1234.0, Some(-1), ValueLocaleConfig::en_us()).unwrap(),
+        "$1,230"
+    );
 }
 
 #[test]
 fn text_formats_numbers_with_simple_patterns() {
     assert_eq!(
-        text::text(&Value::Number(1234.567), "#,##0.00", ExcelDateSystem::EXCEL_1900).unwrap(),
+        text::text(
+            &Value::Number(1234.567),
+            "#,##0.00",
+            ExcelDateSystem::EXCEL_1900,
+            ValueLocaleConfig::en_us()
+        )
+        .unwrap(),
         "1,234.57"
     );
     assert_eq!(
-        text::text(&Value::Number(1.23), "0%", ExcelDateSystem::EXCEL_1900).unwrap(),
+        text::text(
+            &Value::Number(1.23),
+            "0%",
+            ExcelDateSystem::EXCEL_1900,
+            ValueLocaleConfig::en_us()
+        )
+        .unwrap(),
         "123%"
     );
     assert_eq!(
-        text::text(&Value::Number(-1.0), "$0.00", ExcelDateSystem::EXCEL_1900).unwrap(),
+        text::text(
+            &Value::Number(-1.0),
+            "$0.00",
+            ExcelDateSystem::EXCEL_1900,
+            ValueLocaleConfig::en_us()
+        )
+        .unwrap(),
         "-$1.00"
     );
     assert_eq!(
-        text::text(&Value::from("x"), "0.00", ExcelDateSystem::EXCEL_1900).unwrap(),
+        text::text(
+            &Value::from("x"),
+            "0.00",
+            ExcelDateSystem::EXCEL_1900,
+            ValueLocaleConfig::en_us()
+        )
+        .unwrap(),
         "x"
     );
 }
@@ -115,7 +154,7 @@ fn textjoin_propagates_errors() {
         Value::from("b"),
     ];
     assert_eq!(
-        text::textjoin(",", true, &values).unwrap_err(),
+        text::textjoin(",", true, &values, ExcelDateSystem::EXCEL_1900, ValueLocaleConfig::en_us()).unwrap_err(),
         ErrorKind::Div0
     );
 }
@@ -290,6 +329,33 @@ fn numbervalue_defaults_to_engine_value_locale_separators() {
         .unwrap();
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1234.5));
+}
+
+#[test]
+fn value_locale_affects_concat_text_coercion() {
+    let mut sheet = TestSheet::new();
+    sheet.set_value_locale(ValueLocaleConfig::de_de());
+    assert_eq!(sheet.eval("=1.5&\"\""), Value::Text("1,5".to_string()));
+}
+
+#[test]
+fn value_locale_affects_text_formatting() {
+    let mut sheet = TestSheet::new();
+    sheet.set_value_locale(ValueLocaleConfig::de_de());
+    assert_eq!(
+        sheet.eval(r##"=TEXT(1234.567,"#,##0.00")"##),
+        Value::Text("1.234,57".to_string())
+    );
+}
+
+#[test]
+fn value_locale_affects_dollar_formatting() {
+    let mut sheet = TestSheet::new();
+    sheet.set_value_locale(ValueLocaleConfig::de_de());
+    assert_eq!(
+        sheet.eval("=DOLLAR(1234.567,2)"),
+        Value::Text("$1.234,57".to_string())
+    );
 }
 
 #[test]
