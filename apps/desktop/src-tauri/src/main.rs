@@ -912,21 +912,23 @@ fn main() {
         //  2) Registered here in `generate_handler![...]`
         //  3) Added to the explicit JS invoke allowlist in
         //     `src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission)
-        //  4) If invoked from the webview, added to the per-command allowlist in
-        //     `src-tauri/capabilities/main.json` (`core:allow-invoke`)
+        //
+        // Note: this repo's Tauri toolchain does not currently expose a `core:allow-invoke` permission identifier.
+        // The `allow-invoke` application permission is granted to the `main` window via
+        // `src-tauri/capabilities/main.json` (the `"allow-invoke"` entry in `"permissions"`).
         //
         // Guardrails:
         // - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs` asserts this
         //   `generate_handler![...]` list matches `src-tauri/permissions/allow-invoke.json`.
         // - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` asserts
-        //   `core:allow-invoke` (in `src-tauri/capabilities/main.json`) is scoped and matches the
-        //   frontend's `invoke("...")` usage.
+        //   `allow-invoke.json` stays explicit/in sync with the frontend's `invoke("...")` usage, and that we don't
+        //   grant an unsupported `core:allow-invoke` permission.
         //
         // Note: we intentionally do not grant the JS shell plugin API (`shell:allow-open`);
         // external URL opening goes through the `open_external_url` Rust command which enforces a
         // scheme allowlist.
         //
-        // SECURITY: `allow-invoke` / `core:allow-invoke` only gate *which command names* can be invoked.
+        // SECURITY: `allow-invoke` only gates *which command names* can be invoked.
         // Commands touching filesystem/network/etc must still validate inputs and enforce
         // scoping/authorization in Rust (trusted-origin + window-label checks, path/network scopes, etc).
         .invoke_handler(tauri::generate_handler![

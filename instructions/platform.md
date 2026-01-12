@@ -123,7 +123,6 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
   "windows": ["main"],
   "permissions": [
     "allow-invoke",
-    { "identifier": "core:allow-invoke", "allow": [{ "command": "open_external_url" }] },
     { "identifier": "core:event:allow-listen", "allow": [{ "event": "open-file" }] },
     { "identifier": "core:event:allow-emit", "allow": [{ "event": "open-file-ready" }] },
     "core:event:allow-unlisten",
@@ -147,14 +146,14 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
 Note: `core:event:allow-unlisten` is granted so the frontend can unregister event listeners it previously installed (to avoid
 leaking listeners for one-shot flows).
 
-Note: custom Rust `#[tauri::command]` IPC calls are allowlisted in two layers (defense-in-depth):
+Note: custom Rust `#[tauri::command]` IPC calls are allowlisted via the `allow-invoke` application permission:
 
 - `apps/desktop/src-tauri/permissions/allow-invoke.json` defines the `allow-invoke` application permission (global command
-  list; should match the backend `generate_handler![...]` list).
-- `apps/desktop/src-tauri/capabilities/main.json`:
-  - grants `"allow-invoke"` to the `main` window, and
-  - scopes what the webview can call via `core:allow-invoke` (per-command allowlist; should match frontend
-    `invoke("...")` usage).
+  list; should match the backend `generate_handler![...]` list and frontend `invoke("...")` usage).
+- `apps/desktop/src-tauri/capabilities/main.json` grants `"allow-invoke"` to the `main` window via its `"permissions"` list.
+
+Note: `core:allow-invoke` is not present in this repo’s Tauri permission schema/toolchain. Don’t add it unless the schema
+starts supporting it (guardrailed by `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`).
 
 Note: external URL opening should go through the `open_external_url` Rust command (scheme allowlist enforced in Rust,
 and restricted to the main window + trusted app-local origins) rather than granting the webview direct access to the
@@ -187,7 +186,6 @@ If you add new desktop IPC surface area, you must update the capability allowlis
 - new plugin API usage → add the corresponding `*:allow-*` permission string(s)
 - new invoked app command (`#[tauri::command]`):
   - register it in `apps/desktop/src-tauri/src/main.rs`
-  - add it to `apps/desktop/src-tauri/capabilities/main.json` (`core:allow-invoke` allowlist; what the webview can call)
   - add it to `apps/desktop/src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission)
   - enforce window/origin/scope checks in Rust (never trust the webview)
 
@@ -197,7 +195,7 @@ We keep guardrail tests to ensure we don't accidentally broaden the desktop IPC 
   - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts`
 - **Core/plugin + invoke permissions**: ensure required plugin permissions are explicitly granted (dialogs, window ops,
   clipboard plain text, updater, etc), we don't accidentally grant dangerous extras, and the invoke allowlists
-  (`allow-invoke.json` + `capabilities/main.json` `core:allow-invoke`) stay scoped and in sync with frontend invoke usage:
+  stay scoped and in sync with frontend invoke usage (and that we don't rely on unsupported `core:allow-invoke`):
   - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`
 - **App command allowlist**: ensure invokable `#[tauri::command]` surface stays explicit + in sync:
   - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs`
@@ -318,19 +316,18 @@ TypeScript ↔ Rust communication:
 //  1) registered in `apps/desktop/src-tauri/src/main.rs` (`generate_handler![...]`)
 //  2) added to the explicit invoke allowlist in
 //     `apps/desktop/src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission)
-//  3) if invoked from the webview, added to the per-command allowlist in
-//     `apps/desktop/src-tauri/capabilities/main.json` (`core:allow-invoke`)
 //
-// Note: the capability system gates built-in core/plugin APIs (event/window/dialog/etc) and scopes permissions per-window
-// via:
-//  - `tauri.conf.json` (`app.windows[].capabilities`)
-//  - capability files (`capabilities/*.json` `"windows": [...]`)
+// Note: the capability system gates built-in core/plugin APIs (event/window/dialog/etc) and scopes permissions per-window.
 //
-// App-defined `#[tauri::command]` invocation is allowlisted via:
-//  - `allow-invoke` (application permission manifest: `apps/desktop/src-tauri/permissions/allow-invoke.json`)
-//  - `core:allow-invoke` (scoped allowlist in `apps/desktop/src-tauri/capabilities/main.json`)
+// Capabilities are always scoped in the capability file itself via `"windows": [...]` (window labels). Some toolchains also
+// support a window-level opt-in layer via `tauri.conf.json` (`app.windows[].capabilities`); when present, keep it in sync
+// with the capability file’s `"windows"` list so new windows are unprivileged by default.
 //
-// Both are granted to the `main` window via `apps/desktop/src-tauri/capabilities/main.json`.
+// App-defined `#[tauri::command]` invocation is allowlisted via `allow-invoke`
+// (`apps/desktop/src-tauri/permissions/allow-invoke.json`) and granted to the `main` window via
+// `apps/desktop/src-tauri/capabilities/main.json` (the `"allow-invoke"` entry in `"permissions"`).
+//
+// Note: this repo's Tauri toolchain does not currently expose `core:allow-invoke`.
 //
 // Even with allowlisting, commands must be hardened in Rust (trusted-origin + window-label checks, argument validation,
 // filesystem/network scope checks, etc).
