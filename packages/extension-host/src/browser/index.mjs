@@ -2603,20 +2603,58 @@ class BrowserExtensionHost {
         const selection = data?.selection;
         if (!selection || typeof selection !== "object") return;
 
-        // Only taint when the event payload actually includes cell values. Some hosts may emit
-        // selectionChanged events with empty/truncated matrices (e.g. large selections) to avoid
-        // catastrophic allocations; those payloads do not expose spreadsheet data and should not
-        // contribute to clipboard DLP enforcement.
+        // Only taint when the event payload actually includes spreadsheet data. Some hosts may
+        // emit selectionChanged events with empty matrices (e.g. large selections) to avoid
+        // catastrophic allocations; those payloads do not expose cell values/formulas and should
+        // not contribute to clipboard DLP enforcement.
+        let matrixBounds = null;
         try {
-          if (!Object.prototype.hasOwnProperty.call(selection, "values")) return;
-          if (selection.truncated === true) return;
-          const values = selection.values;
-          if (!Array.isArray(values) || values.length === 0) return;
-          const hasAnyCell = values.some((row) => Array.isArray(row) && row.length > 0);
-          if (!hasAnyCell) return;
+          if (Object.prototype.hasOwnProperty.call(selection, "values")) {
+            const values = selection.values;
+            if (Array.isArray(values)) {
+              let maxRow = -1;
+              let maxCol = -1;
+              for (let r = 0; r < values.length; r++) {
+                const row = values[r];
+                if (!Array.isArray(row) || row.length === 0) continue;
+                maxRow = Math.max(maxRow, r);
+                maxCol = Math.max(maxCol, row.length - 1);
+              }
+              if (maxRow >= 0 && maxCol >= 0) {
+                matrixBounds = { rows: maxRow + 1, cols: maxCol + 1 };
+              }
+            }
+          }
         } catch {
-          return;
+          // ignore
         }
+
+        try {
+          if (!matrixBounds && Object.prototype.hasOwnProperty.call(selection, "formulas")) {
+            const formulas = selection.formulas;
+            if (Array.isArray(formulas)) {
+              let maxRow = -1;
+              let maxCol = -1;
+              for (let r = 0; r < formulas.length; r++) {
+                const row = formulas[r];
+                if (!Array.isArray(row) || row.length === 0) continue;
+                for (let c = 0; c < row.length; c++) {
+                  const cell = row[c];
+                  if (typeof cell !== "string" || cell.trim().length === 0) continue;
+                  maxRow = Math.max(maxRow, r);
+                  maxCol = Math.max(maxCol, c);
+                }
+              }
+              if (maxRow >= 0 && maxCol >= 0) {
+                matrixBounds = { rows: maxRow + 1, cols: maxCol + 1 };
+              }
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        if (!matrixBounds) return;
 
         const looksLikeRange =
           Object.prototype.hasOwnProperty.call(selection, "startRow") &&
@@ -2649,6 +2687,30 @@ class BrowserExtensionHost {
         }
         if (!range) return;
 
+        // Some hosts may include truncated/partial matrices that do not fully match the declared
+        // selection range. Align taint tracking with the data that was actually delivered by
+        // clamping the range to the matrix bounds (best-effort).
+        try {
+          if (
+            matrixBounds &&
+            Number.isFinite(Number(range.startRow)) &&
+            Number.isFinite(Number(range.startCol)) &&
+            Number.isFinite(Number(range.endRow)) &&
+            Number.isFinite(Number(range.endCol))
+          ) {
+            const sr = Math.min(Number(range.startRow), Number(range.endRow));
+            const sc = Math.min(Number(range.startCol), Number(range.endCol));
+            const er = Math.max(Number(range.startRow), Number(range.endRow));
+            const ec = Math.max(Number(range.startCol), Number(range.endCol));
+
+            const boundedEndRow = Math.min(er, sr + matrixBounds.rows - 1);
+            const boundedEndCol = Math.min(ec, sc + matrixBounds.cols - 1);
+            range = { startRow: sr, startCol: sc, endRow: boundedEndRow, endCol: boundedEndCol };
+          }
+        } catch {
+          // ignore
+        }
+
         const sheetId =
           (typeof data?.sheetId === "string" && data.sheetId.trim()) ||
           (typeof selection?.sheetId === "string" && selection.sheetId.trim()) ||
@@ -2656,18 +2718,6 @@ class BrowserExtensionHost {
           null;
         if (!sheetId) return;
         this._activeSheetId = sheetId;
-
-        // Only taint-track selection events when they include cell data (values). Hosts may emit
-        // truncated selectionChanged events with empty matrices for very large selections to avoid
-        // allocating huge 2D arrays. Those events do not expose spreadsheet values and should not
-        // make subsequent clipboard writes fail DLP checks.
-        try {
-          if (selection?.truncated) return;
-          const values = selection?.values;
-          if (!Array.isArray(values) || values.length === 0) return;
-        } catch {
-          return;
-        }
 
         this._taintExtensionRange(extension, {
           sheetId,
@@ -2684,6 +2734,7 @@ class BrowserExtensionHost {
         // Only taint when the payload includes a cell value (even if null). If a host emits
         // coordinate-only cellChanged events, those do not expose data and should not taint.
         if (!Object.prototype.hasOwnProperty.call(data, "value")) return;
+        if (data.value === undefined) return;
         const hasRow = Object.prototype.hasOwnProperty.call(data, "row");
         const hasCol = Object.prototype.hasOwnProperty.call(data, "col");
 

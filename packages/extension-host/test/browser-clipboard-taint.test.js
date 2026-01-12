@@ -489,6 +489,48 @@ test("BrowserExtensionHost: does not taint cellChanged when value is missing", a
   assert.deepEqual(extension.taintedRanges, []);
 });
 
+test("BrowserExtensionHost: does not taint cellChanged when value is undefined", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async setCell() {},
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.event-taint-cell-undefined";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "event-taint-cell-undefined",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: [],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+  extension.active = true;
+
+  host._broadcastEvent("cellChanged", { sheetId: "sheet1", row: 0, col: 0, value: undefined });
+
+  assert.deepEqual(extension.taintedRanges, []);
+});
+
 test("BrowserExtensionHost: records taint for selectionChanged events (and passes it to clipboard guard)", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
@@ -556,7 +598,7 @@ test("BrowserExtensionHost: records taint for selectionChanged events (and passe
   });
 });
 
-test("BrowserExtensionHost: does not taint selectionChanged events when payload is truncated", async (t) => {
+test("BrowserExtensionHost: taints selectionChanged events when payload is truncated but includes values", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
   installFakeWorker(t, [{}]);
@@ -589,6 +631,7 @@ test("BrowserExtensionHost: does not taint selectionChanged events when payload 
 
   const extension = host._extensions.get(extensionId);
   assert.ok(extension);
+  extension.active = true;
 
   host._broadcastEvent("selectionChanged", {
     sheetId: "sheet1",
@@ -597,12 +640,14 @@ test("BrowserExtensionHost: does not taint selectionChanged events when payload 
       startCol: 0,
       endRow: 1_000_000,
       endCol: 100,
-      values: [],
+      values: [[1]],
       truncated: true,
     },
   });
 
-  assert.deepEqual(sortRanges(extension.taintedRanges), []);
+  assert.deepEqual(sortRanges(extension.taintedRanges), [
+    { sheetId: "sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
+  ]);
 });
 
 test("BrowserExtensionHost: selectionChanged taints using active-sheet fallback when sheetId omitted", async (t) => {
@@ -644,7 +689,17 @@ test("BrowserExtensionHost: selectionChanged taints using active-sheet fallback 
 
   host._broadcastEvent("sheetActivated", { sheet: { id: "sheet2", name: "Sheet2" } });
   host._broadcastEvent("selectionChanged", {
-    selection: { startRow: 1, startCol: 2, endRow: 3, endCol: 4, values: [[null]] },
+    selection: {
+      startRow: 1,
+      startCol: 2,
+      endRow: 3,
+      endCol: 4,
+      values: [
+        [null, null, null],
+        [null, null, null],
+        [null, null, null],
+      ],
+    },
   });
 
   assert.deepEqual(sortRanges(extension.taintedRanges), [
