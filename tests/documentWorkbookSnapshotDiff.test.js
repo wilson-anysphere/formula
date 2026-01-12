@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { diffDocumentWorkbookSnapshots } from "../packages/versioning/src/index.js";
+import { diffDocumentWorkbookSnapshots } from "../packages/versioning/src/document/diffWorkbookSnapshots.js";
 
 const encoder = new TextEncoder();
 
@@ -93,4 +93,44 @@ test("diffDocumentWorkbookSnapshots reports workbook-level metadata changes (JSO
   assert.deepEqual(diff.metadata.removed.map((r) => r.key), ["owner"]);
   assert.equal(diff.metadata.modified.length, 1);
   assert.equal(diff.metadata.modified[0].key, "title");
+});
+
+test("diffDocumentWorkbookSnapshots reports formatOnly edits when default formats change (layered formats)", () => {
+  const beforeSnapshot = encodeSnapshot({
+    schemaVersion: 2,
+    sheets: [
+      {
+        id: "sheet1",
+        name: "Sheet1",
+        // A1 exists (non-empty) but has no per-cell format override.
+        cells: [{ row: 0, col: 0, value: "x" }],
+        // Column A default formatting.
+        colFormats: { "0": { font: { bold: true } } },
+      },
+    ],
+  });
+
+  const afterSnapshot = encodeSnapshot({
+    schemaVersion: 2,
+    sheets: [
+      {
+        id: "sheet1",
+        name: "Sheet1",
+        cells: [{ row: 0, col: 0, value: "x" }],
+        // Same cell content, but the column default format changed.
+        colFormats: { "0": { font: { italic: true } } },
+      },
+    ],
+  });
+
+  const diff = diffDocumentWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  const sheet1Diff = diff.cellsBySheet.find((entry) => entry.sheetId === "sheet1")?.diff;
+  assert.ok(sheet1Diff);
+
+  assert.deepEqual(sheet1Diff.added, []);
+  assert.deepEqual(sheet1Diff.removed, []);
+  assert.deepEqual(sheet1Diff.modified, []);
+  assert.deepEqual(sheet1Diff.moved, []);
+  assert.equal(sheet1Diff.formatOnly.length, 1);
+  assert.deepEqual(sheet1Diff.formatOnly[0].cell, { row: 0, col: 0 });
 });
