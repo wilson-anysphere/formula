@@ -23,9 +23,11 @@ pub use dir::{DirParseError, DirStream, ModuleRecord, ModuleType};
 pub use ole::{OleError, OleFile};
 pub use project_digest::{compute_vba_project_digest, DigestAlg};
 pub use signature::{
-    extract_signer_certificate_info, list_vba_digital_signatures, parse_and_verify_vba_signature_blob,
-    parse_vba_digital_signature, verify_vba_digital_signature, verify_vba_signature_blob,
-    SignatureError, VbaDigitalSignature, VbaDigitalSignatureStream, VbaSignatureBinding,
+    extract_signer_certificate_info, list_vba_digital_signatures,
+    parse_and_verify_vba_signature_blob, parse_vba_digital_signature, verify_vba_digital_signature,
+    verify_vba_digital_signature_bound, verify_vba_signature_blob, SignatureError,
+    VbaDigitalSignature, VbaDigitalSignatureBound, VbaDigitalSignatureStream,
+    VbaProjectBindingVerification, VbaProjectDigestDebugInfo, VbaSignatureBinding,
     VbaSignatureBlobInfo, VbaSignatureVerification, VbaSignerCertificateInfo,
 };
 

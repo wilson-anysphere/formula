@@ -3,8 +3,8 @@
 use std::io::{Cursor, Write};
 
 use formula_vba::{
-    compute_vba_project_digest, verify_vba_digital_signature, DigestAlg, VbaSignatureBinding,
-    VbaSignatureVerification,
+    compute_vba_project_digest, verify_vba_digital_signature, verify_vba_digital_signature_bound,
+    DigestAlg, VbaProjectBindingVerification, VbaSignatureBinding, VbaSignatureVerification,
 };
 
 const TEST_KEY_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
@@ -211,6 +211,18 @@ fn bound_signature_sets_binding_bound() {
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+
+    let bound = verify_vba_digital_signature_bound(&signed)
+        .expect("bound verify")
+        .expect("signature present");
+    assert_eq!(
+        bound.signature.verification,
+        VbaSignatureVerification::SignedVerified
+    );
+    assert!(matches!(
+        bound.binding,
+        VbaProjectBindingVerification::BoundVerified(_)
+    ));
 }
 
 #[test]
@@ -235,6 +247,18 @@ fn tampering_project_changes_binding_but_not_pkcs7_verification() {
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig.binding, VbaSignatureBinding::NotBound);
+
+    let bound = verify_vba_digital_signature_bound(&tampered)
+        .expect("bound verify")
+        .expect("signature present");
+    assert_eq!(
+        bound.signature.verification,
+        VbaSignatureVerification::SignedVerified
+    );
+    assert!(matches!(
+        bound.binding,
+        VbaProjectBindingVerification::BoundMismatch(_)
+    ));
 }
 
 #[test]
@@ -254,4 +278,3 @@ fn embedded_pkcs7_content_is_used_for_binding() {
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig.binding, VbaSignatureBinding::Bound);
 }
-

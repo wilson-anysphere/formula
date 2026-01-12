@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use crate::{XlsxDocument, XlsxPackage};
 
 pub use formula_vba::{
-    SignatureError, VbaDigitalSignature, VbaSignatureVerification, VBAModule, VBAProject,
-    VBAReference,
+    SignatureError, VbaDigitalSignature, VbaDigitalSignatureBound, VbaProjectBindingVerification,
+    VbaProjectDigestDebugInfo, VbaSignatureVerification, VBAModule, VBAProject, VBAReference,
 };
 
 impl XlsxPackage {

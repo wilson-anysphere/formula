@@ -59,6 +59,41 @@ pub enum VbaSignatureBinding {
     Unknown,
 }
 
+/// Result of verifying a VBA digital signature *and* verifying that the signature is bound to the
+/// current VBA project streams via the MS-OVBA "project digest".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VbaDigitalSignatureBound {
+    /// The parsed signature stream, including PKCS#7 verification result.
+    pub signature: VbaDigitalSignature,
+    /// Project digest binding verification result.
+    pub binding: VbaProjectBindingVerification,
+}
+
+/// Best-effort debug information for MS-OVBA project digest binding verification.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VbaProjectDigestDebugInfo {
+    /// OID of the hash algorithm used by the signed digest structure (if found).
+    pub hash_algorithm_oid: Option<String>,
+    /// Human-readable name for the hash algorithm (best-effort).
+    pub hash_algorithm_name: Option<String>,
+    /// Digest bytes extracted from the signed Authenticode `SpcIndirectDataContent` (if found).
+    pub signed_digest: Option<Vec<u8>>,
+    /// Digest bytes computed from the current `vbaProject.bin` streams (if computed).
+    pub computed_digest: Option<Vec<u8>>,
+}
+
+/// Binding verification result for the MS-OVBA "project digest".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VbaProjectBindingVerification {
+    /// Signature is present and the signed digest matches the digest computed from the current
+    /// project streams.
+    BoundVerified(VbaProjectDigestDebugInfo),
+    /// Signature is present and parses, but the signed digest does not match the current project.
+    BoundMismatch(VbaProjectDigestDebugInfo),
+    /// Binding could not be verified (unsupported algorithm, missing digest structure, etc).
+    BoundUnknown(VbaProjectDigestDebugInfo),
+}
+
 /// Result of inspecting an individual VBA digital signature stream.
 ///
 /// Unlike [`VbaDigitalSignature`] (which is used by the single-signature helper APIs),
@@ -284,6 +319,60 @@ pub fn parse_vba_digital_signature(
         signature,
         verification: VbaSignatureVerification::SignedButUnverified,
         binding: VbaSignatureBinding::Unknown,
+    }))
+}
+
+/// Parse and verify a VBA digital signature (if present) and return additional project digest
+/// binding verification details.
+///
+/// This is a convenience wrapper around [`verify_vba_digital_signature`] that returns a richer
+/// binding status enum with optional debug information (hash algorithm OID/name and the signed vs
+/// computed digest bytes).
+///
+/// Returns `Ok(None)` when the project appears unsigned.
+pub fn verify_vba_digital_signature_bound(
+    vba_project_bin: &[u8],
+) -> Result<Option<VbaDigitalSignatureBound>, SignatureError> {
+    let Some(signature) = verify_vba_digital_signature(vba_project_bin)? else {
+        return Ok(None);
+    };
+
+    // Best-effort debug info for callers.
+    let mut debug = VbaProjectDigestDebugInfo::default();
+
+    let signed = match extract_vba_signature_signed_digest(&signature.signature) {
+        Ok(Some(v)) => Some(v),
+        _ => None,
+    };
+
+    if let Some(signed) = signed {
+        debug.hash_algorithm_oid = Some(signed.digest_algorithm_oid.clone());
+        debug.signed_digest = Some(signed.digest.clone());
+
+        if let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) {
+            debug.hash_algorithm_name = Some(match alg {
+                DigestAlg::Sha1 => "SHA-1".to_owned(),
+                DigestAlg::Sha256 => "SHA-256".to_owned(),
+            });
+
+            if let Ok(computed) = compute_vba_project_digest(vba_project_bin, alg) {
+                debug.computed_digest = Some(computed.clone());
+
+                if signature.verification == VbaSignatureVerification::SignedVerified {
+                    let binding = if computed == signed.digest {
+                        VbaProjectBindingVerification::BoundVerified(debug)
+                    } else {
+                        VbaProjectBindingVerification::BoundMismatch(debug)
+                    };
+                    return Ok(Some(VbaDigitalSignatureBound { signature, binding }));
+                }
+            }
+        }
+    }
+
+    Ok(Some(VbaDigitalSignatureBound {
+        signature,
+        binding: VbaProjectBindingVerification::BoundUnknown(debug),
     }))
 }
 
