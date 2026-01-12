@@ -2,6 +2,25 @@ import { expect, test } from "@playwright/test";
 
 import { gotoDesktop } from "./helpers";
 
+async function openSheetTabContextMenu(page: import("@playwright/test").Page, sheetId: string): Promise<void> {
+  // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic
+  // contextmenu event (mirrors `sheet-tabs-context-menu.spec.ts`).
+  await page.evaluate((id) => {
+    const tab = document.querySelector(`[data-testid="sheet-tab-${id}"]`) as HTMLElement | null;
+    if (!tab) throw new Error(`Missing ${id} tab`);
+    const rect = tab.getBoundingClientRect();
+    tab.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        button: 2,
+        clientX: rect.left + 10,
+        clientY: rect.top + 10,
+      }),
+    );
+  }, sheetId);
+}
+
 test.describe("sheet tab context menu (tauri persistence)", () => {
   test("invokes Tauri persistence commands for visibility + tab color", async ({ page }) => {
     await page.addInitScript(() => {
@@ -103,93 +122,33 @@ test.describe("sheet tab context menu (tauri persistence)", () => {
 
     await gotoDesktop(page);
 
-    // Lazily create Sheet2 by writing a value into it. (The default desktop e2e workbook starts
-    // with only Sheet1 unless we explicitly open/create a workbook via the file menu.)
-    await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
-      app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
-    });
-
     const sheet2Tab = page.getByTestId("sheet-tab-Sheet2");
     await expect(sheet2Tab).toBeVisible();
 
     // Hide Sheet2.
-    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
-    await page.evaluate(() => {
-      const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
-      if (!tab) throw new Error("Missing Sheet2 tab");
-      const rect = tab.getBoundingClientRect();
-      tab.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          button: 2,
-          clientX: rect.left + 10,
-          clientY: rect.top + 10,
-        }),
-      );
-    });
+    await openSheetTabContextMenu(page, "Sheet2");
     const menu = page.getByTestId("sheet-tab-context-menu");
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Hide", exact: true }).click();
     await expect(sheet2Tab).toHaveCount(0);
 
     // Unhide Sheet2.
-    await page.evaluate(() => {
-      const tab = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
-      if (!tab) throw new Error("Missing Sheet1 tab");
-      const rect = tab.getBoundingClientRect();
-      tab.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          button: 2,
-          clientX: rect.left + 10,
-          clientY: rect.top + 10,
-        }),
-      );
-    });
+    await openSheetTabContextMenu(page, "Sheet1");
     await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Unhide…" }).click();
+    await menu.getByRole("button", { name: "Unhide…", exact: true }).click();
     await menu.getByRole("button", { name: "Sheet2" }).click();
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
 
     // Set a tab color on Sheet2.
     const sheet2TabVisible = page.getByTestId("sheet-tab-Sheet2");
-    await page.evaluate(() => {
-      const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
-      if (!tab) throw new Error("Missing Sheet2 tab");
-      const rect = tab.getBoundingClientRect();
-      tab.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          button: 2,
-          clientX: rect.left + 10,
-          clientY: rect.top + 10,
-        }),
-      );
-    });
+    await openSheetTabContextMenu(page, "Sheet2");
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Tab Color", exact: true }).click();
     await menu.getByRole("button", { name: "Red", exact: true }).click();
     await expect(sheet2TabVisible).toHaveAttribute("data-tab-color", "#ff0000");
 
     // Clear the tab color.
-    await page.evaluate(() => {
-      const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
-      if (!tab) throw new Error("Missing Sheet2 tab");
-      const rect = tab.getBoundingClientRect();
-      tab.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          button: 2,
-          clientX: rect.left + 10,
-          clientY: rect.top + 10,
-        }),
-      );
-    });
+    await openSheetTabContextMenu(page, "Sheet2");
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Tab Color", exact: true }).click();
     await menu.getByRole("button", { name: "No Color" }).click();
