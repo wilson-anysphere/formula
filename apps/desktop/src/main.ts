@@ -3030,16 +3030,17 @@ if (
     },
   });
 
-  const applyToSelectionInCommandBatch = (label: string, apply: (sheetId: string, range: CellRange) => void): void => {
+  const applyToSelectionInCommandBatch = (
+    label: string,
+    apply: (sheetId: string, ranges: CellRange[]) => void,
+  ): void => {
     const doc = app.getDocument();
     const sheetId = app.getCurrentSheetId();
     const ranges = selectionRangesForFormatting();
     doc.beginBatch({ label });
     let committed = false;
     try {
-      for (const range of ranges) {
-        apply(sheetId, range);
-      }
+      apply(sheetId, ranges);
       committed = true;
     } finally {
       if (committed) doc.endBatch();
@@ -3053,7 +3054,10 @@ if (
   commandRegistry.registerBuiltinCommand(
     "format.toggleBold",
     t("command.format.toggleBold"),
-    () => applyToSelectionInCommandBatch(t("command.format.toggleBold"), (sheetId, range) => toggleBold(app.getDocument(), sheetId, range)),
+    () =>
+      applyToSelectionInCommandBatch(t("command.format.toggleBold"), (sheetId, ranges) =>
+        toggleBold(app.getDocument(), sheetId, ranges),
+      ),
     { category: commandCategoryFormat },
   );
 
@@ -3061,7 +3065,9 @@ if (
     "format.toggleItalic",
     t("command.format.toggleItalic"),
     () =>
-      applyToSelectionInCommandBatch(t("command.format.toggleItalic"), (sheetId, range) => toggleItalic(app.getDocument(), sheetId, range)),
+      applyToSelectionInCommandBatch(t("command.format.toggleItalic"), (sheetId, ranges) =>
+        toggleItalic(app.getDocument(), sheetId, ranges),
+      ),
     { category: commandCategoryFormat },
   );
 
@@ -3069,7 +3075,9 @@ if (
     "format.toggleUnderline",
     t("command.format.toggleUnderline"),
     () =>
-      applyToSelectionInCommandBatch(t("command.format.toggleUnderline"), (sheetId, range) => toggleUnderline(app.getDocument(), sheetId, range)),
+      applyToSelectionInCommandBatch(t("command.format.toggleUnderline"), (sheetId, ranges) =>
+        toggleUnderline(app.getDocument(), sheetId, ranges),
+      ),
     { category: commandCategoryFormat },
   );
 
@@ -3077,8 +3085,8 @@ if (
     "format.numberFormat.currency",
     t("command.format.numberFormat.currency"),
     () =>
-      applyToSelectionInCommandBatch(t("command.format.numberFormat.currency"), (sheetId, range) =>
-        applyNumberFormatPreset(app.getDocument(), sheetId, range, "currency"),
+      applyToSelectionInCommandBatch(t("command.format.numberFormat.currency"), (sheetId, ranges) =>
+        applyNumberFormatPreset(app.getDocument(), sheetId, ranges, "currency"),
       ),
     { category: commandCategoryFormat },
   );
@@ -3087,8 +3095,8 @@ if (
     "format.numberFormat.percent",
     t("command.format.numberFormat.percent"),
     () =>
-      applyToSelectionInCommandBatch(t("command.format.numberFormat.percent"), (sheetId, range) =>
-        applyNumberFormatPreset(app.getDocument(), sheetId, range, "percent"),
+      applyToSelectionInCommandBatch(t("command.format.numberFormat.percent"), (sheetId, ranges) =>
+        applyNumberFormatPreset(app.getDocument(), sheetId, ranges, "percent"),
       ),
     { category: commandCategoryFormat },
   );
@@ -3097,8 +3105,8 @@ if (
     "format.numberFormat.date",
     t("command.format.numberFormat.date"),
     () =>
-      applyToSelectionInCommandBatch(t("command.format.numberFormat.date"), (sheetId, range) =>
-        applyNumberFormatPreset(app.getDocument(), sheetId, range, "date"),
+      applyToSelectionInCommandBatch(t("command.format.numberFormat.date"), (sheetId, ranges) =>
+        applyNumberFormatPreset(app.getDocument(), sheetId, ranges, "date"),
       ),
     { category: commandCategoryFormat },
   );
@@ -3126,8 +3134,10 @@ if (
               numberFormat: NUMBER_FORMATS[choice],
             };
 
-      applyToSelectionInCommandBatch("Format Cells", (sheetId, range) => {
-        app.getDocument().setRangeFormat(sheetId, range, patch);
+      applyToSelectionInCommandBatch("Format Cells", (sheetId, ranges) => {
+        for (const range of ranges) {
+          app.getDocument().setRangeFormat(sheetId, range, patch);
+        }
       });
     },
     { category: commandCategoryFormat },
