@@ -601,11 +601,13 @@ Instead, Excel uses **cell metadata** in `xl/metadata.xml` (schema varies across
 1. Worksheet cells use `c/@vm` (value-metadata index).
 2. `vm` selects a `<valueMetadata><bk>` record in `xl/metadata.xml`.
 3. That `<bk>` contains an `<rc t="…" v="…"/>` record.
-4. Depending on the `metadata.xml` shape, `rc/@v` may:
-   * directly be the **0-based rich value index** into the rich value store (typically
-     `xl/richData/richValue*.xml`, but some files use `xl/richData/rdrichvalue.xml`), or
-   * be an index into another extension table (commonly a `futureMetadata name="XLRICHVALUE"` table containing
-     `xlrd:rvb i="…"` entries, where `rvb/@i` is the rich value index).
+4. Depending on the `metadata.xml` schema, `rc/@v` can mean different things:
+   * In this repo’s images-in-cell fixtures, `rc/@v` is an index into an extension table (a
+     `futureMetadata name="XLRICHVALUE"` table containing `xlrd:rvb i="…"` entries, where `rvb/@i` is the rich
+     value index).
+   * Other schemas may omit `futureMetadata`/`rvb`; in those cases `rc/@v` may need alternate interpretation
+     (for example, it may directly be the rich value index). This direct mapping is **not** currently
+     observed in the images-in-cell fixtures checked into this repo.
 
 Minimal representative shape for the `futureMetadata`/`rvb` variant (index bases are important; see below):
 
