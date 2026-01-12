@@ -46,6 +46,21 @@ describe("DocumentCellProvider (shared grid)", () => {
     expect(doc.getCell).toHaveBeenCalledTimes(1);
   });
 
+  it("caches header cells", () => {
+    const { provider, doc } = createProvider({
+      getSheetId: () => "sheet-1",
+      getCell: () => ({ value: "should-not-be-called", formula: null }),
+    });
+
+    const header = provider.getCell(0, 5);
+    expect(header?.value).toBe("E");
+    expect(doc.getCell).toHaveBeenCalledTimes(0);
+
+    const headerAgain = provider.getCell(0, 5);
+    expect(headerAgain).toBe(header);
+    expect(doc.getCell).toHaveBeenCalledTimes(0);
+  });
+
   it("does not collide across sheets", () => {
     let activeSheet = "sheet-1";
     const values = new Map<string, string>([
@@ -108,5 +123,41 @@ describe("DocumentCellProvider (shared grid)", () => {
     const sheet2 = provider.getCell(1, 1);
     expect(sheet2?.value).toBe("S2");
   });
-});
 
+  it("invalidateAll clears per-sheet caches", () => {
+    const { provider, doc } = createProvider({
+      getSheetId: () => "sheet-1",
+      getCell: () => ({ value: "hello", formula: null }),
+    });
+
+    const first = provider.getCell(1, 1);
+    expect(first?.value).toBe("hello");
+    expect(doc.getCell).toHaveBeenCalledTimes(1);
+
+    // Cache hit
+    provider.getCell(1, 1);
+    expect(doc.getCell).toHaveBeenCalledTimes(1);
+
+    provider.invalidateAll();
+
+    // Cache miss after invalidation
+    provider.getCell(1, 1);
+    expect(doc.getCell).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidateDocCells clears caches on large invalidations", () => {
+    const { provider, doc } = createProvider({
+      getSheetId: () => "sheet-1",
+      getCell: () => ({ value: "hello", formula: null }),
+    });
+
+    provider.getCell(1, 1);
+    expect(doc.getCell).toHaveBeenCalledTimes(1);
+
+    // Large region (50x50=2500 cells) triggers a full cache clear.
+    provider.invalidateDocCells({ startRow: 0, endRow: 50, startCol: 0, endCol: 50 });
+
+    provider.getCell(1, 1);
+    expect(doc.getCell).toHaveBeenCalledTimes(2);
+  });
+});
