@@ -52,32 +52,34 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-tab-Sheet3")).toHaveAttribute("data-active", "true");
 
     // Drag Sheet3 onto Sheet1.
-    await page.dragAndDrop('[data-testid="sheet-tab-Sheet3"]', '[data-testid="sheet-tab-Sheet1"]', {
-      // Drop near the left edge so the SheetTabStrip interprets this as "insert before".
-      targetPosition: { x: 5, y: 5 },
+    //
+    // We intentionally dispatch a synthetic `drop` event instead of using Playwright's
+    // dragAndDrop helper. The desktop shell can be flaky under load when plumbing
+    // `DataTransfer` through real pointer gestures, which can lead to hung/slow tests
+    // unrelated to sheet reorder correctness.
+    await page.evaluate(() => {
+      const target = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
+      if (!target) throw new Error("Missing sheet-tab-Sheet1");
+      const rect = target.getBoundingClientRect();
+
+      const dt = new DataTransfer();
+      dt.setData("text/sheet-id", "Sheet3");
+      dt.setData("text/plain", "Sheet3");
+
+      const drop = new DragEvent("drop", {
+        bubbles: true,
+        cancelable: true,
+        // Drop near the left edge so the SheetTabStrip interprets this as "insert before".
+        clientX: rect.left + 1,
+        clientY: rect.top + rect.height / 2,
+      });
+      Object.defineProperty(drop, "dataTransfer", { value: dt });
+      target.dispatchEvent(drop);
     });
 
-    // Wait for the UI to re-render in the new order. If Playwright's dragAndDrop
-    // fails to plumb dataTransfer, fall back to a synthetic drop event.
-    try {
-      await expect
-        .poll(async () => await getVisibleSheetTabOrder(page), { timeout: 2_000 })
-        .toEqual(["Sheet3", "Sheet1", "Sheet2"]);
-    } catch {
-      await page.evaluate(() => {
-        const target = document.querySelector('[data-testid="sheet-tab-Sheet1"]');
-        if (!target) throw new Error("Missing sheet-tab-Sheet1");
-        const dt = new DataTransfer();
-        dt.setData("text/plain", "Sheet3");
-        const drop = new DragEvent("drop", { bubbles: true, cancelable: true });
-        Object.defineProperty(drop, "dataTransfer", { value: dt });
-        target.dispatchEvent(drop);
-      });
-
-      await expect
-        .poll(async () => await getVisibleSheetTabOrder(page), { timeout: 2_000 })
-        .toEqual(["Sheet3", "Sheet1", "Sheet2"]);
-    }
+    await expect
+      .poll(async () => await getVisibleSheetTabOrder(page), { timeout: 2_000 })
+      .toEqual(["Sheet3", "Sheet1", "Sheet2"]);
 
     // Sheet switcher ordering should match the visible tab strip ordering (store-driven).
     await expect

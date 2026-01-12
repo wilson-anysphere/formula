@@ -208,42 +208,29 @@ test.describe("pivot builder", () => {
     await panel.getByTestId("pivot-destination-cell").fill("D1");
 
     // Configure fields via drag-and-drop.
-    await page.dragAndDrop('[data-testid="pivot-field-Category"]', '[data-testid="pivot-drop-rows"]');
-    // Playwright dragAndDrop can be flaky with HTML5 dataTransfer under load; fall back to
-    // dispatching a synthetic drop event so the test exercises pivot generation rather than
-    // getting stuck on DnD plumbing.
-    try {
-      await panel.getByTestId("pivot-drop-rows").getByText("Category").waitFor({ state: "visible", timeout: 2_000 });
-    } catch {
-      await page.evaluate(() => {
-        const zone = document.querySelector('[data-testid="pivot-drop-rows"]');
-        if (!zone) throw new Error("Missing pivot-drop-rows");
-        const dt = new DataTransfer();
-        dt.setData("text/plain", "Category");
-        const drop = new DragEvent("drop", { bubbles: true, cancelable: true });
-        Object.defineProperty(drop, "dataTransfer", { value: dt });
-        zone.dispatchEvent(drop);
-      });
-      await expect(panel.getByTestId("pivot-drop-rows")).toContainText("Category");
-    }
-    await page.dragAndDrop('[data-testid="pivot-field-Amount"]', '[data-testid="pivot-drop-values"]');
-    // Playwright dragAndDrop can be flaky with HTML5 dataTransfer under load; fall back to
-    // dispatching a synthetic drop event so the test exercises pivot generation rather than
-    // getting stuck on DnD plumbing.
-    try {
-      await panel.getByTestId("pivot-value-aggregation-0").waitFor({ state: "visible", timeout: 2_000 });
-    } catch {
-      await page.evaluate(() => {
-        const zone = document.querySelector('[data-testid="pivot-drop-values"]');
-        if (!zone) throw new Error("Missing pivot-drop-values");
-        const dt = new DataTransfer();
-        dt.setData("text/plain", "Amount");
-        const drop = new DragEvent("drop", { bubbles: true, cancelable: true });
-        Object.defineProperty(drop, "dataTransfer", { value: dt });
-        zone.dispatchEvent(drop);
-      });
-      await expect(panel.getByTestId("pivot-value-aggregation-0")).toBeVisible();
-    }
+    // Use a synthetic drop event for determinism (Playwright drag/drop can be flaky under load
+    // when plumbing HTML5 DataTransfer through real pointer gestures).
+    await page.evaluate(() => {
+      const zone = document.querySelector('[data-testid="pivot-drop-rows"]');
+      if (!zone) throw new Error("Missing pivot-drop-rows");
+      const dt = new DataTransfer();
+      dt.setData("text/plain", "Category");
+      const drop = new DragEvent("drop", { bubbles: true, cancelable: true });
+      Object.defineProperty(drop, "dataTransfer", { value: dt });
+      zone.dispatchEvent(drop);
+    });
+    await expect(panel.getByTestId("pivot-drop-rows")).toContainText("Category");
+
+    await page.evaluate(() => {
+      const zone = document.querySelector('[data-testid="pivot-drop-values"]');
+      if (!zone) throw new Error("Missing pivot-drop-values");
+      const dt = new DataTransfer();
+      dt.setData("text/plain", "Amount");
+      const drop = new DragEvent("drop", { bubbles: true, cancelable: true });
+      Object.defineProperty(drop, "dataTransfer", { value: dt });
+      zone.dispatchEvent(drop);
+    });
+    await expect(panel.getByTestId("pivot-value-aggregation-0")).toBeVisible();
 
     // Disable column grand totals to keep the output shape deterministic for assertions.
     await panel.getByTestId("pivot-grand-totals-columns").uncheck();
