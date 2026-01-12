@@ -54,10 +54,11 @@ fn days_between(start: i32, end: i32, basis: i32, system: ExcelDateSystem) -> f6
     }
 }
 
-fn coupon_period_e(pcd: i32, ncd: i32, basis: i32, frequency: i32) -> f64 {
+fn coupon_period_e(pcd: i32, ncd: i32, basis: i32, frequency: i32, system: ExcelDateSystem) -> f64 {
     let freq = frequency as f64;
     match basis {
-        0 | 2 | 4 => 360.0 / freq,
+        0 | 2 => 360.0 / freq,
+        4 => days_between(pcd, ncd, 4, system),
         3 => 365.0 / freq,
         1 => (ncd - pcd) as f64,
         _ => panic!("invalid basis {basis}"),
@@ -123,7 +124,7 @@ fn oddf_price_excel_model(
     let eom = is_end_of_month(maturity, system);
     let n = coupon_dates.len() as i32;
     let prev_coupon = coupon_date_with_eom(maturity, -(n * months_per_period), eom, system);
-    let e = coupon_period_e(prev_coupon, first_coupon, basis, frequency);
+    let e = coupon_period_e(prev_coupon, first_coupon, basis, frequency, system);
 
     let odd_first_coupon = c * (dfc / e);
     let accrued_interest = c * (a / e);
@@ -172,7 +173,7 @@ fn oddl_price_excel_model(
     let months_per_period = 12 / frequency;
     let eom = is_end_of_month(last_interest, system);
     let prev_coupon = coupon_date_with_eom(last_interest, -months_per_period, eom, system);
-    let e = coupon_period_e(prev_coupon, last_interest, basis, frequency);
+    let e = coupon_period_e(prev_coupon, last_interest, basis, frequency, system);
 
     let accrued_interest = c * (a / e);
     let odd_last_coupon = c * (dlm / e);
