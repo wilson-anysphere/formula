@@ -8,14 +8,19 @@ const SRC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 
 const SOURCE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"]);
 const WINDOW_DIALOG_RES = [
-  // Direct calls: window.confirm / window.confirm?.
-  /\bwindow\.(confirm|alert|prompt)\s*(?:\?\.)?\s*\(/,
+  // Direct calls: window.confirm / window.confirm?.; whitespace around the dot allowed.
+  /\bwindow\s*\.\s*(confirm|alert|prompt)\s*(?:\?\.)?\s*\(/,
   // Optional chaining on window: window?.confirm / window?.confirm?.
   /\bwindow\s*\?\.\s*(confirm|alert|prompt)\s*(?:\?\.)?\s*\(/,
   // Bracket access: window["confirm"] / window["confirm"]?.
   /\bwindow\s*\[\s*['"](confirm|alert|prompt)['"]\s*\]\s*(?:\?\.)?\s*\(/,
   // Optional chaining + bracket access: window?.["confirm"]
   /\bwindow\s*\?\.\s*\[\s*['"](confirm|alert|prompt)['"]\s*\]\s*(?:\?\.)?\s*\(/,
+  // Direct calls via other global roots: globalThis.confirm / self.confirm / etc.
+  /\b(?:globalThis|self)\s*\.\s*(confirm|alert|prompt)\s*(?:\?\.)?\s*\(/,
+  /\b(?:globalThis|self)\s*\?\.\s*(confirm|alert|prompt)\s*(?:\?\.)?\s*\(/,
+  /\b(?:globalThis|self)\s*\[\s*['"](confirm|alert|prompt)['"]\s*\]\s*(?:\?\.)?\s*\(/,
+  /\b(?:globalThis|self)\s*\?\.\s*\[\s*['"](confirm|alert|prompt)['"]\s*\]\s*(?:\?\.)?\s*\(/,
 ];
 
 async function collectSourceFiles(dir: string): Promise<string[]> {
