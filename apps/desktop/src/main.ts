@@ -358,9 +358,9 @@ if (!gridRoot) {
   throw new Error("Missing #grid container");
 }
 
-const titlebarRoot = document.getElementById("titlebar");
+const titlebarRoot = document.getElementById("titlebar-root");
 if (!titlebarRoot) {
-  throw new Error("Missing #titlebar container");
+  throw new Error("Missing #titlebar-root container");
 }
 const titlebarRootEl = titlebarRoot;
 

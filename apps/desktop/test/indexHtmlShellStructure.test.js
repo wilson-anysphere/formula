@@ -13,7 +13,7 @@ test("desktop index.html exposes required shell containers and testids", () => {
   const requiredSnippets = [
     // Shell roots
     'id="app"',
-    'id="titlebar"',
+    'id="titlebar-root"',
     'id="ribbon"',
     'id="formula-bar"',
     'id="workspace"',
