@@ -212,32 +212,38 @@ fn odd_coupon_boundary_date_validations_match_engine_behavior() {
 
     // ODDF* boundaries
     // issue == settlement is allowed (zero accrued interest).
-    let Some(_pr) = eval_number_or_skip(
+    let Some(pr) = eval_number_or_skip(
         &mut sheet,
         "=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.06,100,2,0)",
     ) else {
         return;
     };
-    let Some(_yld) = eval_number_or_skip(
+    assert!(pr.is_finite(), "expected finite ODDFPRICE, got {pr}");
+
+    let Some(yld) = eval_number_or_skip(
         &mut sheet,
         "=ODDFYIELD(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,99,100,2,0)",
     ) else {
         return;
     };
+    assert!(yld.is_finite(), "expected finite ODDFYIELD, got {yld}");
 
     // settlement == first_coupon is allowed (settlement on coupon date).
-    let Some(_pr) = eval_number_or_skip(
+    let Some(pr) = eval_number_or_skip(
         &mut sheet,
         "=ODDFPRICE(DATE(2020,7,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,0.06,100,2,0)",
     ) else {
         return;
     };
-    let Some(_yld) = eval_number_or_skip(
+    assert!(pr.is_finite(), "expected finite ODDFPRICE, got {pr}");
+
+    let Some(yld) = eval_number_or_skip(
         &mut sheet,
         "=ODDFYIELD(DATE(2020,7,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,99,100,2,0)",
     ) else {
         return;
     };
+    assert!(yld.is_finite(), "expected finite ODDFYIELD, got {yld}");
 
     // first_coupon > maturity
     if !assert_num_error_or_skip(&mut sheet, "=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2021,8,1),0.05,0.06,100,2,0)") {
