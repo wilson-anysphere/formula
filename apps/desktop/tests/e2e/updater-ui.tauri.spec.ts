@@ -204,6 +204,123 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     await expect(page.locator("#toast-root")).toContainText("You're up to date.");
   });
 
+  test("can download an update and trigger restart from the updater dialog", async ({ page }) => {
+    await page.addInitScript(() => {
+      const listeners: Record<string, Array<(event: any) => void>> = {};
+      const emitted: Array<{ event: string; payload: any }> = [];
+      const invokes: Array<{ cmd: string; args: any }> = [];
+      const actionOrder: Array<{ kind: string; name: string }> = [];
+
+      (window as any).__tauriListeners = listeners;
+      (window as any).__tauriEmittedEvents = emitted;
+      (window as any).__tauriInvokes = invokes;
+      (window as any).__tauriActionOrder = actionOrder;
+      (window as any).__tauriUpdateDownloadCalls = 0;
+      (window as any).__tauriUpdateInstallCalls = 0;
+
+      // Avoid any prompts blocking the restart flow.
+      window.confirm = () => true;
+
+      const windowHandle = { show: async () => {}, setFocus: async () => {} };
+
+      (window as any).__TAURI__ = {
+        core: {
+          invoke: async (cmd: string, args: any) => {
+            invokes.push({ cmd, args });
+            actionOrder.push({ kind: "invoke", name: cmd });
+            return null;
+          },
+        },
+        event: {
+          listen: async (name: string, handler: any) => {
+            if (!Array.isArray(listeners[name])) listeners[name] = [];
+            listeners[name].push(handler);
+            return () => {
+              const arr = listeners[name];
+              if (!Array.isArray(arr)) return;
+              const idx = arr.indexOf(handler);
+              if (idx >= 0) arr.splice(idx, 1);
+            };
+          },
+          emit: async (event: string, payload?: any) => {
+            emitted.push({ event, payload: payload ?? null });
+          },
+        },
+        window: {
+          getCurrentWebviewWindow: () => windowHandle,
+          getCurrentWindow: () => windowHandle,
+          getCurrent: () => windowHandle,
+          appWindow: windowHandle,
+        },
+        updater: {
+          check: async () => ({
+            version: "9.9.9",
+            body: "Notes",
+            download: async (onProgress?: any) => {
+              (window as any).__tauriUpdateDownloadCalls += 1;
+              actionOrder.push({ kind: "download", name: "update.download" });
+              onProgress?.({ downloaded: 100, total: 100 });
+            },
+            install: async () => {
+              (window as any).__tauriUpdateInstallCalls += 1;
+              actionOrder.push({ kind: "install", name: "update.install" });
+            },
+          }),
+        },
+      };
+    });
+
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() =>
+      Boolean((window as any).__tauriEmittedEvents?.some((entry: any) => entry?.event === "updater-ui-ready")),
+    );
+
+    await waitForTauriListeners(page, "update-available");
+    await dispatchTauriEvent(page, "update-available", { source: "manual", version: "9.9.9", body: "Notes" });
+
+    const dialog = page.getByTestId("updater-dialog");
+    await expect(dialog).toBeVisible();
+
+    await page.getByTestId("updater-download").click();
+    await expect(page.getByTestId("updater-progress-wrap")).toBeVisible();
+
+    await page.waitForFunction(() => (window as any).__tauriUpdateDownloadCalls >= 1);
+
+    await expect(page.getByTestId("updater-restart")).toBeVisible();
+    await expect(page.getByTestId("updater-status")).toContainText("Download complete.");
+    await expect(page.getByTestId("updater-progress-wrap")).toBeHidden();
+
+    const restartCountBefore = await page.evaluate(() => {
+      const invokes = (window as any).__tauriInvokes ?? [];
+      if (!Array.isArray(invokes)) return 0;
+      return invokes.filter((entry: any) => entry?.cmd === "restart_app").length;
+    });
+
+    await page.getByTestId("updater-restart").click();
+
+    await page.waitForFunction(
+      (before) => {
+        const invokes = (window as any).__tauriInvokes ?? [];
+        if (!Array.isArray(invokes)) return false;
+        const count = invokes.filter((entry: any) => entry?.cmd === "restart_app").length;
+        return count >= before + 1;
+      },
+      restartCountBefore,
+    );
+
+    await page.waitForFunction(() => (window as any).__tauriUpdateInstallCalls >= 1);
+    await expect(dialog).toBeHidden();
+
+    const order = await page.evaluate(() => (window as any).__tauriActionOrder ?? []);
+    expect(Array.isArray(order)).toBe(true);
+    const installIdx = (order as any[]).findIndex((entry: any) => entry?.kind === "install" && entry?.name === "update.install");
+    const restartIdx = (order as any[]).findIndex((entry: any) => entry?.kind === "invoke" && entry?.name === "restart_app");
+    expect(installIdx).toBeGreaterThanOrEqual(0);
+    expect(restartIdx).toBeGreaterThanOrEqual(0);
+    expect(installIdx).toBeLessThan(restartIdx);
+  });
+
   test("startup update completion is treated as manual when a manual check was queued behind an in-flight startup check", async ({
     page,
   }) => {
