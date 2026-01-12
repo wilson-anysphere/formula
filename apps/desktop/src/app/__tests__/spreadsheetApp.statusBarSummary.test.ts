@@ -274,6 +274,51 @@ describe("SpreadsheetApp selection summary (status bar)", () => {
     root.remove();
   });
 
+  it("does not double-count overlapping multi-range selection", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    clearSeededCells(app);
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument();
+
+    doc.setCellValue(sheetId, "A1", 1);
+    doc.setCellValue(sheetId, "B2", 2);
+    doc.setCellValue(sheetId, "C3", 3);
+
+    // A1:B2 overlaps B2:C3 at B2. Only three cells contain content; B2 should
+    // not be double-counted.
+    (app as any).selection = buildSelection(
+      {
+        ranges: [
+          { startRow: 0, endRow: 1, startCol: 0, endCol: 1 }, // A1:B2
+          { startRow: 1, endRow: 2, startCol: 1, endCol: 2 }, // B2:C3
+        ],
+        active: { row: 0, col: 0 },
+        anchor: { row: 0, col: 0 },
+        activeRangeIndex: 0,
+      },
+      (app as any).limits,
+    );
+
+    const summary = app.getSelectionSummary();
+    expect(summary).toEqual({
+      sum: 6,
+      average: 2,
+      count: 3,
+      numericCount: 3,
+      countNonEmpty: 3,
+    });
+
+    app.destroy();
+    root.remove();
+  });
+
   it("includes computed values for formula cells", () => {
     const root = createRoot();
     const status = {
@@ -299,6 +344,36 @@ describe("SpreadsheetApp selection summary (status bar)", () => {
       count: 3,
       numericCount: 3,
       countNonEmpty: 3,
+    });
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("ignores error formula results for sum/average but still counts the cell", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    clearSeededCells(app);
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument();
+
+    doc.setCellFormula(sheetId, "A1", "=1/0");
+    doc.setCellValue(sheetId, "B1", 5);
+
+    app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 0, endCol: 1 } }); // A1:B1
+    const summary = app.getSelectionSummary();
+    expect(summary).toEqual({
+      sum: 5,
+      average: 5,
+      count: 2,
+      numericCount: 1,
+      countNonEmpty: 2,
     });
 
     app.destroy();
