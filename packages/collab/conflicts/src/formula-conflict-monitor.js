@@ -281,6 +281,7 @@ export class FormulaConflictMonitor {
    * @param {Y.Transaction} transaction
    */
   _onDeepEvent(events, transaction) {
+    const isLocalTransaction = this.localOrigins.has(transaction.origin);
     for (const event of events) {
       // We only care about map key changes on the cell-level Y.Map.
       if (!event?.changes?.keys) continue;
@@ -298,6 +299,21 @@ export class FormulaConflictMonitor {
 
       const valueChange = event.changes.keys.get("value");
       const formulaChange = event.changes.keys.get("formula");
+
+      // Local-origin transactions should not emit conflicts, but they *should* be
+      // recorded so we can later detect true offline concurrent overwrites via
+      // causality (even when the writer didn't call `setLocalFormula` /
+      // `setLocalValue`, e.g. binder-style writes).
+      if (isLocalTransaction) {
+        this._trackLocalOriginChange({
+          cellKey,
+          cellMap,
+          formulaChange,
+          valueChange
+        });
+        continue;
+      }
+
       if (formulaChange) {
         const oldFormula = (formulaChange.oldValue ?? "").toString();
         const newFormula = (cellMap.get("formula") ?? "").toString();
@@ -355,6 +371,90 @@ export class FormulaConflictMonitor {
             oldFormula
           });
         }
+      }
+    }
+  }
+
+  /**
+   * Record a local-origin edit (as observed via Yjs events) into the in-memory
+   * local edit logs used for causal conflict detection.
+   *
+   * This enables correct conflict detection even when the local edit was written
+   * by another subsystem using the correct local transaction origin (e.g. binder
+   * writes) instead of calling `setLocalFormula` / `setLocalValue`.
+   *
+   * @param {object} input
+   * @param {string} input.cellKey
+   * @param {Y.Map<any>} input.cellMap
+   * @param {any} [input.formulaChange]
+   * @param {any} [input.valueChange]
+   */
+  _trackLocalOriginChange(input) {
+    const { cellKey, cellMap, formulaChange, valueChange } = input;
+
+    const hasFormulaChange = Boolean(formulaChange);
+    const hasValueChange = Boolean(valueChange);
+    if (!hasFormulaChange && !hasValueChange) return;
+
+    // Normalize post-transaction visible state. Yjs stores formula clears as
+    // `null` (or key deletes); track those as an empty string to match the
+    // `setLocalFormula` API semantics.
+    const nextFormula = (cellMap.get("formula") ?? "").toString().trim();
+    const nextValue = cellMap.get("value") ?? null;
+
+    const formulaItemId = hasFormulaChange ? getItemId(cellMap, "formula") : null;
+    const valueItemId = hasValueChange ? getItemId(cellMap, "value") : null;
+
+    /** @type {"formula" | "value" | null} */
+    let kind = null;
+    if (hasFormulaChange && !hasValueChange) kind = "formula";
+    else if (!hasFormulaChange && hasValueChange) kind = "value";
+    else if (hasFormulaChange && hasValueChange) {
+      // Prefer the post-transaction visible content shape.
+      if (nextFormula) {
+        kind = "formula";
+      } else if (nextValue !== null) {
+        kind = "value";
+      } else if (formulaChange?.action === "delete") {
+        // In formula-only mode, `setLocalValue` clears formulas via key deletion.
+        // Treat those clears as part of the value edit so we don't accidentally
+        // record them as local formula edits.
+        kind = "value";
+      } else if (formulaItemId && valueItemId && formulaItemId.client === valueItemId.client) {
+        // Both formula and value cleared; infer whether this was a formula edit
+        // or value edit based on which key was written first in the transaction.
+        // - setLocalFormula writes formula first, then value.
+        // - setLocalValue writes value first, then formula.
+        kind = formulaItemId.clock <= valueItemId.clock ? "formula" : "value";
+      } else {
+        // Fallback: treat ambiguous clears as formula clears (matches the
+        // existing restart fallback behavior when local value is null).
+        kind = "formula";
+      }
+    }
+
+    if (kind === "formula") {
+      if (!hasFormulaChange) return;
+      this._lastLocalFormulaEditByCellKey.set(cellKey, { formula: nextFormula, itemId: formulaItemId });
+      if (formulaItemId && valueItemId) {
+        this._lastLocalContentEditByCellKey.set(cellKey, {
+          kind: "formula",
+          formula: nextFormula,
+          formulaItemId,
+          valueItemId
+        });
+      }
+      return;
+    }
+
+    if (kind === "value") {
+      // Value edits are only tracked when value conflict detection is enabled.
+      if (!this.includeValueConflicts) return;
+      if (!hasValueChange) return;
+      if (valueItemId) this._lastLocalValueEditByCellKey.set(cellKey, { value: nextValue, itemId: valueItemId });
+
+      if (valueItemId && formulaItemId) {
+        this._lastLocalContentEditByCellKey.set(cellKey, { kind: "value", value: nextValue, valueItemId, formulaItemId });
       }
     }
   }

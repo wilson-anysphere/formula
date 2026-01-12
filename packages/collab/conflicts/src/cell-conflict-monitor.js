@@ -186,7 +186,17 @@ export class CellConflictMonitor {
     } = input;
 
     const isLocal = this.localOrigins.has(origin);
-    if (isLocal) return;
+    if (isLocal) {
+      // Track local-origin edits even when callers don't use `setLocalValue`
+      // (e.g. binder-style writes). This enables deterministic causal conflict
+      // detection even when `modifiedBy` metadata is absent/legacy.
+      //
+      // Value changes that accompany formula writes are represented as value=null
+      // markers and should not be tracked as local value edits.
+      if (currentFormula.trim()) return;
+      if (itemId) this._lastLocalEditByCellKey.set(cellKey, { value: newValue, itemId });
+      return;
+    }
 
     const lastLocal = this._lastLocalEditByCellKey.get(cellKey);
     if (!lastLocal) {
