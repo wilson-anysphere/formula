@@ -127,7 +127,22 @@ test.describe("collaboration: sheet metadata", () => {
           sheet.set("id", "Sheet2");
           sheet.set("name", "Sheet2");
           sheet.set("visibility", "visible");
-          session.sheets.insert(1, [sheet]);
+          // Insert Sheet2 after Sheet1 (if present), rather than assuming Sheet1 is at index 0.
+          // Collab schema init can temporarily create placeholder sheet entries that have not had
+          // their `id` fields applied yet; those placeholders should not influence the user-visible
+          // ordering expectations in this test.
+          let insertIndex = session.sheets.length;
+          for (let i = 0; i < session.sheets.length; i += 1) {
+            const entry: any = session.sheets.get(i);
+            const id = String(entry?.get?.("id") ?? entry?.id ?? "").trim();
+            if (id === "Sheet1") {
+              insertIndex = i + 1;
+              break;
+            }
+          }
+          // Clamp to the current array length (Yjs throws if index > length).
+          insertIndex = Math.max(0, Math.min(insertIndex, session.sheets.length));
+          session.sheets.insert(insertIndex, [sheet]);
         });
       });
 
@@ -216,6 +231,7 @@ test.describe("collaboration: sheet metadata", () => {
       await sheet2TabA.dblclick();
       const renameInputA = sheet2TabA.locator("input.sheet-tab__input");
       await expect(renameInputA).toBeVisible();
+      await expect(renameInputA).toBeFocused();
       await renameInputA.fill("Expenses");
       await renameInputA.press("Enter");
 

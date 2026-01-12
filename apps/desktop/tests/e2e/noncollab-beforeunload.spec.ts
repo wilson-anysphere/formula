@@ -36,6 +36,7 @@ test.describe("non-collab: beforeunload unsaved-changes prompt", () => {
     await tab.dblclick();
     const input = tab.locator("input.sheet-tab__input");
     await expect(input).toBeVisible();
+    await expect(input).toBeFocused();
 
     await input.fill("RenamedSheet1");
     await input.press("Enter");

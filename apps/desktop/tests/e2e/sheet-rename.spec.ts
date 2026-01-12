@@ -20,6 +20,7 @@ test.describe("sheet rename", () => {
 
     const input = sheet2Tab.locator("input.sheet-tab__input");
     await expect(input).toBeVisible();
+    await expect(input).toBeFocused();
     await input.fill("Data");
     await input.press("Enter");
 
