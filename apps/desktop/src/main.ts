@@ -56,6 +56,7 @@ import { getOpenFileFilters } from "./file_dialog_filters.js";
 import { formatRangeAddress, parseRangeAddress } from "@formula/scripting";
 import { normalizeFormulaTextOpt } from "@formula/engine";
 import type { CollabSession } from "@formula/collab-session";
+import * as Y from "yjs";
 import { startWorkbookSync } from "./tauri/workbookSync";
 import { TauriWorkbookBackend } from "./tauri/workbookBackend";
 import * as nativeDialogs from "./tauri/nativeDialogs";
@@ -1436,6 +1437,54 @@ async function handleAddSheet(): Promise<void> {
     const activeId = app.getCurrentSheetId();
     const desiredName = generateDefaultSheetName(workbookSheetStore.listAll());
     const doc = app.getDocument();
+
+    const collabSession = app.getCollabSession?.() ?? null;
+    if (collabSession) {
+      // In collab mode, the Yjs `session.sheets` array is the authoritative sheet list.
+      // Create the new sheet by updating that metadata so it propagates to other clients.
+      const existing = listSheetsFromCollabSession(collabSession);
+      const existingIds = new Set(existing.map((sheet) => sheet.id));
+
+      const randomUuid = (globalThis as any).crypto?.randomUUID as (() => string) | undefined;
+      const generateId = () => {
+        const uuid = typeof randomUuid === "function" ? randomUuid.call((globalThis as any).crypto) : null;
+        return uuid ? `sheet_${uuid}` : `sheet_${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`;
+      };
+
+      let id = generateId();
+      for (let i = 0; i < 10 && existingIds.has(id); i += 1) {
+        id = generateId();
+      }
+      while (existingIds.has(id)) {
+        id = `${id}_${Math.random().toString(16).slice(2)}`;
+      }
+
+      collabSession.transactLocal(() => {
+        const sheet = new Y.Map<unknown>();
+        sheet.set("id", id);
+        sheet.set("name", desiredName);
+
+        // Insert after the active sheet when possible; otherwise append.
+        let insertIndex = collabSession.sheets.length;
+        for (let i = 0; i < collabSession.sheets.length; i += 1) {
+          const entry: any = collabSession.sheets.get(i);
+          const entryId = coerceCollabSheetField(entry?.get?.("id") ?? entry?.id)?.trim();
+          if (entryId === activeId) {
+            insertIndex = i + 1;
+            break;
+          }
+        }
+
+        collabSession.sheets.insert(insertIndex, [sheet as any]);
+      });
+
+      // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
+      doc.getCell(id, { row: 0, col: 0 });
+      doc.markDirty();
+      app.activateSheet(id);
+      app.focus();
+      return;
+    }
 
     const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
     if (typeof baseInvoke === "function") {
