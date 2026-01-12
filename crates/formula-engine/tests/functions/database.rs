@@ -225,3 +225,41 @@ fn database_functions_computed_criteria_or_across_computed_rows() {
     assert_number(&sheet.eval("=DCOUNT(A1:D5,\"Salary\",F1:F3)"), 1.0);
     assert_number(&sheet.eval("=DCOUNTA(A1:D5,\"Salary\",F1:F3)"), 2.0);
 }
+
+#[test]
+fn database_functions_computed_criteria_with_offset_database_range() {
+    let mut sheet = TestSheet::new();
+
+    // Database (B3:E7)
+    sheet.set("B3", "Name");
+    sheet.set("C3", "Dept");
+    sheet.set("D3", "Age");
+    sheet.set("E3", "Salary");
+
+    sheet.set("B4", "Alice");
+    sheet.set("C4", "Sales");
+    sheet.set("D4", 30);
+    sheet.set("E4", 1000);
+
+    sheet.set("B5", "Bob");
+    sheet.set("C5", "Sales");
+    sheet.set("D5", 35);
+    sheet.set("E5", 1500);
+
+    sheet.set("B6", "Carol");
+    sheet.set("C6", "HR");
+    sheet.set("D6", 28);
+    sheet.set("E6", "n/a");
+
+    sheet.set("B7", "Dan");
+    sheet.set("C7", "HR");
+    sheet.set("D7", 40);
+    sheet.set("E7", 2000);
+
+    // Criteria (H1:H2): computed criteria referencing the first record row of the database (row 4).
+    sheet.set_formula("H2", "=D4>30");
+
+    // Matches Bob (35) and Dan (40) => Salary sum = 1500 + 2000.
+    assert_number(&sheet.eval("=DSUM(B3:E7,\"Salary\",H1:H2)"), 3500.0);
+    assert_number(&sheet.eval("=DSUM(B3:E7,4,H1:H2)"), 3500.0);
+}
