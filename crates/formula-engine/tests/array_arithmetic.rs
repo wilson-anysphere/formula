@@ -82,6 +82,37 @@ fn outer_broadcasting_spills_2d_arrays() {
 }
 
 #[test]
+fn outer_broadcasting_over_ranges_spills_2d_arrays() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+
+    engine.set_cell_value("Sheet1", "B1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "C1", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "D1", 30.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "F1", "=A1:A3+B1:D1")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "F1").expect("spill range");
+    assert_eq!(start, parse_a1("F1").unwrap());
+    assert_eq!(end, parse_a1("H3").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "F1"), Value::Number(11.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G1"), Value::Number(21.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "H1"), Value::Number(31.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F2"), Value::Number(12.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G2"), Value::Number(22.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "H2"), Value::Number(32.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "F3"), Value::Number(13.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G3"), Value::Number(23.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "H3"), Value::Number(33.0));
+}
+
+#[test]
 fn row_broadcasting_preserves_column_count() {
     let mut engine = Engine::new();
     engine
