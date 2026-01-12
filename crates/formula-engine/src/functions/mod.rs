@@ -94,6 +94,7 @@ static FORCE_LINK_BUILTINS: [fn(); 17] = [
     builtins_select::__force_link,
     builtins_reference::__force_link,
     builtins_statistical::__force_link,
+    builtins_statistical_distributions::__force_link,
     builtins_text::__force_link,
     financial::__force_link,
 ];

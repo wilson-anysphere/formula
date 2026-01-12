@@ -1347,3 +1347,9 @@ fn confidence_t_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         ))
     })
 }
+
+// On wasm targets, `inventory` registrations can be dropped by the linker if the object file
+// contains no otherwise-referenced symbols. Referencing this function from a `#[used]` table in
+// `functions/mod.rs` ensures the module (and its `inventory::submit!` entries) are retained.
+#[cfg(target_arch = "wasm32")]
+pub(super) fn __force_link() {}
