@@ -82,6 +82,27 @@ describe("KeybindingService keybinding barrier", () => {
     expect(insideExtEvent.defaultPrevented).toBe(false);
     expect(runExtension).toHaveBeenCalledTimes(1);
 
+    // Also cover Shadow DOM retargeting: `Element.closest()` does not cross the shadow
+    // boundary, so the barrier check needs to climb via `ShadowRoot.host`.
+    const shadowHost = document.createElement("div");
+    shadowHost.setAttribute("data-keybinding-barrier", "true");
+    const shadow = shadowHost.attachShadow({ mode: "open" });
+    const shadowInner = document.createElement("button");
+    shadow.appendChild(shadowInner);
+    document.body.appendChild(shadowHost);
+
+    const shadowEvent = makeKeydownEvent({ key: "j", ctrlKey: true, target: shadowInner });
+    const shadowHandled = await service.dispatchKeydown(shadowEvent);
+    expect(shadowHandled).toBe(false);
+    expect(shadowEvent.defaultPrevented).toBe(false);
+    expect(runBuiltin).toHaveBeenCalledTimes(1);
+
+    const shadowExtEvent = makeKeydownEvent({ key: "ArrowDown", target: shadowInner });
+    const shadowExtHandled = await service.dispatchKeydown(shadowExtEvent);
+    expect(shadowExtHandled).toBe(false);
+    expect(shadowExtEvent.defaultPrevented).toBe(false);
+    expect(runExtension).toHaveBeenCalledTimes(1);
+
     // Also ensure the synchronous helper respects the barrier and does not schedule execution.
     const insideSyncEvent = makeKeydownEvent({ key: "j", ctrlKey: true, target: inner });
     const syncHandled = service.handleKeydown(insideSyncEvent);
@@ -98,5 +119,6 @@ describe("KeybindingService keybinding barrier", () => {
     expect(runExtension).toHaveBeenCalledTimes(1);
 
     barrierRoot.remove();
+    shadowHost.remove();
   });
 });

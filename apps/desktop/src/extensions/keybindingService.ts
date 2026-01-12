@@ -62,7 +62,9 @@ function isInsideKeybindingBarrier(target: EventTarget | null): boolean {
   const closest = (target as any).closest;
   if (typeof closest === "function") {
     try {
-      return Boolean(closest.call(target, '[data-keybinding-barrier="true"]'));
+      // NOTE: `closest()` does not cross shadow DOM boundaries. If no match is found,
+      // fall back to manual traversal below so we can climb via `ShadowRoot.host`.
+      if (closest.call(target, '[data-keybinding-barrier="true"]')) return true;
     } catch {
       // ignore and fall back to manual traversal
     }
@@ -73,7 +75,8 @@ function isInsideKeybindingBarrier(target: EventTarget | null): boolean {
   while (node && typeof node === "object") {
     if (node.dataset?.keybindingBarrier === "true") return true;
     if (typeof node.getAttribute === "function" && node.getAttribute("data-keybinding-barrier") === "true") return true;
-    node = node.parentElement ?? node.parentNode ?? null;
+    // Shadow DOM: climb from a ShadowRoot back to its host element.
+    node = node.parentElement ?? node.parentNode ?? node.host ?? null;
   }
   return false;
 }
