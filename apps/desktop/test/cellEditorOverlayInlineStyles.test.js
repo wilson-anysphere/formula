@@ -70,10 +70,17 @@ test("CellEditorOverlay static visibility + z-index are defined in CSS", () => {
   const baseBody = baseRule[1] ?? "";
 
   // Stacking must be handled in CSS (especially for shared-grid mode).
-  assert.ok(
-    /\.cell-editor[^{]*\{[\s\S]*?\bz-index\s*:/.test(css),
-    "Expected .cell-editor styles to set z-index via CSS",
-  );
+  const zIndexMatch = baseBody.match(/\bz-index\s*:\s*([^;]+);?/);
+  assert.ok(zIndexMatch, "Expected .cell-editor styles to set z-index via CSS");
+  const zIndexValue = (zIndexMatch?.[1] ?? "").trim();
+  if (/^\d+$/.test(zIndexValue)) {
+    const parsed = Number.parseInt(zIndexValue, 10);
+    // shared-grid overlay layers go up to z-index 4 (see charts-overlay.css).
+    assert.ok(
+      parsed > 4,
+      `Expected .cell-editor z-index to stay above shared-grid overlay canvases (got ${zIndexValue})`,
+    );
+  }
 
   const baseHidden = /\bdisplay\s*:\s*none\s*;?/.test(baseBody);
   const hiddenRule = css.match(/\.cell-editor[^{]*\[\s*hidden\s*\][^{]*\{([\s\S]*?)\}/);
@@ -92,6 +99,19 @@ test("CellEditorOverlay static visibility + z-index are defined in CSS", () => {
     assert.ok(
       /\bdisplay\s*:\s*(?!none\b)[a-z-]+\s*;?/i.test(openRule[1] ?? ""),
       "Expected .cell-editor--open to set display to a visible value (not none)",
+    );
+  }
+});
+
+test("CellEditorOverlay keeps geometry dynamic via inline styles", () => {
+  const filePath = path.join(__dirname, "..", "src", "editor", "cellEditorOverlay.ts");
+  const content = fs.readFileSync(filePath, "utf8");
+
+  for (const prop of ["left", "top", "width", "height"]) {
+    assert.match(
+      content,
+      new RegExp(`\\.style\\.${prop}\\s*=`),
+      `Expected CellEditorOverlay to keep ${prop} dynamic via inline style assignments`,
     );
   }
 });
