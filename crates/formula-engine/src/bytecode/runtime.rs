@@ -4410,7 +4410,7 @@ fn fn_address(args: &[Value]) -> Value {
     };
 
     let sheet_prefix = if args.len() >= 5 && !matches!(args[4], Value::Missing) {
-        match coerce_to_string(args[4].clone()) {
+        match coerce_to_string(&args[4]) {
             Ok(raw) => {
                 if raw.is_empty() {
                     None
@@ -4663,15 +4663,15 @@ fn format_number_general(n: f64) -> String {
     formula_format::format_value(FmtValue::Number(n), None, &options).text
 }
 
-fn coerce_to_string(v: Value) -> Result<String, ErrorKind> {
+fn coerce_to_string(v: &Value) -> Result<String, ErrorKind> {
     match v {
         Value::Text(s) => Ok(s.to_string()),
         Value::Entity(v) => Ok(v.display.clone()),
         Value::Record(v) => Ok(v.display.clone()),
-        Value::Number(n) => Ok(format_number_general(n)),
-        Value::Bool(b) => Ok(if b { "TRUE" } else { "FALSE" }.to_string()),
+        Value::Number(n) => Ok(format_number_general(*n)),
+        Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
         Value::Empty | Value::Missing => Ok(String::new()),
-        Value::Error(e) => Err(e),
+        Value::Error(e) => Err(*e),
         Value::Lambda(_) => Err(ErrorKind::Value),
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Err(ErrorKind::Value),
     }
@@ -4683,7 +4683,7 @@ fn fn_concat(args: &[Value]) -> Value {
     }
     let mut out = String::new();
     for arg in args {
-        match coerce_to_string(arg.clone()) {
+        match coerce_to_string(arg) {
             Ok(s) => out.push_str(&s),
             Err(e) => return Value::Error(e),
         }
@@ -8275,7 +8275,7 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
 fn coerce_to_string_for_lookup(v: &Value) -> Result<String, ErrorKind> {
     // Use the bytecode runtime's locale-aware coercion (shared with CONCAT/& fixes) so wildcard
     // matching behaves consistently across backends.
-    coerce_to_string(v.clone())
+    coerce_to_string(v)
 }
 
 fn exact_match_in_first_col(grid: &dyn Grid, lookup: &Value, table: ResolvedRange) -> Option<i32> {
