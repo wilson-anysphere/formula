@@ -1,0 +1,196 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`WorkbookContextBuilder > serializes a stable payload snapshot 1`] = `"{
+  "activeSheetId": "Sheet1",
+  "blocks": [
+    {
+      "colHeaders": [
+        "A",
+        "B"
+      ],
+      "kind": "selection",
+      "range": "Sheet1!A1:B3",
+      "rowHeaders": [
+        "1",
+        "2",
+        "3"
+      ],
+      "sheetId": "Sheet1",
+      "values": [
+        [
+          "Region",
+          "Revenue"
+        ],
+        [
+          "North",
+          1000
+        ],
+        [
+          "South",
+          2000
+        ]
+      ]
+    },
+    {
+      "colHeaders": [
+        "A",
+        "B"
+      ],
+      "kind": "sheet_sample",
+      "range": "Sheet1!A1:B3",
+      "rowHeaders": [
+        "1",
+        "2",
+        "3"
+      ],
+      "sheetId": "Sheet1",
+      "values": [
+        [
+          "Region",
+          "Revenue"
+        ],
+        [
+          "North",
+          1000
+        ],
+        [
+          "South",
+          2000
+        ]
+      ]
+    }
+  ],
+  "budget": {
+    "contextWindowTokens": 16000,
+    "maxPromptContextTokens": 2160,
+    "model": "unit-test-model",
+    "mode": "chat",
+    "reserveForOutputTokens": 1600,
+    "usedPromptContextTokens": 0
+  },
+  "namedRanges": [],
+  "retrieval": {
+    "query": "revenue by region",
+    "retrievedChunkIds": [],
+    "retrievedRanges": []
+  },
+  "selection": {
+    "range": "Sheet1!A1:B3",
+    "sheetId": "Sheet1"
+  },
+  "sheets": [
+    {
+      "analyzedRange": {
+        "endCol": 1,
+        "endRow": 2,
+        "startCol": 0,
+        "startRow": 0
+      },
+      "schema": {
+        "dataRegions": [
+          {
+            "columnCount": 2,
+            "hasHeader": true,
+            "headers": [
+              "Region",
+              "Revenue"
+            ],
+            "inferredColumnTypes": [
+              "string",
+              "number"
+            ],
+            "range": "Sheet1!A1:B3",
+            "rowCount": 2
+          }
+        ],
+        "name": "Sheet1",
+        "namedRanges": [],
+        "tables": [
+          {
+            "columns": [
+              {
+                "name": "Region",
+                "sampleValues": [
+                  "North",
+                  "South"
+                ],
+                "type": "string"
+              },
+              {
+                "name": "Revenue",
+                "sampleValues": [
+                  "1000",
+                  "2000"
+                ],
+                "type": "number"
+              }
+            ],
+            "name": "Region1",
+            "range": "Sheet1!A1:B3",
+            "rowCount": 2
+          }
+        ]
+      },
+      "sheetId": "Sheet1"
+    },
+    {
+      "analyzedRange": {
+        "endCol": 0,
+        "endRow": 1,
+        "startCol": 0,
+        "startRow": 0
+      },
+      "schema": {
+        "dataRegions": [
+          {
+            "columnCount": 1,
+            "hasHeader": false,
+            "headers": [
+              "Column1"
+            ],
+            "inferredColumnTypes": [
+              "string"
+            ],
+            "range": "Sheet2!A1:A2",
+            "rowCount": 2
+          }
+        ],
+        "name": "Sheet2",
+        "namedRanges": [],
+        "tables": [
+          {
+            "columns": [
+              {
+                "name": "Column1",
+                "sampleValues": [
+                  "Note",
+                  "Hello"
+                ],
+                "type": "string"
+              }
+            ],
+            "name": "Region1",
+            "range": "Sheet2!A1:A2",
+            "rowCount": 2
+          }
+        ]
+      },
+      "sheetId": "Sheet2"
+    }
+  ],
+  "tables": [
+    {
+      "name": "Region1",
+      "range": "Sheet1!A1:B3",
+      "sheetId": "Sheet1"
+    },
+    {
+      "name": "Region1",
+      "range": "Sheet2!A1:A2",
+      "sheetId": "Sheet2"
+    }
+  ],
+  "version": 1,
+  "workbookId": "wb_snapshot"
+}"`;
+

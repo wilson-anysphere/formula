@@ -31,6 +31,7 @@ import { getDesktopAIAuditStore } from "../audit/auditStore.js";
 import { maybeGetAiCloudDlpOptions } from "../dlp/aiDlp.js";
 import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
 import { getDesktopToolPolicy } from "../toolPolicy.js";
+import { WorkbookContextBuilder } from "../context/WorkbookContextBuilder.js";
 
 export type AiChatAttachment =
   | { type: "range"; reference: string; data?: unknown }
@@ -245,14 +246,25 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     let workbookContext: any;
     try {
       throwIfAborted(signal);
+      const contextBuilder = new WorkbookContextBuilder({
+        workbookId: options.workbookId,
+        documentController: options.documentController,
+        spreadsheet,
+        ragService: contextProvider as any,
+        dlp,
+        mode: "chat",
+        model: options.model,
+        contextWindowTokens,
+        reserveForOutputTokens,
+        tokenEstimator: estimator as any
+      });
+
       workbookContext = await withAbort(
         signal,
-        contextProvider.buildWorkbookContextFromSpreadsheetApi({
-          spreadsheet,
-          workbookId: options.workbookId,
-          query: text,
-          attachments,
-          dlp
+        contextBuilder.build({
+          activeSheetId,
+          focusQuestion: text,
+          attachments
         })
       );
     } catch (error) {

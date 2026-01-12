@@ -257,10 +257,28 @@ function rangeContains(outer, inner) {
  * (named ranges, structured tables). This makes the package usable before the full
  * spreadsheet engine is wired in.
  *
- * @param {{ name: string, values: unknown[][], namedRanges?: NamedRangeSchema[], tables?: { name: string, range: string }[] }} sheet
+ * @param {{
+ *   name: string,
+ *   values: unknown[][],
+ *   /**
+ *    * Optional coordinate origin (0-based) for the provided `values` matrix.
+ *    *
+ *    * When `values` is a cropped window of a larger sheet (e.g. a capped used-range
+ *    * sample), `origin` lets schema extraction produce correct absolute A1 ranges.
+ *    *\/
+ *   origin?: { row: number, col: number },
+ *   namedRanges?: NamedRangeSchema[],
+ *   tables?: { name: string, range: string }[]
+ * }} sheet
  * @returns {SheetSchema}
  */
 export function extractSheetSchema(sheet) {
+  const origin = sheet && typeof sheet === "object" && sheet.origin && typeof sheet.origin === "object"
+    ? {
+        row: Number.isInteger(sheet.origin.row) && sheet.origin.row >= 0 ? sheet.origin.row : 0,
+        col: Number.isInteger(sheet.origin.col) && sheet.origin.col >= 0 ? sheet.origin.col : 0,
+      }
+    : { row: 0, col: 0 };
   const regions = detectDataRegions(sheet.values);
 
   /** @type {DataRegionSchema[]} */
@@ -274,7 +292,13 @@ export function extractSheetSchema(sheet) {
     const region = regions[i];
     const normalized = normalizeRange(region);
     const analyzed = analyzeRegion(sheet.values, normalized);
-    const range = rangeToA1({ ...normalized, sheetName: sheet.name });
+    const rect = {
+      startRow: normalized.startRow + origin.row,
+      endRow: normalized.endRow + origin.row,
+      startCol: normalized.startCol + origin.col,
+      endCol: normalized.endCol + origin.col,
+    };
+    const range = rangeToA1({ ...rect, sheetName: sheet.name });
 
     dataRegions.push({
       range,
@@ -291,7 +315,9 @@ export function extractSheetSchema(sheet) {
       columns: analyzed.columns,
       rowCount: analyzed.rowCount,
     });
-    implicitTableRects.push(normalized);
+    // Track the rect in absolute sheet coordinates so explicit table metadata (A1 ranges)
+    // can be reconciled even when `values` is a cropped window (origin offset).
+    implicitTableRects.push(rect);
   }
 
   /** @type {{ name: string, range: string, rect: { startRow: number, startCol: number, endRow: number, endCol: number } }[]} */
@@ -350,7 +376,16 @@ export function extractSheetSchema(sheet) {
     tableEntries.push(...implicitUncovered);
 
     for (const explicit of explicitDefs) {
-      const analyzed = analyzeRegion(sheet.values, explicit.rect);
+      const rect =
+        origin.row === 0 && origin.col === 0
+          ? explicit.rect
+          : {
+              startRow: explicit.rect.startRow - origin.row,
+              endRow: explicit.rect.endRow - origin.row,
+              startCol: explicit.rect.startCol - origin.col,
+              endCol: explicit.rect.endCol - origin.col,
+            };
+      const analyzed = analyzeRegion(sheet.values, rect);
       tableEntries.push({
         table: {
           name: explicit.name,

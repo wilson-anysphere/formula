@@ -94,4 +94,20 @@ describe("extractSheetSchema", () => {
     expect(schema.tables.map((t: any) => t.name)).toEqual(["FirstTable", "Region1"]);
     expect(schema.tables.map((t: any) => t.range)).toEqual(["Sheet1!A1:A2", "Sheet1!D1:D2"]);
   });
+
+  it("offsets A1 ranges when values are provided as a cropped window (origin)", () => {
+    const sheet = {
+      name: "Sheet1",
+      // This 2x2 matrix represents D11:E12 in the source sheet (0-based origin at row 10, col 3).
+      origin: { row: 10, col: 3 },
+      values: [
+        ["Header", "Value"],
+        ["A", 1]
+      ]
+    };
+
+    const schema = extractSheetSchema(sheet);
+    expect(schema.dataRegions[0].range).toBe("Sheet1!D11:E12");
+    expect(schema.tables[0].range).toBe("Sheet1!D11:E12");
+  });
 });

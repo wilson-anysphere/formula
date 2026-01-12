@@ -40,7 +40,13 @@ export function detectDataRegions(values: unknown[][]): Array<{ startRow: number
 export function extractSheetSchema(sheet: {
   name: string;
   values: unknown[][];
+  /**
+   * Optional coordinate origin (0-based) for the provided `values` matrix.
+   *
+   * When `values` is a cropped window of a larger sheet (e.g. a capped used-range
+   * sample), `origin` lets schema extraction produce correct absolute A1 ranges.
+   */
+  origin?: { row: number; col: number };
   namedRanges?: NamedRangeSchema[];
   tables?: { name: string; range: string }[];
 }): SheetSchema;
-

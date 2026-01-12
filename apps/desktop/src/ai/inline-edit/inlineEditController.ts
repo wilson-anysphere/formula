@@ -2,7 +2,7 @@ import { DocumentController } from "../../document/documentController.js";
 import { rangeToA1 } from "../../selection/a1";
 import type { Range } from "../../selection/types";
 
-import { ToolExecutor, PreviewEngine, runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/index.js";
+import { PreviewEngine, runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/index.js";
 import { SpreadsheetLLMToolExecutor } from "../../../../../packages/ai-tools/src/llm/integration.js";
 
 import { createLLMClient } from "../../../../../packages/llm/src/createLLMClient.js";
@@ -24,6 +24,7 @@ import type { TokenEstimator } from "../../../../../packages/ai-context/src/toke
 import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../packages/ai-context/src/tokenBudget.js";
 import { trimMessagesToBudget } from "../../../../../packages/ai-context/src/trimMessagesToBudget.js";
 import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
+import { WorkbookContextBuilder } from "../context/WorkbookContextBuilder.js";
 
 export interface InlineEditLLMClient {
   chat: (request: any) => Promise<any>;
@@ -156,27 +157,34 @@ export class InlineEditController {
 
       const baseApi = new DocumentControllerSpreadsheetApi(this.options.document);
       const api = createAbortableSpreadsheetApi(baseApi, signal);
-      const executor = new ToolExecutor(api, { default_sheet: params.sheetId, dlp });
 
       const selectionRef = `${params.sheetId}!${rangeToA1(params.range)}`;
-      const sampleRef = buildSampleRange(params.sheetId, params.range, { maxRows: 10, maxCols: 10 });
 
-      this.overlay.setRunning("Reading selection…");
+      this.overlay.setRunning("Building context…");
       throwIfAborted(signal);
-      const sampleResult = await executor.execute({
-        name: "read_range",
-        parameters: { range: sampleRef, include_formulas: false }
+      const contextBuilder = new WorkbookContextBuilder({
+        workbookId,
+        documentController: this.options.document,
+        spreadsheet: api,
+        ragService: null,
+        dlp,
+        mode: "inline_edit",
+        model,
+        contextWindowTokens,
+        reserveForOutputTokens,
+        tokenEstimator: estimator as any
+      });
+      const ctx = await contextBuilder.build({
+        activeSheetId: params.sheetId,
+        selectedRange: { sheetId: params.sheetId, range: params.range },
+        focusQuestion: params.prompt
       });
       throwIfAborted(signal);
-
-      const sampleValues =
-        sampleResult.ok && sampleResult.data && "values" in sampleResult.data ? (sampleResult.data as any).values : null;
 
       const messages = buildMessages({
         sheetId: params.sheetId,
         selection: selectionRef,
-        sampleRange: sampleRef,
-        sampleValues,
+        workbookContext: ctx.promptContext,
         prompt: params.prompt
       });
 
@@ -393,8 +401,7 @@ function createAbortableSpreadsheetApi(api: any, signal: AbortSignal): any {
 function buildMessages(options: {
   sheetId: string;
   selection: string;
-  sampleRange: string;
-  sampleValues: unknown;
+  workbookContext: string;
   prompt: string;
 }): Array<{ role: "system" | "user"; content: string }> {
   const system = [
@@ -412,8 +419,9 @@ function buildMessages(options: {
   const user = [
     `Sheet: ${options.sheetId}`,
     `Selection: ${options.selection}`,
-    `Selection sample (${options.sampleRange}):`,
-    options.sampleValues != null ? JSON.stringify(options.sampleValues, null, 2) : "(unavailable)",
+    "",
+    "Workbook context:",
+    options.workbookContext ? options.workbookContext : "(none)",
     "",
     `User request: ${options.prompt}`
   ].join("\n");
@@ -422,12 +430,4 @@ function buildMessages(options: {
     { role: "system", content: system },
     { role: "user", content: user }
   ];
-}
-
-function buildSampleRange(sheetId: string, range: Range, limits: { maxRows: number; maxCols: number }): string {
-  const rows = Math.max(1, range.endRow - range.startRow + 1);
-  const cols = Math.max(1, range.endCol - range.startCol + 1);
-  const endRow = range.startRow + Math.min(rows, limits.maxRows) - 1;
-  const endCol = range.startCol + Math.min(cols, limits.maxCols) - 1;
-  return `${sheetId}!${rangeToA1({ startRow: range.startRow, endRow, startCol: range.startCol, endCol })}`;
 }

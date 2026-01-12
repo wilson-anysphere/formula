@@ -20,6 +20,7 @@ import { getDesktopToolPolicy } from "../toolPolicy.js";
 import { createDesktopRagService, type DesktopRagService, type DesktopRagServiceOptions } from "../rag/ragService.js";
 import { getDesktopAIAuditStore } from "../audit/auditStore.js";
 import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
+import { WorkbookContextBuilder } from "../context/WorkbookContextBuilder.js";
 
 export interface AgentApprovalRequest {
   call: ToolCall;
@@ -296,13 +297,24 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       ].join("\n");
     }
 
+    const contextBuilder = new WorkbookContextBuilder({
+      workbookId: params.workbookId,
+      documentController: params.documentController,
+      spreadsheet,
+      ragService,
+      dlp,
+      mode: "agent",
+      model: modelName,
+      contextWindowTokens,
+      reserveForOutputTokens,
+      tokenEstimator: estimator as any
+    });
+
     async function refreshSystemMessage(targetMessages: any[]): Promise<void> {
       const ctx = await guard(
-        ragService.buildWorkbookContextFromSpreadsheetApi({
-          spreadsheet,
-          workbookId: params.workbookId,
-          query: goal,
-          dlp
+        contextBuilder.build({
+          activeSheetId: defaultSheetId,
+          focusQuestion: goal
         })
       );
       if (!targetMessages.length || targetMessages[0]?.role !== "system") {
