@@ -260,7 +260,10 @@ describe("updaterUi (events)", () => {
     // microtasks so async window show/focus completes before we assert.
     await flushMicrotasks();
 
-    const toasts = Array.from(document.querySelectorAll('[data-testid="toast"]')).map((el) => el.textContent ?? "");
+    const toastEls = Array.from(document.querySelectorAll('[data-testid="toast"]'));
+    expect(toastEls).toHaveLength(3);
+
+    const toasts = toastEls.map((el) => el.textContent ?? "");
     expect(toasts.join("\n")).toContain(t("updater.checking"));
     expect(toasts.join("\n")).toContain(t("updater.upToDate"));
     expect(toasts.join("\n")).toContain("network down");
