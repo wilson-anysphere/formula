@@ -2524,6 +2524,75 @@ mod tests {
             "expected xmlns:r to be added to root when inserting r:id attributes, got:\n{updated_str}"
         );
     }
+
+    #[test]
+    fn inserts_chartsheets_preserving_relationship_prefix() {
+        let content_types = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+</Types>"#;
+
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:sheets>
+    <x:sheet name="Sheet1" sheetId="1" rel:id="rId1"/>
+  </x:sheets>
+</x:workbook>"#;
+
+        let mut pkg = build_package(&[
+            ("[Content_Types].xml", content_types),
+            ("xl/workbook.xml", workbook_xml),
+        ]);
+
+        let mut chart_sheets = BTreeMap::new();
+        chart_sheets.insert(
+            "Chart1".to_string(),
+            PreservedChartSheet {
+                sheet_index: 1,
+                sheet_id: Some(2),
+                rel_id: "rId2".to_string(),
+                rel_target: "chartsheets/sheet1.xml".to_string(),
+                state: None,
+                part_name: "xl/chartsheets/sheet1.xml".to_string(),
+            },
+        );
+
+        let preserved = PreservedDrawingParts {
+            content_types_xml: content_types.to_vec(),
+            parts: BTreeMap::new(),
+            sheet_drawings: BTreeMap::new(),
+            sheet_pictures: BTreeMap::new(),
+            sheet_ole_objects: BTreeMap::new(),
+            sheet_controls: BTreeMap::new(),
+            sheet_drawing_hfs: BTreeMap::new(),
+            chart_sheets,
+        };
+
+        pkg.apply_preserved_drawing_parts(&preserved)
+            .expect("apply preserved parts");
+
+        let updated = std::str::from_utf8(
+            pkg.part("xl/workbook.xml")
+                .expect("workbook.xml should exist after patch"),
+        )
+        .expect("workbook.xml should be utf-8");
+
+        roxmltree::Document::parse(updated).expect("output workbook.xml should be well-formed");
+        assert!(
+            updated.contains("<x:sheet name=\"Chart1\" sheetId=\"2\" rel:id=\""),
+            "expected inserted chartsheet entry to use rel:id, got:\n{updated}"
+        );
+        assert!(
+            !updated.contains("r:id="),
+            "should not introduce r:id when workbook already uses rel:id, got:\n{updated}"
+        );
+        assert!(
+            !updated.contains("xmlns:r="),
+            "should not introduce xmlns:r when workbook already declares rel namespace, got:\n{updated}"
+        );
+    }
 }
 
 fn root_start_has_r_namespace(
@@ -2571,6 +2640,183 @@ fn element_prefix_at(xml: &str, element_start: usize) -> Option<&str> {
     qname.split_once(':').map(|(p, _)| p)
 }
 
+fn workbook_relationship_id_prefix(
+    workbook_xml: &str,
+) -> Result<(String, bool), ChartExtractionError> {
+    // Prefer detecting the relationships prefix from the workbook root `xmlns:*` declarations so we
+    // preserve the workbook's prefix style (e.g. `rel:id` instead of forcing `r:id`).
+    let mut reader = XmlReader::from_str(workbook_xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut rel_prefix_from_root: Option<String> = None;
+    let mut root_xmlns: HashMap<String, String> = HashMap::new();
+
+    loop {
+        match reader.read_event_into(&mut buf).map_err(|e| {
+            ChartExtractionError::XmlStructure(format!("failed to parse workbook.xml: {e}"))
+        })? {
+            Event::Start(e) | Event::Empty(e) => {
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr.map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "failed to parse workbook.xml root attribute: {e}"
+                        ))
+                    })?;
+                    let key = attr.key.as_ref();
+
+                    if key == b"xmlns" {
+                        // Default namespace declaration. Keep it for completeness even though it
+                        // can't be used for namespaced attributes.
+                        let value = attr
+                            .unescape_value()
+                            .map_err(|e| {
+                                ChartExtractionError::XmlStructure(format!(
+                                    "failed to parse workbook.xml root attribute value: {e}"
+                                ))
+                            })?
+                            .into_owned();
+                        root_xmlns.insert(String::new(), value);
+                        continue;
+                    }
+
+                    let Some(prefix_bytes) = key.strip_prefix(b"xmlns:") else {
+                        continue;
+                    };
+                    let Ok(prefix) = std::str::from_utf8(prefix_bytes) else {
+                        continue;
+                    };
+                    let value = attr
+                        .unescape_value()
+                        .map_err(|e| {
+                            ChartExtractionError::XmlStructure(format!(
+                                "failed to parse workbook.xml root attribute value: {e}"
+                            ))
+                        })?
+                        .into_owned();
+
+                    // Record the first prefix bound to the relationships namespace.
+                    if rel_prefix_from_root.is_none() && value == REL_NS {
+                        rel_prefix_from_root = Some(prefix.to_string());
+                    }
+                    root_xmlns.insert(prefix.to_string(), value);
+                }
+                break;
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    if let Some(prefix) = rel_prefix_from_root {
+        return Ok((prefix, true));
+    }
+
+    // Fallback: scan existing sheet attributes to infer the relationship prefix (`*:id`) used in
+    // the workbook when it isn't declared at the root.
+    let mut reader = XmlReader::from_str(workbook_xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut inferred: Option<String> = None;
+    loop {
+        match reader.read_event_into(&mut buf).map_err(|e| {
+            ChartExtractionError::XmlStructure(format!("failed to parse workbook.xml: {e}"))
+        })? {
+            Event::Start(e) | Event::Empty(e)
+                if crate::openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"sheet") =>
+            {
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr.map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "failed to parse workbook.xml sheet attribute: {e}"
+                        ))
+                    })?;
+                    let key = attr.key.as_ref();
+                    if crate::openxml::local_name(key).eq_ignore_ascii_case(b"id") {
+                        if let Some(idx) = key.iter().position(|b| *b == b':') {
+                            if idx > 0 {
+                                if let Ok(prefix) = std::str::from_utf8(&key[..idx]) {
+                                    inferred = Some(prefix.to_string());
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if inferred.is_some() {
+                    break;
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    if let Some(prefix) = inferred {
+        // Only use the inferred prefix if it is not already declared on the workbook root. If the
+        // root already declares this prefix then it must be bound to a different URI (since we
+        // didn't find any root mapping to `REL_NS`), and using it would make the inserted
+        // `prefix:id` attribute point at the wrong namespace.
+        if !root_xmlns.contains_key(&prefix) {
+            return Ok((prefix, false));
+        }
+    }
+
+    // Default to `r` (Excel's conventional relationship prefix). If `r` is already declared on the
+    // root, pick a variant (`r1`, `r2`, ...) that is not declared so we can safely inject it.
+    let mut prefix = "r".to_string();
+    if root_xmlns.contains_key(&prefix) {
+        let mut counter = 1u32;
+        loop {
+            let candidate = format!("r{counter}");
+            if !root_xmlns.contains_key(&candidate) {
+                prefix = candidate;
+                break;
+            }
+            counter += 1;
+        }
+    }
+    Ok((prefix, false))
+}
+
+fn root_start_has_namespace_prefix(
+    xml: &str,
+    root_start: usize,
+    prefix: &str,
+    part_name: &str,
+) -> Result<bool, ChartExtractionError> {
+    let tag_end_rel = xml[root_start..].find('>').ok_or_else(|| {
+        ChartExtractionError::XmlStructure(format!("{part_name}: invalid root start tag"))
+    })?;
+    let tag_end = root_start + tag_end_rel;
+    Ok(xml[root_start..=tag_end].contains(&format!("xmlns:{prefix}=")))
+}
+
+fn add_namespace_prefix_to_root(
+    xml: &str,
+    root_start: usize,
+    prefix: &str,
+    uri: &str,
+    part_name: &str,
+) -> Result<String, ChartExtractionError> {
+    let tag_end_rel = xml[root_start..].find('>').ok_or_else(|| {
+        ChartExtractionError::XmlStructure(format!("{part_name}: invalid root start tag"))
+    })?;
+    let tag_end = root_start + tag_end_rel;
+    let start_tag = &xml[root_start..=tag_end];
+    let trimmed = start_tag.trim_end();
+    let insert_pos = if trimmed.ends_with("/>") {
+        root_start + trimmed.len() - 2
+    } else {
+        tag_end
+    };
+
+    let mut out = xml.to_string();
+    out.insert_str(insert_pos, &format!(" xmlns:{prefix}=\"{uri}\""));
+    Ok(out)
+}
+
 fn ensure_workbook_has_chartsheets(
     pkg: &mut XlsxPackage,
     chart_sheets: &BTreeMap<String, PreservedChartSheet>,
@@ -2591,6 +2837,8 @@ fn ensure_workbook_has_chartsheets(
     let doc = Document::parse(&workbook_xml)
         .map_err(|e| ChartExtractionError::XmlParse(workbook_part.to_string(), e))?;
     let root_start = doc.root_element().range().start;
+    let (rel_id_prefix, rel_prefix_declared_on_root) =
+        workbook_relationship_id_prefix(&workbook_xml)?;
     let sheets_node = doc
         .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "sheets")
@@ -2646,6 +2894,7 @@ fn ensure_workbook_has_chartsheets(
     )?;
     pkg.set_part(rels_part, updated_rels);
 
+    let rel_id_attr = format!("{rel_id_prefix}:id");
     let mut insertion = String::new();
     for (name, sheet) in to_insert {
         let desired_sheet_id = sheet.sheet_id.filter(|id| *id > 0);
@@ -2668,7 +2917,7 @@ fn ensure_workbook_has_chartsheets(
             .unwrap_or_else(|| sheet.rel_id.clone());
 
         insertion.push_str(&format!(
-            "    <{sheet_tag} name=\"{}\" sheetId=\"{}\" r:id=\"{}\"",
+            "    <{sheet_tag} name=\"{}\" sheetId=\"{}\" {rel_id_attr}=\"{}\"",
             xml_escape(name),
             sheet_id,
             xml_escape(&rel_id)
@@ -2686,11 +2935,21 @@ fn ensure_workbook_has_chartsheets(
     let mut workbook_xml_updated = workbook_xml.clone();
     workbook_xml_updated.insert_str(sheets_end, &insertion);
 
-    if workbook_xml_updated.contains("r:id")
-        && !root_start_has_r_namespace(&workbook_xml_updated, root_start, workbook_part)?
+    if !rel_prefix_declared_on_root
+        && !root_start_has_namespace_prefix(
+            &workbook_xml_updated,
+            root_start,
+            &rel_id_prefix,
+            workbook_part,
+        )?
     {
-        workbook_xml_updated =
-            add_r_namespace_to_root(&workbook_xml_updated, root_start, workbook_part)?;
+        workbook_xml_updated = add_namespace_prefix_to_root(
+            &workbook_xml_updated,
+            root_start,
+            &rel_id_prefix,
+            REL_NS,
+            workbook_part,
+        )?;
     }
 
     pkg.set_part(workbook_part, workbook_xml_updated.into_bytes());
