@@ -1725,6 +1725,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
         : {
             // In web/demo builds we do not have access to the desktop print/export backend.
             "pageLayout.pageSetup.pageSetupDialog": true,
+            "pageLayout.pageSetup.printArea": true,
             "pageLayout.printArea.setPrintArea": true,
             "pageLayout.printArea.clearPrintArea": true,
             "pageLayout.export.exportPdf": true,
