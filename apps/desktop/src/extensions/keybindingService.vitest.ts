@@ -100,6 +100,8 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+cmd+c", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealPasteSpecial", key: "ctrl+shift+v", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealPasteSpecial", key: "ctrl+cmd+shift+v", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealCopy", key: "cmd+h", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+cmd+h", mac: null, when: null },
     ]);
 
     const event = makeKeydownEvent({ key: "c", ctrlKey: true });
@@ -125,6 +127,20 @@ describe("KeybindingService", () => {
     const handled4 = await service.dispatchKeydown(event4);
     expect(handled4).toBe(false);
     expect(event4.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    // macOS system shortcut: Hide (Cmd+H) should never be claimable by extensions.
+    const event5 = makeKeydownEvent({ key: "h", metaKey: true });
+    const handled5 = await service.dispatchKeydown(event5);
+    expect(handled5).toBe(false);
+    expect(event5.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    // Some environments emit both Ctrl+Meta for a single chord.
+    const event6 = makeKeydownEvent({ key: "h", ctrlKey: true, metaKey: true });
+    const handled6 = await service.dispatchKeydown(event6);
+    expect(handled6).toBe(false);
+    expect(event6.defaultPrevented).toBe(false);
     expect(extRun).not.toHaveBeenCalled();
   });
 

@@ -64,6 +64,10 @@ const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   "cmd+shift+p",
   // Some keyboards emit both ctrl+meta on the same chord.
   "ctrl+cmd+shift+p",
+  // macOS system shortcut: Hide (Cmd+H). Extensions should never be able to claim it.
+  "cmd+h",
+  // Some keyboards emit both ctrl+meta on the same chord.
+  "ctrl+cmd+h",
 ];
 
 export class KeybindingService {
