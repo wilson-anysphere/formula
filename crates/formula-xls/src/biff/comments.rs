@@ -818,7 +818,11 @@ fn parse_txo_cch_text(header: &[u8], max_chars: usize) -> Option<usize> {
     // If the spec-defined field is zero but we have continuation bytes, the header may be
     // malformed or use a non-standard layout. Fall back to scanning a few other offsets for a
     // plausible length.
-    for off in [4usize, 8usize, 10usize, 12usize] {
+    //
+    // Note: we intentionally *exclude* offset 12 because that's the spec-defined `cbRuns` field.
+    // Some files report `cchText=0` while still setting `cbRuns=4`; treating `cbRuns` as an
+    // alternate text length would incorrectly truncate the recovered comment text.
+    for off in [4usize, 8usize, 10usize] {
         if header.len() < off + 2 {
             continue;
         }
@@ -1875,6 +1879,28 @@ mod tests {
             obj_with_id(1),
             txo_with_cch_text(0),
             continue_text_ascii("Hello"),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, .. } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
+    }
+
+    #[test]
+    fn parses_txo_text_when_cchtext_is_zero_even_when_cb_runs_is_present() {
+        // Some files report `cchText=0` but still set `cbRuns` (typically 4). Ensure we don't
+        // accidentally treat `cbRuns` as an alternate text-length field and truncate the text.
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text_and_cb_runs(0, 4),
+            continue_text_ascii("Hello"),
+            // Formatting runs CONTINUE payload (dummy bytes, no leading flags byte).
+            record(records::RECORD_CONTINUE, &[0x00u8; 4]),
             eof(),
         ]
         .concat();
