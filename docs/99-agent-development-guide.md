@@ -244,6 +244,8 @@ Note: `apps/desktop` and `apps/web` wrap Playwright via:
 - `apps/web/scripts/run-playwright.mjs`
 
 These wrappers strip a single `--` delimiter for compatibility. Other scripts may not.
+They also resolve `playwright` via the package’s local `node_modules/.bin` and run with a stable
+package-root `cwd`, so `node apps/*/scripts/run-playwright.mjs ...` works reliably outside pnpm.
 
 Prefer:
 
