@@ -1322,6 +1322,75 @@ mod tests {
     }
 
     #[test]
+    fn vm_index_infers_one_based_metadata_offset_when_sheet_uses_vm_zero() {
+        // Build a minimal package where:
+        // - `xl/metadata.xml` uses the structured `metadataTypes`/`futureMetadata` layout, which
+        //   yields a **1-based** vm -> rich value mapping.
+        // - the worksheet uses `vm="0"` (observed in the wild for some producers).
+        //
+        // `RichDataVmIndex` should detect that mismatch and apply an offset so `resolve_vm(0)`
+        // successfully resolves a media target.
+        let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" vm="0"/>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+        let metadata_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+  <futureMetadata name="XLRICHVALUE" count="1">
+    <bk>
+      <xlrd:rvb i="0"/>
+    </bk>
+  </futureMetadata>
+  <valueMetadata count="1">
+    <bk>
+      <!-- `t=\"1\"` selects the first metadataType entry using 1-based indexing. -->
+      <rc t="1" v="0"/>
+    </bk>
+  </valueMetadata>
+</metadata>"#;
+
+        let rich_value_rel_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvRel xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"
+       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rels>
+    <rel r:id="rId1"/>
+  </rels>
+</rvRel>"#;
+
+        let rich_value_rel_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>"#;
+
+        let pkg = build_package(&[
+            ("xl/worksheets/sheet1.xml", sheet_xml),
+            ("xl/metadata.xml", metadata_xml),
+            ("xl/richData/richValueRel.xml", rich_value_rel_xml),
+            ("xl/richData/_rels/richValueRel.xml.rels", rich_value_rel_rels),
+        ]);
+
+        let index = RichDataVmIndex::build(&pkg).expect("build vm index");
+        let resolved = index.resolve_vm(0);
+        assert_eq!(
+            resolved,
+            RichDataVmResolution {
+                rich_value_index: Some(0),
+                rel_index: Some(0),
+                target_part: Some("xl/media/image1.png".to_string()),
+            }
+        );
+    }
+
+    #[test]
     fn extracts_rich_cell_image_with_non_r_prefix_in_rich_value_rel() {
         let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
