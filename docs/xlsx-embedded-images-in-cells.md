@@ -209,7 +209,8 @@ The following overrides are required for the additional parts involved in this s
 
 ## 8) Important: **no `xl/cellimages.xml`** (for Place in Cell)
 
-For the verified “Place in Cell” scenario above, Excel/rust_xlsxwriter **does not** create or reference `xl/cellimages.xml`.
+For the verified “Place in Cell” scenario above, Excel/rust_xlsxwriter **does not** create or reference
+`xl/cellImages.xml` (or the lowercase variant `xl/cellimages.xml`).
 
 Instead, it uses:
 
@@ -220,4 +221,3 @@ Instead, it uses:
 Open question:
 
 * Excel has multiple image-related features (floating drawings, background images, legacy objects, the `IMAGE()` function, “data types”, etc.). It is still possible that **other** Excel scenarios use `xl/cellimages.xml` or additional parts. If/when we encounter such files in the corpus, we should extend this document with concrete samples.
-

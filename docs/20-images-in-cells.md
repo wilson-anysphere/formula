@@ -114,8 +114,13 @@ variant shapes are documented further below.
   a lightweight reference-only element).
 - Whether Excel consistently uses a single relationship `Type` URI (and whether the relationship is
   always on `xl/workbook.xml.rels` vs sometimes worksheet-level).
-- The exact “cell → image” mapping mechanism (likely via `vm`/`metadata.xml` + `xl/richData/*`, but
-  needs confirmation from a real Excel-generated file).
+- The exact “cell → image” mapping mechanism across **all** Excel scenarios.
+  - Confirmed for a rust_xlsxwriter-generated **“Place in Cell”** workbook (used for schema verification in this repo):
+    - worksheet cell is `t="e"` with cached `#VALUE!` and `vm="1"`
+    - image bytes are resolved via `xl/metadata.xml` + `xl/richData/rd*` + `xl/richData/richValueRel.xml(.rels)` → `xl/media/*`
+    - no `xl/cellImages.xml`/`xl/cellimages.xml` part is used in that case
+    - see: [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md)
+  - Still an open question for real Excel-generated `IMAGE()` results and other producers (where `xl/cellImages*.xml` may appear).
 
 #### Parts
 

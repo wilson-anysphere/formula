@@ -111,6 +111,12 @@ And the workbook relationships include versioned Microsoft relationship types (p
 
 Treat these as equivalent to the `richValue*` tables for the purposes of “images in cell” round-trip.
 
+Concrete schema details for the rust_xlsxwriter “Place in Cell” file (including the exact worksheet cell
+encoding `t="e"`/`#VALUE!`, the `_localImage` rich value structure keys, `CalcOrigin` ordering/values, and
+the exact relationship/content-type URIs) are documented here:
+
+* [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md)
+
 ### Roles (high level)
 
 | Part | Purpose |

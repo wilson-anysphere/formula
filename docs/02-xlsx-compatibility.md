@@ -9,6 +9,7 @@ Perfect XLSX compatibility is the foundation of user trust. Users must be confid
 - [20-xlsx-rich-data.md](./20-xlsx-rich-data.md) — Excel `richData` / rich values (including “image in cell”; naming varies: `richValue*` vs `rdrichvalue*`)
 - [20-images-in-cells.md](./20-images-in-cells.md) — Excel “Images in Cell” (`IMAGE()` / “Place in Cell”) packaging + schema notes
 - [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) — RichData (`richValue*` / `rdrichvalue*`) tables used by images-in-cells
+- [xlsx-embedded-images-in-cells.md](./xlsx-embedded-images-in-cells.md) — confirmed “Place in Cell” chain (cell `t="e"`/`#VALUE!` + `metadata.xml` + `xl/richData/rd*` + `richValueRel` → `xl/media/*`)
 
 ---
 
