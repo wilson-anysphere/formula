@@ -356,6 +356,23 @@ fn zip_entry_names_are_normalized_for_diffing() {
 }
 
 #[test]
+fn workbook_archive_errors_on_duplicate_parts_after_normalization() {
+    let zip = zip_bytes(&[
+        ("xl/calcChain.xml", br#"<calcChain/>"#),
+        (r"xl\\calcChain.xml", br#"<calcChain/>"#),
+    ]);
+
+    match WorkbookArchive::from_bytes(&zip) {
+        Ok(_) => panic!("expected WorkbookArchive::from_bytes to fail due to duplicate parts"),
+        Err(err) => assert!(
+            err.to_string()
+                .contains("duplicate part name after normalization"),
+            "unexpected error: {err}"
+        ),
+    }
+}
+
+#[test]
 fn ignore_glob_suppresses_calcchain_related_plumbing_diffs() {
     let expected_zip = zip_bytes(&[
         (
