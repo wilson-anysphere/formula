@@ -7,6 +7,10 @@ const net = require("node:net");
 
 const { ExtensionHost } = require("../src");
 
+// These sandbox tests start worker threads and may run under heavy CI load. Keep the tests
+// focused on sandbox correctness (blocked escape hatches) rather than strict 5s SLAs.
+const SANDBOX_TEST_TIMEOUT_MS = 20_000;
+
 async function writeExtension(dir, { name, publisher, main, activateBody }) {
   await fs.mkdir(dir, { recursive: true });
 
@@ -54,9 +58,8 @@ test("sandbox: blocks dynamic import('node:fs/promises')", async (t) => {
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    // Worker startup can be slow under heavy CI load; keep this security test focused on
-    // correctness (dynamic import is rejected) rather than the default 5s activation SLA.
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: SANDBOX_TEST_TIMEOUT_MS,
+    commandTimeoutMs: SANDBOX_TEST_TIMEOUT_MS,
     permissionPrompt: async () => true
   });
 
@@ -87,7 +90,8 @@ test("sandbox: blocks process.binding('fs')", async (t) => {
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: SANDBOX_TEST_TIMEOUT_MS,
+    commandTimeoutMs: SANDBOX_TEST_TIMEOUT_MS,
     permissionPrompt: async () => true
   });
 
@@ -115,7 +119,8 @@ test("sandbox: blocks dynamic import('node:http2')", async (t) => {
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: SANDBOX_TEST_TIMEOUT_MS,
+    commandTimeoutMs: SANDBOX_TEST_TIMEOUT_MS,
     permissionPrompt: async () => true
   });
 
@@ -194,7 +199,8 @@ test("sandbox: WebSocket events cannot be used as a vm escape hatch", async (t) 
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: SANDBOX_TEST_TIMEOUT_MS,
+    commandTimeoutMs: SANDBOX_TEST_TIMEOUT_MS,
     permissionPrompt: async () => true
   });
 
@@ -259,7 +265,8 @@ test("sandbox: blocks Error.prepareStackTrace CallSite escape", async (t) => {
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: SANDBOX_TEST_TIMEOUT_MS,
+    commandTimeoutMs: SANDBOX_TEST_TIMEOUT_MS,
     permissionPrompt: async () => true
   });
 
@@ -325,7 +332,8 @@ test("sandbox: blocks arguments.callee.caller escape", async (t) => {
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: SANDBOX_TEST_TIMEOUT_MS,
+    commandTimeoutMs: SANDBOX_TEST_TIMEOUT_MS,
     permissionPrompt: async () => true
   });
 
@@ -382,7 +390,8 @@ test("sandbox: does not treat obj.import(...) as dynamic import", async (t) => {
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    activationTimeoutMs: 20_000,
+    activationTimeoutMs: SANDBOX_TEST_TIMEOUT_MS,
+    commandTimeoutMs: SANDBOX_TEST_TIMEOUT_MS,
     permissionPrompt: async () => true
   });
 
