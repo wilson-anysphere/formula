@@ -2976,7 +2976,8 @@ export class SpreadsheetApp {
    * Returns true if the active cell currently has at least one comment thread.
    */
   activeCellHasComment(): boolean {
-    return this.commentCells.has(cellToA1(this.selection.active));
+    const cell = this.selection.active;
+    return this.commentMetaByCoord.has(cell.row * 16_384 + cell.col);
   }
 
   toggleCommentsPanel(): void {
