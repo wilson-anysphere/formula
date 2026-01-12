@@ -57,13 +57,15 @@ fn run() -> Result<(), String> {
 
     // Spec note (important):
     //
-    // For Office-produced VBA signatures, the binding digest bytes embedded in Authenticode
-    // (`SpcIndirectDataContent` -> `DigestInfo.digest`) are always a 16-byte MD5 per MS-OSHARED §4.3,
-    // even when the `DigestInfo.digestAlgorithm.algorithm` OID indicates SHA-256.
+    // - For legacy signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`), Office
+    //   uses a 16-byte MD5 binding digest per MS-OSHARED §4.3 even when
+    //   `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256.
+    // - For the v3 `\x05DigitalSignatureExt` stream, MS-OVBA defines the binding digest as:
+    //   `ContentsHashV3 = SHA-256(ProjectNormalizedData)`.
     //
     // This tool is a debugging helper that prints MD5/SHA-256 digests over the repo's
-    // `project_normalized_data_v3` transcript for comparison/testing. SHA-256 output is legacy/test
-    // and is not the spec-correct VBA binding value.
+    // v3 `project_normalized_data_v3` transcript. SHA-256 output corresponds to the spec-correct
+    // `ContentsHashV3`; MD5 output is provided for experimentation/debugging.
     let digest_md5 = {
         use md5::Digest as _;
         md5::Md5::digest(&project)
