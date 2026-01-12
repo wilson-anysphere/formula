@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use formula_io::{open_workbook, save_workbook};
+use formula_io::{open_workbook, save_workbook, Workbook};
 use formula_xlsx::XlsxPackage;
 
 fn fixture_path(rel: &str) -> PathBuf {
@@ -95,5 +95,70 @@ fn saving_xlsm_as_xlam_preserves_vba_and_sets_addin_macro_content_type() {
     assert!(
         !content_types.contains("application/vnd.ms-excel.sheet.macroEnabled.main+xml"),
         "expected `[Content_Types].xml` workbook main content type to match `.xlam` (not `.xlsm`)"
+    );
+}
+
+#[test]
+fn saving_xltx_as_xlsx_sets_workbook_content_type() {
+    // Start from an XLSM fixture so we can generate a template via the save path (which also strips VBA).
+    let path = fixture_path("xlsx/macros/basic.xlsm");
+    let wb = open_workbook(&path).expect("open workbook");
+
+    let dir = tempfile::tempdir().expect("temp dir");
+
+    // First, save as a macro-free template.
+    let xltx_path = dir.path().join("out.xltx");
+    save_workbook(&wb, &xltx_path).expect("save as xltx");
+
+    // Then, re-save that template as a normal workbook.
+    let xltx_pkg = reopen_pkg(&xltx_path);
+    let xlsx_path = dir.path().join("out.xlsx");
+    save_workbook(&Workbook::Xlsx(xltx_pkg), &xlsx_path).expect("save as xlsx");
+
+    let pkg = reopen_pkg(&xlsx_path);
+    let content_types =
+        std::str::from_utf8(pkg.part("[Content_Types].xml").expect("content types")).unwrap();
+    assert!(
+        content_types.contains(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
+        ),
+        "expected workbook main content type to match `.xlsx`"
+    );
+    assert!(
+        !content_types.contains(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml"
+        ),
+        "expected workbook main content type to not be `.xltx` when saving as `.xlsx`"
+    );
+}
+
+#[test]
+fn saving_xltm_as_xlsm_sets_workbook_content_type() {
+    let path = fixture_path("xlsx/macros/basic.xlsm");
+    let wb = open_workbook(&path).expect("open workbook");
+
+    let dir = tempfile::tempdir().expect("temp dir");
+
+    // First, save as a macro-enabled template.
+    let xltm_path = dir.path().join("out.xltm");
+    save_workbook(&wb, &xltm_path).expect("save as xltm");
+
+    // Then, re-save that template as a macro-enabled workbook.
+    let xltm_pkg = reopen_pkg(&xltm_path);
+    let xlsm_path = dir.path().join("out.xlsm");
+    save_workbook(&Workbook::Xlsx(xltm_pkg), &xlsm_path).expect("save as xlsm");
+
+    let pkg = reopen_pkg(&xlsm_path);
+    assert!(pkg.vba_project_bin().is_some(), "expected vbaProject.bin to be preserved");
+
+    let content_types =
+        std::str::from_utf8(pkg.part("[Content_Types].xml").expect("content types")).unwrap();
+    assert!(
+        content_types.contains("application/vnd.ms-excel.sheet.macroEnabled.main+xml"),
+        "expected workbook main content type to match `.xlsm`"
+    );
+    assert!(
+        !content_types.contains("application/vnd.ms-excel.template.macroEnabled.main+xml"),
+        "expected workbook main content type to not be `.xltm` when saving as `.xlsm`"
     );
 }

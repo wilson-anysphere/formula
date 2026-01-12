@@ -774,47 +774,50 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
                 // If we're saving a macro-enabled workbook to a `.xlsx` filename, strip the VBA
                 // project and its related parts/relationships so we don't produce an
                 // XLSM-in-disguise (which Excel refuses to open).
-                if package.vba_project_bin().is_some() {
-                    let mut stripped = package.clone();
-                    stripped
-                        .remove_vba_project()
+                let mut out = package.clone();
+                if out.vba_project_bin().is_some() {
+                    out.remove_vba_project()
                         .map_err(|source| Error::SaveXlsxPackage {
                             path: path.to_path_buf(),
                             source,
                         })?;
-                    atomic_write(path, |file| stripped.write_to(file)).map_err(|err| match err {
-                        AtomicWriteError::Io(source) => Error::SaveIo {
-                            path: path.to_path_buf(),
-                            source,
-                        },
-                        AtomicWriteError::Write(source) => Error::SaveXlsxPackage {
-                            path: path.to_path_buf(),
-                            source,
-                        },
-                    })
-                } else {
-                    atomic_write(path, |file| package.write_to(file)).map_err(|err| match err {
-                        AtomicWriteError::Io(source) => Error::SaveIo {
-                            path: path.to_path_buf(),
-                            source,
-                        },
-                        AtomicWriteError::Write(source) => Error::SaveXlsxPackage {
-                            path: path.to_path_buf(),
-                            source,
-                        },
-                    })
                 }
+                // Ensure the workbook main content type matches the target extension.
+                out.enforce_workbook_kind(xlsx::WorkbookKind::Workbook)
+                    .map_err(|source| Error::SaveXlsxPackage {
+                        path: path.to_path_buf(),
+                        source,
+                    })?;
+                atomic_write(path, |file| out.write_to(file)).map_err(|err| match err {
+                    AtomicWriteError::Io(source) => Error::SaveIo {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                    AtomicWriteError::Write(source) => Error::SaveXlsxPackage {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                })
             }
-            "xlsm" => atomic_write(path, |file| package.write_to(file)).map_err(|err| match err {
-                AtomicWriteError::Io(source) => Error::SaveIo {
-                    path: path.to_path_buf(),
-                    source,
-                },
-                AtomicWriteError::Write(source) => Error::SaveXlsxPackage {
-                    path: path.to_path_buf(),
-                    source,
-                },
-            }),
+            "xlsm" => {
+                let mut out = package.clone();
+                // Ensure the workbook main content type matches the target extension.
+                out.enforce_workbook_kind(xlsx::WorkbookKind::MacroEnabledWorkbook)
+                    .map_err(|source| Error::SaveXlsxPackage {
+                        path: path.to_path_buf(),
+                        source,
+                    })?;
+                atomic_write(path, |file| out.write_to(file)).map_err(|err| match err {
+                    AtomicWriteError::Io(source) => Error::SaveIo {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                    AtomicWriteError::Write(source) => Error::SaveXlsxPackage {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                })
+            }
             "xltx" => {
                 let mut out = package.clone();
                 if out.vba_project_bin().is_some() {
