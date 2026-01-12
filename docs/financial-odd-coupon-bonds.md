@@ -107,6 +107,12 @@ For quick Windows + Excel runs, use the derived subset corpora (all regenerated 
 - Basis=4 (European 30/360): `tools/excel-oracle/odd_coupon_basis4_cases.json` (tagged `odd_coupon` + `basis4`)
 - Invalid schedule / schedule-misalignment cases: `tools/excel-oracle/odd_coupon_invalid_schedule_cases.json` (tagged `odd_coupon` + `invalid_schedule`)
 
+To verify these subset corpora are in sync with the canonical corpus (without rewriting files), run:
+
+```bash
+python tools/excel-oracle/regenerate_subset_corpora.py --check
+```
+
 To **patch real Excel results for just these odd-coupon cases** into the committed pinned dataset
 (keeping the rest of the corpus intact / merge-friendly), run on Windows + Excel:
 
