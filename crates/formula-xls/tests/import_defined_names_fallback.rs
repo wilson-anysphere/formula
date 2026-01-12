@@ -2,7 +2,7 @@ use std::io::Write;
 
 use calamine::{open_workbook, Reader, Xls};
 use formula_engine::{parse_formula, ParseOptions};
-use formula_model::DefinedNameScope;
+use formula_model::{validate_defined_name, DefinedNameScope};
 
 mod common;
 
@@ -29,19 +29,18 @@ fn imports_defined_names_via_calamine_fallback_when_biff_is_unavailable() {
         "expected fixture to contain at least one defined name"
     );
 
-    let (expected_name, expected_refers_to) = {
-        let (name, refers_to) = workbook_defined_names
-            .first()
-            .cloned()
-            .expect("non-empty");
-        let name = name.replace('\0', "");
-        let refers_to = refers_to.trim();
-        let refers_to = refers_to
-            .strip_prefix('=')
-            .unwrap_or(refers_to)
-         .to_string();
-        (name, refers_to)
-    };
+    // Pick a defined name that the importer would accept (some BIFF fixtures may include invalid
+    // names like `A1`, which the model rejects).
+    let (expected_name, expected_refers_to) = workbook_defined_names
+        .iter()
+        .map(|(name, refers_to)| {
+            let name = name.replace('\0', "");
+            let refers_to = refers_to.trim();
+            let refers_to = refers_to.strip_prefix('=').unwrap_or(refers_to).to_string();
+            (name, refers_to)
+        })
+        .find(|(name, _)| validate_defined_name(name).is_ok())
+        .expect("expected at least one valid defined name from calamine");
     assert_parseable(&expected_refers_to);
 
     // Force BIFF workbook-stream parsing to be unavailable so the importer has to use the
