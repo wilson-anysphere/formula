@@ -2,6 +2,9 @@ use base64::Engine as _;
 use formula_model::CellRef;
 use formula_xlsx::XlsxPackage;
 use rust_xlsxwriter::{Image, Workbook};
+use std::io::{Cursor, Write};
+use zip::write::FileOptions;
+use zip::{CompressionMethod, ZipWriter};
 
 const ONE_BY_ONE_PNG_BASE64: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/w8AAgMBApZ9xO4AAAAASUVORK5CYII=";
@@ -46,6 +49,96 @@ fn build_workbook_with_embedded_image(
     workbook.save_to_buffer().unwrap()
 }
 
+fn build_minimal_vm_indexed_embedded_image_xlsx(png_bytes: &[u8]) -> Vec<u8> {
+    // Some real-world workbooks omit `xl/metadata.xml` and the rich value tables but still encode
+    // embedded-in-cell images by using the worksheet cell `vm=` value as a direct index into
+    // `xl/richData/richValueRel.xml` relationship slots.
+    //
+    // This fixture is intentionally minimal: it includes only the parts required by
+    // `XlsxPackage::worksheet_parts()` + `extract_embedded_cell_images()`.
+
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+    let root_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"#;
+
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>"#;
+
+    // Use vm="1" to cover a 1-based producer; the extractor should tolerate both 0-based and
+    // 1-based slot indices when metadata mapping is missing.
+    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" vm="1"/>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+    let rich_value_rel_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<richValueRel xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rel r:id="rId1"/>
+</richValueRel>"#;
+
+    let rich_value_rel_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+
+    zip.start_file("_rels/.rels", options).unwrap();
+    zip.write_all(root_rels.as_bytes()).unwrap();
+
+    zip.start_file("[Content_Types].xml", options).unwrap();
+    zip.write_all(content_types.as_bytes()).unwrap();
+
+    zip.start_file("xl/workbook.xml", options).unwrap();
+    zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/_rels/workbook.xml.rels", options)
+        .unwrap();
+    zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+    zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+    zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/richData/richValueRel.xml", options)
+        .unwrap();
+    zip.write_all(rich_value_rel_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/richData/_rels/richValueRel.xml.rels", options)
+        .unwrap();
+    zip.write_all(rich_value_rel_rels.as_bytes()).unwrap();
+
+    zip.start_file("xl/media/image1.png", options).unwrap();
+    zip.write_all(png_bytes).unwrap();
+
+    zip.finish().unwrap().into_inner()
+}
+
 #[test]
 fn extracts_single_embedded_image_in_cell() {
     let bytes = build_workbook_with_embedded_image(None, false);
@@ -64,6 +157,27 @@ fn extracts_single_embedded_image_in_cell() {
         &one_by_one_png_bytes(),
         "expected extracted image bytes to match the inserted PNG"
     );
+}
+
+#[test]
+fn extracts_embedded_image_even_without_metadata_xml() {
+    let png = one_by_one_png_bytes();
+    let bytes = build_minimal_vm_indexed_embedded_image_xlsx(&png);
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read xlsx");
+    assert!(
+        pkg.part("xl/metadata.xml").is_none(),
+        "fixture should omit xl/metadata.xml"
+    );
+
+    let images = pkg
+        .extract_embedded_cell_images()
+        .expect("extract embedded cell images");
+    assert_eq!(images.len(), 1);
+
+    let key = ("xl/worksheets/sheet1.xml".to_string(), CellRef::new(0, 0));
+    let cell_img = images.get(&key).expect("expected A1 embedded image");
+    assert_eq!(cell_img.image_part, "xl/media/image1.png");
+    assert_eq!(cell_img.image_bytes, png);
 }
 
 #[test]
