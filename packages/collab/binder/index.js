@@ -381,10 +381,6 @@ export function bindYjsToDocumentController(options) {
   // Stable origin token for local DocumentController -> Yjs transactions when
   // we don't have a dedicated undo service wrapper.
   const binderOrigin = undoService?.origin ?? { type: "document-controller:binder" };
-  // Origin used for internal normalization transactions (e.g. cloning foreign nested
-  // Y.Maps into local constructors). This origin is intentionally distinct from the
-  // undoService origin so collaborative undo only captures the user's actual edit.
-  const normalizeOrigin = { type: "document-controller:binder:normalize" };
   /** @type {Map<string, NormalizedCell>} */
   let cache = new Map();
 
@@ -478,24 +474,21 @@ export function bindYjsToDocumentController(options) {
     const prevApplyingLocal = applyingLocal;
     applyingLocal = true;
     try {
-      ydoc.transact(
-        () => {
-          for (const rawKey of foreign) {
-            const cellData = cells.get(rawKey);
-            const cell = getYMapCell(cellData);
-            if (!cell || cell instanceof Y.Map) continue;
+    // Intentionally run in an *untracked* transaction (no origin) so collaborative undo
+    // only captures the user's actual edit.
+    ydoc.transact(() => {
+      for (const rawKey of foreign) {
+        const cellData = cells.get(rawKey);
+        const cell = getYMapCell(cellData);
+        if (!cell || cell instanceof Y.Map) continue;
 
-            const local = new Y.Map();
-            cell.forEach((v, k) => {
-              local.set(k, v);
-            });
-            cells.set(rawKey, local);
-          }
-        },
-        // Use a dedicated origin token so this conversion does not enter the collab
-        // UndoManager history (trackedOrigins only includes the local edit origin).
-        normalizeOrigin,
-      );
+        const local = new Y.Map();
+        cell.forEach((v, k) => {
+          local.set(k, v);
+        });
+        cells.set(rawKey, local);
+      }
+    });
     } finally {
       applyingLocal = prevApplyingLocal;
     }
