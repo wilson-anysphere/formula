@@ -28,16 +28,18 @@ export async function renderMacroRunner(
   const securityStatus = await backend.getMacroSecurityStatus(workbookId);
 
   container.innerHTML = "";
+  container.classList.add("macros-runner");
 
   const header = document.createElement("div");
+  header.className = "macros-runner__title";
   header.textContent = "Macros";
 
   const securityBanner = document.createElement("div");
   securityBanner.dataset["testid"] = "macro-security-banner";
-  securityBanner.style.whiteSpace = "pre-wrap";
-  securityBanner.style.marginBottom = "8px";
+  securityBanner.className = "macros-runner__banner";
 
   const select = document.createElement("select");
+  select.className = "macros-runner__select";
   for (const macro of macros) {
     const opt = document.createElement("option");
     opt.value = macro.id;
@@ -45,19 +47,24 @@ export async function renderMacroRunner(
     select.appendChild(opt);
   }
 
+  const actions = document.createElement("div");
+  actions.className = "macros-runner__actions";
+
   const trustButton = document.createElement("button");
+  trustButton.type = "button";
   trustButton.textContent = "Trust Center…";
-  trustButton.style.marginLeft = "8px";
 
   const runButton = document.createElement("button");
+  runButton.type = "button";
   runButton.textContent = "Run";
 
   const output = document.createElement("pre");
-  output.style.whiteSpace = "pre-wrap";
+  output.className = "macros-runner__output";
 
   let currentSecurity = securityStatus;
 
   function renderSecurityBanner(status: MacroSecurityStatus): void {
+    securityBanner.dataset["blocked"] = "false";
     if (!status.hasMacros) {
       securityBanner.textContent = "Security: No VBA macros detected.";
       trustButton.disabled = true;
@@ -73,6 +80,7 @@ export async function renderMacroRunner(
     const signatureOk = signature === "signed_verified" || signature === "signed_untrusted";
     const blocked = status.trust === "blocked" || (status.trust === "trusted_signed_only" && !signatureOk);
     trustButton.disabled = false;
+    securityBanner.dataset["blocked"] = blocked ? "true" : "false";
     if (blocked) {
       securityBanner.textContent += "\n\nMacros blocked by Trust Center. Click “Trust Center…” to change this.";
     }
@@ -135,10 +143,12 @@ export async function renderMacroRunner(
     }
   };
 
+  actions.appendChild(select);
+  actions.appendChild(trustButton);
+  actions.appendChild(runButton);
+
   container.appendChild(header);
   container.appendChild(securityBanner);
-  container.appendChild(select);
-  container.appendChild(trustButton);
-  container.appendChild(runButton);
+  container.appendChild(actions);
   container.appendChild(output);
 }

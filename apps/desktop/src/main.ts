@@ -8,6 +8,7 @@ import "./styles/comments.css";
 import "./styles/shell.css";
 import "./styles/auditing.css";
 import "./styles/format-cells-dialog.css";
+import "./styles/macros.css";
 
 import React from "react";
 import { createRoot } from "react-dom/client";
