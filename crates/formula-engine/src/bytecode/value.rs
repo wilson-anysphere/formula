@@ -120,6 +120,38 @@ pub enum ErrorKind {
     Calc,
 }
 
+impl From<crate::value::ErrorKind> for ErrorKind {
+    fn from(value: crate::value::ErrorKind) -> Self {
+        match value {
+            crate::value::ErrorKind::Null => ErrorKind::Null,
+            crate::value::ErrorKind::Div0 => ErrorKind::Div0,
+            crate::value::ErrorKind::Value => ErrorKind::Value,
+            crate::value::ErrorKind::Ref => ErrorKind::Ref,
+            crate::value::ErrorKind::Name => ErrorKind::Name,
+            crate::value::ErrorKind::Num => ErrorKind::Num,
+            crate::value::ErrorKind::NA => ErrorKind::NA,
+            crate::value::ErrorKind::Spill => ErrorKind::Spill,
+            crate::value::ErrorKind::Calc => ErrorKind::Calc,
+        }
+    }
+}
+
+impl From<ErrorKind> for crate::value::ErrorKind {
+    fn from(value: ErrorKind) -> Self {
+        match value {
+            ErrorKind::Null => crate::value::ErrorKind::Null,
+            ErrorKind::Div0 => crate::value::ErrorKind::Div0,
+            ErrorKind::Ref => crate::value::ErrorKind::Ref,
+            ErrorKind::Value => crate::value::ErrorKind::Value,
+            ErrorKind::Name => crate::value::ErrorKind::Name,
+            ErrorKind::Num => crate::value::ErrorKind::Num,
+            ErrorKind::NA => crate::value::ErrorKind::NA,
+            ErrorKind::Spill => crate::value::ErrorKind::Spill,
+            ErrorKind::Calc => crate::value::ErrorKind::Calc,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Array {
     pub rows: usize,

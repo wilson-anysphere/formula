@@ -1,5 +1,5 @@
 use super::ast::{BinaryOp, Expr as BytecodeExpr, Function, UnaryOp};
-use super::value::{RangeRef, Ref, Value};
+use super::value::{ErrorKind as BytecodeErrorKind, RangeRef, Ref, Value};
 use std::sync::Arc;
 
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -185,6 +185,23 @@ fn parse_number(raw: &str) -> Result<f64, LowerError> {
     }
 }
 
+fn parse_error_kind(raw: &str) -> crate::value::ErrorKind {
+    // Keep this in sync with `eval::compiler::parse_error_kind` so AST and bytecode evaluation
+    // agree on the canonical set of supported error literals.
+    match raw.trim().to_ascii_uppercase().as_str() {
+        "#NULL!" => crate::value::ErrorKind::Null,
+        "#DIV/0!" => crate::value::ErrorKind::Div0,
+        "#VALUE!" => crate::value::ErrorKind::Value,
+        "#REF!" => crate::value::ErrorKind::Ref,
+        "#NAME?" => crate::value::ErrorKind::Name,
+        "#NUM!" => crate::value::ErrorKind::Num,
+        "#N/A" => crate::value::ErrorKind::NA,
+        "#SPILL!" => crate::value::ErrorKind::Spill,
+        "#CALC!" => crate::value::ErrorKind::Calc,
+        _ => crate::value::ErrorKind::Value,
+    }
+}
+
 pub fn lower_canonical_expr(
     expr: &crate::Expr,
     origin: crate::CellAddr,
@@ -195,6 +212,9 @@ pub fn lower_canonical_expr(
         crate::Expr::Number(raw) => Ok(BytecodeExpr::Literal(Value::Number(parse_number(raw)?))),
         crate::Expr::String(s) => Ok(BytecodeExpr::Literal(Value::Text(Arc::from(s.as_str())))),
         crate::Expr::Boolean(b) => Ok(BytecodeExpr::Literal(Value::Bool(*b))),
+        crate::Expr::Error(raw) => Ok(BytecodeExpr::Literal(Value::Error(
+            BytecodeErrorKind::from(parse_error_kind(raw)),
+        ))),
         crate::Expr::Missing => Ok(BytecodeExpr::Literal(Value::Empty)),
         crate::Expr::CellRef(r) => Ok(BytecodeExpr::CellRef(lower_cell_ref(
             r,
@@ -312,7 +332,6 @@ pub fn lower_canonical_expr(
         | crate::Expr::ColRef(_)
         | crate::Expr::RowRef(_)
         | crate::Expr::StructuredRef(_)
-        | crate::Expr::Array(_)
-        | crate::Expr::Error(_) => Err(LowerError::Unsupported),
+        | crate::Expr::Array(_) => Err(LowerError::Unsupported),
     }
 }

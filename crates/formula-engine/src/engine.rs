@@ -4860,9 +4860,8 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
             bytecode::Value::Number(_) | bytecode::Value::Bool(_) => true,
             bytecode::Value::Text(_) => true,
             bytecode::Value::Empty => true,
-            bytecode::Value::Error(_) | bytecode::Value::Array(_) | bytecode::Value::Range(_) => {
-                false
-            }
+            bytecode::Value::Error(_) => true,
+            bytecode::Value::Array(_) | bytecode::Value::Range(_) => false,
         },
         bytecode::Expr::CellRef(_) => true,
         bytecode::Expr::RangeRef(_) => allow_range,
