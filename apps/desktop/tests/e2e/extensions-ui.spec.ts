@@ -82,10 +82,27 @@ test.describe("Extensions UI integration", () => {
         try {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const w = window as any;
-          w.__TAURI__ = {};
-          w.__TAURI_IPC__ = {};
-          w.__TAURI_INTERNALS__ = {};
-          w.__TAURI_METADATA__ = {};
+          const define = (key: string) => {
+            try {
+              // Simulate a native runtime defining globals as non-configurable properties.
+              Object.defineProperty(w, key, {
+                value: {},
+                writable: true,
+                configurable: false,
+              });
+            } catch {
+              try {
+                w[key] = {};
+              } catch {
+                // Ignore.
+              }
+            }
+          };
+
+          define("__TAURI__");
+          define("__TAURI_IPC__");
+          define("__TAURI_INTERNALS__");
+          define("__TAURI_METADATA__");
         } catch {
           // Ignore.
         }
