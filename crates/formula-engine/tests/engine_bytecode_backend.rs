@@ -3099,8 +3099,32 @@ fn bytecode_backend_matches_ast_for_xlookup_and_xmatch() {
         .set_cell_formula("Sheet1", "D7", r#"=XMATCH("b",B1:B4,0,-1)"#)
         .unwrap();
 
+    // Wildcard mode.
+    engine
+        .set_cell_formula("Sheet1", "D8", r#"=XMATCH("b*",B1:B3,2)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D9", r#"=XLOOKUP("b*",B1:B3,C1:C3,"missing",2)"#)
+        .unwrap();
+    // Wildcard + last-to-first should find the last matching value.
+    engine
+        .set_cell_formula("Sheet1", "D10", r#"=XLOOKUP("b*",B1:B4,C1:C4,"missing",2,-1)"#)
+        .unwrap();
+
+    // 2D lookup arrays should error with #VALUE!
+    engine
+        .set_cell_formula("Sheet1", "D11", r#"=XMATCH("b",B1:C2)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D12", r#"=XLOOKUP("b",B1:C2,C1:C2)"#)
+        .unwrap();
+    // Mismatched lookup/return lengths should also error with #VALUE!
+    engine
+        .set_cell_formula("Sheet1", "D13", r#"=XLOOKUP("b",B1:B3,C1:C2)"#)
+        .unwrap();
+
     // Ensure we're exercising the bytecode path for all of the above formulas.
-    assert_eq!(engine.bytecode_program_count(), 7);
+    assert_eq!(engine.bytecode_program_count(), 13);
 
     engine.recalculate_single_threaded();
 
@@ -3112,6 +3136,12 @@ fn bytecode_backend_matches_ast_for_xlookup_and_xmatch() {
         (r#"=XMATCH("z",B1:B3)"#, "D5"),
         (r#"=XLOOKUP("b",B1:B4,C1:C4,,0,-1)"#, "D6"),
         (r#"=XMATCH("b",B1:B4,0,-1)"#, "D7"),
+        (r#"=XMATCH("b*",B1:B3,2)"#, "D8"),
+        (r#"=XLOOKUP("b*",B1:B3,C1:C3,"missing",2)"#, "D9"),
+        (r#"=XLOOKUP("b*",B1:B4,C1:C4,"missing",2,-1)"#, "D10"),
+        (r#"=XMATCH("b",B1:C2)"#, "D11"),
+        (r#"=XLOOKUP("b",B1:C2,C1:C2)"#, "D12"),
+        (r#"=XLOOKUP("b",B1:B3,C1:C2)"#, "D13"),
     ] {
         assert_engine_matches_ast(&engine, formula, cell);
     }
