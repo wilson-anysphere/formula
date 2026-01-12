@@ -113,4 +113,13 @@ mod tests {
         assert_eq!(parse_a1("A1").unwrap().to_a1(), "A1");
         assert_eq!(parse_a1("$BC$32").unwrap().to_a1(), "BC32");
     }
+
+    #[test]
+    fn cell_addr_formats_large_rows_without_overflow() {
+        let addr = CellAddr {
+            row: u32::MAX,
+            col: 0,
+        };
+        assert_eq!(addr.to_a1(), "A4294967296");
+    }
 }

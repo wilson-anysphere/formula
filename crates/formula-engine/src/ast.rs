@@ -733,7 +733,7 @@ impl Coord {
         match self {
             Coord::A1 { index, abs: true } => {
                 out.push(axis);
-                out.push_str(&((*index + 1).to_string()));
+                out.push_str(&(u64::from(*index) + 1).to_string());
             }
             Coord::A1 { index, abs: false } => {
                 let origin = origin.ok_or_else(|| {
@@ -820,7 +820,7 @@ impl CellRef {
                 if row_abs {
                     out.push('$');
                 }
-                out.push_str(&(row_idx + 1).to_string());
+                out.push_str(&(u64::from(row_idx) + 1).to_string());
             }
             ReferenceStyle::R1C1 => {
                 self.row.fmt_r1c1(out, 'R', opts.origin.map(|o| o.row))?;
@@ -911,7 +911,7 @@ impl RowRef {
                 if row_abs {
                     out.push('$');
                 }
-                out.push_str(&(row_idx + 1).to_string());
+                out.push_str(&(u64::from(row_idx) + 1).to_string());
             }
             ReferenceStyle::R1C1 => {
                 self.row.fmt_r1c1(out, 'R', opts.origin.map(|o| o.row))?;

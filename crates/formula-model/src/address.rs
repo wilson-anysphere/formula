@@ -384,7 +384,7 @@ impl std::error::Error for RangeParseError {
 
 fn col_to_name(col: u32) -> String {
     // Excel columns are 1-based in A1 notation. We store 0-based internally.
-    let mut n = col + 1;
+    let mut n = u64::from(col) + 1;
     let mut out = Vec::<u8>::new();
     while n > 0 {
         let rem = (n - 1) % 26;

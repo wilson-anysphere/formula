@@ -3720,19 +3720,7 @@ fn cell_addr_from_cell_ref(cell: CellRef) -> CellAddr {
 }
 
 fn cell_addr_to_a1(addr: CellAddr) -> String {
-    format!("{}{}", col_to_name(addr.col), addr.row + 1)
-}
-
-fn col_to_name(col: u32) -> String {
-    let mut n = col + 1;
-    let mut out = Vec::<u8>::new();
-    while n > 0 {
-        let rem = (n - 1) % 26;
-        out.push(b'A' + rem as u8);
-        n = (n - 1) / 26;
-    }
-    out.reverse();
-    String::from_utf8(out).expect("column letters are ASCII")
+    addr.to_a1()
 }
 
 fn ranges_overlap(a: Range, b: Range) -> bool {
