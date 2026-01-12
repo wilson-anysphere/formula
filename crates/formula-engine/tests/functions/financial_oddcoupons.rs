@@ -112,13 +112,16 @@ fn oddfprice_basis1_uses_prev_coupon_period_for_e() {
 fn odd_coupon_settlement_equal_coupon_dates_are_rejected() {
     let system = ExcelDateSystem::EXCEL_1900;
 
-    // Settlement must fall strictly inside the odd coupon period.
+    // Pinned by current engine behavior; verify against real Excel via
+    // tools/excel-oracle/run-excel-oracle.ps1 (Task 393).
+    //
+    // Settlement must fall strictly inside the odd coupon period:
     //
     // - ODDL*: last_interest < settlement < maturity
     // - ODDF*: issue < settlement < first_coupon <= maturity
     //
-    // In Excel, boundary equalities (e.g. `settlement == last_interest`) evaluate to `#NUM!` and
-    // are locked via `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`.
+    // Boundary equalities (e.g. `settlement == last_interest`) currently return `#NUM!` and are
+    // locked via `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`.
 
     // ODDL*: settlement == last_interest => #NUM!
     let maturity = ymd_to_serial(ExcelDate::new(2023, 5, 15), system).unwrap();
