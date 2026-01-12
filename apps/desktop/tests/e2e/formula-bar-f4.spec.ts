@@ -61,5 +61,21 @@ test.describe("formula bar F4 toggles absolute/relative references", () => {
         }))
       ).toEqual({ start: 1, end: 3 });
     });
+
+    test(`preserves sheet qualifiers + toggles both endpoints of a range (${mode})`, async ({ page }) => {
+      await gotoDesktop(page, `/?grid=${mode}`);
+      await waitForIdle(page);
+
+      await page.getByTestId("formula-highlight").click();
+      const input = page.getByTestId("formula-input");
+      await expect(input).toBeVisible();
+
+      await input.fill("='My Sheet'!A1:B2");
+      await input.focus();
+      await page.keyboard.press("ArrowLeft"); // inside B2
+
+      await page.keyboard.press("F4");
+      await expect(input).toHaveValue("='My Sheet'!$A$1:$B$2");
+    });
   }
 });
