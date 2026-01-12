@@ -511,8 +511,13 @@ test.describe("Extensions UI integration", () => {
     await openPanelBtn.dispatchEvent("click");
 
     await expect(page.getByTestId("panel-sampleHello.panel")).toBeAttached();
+    // Panel HTML is delivered via an in-memory `blob:` URL and can take a moment to load,
+    // especially on contended CI runners. Wait for the iframe to receive its final src before
+    // asserting on its contents to avoid flake.
+    const iframe = page.locator('iframe[data-testid="extension-webview-sampleHello.panel"]');
+    await expect(iframe).toHaveAttribute("src", /^(blob:|data:)/, { timeout: 30_000 });
     const frame = page.frameLocator('iframe[data-testid="extension-webview-sampleHello.panel"]');
-    await expect(frame.locator("h1")).toHaveText("Sample Hello Panel");
+    await expect(frame.locator("h1")).toHaveText("Sample Hello Panel", { timeout: 30_000 });
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await waitForDesktopReady(page);
@@ -531,8 +536,10 @@ test.describe("Extensions UI integration", () => {
     await page.keyboard.press("Escape");
 
     await expect(page.getByTestId("panel-sampleHello.panel")).toBeAttached();
+    const iframeAfterReload = page.locator('iframe[data-testid="extension-webview-sampleHello.panel"]');
+    await expect(iframeAfterReload).toHaveAttribute("src", /^(blob:|data:)/, { timeout: 30_000 });
     const frameAfter = page.frameLocator('iframe[data-testid="extension-webview-sampleHello.panel"]');
-    await expect(frameAfter.locator("h1")).toHaveText("Sample Hello Panel");
+    await expect(frameAfter.locator("h1")).toHaveText("Sample Hello Panel", { timeout: 30_000 });
   });
 
   test("executes a contributed keybinding when its when-clause matches", async ({ page }) => {
