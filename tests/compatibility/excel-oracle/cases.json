@@ -33215,6 +33215,36 @@
       "id": "oddlyield_high_price_c8cf5120a715"
     },
     {
+      "formula": "=ODDFYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),DATE(2021,3,1),0.0785,ODDFPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),DATE(2021,3,1),0.0785,-1.5,100,2,0),100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFYIELD",
+        "odd_coupon_validation",
+        "neg_yld",
+        "yld_below_minus1"
+      ],
+      "description": "ODDFYIELD roundtrip: yield from ODDFPRICE at yld=-1.5 (below -1) to confirm Excel allows negative yields in both ODDFPRICE and ODDFYIELD",
+      "id": "oddfyield_roundtrip_neg_yld_below_minus1_04ae13f34c19"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-1.5,100,2,0),100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD",
+        "odd_coupon_validation",
+        "neg_yld",
+        "yld_below_minus1"
+      ],
+      "description": "ODDLYIELD roundtrip: yield from ODDLPRICE at yld=-1.5 (below -1) to confirm Excel allows negative yields in both ODDLPRICE and ODDLYIELD",
+      "id": "oddlyield_roundtrip_neg_yld_below_minus1_25cecfd22c8a"
+    },
+    {
       "formula": "=ODDFPRICE(43831,44378,43739,44013,0,0.1,100,2,0)",
       "outputCell": "A1",
       "inputs": [],
