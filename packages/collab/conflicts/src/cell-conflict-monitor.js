@@ -32,7 +32,11 @@ export class CellConflictMonitor {
    * @param {string} opts.localUserId
    * @param {Y.Map<any>} [opts.cells]
    * @param {object} [opts.origin] Origin token used for local transactions.
-   * @param {Set<any>} [opts.localOrigins] Origins treated as local (for ignoring).
+   * @param {Set<any>} [opts.localOrigins] Origins treated as local:
+   *   - Conflicts are not emitted for these transactions.
+   *   - Local edit tracking is updated from observed Yjs changes so later remote
+   *     overwrites can be detected causally (even if callers don't use
+   *     `setLocalValue`).
    * @param {Set<any>} [opts.ignoredOrigins] Transaction origins to ignore entirely.
    * @param {(conflict: CellConflict) => void} opts.onConflict
    */

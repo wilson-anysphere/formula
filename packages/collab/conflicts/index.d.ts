@@ -77,6 +77,13 @@ export class FormulaConflictMonitor {
     localUserId: string;
     cells?: Y.Map<any>;
     origin?: object;
+    /**
+     * Transaction origins that should be treated as local:
+     * - Conflicts are not emitted for these transactions.
+     * - Local edit tracking is updated from observed Yjs changes so later remote
+     *   overwrites can be detected causally (even if callers don't use
+     *   `setLocalFormula` / `setLocalValue`).
+     */
     localOrigins?: Set<any>;
     /**
      * Transaction origins that should be ignored entirely (no conflicts emitted,
@@ -150,6 +157,13 @@ export class CellConflictMonitor {
     localUserId: string;
     cells?: Y.Map<any>;
     origin?: object;
+    /**
+     * Transaction origins that should be treated as local:
+     * - Conflicts are not emitted for these transactions.
+     * - Local edit tracking is updated from observed Yjs changes so later remote
+     *   overwrites can be detected causally (even if callers don't use
+     *   `setLocalValue`).
+     */
     localOrigins?: Set<any>;
     /**
      * Transaction origins that should be ignored entirely (no conflicts emitted,
