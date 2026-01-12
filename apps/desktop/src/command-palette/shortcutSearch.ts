@@ -187,6 +187,21 @@ function getShortcuts(value: string | readonly string[] | undefined): readonly s
   return [];
 }
 
+function pickShortcutForQuery(shortcuts: readonly string[], query: string): string | null {
+  if (shortcuts.length === 0) return null;
+  if (!query) return shortcuts[0] ?? null;
+
+  // Prefer displaying a shortcut that matches the query (for commands with multiple
+  // bindings). Fall back to the primary/first shortcut so the list remains stable.
+  for (const candidate of shortcuts) {
+    const lower = candidate.toLowerCase();
+    if (lower.includes(query)) return candidate;
+    if (matchesShortcutTokenQuery(candidate, query)) return candidate;
+  }
+
+  return shortcuts[0] ?? null;
+}
+
 function compareShortcutMatches(a: { shortcut: string; title: string; commandId: string }, b: { shortcut: string; title: string; commandId: string }): number {
   const shortcutCompare = a.shortcut.localeCompare(b.shortcut, undefined, { sensitivity: "base" });
   if (shortcutCompare !== 0) return shortcutCompare;
@@ -224,7 +239,7 @@ export function searchShortcutCommands<T extends ShortcutSearchCommandLike>(para
     const byCategory = new Map<string, Array<ShortcutSearchMatch<T>>>();
     for (const cmd of params.commands) {
       const shortcuts = getShortcuts(params.keybindingIndex.get(cmd.commandId));
-      const shortcut = shortcuts[0] ?? null;
+      const shortcut = pickShortcutForQuery(shortcuts, q);
       if (!shortcut) continue;
 
       if (q) {
@@ -273,7 +288,7 @@ export function searchShortcutCommands<T extends ShortcutSearchCommandLike>(para
   const matches: Array<ShortcutSearchMatch<T>> = [];
   for (const cmd of params.commands) {
     const shortcuts = getShortcuts(params.keybindingIndex.get(cmd.commandId));
-    const shortcut = shortcuts[0] ?? null;
+    const shortcut = pickShortcutForQuery(shortcuts, q);
     if (!shortcut) continue;
 
     if (q) {

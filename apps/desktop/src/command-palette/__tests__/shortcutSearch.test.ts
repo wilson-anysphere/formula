@@ -108,9 +108,10 @@ describe("command-palette shortcut search", () => {
       ["edit.redo", ["Ctrl+Y", "Ctrl+Shift+Z"]],
     ]);
 
-    expect(searchShortcutCommands({ commands, keybindingIndex, query: "ctrl+shift+z" }).map((c) => c.commandId)).toEqual([
-      "edit.redo",
-    ]);
+    const [match] = searchShortcutCommands({ commands, keybindingIndex, query: "ctrl+shift+z" });
+    expect(match?.commandId).toBe("edit.redo");
+    // In shortcut mode, prefer displaying the shortcut that matched the query.
+    expect(match?.shortcut).toBe("Ctrl+Shift+Z");
   });
 
   test("does not drop punctuation tokens (cmd+[ should not match all cmd shortcuts)", () => {

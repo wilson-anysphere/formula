@@ -834,9 +834,11 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
           cached.description.textContent = descriptionText;
           cached.description.hidden = !descriptionText;
 
+          const shortcutFromShortcutMode = shortcutMode && typeof (cmd as any).shortcut === "string" ? ((cmd as any).shortcut as string) : null;
           const kbValue = keybindingIndex.get(cmd.commandId);
           const shortcut =
-            typeof kbValue === "string" ? kbValue : Array.isArray(kbValue) ? (kbValue[0] ?? null) : null;
+            shortcutFromShortcutMode ??
+            (typeof kbValue === "string" ? kbValue : Array.isArray(kbValue) ? (kbValue[0] ?? null) : null);
           if (shortcut) {
             cached.shortcutPill.textContent = shortcut;
             cached.right.hidden = false;
