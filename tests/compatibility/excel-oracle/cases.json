@@ -32426,6 +32426,45 @@
       "id": "accrint_stub_true_cf10adfda266"
     },
     {
+      "formula": "=ACCRINT(DATE(2019,12,15),DATE(2020,4,30),DATE(2020,8,15),0.12,1000,4,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ACCRINT",
+        "coupon_schedule",
+        "eom_edge"
+      ],
+      "description": "ACCRINT with first_interest=2020-04-30 (month-end not 31st), basis=1",
+      "id": "accrint_eom_first_interest_94364414770e"
+    },
+    {
+      "formula": "=ACCRINT(DATE(2020,1,15),DATE(2020,4,30),DATE(2020,2,15),0.12,1000,4,1,FALSE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ACCRINT",
+        "coupon_schedule",
+        "eom_edge"
+      ],
+      "description": "ACCRINT with first_interest=2020-04-30 (month-end not 31st), basis=1, calc_method=FALSE",
+      "id": "accrint_eom_first_interest_calc_method_false_6e11c9bd557a"
+    },
+    {
+      "formula": "=ACCRINT(DATE(2020,1,15),DATE(2020,4,30),DATE(2020,2,15),0.12,1000,4,1,TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ACCRINT",
+        "coupon_schedule",
+        "eom_edge"
+      ],
+      "description": "ACCRINT with first_interest=2020-04-30 (month-end not 31st), basis=1, calc_method=TRUE",
+      "id": "accrint_eom_first_interest_calc_method_true_3c78f42e9f56"
+    },
+    {
       "formula": "=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,29),0.08,0.075,100,2,0)",
       "outputCell": "C1",
       "inputs": [],

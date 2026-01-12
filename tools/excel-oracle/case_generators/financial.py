@@ -545,6 +545,31 @@ def generate(
         description="Settlement before first_interest; calc_method TRUE accrues from the start of the regular coupon period.",
     )
 
+    # EOM schedule behavior for ACCRINT: when `first_interest` is month-end (even if not the 31st),
+    # Excel pins coupon dates to month-end. This impacts basis=1 (Actual/Actual) because `E` is the
+    # actual number of days between coupon dates.
+    add_case(
+        cases,
+        prefix="accrint_eom_first_interest",
+        tags=["financial", "ACCRINT", "coupon_schedule", "eom_edge"],
+        formula="=ACCRINT(DATE(2019,12,15),DATE(2020,4,30),DATE(2020,8,15),0.12,1000,4,1)",
+        description="ACCRINT with first_interest=2020-04-30 (month-end not 31st), basis=1",
+    )
+    add_case(
+        cases,
+        prefix="accrint_eom_first_interest_calc_method_false",
+        tags=["financial", "ACCRINT", "coupon_schedule", "eom_edge"],
+        formula="=ACCRINT(DATE(2020,1,15),DATE(2020,4,30),DATE(2020,2,15),0.12,1000,4,1,FALSE)",
+        description="ACCRINT with first_interest=2020-04-30 (month-end not 31st), basis=1, calc_method=FALSE",
+    )
+    add_case(
+        cases,
+        prefix="accrint_eom_first_interest_calc_method_true",
+        tags=["financial", "ACCRINT", "coupon_schedule", "eom_edge"],
+        formula="=ACCRINT(DATE(2020,1,15),DATE(2020,4,30),DATE(2020,2,15),0.12,1000,4,1,TRUE)",
+        description="ACCRINT with first_interest=2020-04-30 (month-end not 31st), basis=1, calc_method=TRUE",
+    )
+
     # Odd-coupon bond functions (ODDF*/ODDL*)
     #
     # Keep these cases small + focused on:

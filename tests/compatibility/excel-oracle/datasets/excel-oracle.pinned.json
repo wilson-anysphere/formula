@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "1206e0b4d26728708f2edcbc63ca1e4cac71dbf2a2447692a1309c499bfd93a0",
-    "count": 1756
+    "sha256": "ac558b2415729953fe434bd10df7e160cba7f249be106810c7c32f5e90244327",
+    "count": 1759
   },
   "results": [
     {
@@ -18300,6 +18300,36 @@
       },
       "address": "A1",
       "displayText": "31"
+    },
+    {
+      "caseId": "accrint_eom_first_interest_94364414770e",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 4.891304347826087
+      },
+      "address": "C1",
+      "displayText": "4.891304347826087"
+    },
+    {
+      "caseId": "accrint_eom_first_interest_calc_method_false_6e11c9bd557a",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 10.333333333333334
+      },
+      "address": "C1",
+      "displayText": "10.333333333333334"
+    },
+    {
+      "caseId": "accrint_eom_first_interest_calc_method_true_3c78f42e9f56",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 5.0
+      },
+      "address": "C1",
+      "displayText": "5"
     }
   ]
 }
