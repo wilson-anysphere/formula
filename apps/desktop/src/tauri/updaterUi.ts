@@ -747,17 +747,22 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
   if (name === "update-available" && rawSource === "startup" && !manualUpdateCheckFollowUp) {
     const version = typeof payload?.version === "string" ? payload.version.trim() : "";
     const body = typeof payload?.body === "string" ? payload.body.trim() : "";
-    const appName = t("app.title");
-    const message =
-      version && body
-        ? tWithVars("updater.systemNotificationBodyWithNotes", { appName, version, notes: body })
-        : version
-          ? tWithVars("updater.systemNotificationBodyWithVersion", { appName, version })
-          : body
-            ? tWithVars("updater.systemNotificationBodyWithNotesUnknownVersion", { appName, notes: body })
-            : tWithVars("updater.systemNotificationBodyGeneric", { appName });
+    // If the user recently clicked "Later" for this version, suppress repeat system notifications too.
+    if (version && shouldSuppressStartupUpdatePrompt(version)) {
+      // Do not notify.
+    } else {
+      const appName = t("app.title");
+      const message =
+        version && body
+          ? tWithVars("updater.systemNotificationBodyWithNotes", { appName, version, notes: body })
+          : version
+            ? tWithVars("updater.systemNotificationBodyWithVersion", { appName, version })
+            : body
+              ? tWithVars("updater.systemNotificationBodyWithNotesUnknownVersion", { appName, notes: body })
+              : tWithVars("updater.systemNotificationBodyGeneric", { appName });
 
-    void notify({ title: t("updater.updateAvailableTitle"), body: message });
+      void notify({ title: t("updater.updateAvailableTitle"), body: message });
+    }
   }
 
   // Tray-triggered manual checks can happen while the app is hidden to tray. Ensure the

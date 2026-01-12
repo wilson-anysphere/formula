@@ -75,12 +75,15 @@ describe("tauri/updaterUi dismissal persistence", () => {
 
   it("suppresses startup prompts for a recently-dismissed version, but manual checks still show", async () => {
     const { handleUpdaterEvent } = await loadUpdaterUi();
+    const notifications = await import("./notifications");
+    const notifySpy = vi.spyOn(notifications, "notify").mockResolvedValue(undefined);
 
     localStorage.setItem(DISMISSED_VERSION_KEY, "1.2.3");
     localStorage.setItem(DISMISSED_AT_KEY, String(Date.now()));
 
     await handleUpdaterEvent("update-available", { source: "startup", version: "1.2.3", body: "Notes" });
     expect(document.querySelector('[data-testid="updater-dialog"]')).toBeNull();
+    expect(notifySpy).not.toHaveBeenCalled();
 
     await handleUpdaterEvent("update-available", { source: "manual", version: "1.2.3", body: "Notes" });
     expect(document.querySelector('[data-testid="updater-dialog"]')).toBeTruthy();
