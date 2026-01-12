@@ -1244,14 +1244,22 @@ export class DocumentController {
     const r = typeof range === "string" ? parseRangeA1(range) : normalizeRange(range);
     /** @type {CellDelta[]} */
     const deltas = [];
-    for (let row = r.start.row; row <= r.end.row; row++) {
-      for (let col = r.start.col; col <= r.end.col; col++) {
-        const before = this.model.getCell(sheetId, row, col);
-        const after = { value: null, formula: null, styleId: before.styleId };
-        if (cellStateEquals(before, after)) continue;
-        deltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
-      }
-    }
+
+    // Iterate only stored cells in the sheet (sparse map) instead of scanning the full rectangle.
+    // This keeps clearRange O(#stored cells) rather than O(range area) for huge ranges.
+    this.forEachCellInSheet(sheetId, ({ row, col, cell }) => {
+      if (row < r.start.row || row > r.end.row) return;
+      if (col < r.start.col || col > r.end.col) return;
+
+      // Skip format-only cells (styleId-only) since clearing content would be a no-op.
+      if (cell.value == null && cell.formula == null) return;
+
+      const before = cloneCellState(cell);
+      const after = { value: null, formula: null, styleId: before.styleId };
+      if (cellStateEquals(before, after)) return;
+      deltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
+    });
+
     this.#applyUserDeltas(deltas, { label: options.label });
   }
 

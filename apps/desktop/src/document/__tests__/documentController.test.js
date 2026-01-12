@@ -80,6 +80,49 @@ test("setRangeValues + clearRange invert correctly via undo", () => {
   assert.equal(doc.getCell("Sheet1", "B2").value, null);
 });
 
+test("clearRange iterates sparse stored cells (does not scale with range area)", () => {
+  const doc = new DocumentController();
+
+  // Populate a couple of cells (and give them formatting) so there are only a few stored cells.
+  doc.setCellValue("Sheet1", "A1", "hello");
+  doc.setCellFormula("Sheet1", "A5000", "1+2");
+  doc.setCellValue("Sheet1", "B1", "keep");
+
+  doc.setRangeFormat("Sheet1", "A1", { font: { bold: true } });
+  doc.setRangeFormat("Sheet1", "A5000", { font: { bold: true } });
+
+  const a1Before = doc.getCell("Sheet1", "A1");
+  const a5000Before = doc.getCell("Sheet1", "A5000");
+
+  let getCellCalls = 0;
+  const originalGetCell = doc.model.getCell;
+  doc.model.getCell = (sheetId, row, col) => {
+    getCellCalls += 1;
+    return originalGetCell.call(doc.model, sheetId, row, col);
+  };
+
+  doc.clearRange("Sheet1", "A1:A10000");
+
+  // Restore before assertions (doc.getCell below calls through the model).
+  doc.model.getCell = originalGetCell;
+
+  // If clearRange scanned the full rectangle, this would be ~10,000.
+  assert.ok(getCellCalls < 100, `expected < 100 getCell calls, got ${getCellCalls}`);
+
+  const a1After = doc.getCell("Sheet1", "A1");
+  assert.equal(a1After.value, null);
+  assert.equal(a1After.formula, null);
+  assert.equal(a1After.styleId, a1Before.styleId);
+
+  const a5000After = doc.getCell("Sheet1", "A5000");
+  assert.equal(a5000After.value, null);
+  assert.equal(a5000After.formula, null);
+  assert.equal(a5000After.styleId, a5000Before.styleId);
+
+  // Cells outside the cleared range should be untouched.
+  assert.equal(doc.getCell("Sheet1", "B1").value, "keep");
+});
+
 test("setCellFormula is undoable", () => {
   const doc = new DocumentController();
 
