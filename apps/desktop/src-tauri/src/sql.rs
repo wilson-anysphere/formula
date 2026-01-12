@@ -1234,7 +1234,12 @@ mod tests {
         // each test so the database doesn't get dropped.
         let db_id = uuid::Uuid::new_v4();
         let dsn = format!("sqlite://file:formula_sql_test_{db_id}?mode=memory&cache=shared");
-        let opts = sqlx::sqlite::SqliteConnectOptions::from_str(&dsn).expect("parse sqlite dsn");
+        // `query_sqlite` opens multiple connections (one for schema discovery and one for the
+        // actual query). Configure a busy timeout so concurrent schema/query connections don't
+        // sporadically fail under load on shared-cache in-memory databases.
+        let opts = sqlx::sqlite::SqliteConnectOptions::from_str(&dsn)
+            .expect("parse sqlite dsn")
+            .busy_timeout(sql_query_timeout_duration());
         let keeper = sqlx::SqliteConnection::connect_with(&opts)
             .await
             .expect("connect sqlite");

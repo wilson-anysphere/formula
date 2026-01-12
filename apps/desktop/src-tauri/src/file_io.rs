@@ -2686,6 +2686,26 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
     }
 
     #[test]
+    fn reads_xls_propagates_number_formats_into_cells() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xls/tests/fixtures/dates.xls"
+        ));
+        let workbook = read_xlsx_blocking(fixture_path).expect("read xls workbook");
+
+        let sheet = workbook
+            .sheets
+            .iter()
+            .find(|s| s.name.eq_ignore_ascii_case("Dates"))
+            .expect("Dates sheet exists");
+
+        // `dates.xls` has a serial date value in A1 with Excel's default date format applied.
+        let cell = sheet.get_cell(0, 0); // A1
+        assert!(matches!(cell.computed_value, CellScalar::Number(_)));
+        assert_eq!(cell.number_format.as_deref(), Some("m/d/yy"));
+    }
+
+    #[test]
     fn read_workbook_sniffs_xlsx_even_with_csv_extension() {
         let fixture_path = Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
