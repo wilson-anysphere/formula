@@ -113,6 +113,12 @@ export default defineConfig({
     // and sandboxed environments). Vitest's thread pool still provides per-file isolation via
     // worker_threads without relying on `child_process.spawn`.
     pool: "threads",
+    // Vitest defaults to pre-spawning `os.availableParallelism() - 1` worker threads in non-watch
+    // mode. In high-core CI/dev environments this can create dozens of idle workers and then
+    // hit teardown timeouts while terminating them.
+    //
+    // Keep the default max worker scaling, but only require a single worker to start.
+    minWorkers: 1,
     // Desktop unit tests can incur a fair amount of Vite/React compilation overhead on
     // shared runners; keep timeouts generous so we don't flake on cold caches.
     testTimeout: 30_000,
