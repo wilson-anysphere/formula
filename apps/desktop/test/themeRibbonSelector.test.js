@@ -48,13 +48,26 @@ test("Desktop ribbon command ids for theme switching are handled in main.ts", ()
   ];
 
   for (const { commandId, preference } of expectations) {
-    assert.match(
-      main,
+    const caseBlockMatch = main.match(
       new RegExp(
-        `case\\s+["']${escapeRegExp(commandId)}["']:\\s*\\n\\s*themeController\\.setThemePreference\\(["']${escapeRegExp(preference)}["']\\)`,
+        `case\\s+["']${escapeRegExp(commandId)}["']:\\s*([\\s\\S]*?)(?=\\n\\s*case\\s+["']|\\n\\s*default:|\\n\\s*\\})`,
         "m",
       ),
-      `Expected main.ts to handle ${commandId} by calling themeController.setThemePreference("${preference}")`,
+    );
+    assert.ok(caseBlockMatch, `Expected to find switch case for ${commandId}`);
+    const caseBlock = caseBlockMatch[1] ?? "";
+
+    assert.match(
+      caseBlock,
+      new RegExp(`\\bthemeController\\.setThemePreference\\(["']${escapeRegExp(preference)}["']\\)`),
+      `Expected ${commandId} to call themeController.setThemePreference("${preference}")`,
+    );
+
+    // Theme switching should update ribbon UI state immediately (label + related controls).
+    assert.match(
+      caseBlock,
+      /\bscheduleRibbonSelectionFormatStateUpdate\s*\(\s*\)\s*;/,
+      `Expected ${commandId} to call scheduleRibbonSelectionFormatStateUpdate() after changing theme`,
     );
   }
 });
