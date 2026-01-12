@@ -82,6 +82,65 @@ fn outer_broadcasting_spills_2d_arrays() {
 }
 
 #[test]
+fn outer_broadcasting_spills_2d_arrays_for_multiplication() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SEQUENCE(2,1)*SEQUENCE(1,3)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("C2").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(6.0));
+}
+
+#[test]
+fn outer_broadcasting_spills_2d_arrays_for_exponentiation() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SEQUENCE(2,1)^SEQUENCE(1,3)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("C2").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(8.0));
+}
+
+#[test]
+fn outer_broadcasting_spills_2d_arrays_for_division() {
+    // Use a 2x1 / 1x2 example so all results are exactly representable in IEEE754.
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SEQUENCE(2,1)/SEQUENCE(1,2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("B2").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(0.5));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(1.0));
+}
+
+#[test]
 fn outer_broadcasting_respects_operand_positions_for_subtraction() {
     let mut engine = Engine::new();
     engine
