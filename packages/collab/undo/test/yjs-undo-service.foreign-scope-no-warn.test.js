@@ -86,7 +86,10 @@ test("collab undo: does not warn [yjs#509] when scope contains a foreign root ty
     existing: placeholder,
     create: () => new MapCtor(),
   });
-  assert.equal(foreignRoot instanceof Y.AbstractType, false, "expected foreign root type (not instanceof ESM AbstractType)");
+  // Note: the undo service patches foreign prototype chains so foreign types can
+  // pass `instanceof Y.AbstractType` checks. Don't assert on that here; instead
+  // assert the root is still a foreign Map constructor.
+  assert.equal(foreignRoot instanceof Y.Map, false, "expected foreign root map type (not instanceof ESM Y.Map)");
 
   const warns = [];
   const prevWarn = console.warn;
@@ -179,4 +182,3 @@ test("collab undo: does not warn [yjs#509] when adding a foreign type to scope l
   doc.destroy();
   remote.destroy();
 });
-

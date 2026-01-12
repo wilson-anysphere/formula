@@ -73,3 +73,60 @@ test("YjsVersionStore normalizes foreign versioning roots created by a different
   assert.deepEqual(Array.from(roundTrip.snapshot), Array.from(snapshot));
 });
 
+test("YjsVersionStore normalizes foreign AbstractType placeholder roots even when they pass instanceof checks", async () => {
+  const Ycjs = requireYjsCjs();
+  const doc = new Y.Doc();
+
+  // Simulate another Yjs module instance touching the roots via Doc.get(name),
+  // leaving a foreign AbstractType placeholder under the same key.
+  Ycjs.Doc.prototype.get.call(doc, "versions");
+  Ycjs.Doc.prototype.get.call(doc, "versionsMeta");
+
+  const placeholder = doc.share.get("versions");
+  assert.ok(placeholder);
+  assert.throws(() => doc.getMap("versions"), /different constructor/);
+
+  // Patch prototype chain so the foreign placeholder passes `instanceof Y.AbstractType`
+  // checks (mirrors collab undo's prototype patching behavior).
+  try {
+    const ctor = placeholder.constructor;
+    if (typeof ctor === "function" && ctor !== Y.AbstractType) {
+      const baseProto = Object.getPrototypeOf(ctor.prototype);
+      if (baseProto && baseProto !== Object.prototype) {
+        Object.setPrototypeOf(baseProto, Y.AbstractType.prototype);
+      } else {
+        Object.setPrototypeOf(ctor.prototype, Y.AbstractType.prototype);
+      }
+    }
+  } catch {
+    // ignore (best-effort)
+  }
+  assert.equal(placeholder instanceof Y.AbstractType, true);
+
+  const store = new YjsVersionStore({
+    doc,
+    snapshotEncoding: "chunks",
+    writeMode: "single",
+  });
+
+  assert.ok(doc.getMap("versions") instanceof Y.Map);
+  assert.ok(doc.getMap("versionsMeta") instanceof Y.Map);
+
+  const snapshot = new Uint8Array([1, 2, 3]);
+  await store.saveVersion({
+    id: "v1",
+    kind: "snapshot",
+    timestampMs: 1,
+    userId: null,
+    userName: null,
+    description: null,
+    checkpointName: null,
+    checkpointLocked: null,
+    checkpointAnnotations: null,
+    snapshot,
+  });
+
+  const roundTrip = await store.getVersion("v1");
+  assert.ok(roundTrip);
+  assert.deepEqual(Array.from(roundTrip.snapshot), Array.from(snapshot));
+});

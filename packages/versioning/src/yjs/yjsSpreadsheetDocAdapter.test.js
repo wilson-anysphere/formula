@@ -142,3 +142,54 @@ test("createYjsSpreadsheetDocAdapter.applyState works when roots were created by
     Y.encodeStateAsUpdate(doc);
   });
 });
+
+test("createYjsSpreadsheetDocAdapter.applyState works when the target doc contains a foreign AbstractType placeholder root that passes instanceof checks", (t) => {
+  const Ycjs = requireYjsCjs();
+
+  // Prepare a snapshot containing a simple map root.
+  const source = new Y.Doc();
+  t.after(() => source.destroy());
+  source.getMap("cells").set("foo", "bar");
+  const snapshot = Y.encodeStateAsUpdate(source);
+
+  const doc = new Y.Doc();
+  t.after(() => doc.destroy());
+  // Simulate another Yjs module instance calling `Doc.get(name)` (defaulting to
+  // AbstractType) on this doc, leaving a foreign root placeholder under the key.
+  Ycjs.Doc.prototype.get.call(doc, "cells");
+
+  const placeholder = doc.share.get("cells");
+  assert.ok(placeholder, "expected cells root placeholder to exist");
+  assert.notEqual(placeholder.constructor, Y.AbstractType);
+  assert.throws(() => doc.getMap("cells"), /different constructor/);
+
+  // Patch the foreign AbstractType prototype chain so the placeholder passes
+  // `instanceof Y.AbstractType` checks (mirrors collab undo's behavior).
+  //
+  // Without the `constructor === Y.AbstractType` guard in `getMapRoot`, this would
+  // cause encodeState() to throw by calling `doc.getMap("cells")`.
+  try {
+    const ctor = placeholder.constructor;
+    if (typeof ctor === "function" && ctor !== Y.AbstractType) {
+      const baseProto = Object.getPrototypeOf(ctor.prototype);
+      if (baseProto && baseProto !== Object.prototype) {
+        Object.setPrototypeOf(baseProto, Y.AbstractType.prototype);
+      } else {
+        Object.setPrototypeOf(ctor.prototype, Y.AbstractType.prototype);
+      }
+    }
+  } catch {
+    // ignore (best-effort)
+  }
+  assert.equal(placeholder instanceof Y.AbstractType, true);
+
+  const adapter = createYjsSpreadsheetDocAdapter(doc);
+  adapter.applyState(snapshot);
+
+  // Root should be normalized so local callers can safely use getMap.
+  assert.ok(doc.getMap("cells") instanceof Y.Map);
+  assert.equal(doc.getMap("cells").get("foo"), "bar");
+
+  // The origin is already asserted in the existing applyState origin test; this
+  // test focuses on foreign-placeholder tolerance.
+});

@@ -269,7 +269,11 @@ function getMapRoot(doc, name) {
   }
 
   // Placeholder root types should be coerced via Yjs' own constructors.
-  if (existing instanceof Y.AbstractType) return doc.getMap(name);
+  //
+  // Note: other parts of the system patch foreign prototype chains so foreign
+  // types can pass `instanceof Y.AbstractType` checks. Use constructor identity
+  // to detect placeholders created by *this* Yjs module instance.
+  if (existing instanceof Y.AbstractType && existing.constructor === Y.AbstractType) return doc.getMap(name);
   if (isYAbstractType(existing) && doc instanceof Y.Doc) {
     return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() });
   }
@@ -300,7 +304,7 @@ function getArrayRoot(doc, name) {
     throw new Error(`Unsupported Yjs root type for "${name}" in current doc: Y.Text`);
   }
 
-  if (existing instanceof Y.AbstractType) return doc.getArray(name);
+  if (existing instanceof Y.AbstractType && existing.constructor === Y.AbstractType) return doc.getArray(name);
   if (isYAbstractType(existing) && doc instanceof Y.Doc) {
     return replaceForeignRootType({ doc, name, existing, create: () => new Y.Array() });
   }
@@ -331,7 +335,7 @@ function getTextRoot(doc, name) {
     throw new Error(`Unsupported Yjs root type for "${name}" in current doc: Y.Array`);
   }
 
-  if (existing instanceof Y.AbstractType) return doc.getText(name);
+  if (existing instanceof Y.AbstractType && existing.constructor === Y.AbstractType) return doc.getText(name);
   if (isYAbstractType(existing) && doc instanceof Y.Doc) {
     return replaceForeignRootType({ doc, name, existing, create: () => new Y.Text() });
   }

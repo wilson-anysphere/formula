@@ -133,7 +133,14 @@ function getMapRoot<T>(doc: Y.Doc, name: string): Y.Map<T> {
     throw new Error(`Yjs root schema mismatch for "${name}": expected a Y.Map but found a Y.Text`);
   }
 
-  if (existing instanceof Y.AbstractType) {
+  // `instanceof Y.AbstractType` is not sufficient to detect whether the placeholder
+  // root was created by *this* Yjs module instance. In mixed-module environments
+  // (ESM + CJS), other parts of the system (e.g. collaborative undo) patch foreign
+  // prototype chains so foreign types pass `instanceof` checks.
+  //
+  // When that happens, calling `doc.getMap(name)` would throw "different constructor"
+  // for foreign placeholders. Use constructor identity instead.
+  if (existing instanceof Y.AbstractType && (existing as any).constructor === Y.AbstractType) {
     return doc.getMap<T>(name);
   }
 
@@ -165,7 +172,7 @@ function getArrayRoot<T>(doc: Y.Doc, name: string): Y.Array<T> {
     throw new Error(`Yjs root schema mismatch for "${name}": expected a Y.Array but found a Y.Text`);
   }
 
-  if (existing instanceof Y.AbstractType) {
+  if (existing instanceof Y.AbstractType && (existing as any).constructor === Y.AbstractType) {
     return doc.getArray<T>(name);
   }
 

@@ -30,9 +30,18 @@ test('collab comments: tolerates foreign AbstractType placeholder root created v
   // uses `Doc.get(name)` (defaulting to `AbstractType`) to touch the `comments` root.
   Ycjs.Doc.prototype.get.call(doc, "comments");
 
-  // The root exists, but the placeholder is not an instanceof the local Y.AbstractType.
+  // The root exists, but it was created by a different Yjs module instance.
   assert.ok(doc.share.get("comments"));
-  assert.equal(doc.share.get("comments") instanceof Y.AbstractType, false);
+  assert.notEqual(
+    doc.share.get("comments")?.constructor,
+    Y.AbstractType,
+    "expected comments root placeholder constructor to differ from the local Y.AbstractType"
+  );
+  assert.throws(
+    () => doc.getMap("comments"),
+    /Type with the name comments has already been defined with a different constructor/,
+    "expected doc.getMap(\"comments\") to throw before placeholder normalization"
+  );
 
   // Regression: `getCommentsRoot` should not throw "different constructor".
   const root = getCommentsRoot(doc);
@@ -56,4 +65,3 @@ test('collab comments: tolerates foreign AbstractType placeholder root created v
 
   doc.destroy();
 });
-
