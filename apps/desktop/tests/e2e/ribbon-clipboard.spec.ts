@@ -92,4 +92,53 @@ test.describe("ribbon clipboard (Home → Clipboard)", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("E1"))).toBe("Hello");
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("E2"))).toBe("World");
   });
+
+  test("Paste Values from the Paste dropdown uses paste-special values semantics", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await gotoDesktop(page);
+
+    const ribbon = page.getByTestId("ribbon-root");
+    await ribbon.getByRole("tab", { name: "Home" }).click();
+
+    // Seed A1 = 1, B1 = =A1+1 (-> 2) with bold formatting.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      doc.beginBatch({ label: "Seed ribbon paste values" });
+      doc.setCellValue(sheetId, "A1", 1);
+      doc.setCellInput(sheetId, "B1", "=A1+1");
+      doc.setRangeFormat(sheetId, "B1", { font: { bold: true } }, { label: "Bold" });
+      doc.endBatch();
+      app.refresh();
+    });
+
+    // Copy B1 via ribbon.
+    await page.click("#grid", { position: { x: 160, y: 40 } }); // B1
+    await expect(page.getByTestId("active-cell")).toHaveText("B1");
+    await ribbon.getByRole("button", { name: "Copy" }).click();
+    await waitForGridFocus(page);
+
+    // Paste Values into C1 using the Paste dropdown.
+    await page.click("#grid", { position: { x: 260, y: 40 } }); // C1
+    await expect(page.getByTestId("active-cell")).toHaveText("C1");
+
+    await ribbon.getByTestId("ribbon-paste").click();
+    await ribbon.getByRole("menuitem", { name: "Paste Values" }).click();
+    await waitForGridFocus(page);
+
+    const c1Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"));
+    expect(c1Value).toBe("2");
+
+    const { formula, styleId } = await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      const cell = doc.getCell(sheetId, "C1");
+      return { formula: cell.formula, styleId: cell.styleId };
+    });
+    expect(formula).toBeNull();
+    // Paste Values should not paste formats; C1 should keep the default styleId.
+    expect(styleId).toBe(0);
+  });
 });
