@@ -10,6 +10,14 @@ use std::io::Cursor;
 
 use png::{BitDepth, ColorType};
 
+// `MAX_IMAGE_BYTES` bounds PNG payload sizes that cross the IPC boundary. A highly-compressible PNG
+// can still expand to a *much* larger RGBA buffer. Guard conversion helpers against allocating
+// unbounded pixel buffers by enforcing a cap on decoded RGBA bytes.
+//
+// This is intentionally larger than `MAX_IMAGE_BYTES` because DIBs are uncompressed, but still
+// bounded to keep clipboard conversions from exhausting memory.
+const MAX_DECODED_RGBA_BYTES: usize = 4 * super::MAX_IMAGE_BYTES; // 40 MiB
+
 const BITMAPINFOHEADER_SIZE: usize = 40;
 const BITMAPV5HEADER_SIZE: usize = 124;
 const BI_RGB: u32 = 0;
@@ -53,7 +61,14 @@ fn decode_png_rgba8(png_bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
         .read_info()
         .map_err(|e| format!("png decode header failed: {e}"))?;
 
-    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let output_size = reader.output_buffer_size();
+    if output_size > MAX_DECODED_RGBA_BYTES {
+        return Err(format!(
+            "png decoded buffer exceeds maximum size ({output_size} > {MAX_DECODED_RGBA_BYTES} bytes)"
+        ));
+    }
+
+    let mut buf = vec![0u8; output_size];
     let info = reader
         .next_frame(&mut buf)
         .map_err(|e| format!("png decode frame failed: {e}"))?;
@@ -67,7 +82,19 @@ fn decode_png_rgba8(png_bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
         return Err("png has zero width/height".to_string());
     }
 
-    let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
+    let width_usize = usize::try_from(width).map_err(|_| "png width exceeds platform limits")?;
+    let height_usize = usize::try_from(height).map_err(|_| "png height exceeds platform limits")?;
+    let rgba_len = width_usize
+        .checked_mul(height_usize)
+        .and_then(|v| v.checked_mul(4))
+        .ok_or_else(|| "png dimensions overflow".to_string())?;
+    if rgba_len > MAX_DECODED_RGBA_BYTES {
+        return Err(format!(
+            "png decoded RGBA exceeds maximum size ({rgba_len} > {MAX_DECODED_RGBA_BYTES} bytes)"
+        ));
+    }
+
+    let mut rgba = Vec::with_capacity(rgba_len);
 
     match (info.color_type, info.bit_depth) {
         (ColorType::Rgba, BitDepth::Eight) => rgba.extend_from_slice(bytes),
@@ -116,27 +143,20 @@ fn encode_png_rgba8(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, Str
 
 /// Convert PNG bytes into CF_DIBV5 bytes (BITMAPV5HEADER + BGRA pixels).
 pub fn png_to_dibv5(png_bytes: &[u8]) -> Result<Vec<u8>, String> {
-    let (width, height, rgba) = decode_png_rgba8(png_bytes)?;
+    let (width, height, mut rgba) = decode_png_rgba8(png_bytes)?;
 
     let width_i32 = i32::try_from(width).map_err(|_| "png width exceeds DIB limits".to_string())?;
     let height_i32 = i32::try_from(height).map_err(|_| "png height exceeds DIB limits".to_string())?;
 
-    let width_usize = width as usize;
-    let height_usize = height as usize;
-
-    // Use a top-down DIB (negative height) so the pixel buffer can stay in row-major order.
-    let mut bgra = vec![0u8; width_usize * height_usize * 4];
-    for (src_px, dst_px) in rgba.chunks_exact(4).zip(bgra.chunks_exact_mut(4)) {
-        let r = src_px[0];
-        let g = src_px[1];
-        let b = src_px[2];
-        let a = src_px[3];
-        dst_px.copy_from_slice(&[b, g, r, a]);
+    // Convert RGBA -> BGRA in place.
+    for px in rgba.chunks_exact_mut(4) {
+        px.swap(0, 2);
     }
 
-    let size_image = bgra.len() as u32;
+    let size_image =
+        u32::try_from(rgba.len()).map_err(|_| "DIB pixel buffer exceeds u32 limits".to_string())?;
 
-    let mut out = Vec::with_capacity(BITMAPV5HEADER_SIZE + bgra.len());
+    let mut out = Vec::with_capacity(BITMAPV5HEADER_SIZE + rgba.len());
 
     // BITMAPV5HEADER
     push_u32_le(&mut out, BITMAPV5HEADER_SIZE as u32); // bV5Size
@@ -174,7 +194,7 @@ pub fn png_to_dibv5(png_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
     debug_assert_eq!(out.len(), BITMAPV5HEADER_SIZE);
 
-    out.extend_from_slice(&bgra);
+    out.extend_from_slice(&rgba);
     Ok(out)
 }
 
@@ -214,6 +234,22 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
     let height_abs = height.unsigned_abs();
     let height_u32 = height_abs;
 
+    let width_usize =
+        usize::try_from(width_u32).map_err(|_| "dib width exceeds platform limits".to_string())?;
+    let height_usize =
+        usize::try_from(height_u32).map_err(|_| "dib height exceeds platform limits".to_string())?;
+
+    // RGBA output buffer bound.
+    let rgba_len = width_usize
+        .checked_mul(height_usize)
+        .and_then(|v| v.checked_mul(4))
+        .ok_or_else(|| "dib dimensions overflow".to_string())?;
+    if rgba_len > MAX_DECODED_RGBA_BYTES {
+        return Err(format!(
+            "dib decoded RGBA exceeds maximum size ({rgba_len} > {MAX_DECODED_RGBA_BYTES} bytes)"
+        ));
+    }
+
     let (row_bytes, stride) = match bit_count {
         32 => {
             if compression != BI_RGB && compression != BI_BITFIELDS {
@@ -221,7 +257,9 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
                     "unsupported DIB compression for 32bpp: {compression}"
                 ));
             }
-            let row = width_u32 as usize * 4;
+            let row = width_usize
+                .checked_mul(4)
+                .ok_or_else(|| "dib row size overflow".to_string())?;
             (row, row)
         }
         24 => {
@@ -230,8 +268,13 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
                     "unsupported DIB compression for 24bpp: {compression}"
                 ));
             }
-            let row = width_u32 as usize * 3;
-            let stride = (row + 3) & !3;
+            let row = width_usize
+                .checked_mul(3)
+                .ok_or_else(|| "dib row size overflow".to_string())?;
+            let stride = row
+                .checked_add(3)
+                .ok_or_else(|| "dib stride overflow".to_string())?
+                & !3;
             (row, stride)
         }
         other => return Err(format!("unsupported DIB bit depth: {other}")),
@@ -242,7 +285,9 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
     // inside the header itself.
     let mut pixel_offset = header_size;
     if compression == BI_BITFIELDS && header_size == BITMAPINFOHEADER_SIZE {
-        pixel_offset = header_size + 12;
+        pixel_offset = header_size
+            .checked_add(12)
+            .ok_or_else(|| "dib pixel offset overflow".to_string())?;
     }
 
     // For BI_BITFIELDS, treat the 4th byte as alpha only when a non-zero alpha mask is present
@@ -252,7 +297,12 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
     } else {
         0
     };
-    let needed = pixel_offset + stride * height_u32 as usize;
+    let pixel_data_bytes = stride
+        .checked_mul(height_usize)
+        .ok_or_else(|| "dib pixel data size overflow".to_string())?;
+    let needed = pixel_offset
+        .checked_add(pixel_data_bytes)
+        .ok_or_else(|| "dib total size overflow".to_string())?;
     if dib_bytes.len() < needed {
         return Err("dib does not contain full pixel data".to_string());
     }
@@ -293,10 +343,10 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
     let bottom_up = height > 0;
 
-    let mut rgba = Vec::with_capacity(width_u32 as usize * height_u32 as usize * 4);
-    for y in 0..height_u32 as usize {
+    let mut rgba = Vec::with_capacity(rgba_len);
+    for y in 0..height_usize {
         let src_y = if bottom_up {
-            height_u32 as usize - 1 - y
+            height_usize - 1 - y
         } else {
             y
         };

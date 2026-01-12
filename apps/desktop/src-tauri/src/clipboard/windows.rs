@@ -311,10 +311,10 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
         })
         .transpose()?;
 
-    let dib_bytes = png_bytes
-        .as_deref()
-        .map(|png| png_to_dibv5(png).map_err(|e| ClipboardError::InvalidPayload(e)))
-        .transpose()?;
+    // Interop: provide a DIBV5 representation when possible, but treat conversion as best-effort.
+    // Large / highly-compressible PNGs can expand to huge pixel buffers; `png_to_dibv5` enforces a
+    // safety cap and may fail. In that case we still write the PNG bytes.
+    let dib_bytes = png_bytes.as_deref().and_then(|png| png_to_dibv5(png).ok());
 
     let format_html = html_bytes
         .as_ref()
