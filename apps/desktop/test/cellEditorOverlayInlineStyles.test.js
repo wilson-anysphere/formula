@@ -11,12 +11,12 @@ test("CellEditorOverlay visibility uses CSS classes (no inline style.display/zIn
   const content = fs.readFileSync(filePath, "utf8");
 
   assert.equal(
-    content.includes(".style.display"),
+    /\.style\.display\s*=/.test(content),
     false,
     "CellEditorOverlay should not assign element.style.display; use a CSS class toggle (e.g. .cell-editor--open)",
   );
   assert.equal(
-    content.includes(".style.zIndex"),
+    /\.style\.zIndex\s*=/.test(content),
     false,
     "CellEditorOverlay should not assign element.style.zIndex; move stacking context into CSS",
   );
@@ -32,4 +32,3 @@ test("CellEditorOverlay visibility uses CSS classes (no inline style.display/zIn
     "CellEditorOverlay.close should remove the cell-editor--open CSS modifier class",
   );
 });
-
