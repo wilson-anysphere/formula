@@ -7468,10 +7468,14 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 2 && args.len() != 3 {
                     return false;
                 }
-                let range_ok = matches!(
-                    args[0],
-                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
-                );
+                let range_ok = match &args[0] {
+                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) => true,
+                    bytecode::Expr::NameRef(name) => matches!(
+                        local_binding_kind(lexical_scopes, name),
+                        Some(BytecodeLocalBindingKind::Range)
+                    ),
+                    _ => false,
+                };
                 let criteria_ok =
                     bytecode_expr_is_eligible_inner(&args[1], false, false, lexical_scopes);
                 let sum_range_ok = match args.get(2) {
@@ -7479,6 +7483,10 @@ fn bytecode_expr_is_eligible_inner(
                     // Excel treats an explicitly missing optional range arg as "omitted".
                     Some(bytecode::Expr::Literal(bytecode::Value::Missing)) => true,
                     Some(bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)) => true,
+                    Some(bytecode::Expr::NameRef(name)) => matches!(
+                        local_binding_kind(lexical_scopes, name),
+                        Some(BytecodeLocalBindingKind::Range)
+                    ),
                     _ => false,
                 };
 
@@ -7491,18 +7499,26 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() < 3 || (args.len() - 1) % 2 != 0 {
                     return false;
                 }
-                let first_range_ok = matches!(
-                    args[0],
-                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
-                );
+                let first_range_ok = match &args[0] {
+                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) => true,
+                    bytecode::Expr::NameRef(name) => matches!(
+                        local_binding_kind(lexical_scopes, name),
+                        Some(BytecodeLocalBindingKind::Range)
+                    ),
+                    _ => false,
+                };
                 if !first_range_ok {
                     return false;
                 }
                 for pair in args[1..].chunks_exact(2) {
-                    let range_ok = matches!(
-                        pair[0],
-                        bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
-                    );
+                    let range_ok = match &pair[0] {
+                        bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) => true,
+                        bytecode::Expr::NameRef(name) => matches!(
+                            local_binding_kind(lexical_scopes, name),
+                            Some(BytecodeLocalBindingKind::Range)
+                        ),
+                        _ => false,
+                    };
                     let criteria_ok =
                         bytecode_expr_is_eligible_inner(&pair[1], false, false, lexical_scopes);
                     if !range_ok || !criteria_ok {
@@ -7561,10 +7577,14 @@ fn bytecode_expr_is_eligible_inner(
                     return false;
                 }
                 for pair in args.chunks_exact(2) {
-                    let range_ok = matches!(
-                        pair[0],
-                        bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
-                    );
+                    let range_ok = match &pair[0] {
+                        bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) => true,
+                        bytecode::Expr::NameRef(name) => matches!(
+                            local_binding_kind(lexical_scopes, name),
+                            Some(BytecodeLocalBindingKind::Range)
+                        ),
+                        _ => false,
+                    };
                     let criteria_ok =
                         bytecode_expr_is_eligible_inner(&pair[1], false, false, lexical_scopes);
                     if !range_ok || !criteria_ok {
@@ -7577,13 +7597,27 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 2 {
                     return false;
                 }
-                (matches!(
-                    args[0],
-                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) | bytecode::Expr::SpillRange(_)
-                )) && (matches!(
-                    args[1],
-                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) | bytecode::Expr::SpillRange(_)
-                ))
+                let lhs_ok = match &args[0] {
+                    bytecode::Expr::RangeRef(_)
+                    | bytecode::Expr::CellRef(_)
+                    | bytecode::Expr::SpillRange(_) => true,
+                    bytecode::Expr::NameRef(name) => matches!(
+                        local_binding_kind(lexical_scopes, name),
+                        Some(BytecodeLocalBindingKind::Range)
+                    ),
+                    _ => false,
+                };
+                let rhs_ok = match &args[1] {
+                    bytecode::Expr::RangeRef(_)
+                    | bytecode::Expr::CellRef(_)
+                    | bytecode::Expr::SpillRange(_) => true,
+                    bytecode::Expr::NameRef(name) => matches!(
+                        local_binding_kind(lexical_scopes, name),
+                        Some(BytecodeLocalBindingKind::Range)
+                    ),
+                    _ => false,
+                };
+                lhs_ok && rhs_ok
             }
             bytecode::ast::Function::VLookup | bytecode::ast::Function::HLookup => {
                 if args.len() < 3 || args.len() > 4 {

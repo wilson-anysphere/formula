@@ -862,6 +862,25 @@ fn bytecode_backend_let_supports_reference_bindings() {
 }
 
 #[test]
+fn bytecode_backend_let_preserves_reference_semantics_for_sum() {
+    // `SUM` treats scalar arguments differently from reference arguments:
+    // - `SUM("5")` => 5
+    // - `SUM(A1)` => 0 if A1 contains text
+    //
+    // LET should preserve reference semantics when binding a bare cell/range reference.
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "5").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=LET(x, A1, SUM(x))")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(0.0));
+    assert_engine_matches_ast(&engine, "=LET(x, A1, SUM(x))", "B1");
+}
+
+#[test]
 fn bytecode_backend_let_supports_range_bindings_when_consumed_by_sum() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
@@ -874,6 +893,22 @@ fn bytecode_backend_let_supports_range_bindings_when_consumed_by_sum() {
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
     assert_engine_matches_ast(&engine, "=LET(r, A1:A2, SUM(r))", "B1");
+}
+
+#[test]
+fn bytecode_backend_let_supports_range_bindings_for_countif() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=LET(r, A1:A3, COUNTIF(r, ">1"))"#)
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+    assert_engine_matches_ast(&engine, r#"=LET(r, A1:A3, COUNTIF(r, ">1"))"#, "B1");
 }
 
 #[test]

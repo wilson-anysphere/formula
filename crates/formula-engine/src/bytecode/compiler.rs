@@ -16,9 +16,22 @@ impl Compiler {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LocalKind {
+    Scalar,
+    RefSingle,
+    RefMulti,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LocalInfo {
+    idx: u32,
+    kind: LocalKind,
+}
+
 struct CompileCtx<'a> {
     program: &'a mut Program,
-    lexical_scopes: Vec<HashMap<Arc<str>, u32>>,
+    lexical_scopes: Vec<HashMap<Arc<str>, LocalInfo>>,
 }
 
 impl<'a> CompileCtx<'a> {
@@ -29,10 +42,10 @@ impl<'a> CompileCtx<'a> {
         }
     }
 
-    fn resolve_local(&self, name: &Arc<str>) -> Option<u32> {
+    fn resolve_local(&self, name: &Arc<str>) -> Option<LocalInfo> {
         for scope in self.lexical_scopes.iter().rev() {
-            if let Some(idx) = scope.get(name) {
-                return Some(*idx);
+            if let Some(info) = scope.get(name) {
+                return Some(*info);
             }
         }
         None
@@ -55,6 +68,10 @@ impl<'a> CompileCtx<'a> {
     }
 
     fn compile_expr(&mut self, expr: &Expr) {
+        self.compile_expr_inner(expr, false);
+    }
+
+    fn compile_expr_inner(&mut self, expr: &Expr, allow_range: bool) {
         match expr {
             Expr::Literal(v) => {
                 let idx = self.program.consts.len() as u32;
@@ -64,11 +81,19 @@ impl<'a> CompileCtx<'a> {
                     .push(Instruction::new(OpCode::PushConst, idx, 0));
             }
             Expr::CellRef(r) => {
-                let idx = self.program.cell_refs.len() as u32;
-                self.program.cell_refs.push(*r);
-                self.program
-                    .instrs
-                    .push(Instruction::new(OpCode::LoadCell, idx, 0));
+                if allow_range {
+                    let idx = self.program.range_refs.len() as u32;
+                    self.program.range_refs.push(RangeRef::new(*r, *r));
+                    self.program
+                        .instrs
+                        .push(Instruction::new(OpCode::LoadRange, idx, 0));
+                } else {
+                    let idx = self.program.cell_refs.len() as u32;
+                    self.program.cell_refs.push(*r);
+                    self.program
+                        .instrs
+                        .push(Instruction::new(OpCode::LoadCell, idx, 0));
+                }
             }
             Expr::RangeRef(r) => {
                 let idx = self.program.range_refs.len() as u32;
@@ -85,10 +110,15 @@ impl<'a> CompileCtx<'a> {
                     .push(Instruction::new(OpCode::LoadMultiRange, idx, 0));
             }
             Expr::NameRef(name) => {
-                if let Some(idx) = self.resolve_local(name) {
+                if let Some(info) = self.resolve_local(name) {
                     self.program
                         .instrs
-                        .push(Instruction::new(OpCode::LoadLocal, idx, 0));
+                        .push(Instruction::new(OpCode::LoadLocal, info.idx, 0));
+                    if !allow_range && info.kind == LocalKind::RefSingle {
+                        self.program
+                            .instrs
+                            .push(Instruction::new(OpCode::ImplicitIntersection, 0, 0));
+                    }
                 } else {
                     // Bytecode evaluation does not currently resolve defined names; treat as `#NAME?`.
                     self.push_error_const(ErrorKind::Name);
@@ -101,7 +131,10 @@ impl<'a> CompileCtx<'a> {
                     .push(Instruction::new(OpCode::SpillRange, 0, 0));
             }
             Expr::Unary { op, expr } => {
-                self.compile_expr(expr);
+                match op {
+                    UnaryOp::ImplicitIntersection => self.compile_expr_inner(expr, true),
+                    UnaryOp::Plus | UnaryOp::Neg => self.compile_expr_inner(expr, false),
+                }
                 match op {
                     UnaryOp::Plus => self
                         .program
@@ -118,8 +151,8 @@ impl<'a> CompileCtx<'a> {
                 }
             }
             Expr::Binary { op, left, right } => {
-                self.compile_expr(left);
-                self.compile_expr(right);
+                self.compile_expr_inner(left, false);
+                self.compile_expr_inner(right, false);
                 let opcode = match op {
                     BinaryOp::Add => OpCode::Add,
                     BinaryOp::Sub => OpCode::Sub,
@@ -136,13 +169,13 @@ impl<'a> CompileCtx<'a> {
                 self.program.instrs.push(Instruction::new(opcode, 0, 0));
             }
             Expr::FuncCall { func, args } => match func {
-                Function::Let => self.compile_let(args),
+                Function::Let => self.compile_let(args, allow_range),
                 // Certain logical/error functions are lazy in Excel: they should only evaluate
                 // the branch argument that is selected at runtime (e.g. `IF(FALSE, <expensive>, 0)`).
                 //
                 // Implement these with explicit control flow opcodes so the VM can short-circuit.
                 Function::If if args.len() == 2 || args.len() == 3 => {
-                    self.compile_expr(&args[0]);
+                    self.compile_expr_inner(&args[0], false);
                     let jump_idx = self.program.instrs.len();
                     // Patched below: a=false_target, b=end_target.
                     self.program.instrs.push(Instruction::new(
@@ -152,7 +185,7 @@ impl<'a> CompileCtx<'a> {
                     ));
 
                     // TRUE branch.
-                    self.compile_expr(&args[1]);
+                    self.compile_expr_inner(&args[1], false);
                     let jump_end_idx = self.program.instrs.len();
                     self.program
                         .instrs
@@ -161,7 +194,7 @@ impl<'a> CompileCtx<'a> {
                     // FALSE branch.
                     let false_target = self.program.instrs.len() as u32;
                     if args.len() == 3 {
-                        self.compile_expr(&args[2]);
+                        self.compile_expr_inner(&args[2], false);
                     } else {
                         // Engine behavior: missing false branch defaults to FALSE (not blank).
                         let idx = self.program.consts.len() as u32;
@@ -186,14 +219,14 @@ impl<'a> CompileCtx<'a> {
                 Function::IfError if args.len() == 2 => {
                     // Evaluate the first argument. If it's not an error, short-circuit and
                     // return it without evaluating the fallback.
-                    self.compile_expr(&args[0]);
+                    self.compile_expr_inner(&args[0], false);
                     let jump_idx = self.program.instrs.len();
                     self.program
                         .instrs
                         .push(Instruction::new(OpCode::JumpIfNotError, 0, 0));
 
                     // Error fallback branch (only evaluated if arg0 is an error).
-                    self.compile_expr(&args[1]);
+                    self.compile_expr_inner(&args[1], false);
                     let end_target = self.program.instrs.len() as u32;
                     self.program.instrs[jump_idx] =
                         Instruction::new(OpCode::JumpIfNotError, end_target, 0);
@@ -201,7 +234,7 @@ impl<'a> CompileCtx<'a> {
                 Function::IfNa if args.len() == 2 => {
                     // Evaluate the first argument. If it's not #N/A, short-circuit and return
                     // it without evaluating the fallback.
-                    self.compile_expr(&args[0]);
+                    self.compile_expr_inner(&args[0], false);
                     let jump_idx = self.program.instrs.len();
                     self.program.instrs.push(Instruction::new(
                         OpCode::JumpIfNotNaError,
@@ -210,7 +243,7 @@ impl<'a> CompileCtx<'a> {
                     ));
 
                     // #N/A fallback branch (only evaluated if arg0 is #N/A).
-                    self.compile_expr(&args[1]);
+                    self.compile_expr_inner(&args[1], false);
                     let end_target = self.program.instrs.len() as u32;
                     self.program.instrs[jump_idx] =
                         Instruction::new(OpCode::JumpIfNotNaError, end_target, 0);
@@ -230,7 +263,26 @@ impl<'a> CompileCtx<'a> {
         }
     }
 
-    fn compile_let(&mut self, args: &[Expr]) {
+    fn infer_let_value_kind(&self, expr: &Expr) -> LocalKind {
+        match expr {
+            Expr::CellRef(_) => LocalKind::RefSingle,
+            Expr::RangeRef(r) => {
+                if r.start == r.end {
+                    LocalKind::RefSingle
+                } else {
+                    LocalKind::RefMulti
+                }
+            }
+            Expr::NameRef(name) => self
+                .resolve_local(name)
+                .map(|info| info.kind)
+                .unwrap_or(LocalKind::Scalar),
+            Expr::Unary { op, .. } if *op == UnaryOp::ImplicitIntersection => LocalKind::Scalar,
+            _ => LocalKind::Scalar,
+        }
+    }
+
+    fn compile_let(&mut self, args: &[Expr], allow_range: bool) {
         if args.len() < 3 || args.len() % 2 == 0 {
             self.push_error_const(ErrorKind::Value);
             return;
@@ -245,10 +297,18 @@ impl<'a> CompileCtx<'a> {
                 self.push_error_const(ErrorKind::Value);
                 return;
             };
+            if name.is_empty() {
+                self.lexical_scopes.pop();
+                self.push_error_const(ErrorKind::Value);
+                return;
+            }
 
             // Evaluate the binding value, then store it into a new local slot.
             // The binding name becomes visible to subsequent bindings and the final body.
-            self.compile_expr(&pair[1]);
+            let kind = self.infer_let_value_kind(&pair[1]);
+
+            // LET binding values are evaluated in "argument mode" (may preserve references).
+            self.compile_expr_inner(&pair[1], true);
             let idx = self.alloc_local(name.clone());
             self.program
                 .instrs
@@ -256,10 +316,10 @@ impl<'a> CompileCtx<'a> {
             self.lexical_scopes
                 .last_mut()
                 .expect("pushed scope")
-                .insert(name.clone(), idx);
+                .insert(name.clone(), LocalInfo { idx, kind });
         }
 
-        self.compile_expr(&args[last]);
+        self.compile_expr_inner(&args[last], allow_range);
         self.lexical_scopes.pop();
     }
 
@@ -421,11 +481,10 @@ impl<'a> CompileCtx<'a> {
         // logical/text values in the referenced cell are ignored (unlike `SUM(TRUE)` / `SUM("5")`).
         //
         // Lower single-cell references to a range so the runtime can apply reference semantics.
-        let treat_cell_as_range = match func {
-            // AND/OR are *not* treated like numeric aggregates: a direct cell reference argument is
-            // treated as a scalar, so text-like values in the referenced cell behave like scalar
-            // text arguments (i.e. typically #VALUE! rather than being ignored).
-            Function::And | Function::Or => false,
+        let allow_range = match func {
+            // AND/OR accept range arguments (which ignore text-like values), but direct *cell*
+            // references are treated as scalar arguments (so text-like values produce #VALUE!).
+            Function::And | Function::Or => true,
             // XOR uses reference semantics for direct cell references (like ranges), matching the
             // engine evaluator.
             Function::Xor => true,
@@ -448,18 +507,14 @@ impl<'a> CompileCtx<'a> {
             _ => false,
         };
 
-        if treat_cell_as_range {
-            if let Expr::CellRef(r) = arg {
-                let idx = self.program.range_refs.len() as u32;
-                self.program.range_refs.push(RangeRef::new(*r, *r));
-                self.program
-                    .instrs
-                    .push(Instruction::new(OpCode::LoadRange, idx, 0));
-                return;
-            }
-        }
+        let allow_range = if matches!(func, Function::And | Function::Or) && matches!(arg, Expr::CellRef(_))
+        {
+            false
+        } else {
+            allow_range
+        };
 
-        self.compile_expr(arg);
+        self.compile_expr_inner(arg, allow_range);
     }
 }
 
