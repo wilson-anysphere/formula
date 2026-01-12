@@ -129,12 +129,12 @@ fn signature_status(vba_project_bin: &[u8]) -> commands::MacroSignatureStatus {
 
     match parsed {
         Some(sig) => match sig.verification {
-            formula_vba::VbaSignatureVerification::SignedVerified => {
-                commands::MacroSignatureStatus::SignedVerified
-            }
-            formula_vba::VbaSignatureVerification::SignedInvalid => {
-                commands::MacroSignatureStatus::SignedInvalid
-            }
+            formula_vba::VbaSignatureVerification::SignedVerified => match sig.binding {
+                formula_vba::VbaSignatureBinding::Bound => commands::MacroSignatureStatus::SignedVerified,
+                formula_vba::VbaSignatureBinding::NotBound => commands::MacroSignatureStatus::SignedInvalid,
+                formula_vba::VbaSignatureBinding::Unknown => commands::MacroSignatureStatus::SignedUnverified,
+            },
+            formula_vba::VbaSignatureVerification::SignedInvalid => commands::MacroSignatureStatus::SignedInvalid,
             formula_vba::VbaSignatureVerification::SignedParseError => {
                 commands::MacroSignatureStatus::SignedParseError
             }

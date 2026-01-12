@@ -1785,9 +1785,21 @@ fn build_macro_security_status(
         Some(match parsed {
             Some(sig) => MacroSignatureInfo {
                 status: match sig.verification {
-                    formula_vba::VbaSignatureVerification::SignedVerified => {
-                        MacroSignatureStatus::SignedVerified
-                    }
+                    formula_vba::VbaSignatureVerification::SignedVerified => match sig.binding {
+                        formula_vba::VbaSignatureBinding::Bound => {
+                            MacroSignatureStatus::SignedVerified
+                        }
+                        formula_vba::VbaSignatureBinding::NotBound => {
+                            // Signature blob is cryptographically valid, but not bound to the VBA
+                            // project contents.
+                            MacroSignatureStatus::SignedInvalid
+                        }
+                        formula_vba::VbaSignatureBinding::Unknown => {
+                            // We couldn't verify the MS-OVBA project digest binding. Treat it as
+                            // unverified so `TrustedSignedOnly` continues to behave conservatively.
+                            MacroSignatureStatus::SignedUnverified
+                        }
+                    },
                     formula_vba::VbaSignatureVerification::SignedInvalid => {
                         MacroSignatureStatus::SignedInvalid
                     }
