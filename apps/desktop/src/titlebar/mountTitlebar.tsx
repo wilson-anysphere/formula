@@ -1,5 +1,6 @@
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { flushSync } from "react-dom";
 
 import { Titlebar, type TitlebarProps } from "./Titlebar.js";
 
@@ -34,7 +35,11 @@ export function mountTitlebar(container: HTMLElement, props: TitlebarProps): Tit
       </React.StrictMode>,
     );
   };
-  render(props);
+  // Render synchronously on first mount so callers can immediately query the DOM
+  // (useful for smoke tests and shell wiring).
+  flushSync(() => {
+    render(props);
+  });
 
   const dispose = () => {
     root?.unmount();
