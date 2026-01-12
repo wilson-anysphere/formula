@@ -259,6 +259,16 @@ fn csv_import_decodes_windows1252_fallback() {
 }
 
 #[test]
+fn csv_import_decodes_windows1252_euro_symbol_and_parses_currency() {
+    // Windows-1252 byte 0x80 is "€". Ensure we decode it correctly (not ISO-8859-1 control chars)
+    // and that currency parsing works on the decoded string.
+    let bytes = b"amount\n\x8012.34\n".to_vec();
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(bytes), CsvOptions::default())
+        .expect("CSV import should decode Windows-1252 bytes in Auto mode");
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(12.34));
+}
+
+#[test]
 fn csv_import_strips_utf8_bom_from_first_header_field() {
     let bytes = b"\xEF\xBB\xBFid,text\n1,hello\n".to_vec();
     let table =
