@@ -243,6 +243,37 @@ describe("updaterUi (dialog + download)", () => {
   );
 
   it(
+    "updates the open dialog when the background download completes (no extra toast)",
+    async () => {
+      const { handleUpdaterEvent } = await import("../updaterUi");
+
+      await handleUpdaterEvent("update-download-started", { source: "startup", version: "1.2.3" });
+      await handleUpdaterEvent("update-download-progress", { source: "startup", version: "1.2.3", percent: 50 });
+      await handleUpdaterEvent("update-available", { source: "manual", version: "1.2.3", body: "notes" });
+      await flushMicrotasks();
+
+      const toast = document.querySelector('[data-testid="update-ready-toast"]');
+      expect(toast).toBeNull();
+
+      const restartBtnBefore = document.querySelector<HTMLButtonElement>('[data-testid="updater-restart"]');
+      expect(restartBtnBefore).not.toBeNull();
+      expect(restartBtnBefore?.hidden).toBe(true);
+
+      await handleUpdaterEvent("update-downloaded", { source: "startup", version: "1.2.3" });
+      await flushMicrotasks();
+
+      const restartBtnAfter = document.querySelector<HTMLButtonElement>('[data-testid="updater-restart"]');
+      expect(restartBtnAfter).not.toBeNull();
+      expect(restartBtnAfter?.hidden).toBe(false);
+
+      // The dialog is already the primary UX surface here; avoid a redundant toast.
+      const toastAfter = document.querySelector('[data-testid="update-ready-toast"]');
+      expect(toastAfter).toBeNull();
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
     "keeps the update dialog open if the user cancels the unsaved-changes prompt on restart",
     async () => {
       const handlers = new Map<string, (event: any) => void>();

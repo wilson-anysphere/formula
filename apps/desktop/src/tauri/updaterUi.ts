@@ -893,7 +893,26 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
     const version = typeof payload?.version === "string" && payload.version.trim() !== "" ? payload.version.trim() : "unknown";
     backendDownloadInFlightVersion = null;
     backendDownloadedVersion = version;
-    showUpdateReadyToast({ version });
+    lastUpdateError = null;
+
+    // If the update dialog is already open for this version (e.g. user triggered a manual check
+    // while a startup download was in-flight), update it to show the restart CTA immediately.
+    if (updateDialog && updateInfo?.version === version) {
+      renderUpdateDialog();
+    }
+
+    // If the user recently dismissed startup update prompts for this version, keep background
+    // download completion quiet; they can still manually check and see the restart CTA.
+    if (rawSource === "startup" && version && shouldSuppressStartupUpdatePrompt(version)) {
+      return;
+    }
+
+    const dialogOpen = updateDialog?.dialog
+      ? (updateDialog.dialog as any).open === true || updateDialog.dialog.hasAttribute("open")
+      : false;
+    if (!dialogOpen) {
+      showUpdateReadyToast({ version });
+    }
     return;
   }
 
