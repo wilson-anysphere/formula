@@ -55,6 +55,12 @@ test("sync-server + BranchService (Yjs): merge preserves sheet metadata + namedR
         disableBc: true,
       },
       defaultSheetId: "Sheet1",
+      // This test asserts BranchService + branchStateAdapter behavior. CollabSession's
+      // workbook schema auto-init can race with large sheet list replacements
+      // (delete + reinsert) and create spurious default sheets under load, making
+      // this test flaky. Disable it here so the Yjs document contents are only
+      // mutated by the adapter under test.
+      schema: { autoInit: false },
     });
 
     const ydoc = session.doc;
