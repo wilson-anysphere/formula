@@ -249,6 +249,38 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(controller.getCell("Sheet1", "B1").styleId).toBe(0);
   });
 
+  it("does not copy inherited (layered) non-ai-tools styles into per-cell styles when writeRange applies formatting", () => {
+    const controller = new DocumentController();
+    const api = new DocumentControllerSpreadsheetApi(controller);
+
+    // Apply a column default border via layered formatting (no per-cell materialization).
+    controller.setRangeFormat("Sheet1", "A1:A1048576", {
+      border: { left: { style: "thin", color: "#FF000000" } }
+    });
+
+    expect(controller.getCell("Sheet1", "A1").styleId).toBe(0);
+
+    // Trigger the writeRange `hasAnyFormat` path by writing a supported ai-tools format.
+    api.writeRange({ sheet: "Sheet1", startRow: 1, startCol: 1, endRow: 1, endCol: 1 }, [[{ format: { italic: true } }]]);
+
+    const after = controller.getCell("Sheet1", "A1");
+    expect(after.styleId).toBeGreaterThan(0);
+
+    // The per-cell style should only contain ai-tools supported overrides (no border materialization).
+    const cellStyle = controller.styleTable.get(after.styleId);
+    expect(cellStyle.border).toBeUndefined();
+
+    // The effective style should still include the inherited column border.
+    const effectiveBeforeClear = controller.getCellFormat("Sheet1", "A1");
+    expect(effectiveBeforeClear.border?.left?.style).toBe("thin");
+    expect(effectiveBeforeClear.border?.left?.color).toBe("#FF000000");
+
+    // Clearing the column formatting should remove the border from the effective style.
+    controller.setRangeFormat("Sheet1", "A1:A1048576", null);
+    const effectiveAfterClear = controller.getCellFormat("Sheet1", "A1");
+    expect(effectiveAfterClear.border).toBeUndefined();
+  });
+
   it("clears stale formatting when writeRange moves formatted cells (no contamination)", () => {
     const controller = new DocumentController();
     controller.setRangeValues("Sheet1", "A1:B1", [[1, 2]]);
