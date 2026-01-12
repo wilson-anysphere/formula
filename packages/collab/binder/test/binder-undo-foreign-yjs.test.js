@@ -36,6 +36,7 @@ class TestDocumentController {
     this._emitter = new EventEmitter();
     /** @type {Map<string, { value: any, formula: string | null, styleId: number }>} */
     this._cells = new Map();
+    this.externalDeltaCount = 0;
     this.styleTable = {
       intern: (_format) => 1,
       get: (_id) => null,
@@ -72,6 +73,7 @@ class TestDocumentController {
    * @param {any[]} deltas
    */
   applyExternalDeltas(deltas) {
+    this.externalDeltaCount += 1;
     for (const delta of deltas) {
       const key = this._key(delta.sheetId, { row: delta.row, col: delta.col });
       this._cells.set(key, {
@@ -155,11 +157,13 @@ test("binder normalizes foreign nested cell maps before mutating so collab undo 
   await flushAsync();
 
   assert.equal(documentController.getCell("Sheet1", { row: 0, col: 0 }).value, "from-cjs");
+  assert.equal(documentController.externalDeltaCount, 1, "initial hydration should apply exactly one external delta batch");
 
   // Clear the cell (null write). This exercises the case where the binder is about to
   // mutate a foreign nested Y.Map even though the resulting value is empty.
   documentController.setCellValue("Sheet1", { row: 0, col: 0 }, null);
   await flushAsync();
+  assert.equal(documentController.externalDeltaCount, 1, "binder should not echo local edits back into DocumentController");
 
   const afterWrite = cellsRoot.get("Sheet1:0:0");
   assert.ok(afterWrite);
@@ -174,6 +178,7 @@ test("binder normalizes foreign nested cell maps before mutating so collab undo 
   assert.equal(undoService.canUndo(), true);
   undoService.undo();
   await flushAsync();
+  assert.equal(documentController.externalDeltaCount, 2, "undo should apply exactly one external delta batch");
 
   const afterUndo = cellsRoot.get("Sheet1:0:0");
   assert.ok(afterUndo);
@@ -229,11 +234,13 @@ test("binder normalizes foreign nested cell maps when only legacy keys exist", a
   await flushAsync();
 
   assert.equal(documentController.getCell("Sheet1", { row: 0, col: 0 }).value, "from-cjs");
+  assert.equal(documentController.externalDeltaCount, 1);
 
   // Clear via canonical coordinates. Binder should target the legacy raw key and
   // normalize it before mutating so undo remains reliable.
   documentController.setCellValue("Sheet1", { row: 0, col: 0 }, null);
   await flushAsync();
+  assert.equal(documentController.externalDeltaCount, 1);
 
   const afterWriteLegacy = cellsRoot.get("Sheet1:0,0");
   assert.ok(afterWriteLegacy);
@@ -243,6 +250,7 @@ test("binder normalizes foreign nested cell maps when only legacy keys exist", a
   assert.equal(undoService.canUndo(), true);
   undoService.undo();
   await flushAsync();
+  assert.equal(documentController.externalDeltaCount, 2);
 
   const afterUndoLegacy = cellsRoot.get("Sheet1:0,0");
   assert.ok(afterUndoLegacy);
@@ -292,9 +300,11 @@ test("binder normalizes foreign nested cell maps when only r{row}c{col} keys exi
   await flushAsync();
 
   assert.equal(documentController.getCell("Sheet1", { row: 0, col: 0 }).value, "from-cjs");
+  assert.equal(documentController.externalDeltaCount, 1);
 
   documentController.setCellValue("Sheet1", { row: 0, col: 0 }, null);
   await flushAsync();
+  assert.equal(documentController.externalDeltaCount, 1);
 
   const afterWriteLegacy = cellsRoot.get("r0c0");
   assert.ok(afterWriteLegacy);
@@ -304,6 +314,7 @@ test("binder normalizes foreign nested cell maps when only r{row}c{col} keys exi
   assert.equal(undoService.canUndo(), true);
   undoService.undo();
   await flushAsync();
+  assert.equal(documentController.externalDeltaCount, 2);
 
   const afterUndoLegacy = cellsRoot.get("r0c0");
   assert.ok(afterUndoLegacy);
