@@ -92,6 +92,44 @@ describe("command palette performance safeguards", () => {
     vi.useRealTimers();
   });
 
+  it("guards scrollIntoView calls when it is missing (jsdom)", async () => {
+    const registry = new CommandRegistry();
+    for (let i = 0; i < 3; i += 1) {
+      registry.registerBuiltinCommand(`test.cmd.${i}`, `Command ${i}`, () => {}, { category: "Test" });
+    }
+
+    const palette = createCommandPalette({
+      commandRegistry: registry,
+      contextKeys: {} as any,
+      keybindingIndex: new Map(),
+      ensureExtensionsLoaded: async () => {},
+      onCloseFocus: () => {},
+      maxResults: 20,
+      maxResultsPerGroup: 20,
+      inputDebounceMs: 0,
+      extensionLoadDelayMs: 60_000,
+    });
+
+    palette.open();
+
+    // Flush the queued microtask that keeps the selected row in view after rendering.
+    await Promise.resolve();
+
+    const input = document.querySelector<HTMLInputElement>('[data-testid="command-palette-input"]')!;
+    const list = document.querySelector<HTMLElement>('[data-testid="command-palette-list"]')!;
+
+    const selectedBefore = list.querySelector<HTMLElement>('.command-palette__item[aria-selected="true"]');
+    expect(selectedBefore?.id).toBe("command-palette-option-0");
+
+    // Arrow navigation triggers `updateSelection`, which should also guard `scrollIntoView`.
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+
+    const selectedAfter = list.querySelector<HTMLElement>('.command-palette__item[aria-selected="true"]');
+    expect(selectedAfter?.id).toBe("command-palette-option-1");
+
+    palette.dispose();
+  });
+
   it("shows a searching placeholder during chunked search until the scan completes", async () => {
     vi.useFakeTimers();
 
