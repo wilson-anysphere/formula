@@ -32,6 +32,24 @@ fn old_entity_and_record_json_with_only_display_deserializes() {
 }
 
 #[test]
+fn entity_and_record_serialize_compactly_when_only_display_is_present() {
+    let entity = CellValue::Entity(EntityValue::new("X"));
+    let record = CellValue::Record(RecordValue::new("Y"));
+
+    let entity_json = serde_json::to_value(&entity).unwrap();
+    let record_json = serde_json::to_value(&record).unwrap();
+
+    assert_eq!(
+        entity_json,
+        serde_json::json!({ "type": "entity", "value": { "displayValue": "X" } })
+    );
+    assert_eq!(
+        record_json,
+        serde_json::json!({ "type": "record", "value": { "displayValue": "Y" } })
+    );
+}
+
+#[test]
 fn rich_entity_and_record_json_roundtrip() {
     let entity = EntityValue::new("Apple Inc.")
         .with_entity_type("stock")
