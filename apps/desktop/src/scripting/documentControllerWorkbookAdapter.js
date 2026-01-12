@@ -676,6 +676,25 @@ export class DocumentControllerWorkbookAdapter {
     if (Array.isArray(formatDeltas)) {
       for (const delta of formatDeltas) {
         if (!delta) continue;
+
+        // DocumentController layered formatting emits `{ layer, index, beforeStyleId, afterStyleId }`.
+        // Normalize those into the row/col/sheet delta streams expected by the macro recorder.
+        const layer = typeof delta.layer === "string" ? delta.layer : null;
+        if (layer === "col") {
+          const col = delta.col ?? delta.column ?? delta.colIndex ?? delta.columnIndex ?? delta.index;
+          rawColStyleDeltas.push({ ...delta, col });
+          continue;
+        }
+        if (layer === "row") {
+          const row = delta.row ?? delta.rowIndex ?? delta.index;
+          rawRowStyleDeltas.push({ ...delta, row });
+          continue;
+        }
+        if (layer === "sheet") {
+          rawSheetStyleDeltas.push(delta);
+          continue;
+        }
+
         const hasRow = delta.row != null;
         const hasCol = delta.col != null;
         if (hasCol && !hasRow) rawColStyleDeltas.push(delta);
