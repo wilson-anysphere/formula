@@ -1614,7 +1614,18 @@ export const defaultRibbonSchema: RibbonSchema = {
           label: "Comments",
           buttons: [
             { id: "review.comments.newComment", label: "New Comment", ariaLabel: "New Comment", icon: "💬", size: "large" },
-            { id: "review.comments.deleteComment", label: "Delete", ariaLabel: "Delete Comment", icon: "🗑", kind: "dropdown" },
+            {
+              id: "review.comments.deleteComment",
+              label: "Delete",
+              ariaLabel: "Delete Comment",
+              icon: "🗑",
+              kind: "dropdown",
+              menuItems: [
+                { id: "review.comments.deleteComment", label: "Delete Comment", ariaLabel: "Delete Comment", icon: "🗑" },
+                { id: "review.comments.deleteComment.deleteThread", label: "Delete Thread", ariaLabel: "Delete Thread", icon: "🧵" },
+                { id: "review.comments.deleteComment.deleteAll", label: "Delete All Comments", ariaLabel: "Delete All Comments", icon: "🗑" },
+              ],
+            },
             { id: "review.comments.previous", label: "Previous", ariaLabel: "Previous Comment", icon: "⬆" },
             { id: "review.comments.next", label: "Next", ariaLabel: "Next Comment", icon: "⬇" },
             { id: "review.comments.showComments", label: "Show Comments", ariaLabel: "Show Comments", icon: "👁", kind: "toggle" },
@@ -1624,7 +1635,18 @@ export const defaultRibbonSchema: RibbonSchema = {
           id: "review.notes",
           label: "Notes",
           buttons: [
-            { id: "review.notes.newNote", label: "New Note", ariaLabel: "New Note", icon: "🗒", kind: "dropdown", size: "large" },
+            {
+              id: "review.notes.newNote",
+              label: "New Note",
+              ariaLabel: "New Note",
+              icon: "🗒",
+              kind: "dropdown",
+              size: "large",
+              menuItems: [
+                { id: "review.notes.newNote", label: "New Note", ariaLabel: "New Note", icon: "🗒" },
+                { id: "review.notes.editNote", label: "Edit Note", ariaLabel: "Edit Note", icon: "✎" },
+              ],
+            },
             { id: "review.notes.showAllNotes", label: "Show All Notes", ariaLabel: "Show All Notes", icon: "👁", kind: "toggle" },
             { id: "review.notes.showHideNote", label: "Show/Hide Note", ariaLabel: "Show or Hide Note", icon: "🙈", kind: "toggle" },
           ],
@@ -1633,9 +1655,40 @@ export const defaultRibbonSchema: RibbonSchema = {
           id: "review.protect",
           label: "Protect",
           buttons: [
-            { id: "review.protect.protectSheet", label: "Protect Sheet", ariaLabel: "Protect Sheet", icon: "🔒", kind: "dropdown", size: "large" },
-            { id: "review.protect.protectWorkbook", label: "Protect Workbook", ariaLabel: "Protect Workbook", icon: "🧰", kind: "dropdown" },
-            { id: "review.protect.allowEditRanges", label: "Allow Edit Ranges", ariaLabel: "Allow Edit Ranges", icon: "✅", kind: "dropdown" },
+            {
+              id: "review.protect.protectSheet",
+              label: "Protect Sheet",
+              ariaLabel: "Protect Sheet",
+              icon: "🔒",
+              kind: "dropdown",
+              size: "large",
+              menuItems: [
+                { id: "review.protect.protectSheet", label: "Protect Sheet…", ariaLabel: "Protect Sheet", icon: "🔒" },
+                { id: "review.protect.unprotectSheet", label: "Unprotect Sheet…", ariaLabel: "Unprotect Sheet", icon: "🔓" },
+              ],
+            },
+            {
+              id: "review.protect.protectWorkbook",
+              label: "Protect Workbook",
+              ariaLabel: "Protect Workbook",
+              icon: "🧰",
+              kind: "dropdown",
+              menuItems: [
+                { id: "review.protect.protectWorkbook", label: "Protect Workbook…", ariaLabel: "Protect Workbook", icon: "🧰" },
+                { id: "review.protect.unprotectWorkbook", label: "Unprotect Workbook…", ariaLabel: "Unprotect Workbook", icon: "🔓" },
+              ],
+            },
+            {
+              id: "review.protect.allowEditRanges",
+              label: "Allow Edit Ranges",
+              ariaLabel: "Allow Edit Ranges",
+              icon: "✅",
+              kind: "dropdown",
+              menuItems: [
+                { id: "review.protect.allowEditRanges", label: "Allow Users to Edit Ranges…", ariaLabel: "Allow Users to Edit Ranges", icon: "✅" },
+                { id: "review.protect.allowEditRanges.new", label: "New…", ariaLabel: "New allowed range", icon: "➕" },
+              ],
+            },
           ],
         },
         {
@@ -1649,17 +1702,68 @@ export const defaultRibbonSchema: RibbonSchema = {
           id: "review.language",
           label: "Language",
           buttons: [
-            { id: "review.language.translate", label: "Translate", ariaLabel: "Translate", icon: "🌐", kind: "dropdown" },
-            { id: "review.language.language", label: "Language", ariaLabel: "Language", icon: "🈯", kind: "dropdown" },
+            {
+              id: "review.language.translate",
+              label: "Translate",
+              ariaLabel: "Translate",
+              icon: "🌐",
+              kind: "dropdown",
+              menuItems: [
+                { id: "review.language.translate.translateSelection", label: "Translate Selection", ariaLabel: "Translate Selection", icon: "🌐" },
+                { id: "review.language.translate.translateSheet", label: "Translate Sheet", ariaLabel: "Translate Sheet", icon: "📄" },
+              ],
+            },
+            {
+              id: "review.language.language",
+              label: "Language",
+              ariaLabel: "Language",
+              icon: "🈯",
+              kind: "dropdown",
+              menuItems: [
+                { id: "review.language.language.setProofing", label: "Set Proofing Language…", ariaLabel: "Set Proofing Language", icon: "🈯" },
+                { id: "review.language.language.translate", label: "Translate", ariaLabel: "Translate", icon: "🌐" },
+              ],
+            },
           ],
         },
         {
           id: "review.changes",
           label: "Changes",
           buttons: [
-            { id: "review.changes.trackChanges", label: "Track Changes", ariaLabel: "Track Changes", icon: "📝", kind: "dropdown", size: "large" },
-            { id: "review.changes.shareWorkbook", label: "Share Workbook", ariaLabel: "Share Workbook", icon: "👥", kind: "dropdown" },
-            { id: "review.changes.protectShareWorkbook", label: "Protect and Share Workbook", ariaLabel: "Protect and Share Workbook", icon: "🔒", kind: "dropdown" },
+            {
+              id: "review.changes.trackChanges",
+              label: "Track Changes",
+              ariaLabel: "Track Changes",
+              icon: "📝",
+              kind: "dropdown",
+              size: "large",
+              menuItems: [
+                { id: "review.changes.trackChanges", label: "Track Changes…", ariaLabel: "Track Changes", icon: "📝" },
+                { id: "review.changes.trackChanges.highlight", label: "Highlight Changes…", ariaLabel: "Highlight Changes", icon: "🟨" },
+              ],
+            },
+            {
+              id: "review.changes.shareWorkbook",
+              label: "Share Workbook",
+              ariaLabel: "Share Workbook",
+              icon: "👥",
+              kind: "dropdown",
+              menuItems: [
+                { id: "review.changes.shareWorkbook", label: "Share Workbook…", ariaLabel: "Share Workbook", icon: "👥" },
+                { id: "review.changes.shareWorkbook.shareNow", label: "Share Now", ariaLabel: "Share Now", icon: "🔗" },
+              ],
+            },
+            {
+              id: "review.changes.protectShareWorkbook",
+              label: "Protect and Share Workbook",
+              ariaLabel: "Protect and Share Workbook",
+              icon: "🔒",
+              kind: "dropdown",
+              menuItems: [
+                { id: "review.changes.protectShareWorkbook", label: "Protect and Share Workbook…", ariaLabel: "Protect and Share Workbook", icon: "🔒" },
+                { id: "review.changes.protectShareWorkbook.protectWorkbook", label: "Protect Workbook", ariaLabel: "Protect Workbook", icon: "🧰" },
+              ],
+            },
           ],
         },
       ],
