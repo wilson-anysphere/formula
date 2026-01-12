@@ -355,6 +355,7 @@ async function renderSearchResults({
           el(
             "button",
             {
+              dataset: { testid: `marketplace-repair-${item.id}` },
               onClick: async () => {
                 actions.textContent = shouldTryUpdate ? "Updating…" : "Repairing…";
                 try {

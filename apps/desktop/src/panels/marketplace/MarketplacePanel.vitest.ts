@@ -338,7 +338,7 @@ describe("MarketplacePanel", () => {
     await waitFor(() => container.textContent?.includes("Installed") ?? false);
     await waitFor(() => container.textContent?.includes("incompatible") ?? false);
 
-    const repairButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Repair");
+    const repairButton = container.querySelector<HTMLButtonElement>('[data-testid="marketplace-repair-formula.sample-hello"]');
     expect(repairButton).toBeInstanceOf(HTMLButtonElement);
     repairButton!.click();
 
@@ -421,7 +421,7 @@ describe("MarketplacePanel", () => {
     await waitFor(() => container.textContent?.includes("Installed") ?? false);
     await waitFor(() => container.textContent?.toLowerCase().includes("incompatible") ?? false);
 
-    const repairButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Repair");
+    const repairButton = container.querySelector<HTMLButtonElement>('[data-testid="marketplace-repair-formula.sample-hello"]');
     expect(repairButton).toBeInstanceOf(HTMLButtonElement);
     repairButton!.click();
 
@@ -432,6 +432,6 @@ describe("MarketplacePanel", () => {
     // The panel rerenders after the attempt so buttons remain available even though nothing changed.
     await waitFor(() => Array.from(container.querySelectorAll("button")).some((b) => b.textContent === "Uninstall"));
     expect(Array.from(container.querySelectorAll(".marketplace-badge")).map((el) => el.textContent)).toContain("incompatible");
-    expect(Array.from(container.querySelectorAll("button")).some((b) => b.textContent === "Repair")).toBe(true);
+    expect(Boolean(container.querySelector('[data-testid="marketplace-repair-formula.sample-hello"]'))).toBe(true);
   });
 });
