@@ -9,8 +9,24 @@ permissions:
   contents: write
 
 jobs:
+  validate-version:
+    name: Validate desktop version matches tag
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check desktop version matches release tag
+        run: node scripts/check-desktop-version.mjs "${{ github.ref_name }}"
+
   build:
     name: Build (${{ matrix.platform }})
+    needs: validate-version
     strategy:
       fail-fast: false
       matrix:
