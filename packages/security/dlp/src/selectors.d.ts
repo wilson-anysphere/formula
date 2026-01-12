@@ -6,6 +6,19 @@ export const CLASSIFICATION_SCOPE: Readonly<{
   CELL: "cell";
 }>;
 
+export type CellCoord = { row: number; col: number };
+export type CellRange = { start: CellCoord; end: CellCoord };
+
+/**
+ * Normalizes a range so that `start` is the top-left and `end` is the bottom-right.
+ */
+export function normalizeRange(range: CellRange): CellRange;
+
+/**
+ * Stable string key for selectors (used for indexing/caching).
+ */
+export function selectorKey(selector: unknown): string;
+
 export function effectiveCellClassification(
   cellRef: { documentId: string; sheetId: string; row: number; col: number; tableId?: string; columnId?: string },
   records: Array<{ selector: any; classification: any }>
