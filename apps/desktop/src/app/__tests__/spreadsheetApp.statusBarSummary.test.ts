@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../spreadsheetApp";
 import { buildSelection } from "../../selection/selection";
+import * as formulaEval from "../../spreadsheet/evaluateFormula";
 
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
@@ -648,6 +649,50 @@ describe("SpreadsheetApp selection summary (status bar)", () => {
     expect(second).toEqual(first);
     expect(getCellSpy).not.toHaveBeenCalled();
     expect(sparseSpy).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("reuses in-process formula memoization across selection cells in multi-sheet mode", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    clearSeededCells(app);
+    const doc = app.getDocument();
+    const sheetId = app.getCurrentSheetId();
+
+    // Materialize a second sheet so SpreadsheetApp falls back to the in-process evaluator.
+    doc.setCellValue("Sheet2", "A1", 0);
+
+    // Shared dependency formula.
+    doc.setCellFormula(sheetId, "B1", "=1+1");
+    // Two selection cells that both reference the same dependency formula.
+    doc.setCellFormula(sheetId, "A1", "=B1");
+    doc.setCellFormula(sheetId, "A2", "=B1");
+
+    app.selectRange({ range: { startRow: 0, endRow: 1, startCol: 0, endCol: 0 } }); // A1:A2
+
+    const evalSpy = vi.spyOn(formulaEval, "evaluateFormula");
+    evalSpy.mockClear();
+
+    const summary = app.getSelectionSummary();
+    expect(summary).toEqual({
+      sum: 4,
+      average: 2,
+      count: 2,
+      numericCount: 2,
+      countNonEmpty: 2,
+    });
+
+    // Without shared memoization, the dependency formula would be evaluated once per root cell:
+    // A1, B1, A2, B1 (4 calls). With shared memoization it should be evaluated once (3 calls).
+    expect(evalSpy).toHaveBeenCalledTimes(3);
 
     app.destroy();
     root.remove();
