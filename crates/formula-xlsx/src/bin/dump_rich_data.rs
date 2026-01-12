@@ -23,12 +23,13 @@ use formula_xlsx::{parse_value_metadata_vm_to_rich_value_index_map, XlsxPackage}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn usage() -> &'static str {
-    "dump_rich_data <path.xlsx> [--print-parts]\n\
+    "dump_rich_data <path.xlsx> [--print-parts] [--extract-cell-images]\n\
 \n\
 Debug helper for inspecting Excel rich data (linked entities, images-in-cell).\n\
 \n\
 Options:\n\
-  --print-parts   List rich-data related ZIP parts found in the workbook\n\
+  --print-parts           List rich-data related ZIP parts found in the workbook\n\
+  --extract-cell-images   Extract rich-data in-cell images by cell and print a summary\n\
 "
 }
 
@@ -39,6 +40,7 @@ fn main() {}
 fn main() -> Result<(), Box<dyn Error>> {
     let mut xlsx_path: Option<PathBuf> = None;
     let mut print_parts = false;
+    let mut extract_cell_images = false;
 
     let mut args = std::env::args().skip(1).peekable();
     while let Some(arg) = args.next() {
@@ -49,6 +51,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             "--print-parts" => {
                 print_parts = true;
+            }
+            "--extract-cell-images" => {
+                extract_cell_images = true;
             }
             flag if flag.starts_with('-') => {
                 return Err(format!("unknown flag: {flag}\n\n{}", usage()).into());
@@ -63,12 +68,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let xlsx_path = xlsx_path.ok_or_else(|| format!("missing <path.xlsx>\n\n{}", usage()))?;
-    dump_one(&xlsx_path, print_parts)?;
+    dump_one(&xlsx_path, print_parts, extract_cell_images)?;
     Ok(())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn dump_one(xlsx_path: &Path, print_parts: bool) -> Result<(), Box<dyn Error>> {
+fn dump_one(
+    xlsx_path: &Path,
+    print_parts: bool,
+    extract_cell_images: bool,
+) -> Result<(), Box<dyn Error>> {
     let bytes = fs::read(xlsx_path)?;
     let pkg = XlsxPackage::from_bytes(&bytes)?;
 
@@ -94,6 +103,10 @@ fn dump_one(xlsx_path: &Path, print_parts: bool) -> Result<(), Box<dyn Error>> {
     dump_rich_value_image_targets(vm_to_rich_value_index.as_ref(), cell_images.as_ref(), &rv_to_targets)?;
 
     dump_vm_cell_mappings(&pkg, vm_to_rich_value_index.as_ref(), &rv_to_targets);
+
+    if extract_cell_images {
+        dump_rich_cell_images_by_cell(&pkg);
+    }
 
     Ok(())
 }
@@ -719,6 +732,60 @@ fn dump_vm_cell_mappings(
             rel.map(|n| n.to_string()).unwrap_or_else(|| "-".to_string()),
             target.unwrap_or_else(|| "-".to_string())
         );
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn dump_rich_cell_images_by_cell(pkg: &XlsxPackage) {
+    let images_by_cell = match pkg.extract_rich_cell_images_by_cell() {
+        Ok(v) => v,
+        Err(err) => {
+            println!();
+            println!("rich-data in-cell images (by cell): (failed to extract: {err})");
+            return;
+        }
+    };
+
+    if images_by_cell.is_empty() {
+        println!();
+        println!("rich-data in-cell images (by cell): (none)");
+        return;
+    }
+
+    println!();
+    println!(
+        "rich-data in-cell images (by cell): {} cell(s)",
+        images_by_cell.len()
+    );
+
+    let mut counts_by_sheet: BTreeMap<&str, usize> = BTreeMap::new();
+    for ((sheet, _cell), _bytes) in &images_by_cell {
+        *counts_by_sheet.entry(sheet.as_str()).or_insert(0) += 1;
+    }
+    if !counts_by_sheet.is_empty() {
+        println!("  sheets:");
+        for (sheet, count) in counts_by_sheet {
+            println!("    {sheet}: {count}");
+        }
+    }
+
+    let mut entries: Vec<(&(String, formula_model::CellRef), &Vec<u8>)> =
+        images_by_cell.iter().collect();
+    entries.sort_by(|(a_key, _), (b_key, _)| {
+        a_key
+            .0
+            .cmp(&b_key.0)
+            .then_with(|| (a_key.1.row, a_key.1.col).cmp(&(b_key.1.row, b_key.1.col)))
+    });
+
+    println!("  examples:");
+    let max = 20usize;
+    for (idx, ((sheet, cell), bytes)) in entries.into_iter().enumerate() {
+        if idx >= max {
+            println!("    ... ({} more)", images_by_cell.len().saturating_sub(max));
+            break;
+        }
+        println!("    {sheet}!{cell}: {} bytes", bytes.len());
     }
 }
 
