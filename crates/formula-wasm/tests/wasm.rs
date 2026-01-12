@@ -290,6 +290,26 @@ fn rewrite_formulas_for_copy_delta_shifts_a1_references() {
 }
 
 #[wasm_bindgen_test]
+fn rewrite_formulas_for_copy_delta_shifts_row_and_column_ranges() {
+    let requests = vec![
+        json!({
+            "formula": "=SUM(A:A)",
+            "deltaRow": 0,
+            "deltaCol": 1,
+        }),
+        json!({
+            "formula": "=SUM(1:1)",
+            "deltaRow": 1,
+            "deltaCol": 0,
+        }),
+    ];
+    let requests_js = serde_wasm_bindgen::to_value(&requests).unwrap();
+    let out_js = rewrite_formulas_for_copy_delta(requests_js).unwrap();
+    let out: Vec<String> = serde_wasm_bindgen::from_value(out_js).unwrap();
+    assert_eq!(out, vec!["=SUM(B:B)".to_string(), "=SUM(2:2)".to_string()]);
+}
+
+#[wasm_bindgen_test]
 fn parse_formula_partial_honors_locale_id_option() {
     let opts = Object::new();
     Reflect::set(&opts, &JsValue::from_str("localeId"), &JsValue::from_str("de-DE")).unwrap();
