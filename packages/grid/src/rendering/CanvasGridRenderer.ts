@@ -390,6 +390,24 @@ export class CanvasGridRenderer {
     blitUsed: false
   };
 
+  // Per-frame (cleared each render) caches used by the hot-path `renderGridQuadrant` renderer.
+  //
+  // These are shared across quadrant renders within a single frame to:
+  // - avoid repeated `provider.getCell()` calls when logic such as text overflow probing touches
+  //   cells outside the currently-rendered quadrant
+  // - avoid per-frame allocations (especially nested Map-of-Map row caches)
+  private readonly frameCellCache = new Map<number, CellData | null>();
+  private readonly frameBlockedCache = new Map<number, boolean>();
+  private readonly frameCellCacheNested = new Map<number, Map<number, CellData | null>>();
+  private readonly frameBlockedCacheNested = new Map<number, Map<number, boolean>>();
+  private frameCacheUsesLinearKeys = true;
+  private frameCacheColCount = 0;
+
+  // Test-only instrumentation: counts the number of inner (per-row) Map allocations when we
+  // fall back to the nested cache strategy (used only for extremely large grids where a
+  // linearized numeric key could exceed Number.MAX_SAFE_INTEGER).
+  private __testOnly_rowCacheMapAllocs = 0;
+
   private readonly gridQuadrantScratch: [GridRenderQuadrant, GridRenderQuadrant, GridRenderQuadrant, GridRenderQuadrant] = [
     {
       originX: 0,
@@ -1512,6 +1530,17 @@ export class CanvasGridRenderer {
 
     const viewport = this.scroll.getViewportState();
 
+    // Reset frame-local caches before any paint work begins.
+    const rowCount = this.getRowCount();
+    const colCount = this.getColCount();
+    this.frameCacheColCount = colCount;
+    this.frameCacheUsesLinearKeys = CanvasGridRenderer.canUseLinearCellCacheKey(rowCount, colCount);
+    this.frameCellCache.clear();
+    this.frameBlockedCache.clear();
+    this.frameCellCacheNested.clear();
+    this.frameBlockedCacheNested.clear();
+    this.__testOnly_rowCacheMapAllocs = 0;
+
     const scrollDeltaX = this.lastRendered.scrollX - viewport.scrollX;
     const scrollDeltaY = this.lastRendered.scrollY - viewport.scrollY;
     const viewportChanged =
@@ -1576,6 +1605,16 @@ export class CanvasGridRenderer {
     if (perfEnabled) {
       perf.lastFrameMs = performance.now() - frameStart;
     }
+  }
+
+  private static canUseLinearCellCacheKey(rowCount: number, colCount: number): boolean {
+    // A linearized key `row * colCount + col` is only guaranteed unique when every key stays
+    // within the safe integer range. For extreme grids (very large rowCount/colCount), we
+    // fall back to the previous nested Map-of-Map strategy to preserve correctness.
+    if (!Number.isSafeInteger(rowCount) || !Number.isSafeInteger(colCount)) return false;
+    if (rowCount <= 0 || colCount <= 0) return true;
+    const maxKey = rowCount * colCount - 1;
+    return Number.isFinite(maxKey) && maxKey <= Number.MAX_SAFE_INTEGER;
   }
 
   private invalidateForScroll(): void {
@@ -2431,42 +2470,71 @@ export class CanvasGridRenderer {
 
     const hasMerges = quadrantMergedRanges.length > 0;
 
-    const cellCache = new Map<number, Map<number, CellData | null>>();
-    const getCellCached = (row: number, col: number): CellData | null => {
-      let rowCache = cellCache.get(row);
-      if (!rowCache) {
-        rowCache = new Map();
-        cellCache.set(row, rowCache);
-      }
-      if (rowCache.has(col)) return rowCache.get(col) ?? null;
-      const cell = this.provider.getCell(row, col);
-      if (trackCellFetches) cellFetches += 1;
-      rowCache.set(col, cell);
-      return cell;
-    };
+    const useLinearKeys = this.frameCacheUsesLinearKeys && this.frameCacheColCount === colCount;
 
-    const blockedCache = new Map<number, Map<number, boolean>>();
-    const isBlockedForOverflow = (row: number, col: number): boolean => {
-      let rowCache = blockedCache.get(row);
-      if (!rowCache) {
-        rowCache = new Map();
-        blockedCache.set(row, rowCache);
-      }
-      if (rowCache.has(col)) return rowCache.get(col) ?? false;
+    const getCellCached: (row: number, col: number) => CellData | null = useLinearKeys
+      ? (row, col) => {
+          const key = row * colCount + col;
+          if (this.frameCellCache.has(key)) return this.frameCellCache.get(key) ?? null;
+          const cell = this.provider.getCell(row, col);
+          if (trackCellFetches) cellFetches += 1;
+          this.frameCellCache.set(key, cell);
+          return cell;
+        }
+      : (row, col) => {
+          let rowCache = this.frameCellCacheNested.get(row);
+          if (!rowCache) {
+            rowCache = new Map();
+            this.frameCellCacheNested.set(row, rowCache);
+            this.__testOnly_rowCacheMapAllocs += 1;
+          }
+          if (rowCache.has(col)) return rowCache.get(col) ?? null;
+          const cell = this.provider.getCell(row, col);
+          if (trackCellFetches) cellFetches += 1;
+          rowCache.set(col, cell);
+          return cell;
+        };
 
-      if (mergedRanges.length > 0 && mergedIndex.rangeAt({ row, col })) {
-        rowCache.set(col, true);
-        return true;
-      }
+    const isBlockedForOverflow: (row: number, col: number) => boolean = useLinearKeys
+      ? (row, col) => {
+          const key = row * colCount + col;
+          if (this.frameBlockedCache.has(key)) return this.frameBlockedCache.get(key) ?? false;
 
-      const cell = getCellCached(row, col);
-      const value = cell?.value ?? null;
-      const richTextText = cell?.richText?.text;
-      const blocked =
-        (value !== null && value !== "") || (typeof richTextText === "string" && richTextText !== "");
-      rowCache.set(col, blocked);
-      return blocked;
-    };
+          if (mergedRanges.length > 0 && mergedIndex.rangeAt({ row, col })) {
+            this.frameBlockedCache.set(key, true);
+            return true;
+          }
+
+          const cell = getCellCached(row, col);
+          const value = cell?.value ?? null;
+          const richTextText = cell?.richText?.text;
+          const blocked =
+            (value !== null && value !== "") || (typeof richTextText === "string" && richTextText !== "");
+          this.frameBlockedCache.set(key, blocked);
+          return blocked;
+        }
+      : (row, col) => {
+          let rowCache = this.frameBlockedCacheNested.get(row);
+          if (!rowCache) {
+            rowCache = new Map();
+            this.frameBlockedCacheNested.set(row, rowCache);
+            this.__testOnly_rowCacheMapAllocs += 1;
+          }
+          if (rowCache.has(col)) return rowCache.get(col) ?? false;
+
+          if (mergedRanges.length > 0 && mergedIndex.rangeAt({ row, col })) {
+            rowCache.set(col, true);
+            return true;
+          }
+
+          const cell = getCellCached(row, col);
+          const value = cell?.value ?? null;
+          const richTextText = cell?.richText?.text;
+          const blocked =
+            (value !== null && value !== "") || (typeof richTextText === "string" && richTextText !== "");
+          rowCache.set(col, blocked);
+          return blocked;
+        };
 
     const drawCellContent = (options: {
       cell: CellData;
