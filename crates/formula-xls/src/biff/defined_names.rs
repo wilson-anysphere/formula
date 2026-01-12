@@ -875,7 +875,8 @@ mod tests {
 
         // rgce for `A1&"ABCDE"`, using a relative reference token (PtgRefN).
         let rgce: Vec<u8> = [
-            vec![0x2C, 0x00, 0x00, 0x00, 0x00], // PtgRefN row_off=0 col_off=0 => A1 (best-effort base)
+            // PtgRefN: rw=0, col=0xC000 (row+col relative) => A1 (base A1).
+            vec![0x2C, 0x00, 0x00, 0x00, 0xC0],
             vec![0x17, literal.len() as u8, 0u8], // PtgStr + cch + flags (compressed)
             literal.as_bytes().to_vec(),
             vec![0x08], // PtgConcat
