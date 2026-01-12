@@ -61,7 +61,7 @@ success/failure after evaluating `globalThis.crossOriginIsolated` and `SharedArr
 
    ```bash
    pnpm -C apps/desktop build
-   bash scripts/cargo_agent.sh build -p desktop --features desktop --bin formula-desktop --release
+   bash scripts/cargo_agent.sh build -p formula-desktop-tauri --features desktop --bin formula-desktop --release
    ```
 
 2. Launch the built app (platform-specific binary path under `target/release/`).
