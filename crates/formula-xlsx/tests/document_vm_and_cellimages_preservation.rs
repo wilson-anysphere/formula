@@ -161,8 +161,8 @@ fn preserves_vm_cell_attribute_and_cellimages_parts_through_document_roundtrip()
 
     assert_eq!(
         cell.attribute("vm"),
-        Some("9"),
-        "expected vm attribute to be preserved, got: {sheet_xml_str}"
+        None,
+        "vm should be dropped when editing away from rich-value placeholder semantics, got: {sheet_xml_str}"
     );
     assert_eq!(
         cell.attribute("customAttr"),

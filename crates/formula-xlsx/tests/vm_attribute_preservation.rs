@@ -68,7 +68,7 @@ fn build_minimal_vm_xlsx() -> Vec<u8> {
     build_minimal_xlsx(worksheet_xml)
 }
 
-fn assert_a2_vm_and_value(worksheet_xml: &str, expected_value: &str) {
+fn assert_a2_value_and_drops_vm(worksheet_xml: &str, expected_value: &str) {
     let doc = roxmltree::Document::parse(worksheet_xml).expect("parse worksheet xml");
     let cell = doc
         .descendants()
@@ -76,8 +76,8 @@ fn assert_a2_vm_and_value(worksheet_xml: &str, expected_value: &str) {
         .expect("expected A2 cell");
     assert_eq!(
         cell.attribute("vm"),
-        Some("1"),
-        "expected A2 to preserve vm attribute, got: {worksheet_xml}"
+        None,
+        "vm should be dropped when patching a cell away from rich-value placeholder semantics, got: {worksheet_xml}"
     );
     let v = cell
         .children()
@@ -91,7 +91,7 @@ fn assert_a2_vm_and_value(worksheet_xml: &str, expected_value: &str) {
 }
 
 #[test]
-fn apply_cell_patches_to_bytes_preserves_vm_attribute_on_patched_cell() -> Result<(), Box<dyn std::error::Error>>
+fn apply_cell_patches_to_bytes_drops_vm_attribute_on_patched_cell() -> Result<(), Box<dyn std::error::Error>>
 {
     let bytes = build_minimal_vm_xlsx();
     let pkg = XlsxPackage::from_bytes(&bytes)?;
@@ -105,13 +105,13 @@ fn apply_cell_patches_to_bytes_preserves_vm_attribute_on_patched_cell() -> Resul
 
     let out_bytes = pkg.apply_cell_patches_to_bytes(&[patch])?;
     let out_xml = read_zip_part_to_string(&out_bytes, "xl/worksheets/sheet1.xml");
-    assert_a2_vm_and_value(&out_xml, "9");
+    assert_a2_value_and_drops_vm(&out_xml, "9");
 
     Ok(())
 }
 
 #[test]
-fn apply_cell_patches_preserves_vm_attribute_on_patched_cell() -> Result<(), Box<dyn std::error::Error>>
+fn apply_cell_patches_drops_vm_attribute_on_patched_cell() -> Result<(), Box<dyn std::error::Error>>
 {
     let bytes = build_minimal_vm_xlsx();
     let mut pkg = XlsxPackage::from_bytes(&bytes)?;
@@ -125,8 +125,7 @@ fn apply_cell_patches_preserves_vm_attribute_on_patched_cell() -> Result<(), Box
     pkg.apply_cell_patches(&patches)?;
 
     let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap())?;
-    assert_a2_vm_and_value(out_xml, "9");
+    assert_a2_value_and_drops_vm(out_xml, "9");
 
     Ok(())
 }
-

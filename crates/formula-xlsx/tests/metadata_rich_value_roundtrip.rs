@@ -101,8 +101,8 @@ fn build_minimal_xlsx_with_rich_value_metadata() -> (Vec<u8>, Vec<u8>) {
 }
 
 #[test]
-fn editing_cell_preserves_workbook_metadata_parts_and_vm_attr() -> Result<(), Box<dyn std::error::Error>>
-{
+fn editing_cell_preserves_workbook_metadata_parts_and_drops_vm_on_edit(
+) -> Result<(), Box<dyn std::error::Error>> {
     let (xlsx_bytes, original_metadata) = build_minimal_xlsx_with_rich_value_metadata();
 
     let mut doc = load_from_bytes(&xlsx_bytes)?;
@@ -158,7 +158,8 @@ fn editing_cell_preserves_workbook_metadata_parts_and_vm_attr() -> Result<(), Bo
     );
     assert_eq!(rel.attribute("Target"), Some("metadata.xml"));
 
-    // Editing must preserve the non-modeled `vm="..."` attribute on the updated cell.
+    // When the cell value changes away from the rich-value placeholder semantics, we must drop
+    // the `vm="..."` attribute to avoid leaving a dangling value-metadata pointer.
     let sheet_bytes = zip_part(&saved, "xl/worksheets/sheet1.xml");
     let sheet_xml = std::str::from_utf8(&sheet_bytes)?;
     let sheet_doc = roxmltree::Document::parse(sheet_xml)?;
@@ -166,7 +167,7 @@ fn editing_cell_preserves_workbook_metadata_parts_and_vm_attr() -> Result<(), Bo
         .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
         .ok_or("sheet1.xml missing A1 cell")?;
-    assert_eq!(cell.attribute("vm"), Some("1"));
+    assert_eq!(cell.attribute("vm"), None);
 
     Ok(())
 }

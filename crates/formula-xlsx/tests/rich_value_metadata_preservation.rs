@@ -109,7 +109,7 @@ fn zip_part_exists(zip_bytes: &[u8], name: &str) -> bool {
     exists
 }
 
-fn assert_sheet_a1_preserves_vm_cm(sheet_xml: &str) {
+fn assert_sheet_a1_drops_vm_but_preserves_cm(sheet_xml: &str) {
     let doc = roxmltree::Document::parse(sheet_xml).expect("parse worksheet xml");
     let cell = doc
         .descendants()
@@ -117,8 +117,8 @@ fn assert_sheet_a1_preserves_vm_cm(sheet_xml: &str) {
         .expect("expected A1 cell");
     assert_eq!(
         cell.attribute("vm"),
-        Some("1"),
-        "expected vm attribute to be preserved (worksheet: {sheet_xml})"
+        None,
+        "vm should be dropped when patching away from rich-value placeholder semantics (worksheet: {sheet_xml})"
     );
     assert_eq!(
         cell.attribute("cm"),
@@ -190,7 +190,7 @@ fn assert_workbook_xml_has_metadata_reference(workbook_xml: &str, rels_xml: &str
 }
 
 #[test]
-fn streaming_patcher_preserves_rich_value_vm_cm_and_metadata_parts(
+fn streaming_patcher_preserves_rich_value_metadata_parts_and_drops_vm_on_edit(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = build_rich_value_fixture_xlsx();
 
@@ -210,7 +210,7 @@ fn streaming_patcher_preserves_rich_value_vm_cm_and_metadata_parts(
     let out_bytes = out.into_inner();
 
     let sheet_xml = String::from_utf8(zip_part(&out_bytes, "xl/worksheets/sheet1.xml"))?;
-    assert_sheet_a1_preserves_vm_cm(&sheet_xml);
+    assert_sheet_a1_drops_vm_but_preserves_cm(&sheet_xml);
 
     assert!(
         zip_part_exists(&out_bytes, "xl/metadata.xml"),
@@ -246,7 +246,7 @@ fn streaming_patcher_preserves_rich_value_vm_cm_and_metadata_parts(
 }
 
 #[test]
-fn package_patcher_preserves_rich_value_vm_cm_and_metadata_parts(
+fn package_patcher_preserves_rich_value_metadata_parts_and_drops_vm_on_edit(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = build_rich_value_fixture_xlsx();
     let mut pkg = XlsxPackage::from_bytes(&bytes)?;
@@ -260,7 +260,7 @@ fn package_patcher_preserves_rich_value_vm_cm_and_metadata_parts(
     pkg.apply_cell_patches(&patches)?;
 
     let sheet_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap())?;
-    assert_sheet_a1_preserves_vm_cm(sheet_xml);
+    assert_sheet_a1_drops_vm_but_preserves_cm(sheet_xml);
 
     assert!(
         pkg.part("xl/metadata.xml").is_some(),

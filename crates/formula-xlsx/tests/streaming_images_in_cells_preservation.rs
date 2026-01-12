@@ -178,7 +178,7 @@ fn build_fixture_xlsx() -> Vec<u8> {
 }
 
 #[test]
-fn streaming_patch_preserves_images_in_cells_metadata_and_related_parts(
+fn streaming_patch_preserves_images_in_cells_metadata_and_related_parts_and_drops_vm_on_edit(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let fixture = build_fixture_xlsx();
 
@@ -210,7 +210,11 @@ fn streaming_patch_preserves_images_in_cells_metadata_and_related_parts(
         .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
         .expect("expected A1 cell");
 
-    assert_eq!(cell.attribute("vm"), Some("9"));
+    assert_eq!(
+        cell.attribute("vm"),
+        None,
+        "vm should be dropped when patching away from rich-value placeholder semantics"
+    );
     assert_eq!(cell.attribute("cm"), Some("7"));
     assert_eq!(cell.attribute("customAttr"), Some("x"));
 
@@ -268,4 +272,3 @@ fn streaming_patch_preserves_images_in_cells_metadata_and_related_parts(
 
     Ok(())
 }
-
