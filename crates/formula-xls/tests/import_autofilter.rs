@@ -72,16 +72,30 @@ fn imports_autofilter_range_from_filterdatabase_defined_name_without_biff() {
 
     let sheet = result.workbook.sheet_by_name("Filter").expect("Filter missing");
 
-    let af = sheet.auto_filter.as_ref().unwrap_or_else(|| {
+    let auto_filter = sheet.auto_filter.as_ref().expect("auto_filter missing");
+    assert_eq!(auto_filter.range, Range::from_a1("A1:C5").unwrap());
+    assert!(auto_filter.filter_columns.is_empty());
+    assert!(auto_filter.sort_state.is_none());
+    assert!(auto_filter.raw_xml.is_empty());
+}
+
+#[test]
+fn imports_autofilter_range_via_calamine_defined_name_fallback_when_biff_unavailable() {
+    let bytes = xls_fixture_builder::build_autofilter_calamine_fixture_xls();
+    let result = import_fixture_without_biff(&bytes);
+
+    let sheet = result.workbook.sheet_by_name("Filter").expect("Filter missing");
+
+    let auto_filter = sheet.auto_filter.as_ref().unwrap_or_else(|| {
         panic!(
             "auto_filter missing; defined_names={:?}; warnings={:?}",
             result.workbook.defined_names, result.warnings
         )
     });
-    assert_eq!(af.range, Range::from_a1("A1:C5").unwrap());
-    assert!(af.filter_columns.is_empty());
-    assert!(af.sort_state.is_none());
-    assert!(af.raw_xml.is_empty());
+    assert_eq!(auto_filter.range, Range::from_a1("A1:C5").unwrap());
+    assert!(auto_filter.filter_columns.is_empty());
+    assert!(auto_filter.sort_state.is_none());
+    assert!(auto_filter.raw_xml.is_empty());
 
     // Calamine fallback does not reliably surface built-in defined names like `_FilterDatabase`.
     // If the name was imported anyway (e.g. due to future calamine improvements), it should remain

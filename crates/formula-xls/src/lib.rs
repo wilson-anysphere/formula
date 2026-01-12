@@ -1403,71 +1403,34 @@ fn import_xls_path_with_biff_reader(
             }
         };
 
-        // AutoFilter ranges are expected to be sheet-scoped. When BIFF scope metadata is
-        // unavailable (calamine fallback), attempt to infer the owning sheet from a sheet-qualified
-        // `refers_to` string like `Sheet1!$A$1:$C$10`.
         let sheet_id = match name.scope {
-            DefinedNameScope::Sheet(sheet_id) => Some(sheet_id),
+            DefinedNameScope::Sheet(sheet_id) => sheet_id,
             DefinedNameScope::Workbook => {
-                let mut refers_to = name.refers_to.trim();
-                if let Some(rest) = refers_to.strip_prefix('=') {
-                    refers_to = rest.trim();
-                }
-                if let Some(rest) = refers_to.strip_prefix('@') {
-                    refers_to = rest.trim();
-                }
-                match refers_to.rsplit_once('!') {
-                    Some((lhs, _)) => {
-                        // Best-effort parse of sheet name, handling quoted identifiers (`'My Sheet'!A1`)
-                        // and external-workbook prefixes (`[Book]Sheet1!A1`).
-                        let mut sheet_name = lhs.trim();
-                        if let Some((_, rest)) = sheet_name.rsplit_once(']') {
-                            sheet_name = rest.trim();
-                        }
-                        let mut sheet_name = if let Some(inner) = sheet_name
-                            .strip_prefix('\'')
-                            .and_then(|s| s.strip_suffix('\''))
-                        {
-                            inner.replace("''", "'")
-                        } else {
-                            sheet_name.to_string()
-                        };
-                        if let Some((first, _)) = sheet_name.split_once(':') {
-                            // Excel forbids `:` in sheet names, so this can only be a 3D sheet span.
-                            sheet_name = first.to_string();
-                        }
-
-                        let sheet_id = out
-                            .sheets
-                            .iter()
-                            .find(|s| sheet_name_eq_case_insensitive(&s.name, &sheet_name))
-                            .map(|s| s.id);
-                        if sheet_id.is_none() {
-                            warnings.push(ImportWarning::new(format!(
-                                "skipping `.xls` AutoFilter defined name `{}`: unknown sheet `{}` in `{}`",
-                                name.name, sheet_name, name.refers_to
-                            )));
-                        }
-
-                        sheet_id
+                // Calamine's `.xls` defined-name API does not expose sheet scope. When a workbook-
+                // scoped `_xlnm._FilterDatabase` is encountered, attempt to infer its sheet from an
+                // explicit `Sheet!` prefix in the definition formula.
+                let warnings_before_infer = warnings.len();
+                let sheet_name = infer_sheet_name_from_workbook_scoped_defined_name(
+                    &out,
+                    &name.name,
+                    &name.refers_to,
+                    &mut warnings,
+                )
+                .or_else(|| (out.sheets.len() == 1).then(|| out.sheets[0].name.clone()));
+                let Some(sheet_name) = sheet_name else {
+                    if warnings.len() == warnings_before_infer {
+                        warnings.push(ImportWarning::new(format!(
+                            "skipping `.xls` AutoFilter defined name `{}`: workbook-scoped and sheet scope could not be inferred from `{}`",
+                            name.name, name.refers_to
+                        )));
                     }
-                    None => {
-                        if out.sheets.len() == 1 {
-                            Some(out.sheets[0].id)
-                        } else {
-                            warnings.push(ImportWarning::new(format!(
-                                "skipping `.xls` AutoFilter defined name `{}`: expected sheet-qualified range, got `{}`",
-                                name.name, name.refers_to
-                            )));
-                            None
-                        }
-                    }
-                }
+                    continue;
+                };
+                let Some(sheet_id) = out.sheet_by_name(&sheet_name).map(|s| s.id) else {
+                    continue;
+                };
+                sheet_id
             }
-        };
-
-        let Some(sheet_id) = sheet_id else {
-            continue;
         };
 
         autofilters.push((sheet_id, range));
@@ -1837,13 +1800,17 @@ fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
         .eq(b.chars().flat_map(|ch| ch.to_uppercase()))
 }
 
-fn infer_sheet_name_from_workbook_scoped_print_name(
+fn infer_sheet_name_from_workbook_scoped_defined_name(
     workbook: &Workbook,
     name: &str,
     refers_to: &str,
     warnings: &mut Vec<ImportWarning>,
 ) -> Option<String> {
+    // `Workbook::create_defined_name` strips leading `=` but not `@`. Strip both defensively so we
+    // can infer sheet scope from dynamic-array era implicit intersection prefixes as well.
     let refers_to = refers_to.trim();
+    let refers_to = refers_to.strip_prefix('=').unwrap_or(refers_to).trim();
+    let refers_to = refers_to.strip_prefix('@').unwrap_or(refers_to).trim();
     if refers_to.is_empty() {
         return None;
     }
@@ -1914,7 +1881,7 @@ fn populate_print_settings_from_defined_names(workbook: &mut Workbook, warnings:
         for (scope, name, refers_to) in &builtins {
             let sheet_name = match (pass, scope) {
                 (0, DefinedNameScope::Sheet(sheet_id)) => workbook.sheet(*sheet_id).map(|s| s.name.clone()),
-                (1, DefinedNameScope::Workbook) => infer_sheet_name_from_workbook_scoped_print_name(
+                (1, DefinedNameScope::Workbook) => infer_sheet_name_from_workbook_scoped_defined_name(
                     workbook,
                     name,
                     refers_to,

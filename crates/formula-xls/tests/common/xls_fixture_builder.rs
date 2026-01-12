@@ -2,7 +2,9 @@
 
 use std::io::{Cursor, Write};
 
-use formula_model::{indexed_color_argb, EXCEL_MAX_COLS, XLNM_PRINT_AREA, XLNM_PRINT_TITLES};
+use formula_model::{
+    indexed_color_argb, EXCEL_MAX_COLS, XLNM_FILTER_DATABASE, XLNM_PRINT_AREA, XLNM_PRINT_TITLES,
+};
 
 // This fixture builder writes just enough BIFF8 to exercise the importer. Keep record ids and
 // commonly-used BIFF constants named so the intent stays readable.
@@ -1170,6 +1172,25 @@ pub fn build_defined_names_builtins_chkey_mismatch_fixture_xls() -> Vec<u8> {
 /// This exercises AutoFilter range import from legacy `.xls` files.
 pub fn build_autofilter_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_autofilter_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a minimal BIFF8 `.xls` fixture containing a single sheet named `Filter` with a
+/// **workbook-scoped** `_xlnm._FilterDatabase` defined name whose formula references `Filter!$A$1:$C$5`.
+///
+/// This fixture is intended to validate the importer’s calamine `Reader::defined_names()` fallback
+/// path (i.e. when BIFF workbook parsing is unavailable and name scope metadata is missing).
+pub fn build_autofilter_calamine_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_autofilter_calamine_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -3598,10 +3619,16 @@ fn name_record_calamine_compat(name: &str, rgce: &[u8]) -> Vec<u8> {
 
     out.extend_from_slice(&0u16.to_le_bytes()); // grbit
     out.push(0); // chKey
-    let cch: u8 = name
-        .len()
-        .try_into()
-        .expect("defined name too long for u8 length");
+    // Calamine's `.xls` NAME parser currently assumes BIFF8 NAME strings are "uncompressed"
+    // (`fHighByte=1`) but still reads only `cch` bytes of payload. For odd-length ASCII names this
+    // truncates the final byte. Work around this by padding odd-length names with a trailing NUL
+    // byte and incrementing `cch` so calamine sees the full string (our importer strips NULs).
+    let mut cch: usize = name.len();
+    let pad_nul = cch % 2 == 1;
+    if pad_nul {
+        cch = cch.saturating_add(1);
+    }
+    let cch: u8 = cch.try_into().expect("defined name too long for u8 length");
     out.push(cch);
     let cce: u16 = rgce
         .len()
@@ -3615,9 +3642,13 @@ fn name_record_calamine_compat(name: &str, rgce: &[u8]) -> Vec<u8> {
     out.push(0); // cchHelpTopic
     out.push(0); // cchStatusText
 
-    // XLUnicodeStringNoCch with "high byte" flag set (calamine expects this for NAME strings).
+    // XLUnicodeStringNoCch with `fHighByte=1` (uncompressed). For calamine compatibility, we
+    // intentionally emit a single byte per character.
     out.push(1);
     out.extend_from_slice(name.as_bytes());
+    if pad_nul {
+        out.push(0);
+    }
 
     out.extend_from_slice(rgce);
     out
@@ -5665,6 +5696,74 @@ fn build_autofilter_workbook_stream() -> Vec<u8> {
     push_record(&mut sheet, RECORD_AUTOFILTERINFO, &3u16.to_le_bytes());
     // FILTERMODE: present (no payload).
     push_record(&mut sheet, RECORD_FILTERMODE, &[]);
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_autofilter_calamine_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table (style XFs only).
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF.
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Filter");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // Minimal external reference tables so calamine can decode 3D references in the NAME formula.
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(1));
+    push_record(&mut globals, RECORD_EXTERNSHEET, &externsheet_record(&[(0, 0)]));
+
+    // Workbook-scoped `_xlnm._FilterDatabase` referencing Filter!$A$1:$C$5.
+    let rgce = ptg_area3d(0, 0, 4, 0, 2);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record_calamine_compat(XLNM_FILTER_DATABASE, &rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 5) cols [0, 3) so A1:C5 exists.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&5u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&3u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // A1: a single General cell so calamine populates a range for the sheet.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_general, 1.0));
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
 
