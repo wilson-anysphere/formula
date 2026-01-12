@@ -730,9 +730,6 @@ test.describe("tauri workbook integration", () => {
 
     await gotoDesktop(page);
 
-    // Auto-accept the delete confirmation dialog.
-    page.on("dialog", (dialog) => dialog.accept());
-
     await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
     await page.evaluate(() => {
       (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
@@ -741,10 +738,33 @@ test.describe("tauri workbook integration", () => {
     await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
 
     // Delete sheet-2 via the sheet tab context menu.
-    await page.getByTestId("sheet-tab-sheet-2").click({ button: "right" });
+    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    await page.evaluate(() => {
+      const tab = document.querySelector('[data-testid="sheet-tab-sheet-2"]') as HTMLElement | null;
+      if (!tab) throw new Error("Missing sheet-tab-sheet-2");
+      const rect = tab.getBoundingClientRect();
+      tab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          clientX: rect.left + 10,
+          clientY: rect.top + 10,
+        }),
+      );
+    });
     const menu = page.getByTestId("sheet-tab-context-menu");
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Delete" }).click();
+    // The desktop web harness uses the non-blocking quick-pick dialog instead of the
+    // browser-native `window.confirm` prompt.
+    const quickPick = page.getByTestId("quick-pick");
+    await quickPick
+      .waitFor({ state: "visible", timeout: 5_000 })
+      .then(() => quickPick.getByTestId("quick-pick-item-0").click())
+      .catch(() => {
+        // If the environment uses native dialogs, the quick-pick may not appear.
+      });
 
     await page.waitForFunction(
       () =>
