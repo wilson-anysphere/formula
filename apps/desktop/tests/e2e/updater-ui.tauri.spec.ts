@@ -130,6 +130,105 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     await expect(page.locator("#toast-root")).toContainText("You're up to date.");
   });
 
+  test("startup update completion is treated as manual when a manual check was queued behind an in-flight startup check", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      const listeners: Record<string, Array<(event: any) => void>> = {};
+      const emitted: Array<{ event: string; payload: any }> = [];
+      const notifications: Array<{ title: string; body?: string }> = [];
+      const invokes: Array<{ cmd: string; args: any }> = [];
+
+      (window as any).__tauriListeners = listeners;
+      (window as any).__tauriEmittedEvents = emitted;
+      (window as any).__tauriNotifications = notifications;
+      (window as any).__tauriInvokes = invokes;
+      (window as any).__tauriShowCalls = 0;
+      (window as any).__tauriFocusCalls = 0;
+
+      const windowHandle = {
+        show: async () => {
+          (window as any).__tauriShowCalls += 1;
+        },
+        setFocus: async () => {
+          (window as any).__tauriFocusCalls += 1;
+        },
+      };
+
+      (window as any).__TAURI__ = {
+        core: {
+          invoke: async (cmd: string, args: any) => {
+            invokes.push({ cmd, args });
+            return null;
+          },
+        },
+        event: {
+          listen: async (name: string, handler: any) => {
+            if (!Array.isArray(listeners[name])) {
+              listeners[name] = [];
+            }
+            listeners[name].push(handler);
+            return () => {
+              const arr = listeners[name];
+              if (!Array.isArray(arr)) return;
+              const idx = arr.indexOf(handler);
+              if (idx >= 0) arr.splice(idx, 1);
+            };
+          },
+          emit: async (event: string, payload?: any) => {
+            emitted.push({ event, payload: payload ?? null });
+          },
+        },
+        window: {
+          getCurrentWebviewWindow: () => windowHandle,
+          getCurrentWindow: () => windowHandle,
+          getCurrent: () => windowHandle,
+          appWindow: windowHandle,
+        },
+        notification: {
+          notify: async (payload: { title: string; body?: string }) => {
+            notifications.push({ title: payload.title, body: payload.body });
+          },
+        },
+      };
+    });
+
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() =>
+      Boolean((window as any).__tauriEmittedEvents?.some((entry: any) => entry?.event === "updater-ui-ready")),
+    );
+
+    // User clicks "Check for Updates" while a startup check is already in flight.
+    await waitForTauriListeners(page, "update-check-already-running");
+    await dispatchTauriEvent(page, "update-check-already-running", { source: "manual" });
+    await expect(page.locator("#toast-root")).toContainText("Already checking for updates…");
+    await page.waitForFunction(() => (window as any).__tauriShowCalls >= 1);
+    await page.waitForFunction(() => (window as any).__tauriFocusCalls >= 1);
+
+    // The backend eventually reports the completion with `source: "startup"`, but the
+    // UI should still surface the dialog (treat as a manual follow-up) and should not
+    // request a system notification.
+    await waitForTauriListeners(page, "update-available");
+    await dispatchTauriEvent(page, "update-available", { source: "startup", version: "9.9.9", body: "Notes" });
+
+    const dialog = page.getByTestId("updater-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(page.getByTestId("updater-version")).toContainText("Version 9.9.9");
+
+    // Should not spam `show()`/`setFocus()` twice (startup completion shouldn't re-focus).
+    const counts = await page.evaluate(() => ({
+      show: (window as any).__tauriShowCalls,
+      focus: (window as any).__tauriFocusCalls,
+      notifications: (window as any).__tauriNotifications?.length ?? 0,
+      notifiedViaInvoke: ((window as any).__tauriInvokes ?? []).some((entry: any) => entry?.cmd === "show_system_notification"),
+    }));
+    expect(counts.show).toBe(1);
+    expect(counts.focus).toBe(1);
+    expect(counts.notifications).toBe(0);
+    expect(counts.notifiedViaInvoke).toBe(false);
+  });
+
   test("startup update-available events do not open the in-app dialog and instead request a system notification", async ({
     page,
   }) => {
