@@ -220,6 +220,20 @@ test.describe("Extensions UI integration", () => {
       }
     });
     expect(parentAccessBlocked, "webview should not be able to access parent window properties").toBe(true);
+    const clipboardPolicy = await webviewFrame!.evaluate(() => {
+      // `featurePolicy` is deprecated but still widely supported; `permissionsPolicy` is the newer name.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const policy: any = (document as any).permissionsPolicy ?? (document as any).featurePolicy;
+      if (!policy || typeof policy.allowsFeature !== "function") return null;
+      return {
+        read: policy.allowsFeature("clipboard-read"),
+        write: policy.allowsFeature("clipboard-write"),
+      };
+    });
+    if (clipboardPolicy) {
+      expect(clipboardPolicy.read, "webview should not allow clipboard-read").toBe(false);
+      expect(clipboardPolicy.write, "webview should not allow clipboard-write").toBe(false);
+    }
 
     const sandboxInfo = await webviewFrame!.evaluate(() => (window as any).__formulaWebviewSandbox);
     expect(sandboxInfo, "webview should inject a sandbox hardening script").toBeTruthy();
