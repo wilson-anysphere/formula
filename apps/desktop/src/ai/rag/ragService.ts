@@ -101,6 +101,7 @@ export interface DesktopRagService {
     query: string;
     attachments?: any[];
     topK?: number;
+    includePromptContext?: boolean;
     dlp?: any;
   }): Promise<any>;
   /**
@@ -239,6 +240,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
     query: string;
     attachments?: any[];
     topK?: number;
+    includePromptContext?: boolean;
     dlp?: any;
   }): Promise<any> {
     if (params.workbookId !== options.workbookId) {

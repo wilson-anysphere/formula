@@ -158,6 +158,7 @@ export interface WorkbookContextBuilderOptions {
       query: string;
       attachments?: any[];
       topK?: number;
+      includePromptContext?: boolean;
       dlp?: any;
     }): Promise<any>;
   } | null;
@@ -294,6 +295,9 @@ export class WorkbookContextBuilder {
             workbookId: this.options.workbookId,
             query: input.focusQuestion,
             attachments: input.attachments,
+            // WorkbookContextBuilder builds its own promptContext; avoid redundant string formatting
+            // + token estimation work inside the underlying RAG service.
+            includePromptContext: false,
             dlp: this.options.dlp,
           })
         : null;

@@ -220,15 +220,16 @@ export class ContextManager {
    * @param {{
    *   workbook: any,
    *   query: string,
-  *   attachments?: Attachment[],
-  *   topK?: number,
-  *   skipIndexing?: boolean,
-  *   skipIndexingWithDlp?: boolean,
-  *   dlp?: {
-  *     documentId: string,
-  *     policy: any,
-  *     classificationRecords?: Array<{ selector: any, classification: any }>,
-  *     classificationStore?: { list(documentId: string): Array<{ selector: any, classification: any }> },
+   *   attachments?: Attachment[],
+   *   topK?: number,
+   *   skipIndexing?: boolean,
+   *   skipIndexingWithDlp?: boolean,
+   *   includePromptContext?: boolean,
+   *   dlp?: {
+   *     documentId: string,
+   *     policy: any,
+   *     classificationRecords?: Array<{ selector: any, classification: any }>,
+   *     classificationStore?: { list(documentId: string): Array<{ selector: any, classification: any }> },
    *     includeRestrictedContent?: boolean,
    *     auditLogger?: { log(event: any): void }
    *   }
@@ -238,6 +239,7 @@ export class ContextManager {
     if (!this.workbookRag) throw new Error("ContextManager.buildWorkbookContext requires workbookRag");
     const { vectorStore, embedder } = this.workbookRag;
     const topK = params.topK ?? this.workbookRag.topK ?? 8;
+    const includePromptContext = params.includePromptContext ?? true;
     const dlp = params.dlp;
     const includeRestrictedContent = dlp?.includeRestrictedContent ?? false;
     const classificationRecords =
@@ -562,51 +564,57 @@ export class ContextManager {
       };
     });
 
-    const sections = [
-      ...(dlp && redactedChunkCount > 0
-        ? [
-            {
-              key: "dlp",
-              priority: 5,
-              text: `DLP: ${redactedChunkCount} retrieved chunks were redacted due to policy.`,
-            },
-          ]
-        : []),
-      {
-        key: "workbook_summary",
-        priority: 3,
-        text: this.redactor(
-          `Workbook summary:\n${stableJsonStringify({
-            id: params.workbook.id,
-            sheets: (params.workbook.sheets ?? []).map((s) => s.name),
-            tables: (params.workbook.tables ?? []).map((t) => ({
-              name: t.name,
-              sheetName: t.sheetName,
-              rect: t.rect,
-            })),
-            namedRanges: (params.workbook.namedRanges ?? []).map((r) => ({
-              name: r.name,
-              sheetName: r.sheetName,
-              rect: r.rect,
-            })),
-          })}`
-        ),
-      },
-      {
-        key: "attachments",
-        priority: 2,
-        text: params.attachments?.length
-          ? this.redactor(`User-provided attachments:\n${stableJsonStringify(params.attachments)}`)
-          : "",
-      },
-      {
-        key: "retrieved",
-        priority: 4,
-        text: retrievedChunks.length ? `Retrieved workbook context:\n${retrievedChunks.map((c) => c.text).join("\n\n")}` : "",
-      },
-    ].filter((s) => s.text);
+    let promptContext = "";
+    if (includePromptContext) {
+      const sections = [
+        ...(dlp && redactedChunkCount > 0
+          ? [
+              {
+                key: "dlp",
+                priority: 5,
+                text: `DLP: ${redactedChunkCount} retrieved chunks were redacted due to policy.`,
+              },
+            ]
+          : []),
+        {
+          key: "workbook_summary",
+          priority: 3,
+          text: this.redactor(
+            `Workbook summary:\n${stableJsonStringify({
+              id: params.workbook.id,
+              sheets: (params.workbook.sheets ?? []).map((s) => s.name),
+              tables: (params.workbook.tables ?? []).map((t) => ({
+                name: t.name,
+                sheetName: t.sheetName,
+                rect: t.rect,
+              })),
+              namedRanges: (params.workbook.namedRanges ?? []).map((r) => ({
+                name: r.name,
+                sheetName: r.sheetName,
+                rect: r.rect,
+              })),
+            })}`
+          ),
+        },
+        {
+          key: "attachments",
+          priority: 2,
+          text: params.attachments?.length
+            ? this.redactor(`User-provided attachments:\n${stableJsonStringify(params.attachments)}`)
+            : "",
+        },
+        {
+          key: "retrieved",
+          priority: 4,
+          text: retrievedChunks.length
+            ? `Retrieved workbook context:\n${retrievedChunks.map((c) => c.text).join("\n\n")}`
+            : "",
+        },
+      ].filter((s) => s.text);
 
-    const packed = packSectionsToTokenBudget(sections, this.tokenBudgetTokens, this.estimator);
+      const packed = packSectionsToTokenBudget(sections, this.tokenBudgetTokens, this.estimator);
+      promptContext = packed.map((s) => `## ${s.key}\n${s.text}`).join("\n\n");
+    }
 
     if (dlp) {
       dlp.auditLogger?.log({
@@ -624,7 +632,7 @@ export class ContextManager {
     return {
       indexStats,
       retrieved: retrievedChunks,
-      promptContext: packed.map((s) => `## ${s.key}\n${s.text}`).join("\n\n"),
+      promptContext,
     };
   }
 
@@ -638,15 +646,16 @@ export class ContextManager {
    *   spreadsheet: any,
    *   workbookId: string,
    *   query: string,
-  *   attachments?: Attachment[],
-  *   topK?: number,
-  *   skipIndexing?: boolean,
-  *   skipIndexingWithDlp?: boolean,
-  *   dlp?: {
-  *     documentId: string,
-  *     policy: any,
-  *     classificationRecords?: Array<{ selector: any, classification: any }>,
-  *     classificationStore?: { list(documentId: string): Array<{ selector: any, classification: any }> },
+   *   attachments?: Attachment[],
+   *   topK?: number,
+   *   skipIndexing?: boolean,
+   *   skipIndexingWithDlp?: boolean,
+   *   includePromptContext?: boolean,
+   *   dlp?: {
+   *     documentId: string,
+   *     policy: any,
+   *     classificationRecords?: Array<{ selector: any, classification: any }>,
+   *     classificationStore?: { list(documentId: string): Array<{ selector: any, classification: any }> },
    *     includeRestrictedContent?: boolean,
    *     auditLogger?: { log(event: any): void }
    *   }
@@ -675,6 +684,7 @@ export class ContextManager {
       dlp: params.dlp,
       skipIndexing: params.skipIndexing,
       skipIndexingWithDlp: params.skipIndexingWithDlp,
+      includePromptContext: params.includePromptContext,
     });
   }
 }

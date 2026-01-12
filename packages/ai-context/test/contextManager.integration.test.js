@@ -37,3 +37,19 @@ test('integration: query "revenue by region" retrieves the right table chunk', a
   assert.ok(out.retrieved.length > 0);
   assert.equal(out.retrieved[0].metadata.title, "RevenueByRegion");
 });
+
+test("buildWorkbookContext: includePromptContext=false skips prompt formatting but still retrieves chunks", async () => {
+  const workbook = makeWorkbook();
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 500,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  const out = await cm.buildWorkbookContext({ workbook, query: "revenue by region", includePromptContext: false });
+
+  assert.equal(out.promptContext, "");
+  assert.ok(out.retrieved.length > 0);
+});

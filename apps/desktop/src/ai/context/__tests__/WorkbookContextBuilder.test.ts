@@ -18,6 +18,9 @@ vi.mock("../../../../../../packages/ai-tools/src/executor/tool-executor.js", asy
 
 import { DocumentController } from "../../../document/documentController.js";
 
+import { ContextManager } from "../../../../../../packages/ai-context/src/contextManager.js";
+import { HashEmbedder, InMemoryVectorStore } from "../../../../../../packages/ai-rag/src/index.js";
+
 import { DLP_ACTION } from "../../../../../../packages/security/dlp/src/actions.js";
 import { createDefaultOrgPolicy } from "../../../../../../packages/security/dlp/src/policy.js";
 import { CLASSIFICATION_LEVEL } from "../../../../../../packages/security/dlp/src/classification.js";
@@ -61,6 +64,52 @@ describe("WorkbookContextBuilder", () => {
     const table = sheet!.schema.tables[0]!;
     expect(table.columns.map((c) => c.name)).toEqual(["Name", "Age"]);
     expect(table.columns.map((c) => c.type)).toEqual(["string", "number"]);
+  });
+
+  it("includes retrieved chunk text in promptContext without depending on ragResult.promptContext", async () => {
+    const documentController = new DocumentController();
+    documentController.setRangeValues("Sheet1", "A1", [
+      ["Region", "Revenue"],
+      ["North", 1000],
+      ["South", 2000],
+    ]);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+
+    const embedder = new HashEmbedder({ dimension: 64 });
+    const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+    const contextManager = new ContextManager({
+      tokenBudgetTokens: 800,
+      workbookRag: { vectorStore, embedder, topK: 3 },
+    });
+
+    let lastRagResult: any = null;
+    const ragService = {
+      async buildWorkbookContextFromSpreadsheetApi(params: any) {
+        lastRagResult = await contextManager.buildWorkbookContextFromSpreadsheetApi(params);
+        return lastRagResult;
+      },
+    };
+
+    const builder = new WorkbookContextBuilder({
+      workbookId: "wb_rag_builder",
+      documentController,
+      spreadsheet,
+      ragService: ragService as any,
+      mode: "chat",
+      model: "unit-test-model",
+      maxPromptContextTokens: 4000,
+    });
+
+    const ctx = await builder.build({ activeSheetId: "Sheet1", focusQuestion: "revenue by region" });
+
+    expect(lastRagResult).toBeTruthy();
+    expect(lastRagResult.promptContext).toBe("");
+    expect(ctx.retrieved.length).toBeGreaterThan(0);
+
+    // WorkbookContextBuilder formats the retrieved chunks into the final packed prompt context.
+    expect(ctx.promptContext).toContain("## retrieved");
+    expect(ctx.promptContext).toMatch(/score=/);
   });
 
   it("includes explicit named ranges and tables when provided by a schemaProvider", async () => {

@@ -42,6 +42,7 @@ export class ContextManager {
     topK?: number;
     skipIndexing?: boolean;
     skipIndexingWithDlp?: boolean;
+    includePromptContext?: boolean;
     dlp?: any;
   }): Promise<{ indexStats: any; retrieved: any[]; promptContext: string }>;
 
@@ -53,6 +54,7 @@ export class ContextManager {
     topK?: number;
     skipIndexing?: boolean;
     skipIndexingWithDlp?: boolean;
+    includePromptContext?: boolean;
     dlp?: any;
   }): Promise<{ indexStats: any; retrieved: any[]; promptContext: string }>;
 }
