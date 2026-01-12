@@ -286,7 +286,7 @@ If you need to update or extend signature handling, start with:
 - `crates/formula-vba/src/contents_hash.rs`
   - MS-OVBA normalized-data transcript builders
 - `crates/formula-vba/src/project_digest.rs`
-  - `compute_vba_project_digest` (v1/v2 digest over MS-OVBA transcripts; strict transcript-only, no raw-stream fallback)
+  - `compute_vba_project_digest` (hash over `ContentNormalizedData || FormsNormalizedData`; equivalent to v1 when `FormsNormalizedData` is empty; strict transcript-only, no raw-stream fallback)
   - `compute_vba_project_digest_v3` (MS-OVBA §2.4.2 v3 digest for `DigitalSignatureExt`)
 
 ## Tests / examples in this repo
