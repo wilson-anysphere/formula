@@ -36,3 +36,34 @@ test("DocumentWorkbookAdapter schemaVersion bumps when schema changes", () => {
   assert.equal(workbook.tables.size, 0);
 });
 
+test("DocumentWorkbookAdapter resolves sheets by display name via sheetNameResolver", () => {
+  const doc = { getSheetIds: () => ["Sheet1", "Sheet2"] };
+  const namesById = new Map([
+    ["Sheet1", "Sheet1"],
+    ["Sheet2", "Budget"],
+  ]);
+  const sheetNameResolver = {
+    getSheetNameById: (id) => namesById.get(id) ?? null,
+    getSheetIdByName: (name) => {
+      const needle = String(name ?? "").trim().toLowerCase();
+      if (!needle) return null;
+      for (const [id, sheetName] of namesById.entries()) {
+        if (sheetName.toLowerCase() === needle) return id;
+      }
+      return null;
+    },
+  };
+
+  const workbook = new DocumentWorkbookAdapter({ document: doc, sheetNameResolver });
+
+  const sheetNames = workbook.sheets.map((s) => s.name);
+  assert.deepEqual(sheetNames, ["Sheet1", "Budget"]);
+
+  const budget = workbook.getSheet("Budget");
+  assert.equal(budget.sheetId, "Sheet2");
+
+  const budgetLower = workbook.getSheet("budget");
+  assert.equal(budgetLower.sheetId, "Sheet2");
+
+  assert.throws(() => workbook.getSheet("MissingSheet"), /Unknown sheet/i);
+});
