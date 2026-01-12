@@ -136,7 +136,7 @@ test.describe("collab: extension sheet deletion (tauri)", () => {
     // sheet" guard. Also force a `syncSheetUi()` pass so the desktop sheet metadata store sees it.
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
+      const app: any = window.__formulaApp as any;
       const session = app?.getCollabSession?.();
       if (!session) throw new Error("Missing collab session");
 
