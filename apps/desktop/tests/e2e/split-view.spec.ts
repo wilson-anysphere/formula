@@ -766,7 +766,9 @@ test.describe("split view", () => {
       });
       await waitForIdle(page);
 
-      await page.getByTestId("split-vertical").click();
+      // Split-view controls are owned by the ribbon UI. Scope to the ribbon root so the locator
+      // stays stable even if other surfaces (e.g. legacy debug toolbars) add similarly named test ids.
+      await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
       await expect(page.getByTestId("grid-secondary")).toBeVisible();
       await waitForGridCanvasesToBeSized(page, "#grid-secondary");
       await waitForGridCanvasesToBeSized(page, "#grid");
