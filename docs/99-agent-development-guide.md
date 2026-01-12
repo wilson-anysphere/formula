@@ -623,10 +623,16 @@ mockups/README.md                # Full design system
 - `Alt+=` – AutoSum
 - All standard Ctrl+C/V/X/Z/Y
 
+**App shortcuts:**
+- `Cmd/Ctrl+Shift+P` – Command palette
+
 **AI shortcuts:**
-- `⌘K` – Inline AI edit
-- `⌘I` – Toggle AI sidebar
+- `Cmd/Ctrl+K` – Inline AI edit
+- `Cmd+I` (macOS) – Toggle AI sidebar
 - `Tab` – Accept suggestion
+
+Platform note:
+- **Windows/Linux:** `Ctrl+I` is reserved for **Italic** (Excel-compatible), so there is no default shortcut for toggling the AI sidebar.
 
 ### AI Sidebar
 
