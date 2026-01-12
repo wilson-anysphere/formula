@@ -24,7 +24,13 @@ function normalizeClipboardText(text: string): string {
 }
 
 function normalizeClipboardRtf(rtf: string): string {
-  return rtf.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  // Clipboard backends may:
+  // - normalize newlines differently across platforms (CRLF vs LF)
+  // - append whitespace/newlines after the payload
+  //
+  // Normalize in a similar spirit to `normalizeClipboardText`: normalize newlines and ignore
+  // trailing whitespace so "internal paste" detection remains stable.
+  return rtf.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd();
 }
 
 function hasUsableClipboardContent(content: ClipboardContentLike): boolean {
