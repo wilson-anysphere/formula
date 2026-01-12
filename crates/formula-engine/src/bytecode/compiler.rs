@@ -474,6 +474,10 @@ impl<'a> CompileCtx<'a> {
         // Normalize the index once using the runtime CHOOSE implementation over constants
         // 1..=choice_count. This preserves the engine's coercion rules (notably NaN -> 0 via
         // float-to-int casts) while ensuring the actual choice expressions remain lazy.
+        //
+        // Avoid normalizing via `INT(index)` + comparisons: the engine's Excel-style comparisons
+        // treat NaN as "equal" for ordering purposes, which can incorrectly select a branch and
+        // eagerly evaluate a choice expression.
         self.compile_expr_inner(&args[0], false);
         let mut selector_consts: Vec<u32> = Vec::with_capacity(choice_count);
         for i in 1..=choice_count {
@@ -679,7 +683,6 @@ impl<'a> CompileCtx<'a> {
             self.program.instrs[idx] = Instruction::new(OpCode::Jump, end_target, 0);
         }
     }
-
     fn compile_func_arg(&mut self, func: &Function, arg_idx: usize, arg: &Expr) {
         // Preserve `Missing` for *direct* blank arguments so functions can distinguish a
         // syntactically omitted argument from a blank cell value.
