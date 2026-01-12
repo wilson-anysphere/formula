@@ -4732,7 +4732,13 @@ export class CanvasGridRenderer {
     }
 
     // Only materialize row->span entries for rows that are actually visible in the current viewport.
-    // This prevents O(merge height) work for extremely tall merged regions.
+    //
+    // We also include the row immediately above the main visible range, because gridline/border
+    // rendering checks `isInteriorHorizontalGridline(index, startRow - 1, col)` for the top-most
+    // visible row. Without this, merged regions that start above the viewport would incorrectly
+    // draw a horizontal gridline at the top edge of the viewport.
+    //
+    // This still keeps indexing costs proportional to viewport size (O(visible rows)).
     const indexedRowRanges: IndexedRowRange[] = [];
     if (viewport.width > 0 && viewport.height > 0) {
       const frozenHeight = Math.min(viewport.height, viewport.frozenHeight);
@@ -4746,7 +4752,7 @@ export class CanvasGridRenderer {
 
       const mainRows = viewport.main.rows;
       if (mainRows.end > mainRows.start) {
-        indexedRowRanges.push({ startRow: mainRows.start, endRow: mainRows.end });
+        indexedRowRanges.push({ startRow: Math.max(0, mainRows.start - 1), endRow: mainRows.end });
       }
     }
 

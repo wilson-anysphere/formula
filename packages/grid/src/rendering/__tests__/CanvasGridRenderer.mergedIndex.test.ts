@@ -38,7 +38,7 @@ describe("CanvasGridRenderer merged index", () => {
 
     // But only materialize row spans for the visible viewport rows.
     const visibleRowCount = viewport.main.rows.end - viewport.main.rows.start;
-    expect(mergedIndex.getIndexedRowCount()).toBe(visibleRowCount);
+    expect(mergedIndex.getIndexedRowCount()).toBe(visibleRowCount + 1);
     expect(mergedIndex.getIndexedRowCount()).toBeLessThan(1_000);
 
     // Interior cells that are visible must still be treated as merged.
