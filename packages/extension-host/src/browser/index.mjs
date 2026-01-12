@@ -559,27 +559,6 @@ class BrowserExtensionHost {
     return extensionId;
   }
 
-  async unloadExtension(extensionId) {
-    const id = String(extensionId);
-    const extension = this._extensions.get(id);
-    if (!extension) return false;
-
-    // Remove contributed commands/custom functions so the host no longer routes calls to the extension.
-    for (const cmd of extension.manifest.contributes.commands ?? []) {
-      if (this._commands.get(cmd.command) === id) this._commands.delete(cmd.command);
-    }
-
-    for (const fn of extension.manifest.contributes.customFunctions ?? []) {
-      if (this._customFunctions.get(fn.name) === id) {
-        this._customFunctions.delete(fn.name);
-      }
-    }
-
-    this._extensions.delete(id);
-    this._terminateWorker(extension, { reason: "unload", cause: new Error("Extension unloaded") });
-    return true;
-  }
-
   /**
    * Clears all persisted state owned by an extension (permission grants + extension storage).
    *
