@@ -411,27 +411,34 @@ describe("KeybindingService", () => {
     expect(extRun).toHaveBeenCalledTimes(1);
   });
 
-  it("matches Excel-style number-format shortcuts via KeyboardEvent.code fallback (Ctrl+Shift+$)", async () => {
-    const contextKeys = new ContextKeyService();
-    const commandRegistry = new CommandRegistry();
+  it.each([
+    { symbol: "$", code: "Digit4", eventKey: "4", command: "builtin.currency", title: "Currency" },
+    { symbol: "%", code: "Digit5", eventKey: "5", command: "builtin.percent", title: "Percent" },
+    { symbol: "#", code: "Digit3", eventKey: "3", command: "builtin.date", title: "Date" },
+  ])(
+    "matches Excel-style number-format shortcuts via KeyboardEvent.code fallback (Ctrl+Shift+$symbol)",
+    async ({ symbol, code, eventKey, command, title }) => {
+      const contextKeys = new ContextKeyService();
+      const commandRegistry = new CommandRegistry();
 
-    const run = vi.fn();
-    commandRegistry.registerBuiltinCommand("builtin.currency", "Currency", run);
+      const run = vi.fn();
+      commandRegistry.registerBuiltinCommand(command, title, run);
 
-    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
-    service.setBuiltinKeybindings([{ command: "builtin.currency", key: "ctrl+shift+$" }]);
+      const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
+      service.setBuiltinKeybindings([{ command, key: `ctrl+shift+${symbol}` }]);
 
-    // Keep the display string Excel-like (show "$", not "4").
-    expect(service.getCommandKeybindingDisplayIndex().get("builtin.currency")).toEqual(["Ctrl+Shift+$"]);
+      // Keep the display string Excel-like (show "$/%/#", not "4/5/3").
+      expect(service.getCommandKeybindingDisplayIndex().get(command)).toEqual([`Ctrl+Shift+${symbol}`]);
 
-    // Simulate a non-US layout where the physical Digit4 key does not produce "$" for the chord.
-    const event = makeKeydownEvent({ key: "4", code: "Digit4", ctrlKey: true, shiftKey: true });
-    const handled = await service.dispatchKeydown(event);
+      // Simulate a non-US layout where the physical Digit key does not produce the literal symbol for the chord.
+      const event = makeKeydownEvent({ key: eventKey, code, ctrlKey: true, shiftKey: true });
+      const handled = await service.dispatchKeydown(event);
 
-    expect(handled).toBe(true);
-    expect(event.defaultPrevented).toBe(true);
-    expect(run).toHaveBeenCalledTimes(1);
-  });
+      expect(handled).toBe(true);
+      expect(event.defaultPrevented).toBe(true);
+      expect(run).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("matches AutoSum on layouts where '=' requires Shift (Alt+Shift+Equal)", async () => {
     const contextKeys = new ContextKeyService();
