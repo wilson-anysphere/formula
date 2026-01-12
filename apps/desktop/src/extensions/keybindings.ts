@@ -39,26 +39,46 @@ function normalizeKeyToken(token: string): string {
 }
 
 export function parseKeybinding(command: string, binding: string, when: string | null = null): ParsedKeybinding | null {
-  const raw = String(binding ?? "").trim();
+  const raw = String(binding ?? "");
   if (!raw) return null;
 
-  const rawParts = raw
-    .split("+")
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
-
-  if (rawParts.length === 0) return null;
-
-  // Defensive: reject "chord" keybindings like `ctrl+k ctrl+c` which we do not
-  // support (and which would otherwise be mis-parsed into something unsafe, like
-  // `ctrl+c`).
-  //
-  // We also treat any token with internal whitespace as invalid.
-  for (const part of rawParts) {
-    if (/\s/.test(part)) return null;
+  // Treat a binding that is literally a single whitespace token as the spacebar.
+  // (This matches `KeyboardEvent.key === " "` and is occasionally used in manifests.)
+  if (raw.trim() === "") {
+    return {
+      command,
+      when: when ?? null,
+      ctrl: false,
+      alt: false,
+      shift: false,
+      meta: false,
+      key: "space",
+    };
   }
 
-  const parts = rawParts.map((p) => normalizeKeyToken(p));
+  const parts: string[] = [];
+
+  for (const rawPart of raw.split("+")) {
+    const trimmed = rawPart.trim();
+
+    // Allow the last token to be a literal space (e.g. `"ctrl+ "` in user-provided strings).
+    // Avoid treating missing tokens (e.g. `"ctrl++c"`) as space.
+    if (trimmed === "") {
+      if (rawPart.length > 0) {
+        parts.push("space");
+        continue;
+      }
+      return null;
+    }
+
+    // Defensive: reject unsupported "chord" syntax like `ctrl+k ctrl+c`. We allow
+    // whitespace around tokens (trimmed above), but not inside a token.
+    if (/\s/.test(trimmed)) return null;
+
+    parts.push(normalizeKeyToken(trimmed));
+  }
+
+  if (parts.length === 0) return null;
 
   const key = parts[parts.length - 1]!;
   const isModifierToken = (token: string): boolean =>

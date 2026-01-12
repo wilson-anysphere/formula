@@ -86,6 +86,16 @@ describe("keybindings", () => {
     expect(parseKeybinding("cmd", "ctrl+k ctrl+c")).toBeNull();
   });
 
+  it("parseKeybinding accepts literal space bindings", () => {
+    const binding = parseKeybinding("cmd", " ");
+    expect(binding).not.toBeNull();
+    expect(binding).toMatchObject({ key: "space", ctrl: false, alt: false, shift: false, meta: false });
+
+    const ctrlSpace = parseKeybinding("cmd", "ctrl+ ");
+    expect(ctrlSpace).not.toBeNull();
+    expect(ctrlSpace).toMatchObject({ key: "space", ctrl: true });
+  });
+
   it("matchesKeybinding handles special keys (space/escape)", () => {
     const spaceBinding = parseKeybinding("cmd.space", "space");
     expect(spaceBinding).not.toBeNull();
