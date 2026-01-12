@@ -13,6 +13,30 @@ fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
 }
 
 #[test]
+fn compute_vba_project_digest_errors_when_transcript_cannot_be_computed() {
+    // Regression test: `compute_vba_project_digest` should be based on the MS-OVBA transcript
+    // (`ContentNormalizedData || FormsNormalizedData`), not a fallback that hashes raw OLE streams.
+    //
+    // Build a valid OLE container but omit `VBA/dir`, which is required for transcript computation.
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole
+            .create_stream("VBA/Module1")
+            .expect("create module stream");
+        s.write_all(b"not-a-valid-compressed-module").expect("write");
+    }
+
+    let vba_bin = ole.into_inner().into_inner();
+
+    assert!(
+        compute_vba_project_digest(&vba_bin, DigestAlg::Md5).is_err(),
+        "expected digest computation to fail when MS-OVBA transcript cannot be produced"
+    );
+}
+
+#[test]
 fn compute_vba_project_digest_matches_msovba_transcript_content_plus_forms() {
     // --- Build a minimal, self-contained vbaProject.bin ---
     //
