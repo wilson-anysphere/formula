@@ -3544,7 +3544,9 @@ export class SpreadsheetApp {
     }
 
     const target = e.target as HTMLElement | null;
-    if (target) {
+    // In both shared and legacy grid modes, pointermoves in the sheet body almost always target
+    // the selection canvas. Skip expensive DOM tree walks (`contains`) in that common case.
+    if (target && target !== this.selectionCanvas) {
       if (this.vScrollbarTrack.contains(target) || this.hScrollbarTrack.contains(target) || this.outlineLayer.contains(target)) {
         this.clearSharedHoverCellCache();
         this.hideCommentTooltip();
@@ -6793,7 +6795,7 @@ export class SpreadsheetApp {
 
     if (!this.dragState) {
       const target = e.target as HTMLElement | null;
-      if (target) {
+      if (target && target !== this.selectionCanvas) {
         if (
           this.vScrollbarTrack.contains(target) ||
           this.hScrollbarTrack.contains(target) ||
