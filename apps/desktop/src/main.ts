@@ -2467,11 +2467,11 @@ window.addEventListener(
       }
     }
 
-    const ordered = workbookSheetStore.listVisible();
+    const ordered = workbookSheetStore.listVisible().map((sheet) => sheet.id);
     if (ordered.length === 0) return;
 
     const current = app.getCurrentSheetId();
-    const idx = ordered.findIndex((sheet) => sheet.id === current);
+    const idx = ordered.indexOf(current);
     if (idx === -1) {
       // Current sheet is no longer visible (should be rare; typically we auto-fallback
       // elsewhere). Treat Ctrl/Cmd+PgUp/PgDn as a "jump to first visible sheet".
@@ -2479,7 +2479,7 @@ window.addEventListener(
       if (!first) return;
       e.preventDefault();
       e.stopPropagation();
-      app.activateSheet(first.id);
+      app.activateSheet(first);
       restoreFocusAfterSheetNavigation();
       return;
     }
@@ -2494,8 +2494,8 @@ window.addEventListener(
     void commandRegistry.executeCommand(commandId).catch(() => {
       const delta = e.key === "PageUp" ? -1 : 1;
       const next = ordered[(idx + delta + ordered.length) % ordered.length];
-      if (!next || next.id === current) return;
-      app.activateSheet(next.id);
+      if (!next || next === current) return;
+      app.activateSheet(next);
       restoreFocusAfterSheetNavigation();
     });
   },
