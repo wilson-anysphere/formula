@@ -5213,11 +5213,21 @@ mountRibbon(ribbonRoot, {
   },
   onToggle: (commandId, pressed) => {
     switch (commandId) {
-      case "data.queriesConnections.queriesConnections":
-        if (pressed) ribbonLayoutController?.openPanel(PanelIds.DATA_QUERIES);
-        else ribbonLayoutController?.closePanel(PanelIds.DATA_QUERIES);
+      case "data.queriesConnections.queriesConnections": {
+        const layoutController = ribbonLayoutController;
+        if (!layoutController) {
+          showToast("Queries panel is not available (layout controller missing).", "error");
+          // Ensure the ribbon toggle state reflects the actual panel placement.
+          scheduleRibbonSelectionFormatStateUpdate();
+          app.focus();
+          return;
+        }
+
+        if (pressed) layoutController.openPanel(PanelIds.DATA_QUERIES);
+        else layoutController.closePanel(PanelIds.DATA_QUERIES);
         app.focus();
         return;
+      }
       case "review.comments.showComments":
         if (pressed) app.openCommentsPanel();
         else app.closeCommentsPanel();
