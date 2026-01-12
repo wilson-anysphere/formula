@@ -1,7 +1,8 @@
 #![cfg(feature = "write")]
 
 use formula_xlsb::rgce::{
-    decode_rgce_with_context, decode_rgce_with_rgcb, encode_rgce_with_context_ast, CellCoord,
+    decode_rgce, decode_rgce_with_context, decode_rgce_with_rgcb, encode_rgce_with_context_ast,
+    CellCoord,
 };
 use formula_xlsb::workbook_context::WorkbookContext;
 use formula_xlsb::XlsbWorkbook;
@@ -18,6 +19,116 @@ fn ast_encoder_roundtrips_3d_ref() {
 
     let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
     assert_eq!(decoded, "Sheet2!A1+1");
+}
+
+#[test]
+fn ast_encoder_roundtrips_area_ref() {
+    let ctx = WorkbookContext::default();
+
+    let encoded =
+        encode_rgce_with_context_ast("=A1:B2", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    let decoded = decode_rgce(&encoded.rgce).expect("decode");
+    assert_eq!(decoded, "A1:B2");
+}
+
+#[test]
+fn ast_encoder_roundtrips_intersection_operator() {
+    let ctx = WorkbookContext::default();
+
+    let encoded =
+        encode_rgce_with_context_ast("=A1 B1", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    let decoded = decode_rgce(&encoded.rgce).expect("decode");
+    assert_eq!(decoded, "A1 B1");
+}
+
+#[test]
+fn ast_encoder_roundtrips_union_operator_inside_function_arg() {
+    let ctx = WorkbookContext::default();
+
+    let encoded =
+        encode_rgce_with_context_ast("=IF(1,(A1,B1))", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    let decoded = decode_rgce(&encoded.rgce).expect("decode");
+    assert_eq!(decoded, "IF(1,(A1,B1))");
+}
+
+#[test]
+fn ast_encoder_roundtrips_percent_operator() {
+    let ctx = WorkbookContext::default();
+
+    let encoded = encode_rgce_with_context_ast("=10%", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    let decoded = decode_rgce(&encoded.rgce).expect("decode");
+    assert_eq!(decoded, "10%");
+}
+
+#[test]
+fn ast_encoder_roundtrips_spill_operator() {
+    let ctx = WorkbookContext::default();
+
+    let encoded = encode_rgce_with_context_ast("=A1#", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    let decoded = decode_rgce(&encoded.rgce).expect("decode");
+    assert_eq!(decoded, "A1#");
+}
+
+#[test]
+fn ast_encoder_roundtrips_implicit_intersection_on_area() {
+    let ctx = WorkbookContext::default();
+
+    let encoded =
+        encode_rgce_with_context_ast("=@A1:A10", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    let decoded = decode_rgce(&encoded.rgce).expect("decode");
+    assert_eq!(decoded, "@A1:A10");
+}
+
+#[test]
+fn ast_encoder_roundtrips_3d_area_ref() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet2", "Sheet2", 0);
+
+    let encoded =
+        encode_rgce_with_context_ast("=Sheet2!A1:B2", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "Sheet2!A1:B2");
+}
+
+#[test]
+fn ast_encoder_roundtrips_sheet_range_ref() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet1", "Sheet3", 1);
+
+    let encoded =
+        encode_rgce_with_context_ast("=SUM(Sheet1:Sheet3!A1)", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "SUM(Sheet1:Sheet3!A1)");
+}
+
+#[test]
+fn ast_encoder_roundtrips_implicit_intersection_on_name() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_workbook_name("MyNamedRange", 1);
+
+    let encoded =
+        encode_rgce_with_context_ast("=@MyNamedRange", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "@MyNamedRange");
 }
 
 #[test]
@@ -51,8 +162,8 @@ fn ast_encoder_encodes_udf_call_via_namex() {
     let wb = XlsbWorkbook::open(path).expect("open xlsb");
     let ctx = wb.workbook_context();
 
-    let encoded =
-        encode_rgce_with_context_ast("=MyAddinFunc(1,2)", ctx, CellCoord::new(0, 0)).expect("encode");
+    let encoded = encode_rgce_with_context_ast("=MyAddinFunc(1,2)", ctx, CellCoord::new(0, 0))
+        .expect("encode");
     assert!(encoded.rgcb.is_empty());
 
     // args..., PtgNameX(func), PtgFuncVar(argc+1, 0x00FF)
@@ -69,4 +180,3 @@ fn ast_encoder_encodes_udf_call_via_namex() {
     let decoded = decode_rgce_with_context(&encoded.rgce, ctx).expect("decode");
     assert_eq!(decoded, "MyAddinFunc(1,2)");
 }
-
