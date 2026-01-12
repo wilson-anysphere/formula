@@ -2827,62 +2827,62 @@ export class CanvasGridRenderer {
             };
 
             const shouldClip = totalWidth > availableWidth;
-            if (shouldClip) {
-              let clipX = x;
-              let clipWidth = width;
+            let clipX = x;
+            let clipWidth = width;
 
-              if ((resolvedAlign === "left" || resolvedAlign === "right") && totalWidth > width - paddingX) {
-                const requiredExtra = paddingX + totalWidth - width;
-                if (requiredExtra > 0) {
-                  if (resolvedAlign === "left") {
-                    let extra = 0;
-                    for (
-                      let probeCol = spanEndCol, steps = 0;
-                      probeCol < colCount && steps < MAX_TEXT_OVERFLOW_COLUMNS && extra < requiredExtra;
-                      probeCol++, steps++
-                    ) {
-                      let blocked = false;
-                      for (let r = spanStartRow; r < spanEndRow; r++) {
-                        if (r < 0 || r >= rowCount) {
-                          blocked = true;
-                          break;
-                        }
-                        if (isBlockedForOverflow(r, probeCol)) {
-                          blocked = true;
-                          break;
-                        }
+            if (shouldClip && (resolvedAlign === "left" || resolvedAlign === "right") && totalWidth > width - paddingX) {
+              const requiredExtra = paddingX + totalWidth - width;
+              if (requiredExtra > 0) {
+                if (resolvedAlign === "left") {
+                  let extra = 0;
+                  for (
+                    let probeCol = spanEndCol, steps = 0;
+                    probeCol < colCount && steps < MAX_TEXT_OVERFLOW_COLUMNS && extra < requiredExtra;
+                    probeCol++, steps++
+                  ) {
+                    let blocked = false;
+                    for (let r = spanStartRow; r < spanEndRow; r++) {
+                      if (r < 0 || r >= rowCount) {
+                        blocked = true;
+                        break;
                       }
-                      if (blocked) break;
-                      extra += colAxis.getSize(probeCol);
-                    }
-                    clipWidth += extra;
-                  } else {
-                    let extra = 0;
-                    for (
-                      let probeCol = spanStartCol - 1, steps = 0;
-                      probeCol >= 0 && steps < MAX_TEXT_OVERFLOW_COLUMNS && extra < requiredExtra;
-                      probeCol--, steps++
-                    ) {
-                      let blocked = false;
-                      for (let r = spanStartRow; r < spanEndRow; r++) {
-                        if (r < 0 || r >= rowCount) {
-                          blocked = true;
-                          break;
-                        }
-                        if (isBlockedForOverflow(r, probeCol)) {
-                          blocked = true;
-                          break;
-                        }
+                      if (isBlockedForOverflow(r, probeCol)) {
+                        blocked = true;
+                        break;
                       }
-                      if (blocked) break;
-                      extra += colAxis.getSize(probeCol);
                     }
-                    clipX -= extra;
-                    clipWidth += extra;
+                    if (blocked) break;
+                    extra += colAxis.getSize(probeCol);
                   }
+                  clipWidth += extra;
+                } else {
+                  let extra = 0;
+                  for (
+                    let probeCol = spanStartCol - 1, steps = 0;
+                    probeCol >= 0 && steps < MAX_TEXT_OVERFLOW_COLUMNS && extra < requiredExtra;
+                    probeCol--, steps++
+                  ) {
+                    let blocked = false;
+                    for (let r = spanStartRow; r < spanEndRow; r++) {
+                      if (r < 0 || r >= rowCount) {
+                        blocked = true;
+                        break;
+                      }
+                      if (isBlockedForOverflow(r, probeCol)) {
+                        blocked = true;
+                        break;
+                      }
+                    }
+                    if (blocked) break;
+                    extra += colAxis.getSize(probeCol);
+                  }
+                  clipX -= extra;
+                  clipWidth += extra;
                 }
               }
+            }
 
+            if (shouldClip) {
               contentCtx.save();
               contentCtx.beginPath();
               contentCtx.rect(clipX, y, clipWidth, height);
@@ -2896,7 +2896,7 @@ export class CanvasGridRenderer {
             if (underlineSegments.length > 0 || strikeSegments.length > 0) {
               contentCtx.save();
               contentCtx.beginPath();
-              contentCtx.rect(x, y, width, height);
+              contentCtx.rect(clipX, y, clipWidth, height);
               contentCtx.clip();
               for (const segment of underlineSegments) {
                 contentCtx.beginPath();
