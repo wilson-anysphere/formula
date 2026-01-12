@@ -59,6 +59,119 @@ const DB_VERSION = 1;
 const STORE_INSTALLED = "installed";
 const STORE_PACKAGES = "packages";
 
+const CONTRIBUTED_PANELS_SEED_STORE_KEY = "formula.extensions.contributedPanels.v1";
+
+type ContributedPanelSeed = {
+  extensionId: string;
+  title: string;
+  icon?: string | null;
+  defaultDock?: "left" | "right" | "bottom";
+};
+
+function getLocalStorage(): Storage | null {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function readContributedPanelSeedStore(storage: Storage): Record<string, ContributedPanelSeed> {
+  try {
+    const raw = storage.getItem(CONTRIBUTED_PANELS_SEED_STORE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: Record<string, ContributedPanelSeed> = {};
+    for (const [panelId, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof panelId !== "string" || panelId.trim().length === 0) continue;
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const record = value as any;
+      const extensionId = typeof record.extensionId === "string" ? record.extensionId.trim() : "";
+      const title = typeof record.title === "string" ? record.title.trim() : "";
+      if (!extensionId || !title) continue;
+      const icon = record.icon === undefined ? undefined : record.icon === null ? null : String(record.icon);
+      const defaultDock =
+        record.defaultDock === "left" || record.defaultDock === "right" || record.defaultDock === "bottom"
+          ? record.defaultDock
+          : undefined;
+      out[panelId] = {
+        extensionId,
+        title,
+        ...(icon !== undefined ? { icon } : {}),
+        ...(defaultDock ? { defaultDock } : {})
+      };
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeContributedPanelSeedStore(storage: Storage, data: Record<string, ContributedPanelSeed>): void {
+  storage.setItem(CONTRIBUTED_PANELS_SEED_STORE_KEY, JSON.stringify(data));
+}
+
+function removeContributedPanelSeedsForExtension(storage: Storage, extensionId: string): void {
+  const owner = String(extensionId ?? "").trim();
+  if (!owner) return;
+  const current = readContributedPanelSeedStore(storage);
+  const next: Record<string, ContributedPanelSeed> = {};
+  let changed = false;
+  for (const [panelId, seed] of Object.entries(current)) {
+    if (seed.extensionId === owner) {
+      changed = true;
+      continue;
+    }
+    next[panelId] = seed;
+  }
+  if (!changed) return;
+  writeContributedPanelSeedStore(storage, next);
+}
+
+function prepareContributedPanelSeedsUpdate(
+  storage: Storage,
+  extensionId: string,
+  panels: Array<{ id?: unknown; title?: unknown; icon?: unknown }>
+): Record<string, ContributedPanelSeed> {
+  const owner = String(extensionId ?? "").trim();
+  if (!owner) return readContributedPanelSeedStore(storage);
+
+  const current = readContributedPanelSeedStore(storage);
+  const next: Record<string, ContributedPanelSeed> = {};
+
+  for (const [panelId, seed] of Object.entries(current)) {
+    if (seed.extensionId === owner) continue;
+    next[panelId] = seed;
+  }
+
+  const seenInExtension = new Set<string>();
+  for (const panel of panels ?? []) {
+    const panelId = typeof panel?.id === "string" ? panel.id.trim() : "";
+    if (!panelId) continue;
+    if (seenInExtension.has(panelId)) continue;
+    seenInExtension.add(panelId);
+
+    const existing = next[panelId];
+    if (existing && existing.extensionId !== owner) {
+      throw new Error(
+        `Panel id already contributed by another extension: ${panelId} (existing: ${existing.extensionId}, new: ${owner})`
+      );
+    }
+
+    const titleRaw = typeof panel?.title === "string" ? panel.title.trim() : "";
+    const title = titleRaw || panelId;
+    const icon = panel?.icon === undefined ? undefined : panel.icon === null ? null : String(panel.icon);
+    next[panelId] = {
+      extensionId: owner,
+      title,
+      ...(icon !== undefined ? { icon } : {})
+    };
+  }
+
+  return next;
+}
+
 function isSha256Hex(value: string): boolean {
   return typeof value === "string" && /^[0-9a-f]{64}$/i.test(value.trim());
 }
@@ -413,6 +526,16 @@ export class WebExtensionManager {
       throw new Error(`Package version mismatch: expected ${resolvedVersion} but got ${manifest.version}`);
     }
 
+    // Prepare a localStorage seed-store update before committing the install to IndexedDB.
+    // This ensures we fail fast on duplicate panel ids (two installed extensions claiming the same
+    // panel id), and avoids ending up with an installed extension whose panels cannot be seeded
+    // synchronously at startup.
+    const seedStorage = getLocalStorage();
+    const seedUpdate =
+      seedStorage && Array.isArray(manifest.contributes?.panels)
+        ? prepareContributedPanelSeedsUpdate(seedStorage, id, manifest.contributes.panels)
+        : null;
+
     if (download.signatureBase64 && download.signatureBase64 !== verified.signatureBase64) {
       throw new Error("Marketplace signature header does not match package signature");
     }
@@ -454,6 +577,22 @@ export class WebExtensionManager {
       await txDone(tx);
     } finally {
       db.close();
+    }
+
+    if (seedStorage && seedUpdate) {
+      try {
+        writeContributedPanelSeedStore(seedStorage, seedUpdate);
+      } catch (error) {
+        // Best-effort: localStorage may be unavailable or full. Failing to write the seed store
+        // should not prevent extension installation; it only affects layout persistence across
+        // restarts.
+        // eslint-disable-next-line no-console
+        console.warn(
+          `Failed to persist contributed panel seed store for ${id}@${resolvedVersion}: ${String(
+            (error as Error)?.message ?? error
+          )}`
+        );
+      }
     }
 
     return { id, version: resolvedVersion, installedAt };
@@ -498,6 +637,16 @@ export class WebExtensionManager {
       globalThis.localStorage?.removeItem(`formula.extensionHost.storage.${String(id)}`);
     } catch {
       // ignore (localStorage may be disabled/unavailable)
+    }
+
+    // Keep the synchronous contributed panel seed store in sync with installed extensions.
+    const seedStorage = getLocalStorage();
+    if (seedStorage) {
+      try {
+        removeContributedPanelSeedsForExtension(seedStorage, String(id));
+      } catch {
+        // ignore
+      }
     }
   }
 

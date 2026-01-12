@@ -277,6 +277,17 @@ test("install → verify → load → execute a command (sample-hello)", async (
   const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
 
   await manager.install("formula.sample-hello");
+
+  // Installing an extension should synchronously persist its contributed panels so the desktop
+  // layout system can seed the panel registry before deserializing persisted layouts.
+  const seedRaw = globalThis.localStorage.getItem("formula.extensions.contributedPanels.v1");
+  expect(seedRaw).not.toBeNull();
+  const seed = JSON.parse(String(seedRaw));
+  expect(seed["sampleHello.panel"]).toMatchObject({
+    extensionId: "formula.sample-hello",
+    title: "Sample Hello Panel",
+  });
+
   await manager.loadInstalled("formula.sample-hello");
 
   const result = await host.executeCommand("sampleHello.sumSelection");
@@ -670,6 +681,13 @@ test("uninstall clears persisted permission + extension storage state (localStor
     JSON.stringify({ foo: "bar" })
   );
 
+  // Ensure we preserve other extensions' panel seeds while removing the uninstalled extension.
+  const seedKey = "formula.extensions.contributedPanels.v1";
+  const seedRaw = globalThis.localStorage.getItem(seedKey);
+  const seed = seedRaw ? JSON.parse(String(seedRaw)) : {};
+  seed["other.panel"] = { extensionId: "other.extension", title: "Other Panel" };
+  globalThis.localStorage.setItem(seedKey, JSON.stringify(seed));
+
   // Ensure the host has the extension store cached in-memory; uninstall should clear it too.
   const storeBefore = (host as any)._storageApi.getExtensionStore("formula.sample-hello");
   expect(storeBefore.foo).toBe("bar");
@@ -686,6 +704,12 @@ test("uninstall clears persisted permission + extension storage state (localStor
   const permissions = JSON.parse(String(permissionsRaw));
   expect(permissions["formula.sample-hello"]).toBeUndefined();
   expect(permissions["other.extension"]).toEqual({ "ui.commands": true });
+
+  const seedAfterRaw = globalThis.localStorage.getItem(seedKey);
+  expect(seedAfterRaw).not.toBeNull();
+  const seedAfter = JSON.parse(String(seedAfterRaw));
+  expect(seedAfter["sampleHello.panel"]).toBeUndefined();
+  expect(seedAfter["other.panel"]).toMatchObject({ extensionId: "other.extension", title: "Other Panel" });
 
   await manager.dispose();
   await host.dispose();
