@@ -1975,7 +1975,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "percent-encoding",
- "png",
+ "png 0.17.16",
  "rand_core 0.6.4",
  "serde",
  "serde_json",

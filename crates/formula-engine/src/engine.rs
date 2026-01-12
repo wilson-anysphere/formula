@@ -6189,6 +6189,7 @@ fn bytecode_value_to_engine(value: bytecode::Value) -> Value {
         bytecode::Value::Bool(b) => Value::Bool(b),
         bytecode::Value::Text(s) => Value::Text(s.to_string()),
         bytecode::Value::Empty => Value::Blank,
+        bytecode::Value::Missing => Value::Blank,
         bytecode::Value::Error(e) => Value::Error(bytecode_error_to_engine(e)),
         bytecode::Value::Array(arr) => {
             let total = match arr.rows.checked_mul(arr.cols) {
@@ -7124,6 +7125,7 @@ fn bytecode_expr_is_eligible_inner(
             bytecode::Value::Number(_) | bytecode::Value::Bool(_) => true,
             bytecode::Value::Text(_) => true,
             bytecode::Value::Empty => true,
+            bytecode::Value::Missing => true,
             bytecode::Value::Error(_) => true,
             // Array literals are supported by the bytecode runtime as full typed arrays, but not
             // all bytecode function implementations support Excel's array-lifting semantics yet
@@ -7294,7 +7296,7 @@ fn bytecode_expr_is_eligible_inner(
                 let sum_range_ok = match args.get(2) {
                     None => true,
                     // Excel treats an explicitly missing optional range arg as "omitted".
-                    Some(bytecode::Expr::Literal(bytecode::Value::Empty)) => true,
+                    Some(bytecode::Expr::Literal(bytecode::Value::Missing)) => true,
                     Some(bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)) => true,
                     _ => false,
                 };

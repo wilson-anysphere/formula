@@ -451,7 +451,7 @@ pub fn lower_canonical_expr(
         crate::Expr::String(s) => Ok(BytecodeExpr::Literal(Value::Text(Arc::from(s.as_str())))),
         crate::Expr::Boolean(b) => Ok(BytecodeExpr::Literal(Value::Bool(*b))),
         crate::Expr::Error(raw) => Ok(BytecodeExpr::Literal(Value::Error(parse_error_kind(raw)))),
-        crate::Expr::Missing => Ok(BytecodeExpr::Literal(Value::Empty)),
+        crate::Expr::Missing => Ok(BytecodeExpr::Literal(Value::Missing)),
         crate::Expr::Array(arr) => Ok(BytecodeExpr::Literal(lower_array_literal(arr)?)),
         crate::Expr::CellRef(r) => lower_cell_ref_expr(r, origin, current_sheet, resolve_sheet),
         crate::Expr::ColRef(_) | crate::Expr::RowRef(_) => {

@@ -184,6 +184,7 @@ fn bytecode_value_to_engine(value: formula_engine::bytecode::Value) -> Value {
         ByteValue::Bool(b) => Value::Bool(b),
         ByteValue::Text(s) => Value::Text(s.to_string()),
         ByteValue::Empty => Value::Blank,
+        ByteValue::Missing => Value::Blank,
         ByteValue::Error(e) => Value::Error(e.into()),
         // Array/range values are not valid scalar results for the engine API; treat them as spills.
         ByteValue::Array(_) | ByteValue::Range(_) | ByteValue::MultiRange(_) => {
@@ -2842,6 +2843,37 @@ fn bytecode_backend_matches_ast_for_reference_functions() {
     ] {
         assert_engine_matches_ast(&engine, formula, cell);
     }
+}
+
+#[test]
+fn bytecode_backend_distinguishes_missing_args_from_blank_cells_for_address() {
+    let mut engine = Engine::new();
+    // A1 is left blank (unset).
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ADDRESS(1,1,,FALSE)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=ADDRESS(1,1,A1,FALSE)")
+        .unwrap();
+
+    // Ensure both formulas compiled to bytecode.
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=ADDRESS(1,1,,FALSE)", "B1");
+    assert_engine_matches_ast(&engine, "=ADDRESS(1,1,A1,FALSE)", "B2");
+
+    // Regression: omitted abs_num defaults to 1, but a blank cell passed for abs_num should error.
+    assert_ne!(
+        engine.get_cell_value("Sheet1", "B1"),
+        engine.get_cell_value("Sheet1", "B2")
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B2"),
+        Value::Error(ErrorKind::Value)
+    );
 }
 
 #[test]

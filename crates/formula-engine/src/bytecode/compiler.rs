@@ -493,6 +493,7 @@ fn value_to_key(v: &Value, out: &mut String) {
             out.push('\0');
         }
         Value::Empty => out.push_str("E"),
+        Value::Missing => out.push_str("M"),
         Value::Error(e) => {
             out.push_str("ERR");
             out.push_str(&format!("{:?}", e));

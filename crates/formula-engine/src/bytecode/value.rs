@@ -259,6 +259,11 @@ pub enum Value {
     Range(RangeRef),
     MultiRange(MultiRangeRef),
     Empty,
+    /// Placeholder for a missing/omitted function argument (e.g. `IF(,1,2)`).
+    ///
+    /// This is distinct from `Empty` (blank cell value) so bytecode runtime implementations can
+    /// preserve Excel's semantics for optional arguments where "omitted" differs from "blank".
+    Missing,
     Error(ErrorKind),
 }
 
@@ -268,7 +273,7 @@ impl Value {
         match self {
             Value::Number(v) => Some(*v),
             Value::Bool(v) => Some(if *v { 1.0 } else { 0.0 }),
-            Value::Empty => None,
+            Value::Empty | Value::Missing => None,
             _ => None,
         }
     }
@@ -282,6 +287,7 @@ impl PartialEq for Value {
             (Bool(a), Bool(b)) => a == b,
             (Text(a), Text(b)) => a == b,
             (Empty, Empty) => true,
+            (Missing, Missing) => true,
             (Error(a), Error(b)) => a == b,
             (Range(a), Range(b)) => a == b,
             (MultiRange(a), MultiRange(b)) => a == b,
