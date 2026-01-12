@@ -49,7 +49,15 @@ export async function confirm(message: string, opts: ConfirmDialogOptions = {}):
   }
 
   const windowConfirm = getWindowConfirm();
-  if (windowConfirm) return windowConfirm(message);
+  if (windowConfirm) {
+    try {
+      return windowConfirm(message);
+    } catch {
+      // Some test/host environments (e.g. jsdom) define `window.confirm` but throw
+      // a "Not implemented" error. Treat that the same as an unavailable API.
+      return false;
+    }
+  }
 
   // Non-browser environment (e.g. unit tests) without a stubbed `window.confirm`.
   // Default to `false` to avoid accidentally confirming destructive actions.
@@ -69,6 +77,12 @@ export async function alert(message: string, opts: AlertDialogOptions = {}): Pro
   }
 
   const windowAlert = getWindowAlert();
-  if (windowAlert) windowAlert(message);
+  if (windowAlert) {
+    try {
+      windowAlert(message);
+    } catch {
+      // Some test/host environments (e.g. jsdom) define `window.alert` but throw
+      // a "Not implemented" error. Ignore and continue.
+    }
+  }
 }
-

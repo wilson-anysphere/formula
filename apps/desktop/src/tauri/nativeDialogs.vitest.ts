@@ -42,5 +42,19 @@ describe("tauri/nativeDialogs", () => {
     await nativeDialogs.alert("Something went wrong");
     expect(windowAlert).toHaveBeenCalledWith("Something went wrong");
   });
-});
 
+  it("treats throwing window.confirm/alert as unavailable APIs", async () => {
+    const windowConfirm = vi.fn(() => {
+      throw new Error("Not implemented: window.confirm");
+    });
+    const windowAlert = vi.fn(() => {
+      throw new Error("Not implemented: window.alert");
+    });
+
+    vi.stubGlobal("__TAURI__", undefined);
+    vi.stubGlobal("window", { confirm: windowConfirm, alert: windowAlert });
+
+    await expect(nativeDialogs.confirm("Discard?")).resolves.toBe(false);
+    await expect(nativeDialogs.alert("Something went wrong")).resolves.toBeUndefined();
+  });
+});
