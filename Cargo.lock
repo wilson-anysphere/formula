@@ -2082,6 +2082,7 @@ dependencies = [
  "calamine 0.32.0",
  "cfb 0.10.0",
  "encoding_rs",
+ "formula-biff",
  "formula-format",
  "formula-model",
  "log",

@@ -9,6 +9,7 @@ use std::io::{Read, Seek};
 use std::path::Path;
 
 pub(crate) mod globals;
+pub(crate) mod rgce;
 pub(crate) mod records;
 pub(crate) mod sheet;
 pub(crate) mod strings;
