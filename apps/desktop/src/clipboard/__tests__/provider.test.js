@@ -266,6 +266,30 @@ test("clipboard provider: rich MIME handling", async (t) => {
     );
   });
 
+  await t.test("tauri provider decodes image base64 without Buffer (atob fallback)", async () => {
+    await withGlobals(
+      {
+        Buffer: undefined,
+        __TAURI__: {
+          core: {
+            async invoke(cmd) {
+              assert.equal(cmd, "read_clipboard");
+              return { image_png_base64: "CQgH" }; // [9, 8, 7]
+            },
+          },
+          clipboard: {},
+        },
+        navigator: { clipboard: {} },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.ok(content.imagePng instanceof Uint8Array);
+        assert.deepEqual(Array.from(content.imagePng), [9, 8, 7]);
+      }
+    );
+  });
+
   await t.test("tauri provider falls back gracefully when invoke throws", async () => {
     await withGlobals(
       {
@@ -349,6 +373,37 @@ test("clipboard provider: rich MIME handling", async (t) => {
         assert.equal(args.text, "plain");
         assert.equal(args.html, "<p>hello</p>");
         assert.equal(args.rtf, undefined);
+        assert.equal(args.image_png_base64, "CQgH");
+      }
+    );
+  });
+
+  await t.test("tauri provider encodes image base64 without Buffer (btoa fallback)", async () => {
+    const imageBytes = Uint8Array.from([9, 8, 7]);
+
+    /** @type {any[]} */
+    const invokeCalls = [];
+
+    await withGlobals(
+      {
+        Buffer: undefined,
+        __TAURI__: {
+          core: {
+            async invoke(cmd, args) {
+              invokeCalls.push([cmd, args]);
+            },
+          },
+          clipboard: {},
+        },
+        navigator: undefined,
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: "plain", imagePng: imageBytes });
+
+        assert.equal(invokeCalls.length, 1);
+        const [cmd, args] = invokeCalls[0];
+        assert.equal(cmd, "write_clipboard");
         assert.equal(args.image_png_base64, "CQgH");
       }
     );
