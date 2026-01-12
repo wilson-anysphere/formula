@@ -11,6 +11,13 @@ type Props = {
   onActivateSheet: (sheetId: string) => void;
   onAddSheet: () => Promise<void> | void;
   /**
+   * Called after a sheet tab reorder is committed (drag-and-drop).
+   *
+   * Used by `main.ts` to restore focus back to the grid so users can continue
+   * editing after reordering.
+   */
+  onSheetsReordered?: () => void;
+  /**
    * Called after a sheet rename is successfully committed.
    *
    * Used by `main.ts` to rewrite DocumentController formulas referencing the old sheet name.
@@ -33,6 +40,7 @@ export function SheetTabStrip({
   activeSheetId,
   onActivateSheet,
   onAddSheet,
+  onSheetsReordered,
   onSheetRenamed,
   onSheetDeleted,
   onError,
@@ -160,14 +168,18 @@ export function SheetTabStrip({
 
   const moveSheet = (sheetId: string, dropTarget: Parameters<typeof computeWorkbookSheetMoveIndex>[0]["dropTarget"]) => {
     const all = store.listAll();
+    const fromIndex = all.findIndex((s) => s.id === sheetId);
     const toIndex = computeWorkbookSheetMoveIndex({ sheets: all, fromSheetId: sheetId, dropTarget });
     if (toIndex == null) return;
+    if (fromIndex === -1 || fromIndex === toIndex) return;
     try {
       store.move(sheetId, toIndex);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       onError?.(message);
+      return;
     }
+    onSheetsReordered?.();
   };
 
   const activateSheetWithRenameGuard = (sheetId: string) => {

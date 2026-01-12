@@ -1766,6 +1766,7 @@ function renderSheetTabs(): void {
         restoreFocusAfterSheetNavigation();
       },
       onAddSheet: handleAddSheet,
+      onSheetsReordered: () => restoreFocusAfterSheetNavigation(),
       onSheetRenamed: ({ oldName, newName }) => {
         try {
           rewriteDocumentFormulasForSheetRename(app.getDocument(), oldName, newName);
