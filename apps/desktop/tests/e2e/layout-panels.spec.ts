@@ -10,7 +10,7 @@ test.describe("dockable panels layout persistence", () => {
     await waitForDesktopReady(page);
 
     // Open AI panel (defaults to right dock via panel registry).
-    await page.getByTestId("open-ai-panel").click();
+    await page.getByTestId("open-panel-ai-chat").click();
     await expect(page.getByTestId("dock-right").getByTestId("panel-aiChat")).toBeVisible();
 
     // Dock to left.
@@ -33,7 +33,7 @@ test.describe("dockable panels layout persistence", () => {
     await waitForDesktopReady(page);
 
     // Open AI panel (defaults to right dock).
-    await page.getByTestId("open-ai-panel").click();
+    await page.getByTestId("open-panel-ai-chat").click();
     const rightDock = page.getByTestId("dock-right");
     await expect(rightDock.getByTestId("panel-aiChat")).toBeVisible();
 

@@ -908,8 +908,8 @@ const workspaceRoot = document.getElementById("workspace");
 const gridSplit = document.getElementById("grid-split");
 const gridSecondary = document.getElementById("grid-secondary");
 const gridSplitter = document.getElementById("grid-splitter");
-const openAiPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-ai-panel"]');
-const openAiAuditPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-ai-audit-panel"]');
+const openChatAiPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-panel-ai-chat"]');
+const openAuditAiPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-panel-ai-audit"]');
 const openDataQueriesPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-data-queries-panel"]');
 const openMacrosPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-macros-panel"]');
 const openScriptEditorPanel = document.querySelector<HTMLButtonElement>('[data-testid="open-script-editor-panel"]');
@@ -932,8 +932,8 @@ if (
   gridSplit &&
   gridSecondary &&
   gridSplitter &&
-  openAiPanel &&
-  openAiAuditPanel &&
+  openChatAiPanel &&
+  openAuditAiPanel &&
   openDataQueriesPanel &&
   openMacrosPanel &&
   openScriptEditorPanel &&
@@ -2497,7 +2497,7 @@ if (
     window.addEventListener("pointercancel", onUp, { passive: false });
   });
 
-  openAiPanel.addEventListener("click", () => {
+  openChatAiPanel.addEventListener("click", () => {
     toggleAiChatPanel();
   });
 
@@ -2507,7 +2507,7 @@ if (
     else layoutController.closePanel(PanelIds.AI_CHAT);
   }
 
-  openAiAuditPanel.addEventListener("click", () => {
+  openAuditAiPanel.addEventListener("click", () => {
     const placement = getPanelPlacement(layoutController.layout, PanelIds.AI_AUDIT);
     if (placement.kind === "closed") layoutController.openPanel(PanelIds.AI_AUDIT);
     else layoutController.closePanel(PanelIds.AI_AUDIT);
