@@ -30,9 +30,16 @@ test("SpreadsheetApp comments panel/tooltip use CSS classes (no inline style.*)"
   const filePath = path.join(__dirname, "..", "src", "app", "spreadsheetApp.ts");
   const content = fs.readFileSync(filePath, "utf8");
 
+  const togglePanel = extractBlock(content, "toggleCommentsPanel(): void");
   const createPanel = extractBlock(content, "private createCommentsPanel(");
   const createTooltip = extractBlock(content, "private createCommentTooltip(");
+  const hideTooltip = extractBlock(content, "private hideCommentTooltip(): void");
 
+  assert.equal(
+    /\.style\./.test(togglePanel),
+    false,
+    "toggleCommentsPanel should not set inline styles; use a CSS class toggle (e.g. .comments-panel--visible)",
+  );
   assert.equal(
     /\.style\./.test(createPanel),
     false,
@@ -42,6 +49,23 @@ test("SpreadsheetApp comments panel/tooltip use CSS classes (no inline style.*)"
     /\.style\./.test(createTooltip),
     false,
     "createCommentTooltip should not set inline styles; move comment tooltip styling into src/styles/comments.css",
+  );
+  assert.equal(
+    /\.style\./.test(hideTooltip),
+    false,
+    "hideCommentTooltip should not set inline styles; use a CSS class toggle (e.g. .comment-tooltip--visible)",
+  );
+
+  // Keep show/hide behavior class-based (not style.display).
+  assert.equal(
+    content.includes("commentsPanel.style.display"),
+    false,
+    "Comments panel visibility should be controlled via CSS classes (not commentsPanel.style.display)",
+  );
+  assert.equal(
+    content.includes("commentTooltip.style.display"),
+    false,
+    "Comment tooltip visibility should be controlled via CSS classes (not commentTooltip.style.display)",
   );
 
   // Panel/tooltip should be styled via semantic classes.
@@ -65,5 +89,11 @@ test("SpreadsheetApp comments panel/tooltip use CSS classes (no inline style.*)"
       `Expected createCommentsPanel/createCommentTooltip to preserve data-testid=\"${testId}\"`,
     );
   }
-});
 
+  // Sanity-check: class-based visibility selectors exist in CSS.
+  const cssPath = path.join(__dirname, "..", "src", "styles", "comments.css");
+  const css = fs.readFileSync(cssPath, "utf8");
+  for (const selector of [".comments-panel--visible", ".comment-tooltip--visible"]) {
+    assert.ok(css.includes(selector), `Expected comments.css to define ${selector}`);
+  }
+});
