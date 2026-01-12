@@ -1933,6 +1933,7 @@ dependencies = [
  "dashmap",
  "formula-format",
  "formula-model",
+ "getrandom 0.2.16",
  "getrandom 0.3.4",
  "inventory",
  "pretty_assertions",

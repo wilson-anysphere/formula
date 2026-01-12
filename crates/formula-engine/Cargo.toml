@@ -35,6 +35,8 @@ dashmap = { version = "5", optional = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # `ahash` pulls in `getrandom` v0.3 which requires opting into a WASM backend.
 getrandom = { version = "0.3", features = ["wasm_js"] }
+# `statrs` pulls in `rand`, which depends on `getrandom` v0.2; enable its WASM backend too.
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 pretty_assertions = "1.4"
