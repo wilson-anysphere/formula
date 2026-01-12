@@ -163,9 +163,9 @@ export function getRibbonIcon(commandId: string): RibbonIconComponent | undefine
 /**
  * Command-id → icon component mapping for ribbon integration.
  *
- * This file is intentionally not wired into the ribbon UI yet; it exists as a
- * central place to import icons by command id when the ribbon migrates away from
- * placeholder glyph strings.
+ * `RibbonButton` will consult this map first (falling back to the schema's
+ * placeholder glyph string) so we can progressively replace emoji/text icons
+ * with Cursor-style SVGs without rewriting the full ribbon schema.
  */
 export const ribbonIconMap = {
   // File
