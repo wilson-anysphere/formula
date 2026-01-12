@@ -7794,6 +7794,74 @@ export class SpreadsheetApp {
     }
   }
 
+  private insertCurrentDateTimeIntoSelectionExcelSerial(kind: "date" | "time"): void {
+    const MAX_INSERT_DATE_TIME_CELLS = 10_000;
+    const sheetId = this.sheetId;
+
+    const now = new Date();
+    const { value, numberFormat, label } = (() => {
+      if (kind === "date") {
+        // Use the user's local date, but compute the serial from a UTC midnight so the value is
+        // stable across timezones (Excel-style date serial, no time component).
+        const utcMidnight = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+        return {
+          value: dateToExcelSerial(utcMidnight),
+          numberFormat: "yyyy-mm-dd",
+          label: "Insert Date",
+        };
+      }
+
+      const seconds =
+        now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds() + now.getMilliseconds() / 1000;
+      return {
+        value: seconds / 86_400,
+        numberFormat: "hh:mm:ss",
+        label: "Insert Time",
+      };
+    })();
+
+    // Safety cap: don't enumerate huge selections; fall back to only the active cell.
+    let selectionCellCount = 0;
+    for (const r of this.selection.ranges) {
+      const range = normalizeSelectionRange(r);
+      const rows = range.endRow - range.startRow + 1;
+      const cols = range.endCol - range.startCol + 1;
+      if (rows <= 0 || cols <= 0) continue;
+      selectionCellCount += rows * cols;
+      if (selectionCellCount > MAX_INSERT_DATE_TIME_CELLS) break;
+    }
+
+    const ranges =
+      selectionCellCount > MAX_INSERT_DATE_TIME_CELLS
+        ? [
+            {
+              startRow: this.selection.active.row,
+              endRow: this.selection.active.row,
+              startCol: this.selection.active.col,
+              endCol: this.selection.active.col,
+            },
+          ]
+        : this.selection.ranges.map((r) => normalizeSelectionRange(r));
+
+    this.document.beginBatch({ label });
+    try {
+      for (const r of ranges) {
+        const rowCount = r.endRow - r.startRow + 1;
+        const colCount = r.endCol - r.startCol + 1;
+        if (rowCount <= 0 || colCount <= 0) continue;
+
+        const rowValues = new Array(colCount).fill(value);
+        const values = new Array(rowCount).fill(rowValues);
+        const docRange = { start: { row: r.startRow, col: r.startCol }, end: { row: r.endRow, col: r.endCol } };
+
+        this.document.setRangeValues(sheetId, docRange, values);
+        this.document.setRangeFormat(sheetId, docRange, { numberFormat });
+      }
+    } finally {
+      this.document.endBatch();
+    }
+  }
+
   private handleAutoSumShortcut(e: KeyboardEvent): boolean {
     if (!e.altKey) return false;
     if (e.code !== "Equal") return false;
