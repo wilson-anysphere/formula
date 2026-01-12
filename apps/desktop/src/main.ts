@@ -5605,6 +5605,11 @@ mountRibbon(ribbonRoot, {
         openRibbonPanel(PanelIds.MACROS);
         return;
 
+      case "view.macros.useRelativeReferences":
+        // Toggle state is handled by the ribbon UI; we don't currently implement a
+        // "relative reference" mode in the macro recorder. Avoid the default toast.
+        return;
+
       case "developer.code.macros":
       case "developer.code.macros.run":
       case "developer.code.macros.edit":
@@ -5619,6 +5624,11 @@ mountRibbon(ribbonRoot, {
       case "developer.code.macroSecurity":
       case "developer.code.macroSecurity.trustCenter":
         openRibbonPanel(PanelIds.MACROS);
+        return;
+
+      case "developer.code.useRelativeReferences":
+        // Toggle state is handled by the ribbon UI; we don't currently implement a
+        // "relative reference" mode in the macro recorder. Avoid the default toast.
         return;
 
       case "developer.code.visualBasic":
