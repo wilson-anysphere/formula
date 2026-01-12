@@ -84,6 +84,8 @@ export class FormulaConflictMonitor {
      * Deprecated/ignored. Former wall-clock heuristic for inferring concurrency.
      *
      * Conflict detection is now causal (Yjs-based) and works across long offline periods.
+     *
+     * @deprecated
      */
     concurrencyWindowMs?: number;
     mode?: "formula" | "formula+value";
