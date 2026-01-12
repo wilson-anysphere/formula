@@ -1086,6 +1086,8 @@ struct ModuleInfoV3 {
     // module type). Used to disambiguate MODULENAMEUNICODE when the ANSI MODULENAME record is
     // absent and modules are described only by Unicode records.
     seen_non_name_record: bool,
+    read_only_record_reserved: Option<[u8; 4]>,
+    private_record_reserved: Option<[u8; 4]>,
 }
 
 /// Build the MS-OVBA §2.4.2 V3 "V3ContentNormalizedData" byte sequence for a VBA project.
@@ -1337,6 +1339,8 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                     name_unicode_bytes: None,
                     type_record_reserved: None,
                     seen_non_name_record: false,
+                    read_only_record_reserved: None,
+                    private_record_reserved: None,
                 });
             }
 
@@ -1362,6 +1366,8 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                         name_unicode_bytes: Some(data.to_vec()),
                         type_record_reserved: None,
                         seen_non_name_record: false,
+                        read_only_record_reserved: None,
+                        private_record_reserved: None,
                     });
                 } else if let Some(m) = current_module.as_mut() {
                     m.name_unicode_bytes = Some(data.to_vec());
@@ -1417,6 +1423,37 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                 // Explicitly ignored: non-procedural module type records do not contribute to the
                 // v3 transcript per MS-OVBA §2.4.2.5 pseudocode.
                 if let Some(m) = current_module.as_mut() {
+                    m.seen_non_name_record = true;
+                }
+            }
+
+            // MODULEREADONLY
+            //
+            // MS-OVBA §2.4.2.5 includes the bytes `ReadOnlyRecord.Id || ReadOnlyRecord.Reserved`
+            // when the record is present in the module record.
+            0x0025 => {
+                if let Some(m) = current_module.as_mut() {
+                    // In the decompressed `VBA/dir` stream we parse using a generic `Id(u16) ||
+                    // Size(u32) || Data(Size)` form. For fixed-size records like MODULEREADONLY,
+                    // the `Reserved` field is stored in the u32 slot and MUST be 0x00000000.
+                    let reserved = dir_decompressed[record_start + 2..header_end]
+                        .try_into()
+                        .unwrap_or([0u8; 4]);
+                    m.read_only_record_reserved = Some(reserved);
+                    m.seen_non_name_record = true;
+                }
+            }
+
+            // MODULEPRIVATE
+            //
+            // MS-OVBA §2.4.2.5 includes the bytes `PrivateRecord.Id || PrivateRecord.Reserved`
+            // when the record is present in the module record.
+            0x0028 => {
+                if let Some(m) = current_module.as_mut() {
+                    let reserved = dir_decompressed[record_start + 2..header_end]
+                        .try_into()
+                        .unwrap_or([0u8; 4]);
+                    m.private_record_reserved = Some(reserved);
                     m.seen_non_name_record = true;
                 }
             }
@@ -1501,6 +1538,16 @@ fn append_v3_module(
     // MS-OVBA §2.4.2.5: Include the module's TypeRecord only when its record id is 0x0021.
     if let Some(reserved) = module.type_record_reserved {
         out.extend_from_slice(&0x0021u16.to_le_bytes());
+        out.extend_from_slice(&reserved);
+    }
+
+    if let Some(reserved) = module.read_only_record_reserved {
+        out.extend_from_slice(&0x0025u16.to_le_bytes());
+        out.extend_from_slice(&reserved);
+    }
+
+    if let Some(reserved) = module.private_record_reserved {
+        out.extend_from_slice(&0x0028u16.to_le_bytes());
         out.extend_from_slice(&reserved);
     }
 

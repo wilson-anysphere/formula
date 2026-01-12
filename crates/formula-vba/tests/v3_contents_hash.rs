@@ -217,3 +217,138 @@ fn v3_content_normalized_data_module_source_normalization_defaultattributes_and_
         "expected LF-only output (no CR bytes)"
     );
 }
+
+#[test]
+fn v3_content_normalized_data_hash_module_name_flag_stays_false_when_only_vb_name_and_defaultattributes(
+) {
+    // MS-OVBA §2.4.2.5: HashModuleNameFlag should remain false when the only lines present are:
+    // - `Attribute VB_Name = "..."` (skipped), and
+    // - the 7 exact DefaultAttributes lines (skipped by byte-equality).
+    //
+    // Regression target: implementations that always append the module name even when no module
+    // source bytes are incorporated.
+    let module_name = "OnlyDefaultAttrs";
+
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format!("Attribute VB_Name = \"{}\"", module_name));
+    lines.push("Attribute VB_Base = \"0{00020820-0000-0000-C000-000000000046}\"".to_string());
+    lines.push("Attribute VB_GlobalNameSpace = False".to_string());
+    lines.push("Attribute VB_Creatable = False".to_string());
+    lines.push("Attribute VB_PredeclaredId = True".to_string());
+    lines.push("Attribute VB_Exposed = True".to_string());
+    lines.push("Attribute VB_TemplateDerived = False".to_string());
+    lines.push("Attribute VB_Customizable = True".to_string());
+
+    // Important: do NOT end with a trailing newline. The MS-OVBA line-splitting algorithm appends
+    // the final TextBuffer even when empty; a trailing newline would therefore add an empty line
+    // that contributes to the transcript and would flip HashModuleNameFlag to true.
+    let module_code = lines.join("\r\n");
+    let module_container = compress_container(module_code.as_bytes());
+
+    // Minimal decompressed `VBA/dir` stream describing a single module at offset 0.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0019, module_name.as_bytes()); // MODULENAME
+
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(module_name.as_bytes());
+        stream_name.extend_from_slice(&0u16.to_le_bytes()); // reserved u16
+        push_record(&mut out, 0x001A, &stream_name); // MODULESTREAMNAME
+
+        // Include a procedural MODULETYPE record so the transcript is non-empty even when the
+        // source contributes no bytes.
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE (procedural)
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // MODULETEXTOFFSET (0)
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
+    ole.create_storage("VBA").expect("create VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole
+            .create_stream("VBA/OnlyDefaultAttrs")
+            .expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let normalized = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
+
+    // Only the MODULETYPE bytes should remain; the module name must NOT be appended.
+    assert_eq!(normalized, [0x21u8, 0x00, 0x00, 0x00].to_vec());
+    assert!(
+        find_subslice(&normalized, module_name.as_bytes()).is_none(),
+        "module name bytes must not be appended when HashModuleNameFlag stays false"
+    );
+}
+
+#[test]
+fn v3_content_normalized_data_includes_readonly_and_private_record_bytes() {
+    // MS-OVBA §2.4.2.5: When MODULEREADONLY (0x0025) / MODULEPRIVATE (0x0028) records are present
+    // in a module record, their `Id || Reserved` bytes must be incorporated in the v3 transcript,
+    // in the order: MODULETYPE → MODULEREADONLY → MODULEPRIVATE.
+    let module_name = "Module1";
+    let module_code = b"Sub Foo()\r\nEnd Sub\r\n";
+    let module_container = compress_container(module_code);
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0019, module_name.as_bytes()); // MODULENAME
+
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(module_name.as_bytes());
+        stream_name.extend_from_slice(&0u16.to_le_bytes()); // reserved u16
+        push_record(&mut out, 0x001A, &stream_name); // MODULESTREAMNAME
+
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE (procedural)
+        push_record(&mut out, 0x0025, &[]); // MODULEREADONLY (Reserved=u32 0)
+        push_record(&mut out, 0x0028, &[]); // MODULEPRIVATE (Reserved=u32 0)
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // MODULETEXTOFFSET (0)
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
+    ole.create_storage("VBA").expect("create VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let normalized = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
+
+    let type_record = [0x21u8, 0x00, 0x00, 0x00]; // 0x0021 + reserved(u16)=0
+    let readonly_record = [0x25u8, 0x00, 0x00, 0x00, 0x00, 0x00]; // 0x0025 + reserved(u32)=0
+    let private_record = [0x28u8, 0x00, 0x00, 0x00, 0x00, 0x00]; // 0x0028 + reserved(u32)=0
+
+    let expected_prefix = [
+        type_record.as_slice(),
+        readonly_record.as_slice(),
+        private_record.as_slice(),
+    ]
+    .concat();
+    assert!(
+        normalized.starts_with(&expected_prefix),
+        "expected V3ContentNormalizedData to begin with MODULETYPE/READONLY/PRIVATE record bytes"
+    );
+
+    let pos_type = find_subslice(&normalized, &type_record).expect("TypeRecord bytes present");
+    let pos_ro = find_subslice(&normalized, &readonly_record).expect("ReadOnlyRecord bytes present");
+    let pos_priv = find_subslice(&normalized, &private_record).expect("PrivateRecord bytes present");
+    assert!(
+        pos_type < pos_ro && pos_ro < pos_priv,
+        "expected MODULETYPE → MODULEREADONLY → MODULEPRIVATE byte order"
+    );
+}
