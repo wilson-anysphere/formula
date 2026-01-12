@@ -29,6 +29,13 @@ if (process.env.PATH) {
   process.env.PATH = cargoBinDir;
 }
 
+// Default to conservative parallelism. On high-core-count machines the Rust linker
+// (lld) can spawn many threads per invocation; combining that with Cargo-level
+// parallelism can exceed sandbox process/thread limits and cause flaky "Resource
+// temporarily unavailable" failures.
+const cpuCount = os.cpus().length;
+const defaultJobs = cpuCount >= 64 ? "2" : "4";
+
 const outDir = path.join(crateDir, "pkg-node");
 const outPackageJsonPath = path.join(outDir, "package.json");
 const outEntryJsPath = path.join(outDir, "formula_wasm.js");
@@ -139,7 +146,7 @@ function assertCommand(cmd, args, message) {
 }
 
 function buildWithWasmPack() {
-  const jobs = process.env.FORMULA_CARGO_JOBS ?? process.env.CARGO_BUILD_JOBS ?? "4";
+  const jobs = process.env.FORMULA_CARGO_JOBS ?? process.env.CARGO_BUILD_JOBS ?? defaultJobs;
   const makeflags = process.env.MAKEFLAGS ?? `-j${jobs}`;
   const rayonThreads = process.env.RAYON_NUM_THREADS ?? process.env.FORMULA_RAYON_NUM_THREADS ?? jobs;
   const limitAs = process.env.FORMULA_CARGO_LIMIT_AS ?? "14G";

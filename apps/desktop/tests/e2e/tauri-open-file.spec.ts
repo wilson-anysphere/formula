@@ -9,6 +9,7 @@ test.describe("tauri open-file integration", () => {
       const emitted: Array<{ event: string; payload: any }> = [];
       const callOrder: Array<{ kind: "listen" | "listen-registered" | "emit"; name: string; seq: number }> = [];
       const invokes: Array<{ cmd: string; args: any }> = [];
+      const dialogs: Array<{ kind: "confirm" | "message" | "alert"; message: string; options?: any }> = [];
       let seq = 0;
       let activeWorkbookPath: string | null = null;
       const a1ValueByPath: Record<string, string> = {
@@ -20,6 +21,12 @@ test.describe("tauri open-file integration", () => {
       (window as any).__tauriEmittedEvents = emitted;
       (window as any).__tauriCallOrder = callOrder;
       (window as any).__tauriInvokes = invokes;
+      (window as any).__tauriDialogCalls = dialogs;
+
+      // eslint-disable-next-line no-alert
+      (window as any).confirm = () => true;
+      // eslint-disable-next-line no-alert
+      (window as any).alert = () => {};
 
       (window as any).__TAURI__ = {
         core: {
@@ -78,6 +85,12 @@ test.describe("tauri open-file integration", () => {
                 return { ok: true, output: [], updates: [] };
 
               case "set_tray_status":
+              case "power_query_state_get":
+              case "power_query_state_set":
+              case "power_query_refresh_state_get":
+              case "power_query_refresh_state_set":
+              case "report_startup_webview_loaded":
+              case "report_startup_tti":
               case "mark_saved":
               case "get_workbook_theme_palette":
               case "list_defined_names":
@@ -110,6 +123,20 @@ test.describe("tauri open-file integration", () => {
           emit: async (event: string, payload?: any) => {
             callOrder.push({ kind: "emit", name: event, seq: ++seq });
             emitted.push({ event, payload });
+          },
+        },
+        dialog: {
+          // Opening a workbook may prompt to discard unsaved changes. In e2e we always accept so
+          // open-file events deterministically proceed.
+          confirm: async (message: string, options?: any) => {
+            dialogs.push({ kind: "confirm", message, options });
+            return true;
+          },
+          message: async (message: string, options?: any) => {
+            dialogs.push({ kind: "message", message, options });
+          },
+          alert: async (message: string, options?: any) => {
+            dialogs.push({ kind: "alert", message, options });
           },
         },
         window: {
@@ -148,11 +175,41 @@ test.describe("tauri open-file integration", () => {
       (window as any).__tauriListeners["open-file"]({ payload: ["/tmp/fake.xlsx"] });
     });
 
-    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+    await page.waitForFunction(
+      () => {
+        const invokes = (window as any).__tauriInvokes as Array<{ cmd: string; args: any }> | undefined;
+        const dialogs = (window as any).__tauriDialogCalls as Array<{ kind: string }> | undefined;
+        if (Array.isArray(dialogs) && dialogs.some((d) => d?.kind === "message" || d?.kind === "alert")) return true;
+        if (!Array.isArray(invokes)) return false;
+        return invokes.some((i) => i?.cmd === "open_workbook" && i?.args?.path === "/tmp/fake.xlsx");
+      },
+      undefined,
+      { timeout: 20_000 },
+    );
+
+    const openWorkbookOutcome = await page.evaluate(() => {
+      const invokes = (window as any).__tauriInvokes as Array<{ cmd: string; args: any }> | undefined;
+      const dialogs = (window as any).__tauriDialogCalls as Array<{ kind: string; message: string }> | undefined;
+      const openWorkbookCalled =
+        Array.isArray(invokes) && invokes.some((i) => i?.cmd === "open_workbook" && i?.args?.path === "/tmp/fake.xlsx");
+      const errorDialog =
+        Array.isArray(dialogs) && dialogs.find((d) => d?.kind === "message" || d?.kind === "alert")?.message;
+      return { openWorkbookCalled, errorDialog: errorDialog ?? null };
+    });
+    if (!openWorkbookOutcome.openWorkbookCalled) {
+      throw new Error(openWorkbookOutcome.errorDialog ?? "open_workbook was never invoked");
+    }
+
+    await page.evaluate(async () => {
+      const app = (window as any).__formulaApp;
+      if (app && typeof app.whenIdle === "function") {
+        await app.whenIdle();
+      }
+    });
 
     await expect(page.getByTestId("sheet-switcher")).toHaveValue("Sheet1");
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
-    await expect(page.getByTestId("active-value")).toHaveText("Hello");
+    await expect(page.getByTestId("active-value")).toHaveText("Hello", { timeout: 20_000 });
 
     const openWorkbookPaths = await page.evaluate(() => {
       const invokes = (window as any).__tauriInvokes as Array<{ cmd: string; args: any }> | undefined;
@@ -173,6 +230,7 @@ test.describe("tauri open-file integration", () => {
       const emitted: Array<{ event: string; payload: any }> = [];
       const callOrder: Array<{ kind: "listen" | "listen-registered" | "emit"; name: string; seq: number }> = [];
       const invokes: Array<{ cmd: string; args: any }> = [];
+      const dialogs: Array<{ kind: "confirm" | "message" | "alert"; message: string; options?: any }> = [];
       let seq = 0;
       let activeWorkbookPath: string | null = null;
       const a1ValueByPath: Record<string, string> = {
@@ -184,6 +242,12 @@ test.describe("tauri open-file integration", () => {
       (window as any).__tauriEmittedEvents = emitted;
       (window as any).__tauriCallOrder = callOrder;
       (window as any).__tauriInvokes = invokes;
+      (window as any).__tauriDialogCalls = dialogs;
+
+      // eslint-disable-next-line no-alert
+      (window as any).confirm = () => true;
+      // eslint-disable-next-line no-alert
+      (window as any).alert = () => {};
 
       (window as any).__TAURI__ = {
         core: {
@@ -241,6 +305,12 @@ test.describe("tauri open-file integration", () => {
                 return { ok: true, output: [], updates: [] };
 
               case "set_tray_status":
+              case "power_query_state_get":
+              case "power_query_state_set":
+              case "power_query_refresh_state_get":
+              case "power_query_refresh_state_set":
+              case "report_startup_webview_loaded":
+              case "report_startup_tti":
               case "mark_saved":
               case "get_workbook_theme_palette":
               case "list_defined_names":
@@ -272,6 +342,18 @@ test.describe("tauri open-file integration", () => {
             emitted.push({ event, payload });
           },
         },
+        dialog: {
+          confirm: async (message: string, options?: any) => {
+            dialogs.push({ kind: "confirm", message, options });
+            return true;
+          },
+          message: async (message: string, options?: any) => {
+            dialogs.push({ kind: "message", message, options });
+          },
+          alert: async (message: string, options?: any) => {
+            dialogs.push({ kind: "alert", message, options });
+          },
+        },
         window: {
           getCurrentWebviewWindow: () => ({
             hide: async () => {
@@ -293,10 +375,49 @@ test.describe("tauri open-file integration", () => {
     );
 
     await page.evaluate(() => {
-      (window as any).__tauriListeners["open-file"]({ payload: ["/tmp/first.xlsx", "/tmp/second.xlsx"] });
+      // Payloads come from OS integrations (file associations / argv / single-instance forwarding),
+      // so be tolerant of non-string entries or empty strings.
+      (window as any).__tauriListeners["open-file"]({
+        payload: ["", "/tmp/first.xlsx", "   ", 123, null, "/tmp/second.xlsx"],
+      });
     });
 
-    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Second");
+    await page.waitForFunction(
+      () => {
+        const invokes = (window as any).__tauriInvokes as Array<{ cmd: string; args: any }> | undefined;
+        const dialogs = (window as any).__tauriDialogCalls as Array<{ kind: string }> | undefined;
+        if (Array.isArray(dialogs) && dialogs.some((d) => d?.kind === "message" || d?.kind === "alert")) return true;
+        if (!Array.isArray(invokes)) return false;
+        const openPaths = invokes.filter((i) => i?.cmd === "open_workbook").map((i) => i?.args?.path);
+        return openPaths[openPaths.length - 1] === "/tmp/second.xlsx";
+      },
+      undefined,
+      { timeout: 20_000 },
+    );
+
+    const openWorkbookOutcome = await page.evaluate(() => {
+      const invokes = (window as any).__tauriInvokes as Array<{ cmd: string; args: any }> | undefined;
+      const dialogs = (window as any).__tauriDialogCalls as Array<{ kind: string; message: string }> | undefined;
+      const openPaths = Array.isArray(invokes)
+        ? invokes.filter((i) => i?.cmd === "open_workbook").map((i) => i?.args?.path)
+        : [];
+      const errorDialog =
+        Array.isArray(dialogs) && dialogs.find((d) => d?.kind === "message" || d?.kind === "alert")?.message;
+      return { openPaths, errorDialog: errorDialog ?? null };
+    });
+    if (openWorkbookOutcome.openPaths[openWorkbookOutcome.openPaths.length - 1] !== "/tmp/second.xlsx") {
+      throw new Error(openWorkbookOutcome.errorDialog ?? "open_workbook was never invoked for /tmp/second.xlsx");
+    }
+
+    await page.evaluate(async () => {
+      const app = (window as any).__formulaApp;
+      if (app && typeof app.whenIdle === "function") {
+        await app.whenIdle();
+      }
+    });
+
+    const a1Value = await page.evaluate(async () => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(a1Value).toBe("Second");
 
     const openWorkbookPaths = await page.evaluate(() => {
       const invokes = (window as any).__tauriInvokes as Array<{ cmd: string; args: any }> | undefined;

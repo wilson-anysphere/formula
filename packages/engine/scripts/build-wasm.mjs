@@ -270,7 +270,13 @@ function defaultWasmConcurrency() {
   const jobsFromEnv =
     (isPositiveIntegerString(rawFormulaJobs) ? rawFormulaJobs.trim() : null) ??
     (isPositiveIntegerString(rawCargoJobs) ? rawCargoJobs.trim() : null);
-  const jobs = jobsFromEnv ?? "4";
+  // Default to conservative parallelism. On high-core-count machines the Rust linker
+  // (lld) can spawn many threads per invocation; combining that with Cargo-level
+  // parallelism can exceed sandbox process/thread limits and cause flaky "Resource
+  // temporarily unavailable" failures.
+  const cpuCount = os.cpus().length;
+  const defaultJobs = cpuCount >= 64 ? "2" : "4";
+  const jobs = jobsFromEnv ?? defaultJobs;
   return {
     jobs,
     makeflags: process.env.MAKEFLAGS ?? `-j${jobs}`,
