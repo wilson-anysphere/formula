@@ -339,7 +339,7 @@ pub fn parse_vba_digital_signature(
     }
 
     // Prefer the signature stream that Excel would treat as authoritative when more than one
-    // signature stream exists (see `signature_path_rank` for the MS-OVBA-defined ordering).
+    // signature stream exists (see `signature_path_rank` for the Excel-like stream-name ordering).
     candidates.sort_by(|a, b| signature_path_rank(a).cmp(&signature_path_rank(b)).then(a.cmp(b)));
     let chosen = candidates
         .into_iter()
@@ -423,7 +423,7 @@ pub fn verify_vba_digital_signature_bound(
 /// streams (excluding any signature streams).
 ///
 /// If multiple signature streams are present, we prefer:
-/// 1) The first signature stream (by Excel/MS-OVBA preference ordering; see `signature_path_rank`)
+/// 1) The first signature stream (by Excel-like stream-name ordering; see `signature_path_rank`)
 ///    that is both cryptographically verified *and* bound to this project (`binding == Bound`).
 /// 2) Otherwise, the first cryptographically verified signature stream (even if not bound).
 /// 3) Otherwise, the first signature stream candidate (even if invalid/unparseable).

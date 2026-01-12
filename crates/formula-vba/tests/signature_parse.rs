@@ -8,8 +8,8 @@ fn parse_prefers_signature_component_even_when_stream_is_nested_under_storage() 
     let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
 
     // Some producers store the signature as a storage containing a stream rather than a single
-    // `\x05DigitalSignature*` stream. Ensure we still detect it, and that we apply Excel/MS-OVBA
-    // precedence rules when multiple signature streams exist.
+    // `\x05DigitalSignature*` stream. Ensure we still detect it, and that we apply Excel-like
+    // stream-name precedence rules when multiple signature streams exist.
     //
     // `DigitalSignatureEx` is preferred over the legacy `DigitalSignature`.
     ole.create_storage("\u{0005}DigitalSignatureEx")

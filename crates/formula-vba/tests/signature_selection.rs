@@ -127,8 +127,9 @@ fn prefers_bound_verified_signature_stream_over_unbound_verified_candidate() {
     let mut unbound_stream = unbound_content.clone();
     unbound_stream.extend_from_slice(&unbound_pkcs7);
 
-    // Include both signature streams; MS-OVBA preference ordering will consider `DigitalSignatureExt`
-    // before `DigitalSignatureEx`, so without the bound-selection logic we'd pick the unbound stream.
+    // Include both signature streams; Excel-like stream-name ordering will consider
+    // `DigitalSignatureExt` before `DigitalSignatureEx`, so without the bound-selection logic we'd
+    // pick the unbound stream.
     let streams = [
         ("\u{0005}DigitalSignatureExt", unbound_stream.as_slice()),
         ("\u{0005}DigitalSignatureEx", bound_stream.as_slice()),
