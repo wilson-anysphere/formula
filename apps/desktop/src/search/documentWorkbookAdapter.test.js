@@ -151,3 +151,39 @@ test("DocumentWorkbookAdapter resolves quoted sheet names via sheetNameResolver"
   assert.equal(workbook.getSheet("'O''Brien'").sheetId, "Sheet2");
   assert.throws(() => workbook.getSheet("'Missing'"), /Unknown sheet/i);
 });
+
+test("DocumentWorkbookAdapter does not create phantom sheets after a rename (stale display name)", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("sheet-1", "A1", "hello");
+
+  // Mutable mapping to simulate rename.
+  const namesById = new Map([["sheet-1", "Budget"]]);
+  const sheetNameResolver = {
+    getSheetNameById: (id) => namesById.get(String(id)) ?? null,
+    getSheetIdByName: (name) => {
+      const needle = String(name ?? "").trim().toLowerCase();
+      if (!needle) return null;
+      for (const [id, sheetName] of namesById.entries()) {
+        if (sheetName.toLowerCase() === needle) return id;
+      }
+      return null;
+    },
+  };
+
+  const workbook = new DocumentWorkbookAdapter({ document: doc, sheetNameResolver });
+
+  // Initially resolvable.
+  assert.equal(workbook.getSheet("Budget").sheetId, "sheet-1");
+
+  // Rename display name (id stays stable).
+  namesById.set("sheet-1", "Budget2026");
+
+  // Old display name should no longer resolve and must not create a new sheet.
+  assert.throws(() => workbook.getSheet("Budget"), /Unknown sheet/i);
+  assert.deepEqual(doc.getSheetIds(), ["sheet-1"]);
+
+  // New display name should resolve to the same sheet id.
+  const renamed = workbook.getSheet("Budget2026");
+  assert.equal(renamed.sheetId, "sheet-1");
+  assert.equal(renamed.name, "Budget2026");
+});
