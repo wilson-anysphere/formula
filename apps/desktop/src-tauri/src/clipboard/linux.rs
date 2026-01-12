@@ -231,17 +231,21 @@ mod gtk_backend {
                         MAX_RICH_TEXT_BYTES,
                     ),
                 };
-                let png_base64 = wait_for_bytes_base64(clipboard, "image/png", MAX_IMAGE_BYTES)
-                    .or_else(|| {
-                        // Some applications expose images on the clipboard without an `image/png` target.
-                        // Fall back to GTK's pixbuf API and re-encode to PNG (requires image loaders).
-                        let pixbuf = clipboard.wait_for_image()?;
-                        let bytes = pixbuf.save_to_bufferv("png", &[]).ok()?;
-                        if bytes.len() > MAX_IMAGE_BYTES {
-                            return None;
-                        }
-                        Some(STANDARD.encode(bytes))
-                    });
+                let png_base64 = match targets.as_deref() {
+                    Some(targets) => choose_best_target(targets, &["image/png"])
+                        .and_then(|t| wait_for_bytes_base64(clipboard, t, MAX_IMAGE_BYTES)),
+                    None => wait_for_bytes_base64(clipboard, "image/png", MAX_IMAGE_BYTES),
+                }
+                .or_else(|| {
+                    // Some applications expose images on the clipboard without an `image/png` target.
+                    // Fall back to GTK's pixbuf API and re-encode to PNG (requires image loaders).
+                    let pixbuf = clipboard.wait_for_image()?;
+                    let bytes = pixbuf.save_to_bufferv("png", &[]).ok()?;
+                    if bytes.len() > MAX_IMAGE_BYTES {
+                        return None;
+                    }
+                    Some(STANDARD.encode(bytes))
+                });
 
                 ClipboardContent {
                     text,
@@ -453,6 +457,13 @@ mod tests {
         let targets = vec!["text/plain;charset=utf-8", "UTF8_STRING"];
         let best = choose_best_target(&targets, &["text/plain"]);
         assert_eq!(best, Some("text/plain;charset=utf-8"));
+    }
+
+    #[test]
+    fn choose_best_target_supports_image_png_with_parameters() {
+        let targets = vec!["image/png;foo=bar", "image/jpeg"];
+        let best = choose_best_target(&targets, &["image/png"]);
+        assert_eq!(best, Some("image/png;foo=bar"));
     }
 
     #[test]
