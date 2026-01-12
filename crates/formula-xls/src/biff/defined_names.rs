@@ -1225,4 +1225,45 @@ mod tests {
 
         assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
     }
+
+    #[test]
+    fn builtin_name_prefers_chkey_when_present() {
+        // Some `.xls` producers populate both `chKey` and the `rgchName` built-in id byte. When
+        // they disagree, we prefer `chKey` (matching the parser's best-effort behavior).
+        let rgce: Vec<u8> = vec![0x1E, 0x01, 0x00]; // PtgInt 1
+
+        let grbit = NAME_FLAG_BUILTIN;
+        let ch_key_builtin_id = 0x06u8; // Print_Area
+        let rgch_builtin_id = 0x07u8; // Print_Titles (mismatched)
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&grbit.to_le_bytes());
+        header.push(ch_key_builtin_id); // chKey
+        header.push(1); // cch (built-in id length)
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab (workbook scope)
+        header.extend_from_slice(&[0, 0, 0, 0]); // no optional strings
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(
+                RECORD_NAME,
+                &[header, vec![rgch_builtin_id], rgce.clone()].concat(),
+            ),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+        assert_eq!(parsed.names.len(), 1);
+        assert_eq!(parsed.names[0].name, formula_model::XLNM_PRINT_AREA);
+        assert_eq!(parsed.names[0].builtin_id, Some(ch_key_builtin_id));
+        assert_eq!(parsed.names[0].itab, 0);
+        assert_eq!(parsed.names[0].scope_sheet, None);
+        assert_eq!(parsed.names[0].rgce, rgce);
+        assert_eq!(parsed.names[0].refers_to, "1");
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+    }
 }
