@@ -69,6 +69,11 @@ See also: [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) for
 best-effort) description of the `richValue*` part set and how `richValueRel.xml` is used to resolve
 media relationships.
 
+For a concrete, fixture-backed “Place in Cell” schema walkthrough (including the `rdrichvalue*` keys
+`_rvRel:LocalImageIdentifier` and `CalcOrigin`), see:
+
+- [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md)
+
 ## In-repo fixture (cell image store part)
 
 Fixture workbook: `fixtures/xlsx/basic/cell-images.xlsx`

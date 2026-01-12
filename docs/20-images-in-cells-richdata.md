@@ -7,6 +7,11 @@ This note documents the **expected part set**, the **role of each part**, and th
 For the overall “images in cells” packaging overview (including the optional `xl/cellImages.xml` store part (a.k.a. `xl/cellimages.xml`), `xl/metadata.xml`,
 and current Formula status/tests), see: [20-images-in-cells.md](./20-images-in-cells.md).
 
+For a **concrete, confirmed** “Place in Cell” (embedded local image) package shape generated via `rust_xlsxwriter`
+(including the exact `rdrichvalue*` structure keys like `_rvRel:LocalImageIdentifier` and the `CalcOrigin` field), see:
+
+- [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md)
+
 > Status: best-effort reverse engineering. Exact namespaces / relationship-type URIs may vary by Excel version; preserve unknown attributes and namespaces when round-tripping.
 
 ---
@@ -104,9 +109,11 @@ The generated workbook uses a different naming convention for the rich value sto
 * `xl/richData/rdRichValueTypes.xml` (note casing)
 * `xl/richData/richValueRel.xml` + `xl/richData/_rels/richValueRel.xml.rels`
 
-And the workbook relationships include versioned Microsoft relationship types (partial list, asserted in the test):
+And the workbook relationships include versioned Microsoft relationship types (partial list; some asserted in the test, full set documented in [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md)):
 
 * `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue` (rdRichValue tables)
+* `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure` (rdRichValue tables)
+* `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes` (rdRichValue tables)
 * `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel` (richValueRel table)
 
 Treat these as equivalent to the `richValue*` tables for the purposes of “images in cell” round-trip.
@@ -455,6 +462,10 @@ The richValue relationships are Microsoft-specific. Observed in this repo:
   * Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
 * `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue` → `xl/richData/rdrichvalue.xml` (and related rdRichValue tables)
   * Observed (via assertions) in `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs`
+* `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure` → `xl/richData/rdrichvaluestructure.xml`
+  * Observed by inspecting the generated “Place in Cell” workbook (see [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md))
+* `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes` → `xl/richData/rdRichValueTypes.xml`
+  * Observed by inspecting the generated “Place in Cell” workbook (see [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md))
 * `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel` → `xl/richData/richValueRel.xml`
   * Observed (via assertions) in `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs`
 
@@ -474,7 +485,7 @@ Implementation guidance:
 
 #### Observed values summary (from in-repo fixtures/tests)
 
-These values are copied from fixtures/tests in this repo and are safe to treat as “known in the wild”:
+These values are copied from fixtures/tests (and inspected generated workbooks) in this repo and are safe to treat as “known in the wild”:
 
 | Kind | Value | Source |
 |------|-------|--------|
@@ -483,11 +494,19 @@ These values are copied from fixtures/tests in this repo and are safe to treat a
 | Workbook → richValue relationship Type | `http://schemas.microsoft.com/office/2017/06/relationships/richValue` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
 | Workbook → richValueRel relationship Type | `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
 | Workbook → rdRichValue relationship Type | `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue` | `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs` (asserted substring) |
+| Workbook → rdRichValueStructure relationship Type | `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure` | `docs/xlsx-embedded-images-in-cells.md` (inspected `rust_xlsxwriter` output) |
+| Workbook → rdRichValueTypes relationship Type | `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes` | `docs/xlsx-embedded-images-in-cells.md` (inspected `rust_xlsxwriter` output) |
 | Workbook → richValueRel relationship Type | `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel` | `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs` (asserted substring) |
 | `richValueRel.xml` namespace | `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
+| `richValueRel.xml` namespace | `http://schemas.microsoft.com/office/spreadsheetml/2022/richvaluerel` | `docs/xlsx-embedded-images-in-cells.md` (inspected `rust_xlsxwriter` output) |
 | `richValue.xml` namespace | `http://schemas.microsoft.com/office/spreadsheetml/2017/richdata` | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
 | `metadata.xml` content type override | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml` | `fixtures/xlsx/metadata/rich-values-vm.xlsx` |
 | `metadata.xml` content type override | `application/vnd.openxmlformats-officedocument.spreadsheetml.metadata+xml` | `crates/formula-xlsx/tests/metadata_rich_value_roundtrip.rs` |
+| `richValue.xml` content type override | `application/vnd.ms-excel.richvalue+xml` | `crates/formula-xlsx/tests/rich_data_workbook_structure_edits.rs` (synthetic fixture) |
+| `richValueRel.xml` content type override | `application/vnd.ms-excel.richvaluerel+xml` | `crates/formula-xlsx/tests/rich_data_workbook_structure_edits.rs` (synthetic fixture) |
+| `rdrichvalue.xml` content type override | `application/vnd.ms-excel.rdrichvalue+xml` | `docs/xlsx-embedded-images-in-cells.md` (inspected `rust_xlsxwriter` output) |
+| `rdrichvaluestructure.xml` content type override | `application/vnd.ms-excel.rdrichvaluestructure+xml` | `docs/xlsx-embedded-images-in-cells.md` (inspected `rust_xlsxwriter` output) |
+| `rdRichValueTypes.xml` content type override | `application/vnd.ms-excel.rdrichvaluetypes+xml` | `docs/xlsx-embedded-images-in-cells.md` (inspected `rust_xlsxwriter` output) |
 | No override for metadata/richData XML parts (default `application/xml`) | (none) | `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` |
 
 #### Minimal `.rels` skeletons (best-effort)
@@ -541,12 +560,25 @@ Observed patterns in this repo:
 * Some tests construct workbooks that use:
   * `application/vnd.openxmlformats-officedocument.spreadsheetml.metadata+xml` for `/xl/metadata.xml`
 
-For the richData tables themselves, Excel may emit Microsoft-specific content types (not yet verified here);
-best-effort likely patterns:
+For the richData tables themselves, producers can emit Microsoft-specific content types.
+
+Observed in this repo:
 
 ```xml
-<Override PartName="/xl/richData/richValue.xml"          ContentType="application/vnd.ms-excel.richvalue+xml"/>
-<Override PartName="/xl/richData/richValueRel.xml"       ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
+<!-- Unprefixed “richValue*” naming (synthetic fixture) -->
+<Override PartName="/xl/richData/richValue.xml"    ContentType="application/vnd.ms-excel.richvalue+xml"/>
+<Override PartName="/xl/richData/richValueRel.xml" ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
+
+<!-- “rdRichValue*” naming (inspected rust_xlsxwriter output; see docs/xlsx-embedded-images-in-cells.md) -->
+<Override PartName="/xl/richData/rdrichvalue.xml"          ContentType="application/vnd.ms-excel.rdrichvalue+xml"/>
+<Override PartName="/xl/richData/rdrichvaluestructure.xml" ContentType="application/vnd.ms-excel.rdrichvaluestructure+xml"/>
+<Override PartName="/xl/richData/rdRichValueTypes.xml"     ContentType="application/vnd.ms-excel.rdrichvaluetypes+xml"/>
+<Override PartName="/xl/richData/richValueRel.xml"         ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
+```
+
+Likely patterns for additional tables (not yet verified against a real Excel-generated workbook that emits explicit overrides):
+
+```xml
 <Override PartName="/xl/richData/richValueTypes.xml"     ContentType="application/vnd.ms-excel.richvaluetypes+xml"/>
 <Override PartName="/xl/richData/richValueStructure.xml" ContentType="application/vnd.ms-excel.richvaluestructure+xml"/>
 ```

@@ -56,9 +56,14 @@ Observed (in this repo) relationship type URIs:
   - `http://schemas.microsoft.com/office/2017/06/relationships/richValue`
   - `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel`
   - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue` (rdRichValue naming)
+  - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure` (rdRichValue naming)
+  - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes` (rdRichValue naming)
   - `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel`
 
-For details and fixture references, see: [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md).
+For details and fixture references, see:
+
+- [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md) (general richValue* / rdRichValue* notes)
+- [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md) (concrete “Place in Cell” mapping chain)
 
 This doc focuses on the **parts listed above** because they form the minimal chain to go from a cell → image bytes.
 
