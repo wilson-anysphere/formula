@@ -5175,7 +5175,9 @@ mountRibbon(ribbonRoot, {
         return;
       }
 
-      case "file.save.saveAs": {
+      case "file.save.saveAs":
+      case "file.save.saveAs.copy":
+      case "file.save.saveAs.download": {
         if (!tauriBackend) {
           showToast("Save As is available in the desktop app.");
           return;
@@ -5184,6 +5186,25 @@ mountRibbon(ribbonRoot, {
           console.error("Failed to save workbook:", err);
           showToast(`Failed to save workbook: ${String(err)}`, "error");
         });
+        return;
+      }
+
+      case "file.export.createPdf":
+      case "file.export.export.pdf":
+      case "file.export.changeFileType.pdf": {
+        void handleRibbonExportPdf().catch((err) => {
+          console.error("Failed to export PDF:", err);
+          showToast(`Failed to export PDF: ${String(err)}`, "error");
+        });
+        return;
+      }
+
+      case "file.export.export.csv":
+      case "file.export.export.xlsx":
+      case "file.export.changeFileType.csv":
+      case "file.export.changeFileType.tsv":
+      case "file.export.changeFileType.xlsx": {
+        showToast("Export is not implemented yet.");
         return;
       }
 
@@ -5202,6 +5223,29 @@ mountRibbon(ribbonRoot, {
           return;
         }
         showToast("Print is not implemented yet. Opening Page Setup…");
+        void handleRibbonPageSetup().catch((err) => {
+          console.error("Failed to open page setup:", err);
+          showToast(`Failed to open page setup: ${String(err)}`, "error");
+        });
+        return;
+      }
+
+      case "file.print.printPreview": {
+        const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+        if (!invokeAvailable) {
+          showToast("Print Preview is available in the desktop app.");
+          return;
+        }
+        showToast("Print Preview is not implemented yet. Exporting PDF instead…");
+        void handleRibbonExportPdf().catch((err) => {
+          console.error("Failed to export PDF:", err);
+          showToast(`Failed to export PDF: ${String(err)}`, "error");
+        });
+        return;
+      }
+
+      case "file.print.pageSetup.printTitles":
+      case "file.print.pageSetup.margins": {
         void handleRibbonPageSetup().catch((err) => {
           console.error("Failed to open page setup:", err);
           showToast(`Failed to open page setup: ${String(err)}`, "error");
