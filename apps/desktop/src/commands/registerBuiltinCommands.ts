@@ -626,7 +626,7 @@ export function registerBuiltinCommands(params: {
         tryExecCommand("copy");
         return;
       }
-      void app.copyToClipboard();
+      return app.copyToClipboard();
     },
     {
       category: t("commandCategory.editing"),
@@ -649,7 +649,7 @@ export function registerBuiltinCommands(params: {
         tryExecCommand("cut");
         return;
       }
-      void app.cutToClipboard();
+      return app.cutToClipboard();
     },
     {
       category: t("commandCategory.editing"),
@@ -672,7 +672,7 @@ export function registerBuiltinCommands(params: {
         tryExecCommand("paste");
         return;
       }
-      void app.pasteFromClipboard();
+      return app.pasteFromClipboard();
     },
     {
       category: t("commandCategory.editing"),
