@@ -48,6 +48,39 @@ fn detects_xlsm() {
 }
 
 #[test]
+fn detects_xltx_as_xlsx() {
+    let src = fixture_path("xlsx/basic/basic.xlsx");
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let dst = tmp.path().join("basic.xltx");
+    std::fs::copy(&src, &dst).expect("copy fixture to .xltx");
+
+    // Template files are still OOXML spreadsheets; format detection should classify by content,
+    // not extension.
+    assert_eq!(
+        detect_workbook_format(&dst).expect("detect"),
+        WorkbookFormat::Xlsx
+    );
+}
+
+#[test]
+fn detects_xltm_and_xlam_as_xlsm() {
+    let src = fixture_path("xlsx/macros/basic.xlsm");
+    let tmp = tempfile::tempdir().expect("temp dir");
+
+    for ext in ["xltm", "xlam"] {
+        let dst = tmp.path().join(format!("basic.{ext}"));
+        std::fs::copy(&src, &dst).expect("copy macro fixture");
+
+        // Macro-enabled templates/add-ins are still OOXML ZIP packages; the presence of
+        // `xl/vbaProject.bin` should classify them as "macro-enabled" regardless of extension.
+        assert_eq!(
+            detect_workbook_format(&dst).expect("detect"),
+            WorkbookFormat::Xlsm
+        );
+    }
+}
+
+#[test]
 fn detects_xlsb() {
     let path = xlsb_fixture_path("simple.xlsb");
     assert_eq!(
@@ -110,4 +143,3 @@ fn detects_encrypted_ooxml_container() {
         "expected Error::EncryptedWorkbook, got {err:?}"
     );
 }
-
