@@ -102,6 +102,13 @@ describe("find/replace shortcuts", () => {
     expect(replaceDialog.hasAttribute("open")).toBe(false);
     (findDialog as any).close();
 
+    // Ctrl+F should also open Find on macOS as a fallback (Windows/Linux-style shortcut).
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true }));
+    await flushMicrotasks();
+    expect(findDialog.hasAttribute("open")).toBe(true);
+    expect(replaceDialog.hasAttribute("open")).toBe(false);
+    (findDialog as any).close();
+
     // Cmd+H (macOS Hide) should no longer open Replace.
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "h", metaKey: true, bubbles: true }));
     await flushMicrotasks();
