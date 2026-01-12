@@ -46,6 +46,12 @@ export function startSheetStoreDocumentSync(
   let scheduled = false;
   let disposed = false;
   let lastChangeSource: string | null = null;
+  // Track whether we've observed a sheet-order delta since the last sync tick.
+  // This is important because DocumentController can emit multiple change events
+  // inside a single task (e.g. sheet ops inside a batch followed by an `endBatch`
+  // recalc event). We still want to reconcile sheet order based on the *latest*
+  // DocumentController ordering if any sheet order delta occurred.
+  let pendingSheetOrderSync = false;
 
   const schedule = () => {
     if (disposed) return;
@@ -120,11 +126,15 @@ export function startSheetStoreDocumentSync(
     // authoritative source of truth for ordering:
     // - applyState restores (workbook open / version restore)
     // - undo/redo of sheet reorders
+    // - any explicit sheet-order delta (scripts, external integrations)
     //
-    // Avoid forcing the doc ordering for unrelated change sources (e.g. endBatch),
-    // since in normal editing flows the UI store is the canonical sheet tab ordering.
+    // Avoid forcing the doc ordering for unrelated change sources (e.g. endBatch)
+    // unless we've seen an actual sheet-order delta.
     const shouldSyncOrder =
-      lastChangeSource === "applyState" || lastChangeSource === "undo" || lastChangeSource === "redo";
+      pendingSheetOrderSync ||
+      lastChangeSource === "applyState" ||
+      lastChangeSource === "undo" ||
+      lastChangeSource === "redo";
     if (shouldSyncOrder) {
       const desiredOrder = docSheetIds.slice();
       const current = store.listAll().map((s) => s.id);
@@ -149,10 +159,23 @@ export function startSheetStoreDocumentSync(
         }
       });
     }
+    pendingSheetOrderSync = false;
 
     // Sync sheet metadata (name/visibility/tabColor) into the UI store so undo/redo of sheet
     // metadata operations updates the tab strip and sheet switcher.
     if (typeof doc.getSheetMeta === "function") {
+      const tabColorEqual = (a: any, b: any): boolean => {
+        if (a === b) return true;
+        if (!a || !b) return !a && !b;
+        return (
+          (a.rgb ?? null) === (b.rgb ?? null) &&
+          (a.theme ?? null) === (b.theme ?? null) &&
+          (a.indexed ?? null) === (b.indexed ?? null) &&
+          (a.tint ?? null) === (b.tint ?? null) &&
+          (a.auto ?? null) === (b.auto ?? null)
+        );
+      };
+
       withStoreMutations(() => {
         for (const sheetId of docSheetIds) {
           const meta = doc.getSheetMeta?.(sheetId);
@@ -189,8 +212,7 @@ export function startSheetStoreDocumentSync(
           // Tab color.
           const a = storeMeta.tabColor ?? null;
           const b = meta.tabColor ?? null;
-          const sameColor = JSON.stringify(a) === JSON.stringify(b);
-          if (!sameColor) {
+          if (!tabColorEqual(a, b)) {
             try {
               store.setTabColor(sheetId, meta.tabColor ?? undefined);
             } catch {
@@ -212,6 +234,7 @@ export function startSheetStoreDocumentSync(
 
   const unsubscribeChange = doc.on("change", (payload) => {
     lastChangeSource = typeof (payload as any)?.source === "string" ? (payload as any).source : null;
+    if ((payload as any)?.sheetOrderDelta) pendingSheetOrderSync = true;
     schedule();
   });
   const unsubscribeUpdate = doc.on("update", schedule);
