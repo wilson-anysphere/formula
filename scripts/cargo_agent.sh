@@ -331,7 +331,15 @@ while true; do
     exit 0
   fi
 
+  retryable=false
   if grep -q "Resource temporarily unavailable" "${tmp_log}"; then
+    retryable=true
+  elif grep -Eq "(rust-lld|ld\\.lld)" "${tmp_log}" \
+    && { grep -q "__throw_system_error" "${tmp_log}" || grep -q "ThreadPoolExecutor" "${tmp_log}"; }; then
+    retryable=true
+  fi
+
+  if [[ "${retryable}" == "true" ]]; then
     if [[ "${attempt}" -ge "${max_attempts}" ]]; then
       rm -f "${tmp_log}"
       exit "${status}"
