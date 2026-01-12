@@ -428,7 +428,7 @@ impl<'a> Parser<'a> {
         if self.peek_byte() == Some(b'=') {
             self.pos += 1;
         }
-        let expr = self.parse_bp(0)?;
+        let expr = self.parse_bp(0, false)?;
         self.skip_ws();
         if self.pos != self.input.len() {
             return Err(ParseError::UnexpectedToken(self.pos));
@@ -436,9 +436,9 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn parse_bp(&mut self, min_bp: u8) -> Result<Expr, ParseError> {
+    fn parse_bp(&mut self, min_bp: u8, stop_on_comma: bool) -> Result<Expr, ParseError> {
         self.skip_ws();
-        let mut lhs = self.parse_prefix()?;
+        let mut lhs = self.parse_prefix(stop_on_comma)?;
         loop {
             self.skip_ws();
 
@@ -489,7 +489,7 @@ impl<'a> Parser<'a> {
             }
 
             let op_pos = self.pos;
-            let (op, l_bp, r_bp) = match self.peek_infix_op() {
+            let (op, l_bp, r_bp) = match self.peek_infix_op(stop_on_comma) {
                 Some(v) => v,
                 None => break,
             };
@@ -497,7 +497,7 @@ impl<'a> Parser<'a> {
                 break;
             }
             self.pos = op_pos + op.token_len();
-            let rhs = self.parse_bp(r_bp)?;
+            let rhs = self.parse_bp(r_bp, stop_on_comma)?;
             lhs = match op {
                 InfixOp::Binary(op) => Expr::Binary {
                     op,
@@ -530,33 +530,36 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
-    fn parse_prefix(&mut self) -> Result<Expr, ParseError> {
+    fn parse_prefix(&mut self, stop_on_comma: bool) -> Result<Expr, ParseError> {
         self.skip_ws();
         match self.peek_byte() {
             Some(b'+') => {
                 self.pos += 1;
                 Ok(Expr::Unary {
                     op: UnaryOp::Plus,
-                    expr: Box::new(self.parse_bp(9)?),
+                    expr: Box::new(self.parse_bp(9, stop_on_comma)?),
                 })
             }
             Some(b'-') => {
                 self.pos += 1;
                 Ok(Expr::Unary {
                     op: UnaryOp::Neg,
-                    expr: Box::new(self.parse_bp(9)?),
+                    expr: Box::new(self.parse_bp(9, stop_on_comma)?),
                 })
             }
             Some(b'@') => {
                 self.pos += 1;
                 Ok(Expr::Unary {
                     op: UnaryOp::ImplicitIntersection,
-                    expr: Box::new(self.parse_bp(9)?),
+                    expr: Box::new(self.parse_bp(9, stop_on_comma)?),
                 })
             }
             Some(b'(') => {
                 self.pos += 1;
-                let expr = self.parse_bp(0)?;
+                // Parenthesized expressions are not function-argument lists, so commas act as the
+                // reference union operator (Excel requires parentheses to disambiguate e.g.
+                // `SUM((A1,B1))`).
+                let expr = self.parse_bp(0, false)?;
                 self.skip_ws();
                 if self.peek_byte() != Some(b')') {
                     return Err(ParseError::UnexpectedToken(self.pos));
@@ -682,7 +685,7 @@ impl<'a> Parser<'a> {
                         args.push(Expr::Literal(Value::Missing));
                         break;
                     }
-                    Some(_) => args.push(self.parse_bp(0)?),
+                    Some(_) => args.push(self.parse_bp(0, true)?),
                     None => return Err(ParseError::UnexpectedEof),
                 }
 
@@ -786,10 +789,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn peek_infix_op(&self) -> Option<(InfixOp, u8, u8)> {
+    fn peek_infix_op(&self, stop_on_comma: bool) -> Option<(InfixOp, u8, u8)> {
         let b0 = *self.input.get(self.pos)?;
         let b1 = *self.input.get(self.pos + 1).unwrap_or(&0);
         let (op, l_bp, r_bp) = match (b0, b1) {
+            (b',', _) if !stop_on_comma => (InfixOp::Binary(BinaryOp::Union), 11, 12),
             (b'+', _) => (InfixOp::Binary(BinaryOp::Add), 5, 6),
             (b'-', _) => (InfixOp::Binary(BinaryOp::Sub), 5, 6),
             (b'*', _) => (InfixOp::Binary(BinaryOp::Mul), 7, 8),
