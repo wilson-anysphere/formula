@@ -120,7 +120,8 @@ fn odd_coupon_settlement_boundary_behavior() {
     // - ODDL*: settlement < maturity, maturity > last_interest (settlement may be <= last_interest).
     //   If settlement < last_interest, the engine PVs remaining regular coupons through last_interest
     //   plus the final odd stub cashflow at maturity.
-    // - ODDF*: issue < settlement < first_coupon <= maturity
+    // - ODDF*: issue <= settlement <= first_coupon <= maturity (with `issue < first_coupon` and
+    //   `settlement < maturity`).
     //
     // ODDF* rejects settlement > first_coupon and settlement >= maturity (see
     // `crates/formula-engine/tests/odd_coupon_date_boundaries.rs` for pinned boundary behavior).
