@@ -4,6 +4,7 @@ import type { RibbonActions, RibbonButtonDefinition, RibbonSchema } from "./ribb
 import { defaultRibbonSchema } from "./ribbonSchema.js";
 import { RibbonGroup } from "./RibbonGroup.js";
 import { getRibbonUiStateSnapshot, subscribeRibbonUiState } from "./ribbonUiState.js";
+import { FileBackstage } from "./FileBackstage.js";
 
 import "../styles/ribbon.css";
 
@@ -84,6 +85,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
   const [activeTabId, setActiveTabId] = React.useState<string>(defaultTabId);
   const [pressedById, setPressedById] = React.useState<Record<string, boolean>>(() => computeInitialPressed(schema));
   const pressedByIdRef = React.useRef<Record<string, boolean>>(pressedById);
+  const [backstageOpen, setBackstageOpen] = React.useState(false);
 
   const uiState = React.useSyncExternalStore(
     subscribeRibbonUiState,
@@ -104,6 +106,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
   }, [userCollapsed]);
 
   const tabButtonRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
+  const lastNonFileTabId = React.useRef<string>(defaultTabId);
 
   React.useEffect(() => {
     pressedByIdRef.current = pressedById;
@@ -159,6 +162,13 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
     }
   }, [activeTabId, defaultTabId, tabs]);
 
+  React.useEffect(() => {
+    const active = tabs.find((tab) => tab.id === activeTabId);
+    if (active && !active.isFile) {
+      lastNonFileTabId.current = activeTabId;
+    }
+  }, [activeTabId, tabs]);
+
   const activateButton = React.useCallback(
     (button: RibbonButtonDefinition) => {
       const kind = button.kind ?? "button";
@@ -186,6 +196,10 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
       const tab = tabs[nextIndex];
       if (!tab) return;
       setActiveTabId(tab.id);
+      setBackstageOpen(Boolean(tab.isFile));
+      if (tab.isFile) {
+        setFlyoutOpen(false);
+      }
       actions.onTabChange?.(tab.id);
       const button = tabButtonRefs.current[tab.id];
       // Prefer keeping the viewport stable while still ensuring the newly-focused
@@ -259,6 +273,21 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
     };
   }, [activeTabId, contentVisible, flyoutOpen]);
 
+  const closeBackstage = React.useCallback(() => {
+    setBackstageOpen(false);
+    setFlyoutOpen(false);
+    const fallback =
+      tabs.find((tab) => tab.id === lastNonFileTabId.current && !tab.isFile)?.id ??
+      tabs.find((tab) => !tab.isFile)?.id ??
+      defaultTabId;
+    setActiveTabId(fallback);
+    requestAnimationFrame(() => {
+      const button = tabButtonRefs.current[fallback];
+      button?.focus({ preventScroll: true });
+      button?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    });
+  }, [defaultTabId, tabs]);
+
   return (
     <div
       className="ribbon"
@@ -314,10 +343,15 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                 }}
                 onClick={() => {
                   setActiveTabId(tab.id);
-                  actions.onTabChange?.(tab.id);
-                  if (!contentVisible) {
-                    setFlyoutOpen((prev) => (isActive ? !prev : true));
+                  if (isFile) {
+                    setBackstageOpen(true);
+                    setFlyoutOpen(false);
+                    actions.onTabChange?.(tab.id);
+                    return;
                   }
+                  setBackstageOpen(false);
+                  actions.onTabChange?.(tab.id);
+                  if (!contentVisible) setFlyoutOpen((prev) => (isActive ? !prev : true));
                 }}
                 onKeyDown={(event) => {
                   if (event.key === "ArrowRight") {
@@ -341,10 +375,24 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                     return;
                   }
                   if (event.key === "ArrowDown") {
+                    if (isFile) {
+                      event.preventDefault();
+                      if (!isActive) {
+                        setActiveTabId(tab.id);
+                        setBackstageOpen(true);
+                        setFlyoutOpen(false);
+                        actions.onTabChange?.(tab.id);
+                        return;
+                      }
+                      setBackstageOpen(true);
+                      setFlyoutOpen(false);
+                      return;
+                    }
                     event.preventDefault();
                     if (!contentVisible) {
                       if (!isActive) {
                         setActiveTabId(tab.id);
+                        setBackstageOpen(false);
                         actions.onTabChange?.(tab.id);
                       }
                       setFlyoutOpen(true);
@@ -353,6 +401,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                     }
                     if (!isActive) {
                       setActiveTabId(tab.id);
+                      setBackstageOpen(false);
                       actions.onTabChange?.(tab.id);
                       requestAnimationFrame(() => focusFirstControl(tab.id));
                       return;
@@ -361,12 +410,26 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                     return;
                   }
                   if (event.key === "Tab" && !event.shiftKey) {
-                    if (!contentVisible) return;
                     // Excel-style: Tab from the active tab moves focus into the tab panel.
                     // Shift+Tab should keep browser default behavior (move focus backwards).
+                    if (isFile) {
+                      event.preventDefault();
+                      if (!isActive) {
+                        setActiveTabId(tab.id);
+                        setBackstageOpen(true);
+                        setFlyoutOpen(false);
+                        actions.onTabChange?.(tab.id);
+                        return;
+                      }
+                      setBackstageOpen(true);
+                      setFlyoutOpen(false);
+                      return;
+                    }
+                    if (!contentVisible) return;
                     event.preventDefault();
                     if (!isActive) {
                       setActiveTabId(tab.id);
+                      setBackstageOpen(false);
                       actions.onTabChange?.(tab.id);
                       requestAnimationFrame(() => focusFirstControl(tab.id));
                       return;
@@ -398,7 +461,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
         </div>
       </div>
 
-      <div className="ribbon__content" hidden={!showContent}>
+      <div className="ribbon__content" hidden={!showContent || backstageOpen}>
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
           return (
@@ -426,6 +489,12 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
           );
         })}
       </div>
+
+      <FileBackstage
+        open={backstageOpen && Boolean(tabs.find((tab) => tab.id === activeTabId)?.isFile)}
+        actions={actions.fileActions}
+        onClose={closeBackstage}
+      />
     </div>
   );
 }

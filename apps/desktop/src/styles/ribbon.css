@@ -429,3 +429,76 @@
   box-shadow: var(--dialog-shadow);
   z-index: 1;
 }
+
+/* --- File backstage --------------------------------------------------------- */
+
+.ribbon-backstage-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--dialog-backdrop);
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+
+.ribbon-backstage {
+  width: min(320px, 92vw);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-right: 1px solid var(--border);
+  box-shadow: var(--dialog-shadow);
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ribbon-backstage__title {
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 18px;
+  padding: 6px 8px;
+}
+
+.ribbon-backstage__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ribbon-backstage__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ribbon-backstage__item:hover:not(:disabled) {
+  background: var(--bg-secondary);
+}
+
+.ribbon-backstage__item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ribbon-backstage__item:focus-visible {
+  outline: 2px solid var(--selection-border);
+  outline-offset: 2px;
+}
+
+.ribbon-backstage__hint {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+  flex: none;
+}

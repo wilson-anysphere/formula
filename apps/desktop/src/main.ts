@@ -313,6 +313,7 @@ function toggleDockPanel(panelId: string): void {
   if (placement.kind === "closed") controller.openPanel(panelId);
   else controller.closePanel(panelId);
 }
+let handleCloseRequestForRibbon: ((opts: { quit: boolean }) => Promise<void>) | null = null;
 
 const gridRoot = document.getElementById("grid");
 if (!gridRoot) {
@@ -3207,6 +3208,66 @@ async function handleRibbonExportPdf(): Promise<void> {
 }
 
 mountRibbon(ribbonRoot, {
+  fileActions: {
+    newWorkbook: () => {
+      if (!tauriBackend) {
+        showToast("Desktop-only");
+        return;
+      }
+      void handleNewWorkbook().catch((err) => {
+        console.error("Failed to create workbook:", err);
+        showToast(`Failed to create workbook: ${String(err)}`, "error");
+      });
+    },
+    openWorkbook: () => {
+      if (!tauriBackend) {
+        showToast("Desktop-only");
+        return;
+      }
+      void promptOpenWorkbook().catch((err) => {
+        console.error("Failed to open workbook:", err);
+        showToast(`Failed to open workbook: ${String(err)}`, "error");
+      });
+    },
+    saveWorkbook: () => {
+      if (!tauriBackend) {
+        showToast("Desktop-only");
+        return;
+      }
+      void handleSave().catch((err) => {
+        console.error("Failed to save workbook:", err);
+        showToast(`Failed to save workbook: ${String(err)}`, "error");
+      });
+    },
+    saveWorkbookAs: () => {
+      if (!tauriBackend) {
+        showToast("Desktop-only");
+        return;
+      }
+      void handleSaveAs().catch((err) => {
+        console.error("Failed to save workbook:", err);
+        showToast(`Failed to save workbook: ${String(err)}`, "error");
+      });
+    },
+    closeWindow: () => {
+      if (!handleCloseRequestForRibbon) {
+        showToast("Desktop-only");
+        return;
+      }
+      void handleCloseRequestForRibbon({ quit: false }).catch((err) => {
+        console.error("Failed to close window:", err);
+      });
+    },
+    quit: () => {
+      if (!handleCloseRequestForRibbon) {
+        showToast("Desktop-only");
+        return;
+      }
+      void handleCloseRequestForRibbon({ quit: true }).catch((err) => {
+        console.error("Failed to quit app:", err);
+      });
+    },
+  },
   onToggle: (commandId, pressed) => {
     switch (commandId) {
       case "view.show.showFormulas":
@@ -4724,6 +4785,8 @@ try {
       closeInFlight = false;
     }
   }
+
+  handleCloseRequestForRibbon = handleCloseRequest;
 
   void listen("close-requested", async (event) => {
     const payload = (event as any)?.payload;

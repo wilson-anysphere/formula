@@ -72,6 +72,15 @@ export interface RibbonSchema {
   tabs: RibbonTabDefinition[];
 }
 
+export interface RibbonFileActions {
+  newWorkbook?: () => void;
+  openWorkbook?: () => void;
+  saveWorkbook?: () => void;
+  saveWorkbookAs?: () => void;
+  closeWindow?: () => void;
+  quit?: () => void;
+}
+
 export interface RibbonActions {
   /**
    * Called for any command-like activation (including dropdown buttons).
@@ -85,6 +94,13 @@ export interface RibbonActions {
    * Called when a tab is selected.
    */
   onTabChange?: (tabId: string) => void;
+  /**
+   * Optional File tab / backstage actions.
+   *
+   * The File tab is treated specially (Excel-style "backstage" view) and is
+   * wired directly to app-level file operations in `apps/desktop/src/main.ts`.
+   */
+  fileActions?: RibbonFileActions;
 }
 
 export const defaultRibbonSchema: RibbonSchema = {
