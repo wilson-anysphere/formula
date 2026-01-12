@@ -48,6 +48,7 @@ mod builtins_math_more;
 mod builtins_select;
 mod builtins_reference;
 mod builtins_statistical;
+mod builtins_statistical_moments;
 mod builtins_text;
 mod builtins_text_dbcs;
 

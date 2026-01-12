@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T06:26:08.223384754Z",
+  "generatedAt": "2026-01-12T06:34:54.425433923Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "769e62e77ab4aaa5f7f7168864d99ac74066a7e046cdef4954a5bb351f1da16c",
-    "count": 1465
+    "sha256": "404a74d0e90f742e7bf234a2364451e50591b3f3a138eeb774909030f122f5c2",
+    "count": 1468
   },
   "results": [
     {
@@ -9153,6 +9153,36 @@
       },
       "address": "C1",
       "displayText": "1.7142857142857142"
+    },
+    {
+      "caseId": "kurt_bac3e400bcb6",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": -0.1517996372084136
+      },
+      "address": "C1",
+      "displayText": "-0.1517996372084136"
+    },
+    {
+      "caseId": "skew_03361466f073",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.3595430714067975
+      },
+      "address": "C1",
+      "displayText": "0.3595430714067975"
+    },
+    {
+      "caseId": "skew_p_8705cedc427f",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.30319333935414405
+      },
+      "address": "C1",
+      "displayText": "0.30319333935414405"
     },
     {
       "caseId": "large_de18bd067da8",

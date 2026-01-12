@@ -19566,6 +19566,36 @@
       "id": "harmean_5aea8861994a"
     },
     {
+      "formula": "=KURT({3,4,5,2,3,4,5,6,4,7})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "KURT"
+      ],
+      "id": "kurt_bac3e400bcb6"
+    },
+    {
+      "formula": "=SKEW({3,4,5,2,3,4,5,6,4,7})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "SKEW"
+      ],
+      "id": "skew_03361466f073"
+    },
+    {
+      "formula": "=SKEW.P({3,4,5,2,3,4,5,6,4,7})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "SKEW.P"
+      ],
+      "id": "skew_p_8705cedc427f"
+    },
+    {
       "formula": "=LARGE({1,2,3,4},2)",
       "outputCell": "C1",
       "inputs": [],

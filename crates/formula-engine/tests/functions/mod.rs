@@ -32,6 +32,7 @@ mod math_random;
 mod math_rounding;
 mod reference;
 mod statistical;
+mod statistical_moments;
 mod criteria_locale;
 mod text;
 mod text_dbcs;

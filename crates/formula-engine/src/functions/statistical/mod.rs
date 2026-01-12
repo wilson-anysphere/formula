@@ -1,6 +1,9 @@
 use crate::value::ErrorKind;
 use std::cmp::Ordering;
 
+mod moments;
+pub use moments::{kurt, skew, skew_p};
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RankMethod {
     Eq,
