@@ -195,7 +195,18 @@ for await (const absPath of walkFiles(desktopSrcDir)) {
 }
 
 if (violations.length > 0) {
-  console.error("Desktop renderer must stay Node-free. Found Node built-in imports in apps/desktop/src (excluding tests):");
+  violations.sort(
+    (a, b) =>
+      a.file.localeCompare(b.file) ||
+      a.line - b.line ||
+      a.column - b.column ||
+      a.kind.localeCompare(b.kind) ||
+      a.specifier.localeCompare(b.specifier),
+  );
+
+  console.error(
+    "Desktop renderer must stay Node-free. Found Node-only imports in apps/desktop/src (excluding tests):",
+  );
   for (const v of violations) {
     console.error(`- ${v.file}:${v.line}:${v.column} ${v.kind} -> "${v.specifier}"`);
   }
