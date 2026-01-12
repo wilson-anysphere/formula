@@ -330,6 +330,12 @@ export class EngineWorker {
         } else if (isRpcOptions(optionsOrRpcOptions)) {
           options = undefined;
           finalRpcOptions = optionsOrRpcOptions;
+        } else if (optionsOrRpcOptions != null && typeof optionsOrRpcOptions === "object") {
+          // Unknown object: treat it as a parse options bag and let the WASM boundary validate.
+          // This ensures common mistakes (e.g. wrong casing on `localeId`) surface as a clear error
+          // instead of being silently ignored.
+          options = optionsOrRpcOptions as FormulaParseOptions;
+          finalRpcOptions = rpcOptions;
         } else {
           options = undefined;
           finalRpcOptions = rpcOptions;
