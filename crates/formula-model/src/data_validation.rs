@@ -562,8 +562,8 @@ fn coerce_number(value: &CellValue) -> Option<f64> {
         CellValue::String(s) => s.trim().parse::<f64>().ok(),
         CellValue::Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
         CellValue::RichText(rt) => rt.plain_text().trim().parse::<f64>().ok(),
-        CellValue::Entity(e) => e.display.trim().parse::<f64>().ok(),
-        CellValue::Record(r) => r.display.trim().parse::<f64>().ok(),
+        CellValue::Entity(e) => e.display_value.trim().parse::<f64>().ok(),
+        CellValue::Record(r) => r.to_string().trim().parse::<f64>().ok(),
         _ => None,
     }
 }
@@ -583,8 +583,8 @@ fn coerce_text(value: &CellValue) -> Option<String> {
         } else {
             "FALSE".to_string()
         }),
-        CellValue::Entity(e) => Some(e.display.clone()),
-        CellValue::Record(r) => Some(r.display.clone()),
+        CellValue::Entity(e) => Some(e.display_value.clone()),
+        CellValue::Record(r) => Some(r.to_string()),
         _ => None,
     }
 }
@@ -602,8 +602,8 @@ fn coerce_date_serial(value: &CellValue) -> Option<f64> {
         CellValue::Number(n) => Some(*n),
         CellValue::String(s) => parse_date_time_serial(s.trim()),
         CellValue::RichText(rt) => parse_date_time_serial(rt.plain_text().trim()),
-        CellValue::Entity(e) => parse_date_time_serial(e.display.trim()),
-        CellValue::Record(r) => parse_date_time_serial(r.display.trim()),
+        CellValue::Entity(e) => parse_date_time_serial(e.display_value.trim()),
+        CellValue::Record(r) => parse_date_time_serial(r.to_string().trim()),
         _ => None,
     }
 }
@@ -613,8 +613,8 @@ fn coerce_time_fraction(value: &CellValue) -> Option<f64> {
         CellValue::Number(n) => Some(n.rem_euclid(1.0)),
         CellValue::String(s) => parse_time_fraction(s.trim()),
         CellValue::RichText(rt) => parse_time_fraction(rt.plain_text().trim()),
-        CellValue::Entity(e) => parse_time_fraction(e.display.trim()),
-        CellValue::Record(r) => parse_time_fraction(r.display.trim()),
+        CellValue::Entity(e) => parse_time_fraction(e.display_value.trim()),
+        CellValue::Record(r) => parse_time_fraction(r.to_string().trim()),
         _ => None,
     }
 }

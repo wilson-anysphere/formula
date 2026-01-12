@@ -1073,8 +1073,14 @@ fn cell_value_truthy(value: &CellValue) -> bool {
         CellValue::Empty => false,
         CellValue::Error(_) => false,
         CellValue::RichText(t) => !t.text.is_empty(),
-        CellValue::Entity(e) => !e.display.is_empty(),
-        CellValue::Record(r) => !r.display.is_empty(),
+        CellValue::Entity(e) => !e.display_value.is_empty(),
+        CellValue::Record(r) => match r.display_field.as_deref() {
+            Some(field) => r
+                .fields
+                .get(field)
+                .map_or(!r.display_value.is_empty(), cell_value_truthy),
+            None => !r.display_value.is_empty() || !r.fields.is_empty(),
+        },
         CellValue::Array(a) => !a.data.is_empty(),
         CellValue::Spill(_) => true,
     }
@@ -1392,8 +1398,29 @@ impl ValueKey {
             CellValue::Error(e) => Some(ValueKey::Error(e)),
             CellValue::Empty => None,
             CellValue::RichText(t) => Some(ValueKey::String(t.text)),
-            CellValue::Entity(e) => Some(ValueKey::String(e.display)),
-            CellValue::Record(r) => Some(ValueKey::String(r.display)),
+            CellValue::Entity(e) => Some(ValueKey::String(e.display_value)),
+            CellValue::Record(r) => {
+                let from_field = r
+                    .display_field
+                    .as_deref()
+                    .and_then(|field| r.fields.get(field))
+                    .and_then(|value| match value {
+                        CellValue::String(s) => Some(s.clone()),
+                        CellValue::Number(n) => Some(n.to_string()),
+                        CellValue::Boolean(b) => Some(if *b { "TRUE" } else { "FALSE" }.to_string()),
+                        CellValue::Error(e) => Some(e.as_str().to_string()),
+                        CellValue::RichText(rt) => Some(rt.text.clone()),
+                        _ => None,
+                    });
+                let display = from_field.or_else(|| {
+                    if r.display_value.is_empty() {
+                        None
+                    } else {
+                        Some(r.display_value)
+                    }
+                });
+                display.map(ValueKey::String)
+            }
             CellValue::Array(_) => None,
             CellValue::Spill(_) => None,
         }

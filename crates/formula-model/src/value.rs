@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::rich_text::RichText;
 use crate::{CellRef, ErrorValue};
+use std::collections::HashMap;
 use std::fmt;
 
 /// Versioned, JSON-friendly representation of a cell value.
@@ -88,24 +89,37 @@ impl From<RichText> for CellValue {
     }
 }
 
-/// Stub representation of an Excel rich "entity" value.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// JSON-friendly representation of an Excel rich "entity" value.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct EntityValue {
+    /// Entity type discriminator (e.g. `"stock"`, `"geography"`).
+    #[serde(default)]
+    pub entity_type: String,
+    /// Entity identifier (e.g. `"AAPL"`).
+    #[serde(default)]
+    pub entity_id: String,
     /// User-visible string representation (what Excel renders in the grid).
-    pub display: String,
+    ///
+    /// Accept the legacy `"display"` key as an alias for backward compatibility.
+    #[serde(default, alias = "display")]
+    pub display_value: String,
+    #[serde(default)]
+    pub properties: HashMap<String, CellValue>,
 }
 
 impl EntityValue {
     pub fn new(display: impl Into<String>) -> Self {
         Self {
-            display: display.into(),
+            display_value: display.into(),
+            ..Self::default()
         }
     }
 }
 
 impl fmt::Display for EntityValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.display)
+        f.write_str(&self.display_value)
     }
 }
 
@@ -115,24 +129,51 @@ impl From<EntityValue> for CellValue {
     }
 }
 
-/// Stub representation of an Excel rich "record" value.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// JSON-friendly representation of an Excel rich "record" value.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct RecordValue {
-    /// User-visible string representation (what Excel renders in the grid).
-    pub display: String,
+    #[serde(default)]
+    pub fields: HashMap<String, CellValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_field: Option<String>,
+    /// Optional precomputed display string (legacy / fallback).
+    ///
+    /// This field exists to keep older IPC payloads working; when `displayField`
+    /// is present and points to a scalar field, UIs should prefer that value.
+    #[serde(default, alias = "display", skip_serializing_if = "String::is_empty")]
+    pub display_value: String,
 }
 
 impl RecordValue {
     pub fn new(display: impl Into<String>) -> Self {
         Self {
-            display: display.into(),
+            display_value: display.into(),
+            ..Self::default()
+        }
+    }
+
+    fn display_text(&self) -> Option<String> {
+        let field = self.display_field.as_deref()?;
+        let value = self.fields.get(field)?;
+        match value {
+            CellValue::String(s) => Some(s.clone()),
+            CellValue::Number(n) => Some(n.to_string()),
+            CellValue::Boolean(b) => Some(if *b { "TRUE" } else { "FALSE" }.to_string()),
+            CellValue::Error(e) => Some(e.as_str().to_string()),
+            CellValue::RichText(rt) => Some(rt.text.clone()),
+            _ => None,
         }
     }
 }
 
 impl fmt::Display for RecordValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.display)
+        if let Some(display) = self.display_text().as_deref() {
+            f.write_str(display)
+        } else {
+            f.write_str(&self.display_value)
+        }
     }
 }
 

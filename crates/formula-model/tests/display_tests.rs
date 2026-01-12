@@ -1,5 +1,9 @@
 use formula_format::FormatOptions;
-use formula_model::{format_cell_display, CellDisplay, CellValue, HorizontalAlignment, Style};
+use formula_model::{
+    format_cell_display, CellDisplay, CellValue, EntityValue, HorizontalAlignment, RecordValue,
+    Style,
+};
+use std::collections::HashMap;
 
 #[test]
 fn model_formats_numbers_using_style_number_format() {
@@ -32,3 +36,28 @@ fn model_aligns_bools_and_errors_center_under_general_alignment() {
     assert_eq!(display.alignment, HorizontalAlignment::Center);
 }
 
+#[test]
+fn model_formats_entities_and_records_as_text() {
+    let options = FormatOptions::default();
+
+    let entity = CellValue::Entity(EntityValue {
+        entity_type: "stock".to_string(),
+        entity_id: "AAPL".to_string(),
+        display_value: "Apple Inc.".to_string(),
+        properties: HashMap::new(),
+    });
+
+    let display = format_cell_display(&entity, None, &options);
+    assert_eq!(display.text, "Apple Inc.");
+    assert_eq!(display.alignment, HorizontalAlignment::Left);
+
+    let record = CellValue::Record(RecordValue {
+        fields: HashMap::from([("name".to_string(), CellValue::String("Ada".to_string()))]),
+        display_field: Some("name".to_string()),
+        ..RecordValue::default()
+    });
+
+    let display = format_cell_display(&record, None, &options);
+    assert_eq!(display.text, "Ada");
+    assert_eq!(display.alignment, HorizontalAlignment::Left);
+}

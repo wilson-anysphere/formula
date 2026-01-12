@@ -17,6 +17,10 @@ pub fn format_cell_display(
     style: Option<&Style>,
     options: &FormatOptions,
 ) -> CellDisplay {
+    // Some `CellValue` variants (e.g. Record/Entity) map to a synthesized display
+    // string rather than a direct reference into the input value.
+    let mut display_buf: Option<String> = None;
+
     let fmt_value = match value {
         CellValue::Empty => FmtValue::Blank,
         CellValue::Number(n) => FmtValue::Number(*n),
@@ -24,8 +28,31 @@ pub fn format_cell_display(
         CellValue::Boolean(b) => FmtValue::Bool(*b),
         CellValue::Error(e) => FmtValue::Error(e.as_str()),
         CellValue::RichText(r) => FmtValue::Text(r.text.as_str()),
-        CellValue::Entity(e) => FmtValue::Text(e.display.as_str()),
-        CellValue::Record(r) => FmtValue::Text(r.display.as_str()),
+        CellValue::Entity(entity) => FmtValue::Text(entity.display_value.as_str()),
+        CellValue::Record(record) => {
+            let display = record
+                .display_field
+                .as_deref()
+                .and_then(|field| record.fields.get(field))
+                .and_then(|value| match value {
+                    CellValue::String(s) => Some(s.as_str()),
+                    CellValue::Number(n) => {
+                        display_buf =
+                            Some(formula_format::format_value(FmtValue::Number(*n), None, options).text);
+                        display_buf.as_deref()
+                    }
+                    CellValue::Boolean(b) => {
+                        display_buf = Some(if *b { "TRUE" } else { "FALSE" }.to_string());
+                        display_buf.as_deref()
+                    }
+                    CellValue::Error(e) => Some(e.as_str()),
+                    CellValue::RichText(rt) => Some(rt.text.as_str()),
+                    _ => None,
+                })
+                .or_else(|| (!record.display_value.is_empty()).then_some(record.display_value.as_str()))
+                .unwrap_or("");
+            FmtValue::Text(display)
+        }
         // For now arrays/spills are UI-rendered elsewhere.
         CellValue::Array(_) | CellValue::Spill(_) => FmtValue::Blank,
     };
