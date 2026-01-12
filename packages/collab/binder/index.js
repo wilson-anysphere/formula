@@ -24,6 +24,13 @@ function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function isPlainObject(value) {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 function isYText(value) {
   if (!value || typeof value !== "object") return false;
   if (value.constructor?.name === "YText") return true;
@@ -65,7 +72,15 @@ function yjsValueToJson(value) {
 
     if (Array.isArray(value)) return value.map((item) => yjsValueToJson(item));
 
-    // Preserve plain objects as-is (clone to avoid accidental mutations).
+    if (isPlainObject(value)) {
+      /** @type {Record<string, any>} */
+      const out = {};
+      const keys = Object.keys(value).sort();
+      for (const key of keys) out[key] = yjsValueToJson(value[key]);
+      return out;
+    }
+
+    // Preserve other objects as-is (clone to avoid accidental mutations).
     if (!Array.isArray(value)) {
       try {
         return structuredClone(value);
