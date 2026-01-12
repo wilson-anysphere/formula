@@ -566,10 +566,13 @@ pub(crate) fn load_data_model(
             }
         }
         if !page_size_counts.is_empty() {
-            let mut best_size = 0usize;
+            let mut best_size = usize::MAX;
             let mut best_count = 0usize;
             for (size, count) in page_size_counts {
-                if count > best_count || (count == best_count && size > best_size) {
+                // Prefer the most common chunk length. When there's a tie, pick the smaller page
+                // size: it is more conservative (and less likely to cause other columns to be
+                // rejected due to a single outlier chunk reporting an inflated length).
+                if count > best_count || (count == best_count && size < best_size) {
                     best_size = size;
                     best_count = count;
                 }
