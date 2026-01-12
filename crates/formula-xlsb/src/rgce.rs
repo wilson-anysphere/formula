@@ -2075,6 +2075,20 @@ pub fn encode_rgce_with_context_ast(
     encode_ast::encode_rgce_with_context_ast(formula, ctx, base)
 }
 
+/// Encode an A1-style formula to an XLSB `rgce` token stream using workbook context and a sheet
+/// name for resolving table-less structured references like `[@Col]`.
+///
+/// The input may include a leading `=`; it will be ignored.
+#[cfg(feature = "write")]
+pub fn encode_rgce_with_context_ast_in_sheet(
+    formula: &str,
+    ctx: &WorkbookContext,
+    sheet: &str,
+    base: CellCoord,
+) -> Result<EncodedRgce, EncodeError> {
+    encode_ast::encode_rgce_with_context_ast_in_sheet(formula, ctx, sheet, base)
+}
+
 #[cfg(feature = "write")]
 mod encode_ast {
     use super::{
@@ -2133,6 +2147,24 @@ mod encode_ast {
         ctx: &WorkbookContext,
         base: CellCoord,
     ) -> Result<EncodedRgce, EncodeError> {
+        encode_rgce_with_context_ast_impl(formula, ctx, None, base)
+    }
+
+    pub(super) fn encode_rgce_with_context_ast_in_sheet(
+        formula: &str,
+        ctx: &WorkbookContext,
+        sheet: &str,
+        base: CellCoord,
+    ) -> Result<EncodedRgce, EncodeError> {
+        encode_rgce_with_context_ast_impl(formula, ctx, Some(sheet), base)
+    }
+
+    fn encode_rgce_with_context_ast_impl(
+        formula: &str,
+        ctx: &WorkbookContext,
+        sheet: Option<&str>,
+        base: CellCoord,
+    ) -> Result<EncodedRgce, EncodeError> {
         let ast = fe::parse_formula(formula, fe::ParseOptions::default()).map_err(|e| {
             EncodeError::Parse(format!(
                 "{} (span {}..{})",
@@ -2142,13 +2174,14 @@ mod encode_ast {
 
         let mut rgce = Vec::new();
         let mut rgcb = Vec::new();
-        emit_expr(&ast.expr, ctx, base, &mut rgce, &mut rgcb)?;
+        emit_expr(&ast.expr, ctx, sheet, base, &mut rgce, &mut rgcb)?;
         Ok(EncodedRgce { rgce, rgcb })
     }
 
     fn emit_expr(
         expr: &fe::Expr,
         ctx: &WorkbookContext,
+        sheet: Option<&str>,
         base: CellCoord,
         rgce: &mut Vec<u8>,
         rgcb: &mut Vec<u8>,
@@ -2202,7 +2235,7 @@ mod encode_ast {
                     if matches!(arg, fe::Expr::Missing) {
                         rgce.push(PTG_MISS_ARG);
                     } else {
-                        emit_expr(arg, ctx, base, rgce, rgcb)?;
+                        emit_expr(arg, ctx, sheet, base, rgce, rgcb)?;
                     }
                 }
                 match emit_function_call(&call.name, call.args.len(), ctx, rgce) {
@@ -2239,38 +2272,38 @@ mod encode_ast {
                     if matches!(arg, fe::Expr::Missing) {
                         rgce.push(PTG_MISS_ARG);
                     } else {
-                        emit_expr(arg, ctx, base, rgce, rgcb)?;
+                        emit_expr(arg, ctx, sheet, base, rgce, rgcb)?;
                     }
                 }
 
-                emit_expr(&call.callee, ctx, base, rgce, rgcb)?;
+                emit_expr(&call.callee, ctx, sheet, base, rgce, rgcb)?;
                 emit_call_udf_sentinel(call.args.len(), rgce)?;
             }
             fe::Expr::Unary(u) => match u.op {
                 fe::UnaryOp::ImplicitIntersection => {
-                    emit_reference_expr(&u.expr, ctx, base, rgce, rgcb, PtgClass::Value)?;
+                    emit_reference_expr(&u.expr, ctx, sheet, base, rgce, rgcb, PtgClass::Value)?;
                 }
                 fe::UnaryOp::Plus => {
-                    emit_expr(&u.expr, ctx, base, rgce, rgcb)?;
+                    emit_expr(&u.expr, ctx, sheet, base, rgce, rgcb)?;
                     rgce.push(PTG_UPLUS);
                 }
                 fe::UnaryOp::Minus => {
-                    emit_expr(&u.expr, ctx, base, rgce, rgcb)?;
+                    emit_expr(&u.expr, ctx, sheet, base, rgce, rgcb)?;
                     rgce.push(PTG_UMINUS);
                 }
             },
             fe::Expr::Postfix(p) => {
-                emit_expr(&p.expr, ctx, base, rgce, rgcb)?;
+                emit_expr(&p.expr, ctx, sheet, base, rgce, rgcb)?;
                 match p.op {
                     fe::PostfixOp::Percent => rgce.push(PTG_PERCENT),
                     fe::PostfixOp::SpillRange => rgce.push(PTG_SPILL),
                 }
             }
             fe::Expr::Binary(b) => match b.op {
-                fe::BinaryOp::Range => emit_range_binary(b, ctx, base, rgce, rgcb)?,
+                fe::BinaryOp::Range => emit_range_binary(b, ctx, sheet, base, rgce, rgcb)?,
                 _ => {
-                    emit_expr(&b.left, ctx, base, rgce, rgcb)?;
-                    emit_expr(&b.right, ctx, base, rgce, rgcb)?;
+                    emit_expr(&b.left, ctx, sheet, base, rgce, rgcb)?;
+                    emit_expr(&b.right, ctx, sheet, base, rgce, rgcb)?;
                     rgce.push(match b.op {
                         fe::BinaryOp::Add => PTG_ADD,
                         fe::BinaryOp::Sub => PTG_SUB,
@@ -2297,7 +2330,7 @@ mod encode_ast {
                 emit_row_ref(r, ctx, base, rgce, PtgClass::Ref)?;
             }
             fe::Expr::StructuredRef(r) => {
-                emit_structured_ref(r, ctx, rgce, PtgClass::Ref)?;
+                emit_structured_ref(r, ctx, sheet, base, rgce, PtgClass::Ref)?;
             }
         }
 
@@ -2328,6 +2361,8 @@ mod encode_ast {
     fn emit_structured_ref(
         r: &fe::StructuredRef,
         ctx: &WorkbookContext,
+        sheet: Option<&str>,
+        base: CellCoord,
         rgce: &mut Vec<u8>,
         class: PtgClass,
     ) -> Result<(), EncodeError> {
@@ -2341,12 +2376,26 @@ mod encode_ast {
             Some(table_name) => ctx
                 .table_id_by_name(table_name)
                 .ok_or_else(|| EncodeError::Parse(format!("unknown table: {table_name}")))?,
-            None => ctx.single_table_id().ok_or_else(|| {
-                EncodeError::Parse(
-                    "structured references without an explicit table name are ambiguous; specify TableName[...]"
-                        .to_string(),
-                )
-            })?,
+            None => {
+                if let Some(sheet) = sheet {
+                    ctx.table_id_for_cell(sheet, base.row, base.col).ok_or_else(|| {
+                        EncodeError::Parse(format!(
+                            "cannot infer table for structured reference without an explicit table name at '{sheet}'!R{}C{} (cell must be inside exactly one table)",
+                            base.row.saturating_add(1),
+                            base.col.saturating_add(1)
+                        ))
+                    })?
+                } else {
+                    // Back-compat: fall back to a "single table in workbook" heuristic when the
+                    // caller doesn't know the base sheet.
+                    ctx.single_table_id().ok_or_else(|| {
+                        EncodeError::Parse(
+                            "structured references without an explicit table name are ambiguous; specify TableName[...]"
+                                .to_string(),
+                        )
+                    })?
+                }
+            }
         };
 
         let (flags, col_first, col_last) = parse_structured_ref_spec(&r.spec, table_id, ctx)?;
@@ -2577,6 +2626,7 @@ mod encode_ast {
     fn emit_reference_expr(
         expr: &fe::Expr,
         ctx: &WorkbookContext,
+        sheet: Option<&str>,
         base: CellCoord,
         rgce: &mut Vec<u8>,
         _rgcb: &mut Vec<u8>,
@@ -2587,7 +2637,7 @@ mod encode_ast {
             fe::Expr::ColRef(r) => emit_col_ref(r, ctx, base, rgce, class),
             fe::Expr::RowRef(r) => emit_row_ref(r, ctx, base, rgce, class),
             fe::Expr::NameRef(name) => emit_defined_name(name, ctx, rgce, class),
-            fe::Expr::StructuredRef(r) => emit_structured_ref(r, ctx, rgce, class),
+            fe::Expr::StructuredRef(r) => emit_structured_ref(r, ctx, sheet, base, rgce, class),
             fe::Expr::Binary(b) if b.op == fe::BinaryOp::Range => {
                 if let Some(area) = area_ref_from_range_operands(&b.left, &b.right, ctx, base)? {
                     return emit_area_ref_info(&area.0, &area.1, &area.2, ctx, rgce, class);
@@ -2606,6 +2656,7 @@ mod encode_ast {
     fn emit_range_binary(
         b: &fe::BinaryExpr,
         ctx: &WorkbookContext,
+        sheet: Option<&str>,
         base: CellCoord,
         rgce: &mut Vec<u8>,
         rgcb: &mut Vec<u8>,
@@ -2616,8 +2667,8 @@ mod encode_ast {
         }
 
         // Fallback: encode as the `:` operator.
-        emit_expr(&b.left, ctx, base, rgce, rgcb)?;
-        emit_expr(&b.right, ctx, base, rgce, rgcb)?;
+        emit_expr(&b.left, ctx, sheet, base, rgce, rgcb)?;
+        emit_expr(&b.right, ctx, sheet, base, rgce, rgcb)?;
         rgce.push(PTG_RANGE);
         Ok(())
     }

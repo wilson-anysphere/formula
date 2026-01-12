@@ -49,6 +49,18 @@ pub struct WorkbookContext {
 struct TableInfo {
     name: String,
     columns: HashMap<u32, String>,
+    range: Option<TableRange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TableRange {
+    /// Normalized (ASCII-lowercased) sheet name.
+    sheet_key: String,
+    /// Bounding box (0-indexed, inclusive) for the table's `ref` range.
+    min_row: u32,
+    max_row: u32,
+    min_col: u32,
+    max_col: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -487,6 +499,7 @@ impl WorkbookContext {
             .or_insert_with(|| TableInfo {
                 name,
                 columns: HashMap::new(),
+                range: None,
             });
     }
 
@@ -496,8 +509,67 @@ impl WorkbookContext {
         let entry = self.tables.entry(table_id).or_insert_with(|| TableInfo {
             name: format!("Table{table_id}"),
             columns: HashMap::new(),
+            range: None,
         });
         entry.columns.insert(column_id, name);
+    }
+
+    /// Registers the bounding box (`ref`) for a table on a specific sheet.
+    ///
+    /// The row/col indices are 0-based and inclusive.
+    pub fn add_table_range(
+        &mut self,
+        table_id: u32,
+        sheet: String,
+        r1: u32,
+        c1: u32,
+        r2: u32,
+        c2: u32,
+    ) {
+        let entry = self.tables.entry(table_id).or_insert_with(|| TableInfo {
+            name: format!("Table{table_id}"),
+            columns: HashMap::new(),
+            range: None,
+        });
+
+        let (min_row, max_row) = if r1 <= r2 { (r1, r2) } else { (r2, r1) };
+        let (min_col, max_col) = if c1 <= c2 { (c1, c2) } else { (c2, c1) };
+
+        entry.range = Some(TableRange {
+            sheet_key: normalize_key(&sheet),
+            min_row,
+            max_row,
+            min_col,
+            max_col,
+        });
+    }
+
+    /// Returns the table id for a given cell coordinate, but only when exactly one table range on
+    /// the provided sheet contains the cell.
+    ///
+    /// This is used to infer table-less structured references such as `[@Qty]`.
+    pub fn table_id_for_cell(&self, sheet: &str, row: u32, col: u32) -> Option<u32> {
+        let wanted_sheet = normalize_key(sheet);
+
+        let mut found: Option<u32> = None;
+        for (&table_id, info) in &self.tables {
+            let Some(range) = &info.range else {
+                continue;
+            };
+            if range.sheet_key != wanted_sheet {
+                continue;
+            }
+            if row < range.min_row || row > range.max_row || col < range.min_col || col > range.max_col
+            {
+                continue;
+            }
+            if found.is_some() {
+                // Ambiguous: multiple tables contain this cell.
+                return None;
+            }
+            found = Some(table_id);
+        }
+        found
     }
 
     /// Returns the display name for a table id.

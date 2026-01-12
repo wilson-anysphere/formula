@@ -33,6 +33,8 @@ const SHARED_STRINGS_REL_TYPE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
 const STYLES_REL_TYPE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
+const TABLE_REL_TYPE: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table";
 
 const SHARED_STRINGS_CONTENT_TYPE: &str = "application/vnd.ms-excel.sharedStrings";
 const STYLES_CONTENT_TYPE: &str = "application/vnd.ms-excel.styles";
@@ -200,7 +202,7 @@ impl XlsbWorkbook {
             )?;
         let mut workbook_context = workbook_context;
 
-        load_table_definitions(&mut zip, &mut workbook_context)?;
+        load_table_definitions(&mut zip, &mut workbook_context, &sheets)?;
 
         // `workbook.bin.rels` targets are compared case-insensitively by Excel on Windows/macOS,
         // but ZIP entry names are case-sensitive. Normalize sheet part paths to the exact entry
@@ -1608,6 +1610,36 @@ fn relationship_target_by_type(
     Ok(None)
 }
 
+fn relationship_targets_by_type(
+    xml_bytes: &[u8],
+    relationship_type: &str,
+) -> Result<Vec<String>, ParseError> {
+    let mut reader = XmlReader::from_reader(std::io::BufReader::new(Cursor::new(xml_bytes)));
+    reader.trim_text(true);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                if e.name().as_ref().ends_with(b"Relationship") =>
+            {
+                if let Some(ty) = xml_attr_value(&e, &reader, b"Type")? {
+                    if ty.eq_ignore_ascii_case(relationship_type) {
+                        if let Some(target) = xml_attr_value(&e, &reader, b"Target")? {
+                            out.push(target);
+                        }
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => return Err(ParseError::Xml(e)),
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(out)
+}
+
 fn content_type_override_part_names(
     xml_bytes: &[u8],
     content_type: &str,
@@ -1661,6 +1693,27 @@ fn workbook_target_candidates(target: &str) -> Vec<String> {
     candidates.push(normalize_zip_part_name(&format!("xl/{target}")));
     candidates.push(normalize_zip_part_name(target));
     candidates
+}
+
+fn resolve_part_name_from_relationship(source_part: &str, target: &str) -> String {
+    let source_part = normalize_zip_part_name(source_part);
+
+    // Relationship targets use `/` separators, but some writers use Windows-style `\`.
+    let mut target = target.replace('\\', "/");
+    // Some writers use absolute targets with a leading `/`.
+    let target_is_absolute = target.starts_with('/');
+    target = target.trim_start_matches('/').to_string();
+
+    if target_is_absolute {
+        return normalize_zip_part_name(&target);
+    }
+
+    let base_dir = source_part.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("");
+    if base_dir.is_empty() {
+        normalize_zip_part_name(&target)
+    } else {
+        normalize_zip_part_name(&format!("{base_dir}/{target}"))
+    }
 }
 
 fn rels_part_name_for_part(part_name: &str) -> String {
@@ -1727,6 +1780,7 @@ fn preserve_part<R: Read + Seek>(
 fn load_table_definitions<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     ctx: &mut WorkbookContext,
+    sheets: &[SheetMeta],
 ) -> Result<(), ParseError> {
     // Best-effort: tables are not required for basic parsing, but we use them to reconstruct
     // structured reference (Excel table) formulas with the correct display names.
@@ -1752,6 +1806,52 @@ fn load_table_definitions<R: Read + Seek>(
         }
     }
 
+    // Sheet association + range bounds (used to encode table-less structured refs like `[@Col]`).
+    //
+    // Table parts (`xl/tables/tableN.xml`) do not embed their owning sheet; that association is
+    // defined by the worksheet relationships (`xl/worksheets/_rels/sheetN.bin.rels`).
+    for sheet in sheets {
+        let rels_candidate = rels_part_name_for_part(&sheet.part_path);
+        let Some(rels_part) = find_zip_entry_case_insensitive(zip, &rels_candidate) else {
+            continue;
+        };
+
+        let Some(rels_bytes) = read_zip_entry(zip, &rels_part)? else {
+            continue;
+        };
+
+        let targets = match relationship_targets_by_type(&rels_bytes, TABLE_REL_TYPE) {
+            Ok(v) => v,
+            // Best-effort: malformed relationships should not block workbook open.
+            Err(_) => continue,
+        };
+
+        for target in targets {
+            let resolved = resolve_part_name_from_relationship(&sheet.part_path, &target);
+            let Some(table_part) = find_zip_entry_case_insensitive(zip, &resolved) else {
+                continue;
+            };
+
+            let Some(bytes) = read_zip_entry(zip, &table_part)? else {
+                continue;
+            };
+            let Some(info) = parse_table_xml_best_effort(&bytes) else {
+                continue;
+            };
+
+            ctx.add_table(info.id, info.name);
+            for (col_id, col_name) in info.columns {
+                ctx.add_table_column(info.id, col_id, col_name);
+            }
+
+            if let Some(a1_ref) = info.ref_a1 {
+                if let Some((r1, c1, r2, c2)) = parse_a1_range_bounds(&a1_ref) {
+                    ctx.add_table_range(info.id, sheet.name.clone(), r1, c1, r2, c2);
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -1760,6 +1860,7 @@ struct ParsedTableXml {
     id: u32,
     name: String,
     columns: Vec<(u32, String)>,
+    ref_a1: Option<String>,
 }
 
 fn parse_table_xml_best_effort(xml_bytes: &[u8]) -> Option<ParsedTableXml> {
@@ -1785,6 +1886,7 @@ fn parse_table_xml_best_effort(xml_bytes: &[u8]) -> Option<ParsedTableXml> {
 
     let mut table_id: Option<u32> = None;
     let mut table_name: Option<String> = None;
+    let mut ref_a1: Option<String> = None;
     let mut columns: Vec<(u32, String)> = Vec::new();
 
     loop {
@@ -1805,6 +1907,10 @@ fn parse_table_xml_best_effort(xml_bytes: &[u8]) -> Option<ParsedTableXml> {
                 let name =
                     attr_value(&e, &reader, b"name").or_else(|| attr_value(&e, &reader, b"Name"));
                 table_name = display.or(name);
+
+                // A1-style bounding box for the table.
+                ref_a1 =
+                    attr_value(&e, &reader, b"ref").or_else(|| attr_value(&e, &reader, b"Ref"));
             }
             Ok(Event::Start(e)) | Ok(Event::Empty(e))
                 if e.name().as_ref().ends_with(b"tableColumn") =>
@@ -1838,7 +1944,123 @@ fn parse_table_xml_best_effort(xml_bytes: &[u8]) -> Option<ParsedTableXml> {
         id: table_id?,
         name: table_name?,
         columns,
+        ref_a1,
     })
+}
+
+fn parse_a1_range_bounds(a1: &str) -> Option<(u32, u32, u32, u32)> {
+    let a1 = a1.trim();
+    if a1.is_empty() {
+        return None;
+    }
+
+    // Be tolerant of unexpected sheet-qualified refs (e.g. `Sheet1!A1:B2`) by stripping the
+    // prefix. Table `ref` attributes are typically unqualified.
+    let a1 = a1.rsplit_once('!').map(|(_, tail)| tail).unwrap_or(a1);
+
+    // Strip absolute markers.
+    let a1 = a1.replace('$', "");
+
+    let mut parts = a1.split(':');
+    let start = parts.next()?.trim();
+    let end = parts.next().unwrap_or(start).trim();
+    if parts.next().is_some() {
+        // Multiple ':' separators.
+        return None;
+    }
+
+    let (r1, c1) = parse_a1_cell_ref(start)?;
+    let (r2, c2) = parse_a1_cell_ref(end)?;
+
+    let (min_row, max_row) = if r1 <= r2 { (r1, r2) } else { (r2, r1) };
+    let (min_col, max_col) = if c1 <= c2 { (c1, c2) } else { (c2, c1) };
+    Some((min_row, min_col, max_row, max_col))
+}
+
+fn parse_a1_cell_ref(cell: &str) -> Option<(u32, u32)> {
+    let cell = cell.trim();
+    if cell.is_empty() {
+        return None;
+    }
+
+    let bytes = cell.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+        i += 1;
+    }
+    if i == 0 {
+        return None;
+    }
+    let col_label = &cell[..i];
+    let row_str = cell.get(i..)?.trim();
+    if row_str.is_empty() {
+        return None;
+    }
+    if !row_str.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+
+    let col = a1_col_label_to_index(col_label)?;
+    let row1: u32 = row_str.parse().ok()?;
+    if row1 == 0 {
+        return None;
+    }
+    let row = row1 - 1;
+
+    // Clamp to Excel's grid limits.
+    if col > 16_383 || row > 1_048_575 {
+        return None;
+    }
+
+    Some((row, col))
+}
+
+fn a1_col_label_to_index(label: &str) -> Option<u32> {
+    let mut col: u32 = 0;
+    for ch in label.chars() {
+        if !ch.is_ascii_alphabetic() {
+            return None;
+        }
+        let upper = ch.to_ascii_uppercase() as u32;
+        col = col.checked_mul(26)?;
+        col = col.checked_add(upper.checked_sub('A' as u32)?.checked_add(1)?)?;
+    }
+    if col == 0 {
+        return None;
+    }
+    Some(col - 1)
+}
+
+#[cfg(test)]
+mod a1_range_tests {
+    use super::parse_a1_range_bounds;
+
+    #[test]
+    fn parses_simple_a1_range() {
+        assert_eq!(parse_a1_range_bounds("A1:B10"), Some((0, 0, 9, 1)));
+    }
+
+    #[test]
+    fn parses_absolute_a1_range() {
+        assert_eq!(parse_a1_range_bounds("$A$1:$B$10"), Some((0, 0, 9, 1)));
+    }
+
+    #[test]
+    fn parses_single_cell_ref_as_range() {
+        assert_eq!(parse_a1_range_bounds("C3"), Some((2, 2, 2, 2)));
+    }
+
+    #[test]
+    fn parses_sheet_qualified_a1_range() {
+        assert_eq!(parse_a1_range_bounds("Sheet1!A1:B2"), Some((0, 0, 1, 1)));
+    }
+
+    #[test]
+    fn rejects_invalid_a1_range() {
+        assert_eq!(parse_a1_range_bounds(""), None);
+        assert_eq!(parse_a1_range_bounds("A0:B1"), None);
+        assert_eq!(parse_a1_range_bounds("A1:B"), None);
+    }
 }
 
 #[derive(Debug)]
