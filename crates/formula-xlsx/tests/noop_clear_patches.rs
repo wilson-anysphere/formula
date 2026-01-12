@@ -227,6 +227,8 @@ fn streaming_empty_formula_is_treated_as_noop_clear_for_missing_cell(
             value: CellValue::Empty,
             formula: Some("=".to_string()),
             style: None,
+            vm: None,
+            cm: None,
         },
     );
 
@@ -261,6 +263,8 @@ fn in_memory_empty_formula_is_treated_as_noop_clear_for_missing_cell(
             value: CellValue::Empty,
             formula: Some("=".to_string()),
             style: None,
+            vm: None,
+            cm: None,
         },
     );
     pkg.apply_cell_patches(&patches)?;

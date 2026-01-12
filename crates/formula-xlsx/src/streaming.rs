@@ -80,6 +80,26 @@ pub struct WorksheetCellPatch {
     /// - `Some(0)`: remove the `s` attribute.
     /// - `Some(xf)` where `xf != 0`: set/overwrite `s="xf"`.
     pub xf_index: Option<u32>,
+
+    /// Optional cell `vm` attribute override.
+    ///
+    /// SpreadsheetML uses `c/@vm` for RichData-backed cell content (e.g. images-in-cell).
+    ///
+    /// - `None`: preserve the existing attribute when patching an existing cell (and omit it when
+    ///   inserting a new cell).
+    /// - `Some(Some(n))`: set/overwrite `vm="n"`.
+    /// - `Some(None)`: remove the attribute.
+    pub vm: Option<Option<u32>>,
+
+    /// Optional cell `cm` attribute override.
+    ///
+    /// Some RichData-backed cell content also requires `c/@cm`.
+    ///
+    /// - `None`: preserve the existing attribute when patching an existing cell (and omit it when
+    ///   inserting a new cell).
+    /// - `Some(Some(n))`: set/overwrite `cm="n"`.
+    /// - `Some(None)`: remove the attribute.
+    pub cm: Option<Option<u32>>,
 }
 
 /// Override behavior for arbitrary (non-worksheet) OPC parts while streaming-patching.
@@ -115,12 +135,40 @@ impl WorksheetCellPatch {
             value,
             formula,
             xf_index: None,
+            vm: None,
+            cm: None,
         }
     }
 
     pub fn with_xf_index(mut self, xf_index: Option<u32>) -> Self {
         self.xf_index = xf_index;
         self
+    }
+
+    pub fn with_vm(mut self, vm: Option<Option<u32>>) -> Self {
+        self.vm = vm;
+        self
+    }
+
+    pub fn with_cm(mut self, cm: Option<Option<u32>>) -> Self {
+        self.cm = cm;
+        self
+    }
+
+    pub fn set_vm(self, vm: u32) -> Self {
+        self.with_vm(Some(Some(vm)))
+    }
+
+    pub fn clear_vm(self) -> Self {
+        self.with_vm(Some(None))
+    }
+
+    pub fn set_cm(self, cm: u32) -> Self {
+        self.with_cm(Some(Some(cm)))
+    }
+
+    pub fn clear_cm(self) -> Self {
+        self.with_cm(Some(None))
     }
 }
 
@@ -326,7 +374,9 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_recalc_policy<
                 .or_default()
                 .push(
                     WorksheetCellPatch::new(worksheet_part.clone(), cell_ref, value, formula)
-                        .with_xf_index(xf_index),
+                        .with_xf_index(xf_index)
+                        .with_vm(patch.vm_override())
+                        .with_cm(patch.cm_override()),
                 );
         }
     }
@@ -1742,7 +1792,9 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy<
                 .or_default()
                 .push(
                     WorksheetCellPatch::new(worksheet_part.clone(), cell_ref, value, formula)
-                        .with_xf_index(xf_index),
+                        .with_xf_index(xf_index)
+                        .with_vm(patch.vm_override())
+                        .with_cm(patch.cm_override()),
                 );
         }
     }
@@ -2949,6 +3001,8 @@ struct CellPatchInternal {
     value: CellValue,
     formula: Option<String>,
     xf_index: Option<u32>,
+    vm: Option<Option<u32>>,
+    cm: Option<Option<u32>>,
     shared_string_idx: Option<u32>,
     clear_cached_value: bool,
     material_for_insertion: bool,
@@ -3000,6 +3054,8 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 value: patch.value.clone(),
                 formula: patch.formula.clone(),
                 xf_index: patch.xf_index,
+                vm: patch.vm,
+                cm: patch.cm,
                 shared_string_idx,
                 clear_cached_value,
                 material_for_insertion,
@@ -3693,7 +3749,10 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         if attr.key.as_ref() == b"s" && style_override.is_some() {
             continue;
         }
-        if attr.key.as_ref() == b"vm" && drop_vm {
+        if attr.key.as_ref() == b"vm" && (drop_vm || patch.vm.is_some()) {
+            continue;
+        }
+        if attr.key.as_ref() == b"cm" && patch.cm.is_some() {
             continue;
         }
         if attr.key.as_ref() == b"r" {
@@ -3722,6 +3781,15 @@ fn patch_existing_cell<R: BufRead, W: Write>(
 
     if let Some(t) = cell_t_owned.as_deref() {
         c.push_attribute(("t", t));
+    }
+
+    let vm_value = patch.vm.flatten().map(|vm| vm.to_string());
+    if let Some(vm) = vm_value.as_deref() {
+        c.push_attribute(("vm", vm));
+    }
+    let cm_value = patch.cm.flatten().map(|cm| cm.to_string());
+    if let Some(cm) = cm_value.as_deref() {
+        c.push_attribute(("cm", cm));
     }
 
     writer.write_event(Event::Start(c))?;
@@ -4039,7 +4107,10 @@ fn write_patched_cell<W: Write>(
             if attr.key.as_ref() == b"s" && style_override.is_some() {
                 continue;
             }
-            if attr.key.as_ref() == b"vm" && drop_vm {
+            if attr.key.as_ref() == b"vm" && (drop_vm || patch.vm.is_some()) {
+                continue;
+            }
+            if attr.key.as_ref() == b"cm" && patch.cm.is_some() {
                 continue;
             }
             if attr.key.as_ref() == b"r" {
@@ -4073,6 +4144,15 @@ fn write_patched_cell<W: Write>(
 
     if let Some(t) = cell_t_owned.as_deref() {
         c.push_attribute(("t", t));
+    }
+
+    let vm_value = patch.vm.flatten().map(|vm| vm.to_string());
+    if let Some(vm) = vm_value.as_deref() {
+        c.push_attribute(("vm", vm));
+    }
+    let cm_value = patch.cm.flatten().map(|cm| cm.to_string());
+    if let Some(cm) = cm_value.as_deref() {
+        c.push_attribute(("cm", cm));
     }
 
     writer.write_event(Event::Start(c))?;
@@ -4270,6 +4350,8 @@ struct PatchBounds {
 
 fn patch_is_material_for_insertion(patch: &WorksheetCellPatch) -> bool {
     is_material_cell_patch_for_insertion(&patch.value, patch.formula.as_deref(), patch.xf_index)
+        || patch.vm.flatten().is_some()
+        || patch.cm.flatten().is_some()
 }
 
 fn is_material_cell_patch_for_insertion(

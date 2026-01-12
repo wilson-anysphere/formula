@@ -124,6 +124,24 @@ pub enum CellPatch {
     Clear {
         /// Optional style override.
         style: Option<CellStyleRef>,
+        /// Optional cell `vm` attribute override.
+        ///
+        /// SpreadsheetML uses `c/@vm` for RichData-backed cell content (e.g. images-in-cell).
+        ///
+        /// - `None`: preserve the existing attribute when patching an existing cell (and omit it
+        ///   when inserting a new cell).
+        /// - `Some(Some(n))`: set/overwrite `vm="n"`.
+        /// - `Some(None)`: remove the attribute.
+        vm: Option<Option<u32>>,
+        /// Optional cell `cm` attribute override.
+        ///
+        /// Some RichData-backed cell content also requires `c/@cm`.
+        ///
+        /// - `None`: preserve the existing attribute when patching an existing cell (and omit it
+        ///   when inserting a new cell).
+        /// - `Some(Some(n))`: set/overwrite `cm="n"`.
+        /// - `Some(None)`: remove the attribute.
+        cm: Option<Option<u32>>,
     },
     /// Set a cell value (and optionally a formula).
     Set {
@@ -132,23 +150,39 @@ pub enum CellPatch {
         formula: Option<String>,
         /// Optional style override.
         style: Option<CellStyleRef>,
+        /// Optional cell `vm` attribute override.
+        ///
+        /// See [`CellPatch::Clear::vm`] for semantics.
+        vm: Option<Option<u32>>,
+        /// Optional cell `cm` attribute override.
+        ///
+        /// See [`CellPatch::Clear::cm`] for semantics.
+        cm: Option<Option<u32>>,
     },
 }
 
 impl CellPatch {
     pub fn clear() -> Self {
-        Self::Clear { style: None }
+        Self::Clear {
+            style: None,
+            vm: None,
+            cm: None,
+        }
     }
 
     pub fn clear_with_style(style_index: u32) -> Self {
         Self::Clear {
             style: Some(CellStyleRef::XfIndex(style_index)),
+            vm: None,
+            cm: None,
         }
     }
 
     pub fn clear_with_style_id(style_id: u32) -> Self {
         Self::Clear {
             style: Some(CellStyleRef::StyleId(style_id)),
+            vm: None,
+            cm: None,
         }
     }
 
@@ -157,6 +191,8 @@ impl CellPatch {
             value,
             formula: None,
             style: None,
+            vm: None,
+            cm: None,
         }
     }
 
@@ -165,6 +201,8 @@ impl CellPatch {
             value,
             formula: Some(formula.into()),
             style: None,
+            vm: None,
+            cm: None,
         }
     }
 
@@ -173,6 +211,8 @@ impl CellPatch {
             value,
             formula: None,
             style: Some(CellStyleRef::XfIndex(style_index)),
+            vm: None,
+            cm: None,
         }
     }
 
@@ -181,6 +221,8 @@ impl CellPatch {
             value,
             formula: None,
             style: Some(CellStyleRef::StyleId(style_id)),
+            vm: None,
+            cm: None,
         }
     }
 
@@ -193,6 +235,8 @@ impl CellPatch {
             value,
             formula: Some(formula.into()),
             style: Some(CellStyleRef::XfIndex(style_index)),
+            vm: None,
+            cm: None,
         }
     }
 
@@ -205,17 +249,101 @@ impl CellPatch {
             value,
             formula: Some(formula.into()),
             style: Some(CellStyleRef::StyleId(style_id)),
+            vm: None,
+            cm: None,
         }
     }
 
     pub fn with_style_ref(self, style: CellStyleRef) -> Self {
         match self {
-            CellPatch::Clear { .. } => CellPatch::Clear { style: Some(style) },
-            CellPatch::Set { value, formula, .. } => CellPatch::Set {
+            CellPatch::Clear { vm, cm, .. } => CellPatch::Clear {
+                style: Some(style),
+                vm,
+                cm,
+            },
+            CellPatch::Set {
+                value,
+                formula,
+                vm,
+                cm,
+                ..
+            } => CellPatch::Set {
                 value,
                 formula,
                 style: Some(style),
+                vm,
+                cm,
             },
+        }
+    }
+
+    pub fn set_value_with_vm(value: CellValue, vm: u32) -> Self {
+        Self::set_value(value).with_vm(vm)
+    }
+
+    pub fn with_vm(self, vm: u32) -> Self {
+        self.with_vm_override(Some(Some(vm)))
+    }
+
+    pub fn clear_vm(self) -> Self {
+        self.with_vm_override(Some(None))
+    }
+
+    pub fn with_vm_override(self, vm: Option<Option<u32>>) -> Self {
+        match self {
+            CellPatch::Clear { style, cm, .. } => CellPatch::Clear { style, vm, cm },
+            CellPatch::Set {
+                value,
+                formula,
+                style,
+                cm,
+                ..
+            } => CellPatch::Set {
+                value,
+                formula,
+                style,
+                vm,
+                cm,
+            },
+        }
+    }
+
+    pub fn vm_override(&self) -> Option<Option<u32>> {
+        match self {
+            CellPatch::Clear { vm, .. } | CellPatch::Set { vm, .. } => *vm,
+        }
+    }
+
+    pub fn with_cm(self, cm: u32) -> Self {
+        self.with_cm_override(Some(Some(cm)))
+    }
+
+    pub fn clear_cm(self) -> Self {
+        self.with_cm_override(Some(None))
+    }
+
+    pub fn with_cm_override(self, cm: Option<Option<u32>>) -> Self {
+        match self {
+            CellPatch::Clear { style, vm, .. } => CellPatch::Clear { style, vm, cm },
+            CellPatch::Set {
+                value,
+                formula,
+                style,
+                vm,
+                ..
+            } => CellPatch::Set {
+                value,
+                formula,
+                style,
+                vm,
+                cm,
+            },
+        }
+    }
+
+    pub fn cm_override(&self) -> Option<Option<u32>> {
+        match self {
+            CellPatch::Clear { cm, .. } | CellPatch::Set { cm, .. } => *cm,
         }
     }
 
@@ -229,7 +357,7 @@ impl CellPatch {
 
     pub fn style_ref(&self) -> Option<CellStyleRef> {
         match self {
-            CellPatch::Clear { style } | CellPatch::Set { style, .. } => *style,
+            CellPatch::Clear { style, .. } | CellPatch::Set { style, .. } => *style,
         }
     }
 
@@ -1545,6 +1673,9 @@ fn write_cell_patch(
     let cell_ref = CellRef::new(row_num - 1, col);
     let a1 = cell_ref.to_a1();
 
+    let vm_override = patch.vm_override();
+    let cm_override = patch.cm_override();
+
     // Style: explicit override wins, otherwise preserve existing s=... if present.
     let style_index = patch
         .style_index_override(style_id_to_xf)?
@@ -1587,6 +1718,15 @@ fn write_cell_patch(
 
     if let Some(t) = new_t.as_deref() {
         c.push_attribute(("t", t));
+    }
+
+    let vm_value = vm_override.flatten().map(|vm| vm.to_string());
+    if let Some(vm) = vm_value.as_deref() {
+        c.push_attribute(("vm", vm));
+    }
+    let cm_value = cm_override.flatten().map(|cm| cm.to_string());
+    if let Some(cm) = cm_value.as_deref() {
+        c.push_attribute(("cm", cm));
     }
 
     let has_children = formula.is_some() || !matches!(body_kind, CellBodyKind::None);
@@ -1686,11 +1826,42 @@ fn patch_cell_element(
         Some(xf) => existing_s.as_deref().and_then(|s| s.parse::<u32>().ok()) != Some(xf),
     };
 
+    let vm_override = patch.vm_override();
+    let cm_override = patch.cm_override();
+    let mut existing_vm: Option<String> = None;
+    let mut existing_cm: Option<String> = None;
+    if vm_override.is_some() || cm_override.is_some() {
+        for attr in original_start.attributes() {
+            let attr = attr?;
+            match attr.key.as_ref() {
+                b"vm" => existing_vm = Some(attr.unescape_value()?.into_owned()),
+                b"cm" => existing_cm = Some(attr.unescape_value()?.into_owned()),
+                _ => {}
+            }
+        }
+    }
+    let vm_change = match vm_override {
+        None => false,
+        Some(None) => existing_vm.is_some(),
+        Some(Some(vm)) => existing_vm
+            .as_deref()
+            .and_then(|s| s.trim().parse::<u32>().ok())
+            != Some(vm),
+    };
+    let cm_change = match cm_override {
+        None => false,
+        Some(None) => existing_cm.is_some(),
+        Some(Some(cm)) => existing_cm
+            .as_deref()
+            .and_then(|s| s.trim().parse::<u32>().ok())
+            != Some(cm),
+    };
+
     let update_formula = !formula_eq;
     let clear_value =
         clear_cached_values_on_formula_change && update_formula && patch_formula.is_some();
     let update_value = !value_eq || clear_value;
-    let any_change = style_change || update_formula || update_value;
+    let any_change = style_change || update_formula || update_value || vm_change || cm_change;
 
     let clear_cached_value =
         clear_cached_values_on_formula_change && update_formula && patch_formula.is_some();
@@ -1754,7 +1925,8 @@ fn patch_cell_element(
             // "place in cell" images and other rich values. When patching a cell's value to
             // anything other than the rich-value placeholder error (`#VALUE!` / `ErrorValue::Value`),
             // drop `vm` so the cell no longer points at stale metadata.
-            b"vm" if drop_vm => continue,
+            b"vm" if drop_vm || vm_override.is_some() => continue,
+            b"cm" if cm_override.is_some() => continue,
             b"r" => has_r = true,
             _ => {}
         }
@@ -1776,6 +1948,15 @@ fn patch_cell_element(
         if let Some(t) = new_t.as_deref() {
             c.push_attribute(("t", t));
         }
+    }
+
+    let vm_value = vm_override.flatten().map(|vm| vm.to_string());
+    if let Some(vm) = vm_value.as_deref() {
+        c.push_attribute(("vm", vm));
+    }
+    let cm_value = cm_override.flatten().map(|cm| cm.to_string());
+    if let Some(cm) = cm_value.as_deref() {
+        c.push_attribute(("cm", cm));
     }
 
     writer.write_event(Event::Start(c.into_owned()))?;
@@ -2679,6 +2860,10 @@ fn cell_patch_is_material_for_insertion(
 ) -> Result<bool, XlsxError> {
     let style_index = patch.style_index_override(style_id_to_xf)?;
     if style_index.is_some_and(|xf| xf != 0) {
+        return Ok(true);
+    }
+
+    if patch.vm_override().flatten().is_some() || patch.cm_override().flatten().is_some() {
         return Ok(true);
     }
 

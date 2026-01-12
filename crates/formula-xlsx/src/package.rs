@@ -336,6 +336,24 @@ pub struct CellPatch {
     pub value: CellValue,
     /// Optional formula to write into the `<f>` element. Leading `=` is permitted.
     pub formula: Option<String>,
+    /// Optional cell `vm` attribute override.
+    ///
+    /// SpreadsheetML uses `c/@vm` for RichData-backed cell content (e.g. images-in-cell).
+    ///
+    /// - `None`: preserve the existing attribute when patching an existing cell (and omit it when
+    ///   inserting a new cell).
+    /// - `Some(Some(n))`: set/overwrite `vm="n"`.
+    /// - `Some(None)`: remove the attribute.
+    pub vm: Option<Option<u32>>,
+    /// Optional cell `cm` attribute override.
+    ///
+    /// Some RichData-backed cell content also requires `c/@cm`.
+    ///
+    /// - `None`: preserve the existing attribute when patching an existing cell (and omit it when
+    ///   inserting a new cell).
+    /// - `Some(Some(n))`: set/overwrite `cm="n"`.
+    /// - `Some(None)`: remove the attribute.
+    pub cm: Option<Option<u32>>,
 }
 
 impl CellPatch {
@@ -350,7 +368,35 @@ impl CellPatch {
             cell,
             value,
             formula,
+            vm: None,
+            cm: None,
         }
+    }
+
+    pub fn with_vm(mut self, vm: Option<Option<u32>>) -> Self {
+        self.vm = vm;
+        self
+    }
+
+    pub fn with_cm(mut self, cm: Option<Option<u32>>) -> Self {
+        self.cm = cm;
+        self
+    }
+
+    pub fn set_vm(self, vm: u32) -> Self {
+        self.with_vm(Some(Some(vm)))
+    }
+
+    pub fn clear_vm(self) -> Self {
+        self.with_vm(Some(None))
+    }
+
+    pub fn set_cm(self, cm: u32) -> Self {
+        self.with_cm(Some(Some(cm)))
+    }
+
+    pub fn clear_cm(self) -> Self {
+        self.with_cm(Some(None))
     }
 
     pub fn for_sheet_name(
@@ -846,7 +892,9 @@ impl XlsxPackage {
                         patch.cell,
                         patch.value.clone(),
                         patch.formula.clone(),
-                    ),
+                    )
+                    .with_vm(patch.vm)
+                    .with_cm(patch.cm),
                 );
         }
 
