@@ -14,6 +14,7 @@ and exits non-zero if the mismatch rate exceeds the configured threshold.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -53,11 +54,23 @@ DEFAULT_INCLUDE_TAGS = [
 ]
 
 
-def _default_expected_dataset() -> Path:
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _default_expected_dataset(*, cases_path: Path) -> Path:
     versioned_dir = Path("tests/compatibility/excel-oracle/datasets/versioned")
-    candidates = sorted(p for p in versioned_dir.glob("*.json") if p.is_file())
-    if candidates:
-        return candidates[-1]
+    if versioned_dir.is_dir():
+        cases_sha8 = _sha256_file(cases_path)[:8]
+        candidates = sorted(p for p in versioned_dir.glob(f"*-cases-{cases_sha8}.json") if p.is_file())
+        if candidates:
+            # Multiple Excel versions/builds can share the same corpus hash. Prefer the newest by
+            # mtime for developer ergonomics.
+            return max(candidates, key=lambda p: p.stat().st_mtime)
 
     pinned = Path("tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json")
     if pinned.is_file():
@@ -130,7 +143,7 @@ def main() -> int:
     args = p.parse_args()
 
     cases_path = Path(args.cases)
-    expected_path = Path(args.expected) if args.expected else _default_expected_dataset()
+    expected_path = Path(args.expected) if args.expected else _default_expected_dataset(cases_path=cases_path)
     actual_path = Path(args.actual)
     report_path = Path(args.report)
 
