@@ -118,7 +118,13 @@ export class ContextMenu {
       if (this.menu.contains(target)) {
         // If the main menu scrolls while a submenu is open, the submenu would no longer
         // be anchored to the correct parent item. Close it to avoid mis-positioning.
-        if (this.submenu) this.closeSubmenu();
+        if (this.submenu) {
+          const parent = this.submenuParent;
+          const active = document.activeElement as HTMLElement | null;
+          const focusInSubmenu = Boolean(active && this.submenu.contains(active));
+          this.closeSubmenu();
+          if (focusInSubmenu) parent?.focus({ preventScroll: true });
+        }
         return;
       }
       this.close();
@@ -133,7 +139,13 @@ export class ContextMenu {
       if (!target) return;
       if (this.submenu && this.submenu.contains(target)) return;
       if (this.menu.contains(target)) {
-        if (this.submenu) this.closeSubmenu();
+        if (this.submenu) {
+          const parent = this.submenuParent;
+          const active = document.activeElement as HTMLElement | null;
+          const focusInSubmenu = Boolean(active && this.submenu.contains(active));
+          this.closeSubmenu();
+          if (focusInSubmenu) parent?.focus({ preventScroll: true });
+        }
         return;
       }
       this.close();
