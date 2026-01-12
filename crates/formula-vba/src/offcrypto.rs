@@ -191,8 +191,14 @@ pub(crate) fn parse_digsig_info_serialized(stream: &[u8]) -> Option<DigSigInfoSe
                 };
 
                 match best {
-                    Some((best_padding, _)) if best_padding <= padding => {}
-                    _ => best = Some((padding, info)),
+                    Some((best_padding, best_info)) => {
+                        if padding < best_padding
+                            || (padding == best_padding && info.pkcs7_offset > best_info.pkcs7_offset)
+                        {
+                            best = Some((padding, info));
+                        }
+                    }
+                    None => best = Some((padding, info)),
                 }
             }
         }
