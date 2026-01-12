@@ -234,6 +234,22 @@ class CellFormattingDemoProvider implements CellProvider {
       fontWeight: "600"
     });
 
+    // Vertical alignment (top/middle/bottom).
+    put(18, 1, "Top\naligned", { verticalAlign: "top", textAlign: "center", fill: "rgba(148, 163, 184, 0.06)" });
+    put(18, 2, "Middle\naligned", { verticalAlign: "middle", textAlign: "center", fill: "rgba(148, 163, 184, 0.06)" });
+    put(18, 3, "Bottom\naligned", { verticalAlign: "bottom", textAlign: "center", fill: "rgba(148, 163, 184, 0.06)" });
+
+    // Char wrap + RTL/LTR direction.
+    put(19, 1, "CharWrap: 1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ", {
+      wrapMode: "char",
+      textAlign: "start"
+    });
+    put(19, 2, "Auto RTL (start-align): שלום world 123", {
+      wrapMode: "word",
+      textAlign: "start",
+      direction: "auto"
+    });
+
     // ---------------------------------------------------------------------------------------------
     // Rich text runs (if Task 84 lands)
     // ---------------------------------------------------------------------------------------------
@@ -323,6 +339,8 @@ export function CellFormattingDemo(): React.ReactElement {
     // Give wrap/rotation rows a bit more room.
     api.setRowHeight(16, 60);
     api.setRowHeight(17, 60);
+    api.setRowHeight(18, 68);
+    api.setRowHeight(19, 60);
     api.setRowHeight(20, 48);
 
     // Slightly wider first few columns so labels are readable.
@@ -363,6 +381,9 @@ export function CellFormattingDemo(): React.ReactElement {
               </li>
               <li>
                 <code>A14:D17</code>: alignment, wrap on/off, rotation
+              </li>
+              <li>
+                <code>A18:C19</code>: vertical alignment + char wrap + RTL/LTR direction
               </li>
               <li>
                 <code>A20</code>: rich text runs (if Task 84 lands)
