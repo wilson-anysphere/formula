@@ -273,20 +273,22 @@ fn app_error(err: AppStateError) -> String {
 #[cfg(any(feature = "desktop", test))]
 fn coerce_save_path_to_xlsx(path: &str) -> String {
     let mut buf = PathBuf::from(path);
-    if buf
-        .extension()
-        .and_then(|s| s.to_str())
-        .is_some_and(|ext| {
-            ext.eq_ignore_ascii_case("xls")
-                || ext.eq_ignore_ascii_case("csv")
-                || ext.eq_ignore_ascii_case("parquet")
-        })
+    let Some(ext) = buf.extension().and_then(|s| s.to_str()) else {
+        return path.to_string();
+    };
+
+    // We can only write XLSX/XLSM/XLSB bytes. If the workbook was opened from a non-workbook
+    // source (CSV/Parquet/etc) or a legacy format that we import into the workbook model (XLS),
+    // saving without "Save As" would otherwise write an XLSX file to a non-XLSX filename.
+    if ext.eq_ignore_ascii_case("xlsx")
+        || ext.eq_ignore_ascii_case("xlsm")
+        || ext.eq_ignore_ascii_case("xlsb")
     {
-        buf.set_extension("xlsx");
-        return buf.to_string_lossy().to_string();
+        return path.to_string();
     }
 
-    path.to_string()
+    buf.set_extension("xlsx");
+    buf.to_string_lossy().to_string()
 }
 
 #[cfg(any(feature = "desktop", test))]
@@ -3618,6 +3620,16 @@ mod tests {
             coerce_save_path_to_xlsx("/tmp/foo.xlsx"),
             "/tmp/foo.xlsx",
             "expected .xlsx saves to remain unchanged"
+        );
+        assert_eq!(
+            coerce_save_path_to_xlsx("/tmp/foo.xlsm"),
+            "/tmp/foo.xlsm",
+            "expected .xlsm saves to remain unchanged"
+        );
+        assert_eq!(
+            coerce_save_path_to_xlsx("/tmp/foo.xlsb"),
+            "/tmp/foo.xlsb",
+            "expected .xlsb saves to remain unchanged"
         );
     }
 
