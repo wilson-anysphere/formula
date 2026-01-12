@@ -7675,8 +7675,10 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
 
   doc.markSaved();
 
-  const firstSheetId = sheets[0].id;
-  renderSheetSwitcher(sheets, firstSheetId);
+  // Default to the first *visible* sheet so hidden sheets are never activated
+  // (and therefore never shown as the selected value in the sheet switcher).
+  const visibleSheets = listSheetsForUi();
+  const firstSheetId = visibleSheets[0]?.id ?? sheets[0].id;
   app.activateSheet(firstSheetId);
   app.activateCell({ sheetId: firstSheetId, row: 0, col: 0 });
   app.refresh();
