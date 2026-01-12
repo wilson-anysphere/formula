@@ -1278,6 +1278,65 @@ mod tests {
     }
 
     #[test]
+    fn skips_malformed_name_record_but_continues_scan() {
+        // First record: malformed/truncated description string.
+        let bad_name = "BadDesc";
+        let rgce: Vec<u8> = vec![0x1E, 0x01, 0x00]; // PtgInt 1
+
+        let mut bad_header = Vec::new();
+        bad_header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        bad_header.push(0); // chKey
+        bad_header.push(bad_name.len() as u8); // cch
+        bad_header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        bad_header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        bad_header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        bad_header.push(0); // cchCustMenu
+        bad_header.push(5); // cchDescription (claims 5 chars, but we truncate below)
+        bad_header.push(0); // cchHelpTopic
+        bad_header.push(0); // cchStatusText
+
+        let bad_name_str = xl_unicode_string_no_cch_compressed(bad_name);
+        // Truncated description: flags + only 2 bytes ("AB"), but header says 5 chars.
+        let bad_desc_partial: Vec<u8> = [vec![0u8], b"AB".to_vec()].concat();
+
+        let bad_record_payload = [bad_header, bad_name_str, rgce.clone(), bad_desc_partial].concat();
+
+        // Second record: valid defined name.
+        let good_name = "Good";
+        let mut good_header = Vec::new();
+        good_header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        good_header.push(0); // chKey
+        good_header.push(good_name.len() as u8); // cch
+        good_header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        good_header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        good_header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        good_header.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+
+        let good_name_str = xl_unicode_string_no_cch_compressed(good_name);
+        let good_record_payload = [good_header, good_name_str, rgce.clone()].concat();
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &bad_record_payload),
+            record(RECORD_NAME, &good_record_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+        assert_eq!(parsed.names.len(), 1);
+        assert_eq!(parsed.names[0].name, good_name);
+        assert_eq!(parsed.names[0].refers_to, "1");
+        assert_eq!(parsed.warnings.len(), 1);
+        assert!(
+            parsed.warnings[0].contains("failed to parse NAME record"),
+            "warnings={:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
     fn parses_name_metadata_and_builtin_name_ids() {
         let rgce: Vec<u8> = vec![0x1E, 0x01, 0x00]; // PtgInt 1
         let description = "My description";
