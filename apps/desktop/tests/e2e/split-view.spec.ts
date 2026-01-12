@@ -582,10 +582,6 @@ test.describe("split view", () => {
       await waitForGridCanvasesToBeSized(page, "#grid-secondary");
       const secondary = page.locator("#grid-secondary");
       const secondaryStatus = secondary.getByTestId("canvas-grid-a11y-status");
-      await waitForGridCanvasesToBeSized(page, "#grid-secondary");
-
-      const secondary = page.locator("#grid-secondary");
-      const secondaryStatus = secondary.getByTestId("canvas-grid-a11y-status");
 
       // Select C1 in the primary pane (same offsets as formula-bar.spec.ts).
       await page.click("#grid", { position: { x: 260, y: 40 } });

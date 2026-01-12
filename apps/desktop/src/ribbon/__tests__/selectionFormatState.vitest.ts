@@ -12,6 +12,8 @@ describe("computeSelectionFormatState", () => {
       italic: false,
       underline: false,
       strikethrough: false,
+      fontName: null,
+      fontSize: null,
       wrapText: false,
       align: "left",
       numberFormat: null,
@@ -31,6 +33,19 @@ describe("computeSelectionFormatState", () => {
     expect(state.underline).toBe(true);
     expect(state.strikethrough).toBe(true);
     expect(state.wrapText).toBe(true);
+  });
+
+  it("detects font name/size and reports mixed when selection differs", () => {
+    const doc = new DocumentController();
+    doc.setRangeFormat("Sheet1", "A1", { font: { name: "Arial", size: 14 } });
+
+    const single = computeSelectionFormatState(doc, "Sheet1", [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }]);
+    expect(single.fontName).toBe("Arial");
+    expect(single.fontSize).toBe(14);
+
+    const mixed = computeSelectionFormatState(doc, "Sheet1", [{ startRow: 0, startCol: 0, endRow: 0, endCol: 1 }]);
+    expect(mixed.fontName).toBe("mixed");
+    expect(mixed.fontSize).toBe("mixed");
   });
 
   it("reports mixed state for alignment and number formats", () => {

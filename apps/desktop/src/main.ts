@@ -1188,6 +1188,26 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       }
     })();
 
+    const labelById: Record<string, string> = {
+      "home.number.numberFormat": numberFormatLabel,
+      "view.appearance.theme": `Theme: ${themePreferenceLabel}`,
+    };
+
+    // Font dropdown labels should reflect the current selection (Excel-style).
+    // Keep defaults ("Font"/"Size") when we don't have an explicit value, but show "Mixed"
+    // when the selection contains multiple values.
+    if (formatState.fontName === "mixed") {
+      labelById["home.font.fontName"] = "Mixed";
+    } else if (typeof formatState.fontName === "string") {
+      labelById["home.font.fontName"] = formatState.fontName;
+    }
+
+    if (formatState.fontSize === "mixed") {
+      labelById["home.font.fontSize"] = "Mixed";
+    } else if (typeof formatState.fontSize === "number") {
+      labelById["home.font.fontSize"] = String(formatState.fontSize);
+    }
+
     const zoomDisabled = !app.supportsZoom();
     const disabledById = {
       ...(isEditing
@@ -1232,10 +1252,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
 
     setRibbonUiState({
       pressedById,
-      labelById: {
-        "home.number.numberFormat": numberFormatLabel,
-        "view.appearance.theme": `Theme: ${themePreferenceLabel}`,
-      },
+      labelById,
       disabledById,
     });
   });

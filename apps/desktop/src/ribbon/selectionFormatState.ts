@@ -5,11 +5,16 @@ export type SelectionHorizontalAlign = "left" | "center" | "right" | "mixed";
 
 export type SelectionNumberFormat = string | "mixed" | null;
 
+export type SelectionFontName = string | "mixed" | null;
+export type SelectionFontSize = number | "mixed" | null;
+
 export type SelectionFormatState = {
   bold: boolean;
   italic: boolean;
   underline: boolean;
   strikethrough: boolean;
+  fontName: SelectionFontName;
+  fontSize: SelectionFontSize;
   wrapText: boolean;
   align: SelectionHorizontalAlign;
   numberFormat: SelectionNumberFormat;
@@ -88,6 +93,8 @@ type AggregationState = {
   italic: boolean;
   underline: boolean;
   strikethrough: boolean;
+  fontName: string | null | "mixed" | undefined;
+  fontSize: number | null | "mixed" | undefined;
   wrapText: boolean;
   align: "left" | "center" | "right" | "mixed" | null;
   numberFormat: string | null | "mixed" | undefined;
@@ -121,6 +128,8 @@ export function computeSelectionFormatState(
       italic: false,
       underline: false,
       strikethrough: false,
+      fontName: null,
+      fontSize: null,
       wrapText: false,
       align: "left",
       numberFormat: null,
@@ -141,6 +150,8 @@ export function computeSelectionFormatState(
     italic: true,
     underline: true,
     strikethrough: true,
+    fontName: undefined,
+    fontSize: undefined,
     wrapText: true,
     align: null,
     numberFormat: undefined,
@@ -162,6 +173,17 @@ export function computeSelectionFormatState(
     else if (state.numberFormat !== "mixed" && state.numberFormat !== value) state.numberFormat = "mixed";
   };
 
+  const mergeFontName = (raw: unknown) => {
+    const value = typeof raw === "string" ? raw : null;
+    if (state.fontName === undefined) state.fontName = value;
+    else if (state.fontName !== "mixed" && state.fontName !== value) state.fontName = "mixed";
+  };
+
+  const mergeFontSize = (raw: unknown) => {
+    const value = typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+    if (state.fontSize === undefined) state.fontSize = value;
+    else if (state.fontSize !== "mixed" && state.fontSize !== value) state.fontSize = "mixed";
+  };
   const anyDoc = doc as any;
   const hasGetCellFormat = typeof anyDoc.getCellFormat === "function";
   const hasGetCellFormatStyleIds = typeof anyDoc.getCellFormatStyleIds === "function";
@@ -200,6 +222,8 @@ export function computeSelectionFormatState(
     state.strikethrough = state.strikethrough && Boolean(style?.font?.strike);
     state.wrapText = state.wrapText && Boolean(style?.alignment?.wrapText);
 
+    mergeFontName(style?.font?.name);
+    mergeFontSize(style?.font?.size);
     mergeAlign(style?.alignment?.horizontal);
     mergeNumberFormat(style?.numberFormat);
   };
@@ -229,6 +253,8 @@ export function computeSelectionFormatState(
     italic: state.italic,
     underline: state.underline,
     strikethrough: state.strikethrough,
+    fontName: state.fontName === undefined ? null : state.fontName,
+    fontSize: state.fontSize === undefined ? null : state.fontSize,
     wrapText: state.wrapText,
     align: state.align ?? "left",
     numberFormat: state.numberFormat === undefined ? null : state.numberFormat,
