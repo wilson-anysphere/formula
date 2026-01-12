@@ -254,16 +254,20 @@ console.log("[formula] Building WASM artifacts via wasm-pack…");
 // other wrapper settings. When the wrapper is unavailable/misconfigured, wasm-pack
 // builds can fail even for `cargo metadata`/`rustc -vV`. Default to disabling any
 // configured wrapper unless the user explicitly overrides it in the environment.
+const rustcWrapper = process.env.RUSTC_WRAPPER ?? process.env.CARGO_BUILD_RUSTC_WRAPPER ?? "";
+const rustcWorkspaceWrapper =
+  process.env.RUSTC_WORKSPACE_WRAPPER ??
+  process.env.CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER ??
+  "";
 const wasmPackEnv = {
   ...childEnv,
-  RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
-  RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
+  RUSTC_WRAPPER: rustcWrapper,
+  RUSTC_WORKSPACE_WRAPPER: rustcWorkspaceWrapper,
   // Cargo config can also be controlled via `CARGO_BUILD_RUSTC_WRAPPER` env vars; set these so
   // we reliably override any global config (e.g. `build.rustc-wrapper=sccache`) when callers
   // didn't explicitly opt in.
-  CARGO_BUILD_RUSTC_WRAPPER: process.env.CARGO_BUILD_RUSTC_WRAPPER ?? process.env.RUSTC_WRAPPER ?? "",
-  CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER:
-    process.env.CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER ?? process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
+  CARGO_BUILD_RUSTC_WRAPPER: rustcWrapper,
+  CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER: rustcWorkspaceWrapper,
 };
 
 function isPositiveIntegerString(value) {

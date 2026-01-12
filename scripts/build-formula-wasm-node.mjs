@@ -152,6 +152,11 @@ function buildWithWasmPack() {
   const limitAs = process.env.FORMULA_CARGO_LIMIT_AS ?? "14G";
   const runLimited = path.join(repoRoot, "scripts", "run_limited.sh");
   const canUseRunLimited = process.platform !== "win32" && existsSync(runLimited);
+  const rustcWrapper = process.env.RUSTC_WRAPPER ?? process.env.CARGO_BUILD_RUSTC_WRAPPER ?? "";
+  const rustcWorkspaceWrapper =
+    process.env.RUSTC_WORKSPACE_WRAPPER ??
+    process.env.CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER ??
+    "";
 
   // Equivalent to: `wasm-pack build crates/formula-wasm --target nodejs --out-dir pkg-node`
   // but avoids any ambiguity around relative output paths by running from the crate dir.
@@ -172,15 +177,13 @@ function buildWithWasmPack() {
     // Rayon defaults to spawning one worker per core; cap it for multi-agent hosts unless
     // callers explicitly override it.
     RAYON_NUM_THREADS: rayonThreads,
-    RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
-    RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
+    RUSTC_WRAPPER: rustcWrapper,
+    RUSTC_WORKSPACE_WRAPPER: rustcWorkspaceWrapper,
     // Cargo can also read wrapper settings via `CARGO_BUILD_RUSTC_WRAPPER`. Set it explicitly so
     // a global Cargo config (`build.rustc-wrapper`) cannot accidentally re-enable a flaky wrapper
     // when `RUSTC_WRAPPER` is unset.
-    CARGO_BUILD_RUSTC_WRAPPER:
-      process.env.CARGO_BUILD_RUSTC_WRAPPER ?? process.env.RUSTC_WRAPPER ?? "",
-    CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER:
-      process.env.CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER ?? process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
+    CARGO_BUILD_RUSTC_WRAPPER: rustcWrapper,
+    CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER: rustcWorkspaceWrapper,
   };
 
   const res = canUseRunLimited
