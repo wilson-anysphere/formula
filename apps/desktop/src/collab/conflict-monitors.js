@@ -75,6 +75,7 @@ export function createDesktopFormulaConflictMonitor(opts) {
  * - Do NOT treat `sessionOrigin` as local (it is used for programmatic/bulk writes like
  *   conflict resolutions and should not be logged).
  * - Do NOT treat `VERSIONING_RESTORE_ORIGIN` as local (version restore is a bulk write).
+ * - Do NOT treat `BRANCHING_APPLY_ORIGIN` as local (branch checkout/merge apply is a bulk write).
  *
  * @param {object} opts
  * @param {import("yjs").Doc} opts.doc
@@ -99,6 +100,7 @@ export function createDesktopCellStructuralConflictMonitor(opts) {
   // Critical exclusions: bulk operations should never be treated as local for op logging.
   localOrigins.delete(opts.sessionOrigin);
   localOrigins.delete(VERSIONING_RESTORE_ORIGIN);
+  localOrigins.delete(BRANCHING_APPLY_ORIGIN);
 
   return new CellStructuralConflictMonitor({
     doc: opts.doc,
