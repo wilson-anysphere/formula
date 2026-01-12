@@ -126,6 +126,13 @@ class WasmBackedWorker implements WorkerLike {
           case "getCell":
             result = this.workbook?.getCell(params.address, params.sheet);
             break;
+          case "getCellRich":
+            result = this.workbook?.getCellRich(params.address, params.sheet);
+            break;
+          case "setCellRich":
+            this.workbook?.setCellRich(params.address, params.value, params.sheet);
+            result = null;
+            break;
           case "setCells":
             if (typeof this.workbook?.setCells === "function") {
               this.workbook?.setCells(params.updates);
@@ -191,6 +198,93 @@ describeWasm("EngineWorker null clear semantics", () => {
       await engine.setCell("A1", "  =  SUM(A1:A2)  ");
       const cell = await engine.getCell("A1");
       expect(cell.input).toBe("=SUM(A1:A2)");
+    } finally {
+      engine.terminate();
+    }
+  });
+
+  it("supports rich values (entity) with field access formulas", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+
+      const entity = {
+        type: "entity",
+        value: {
+          entityType: "stock",
+          entityId: "AAPL",
+          displayValue: "Apple Inc.",
+          properties: {
+            Price: { type: "number", value: 12.5 }
+          }
+        }
+      } as const;
+
+      await engine.setCellRich?.("A1", entity, "Sheet1");
+      await engine.setCell("B1", "=A1.Price", "Sheet1");
+      await engine.recalculate("Sheet1");
+
+      const b1 = await engine.getCell("B1", "Sheet1");
+      expect(b1.value).toBe(12.5);
+
+      const a1 = await engine.getCell("A1", "Sheet1");
+      expect(a1.input).toBeNull();
+      expect(a1.value).toBe("Apple Inc.");
+
+      const a1Rich = await engine.getCellRich?.("A1", "Sheet1");
+      expect(a1Rich).toEqual({
+        sheet: "Sheet1",
+        address: "A1",
+        input: entity,
+        value: entity
+      });
+    } finally {
+      engine.terminate();
+    }
+  });
+
+  it("roundtrips rich_text input through getCellRich while degrading scalar getCell", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await engine.newWorkbook();
+
+      const richText = {
+        type: "rich_text",
+        value: {
+          text: "Hello",
+          runs: [
+            {
+              start: 0,
+              end: 5,
+              style: { bold: true }
+            }
+          ]
+        }
+      } as const;
+
+      await engine.setCellRich?.("A1", richText, "Sheet1");
+
+      const a1 = await engine.getCell("A1", "Sheet1");
+      expect(a1.input).toBe("Hello");
+      expect(a1.value).toBe("Hello");
+
+      const a1Rich = await engine.getCellRich?.("A1", "Sheet1");
+      expect(a1Rich?.input).toEqual(richText);
+      expect(a1Rich?.value).toEqual({ type: "string", value: "Hello" });
     } finally {
       engine.terminate();
     }
