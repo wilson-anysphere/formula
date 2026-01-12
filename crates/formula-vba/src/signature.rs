@@ -851,7 +851,6 @@ fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
         DigestAlg::Sha256 => "SHA-256",
     })
 }
-
 fn signature_kind_rank(kind: VbaSignatureStreamKind) -> u8 {
     match kind {
         VbaSignatureStreamKind::DigitalSignatureExt => 0,
@@ -891,7 +890,6 @@ fn signature_path_stream_kind(path: &str) -> Option<VbaSignatureStreamKind> {
     }
     best.map(|(_, kind)| kind)
 }
-
 fn is_signature_component(component: &str) -> bool {
     signature_component_stream_kind(component).is_some()
 }

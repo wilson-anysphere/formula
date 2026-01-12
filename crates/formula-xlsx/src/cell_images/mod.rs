@@ -227,7 +227,13 @@ fn parse_cell_images_part(
         .descendants()
         .filter(|n| n.is_element() && n.tag_name().name() == "cellImage")
     {
-        let Some(embed_rel_id) = get_cell_image_rel_id(&cell_image) else {
+        let embed_rel_id = get_cell_image_rel_id(&cell_image).or_else(|| {
+            cell_image
+                .descendants()
+                .find(|n| n.is_element() && n.tag_name().name() == "blip")
+                .and_then(|blip| get_blip_embed_rel_id(&blip))
+        });
+        let Some(embed_rel_id) = embed_rel_id else {
             continue;
         };
 

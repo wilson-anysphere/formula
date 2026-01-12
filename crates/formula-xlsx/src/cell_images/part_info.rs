@@ -25,14 +25,14 @@ pub struct CellImagesPartInfo {
     /// ZIP entry name for the `.rels` associated with [`Self::part_path`]
     /// (typically `xl/_rels/cellimages.xml.rels`).
     pub rels_path: String,
-    /// All `r:embed` references discovered under `<a:blip>` elements in `cellimages.xml`,
-    /// resolved to concrete `xl/media/*` parts via `cellimages.xml.rels`.
+    /// All image relationship IDs discovered in `cellimages.xml`, resolved to concrete `xl/media/*`
+    /// parts via `cellimages.xml.rels`.
     pub embeds: Vec<CellImageEmbed>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CellImageEmbed {
-    /// Relationship ID from `<a:blip r:embed="...">`.
+    /// Relationship ID referenced by `cellimages.xml` (e.g. `rId1`).
     pub embed_rid: String,
     /// Resolved relationship target part name (e.g. `xl/media/image1.png`).
     pub target_part: String,
@@ -167,10 +167,24 @@ fn parse_cell_images_embeds(xml: &[u8]) -> Result<Vec<String>> {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) | Event::Empty(e) => {
                 let name = e.name();
-                if local_name(name.as_ref()).eq_ignore_ascii_case(b"blip") {
+                let elem = local_name(name.as_ref());
+
+                // DrawingML `a:blip r:embed="…"` (commonly under `<pic>`).
+                if elem.eq_ignore_ascii_case(b"blip") {
                     for attr in e.attributes() {
                         let attr = attr?;
                         if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"embed") {
+                            embeds.push(attr.unescape_value()?.into_owned());
+                        }
+                    }
+                }
+
+                // Lightweight schema: `<cellImage r:id="…">` or `<cellImage r:embed="…">`.
+                if elem.eq_ignore_ascii_case(b"cellImage") {
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        let key = local_name(attr.key.as_ref());
+                        if key.eq_ignore_ascii_case(b"id") || key.eq_ignore_ascii_case(b"embed") {
                             embeds.push(attr.unescape_value()?.into_owned());
                         }
                     }
