@@ -310,6 +310,23 @@ fn create_sheet_rejects_names_longer_than_31_chars() {
 }
 
 #[test]
+fn create_sheet_rejects_names_longer_than_31_utf16_units() {
+    let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
+    // 🙂 is a non-BMP character (2 UTF-16 code units). 16 of them => 32 UTF-16 units.
+    let long_name = "🙂".repeat(16);
+    let err = state
+        .create_sheet(long_name)
+        .expect_err("expected sheet name too long error");
+    match err {
+        AppStateError::WhatIf(msg) => assert!(
+            msg.contains("cannot exceed"),
+            "expected length error, got {msg:?}"
+        ),
+        other => panic!("expected WhatIf error, got {other:?}"),
+    }
+}
+
+#[test]
 fn rename_sheet_rejects_invalid_character() {
     let (mut state, sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
     let err = state
@@ -328,6 +345,23 @@ fn rename_sheet_rejects_invalid_character() {
 fn rename_sheet_rejects_names_longer_than_31_chars() {
     let (mut state, sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
     let long_name = "a".repeat(32);
+    let err = state
+        .rename_sheet(&sheet1_id, long_name)
+        .expect_err("expected sheet name too long error");
+    match err {
+        AppStateError::WhatIf(msg) => assert!(
+            msg.contains("cannot exceed"),
+            "expected length error, got {msg:?}"
+        ),
+        other => panic!("expected WhatIf error, got {other:?}"),
+    }
+}
+
+#[test]
+fn rename_sheet_rejects_names_longer_than_31_utf16_units() {
+    let (mut state, sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
+    // 🙂 is a non-BMP character (2 UTF-16 code units). 16 of them => 32 UTF-16 units.
+    let long_name = "🙂".repeat(16);
     let err = state
         .rename_sheet(&sheet1_id, long_name)
         .expect_err("expected sheet name too long error");
