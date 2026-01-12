@@ -144,13 +144,15 @@ pub struct VbaDigitalSignatureStream {
     /// (commonly seen in the wild; distinct from the MS-OSHARED DigSigBlob/offset-based wrapper) and
     /// the header includes a version DWORD, this is the parsed value.
     pub digsig_info_version: Option<u32>,
-    /// If the signature stream starts with a *length-prefixed* DigSigInfoSerialized-like header,
-    /// this is the byte offset (from the start of the stream) where the PKCS#7/CMS `ContentInfo`
-    /// begins.
+    /// If the signature stream includes a wrapper that provides deterministic offsets to the
+    /// PKCS#7/CMS bytes (e.g. a length-prefixed DigSigInfoSerialized-like header or an MS-OSHARED
+    /// `DigSigBlob` offset table), this is the byte offset (from the start of the stream) where the
+    /// PKCS#7/CMS `ContentInfo` begins.
     pub pkcs7_offset: Option<usize>,
-    /// If the signature stream starts with a *length-prefixed* DigSigInfoSerialized-like header,
-    /// this is the length (in bytes) of the PKCS#7/CMS `ContentInfo` TLV (supports both strict DER
-    /// and BER/indefinite-length encodings).
+    /// If the signature stream includes a wrapper that provides deterministic offsets to the
+    /// PKCS#7/CMS bytes (e.g. a length-prefixed DigSigInfoSerialized-like header or an MS-OSHARED
+    /// `DigSigBlob` offset table), this is the length (in bytes) of the PKCS#7/CMS `ContentInfo` TLV
+    /// (supports both strict DER and BER/indefinite-length encodings).
     pub pkcs7_len: Option<usize>,
     /// Best-effort DigestInfo algorithm OID extracted from Authenticode's
     /// `SpcIndirectDataContent` (if present).
@@ -280,9 +282,12 @@ pub fn list_vba_digital_signatures(
         let signer_subject = extract_first_certificate_subject(&signature);
         let verification = verify_signature_blob(&signature);
         let (digsig_info_version, pkcs7_offset, pkcs7_len) =
-            match crate::offcrypto::parse_digsig_info_serialized(&signature) {
-                Some(info) => (info.version, Some(info.pkcs7_offset), Some(info.pkcs7_len)),
-                None => (None, None, None),
+            if let Some(info) = crate::offcrypto::parse_digsig_info_serialized(&signature) {
+                (info.version, Some(info.pkcs7_offset), Some(info.pkcs7_len))
+            } else if let Some(info) = crate::offcrypto::parse_digsig_blob(&signature) {
+                (None, Some(info.pkcs7_offset), Some(info.pkcs7_len))
+            } else {
+                (None, None, None)
             };
 
         let (signed_digest_algorithm_oid, signed_digest) =
@@ -464,9 +469,8 @@ pub fn verify_vba_digital_signature_bound(
                     let content_hash: [u8; 16] = Md5::digest(&content_normalized).into();
 
                     // Best-effort: only compute Agile hash when FormsNormalizedData can be derived.
-                    let agile_hash: Option<[u8; 16]> = forms_normalized_data(vba_project_bin)
-                        .ok()
-                        .map(|forms| {
+                    let agile_hash: Option<[u8; 16]> =
+                        forms_normalized_data(vba_project_bin).ok().map(|forms| {
                             let mut h = Md5::new();
                             h.update(&content_normalized);
                             h.update(&forms);
@@ -802,7 +806,10 @@ pub fn verify_vba_signature_binding_with_stream_path(
 /// Note: signature binding for `\x05DigitalSignatureExt` depends on knowing which signature stream
 /// variant is being verified. If you know the stream path, prefer
 /// [`verify_vba_signature_binding_with_stream_path`].
-pub fn verify_vba_signature_binding(vba_project_bin: &[u8], signature: &[u8]) -> VbaSignatureBinding {
+pub fn verify_vba_signature_binding(
+    vba_project_bin: &[u8],
+    signature: &[u8],
+) -> VbaSignatureBinding {
     verify_vba_signature_binding_with_stream_path(vba_project_bin, "", signature)
 }
 
@@ -1428,7 +1435,9 @@ pub fn verify_vba_project_signature_binding(
             first_comparison = Some(debug.clone());
         }
 
-        if signed_digest == content_hash_md5 || matches!(agile_hash_md5, Some(h) if signed_digest == h) {
+        if signed_digest == content_hash_md5
+            || matches!(agile_hash_md5, Some(h) if signed_digest == h)
+        {
             return Ok(VbaProjectBindingVerification::BoundVerified(debug));
         }
     }
@@ -1457,7 +1466,11 @@ fn signature_payload_candidates(signature_bytes: &[u8]) -> Vec<Vec<u8>> {
                 .into_iter()
                 .filter(|path| path.split('/').any(is_signature_component))
                 .collect::<Vec<_>>();
-            candidates.sort_by(|a, b| signature_path_rank(a).cmp(&signature_path_rank(b)).then(a.cmp(b)));
+            candidates.sort_by(|a, b| {
+                signature_path_rank(a)
+                    .cmp(&signature_path_rank(b))
+                    .then(a.cmp(b))
+            });
 
             let mut out = Vec::new();
             for path in candidates {

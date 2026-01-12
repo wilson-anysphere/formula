@@ -432,7 +432,8 @@ If you need to update or extend signature handling, start with:
   - signature stream discovery (`\x05DigitalSignature*`)
   - CMS verification and the `VbaDigitalSignature::binding` decision
 - `crates/formula-vba/src/offcrypto.rs`
-  - MS-OSHARED `DigSigBlob` parsing + the length-prefixed DigSigInfoSerialized-like wrapper (deterministic CMS offset/length)
+  - MS-OSHARED `DigSigBlob` parsing + the length-prefixed DigSigInfoSerialized-like wrapper
+    (deterministic CMS offset/length)
 - `crates/formula-vba/src/authenticode.rs`
   - `SignedData.encapContentInfo.eContent` parsing and `SpcIndirectDataContent` → `DigestInfo`
 - `crates/formula-vba/src/contents_hash.rs`
@@ -461,6 +462,9 @@ and binding behavior:
     and checks that tampering with non-signature streams flips `VbaSignatureBinding` to `NotBound`.
 - `crates/formula-vba/tests/contents_hash_v3.rs` and `crates/formula-vba/tests/signature_binding_v3.rs`
   - cover v3 transcript construction and `\x05DigitalSignatureExt` binding behavior.
+- `crates/formula-vba/tests/digsig_blob.rs`
+  - verifies that MS-OSHARED `DigSigBlob`-wrapped signatures are parsed deterministically (without
+    relying on DER scanning heuristics).
 
 ## Specs / references
 

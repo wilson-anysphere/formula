@@ -215,7 +215,8 @@ pub(crate) fn parse_digsig_info_serialized(stream: &[u8]) -> Option<DigSigInfoSe
             Some(header.proj_len),
             header.proj_len.checked_add(2),
             header.proj_len.checked_mul(2),
-            header.proj_len
+            header
+                .proj_len
                 .checked_mul(2)
                 .and_then(|n| n.checked_add(2)),
         ]
@@ -270,7 +271,8 @@ pub(crate) fn parse_digsig_info_serialized(stream: &[u8]) -> Option<DigSigInfoSe
                 match best {
                     Some((best_padding, best_info)) => {
                         if padding < best_padding
-                            || (padding == best_padding && info.pkcs7_offset > best_info.pkcs7_offset)
+                            || (padding == best_padding
+                                && info.pkcs7_offset > best_info.pkcs7_offset)
                         {
                             best = Some((padding, info));
                         }
@@ -789,7 +791,8 @@ mod tests {
         // the stored project name bytes still include the NUL terminator. This requires the parser
         // to consider the `proj_len * 2 + 2` interpretation.
         let project_name_utf16_with_nul: Vec<u16> = "VBAProject\0".encode_utf16().collect();
-        let project_name_utf16_no_nul = &project_name_utf16_with_nul[..project_name_utf16_with_nul.len() - 1];
+        let project_name_utf16_no_nul =
+            &project_name_utf16_with_nul[..project_name_utf16_with_nul.len() - 1];
 
         let mut project_name_bytes = Vec::new();
         for ch in &project_name_utf16_with_nul {
@@ -841,6 +844,73 @@ mod tests {
 
         let parsed = parse_digsig_info_serialized(&stream).expect("should parse");
         assert_eq!(parsed.pkcs7_offset, 12);
+        assert_eq!(parsed.pkcs7_len, pkcs7.len());
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn parses_pkcs7_payload_from_digsig_blob_wrapper() {
+        use openssl::pkcs7::Pkcs7;
+
+        let pkcs7 = make_pkcs7_signed_message(b"formula-vba-test");
+
+        // Minimal DigSigBlob:
+        // - u32le cb
+        // - u32le serializedPointer (=8)
+        // - DigSigInfoSerialized (starts at offset 8):
+        //     u32le cbSignature
+        //     u32le signatureOffset
+        //     (remaining fields set to 0)
+        // - signature bytes at signatureOffset
+        let digsig_blob_header_len = 8usize;
+        let digsig_info_len = 0x24usize; // 9 DWORDs (cbSignature/signatureOffset + 7 reserved fields)
+        let signature_offset = digsig_blob_header_len + digsig_info_len; // 0x2C
+
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&0u32.to_le_bytes()); // cb placeholder
+        stream.extend_from_slice(&8u32.to_le_bytes()); // serializedPointer
+        stream.extend_from_slice(&(pkcs7.len() as u32).to_le_bytes()); // cbSignature
+        stream.extend_from_slice(&(signature_offset as u32).to_le_bytes()); // signatureOffset
+        for _ in 0..7 {
+            stream.extend_from_slice(&0u32.to_le_bytes());
+        }
+        assert_eq!(stream.len(), signature_offset);
+        stream.extend_from_slice(&pkcs7);
+
+        let cb = (stream.len().saturating_sub(digsig_blob_header_len)) as u32;
+        stream[0..4].copy_from_slice(&cb.to_le_bytes());
+
+        let parsed = parse_digsig_blob(&stream).expect("should parse digsig blob");
+        assert_eq!(parsed.pkcs7_offset, signature_offset);
+        assert_eq!(parsed.pkcs7_len, pkcs7.len());
+
+        let pkcs7_slice = &stream[parsed.pkcs7_offset..parsed.pkcs7_offset + parsed.pkcs7_len];
+        Pkcs7::from_der(pkcs7_slice).expect("openssl should parse extracted pkcs7");
+    }
+
+    #[test]
+    fn parses_ber_indefinite_pkcs7_payload_from_digsig_blob_wrapper() {
+        let pkcs7 = include_bytes!("../tests/fixtures/cms_indefinite.der");
+
+        let digsig_blob_header_len = 8usize;
+        let digsig_info_len = 0x24usize;
+        let signature_offset = digsig_blob_header_len + digsig_info_len; // 0x2C
+
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&0u32.to_le_bytes()); // cb placeholder
+        stream.extend_from_slice(&8u32.to_le_bytes()); // serializedPointer
+        stream.extend_from_slice(&(pkcs7.len() as u32).to_le_bytes()); // cbSignature
+        stream.extend_from_slice(&(signature_offset as u32).to_le_bytes()); // signatureOffset
+        for _ in 0..7 {
+            stream.extend_from_slice(&0u32.to_le_bytes());
+        }
+        stream.extend_from_slice(pkcs7);
+
+        let cb = (stream.len().saturating_sub(digsig_blob_header_len)) as u32;
+        stream[0..4].copy_from_slice(&cb.to_le_bytes());
+
+        let parsed = parse_digsig_blob(&stream).expect("should parse digsig blob");
+        assert_eq!(parsed.pkcs7_offset, signature_offset);
         assert_eq!(parsed.pkcs7_len, pkcs7.len());
     }
 }

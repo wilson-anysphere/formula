@@ -47,14 +47,16 @@ fn run() -> Result<(), String> {
         println!("signature streams: {}", signatures.len());
         for (idx, sig) in signatures.iter().enumerate() {
             println!();
-            println!("[{}] stream_path: {}", idx + 1, escape_ole_path(&sig.stream_path));
+            println!(
+                "[{}] stream_path: {}",
+                idx + 1,
+                escape_ole_path(&sig.stream_path)
+            );
             println!("    stream_len: {} bytes", sig.signature.len());
             println!("    pkcs7_verification: {:?}", sig.verification);
             println!(
                 "    signer_subject: {}",
-                sig.signer_subject
-                    .as_deref()
-                    .unwrap_or("<not found>")
+                sig.signer_subject.as_deref().unwrap_or("<not found>")
             );
 
             match extract_signer_certificate_info(&sig.signature) {
@@ -76,12 +78,10 @@ fn run() -> Result<(), String> {
 
             match (sig.pkcs7_offset, sig.pkcs7_len) {
                 (Some(offset), Some(len)) => {
-                    println!(
-                        "    pkcs7_location: offset={offset} len={len} (DigSigInfoSerialized)"
-                    );
+                    println!("    pkcs7_location: offset={offset} len={len} (DigSig wrapper)");
                 }
                 _ => {
-                    println!("    pkcs7_location: <unknown> (DigSigInfoSerialized not detected)");
+                    println!("    pkcs7_location: <unknown> (no DigSig wrapper detected)");
                 }
             }
             if let Some(version) = sig.digsig_info_version {
@@ -184,9 +184,12 @@ fn extract_vba_project_bin_from_zip(path: &Path) -> Result<Vec<u8>, String> {
     };
 
     let mut buf = Vec::new();
-    entry
-        .read_to_end(&mut buf)
-        .map_err(|e| format!("failed to read xl/vbaProject.bin from {}: {e}", path.display()))?;
+    entry.read_to_end(&mut buf).map_err(|e| {
+        format!(
+            "failed to read xl/vbaProject.bin from {}: {e}",
+            path.display()
+        )
+    })?;
     Ok(buf)
 }
 
