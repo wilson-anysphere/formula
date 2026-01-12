@@ -432,6 +432,103 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     expect(versionResult.notificationsCount > 0 || versionResult.invoked).toBe(true);
   });
 
+  test("menu-check-updates triggers a fallback check_for_updates invoke (and suppresses duplicates)", async ({ page }) => {
+    await page.addInitScript(() => {
+      const listeners: Record<string, Array<(event: any) => void>> = {};
+      const emitted: Array<{ event: string; payload: any }> = [];
+      const invokes: Array<{ cmd: string; args: any }> = [];
+
+      (window as any).__tauriListeners = listeners;
+      (window as any).__tauriEmittedEvents = emitted;
+      (window as any).__tauriInvokes = invokes;
+
+      const windowHandle = { show: async () => {}, setFocus: async () => {} };
+
+      (window as any).__TAURI__ = {
+        core: {
+          invoke: async (cmd: string, args: any) => {
+            invokes.push({ cmd, args });
+            return null;
+          },
+        },
+        event: {
+          listen: async (name: string, handler: any) => {
+            if (!Array.isArray(listeners[name])) listeners[name] = [];
+            listeners[name].push(handler);
+            return () => {
+              const arr = listeners[name];
+              if (!Array.isArray(arr)) return;
+              const idx = arr.indexOf(handler);
+              if (idx >= 0) arr.splice(idx, 1);
+            };
+          },
+          emit: async (event: string, payload?: any) => {
+            emitted.push({ event, payload: payload ?? null });
+          },
+        },
+        window: {
+          getCurrentWebviewWindow: () => windowHandle,
+          getCurrentWindow: () => windowHandle,
+          getCurrent: () => windowHandle,
+          appWindow: windowHandle,
+        },
+      };
+    });
+
+    await gotoDesktop(page);
+
+    // Ensure all desktop listeners installed before we emit.
+    await page.waitForFunction(() =>
+      Boolean((window as any).__tauriEmittedEvents?.some((entry: any) => entry?.event === "updater-ui-ready")),
+    );
+
+    await page.evaluate(() => {
+      const invokes = (window as any).__tauriInvokes;
+      if (Array.isArray(invokes)) invokes.length = 0;
+    });
+
+    await waitForTauriListeners(page, "menu-check-updates");
+    await dispatchTauriEvent(page, "menu-check-updates", null);
+
+    // The listener uses a small setTimeout before invoking `check_for_updates`.
+    await page.waitForFunction(
+      () => Array.isArray((window as any).__tauriInvokes) && (window as any).__tauriInvokes.some((e: any) => e?.cmd === "check_for_updates"),
+      undefined,
+      { timeout: 5_000 },
+    );
+    const firstInvoke = await page.evaluate(() =>
+      (window as any).__tauriInvokes?.find((entry: any) => entry?.cmd === "check_for_updates") ?? null,
+    );
+    expect(firstInvoke).not.toBeNull();
+    expect(firstInvoke.args?.source).toBe("manual");
+
+    // If the backend has already kicked off a manual update check, menu-check-updates should not
+    // trigger another frontend-initiated check.
+    await page.evaluate(() => {
+      const invokes = (window as any).__tauriInvokes;
+      if (Array.isArray(invokes)) invokes.length = 0;
+    });
+
+    await waitForTauriListeners(page, "update-check-started");
+    await dispatchTauriEvent(page, "update-check-started", { source: "manual" });
+    await dispatchTauriEvent(page, "menu-check-updates", null);
+
+    let invoked = false;
+    try {
+      await page.waitForFunction(
+        () =>
+          Array.isArray((window as any).__tauriInvokes) &&
+          (window as any).__tauriInvokes.some((e: any) => e?.cmd === "check_for_updates"),
+        undefined,
+        { timeout: 400 },
+      );
+      invoked = true;
+    } catch {
+      invoked = false;
+    }
+    expect(invoked).toBe(false);
+  });
+
   test("startup update-available events do not open the in-app dialog and instead request a system notification", async ({
     page,
   }) => {
