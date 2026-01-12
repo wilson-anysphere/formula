@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
 
+use quick_xml::events::{BytesEnd, BytesStart, Event};
+use quick_xml::{Reader, Writer};
 use roxmltree::Document;
 use zip::ZipArchive;
 
@@ -644,6 +646,9 @@ fn merge_pivot_caches(
 ) -> Result<String, ChartExtractionError> {
     let pivot_caches_range = existing_pivot_caches.range();
     let existing_section = &workbook_xml[pivot_caches_range.clone()];
+    let pivot_caches_prefix = element_prefix_at(workbook_xml, pivot_caches_range.start);
+    let pivot_caches_tag = crate::xml::prefixed_tag(pivot_caches_prefix, "pivotCaches");
+    let close_tag = format!("</{pivot_caches_tag}>");
 
     let existing_cache_ids: HashSet<u32> = existing_pivot_caches
         .children()
@@ -671,22 +676,33 @@ fn merge_pivot_caches(
 
     let mut inserted_xml = String::new();
     for entry in &to_insert {
-        inserted_xml.push_str(&entry.raw_xml);
+        // Make sure inserted entries follow the existing SpreadsheetML prefix style.
+        let rewritten = rewrite_spreadsheetml_prefix_in_fragment(
+            &entry.raw_xml,
+            pivot_caches_prefix,
+            &["pivotCache"],
+            "pivotCaches",
+        )?;
+        inserted_xml.push_str(&rewritten);
     }
 
     let mut new_section = if is_self_closing_element(existing_section) {
         let (start, trailing_ws) = split_trailing_whitespace(existing_section);
-        let start = start.trim_end().strip_suffix("/>").unwrap_or(start.trim_end());
+        let start = start.trim_end();
+        let start = start.strip_suffix("/>").unwrap_or(start);
+        let start = start.trim_end();
         let mut section = String::new();
         section.push_str(start);
         section.push('>');
         section.push_str(&inserted_xml);
-        section.push_str("</pivotCaches>");
+        section.push_str(&close_tag);
         section.push_str(trailing_ws);
         section
     } else {
-        let close_tag_pos = existing_section.rfind("</pivotCaches>").ok_or_else(|| {
-            ChartExtractionError::XmlStructure("workbook.xml: missing </pivotCaches>".to_string())
+        let close_tag_pos = existing_section.rfind(&close_tag).ok_or_else(|| {
+            ChartExtractionError::XmlStructure(format!(
+                "workbook.xml: missing {close_tag} in <pivotCaches>"
+            ))
         })?;
         let mut section =
             String::with_capacity(existing_section.len().saturating_add(inserted_xml.len()));
@@ -743,14 +759,34 @@ fn insert_pivot_caches(
     // 3) Fallback: insert before closing `</workbook>`.
     let insert_idx = match insert_idx {
         Some(idx) => idx,
-        None => workbook_xml.rfind("</workbook>").ok_or_else(|| {
-            ChartExtractionError::XmlStructure("workbook.xml: missing </workbook>".to_string())
-        })?,
+        None => {
+            let root_start = workbook_node.range().start;
+            let workbook_prefix = element_prefix_at(workbook_xml, root_start);
+            let close_tag_len = crate::xml::prefixed_tag(workbook_prefix, "workbook").len() + 3;
+            workbook_node
+                .range()
+                .end
+                .checked_sub(close_tag_len)
+                .ok_or_else(|| {
+                    ChartExtractionError::XmlStructure(
+                        "workbook.xml: invalid </workbook> close tag".to_string(),
+                    )
+                })?
+        }
     };
+
+    let root_start = workbook_node.range().start;
+    let workbook_prefix = element_prefix_at(workbook_xml, root_start);
+    let preserved_pivot_caches_xml = rewrite_spreadsheetml_prefix_in_fragment(
+        preserved_pivot_caches_xml,
+        workbook_prefix,
+        &["pivotCaches", "pivotCache"],
+        "pivotCaches",
+    )?;
 
     let mut out = String::with_capacity(workbook_xml.len() + preserved_pivot_caches_xml.len());
     out.push_str(&workbook_xml[..insert_idx]);
-    out.push_str(preserved_pivot_caches_xml);
+    out.push_str(&preserved_pivot_caches_xml);
     out.push_str(&workbook_xml[insert_idx..]);
     Ok(out)
 }
@@ -759,7 +795,28 @@ fn parse_pivot_cache_entries(xml: &str) -> Result<Vec<PivotCacheEntry>, ChartExt
     // The preserved `<pivotCaches>` section usually relies on `xmlns:r` declared on the
     // surrounding `<workbook>` element. When parsing it in isolation we need to provide
     // a namespace binding for the `r:` prefix so `r:id="..."` attributes remain valid.
-    let wrapped = format!(r#"<root xmlns:r="{REL_NS}">{xml}</root>"#);
+    let spreadsheet_prefix = detect_prefix_in_fragment(xml, "pivotCaches")
+        .or_else(|| detect_prefix_in_fragment(xml, "pivotCache"));
+    let prefix_decl = spreadsheet_prefix
+        .as_deref()
+        .map(|p| format!(" xmlns:{p}=\"{SPREADSHEETML_NS}\""))
+        .unwrap_or_default();
+
+    // Workbook/worksheet fragments frequently inherit the relationships namespace declaration from
+    // an ancestor element. Declare any prefixes we see on `*:id="..."` attributes so the fragment
+    // is namespace-well-formed when parsed in isolation.
+    let mut rel_decls = String::new();
+    for prefix in detect_attr_prefixes(xml, "id") {
+        if prefix == "xmlns" {
+            continue;
+        }
+        if spreadsheet_prefix.as_deref() == Some(prefix.as_str()) {
+            continue;
+        }
+        rel_decls.push_str(&format!(" xmlns:{prefix}=\"{REL_NS}\""));
+    }
+
+    let wrapped = format!(r#"<root{rel_decls}{prefix_decl}>{xml}</root>"#);
     let doc = Document::parse(&wrapped)
         .map_err(|e| ChartExtractionError::XmlParse("pivotCaches".to_string(), e))?;
 
@@ -790,17 +847,57 @@ fn ensure_workbook_has_r_namespace(
         return Ok(workbook_xml.to_string());
     }
 
-    let workbook_start = workbook_xml.find("<workbook").ok_or_else(|| {
-        ChartExtractionError::XmlStructure(format!("{part_name}: missing <workbook"))
-    })?;
-    let tag_end_rel = workbook_xml[workbook_start..].find('>').ok_or_else(|| {
-        ChartExtractionError::XmlStructure(format!("{part_name}: invalid <workbook> start tag"))
-    })?;
-    let insert_pos = workbook_start + tag_end_rel;
+    // This helper is commonly called when we've just inserted `r:id="..."` attributes into a
+    // workbook that did not previously declare `xmlns:r`. At that point the XML isn't
+    // namespace-well-formed, so we can't rely on a namespace-aware parser like `roxmltree`.
+    //
+    // Use a fast streaming parser to locate the `<workbook ...>` start tag and patch it in-place.
+    let mut reader = Reader::from_str(workbook_xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
 
-    let mut out = workbook_xml.to_string();
-    out.insert_str(insert_pos, &format!(" xmlns:r=\"{REL_NS}\""));
-    Ok(out)
+    loop {
+        let pos_before = reader.buffer_position() as usize;
+        let event = reader.read_event_into(&mut buf).map_err(|e| {
+            ChartExtractionError::XmlStructure(format!("{part_name}: xml parse error: {e}"))
+        })?;
+        let pos_after = reader.buffer_position() as usize;
+
+        match event {
+            Event::Start(ref e) | Event::Empty(ref e) if e.local_name().as_ref() == b"workbook" => {
+                let tag = workbook_xml
+                    .get(pos_before..pos_after)
+                    .ok_or_else(|| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: invalid <workbook> start tag offsets"
+                        ))
+                    })?;
+                let trimmed = tag.trim_end();
+                let insert_rel = if trimmed.ends_with("/>") {
+                    trimmed.len().saturating_sub(2)
+                } else if trimmed.ends_with('>') {
+                    trimmed.len().saturating_sub(1)
+                } else {
+                    return Err(ChartExtractionError::XmlStructure(format!(
+                        "{part_name}: invalid <workbook> start tag"
+                    )));
+                };
+                let insert_pos = pos_before + insert_rel;
+
+                let mut out = workbook_xml.to_string();
+                out.insert_str(insert_pos, &format!(" xmlns:r=\"{REL_NS}\""));
+                return Ok(out);
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+
+        buf.clear();
+    }
+
+    Err(ChartExtractionError::XmlStructure(format!(
+        "{part_name}: missing <workbook>"
+    )))
 }
 
 fn is_self_closing_element(xml: &str) -> bool {
@@ -992,16 +1089,212 @@ fn rewrite_relationship_ids(
         return Ok(xml_bytes.to_vec());
     }
 
-    let mut xml = std::str::from_utf8(xml_bytes)
-        .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?
-        .to_string();
+    let xml = std::str::from_utf8(xml_bytes)
+        .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
 
-    for (old_id, new_id) in id_map {
-        xml = xml.replace(&format!("r:id=\"{old_id}\""), &format!("r:id=\"{new_id}\""));
-        xml = xml.replace(&format!("r:id='{old_id}'"), &format!("r:id='{new_id}'"));
+    // Preserved subtrees often rely on `xmlns:*` declarations on an ancestor element (e.g.
+    // `<workbook>`/`<worksheet>`). Seed the namespace map with any `prefix:id="..."` prefixes we see
+    // so we can resolve relationship attributes even when the prefix declaration is missing from
+    // the fragment itself.
+    let mut base_ns_map: HashMap<String, String> = HashMap::new();
+    for prefix in detect_attr_prefixes(xml, "id") {
+        if prefix == "xmlns" {
+            continue;
+        }
+        base_ns_map.insert(prefix, REL_NS.to_string());
     }
 
-    Ok(xml.into_bytes())
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut writer = Writer::new(Vec::with_capacity(xml_bytes.len()));
+    let mut buf = Vec::new();
+
+    // Namespace stack, one entry per open element. The top represents the in-scope mappings.
+    let mut ns_stack: Vec<HashMap<String, String>> = Vec::new();
+
+    loop {
+        let event = reader.read_event_into(&mut buf).map_err(|e| {
+            ChartExtractionError::XmlStructure(format!("{part_name}: xml parse error: {e}"))
+        })?;
+
+        match event {
+            Event::Eof => break,
+            Event::Start(ref e) => {
+                let mut current = ns_stack
+                    .last()
+                    .cloned()
+                    .unwrap_or_else(|| base_ns_map.clone());
+
+                // Apply any in-fragment `xmlns:...` declarations so we can resolve attribute
+                // namespace URIs correctly.
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr.map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: xml attribute error: {e}"
+                        ))
+                    })?;
+                    let key = attr.key.as_ref();
+                    if let Some(prefix) = key.strip_prefix(b"xmlns:") {
+                        let prefix = std::str::from_utf8(prefix).map_err(|_| {
+                            ChartExtractionError::XmlStructure(format!(
+                                "{part_name}: non-utf8 xmlns prefix"
+                            ))
+                        })?;
+                        let uri = attr.unescape_value().map_err(|e| {
+                            ChartExtractionError::XmlStructure(format!(
+                                "{part_name}: xml attribute error: {e}"
+                            ))
+                        })?;
+                        current.insert(prefix.to_string(), uri.into_owned());
+                    }
+                }
+
+                let qname = e.name();
+                let name = std::str::from_utf8(qname.as_ref()).map_err(|_| {
+                    ChartExtractionError::XmlStructure(format!("{part_name}: non-utf8 element name"))
+                })?;
+                let mut out = BytesStart::new(name);
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr.map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: xml attribute error: {e}"
+                        ))
+                    })?;
+                    let key = attr.key.as_ref();
+
+                    let colon = key.iter().position(|b| *b == b':');
+                    let Some(colon) = colon else {
+                        out.push_attribute((key, attr.value.as_ref()));
+                        continue;
+                    };
+                    let prefix_bytes = &key[..colon];
+                    let local = &key[colon + 1..];
+                    if local != b"id" {
+                        out.push_attribute((key, attr.value.as_ref()));
+                        continue;
+                    }
+                    let prefix = std::str::from_utf8(prefix_bytes).map_err(|_| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: non-utf8 attribute prefix"
+                        ))
+                    })?;
+                    if current.get(prefix).map(|s| s.as_str()) != Some(REL_NS) {
+                        out.push_attribute((key, attr.value.as_ref()));
+                        continue;
+                    }
+
+                    let value = attr.unescape_value().map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: xml attribute error: {e}"
+                        ))
+                    })?;
+                    if let Some(new_id) = id_map.get(value.as_ref()) {
+                        out.push_attribute((key, new_id.as_bytes()));
+                    } else {
+                        out.push_attribute((key, attr.value.as_ref()));
+                    }
+                }
+
+                writer
+                    .write_event(Event::Start(out))
+                    .map_err(|e| ChartExtractionError::XmlStructure(format!("{part_name}: {e}")))?;
+
+                ns_stack.push(current);
+            }
+            Event::Empty(ref e) => {
+                let mut current = ns_stack
+                    .last()
+                    .cloned()
+                    .unwrap_or_else(|| base_ns_map.clone());
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr.map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: xml attribute error: {e}"
+                        ))
+                    })?;
+                    let key = attr.key.as_ref();
+                    if let Some(prefix) = key.strip_prefix(b"xmlns:") {
+                        let prefix = std::str::from_utf8(prefix).map_err(|_| {
+                            ChartExtractionError::XmlStructure(format!(
+                                "{part_name}: non-utf8 xmlns prefix"
+                            ))
+                        })?;
+                        let uri = attr.unescape_value().map_err(|e| {
+                            ChartExtractionError::XmlStructure(format!(
+                                "{part_name}: xml attribute error: {e}"
+                            ))
+                        })?;
+                        current.insert(prefix.to_string(), uri.into_owned());
+                    }
+                }
+
+                let qname = e.name();
+                let name = std::str::from_utf8(qname.as_ref()).map_err(|_| {
+                    ChartExtractionError::XmlStructure(format!("{part_name}: non-utf8 element name"))
+                })?;
+                let mut out = BytesStart::new(name);
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr.map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: xml attribute error: {e}"
+                        ))
+                    })?;
+                    let key = attr.key.as_ref();
+
+                    let colon = key.iter().position(|b| *b == b':');
+                    let Some(colon) = colon else {
+                        out.push_attribute((key, attr.value.as_ref()));
+                        continue;
+                    };
+                    let prefix_bytes = &key[..colon];
+                    let local = &key[colon + 1..];
+                    if local != b"id" {
+                        out.push_attribute((key, attr.value.as_ref()));
+                        continue;
+                    }
+                    let prefix = std::str::from_utf8(prefix_bytes).map_err(|_| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: non-utf8 attribute prefix"
+                        ))
+                    })?;
+                    if current.get(prefix).map(|s| s.as_str()) != Some(REL_NS) {
+                        out.push_attribute((key, attr.value.as_ref()));
+                        continue;
+                    }
+
+                    let value = attr.unescape_value().map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: xml attribute error: {e}"
+                        ))
+                    })?;
+                    if let Some(new_id) = id_map.get(value.as_ref()) {
+                        out.push_attribute((key, new_id.as_bytes()));
+                    } else {
+                        out.push_attribute((key, attr.value.as_ref()));
+                    }
+                }
+
+                writer
+                    .write_event(Event::Empty(out))
+                    .map_err(|e| ChartExtractionError::XmlStructure(format!("{part_name}: {e}")))?;
+            }
+            Event::End(ref e) => {
+                writer
+                    .write_event(Event::End(e.to_owned()))
+                    .map_err(|e| ChartExtractionError::XmlStructure(format!("{part_name}: {e}")))?;
+                ns_stack.pop();
+            }
+            _ => {
+                writer.write_event(event.to_owned()).map_err(|e| {
+                    ChartExtractionError::XmlStructure(format!("{part_name}: {e}"))
+                })?;
+            }
+        }
+
+        buf.clear();
+    }
+
+    Ok(writer.into_inner())
 }
 
 fn extract_pivot_table_rids(fragment: &str, context: &str) -> Result<Vec<String>, ChartExtractionError> {
@@ -1011,7 +1304,19 @@ fn extract_pivot_table_rids(fragment: &str, context: &str) -> Result<Vec<String>
         .as_deref()
         .map(|p| format!(" xmlns:{p}=\"{SPREADSHEETML_NS}\""))
         .unwrap_or_default();
-    let wrapped = format!("<worksheet xmlns:r=\"{REL_NS}\"{prefix_decl}>{fragment}</worksheet>");
+
+    let mut rel_decls = String::new();
+    for prefix in detect_attr_prefixes(fragment, "id") {
+        if prefix == "xmlns" {
+            continue;
+        }
+        if maybe_prefix.as_deref() == Some(prefix.as_str()) {
+            continue;
+        }
+        rel_decls.push_str(&format!(" xmlns:{prefix}=\"{REL_NS}\""));
+    }
+
+    let wrapped = format!("<worksheet{rel_decls}{prefix_decl}>{fragment}</worksheet>");
     let doc = Document::parse(&wrapped)
         .map_err(|e| ChartExtractionError::XmlParse(context.to_string(), e))?;
 
@@ -1047,6 +1352,169 @@ fn detect_prefix_in_fragment(fragment: &str, local: &str) -> Option<String> {
     let lt = fragment[..idx].rfind('<')?;
     let prefix = &fragment[lt + 1..idx];
     (!prefix.is_empty()).then(|| prefix.to_string())
+}
+
+fn detect_attr_prefixes(fragment: &str, local: &str) -> HashSet<String> {
+    let bytes = fragment.as_bytes();
+    let mut prefixes = HashSet::new();
+    let needle = format!(":{local}");
+    let mut i = 0usize;
+    while let Some(rel_idx) = fragment[i..].find(&needle) {
+        let idx = i + rel_idx;
+
+        // Confirm this looks like an attribute name: `prefix:local ...=...`
+        let mut j = idx + needle.len();
+        while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        if j >= bytes.len() || bytes[j] != b'=' {
+            i = idx + needle.len();
+            continue;
+        }
+
+        // Scan backwards for the beginning of the prefix.
+        let mut start = idx;
+        while start > 0 {
+            let c = bytes[start - 1];
+            let is_name_char =
+                c.is_ascii_alphanumeric() || c == b'_' || c == b'-' || c == b'.';
+            if !is_name_char {
+                break;
+            }
+            start -= 1;
+        }
+        if start < idx {
+            prefixes.insert(fragment[start..idx].to_string());
+        }
+
+        i = idx + needle.len();
+    }
+    prefixes
+}
+
+fn rewrite_spreadsheetml_prefix_in_fragment(
+    fragment: &str,
+    desired_prefix: Option<&str>,
+    targets: &[&str],
+    part_name: &str,
+) -> Result<String, ChartExtractionError> {
+    let mut reader = Reader::from_str(fragment);
+    reader.config_mut().trim_text(false);
+    let mut writer = Writer::new(Vec::with_capacity(fragment.len()));
+    let mut buf = Vec::new();
+
+    loop {
+        let event = reader.read_event_into(&mut buf).map_err(|e| {
+            ChartExtractionError::XmlStructure(format!("{part_name}: xml parse error: {e}"))
+        })?;
+
+        match event {
+            Event::Eof => break,
+            Event::Start(ref e) => {
+                let local_name = e.local_name();
+                let local = local_name.as_ref();
+                let should_rewrite = targets.iter().any(|t| local == t.as_bytes());
+                if should_rewrite {
+                    let local_str = std::str::from_utf8(local).map_err(|_| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: non-utf8 element name"
+                        ))
+                    })?;
+                    let new_name = crate::xml::prefixed_tag(desired_prefix, local_str);
+                    let mut out = BytesStart::new(new_name.as_str());
+                    for attr in e.attributes().with_checks(false) {
+                        let attr = attr.map_err(|e| {
+                            ChartExtractionError::XmlStructure(format!(
+                                "{part_name}: xml attribute error: {e}"
+                            ))
+                        })?;
+                        out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+                    }
+                    writer.write_event(Event::Start(out)).map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: xml write error: {e}"
+                        ))
+                    })?;
+                } else {
+                    writer.write_event(Event::Start(e.to_owned())).map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: xml write error: {e}"
+                        ))
+                    })?;
+                }
+            }
+            Event::Empty(ref e) => {
+                let local_name = e.local_name();
+                let local = local_name.as_ref();
+                let should_rewrite = targets.iter().any(|t| local == t.as_bytes());
+                if should_rewrite {
+                    let local_str = std::str::from_utf8(local).map_err(|_| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: non-utf8 element name"
+                        ))
+                    })?;
+                    let new_name = crate::xml::prefixed_tag(desired_prefix, local_str);
+                    let mut out = BytesStart::new(new_name.as_str());
+                    for attr in e.attributes().with_checks(false) {
+                        let attr = attr.map_err(|e| {
+                            ChartExtractionError::XmlStructure(format!(
+                                "{part_name}: xml attribute error: {e}"
+                            ))
+                        })?;
+                        out.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
+                    }
+                    writer.write_event(Event::Empty(out)).map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: xml write error: {e}"
+                        ))
+                    })?;
+                } else {
+                    writer.write_event(Event::Empty(e.to_owned())).map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: xml write error: {e}"
+                        ))
+                    })?;
+                }
+            }
+            Event::End(ref e) => {
+                let local_name = e.local_name();
+                let local = local_name.as_ref();
+                let should_rewrite = targets.iter().any(|t| local == t.as_bytes());
+                if should_rewrite {
+                    let local_str = std::str::from_utf8(local).map_err(|_| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: non-utf8 element name"
+                        ))
+                    })?;
+                    let new_name = crate::xml::prefixed_tag(desired_prefix, local_str);
+                    writer
+                        .write_event(Event::End(BytesEnd::new(new_name.as_str())))
+                        .map_err(|e| {
+                            ChartExtractionError::XmlStructure(format!(
+                                "{part_name}: xml write error: {e}"
+                            ))
+                        })?;
+                } else {
+                    writer.write_event(Event::End(e.to_owned())).map_err(|e| {
+                        ChartExtractionError::XmlStructure(format!(
+                            "{part_name}: xml write error: {e}"
+                        ))
+                    })?;
+                }
+            }
+            _ => {
+                writer.write_event(event.to_owned()).map_err(|e| {
+                    ChartExtractionError::XmlStructure(format!("{part_name}: xml write error: {e}"))
+                })?;
+            }
+        }
+
+        buf.clear();
+    }
+
+    String::from_utf8(writer.into_inner()).map_err(|_| {
+        ChartExtractionError::XmlStructure(format!("{part_name}: xml output was not utf-8"))
+    })
 }
 
 fn root_start_has_r_namespace(
@@ -1110,5 +1578,57 @@ mod tests {
         let pivot_pos = updated_str.find("<pivotTables").unwrap();
         let ext_pos = updated_str.find("<extLst").unwrap();
         assert!(pivot_pos < ext_pos, "pivotTables should be inserted before extLst");
+    }
+
+    #[test]
+    fn inserts_pivot_caches_into_prefixed_workbook() {
+        let workbook = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheets/></x:workbook>"#;
+        let fragment = r#"<x:pivotCaches><x:pivotCache cacheId="1" r:id="rId1"/></x:pivotCaches>"#;
+
+        let updated =
+            apply_preserved_pivot_caches_to_workbook_xml(workbook, fragment).expect("patch");
+
+        Document::parse(&updated).expect("output should be parseable XML");
+        assert!(updated.contains("<x:pivotCaches"), "missing inserted block: {updated}");
+        assert!(!updated.contains("</workbook>"), "introduced unprefixed close tag: {updated}");
+        assert!(
+            !updated.contains("</pivotCaches>"),
+            "introduced unprefixed pivotCaches close tag: {updated}"
+        );
+    }
+
+    #[test]
+    fn merges_into_self_closing_prefixed_pivot_caches() {
+        let workbook = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:pivotCaches/></x:workbook>"#;
+        let fragment = r#"<x:pivotCaches><x:pivotCache cacheId="1" r:id="rId1"/></x:pivotCaches>"#;
+
+        let updated =
+            apply_preserved_pivot_caches_to_workbook_xml(workbook, fragment).expect("patch");
+
+        Document::parse(&updated).expect("output should be parseable XML");
+        assert!(updated.contains("</x:pivotCaches>"), "missing prefixed close tag: {updated}");
+        assert!(
+            !updated.contains("</pivotCaches>"),
+            "introduced unprefixed pivotCaches close tag: {updated}"
+        );
+    }
+
+    #[test]
+    fn rewrites_relationship_ids_with_non_r_prefix() {
+        let fragment = format!(r#"<a xmlns:rel="{REL_NS}" rel:id="rId1"/>"#);
+        let mut id_map = HashMap::new();
+        id_map.insert("rId1".to_string(), "rId9".to_string());
+
+        let rewritten = rewrite_relationship_ids(fragment.as_bytes(), "test", &id_map)
+            .expect("rewrite relationship ids");
+        let rewritten = std::str::from_utf8(&rewritten).unwrap();
+        assert!(
+            rewritten.contains(r#"rel:id="rId9""#),
+            "unexpected output: {rewritten}"
+        );
+        assert!(
+            !rewritten.contains(r#"rel:id="rId1""#),
+            "unexpected output: {rewritten}"
+        );
     }
 }
