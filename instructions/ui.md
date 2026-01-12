@@ -167,6 +167,7 @@ FUNCTIONALITY (# of Excel buttons/features)
 | Shortcut | Action |
 |----------|--------|
 | `Cmd/Ctrl+Shift+P` | Open command palette |
+| `/` (in command palette) | Search shortcuts/keybindings |
 
 ### AI Shortcuts
 
