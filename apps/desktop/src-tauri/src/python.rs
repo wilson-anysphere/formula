@@ -927,4 +927,97 @@ mod tests {
             "unexpected error: {err}"
         );
     }
+
+    #[test]
+    fn python_rpc_create_sheet_rejects_duplicate_name_with_canonical_error() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        let err = host
+            .handle_rpc("create_sheet", Some(json!({ "name": "sheet1" })))
+            .expect_err("expected create_sheet to reject duplicate name");
+        assert_eq!(
+            err,
+            formula_model::SheetNameError::DuplicateName.to_string(),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn python_rpc_create_sheet_rejects_invalid_character_with_canonical_error() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        let err = host
+            .handle_rpc("create_sheet", Some(json!({ "name": "Bad/Name" })))
+            .expect_err("expected create_sheet to reject invalid name");
+        assert_eq!(
+            err,
+            formula_model::SheetNameError::InvalidCharacter('/').to_string(),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn python_rpc_create_sheet_rejects_leading_or_trailing_apostrophe_with_canonical_error() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        let err = host
+            .handle_rpc("create_sheet", Some(json!({ "name": "'Leading" })))
+            .expect_err("expected create_sheet to reject invalid name");
+        assert_eq!(
+            err,
+            formula_model::SheetNameError::LeadingOrTrailingApostrophe.to_string(),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn python_rpc_create_sheet_rejects_too_long_name_with_canonical_error() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        let long_name = "a".repeat(formula_model::EXCEL_MAX_SHEET_NAME_LEN + 1);
+        let err = host
+            .handle_rpc("create_sheet", Some(json!({ "name": long_name })))
+            .expect_err("expected create_sheet to reject too-long name");
+        assert_eq!(
+            err,
+            formula_model::SheetNameError::TooLong.to_string(),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn python_rpc_create_sheet_rejects_too_long_name_by_utf16_units_with_canonical_error() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        // 🙂 is 2 UTF-16 code units; 16 of them is 32 units (over Excel's 31-unit limit).
+        let long_name = "🙂".repeat(16);
+        let err = host
+            .handle_rpc("create_sheet", Some(json!({ "name": long_name })))
+            .expect_err("expected create_sheet to reject too-long name");
+        assert_eq!(
+            err,
+            formula_model::SheetNameError::TooLong.to_string(),
+            "unexpected error: {err}"
+        );
+    }
 }
