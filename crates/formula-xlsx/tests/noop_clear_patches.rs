@@ -223,13 +223,7 @@ fn streaming_empty_formula_is_treated_as_noop_clear_for_missing_cell(
     patches.set_cell(
         "Sheet1",
         CellRef::from_a1("Z100")?,
-        CellPatch::Set {
-            value: CellValue::Empty,
-            formula: Some("=".to_string()),
-            style: None,
-            vm: None,
-            cm: None,
-        },
+        CellPatch::set_value_with_formula(CellValue::Empty, "="),
     );
 
     let mut out = Cursor::new(Vec::new());
@@ -259,13 +253,7 @@ fn in_memory_empty_formula_is_treated_as_noop_clear_for_missing_cell(
     patches.set_cell(
         "Sheet1",
         CellRef::from_a1("Z100")?,
-        CellPatch::Set {
-            value: CellValue::Empty,
-            formula: Some("=".to_string()),
-            style: None,
-            vm: None,
-            cm: None,
-        },
+        CellPatch::set_value_with_formula(CellValue::Empty, "="),
     );
     pkg.apply_cell_patches(&patches)?;
 

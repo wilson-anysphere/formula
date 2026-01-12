@@ -88,7 +88,9 @@ pub use package::{
     CellPatch as PackageCellPatch, CellPatchSheet, MacroPresence, WorkbookKind, WorksheetPartInfo,
     XlsxError, XlsxPackage,
 };
-pub use patch::{CellPatch, CellStyleRef, WorkbookCellPatches, WorksheetCellPatches};
+pub use patch::{
+    CellPatch, CellStyleRef, WorkbookCellPatches, WorksheetCellPatches,
+};
 pub use pivots::{
     cache_records::{pivot_cache_datetime_to_naive_date, PivotCacheRecordsReader, PivotCacheValue},
     graph::{PivotTableInstance, XlsxPivotGraph},
