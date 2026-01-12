@@ -34,7 +34,7 @@ workbook.xlsx (ZIP archive)
 │   ├── richData/                # Excel 365+ rich values (data types, in-cell images; naming varies: richValue* vs rdrichvalue*)
 │   │   ├── rdrichvalue.xml
 │   │   ├── rdrichvaluestructure.xml
-│   │   ├── rdrichvaluetypes.xml
+│   │   ├── rdRichValueTypes.xml
 │   │   ├── richValueRel.xml     # Indirection to rich-value relationships (e.g. images)
 │   │   └── _rels/
 │   │       └── richValueRel.xml.rels  # richValueRel -> xl/media/* (image binaries)
@@ -295,7 +295,7 @@ Representative `xl/_rels/workbook.xml.rels` snippet:
                 Target="richData/rdrichvaluestructure.xml"/>
   <Relationship Id="rIdRVT"
                 Type="http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes"
-                Target="richData/rdrichvaluetypes.xml"/>
+                Target="richData/rdRichValueTypes.xml"/>
 
   <Relationship Id="rIdRel"
                 Type="http://schemas.microsoft.com/office/2022/10/relationships/richValueRel"
@@ -335,18 +335,18 @@ Some packages instead attach the richData parts to `xl/metadata.xml` via `xl/_re
 </Relationships>
 ```
 
-##### `xl/richData/rdrichvaluetypes.xml` + `xl/richData/rdrichvaluestructure.xml` (type/structure tables)
+##### `xl/richData/rdRichValueTypes.xml` + `xl/richData/rdrichvaluestructure.xml` (type/structure tables)
 
 Excel commonly emits additional Rich Data “schema” parts:
 
-- `xl/richData/rdrichvaluetypes.xml` — rich value type IDs (numeric) and links to a structure ID
+- `xl/richData/rdRichValueTypes.xml` — rich value type IDs (numeric) and links to a structure ID
 - `xl/richData/rdrichvaluestructure.xml` — rich value structures (field layouts)
 
 These are not always required to follow the **image byte** chain above (which mainly depends on `metadata.xml`, `rdrichvalue.xml`, and `richValueRel.xml`), but they are important for interpreting rich value payloads and should be preserved for round-trip safety.
 
 Representative (synthetic) shapes (element names/namespaces vary across Excel versions; see [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) for a deeper breakdown):
 
-`xl/richData/rdrichvaluetypes.xml`:
+`xl/richData/rdRichValueTypes.xml`:
 
 ```xml
 <rvTypes xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
@@ -404,8 +404,8 @@ Workbooks that include in-cell images typically include overrides like:
           ContentType="application/vnd.ms-excel.rdrichvalue+xml"/>
 <Override PartName="/xl/richData/rdrichvaluestructure.xml"
           ContentType="application/vnd.ms-excel.rdrichvaluestructure+xml"/>
-<Override PartName="/xl/richData/rdrichvaluetypes.xml"
-          ContentType="application/vnd.ms-excel.rdrichvaluetypes+xml"/>
+<Override PartName="/xl/richData/rdRichValueTypes.xml"
+          ContentType="application/vnd.ms-excel.rdRichValueTypes+xml"/>
 <Override PartName="/xl/richData/richValueRel.xml"
           ContentType="application/vnd.ms-excel.richValueRel+xml"/>
 ```
@@ -490,7 +490,7 @@ Minimal sketch of `xl/metadata.xml` structure:
 ```
 
 The structured payloads referenced by this metadata live under `xl/richData/` (commonly
-`rdrichvaluetypes.xml` + `rdrichvalue.xml`, plus related supporting tables such as `richValueRel.xml`.
+`rdRichValueTypes.xml` + `rdrichvalue.xml`, plus related supporting tables such as `richValueRel.xml`.
 Some Excel builds use the unprefixed naming (`richValue*.xml`) for rich value instances/types/structure.
 
 These pieces are connected via OPC relationships:
