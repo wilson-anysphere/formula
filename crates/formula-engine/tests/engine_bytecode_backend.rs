@@ -6100,6 +6100,56 @@ fn bytecode_backend_matches_ast_for_reference_union_and_intersection() {
 }
 
 #[test]
+fn bytecode_backend_reference_union_error_precedence_matches_ast() {
+    let mut engine = Engine::new();
+
+    // First union area: C1:C10 (vertical strip).
+    for row in 1..=10 {
+        engine
+            .set_cell_value("Sheet1", &format!("C{row}"), row as f64)
+            .unwrap();
+    }
+
+    // Second union area: A2:D3 overlaps C2:C3 with the first area. Place two distinct errors in
+    // the *unique* portion so error precedence depends on union iteration order:
+    // - D2 should be visited before A3 under the AST evaluator's row-major scan.
+    engine.set_cell_value("Sheet1", "A2", 0.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 0.0).unwrap();
+    engine.set_cell_value("Sheet1", "C2", 0.0).unwrap();
+    engine
+        .set_cell_value("Sheet1", "D2", Value::Error(ErrorKind::Div0))
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "A3", Value::Error(ErrorKind::Value))
+        .unwrap();
+    engine.set_cell_value("Sheet1", "B3", 0.0).unwrap();
+    engine.set_cell_value("Sheet1", "C3", 0.0).unwrap();
+    engine.set_cell_value("Sheet1", "D3", 0.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "E11", "=XOR((C1:C10,A2:D3))")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(
+        stats.fallback,
+        0,
+        "expected XOR + union formula to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
+    );
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 1);
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=XOR((C1:C10,A2:D3))", "E11");
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "E11"),
+        Value::Error(ErrorKind::Div0)
+    );
+}
+
+#[test]
 fn bytecode_backend_reference_algebra_accepts_let_single_cell_reference_locals() {
     let mut engine = Engine::new();
 

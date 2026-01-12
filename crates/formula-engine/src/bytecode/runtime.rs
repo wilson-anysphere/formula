@@ -37,6 +37,12 @@ thread_local! {
 struct ResolvedSheetRange {
     sheet: usize,
     range: ResolvedRange,
+    /// Index of the originating area in the source [`MultiRangeRef`].
+    ///
+    /// This is used to preserve AST-like error precedence for functions that iterate ranges
+    /// row-major: reference unions are evaluated area-by-area (in sorted order), and within an
+    /// area the first error is the one with the smallest `(row, col)` coordinate.
+    area_idx: usize,
 }
 
 fn intersect_resolved_ranges(a: ResolvedRange, b: ResolvedRange) -> Option<ResolvedRange> {
@@ -125,7 +131,7 @@ fn multirange_unique_areas(r: &MultiRangeRef, base: CellCoord) -> Vec<ResolvedSh
     let mut out = Vec::new();
     let mut seen_by_sheet: HashMap<usize, Vec<ResolvedRange>> = HashMap::new();
 
-    for area in r.areas.iter() {
+    for (area_idx, area) in r.areas.iter().enumerate() {
         let sheet = area.sheet;
         let resolved = area.range.resolve(base);
 
@@ -147,7 +153,11 @@ fn multirange_unique_areas(r: &MultiRangeRef, base: CellCoord) -> Vec<ResolvedSh
         out.extend(
             pieces
                 .into_iter()
-                .map(|range| ResolvedSheetRange { sheet, range }),
+                .map(|range| ResolvedSheetRange {
+                    sheet,
+                    range,
+                    area_idx,
+                }),
         );
     }
 
@@ -4646,12 +4656,35 @@ fn xor_multi_range(
     base: CellCoord,
     acc: &mut bool,
 ) -> Option<ErrorKind> {
+    // XOR is sensitive to overlap (duplicate cells must be visited once), so we use
+    // `multirange_unique_areas` to subtract overlaps.
+    //
+    // However, the resulting disjoint rectangles are not guaranteed to preserve the AST
+    // evaluator's row-major cell visitation order when iterated sequentially (e.g. a range with a
+    // removed middle column yields left/right strips that must be interleaved row-by-row).
+    //
+    // XOR is commutative, so we can safely compute the accumulator in any order, but we must
+    // preserve AST-like error precedence:
+    // - Errors in earlier areas win.
+    // - Within an area, the first error is the one with the smallest `(row, col)` coordinate.
+    let mut current_area_idx: Option<usize> = None;
+    let mut best_error_in_area: Option<(i32, i32, ErrorKind)> = None;
+
     for area in multirange_unique_areas(range, base) {
-        if let Some(e) = xor_range_on_sheet(grid, area.sheet, area.range, acc) {
-            return Some(e);
+        if current_area_idx != Some(area.area_idx) {
+            if let Some((_, _, err)) = best_error_in_area {
+                return Some(err);
+            }
+            current_area_idx = Some(area.area_idx);
+            best_error_in_area = None;
+        }
+
+        if let Some((coord, err)) = xor_range_on_sheet(grid, area.sheet, area.range, acc) {
+            record_error_row_major(&mut best_error_in_area, coord, err);
         }
     }
-    None
+
+    best_error_in_area.map(|(_, _, err)| err)
 }
 
 fn xor_range_on_sheet(
@@ -4659,9 +4692,15 @@ fn xor_range_on_sheet(
     sheet: usize,
     range: ResolvedRange,
     acc: &mut bool,
-) -> Option<ErrorKind> {
+) -> Option<(CellCoord, ErrorKind)> {
     if !range_in_bounds_on_sheet(grid, sheet, range) {
-        return Some(ErrorKind::Ref);
+        return Some((
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            ErrorKind::Ref,
+        ));
     }
 
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
@@ -4687,8 +4726,8 @@ fn xor_range_on_sheet(
                     | Value::MultiRange(_) => {}
                 }
             }
-            if let Some((_, _, err)) = best_error {
-                return Some(err);
+            if let Some((row, col, err)) = best_error {
+                return Some((CellCoord { row, col }, err));
             }
             return None;
         }
@@ -4697,7 +4736,7 @@ fn xor_range_on_sheet(
     for row in range.row_start..=range.row_end {
         for col in range.col_start..=range.col_end {
             match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
-                Value::Error(e) => return Some(e),
+                Value::Error(e) => return Some((CellCoord { row, col }, e)),
                 Value::Number(n) => *acc ^= n != 0.0,
                 Value::Bool(b) => *acc ^= b,
                 // Text/blanks in references are ignored.
