@@ -655,6 +655,47 @@ test.describe("split view", () => {
 
       await expect(secondaryStatus).toContainText("Selection C1");
     });
+
+    test(`secondary-pane range insertion on another sheet inserts a sheet-qualified reference (${mode})`, async ({ page }) => {
+      await gotoDesktop(page, `/?grid=${mode}`);
+      await waitForIdle(page);
+
+      // Lazily create Sheet2 and seed A1:A2.
+      await page.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const doc = app.getDocument();
+        doc.setCellValue("Sheet2", "A1", 7);
+        doc.setCellValue("Sheet2", "A2", 8);
+      });
+      await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+      await page.getByTestId("split-vertical").click();
+      await expect(page.getByTestId("grid-secondary")).toBeVisible();
+      await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+      // Start editing on Sheet1!C1.
+      await page.click("#grid", { position: { x: 260, y: 40 } });
+      await expect(page.getByTestId("active-cell")).toHaveText("C1");
+
+      await page.getByTestId("formula-highlight").click();
+      const input = page.getByTestId("formula-input");
+      await expect(input).toBeVisible();
+      await input.fill("=SUM(");
+
+      // Switch to Sheet2 while still editing and pick A1:A2 from the secondary pane.
+      await page.getByTestId("sheet-tab-Sheet2").click();
+      await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
+
+      const gridBox = await page.locator("#grid-secondary").boundingBox();
+      if (!gridBox) throw new Error("Missing grid-secondary bounding box");
+
+      await page.mouse.move(gridBox.x + 60, gridBox.y + 40);
+      await page.mouse.down();
+      await page.mouse.move(gridBox.x + 60, gridBox.y + 64);
+      await page.mouse.up();
+
+      await expect(input).toHaveValue("=SUM(Sheet2!A1:A2");
+    });
   }
 
   test("secondary pane supports in-place editing without scrolling the primary pane", async ({ page }) => {
