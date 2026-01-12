@@ -9,6 +9,7 @@ functions) and therefore need coordinated updates across:
 - shared/functionCatalog.json (+ .mjs + .d.mts)
 - tools/excel-oracle/generate_cases.py (must include coverage cases)
 - tests/compatibility/excel-oracle/cases.json (generated)
+- tools/excel-oracle/odd_coupon_*_cases.json (derived subset corpora for quick Excel runs)
 - tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json (synthetic baseline)
 
 Unlike tools/excel-oracle/run-excel-oracle.ps1, this does NOT require Microsoft
