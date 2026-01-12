@@ -6181,6 +6181,12 @@ export class SpreadsheetApp {
   }
 
   private onKeyDown(e: KeyboardEvent): void {
+    // Other desktop UI surfaces (menus, global shortcuts, etc) may handle keyboard events
+    // at the window level. If an earlier handler already called `preventDefault()`, treat
+    // the event as consumed and don't apply spreadsheet keyboard behavior on top.
+    if (e.defaultPrevented) {
+      return;
+    }
     if (this.inlineEditController.isOpen()) {
       return;
     }
