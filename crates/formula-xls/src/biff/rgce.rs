@@ -1526,6 +1526,49 @@ mod tests {
         }
     }
 
+    /*
+    // Legacy helpers retained for reference: originally `assert_parseable` only validated A1 ranges
+    // for print area / print titles style defined names.
+    fn is_row_range(s: &str) -> bool {
+        let Some((a, b)) = s.split_once(':') else {
+            return false;
+        };
+
+        let a = a.trim().replace('$', "");
+        let b = b.trim().replace('$', "");
+        if a.is_empty() || b.is_empty() {
+            return false;
+        }
+        if !a.chars().all(|c| c.is_ascii_digit()) || !b.chars().all(|c| c.is_ascii_digit()) {
+            return false;
+        }
+        match (a.parse::<u32>(), b.parse::<u32>()) {
+            (Ok(a), Ok(b)) => a > 0 && b > 0,
+            _ => false,
+        }
+    }
+
+    fn is_col_range(s: &str) -> bool {
+        let Some((a, b)) = s.split_once(':') else {
+            return false;
+        };
+
+        let a = a.trim().replace('$', "");
+        let b = b.trim().replace('$', "");
+        if a.is_empty() || b.is_empty() {
+            return false;
+        }
+        if !a.chars().all(|c| c.is_ascii_alphabetic())
+            || !b.chars().all(|c| c.is_ascii_alphabetic())
+        {
+            return false;
+        }
+
+        col_from_a1(&a).is_some() && col_from_a1(&b).is_some()
+    }
+
+    */
+
     fn assert_print_area_parseable(sheet_name: &str, expr: &str) {
         let mut warnings = Vec::<crate::ImportWarning>::new();
         crate::parse_print_area_refers_to(sheet_name, expr, &mut warnings)

@@ -44,8 +44,11 @@ pub(crate) struct BiffDefinedName {
     pub(crate) comment: Option<String>,
     /// Built-in defined name id when `fBuiltin` is set.
     ///
-    /// In BIFF8 this is typically stored as a single-byte id in `rgchName` (with `cch=1`), but we
-    /// also fall back to `chKey` if the `rgchName` payload is missing.
+    /// In BIFF8 this is typically stored as a single-byte id in `rgchName` (with `cch=1`).
+    ///
+    /// Some writers also populate `chKey`; empirically Excel appears to prefer the id from
+    /// `rgchName` and treat `chKey` as a keyboard shortcut, so we only fall back to `chKey` when
+    /// the `rgchName` payload is missing.
     pub(crate) builtin_id: Option<u8>,
     /// Raw BIFF8 `rgce` bytes for the defined name formula.
     pub(crate) rgce: Vec<u8>,
@@ -202,7 +205,8 @@ fn parse_biff8_name_record(
         // Built-in names are special:
         //
         // In BIFF8, `rgchName` is stored as a *single byte* built-in name id (no XLUnicodeString
-        // option flags), and `cch` MUST be 1.
+        // option flags), and `cch` MUST be 1. Some producers also populate `chKey` (documented as a
+        // keyboard shortcut), but Excel appears to prefer `rgchName` when present.
         //
         // We still consume `rgchName` so `rgce` parsing stays aligned.
         let id_from_name = if cch > 0 { Some(cursor.read_u8()?) } else { None };
@@ -210,11 +214,11 @@ fn parse_biff8_name_record(
             cursor.skip_bytes(cch - 1)?;
         }
 
+        // `chKey` is documented as a keyboard shortcut for user-defined names; when `fBuiltin` is
+        // set, some writers still populate `chKey`. Empirically Excel appears to prefer the built-in
+        // id stored in `rgchName` and treat `chKey` as a shortcut.
         let id = match (id_from_name, ch_key) {
             (Some(id_from_name), ch_key) if ch_key != 0 && id_from_name != ch_key => {
-                // [MS-XLS] defines `chKey` as a keyboard shortcut for user-defined names; when
-                // `fBuiltin` is set, some writers still populate `chKey`. Empirically Excel appears
-                // to prefer the built-in id stored in `rgchName` and treat `chKey` as a shortcut.
                 log::debug!(
                     "NAME record built-in id mismatch: rgchName=0x{id_from_name:02X} chKey=0x{ch_key:02X} (using rgchName)"
                 );
@@ -1465,13 +1469,14 @@ mod tests {
 
     #[test]
     fn builtin_name_prefers_rgchname_when_chkey_is_nonzero() {
-        // `chKey` is documented as a keyboard shortcut. Ensure we still interpret the built-in id
-        // from `rgchName` even when `chKey` is non-zero (and different).
+        // Some producers store mismatched built-in ids in `chKey` vs `rgchName`.
+        // Empirically Excel prefers the built-in id stored in `rgchName` and treats `chKey` as a
+        // shortcut; ensure we do the same.
         let rgce: Vec<u8> = vec![0x1E, 0x01, 0x00]; // PtgInt 1
 
         let grbit = NAME_FLAG_BUILTIN;
-        let rgch_builtin_id = 0x06u8; // Print_Area
-        let ch_key = b'P'; // Arbitrary non-zero keyboard shortcut.
+        let ch_key = 0x06u8; // Print_Area
+        let rgch_builtin_id = 0x07u8; // Print_Titles (mismatch)
 
         let mut header = Vec::new();
         header.extend_from_slice(&grbit.to_le_bytes());
@@ -1495,7 +1500,7 @@ mod tests {
         let parsed =
             parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
         assert_eq!(parsed.names.len(), 1);
-        assert_eq!(parsed.names[0].name, formula_model::XLNM_PRINT_AREA);
+        assert_eq!(parsed.names[0].name, formula_model::XLNM_PRINT_TITLES);
         assert_eq!(parsed.names[0].builtin_id, Some(rgch_builtin_id));
         assert_eq!(parsed.names[0].itab, 0);
         assert_eq!(parsed.names[0].scope_sheet, None);

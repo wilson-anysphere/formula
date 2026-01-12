@@ -410,7 +410,38 @@ fn parse_txo_text_biff5(
     // Some producers appear to mimic BIFF8's continued-string layout and prefix each CONTINUE
     // fragment with a one-byte "high-byte" flag (0/1). In that case, the TXO `cchText` count does
     // *not* include those flag bytes, so treat them as optional and skip them best-effort.
-    let capacity_raw = txo_continue_capacity_biff5(continues);
+
+    // Like BIFF8, some BIFF5 files reserve trailing continuation bytes for rich-text formatting
+    // runs (per TXO `cbRuns`). Respect that so we don't decode formatting-run bytes as text when
+    // `cchText` is larger than the available text bytes.
+    let cb_runs = first
+        .get(TXO_RUNS_LEN_OFFSET..TXO_RUNS_LEN_OFFSET + 2)
+        .map(|v| u16::from_le_bytes([v[0], v[1]]) as usize)
+        .unwrap_or(0);
+    let total_continue_bytes: usize = continues.iter().map(|frag| frag.len()).sum();
+    let text_continue_bytes = total_continue_bytes.saturating_sub(cb_runs);
+    if cb_runs > total_continue_bytes {
+        push_warning(
+            warnings,
+            format!(
+                "TXO record at offset {} has cbRuns ({cb_runs}) larger than continuation payload ({total_continue_bytes})",
+                record.offset
+            ),
+        );
+    }
+
+    // Compute capacities using only the text-bytes region (excluding the trailing cbRuns bytes).
+    let mut capacity_raw = 0usize;
+    let mut remaining_bytes = text_continue_bytes;
+    for &frag in continues {
+        if remaining_bytes == 0 {
+            break;
+        }
+        let take_len = frag.len().min(remaining_bytes);
+        remaining_bytes = remaining_bytes.saturating_sub(take_len);
+        capacity_raw = capacity_raw.saturating_add(take_len).min(TXO_MAX_TEXT_CHARS);
+    }
+
     let first_continue_has_flag = matches!(
         continues
             .first()
@@ -420,7 +451,14 @@ fn parse_txo_text_biff5(
     );
     let capacity_without_flags = if first_continue_has_flag {
         let mut cap = 0usize;
+        let mut remaining_bytes = text_continue_bytes;
         for &frag in continues {
+            if remaining_bytes == 0 {
+                break;
+            }
+            let take_len = frag.len().min(remaining_bytes);
+            remaining_bytes = remaining_bytes.saturating_sub(take_len);
+            let frag = &frag[..take_len];
             let len = if matches!(frag.first().copied(), Some(0) | Some(1)) {
                 frag.len().saturating_sub(1)
             } else {
@@ -471,20 +509,22 @@ fn parse_txo_text_biff5(
     // Accumulate the byte payload first, then decode once. This preserves stateful multibyte
     // codepages (e.g. Shift-JIS) when a character boundary is split across CONTINUE records.
     let mut bytes = Vec::with_capacity(remaining);
+    let mut remaining_bytes = text_continue_bytes;
     for &frag in continues {
-        if remaining == 0 {
+        if remaining == 0 || remaining_bytes == 0 {
             break;
         }
         if frag.is_empty() {
             continue;
         }
 
-        let frag = if skip_leading_flag_bytes && matches!(frag.first().copied(), Some(0) | Some(1))
-        {
-            frag.get(1..).unwrap_or(&[])
-        } else {
-            frag
-        };
+        let take_len = frag.len().min(remaining_bytes);
+        remaining_bytes = remaining_bytes.saturating_sub(take_len);
+        let mut frag = &frag[..take_len];
+
+        if skip_leading_flag_bytes && matches!(frag.first().copied(), Some(0) | Some(1)) {
+            frag = frag.get(1..).unwrap_or(&[]);
+        }
         if frag.is_empty() {
             continue;
         }
@@ -506,12 +546,12 @@ fn parse_txo_text_biff5(
             );
         }
     }
+
     let mut out = strings::decode_ansi(codepage, &bytes);
     trim_trailing_nuls(&mut out);
     strip_embedded_nuls(&mut out);
     Some(out)
 }
-
 fn parse_txo_text_biff8(
     record: &records::LogicalBiffRecord<'_>,
     codepage: u16,
@@ -661,14 +701,6 @@ fn detect_txo_cch_text(header: &[u8], continue_capacity: usize) -> Option<usize>
     }
 
     None
-}
-
-fn txo_continue_capacity_biff5(continues: &[&[u8]]) -> usize {
-    let mut cap = 0usize;
-    for frag in continues {
-        cap = cap.saturating_add(frag.len()).min(TXO_MAX_TEXT_CHARS);
-    }
-    cap
 }
 
 fn parse_txo_cch_text(header: &[u8], max_chars: usize) -> Option<usize> {
@@ -1085,6 +1117,33 @@ mod tests {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].author, "Alice");
         assert_eq!(notes[0].text, "Hi А");
+    }
+
+    #[test]
+    fn does_not_decode_biff5_formatting_run_bytes_as_text_when_cbruns_is_set() {
+        // `cchText` is intentionally larger than the available text bytes. Without respecting
+        // `cbRuns`, parsers may decode the formatting run bytes as if they were characters.
+        let stream = [
+            bof_biff5(),
+            note_biff5(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            // cchText=6 but only 5 chars of actual text bytes.
+            txo_with_cch_text_and_cb_runs(6, 4),
+            continue_text_biff5(b"Hello"),
+            // Formatting CONTINUE payload (dummy bytes).
+            continue_text_biff5(&[0xFFu8; 4]),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
+        assert!(
+            warnings.iter().any(|w| w.contains("truncated text")),
+            "expected truncation warning; warnings={warnings:?}"
+        );
     }
 
     #[test]

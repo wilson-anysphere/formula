@@ -111,38 +111,38 @@ fn extracts_in_cell_images_with_direct_extlst_rvb_list() {
     assert_eq!(images.get(&key).cloned(), Some(png_1x1()));
 }
 
-#[test]
-fn extracts_in_cell_images_with_future_metadata_indirection() {
-    // Excel commonly emits `metadataTypes` + `futureMetadata`, and `valueMetadata/rc` references
-    // the XLRICHVALUE type via `t=` and chooses a `futureMetadata/bk` entry via `v=`.
-    let metadata_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
- xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
-    <metadataTypes>
-      <metadataType name="XLRICHVALUE"/>
-    </metadataTypes>
-    <!-- Unrelated rvb to ensure resolution uses metadataTypes/futureMetadata instead of scanning
-         all rvb entries in document order. -->
-    <extLst>
-      <ext uri="{DUMMY}">
-        <xlrd:rvb i="999"/>
-      </ext>
-    </extLst>
-    <futureMetadata name="XLRICHVALUE">
-      <bk>
-        <extLst>
-          <ext uri="{DUMMY}">
-            <xlrd:rvb i="0"/>
-          </ext>
-        </extLst>
-      </bk>
-    </futureMetadata>
-    <valueMetadata>
-      <bk>
-        <rc t="0" v="0"/>
-      </bk>
-    </valueMetadata>
-</metadata>"#;
+ #[test]
+ fn extracts_in_cell_images_with_future_metadata_indirection() {
+     // Excel commonly emits `metadataTypes` + `futureMetadata`, and `valueMetadata/rc` references
+     // the XLRICHVALUE type via `t=` and chooses a `futureMetadata/bk` entry via `v=`.
+     let metadata_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+ <metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+   <metadataTypes>
+     <metadataType name="XLRICHVALUE"/>
+   </metadataTypes>
+   <!-- Unrelated rvb to ensure resolution uses metadataTypes/futureMetadata instead of scanning
+        all rvb entries in document order. -->
+   <extLst>
+     <ext uri="{DUMMY}">
+       <xlrd:rvb i="999"/>
+     </ext>
+   </extLst>
+   <futureMetadata name="XLRICHVALUE">
+     <bk>
+       <extLst>
+         <ext uri="{DUMMY}">
+           <xlrd:rvb i="0"/>
+         </ext>
+       </extLst>
+     </bk>
+   </futureMetadata>
+   <valueMetadata>
+     <bk>
+       <rc t="0" v="0"/>
+     </bk>
+   </valueMetadata>
+ </metadata>"#;
 
     let bytes = build_rich_data_package(metadata_xml);
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
