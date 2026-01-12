@@ -7,7 +7,10 @@ pub mod charts;
 mod preserve;
 pub mod style;
 
-pub use preserve::{PreservedDrawingParts, PreservedSheetDrawings, SheetDrawingRelationship};
+pub use preserve::{
+    PreservedChartSheet, PreservedDrawingParts, PreservedSheetDrawings, PreservedSheetOleObjects,
+    PreservedSheetPicture, SheetDrawingRelationship, SheetRelationshipStub,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DrawingChartRef {

@@ -37,7 +37,6 @@ impl XlsxPackage {
             if part.ends_with(".rels") {
                 continue;
             }
-
             let part_name = format!("/{part}");
             if let Some(content_type) = source_overrides.get(part_name.as_str()) {
                 needed_overrides.push((part_name, content_type.clone()));

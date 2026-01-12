@@ -13,6 +13,8 @@ use crate::xml::{XmlDomError, XmlElement, XmlNode};
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const REL_TYPE_WORKSHEET: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
+const REL_TYPE_CHARTSHEET: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet";
 const REL_TYPE_STYLES: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
 
@@ -138,11 +140,22 @@ impl WorkbookPackage {
                 .attr_ns(REL_NS, "id")
                 .ok_or(WorkbookPackageError::MissingSheetAttribute("r:id"))?;
 
-            let target = rels
+            let rel = rels
                 .iter()
-                .find(|rel| rel.id == rel_id && rel.type_ == REL_TYPE_WORKSHEET)
-                .map(|rel| rel.target.clone())
+                .find(|rel| rel.id == rel_id)
                 .ok_or_else(|| WorkbookPackageError::MissingSheetRelationship(name.clone()))?;
+
+            // Preserve non-worksheet sheet types (chartsheets, etc) verbatim in the underlying
+            // package without attempting to parse them into the workbook model.
+            if rel.type_ == REL_TYPE_CHARTSHEET {
+                continue;
+            }
+
+            if rel.type_ != REL_TYPE_WORKSHEET {
+                continue;
+            }
+
+            let target = rel.target.clone();
 
             let sheet_part_name = resolve_target(workbook_part, &target);
             let sheet_xml = package

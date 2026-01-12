@@ -24,6 +24,13 @@ def _zip_write(zf: zipfile.ZipFile, name: str, data: str) -> None:
     zf.writestr(info, data.encode("utf-8"))
 
 
+def _zip_write_bytes(zf: zipfile.ZipFile, name: str, data: bytes) -> None:
+    info = zipfile.ZipInfo(name, date_time=EPOCH)
+    info.compress_type = zipfile.ZIP_DEFLATED
+    info.create_system = 0
+    zf.writestr(info, data)
+
+
 def write_xlsx(
     path: pathlib.Path,
     sheet_xmls: list[str],
@@ -1030,6 +1037,220 @@ def one_by_one_png_bytes() -> bytes:
     )
 
 
+def content_types_background_image_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>
+"""
+
+
+def sheet_background_image_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>1</v></c>
+    </row>
+  </sheetData>
+  <picture r:id="rId1"/>
+</worksheet>
+"""
+
+
+def sheet1_background_image_rels_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>
+"""
+
+
+def write_background_image_xlsx(path: pathlib.Path) -> None:
+    sheet_names = ["Sheet1"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+
+    with zipfile.ZipFile(path, "w") as zf:
+        _zip_write(zf, "[Content_Types].xml", content_types_background_image_xml())
+        _zip_write(zf, "_rels/.rels", package_rels_xml())
+        _zip_write(zf, "docProps/core.xml", core_props_xml())
+        _zip_write(zf, "docProps/app.xml", app_props_xml(sheet_names))
+        _zip_write(zf, "xl/workbook.xml", workbook_xml(sheet_names))
+        _zip_write(
+            zf,
+            "xl/_rels/workbook.xml.rels",
+            workbook_rels_xml(sheet_count=1, include_shared_strings=False),
+        )
+        _zip_write(zf, "xl/worksheets/sheet1.xml", sheet_background_image_xml())
+        _zip_write(zf, "xl/worksheets/_rels/sheet1.xml.rels", sheet1_background_image_rels_xml())
+        _zip_write_bytes(zf, "xl/media/image1.png", one_by_one_png_bytes())
+        _zip_write(zf, "xl/styles.xml", styles_minimal_xml())
+
+
+def content_types_ole_object_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="bin" ContentType="application/vnd.openxmlformats-officedocument.oleObject"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>
+"""
+
+
+def sheet_ole_object_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>OLE</t></is></c>
+    </row>
+  </sheetData>
+  <oleObjects>
+    <oleObject progId="Package" dvAspect="DVASPECT_ICON" oleUpdate="OLEUPDATE_ALWAYS" shapeId="1" r:id="rId2"/>
+  </oleObjects>
+</worksheet>
+"""
+
+
+def sheet1_ole_object_rels_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject" Target="../embeddings/oleObject1.bin"/>
+</Relationships>
+"""
+
+
+def write_ole_object_xlsx(path: pathlib.Path) -> None:
+    sheet_names = ["Sheet1"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+
+    with zipfile.ZipFile(path, "w") as zf:
+        _zip_write(zf, "[Content_Types].xml", content_types_ole_object_xml())
+        _zip_write(zf, "_rels/.rels", package_rels_xml())
+        _zip_write(zf, "docProps/core.xml", core_props_xml())
+        _zip_write(zf, "docProps/app.xml", app_props_xml(sheet_names))
+        _zip_write(zf, "xl/workbook.xml", workbook_xml(sheet_names))
+        _zip_write(
+            zf,
+            "xl/_rels/workbook.xml.rels",
+            workbook_rels_xml(sheet_count=1, include_shared_strings=False),
+        )
+        _zip_write(zf, "xl/worksheets/sheet1.xml", sheet_ole_object_xml())
+        _zip_write(zf, "xl/worksheets/_rels/sheet1.xml.rels", sheet1_ole_object_rels_xml())
+        _zip_write_bytes(zf, "xl/embeddings/oleObject1.bin", b"OLE\x00OBJECT\x01")
+        _zip_write(zf, "xl/styles.xml", styles_minimal_xml())
+
+
+def content_types_chart_sheet_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/chartsheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.chartsheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>
+  <Override PartName="/xl/charts/chart1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>
+"""
+
+
+def workbook_rels_chart_sheet_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet" Target="chartsheets/sheet1.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>
+"""
+
+
+def sheet_chart_sheet_data_only_xml() -> str:
+    # Data referenced by xl/charts/chart1.xml.
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Category</t></is></c>
+      <c r="B1" t="inlineStr"><is><t>Value</t></is></c>
+    </row>
+    <row r="2">
+      <c r="A2" t="inlineStr"><is><t>A</t></is></c>
+      <c r="B2"><v>10</v></c>
+    </row>
+    <row r="3">
+      <c r="A3" t="inlineStr"><is><t>B</t></is></c>
+      <c r="B3"><v>20</v></c>
+    </row>
+    <row r="4">
+      <c r="A4" t="inlineStr"><is><t>C</t></is></c>
+      <c r="B4"><v>30</v></c>
+    </row>
+  </sheetData>
+</worksheet>
+"""
+
+
+def chartsheet1_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<chartsheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <drawing r:id="rId1"/>
+</chartsheet>
+"""
+
+
+def chartsheet1_rels_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/>
+</Relationships>
+"""
+
+
+def write_chart_sheet_xlsx(path: pathlib.Path) -> None:
+    sheet_names = ["Sheet1", "Chart1"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+
+    with zipfile.ZipFile(path, "w") as zf:
+        _zip_write(zf, "[Content_Types].xml", content_types_chart_sheet_xml())
+        _zip_write(zf, "_rels/.rels", package_rels_xml())
+        _zip_write(zf, "docProps/core.xml", core_props_xml())
+        _zip_write(zf, "docProps/app.xml", app_props_xml(sheet_names))
+        _zip_write(zf, "xl/workbook.xml", workbook_xml(sheet_names))
+        _zip_write(zf, "xl/_rels/workbook.xml.rels", workbook_rels_chart_sheet_xml())
+        _zip_write(zf, "xl/worksheets/sheet1.xml", sheet_chart_sheet_data_only_xml())
+        _zip_write(zf, "xl/chartsheets/sheet1.xml", chartsheet1_xml())
+        _zip_write(zf, "xl/chartsheets/_rels/sheet1.xml.rels", chartsheet1_rels_xml())
+        _zip_write(zf, "xl/drawings/drawing1.xml", drawing1_xml())
+        _zip_write(zf, "xl/drawings/_rels/drawing1.xml.rels", drawing1_rels_xml())
+        _zip_write(zf, "xl/charts/chart1.xml", chart1_xml())
+        _zip_write(zf, "xl/styles.xml", styles_minimal_xml())
+
+
 def write_image_xlsx(path: pathlib.Path) -> None:
     sheet_names = ["Sheet1"]
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1052,10 +1273,7 @@ def write_image_xlsx(path: pathlib.Path) -> None:
         _zip_write(zf, "xl/drawings/drawing1.xml", drawing_image_xml())
         _zip_write(zf, "xl/drawings/_rels/drawing1.xml.rels", drawing_image_rels_xml())
 
-        info = zipfile.ZipInfo("xl/media/image1.png", date_time=EPOCH)
-        info.compress_type = zipfile.ZIP_DEFLATED
-        info.create_system = 0
-        zf.writestr(info, one_by_one_png_bytes())
+        _zip_write_bytes(zf, "xl/media/image1.png", one_by_one_png_bytes())
 
         _zip_write(zf, "xl/styles.xml", styles_minimal_xml())
 
@@ -1115,6 +1333,9 @@ def main() -> None:
     )
     write_chart_xlsx(ROOT / "charts" / "basic-chart.xlsx")
     write_image_xlsx(ROOT / "basic" / "image.xlsx")
+    write_background_image_xlsx(ROOT / "basic" / "background-image.xlsx")
+    write_ole_object_xlsx(ROOT / "basic" / "ole-object.xlsx")
+    write_chart_sheet_xlsx(ROOT / "charts" / "chart-sheet.xlsx")
     write_hyperlinks_xlsx(ROOT / "hyperlinks" / "hyperlinks.xlsx")
 
     write_xlsx(
