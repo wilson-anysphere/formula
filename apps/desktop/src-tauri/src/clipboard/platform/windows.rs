@@ -226,8 +226,8 @@ mod win32_backend {
 
         let html = register_format("HTML Format")
             .ok()
-            .and_then(|fmt| read_clipboard_string(fmt, "HTML Format").ok().flatten())
-            .and_then(|payload| cf_html::decode_cf_html(&payload));
+            .and_then(|fmt| read_clipboard_bytes(fmt, "HTML Format").ok().flatten())
+            .and_then(|bytes| cf_html::decode_cf_html_bytes(&bytes));
 
         let rtf = register_format("Rich Text Format")
             .ok()
@@ -324,4 +324,3 @@ pub fn write(_payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
         "Windows clipboard backend requires the `desktop` feature".to_string(),
     ))
 }
-

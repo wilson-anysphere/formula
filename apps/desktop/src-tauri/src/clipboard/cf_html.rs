@@ -109,27 +109,63 @@ pub(crate) fn build_cf_html_payload(html: &str) -> Result<Vec<u8>, String> {
 /// missing, attempt to extract the `<!--StartFragment-->` region from the HTML document. Returns
 /// `None` when the payload is empty or does not contain usable HTML.
 pub(crate) fn decode_cf_html(payload: &str) -> Option<String> {
-    let payload = payload.trim_end_matches('\0');
+    decode_cf_html_bytes(payload.as_bytes())
+}
+
+/// Decode a CF_HTML payload from raw bytes.
+///
+/// This is the preferred decode entrypoint for clipboard reads because CF_HTML offsets are byte
+/// offsets. Passing through `String::from_utf8_lossy` before slicing can distort offsets in the
+/// presence of invalid UTF-8.
+pub(crate) fn decode_cf_html_bytes(payload: &[u8]) -> Option<String> {
+    // Some producers include NUL termination.
+    let mut end = payload.len();
+    while end > 0 && payload[end - 1] == 0 {
+        end -= 1;
+    }
+    let payload = &payload[..end];
+
     if payload.is_empty() {
         return None;
     }
 
-    fn parse_offset(payload: &str, key: &str) -> Option<usize> {
-        let idx = payload.find(key)?;
-        let after = &payload[idx + key.len()..];
-        let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
-        if digits.is_empty() {
-            return None;
+    fn parse_offset(payload: &[u8], key: &[u8]) -> Option<usize> {
+        let idx = find_subslice(payload, key)?;
+        let mut i = idx + key.len();
+        // Be permissive about optional whitespace after the colon.
+        while i < payload.len() && payload[i].is_ascii_whitespace() {
+            i += 1;
         }
-        digits.parse::<usize>().ok()
+        let mut value: usize = 0;
+        let mut any = false;
+        while i < payload.len() {
+            let b = payload[i];
+            if b.is_ascii_digit() {
+                any = true;
+                value = value.saturating_mul(10).saturating_add((b - b'0') as usize);
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        if any { Some(value) } else { None }
     }
 
-    let bytes = payload.as_bytes();
+    fn extract_fragment_markers_bytes(html_doc: &[u8]) -> Option<String> {
+        let start_marker = START_FRAGMENT_MARKER.as_bytes();
+        let end_marker = END_FRAGMENT_MARKER.as_bytes();
+        let start = find_subslice(html_doc, start_marker)? + start_marker.len();
+        let end_rel = find_subslice(&html_doc[start..], end_marker)?;
+        let end = start + end_rel;
+        Some(String::from_utf8_lossy(&html_doc[start..end]).into_owned())
+    }
+
+    let bytes = payload;
 
     // 1) Prefer explicit fragment offsets.
     if let (Some(start), Some(end)) = (
-        parse_offset(payload, "StartFragment:"),
-        parse_offset(payload, "EndFragment:"),
+        parse_offset(bytes, b"StartFragment:"),
+        parse_offset(bytes, b"EndFragment:"),
     ) {
         if start < end && end <= bytes.len() {
             return Some(String::from_utf8_lossy(&bytes[start..end]).into_owned());
@@ -138,39 +174,33 @@ pub(crate) fn decode_cf_html(payload: &str) -> Option<String> {
 
     // 2) Fall back to StartHTML/EndHTML and extract markers if present.
     if let (Some(start), Some(end)) = (
-        parse_offset(payload, "StartHTML:"),
-        parse_offset(payload, "EndHTML:"),
+        parse_offset(bytes, b"StartHTML:"),
+        parse_offset(bytes, b"EndHTML:"),
     ) {
         if start < end && end <= bytes.len() {
-            let html_doc = String::from_utf8_lossy(&bytes[start..end]).into_owned();
-            if let Some(fragment) = extract_fragment_markers(&html_doc) {
+            let html_doc = &bytes[start..end];
+            if let Some(fragment) = extract_fragment_markers_bytes(html_doc) {
                 return Some(fragment);
             }
             if !html_doc.is_empty() {
-                return Some(html_doc);
+                return Some(String::from_utf8_lossy(html_doc).into_owned());
             }
         }
     }
 
     // 3) Try extracting standard markers anywhere in the payload.
-    if let Some(fragment) = extract_fragment_markers(payload) {
+    if let Some(fragment) = extract_fragment_markers_bytes(bytes) {
         return Some(fragment);
     }
 
-    // 4) Last resort: strip the header by finding the first '<' character.
-    payload.find('<').map(|pos| payload[pos..].to_string())
-}
-
-fn extract_fragment_markers(html_doc: &str) -> Option<String> {
-    let start = html_doc.find(START_FRAGMENT_MARKER)? + START_FRAGMENT_MARKER.len();
-    let end_rel = html_doc[start..].find(END_FRAGMENT_MARKER)?;
-    let end = start + end_rel;
-    Some(html_doc[start..end].to_string())
+    // 4) Last resort: strip the header by finding the first '<' byte.
+    let start = bytes.iter().position(|&b| b == b'<')?;
+    Some(String::from_utf8_lossy(&bytes[start..]).into_owned())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{build_cf_html_payload, decode_cf_html};
+    use super::{build_cf_html_payload, decode_cf_html, decode_cf_html_bytes};
 
     fn parse_offset(s: &str, name: &str) -> usize {
         for line in s.split("\r\n") {
@@ -214,6 +244,14 @@ mod tests {
         let payload = build_cf_html_payload(fragment).expect("payload");
         let s = String::from_utf8(payload).expect("utf8");
         let decoded = decode_cf_html(&s).expect("decoded");
+        assert_eq!(decoded, fragment);
+    }
+
+    #[test]
+    fn decode_cf_html_bytes_extracts_fragment_from_offsets() {
+        let fragment = "<b>Hello</b>";
+        let payload = build_cf_html_payload(fragment).expect("payload");
+        let decoded = decode_cf_html_bytes(&payload).expect("decoded");
         assert_eq!(decoded, fragment);
     }
 
