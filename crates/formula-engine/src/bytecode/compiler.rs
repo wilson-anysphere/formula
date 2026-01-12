@@ -423,15 +423,10 @@ impl<'a> CompileCtx<'a> {
         // Excel evaluates references first and implicitly dereferences only when needed.
         // Passing a cell reference as a reference (not as a scalar value) is important for
         // correct behavior in nested aggregate calls (e.g. `LAMBDA(r, SUM(r))(A1)`).
-        if let Expr::CellRef(r) = arg {
-            let idx = self.program.range_refs.len() as u32;
-            self.program.range_refs.push(RangeRef::new(*r, *r));
-            self.program
-                .instrs
-                .push(Instruction::new(OpCode::LoadRange, idx, 0));
-            return;
-        }
-        self.compile_expr(arg);
+        //
+        // This also applies to LET/LAMBDA lexical locals that hold single-cell references:
+        // `LET(r, A10, LAMBDA(x, ROW(x))(r))` should treat `r` as a reference, not a scalar.
+        self.compile_expr_inner(arg, true);
     }
 
     fn collect_visible_locals(&self) -> HashMap<Arc<str>, LocalInfo> {

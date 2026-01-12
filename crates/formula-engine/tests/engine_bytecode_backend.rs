@@ -774,6 +774,19 @@ fn bytecode_backend_matches_ast_for_let_captured_env_lambda_call() {
 }
 
 #[test]
+fn bytecode_backend_preserves_reference_semantics_for_let_single_cell_reference_passed_to_lambda() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(r,A10,LAMBDA(x,ROW(x))(r))")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, "=LET(r,A10,LAMBDA(x,ROW(x))(r))", "A1");
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(10.0));
+}
+
+#[test]
 fn bytecode_backend_enforces_lambda_recursion_limit() {
     let mut engine = Engine::new();
     engine
