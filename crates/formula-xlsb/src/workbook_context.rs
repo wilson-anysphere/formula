@@ -393,6 +393,89 @@ impl WorkbookContext {
         Some((ixti, name_index))
     }
 
+    pub(crate) fn namex_ref(
+        &self,
+        workbook: Option<&str>,
+        sheet: Option<&str>,
+        name: &str,
+    ) -> Option<(u16, u16)> {
+        let normalized_name = normalize_key(name);
+        let normalized_book = workbook.map(normalize_key);
+
+        // HashMap iteration order is nondeterministic; pick the lowest `(supbook, name_index)`
+        // match so encoding is stable.
+        let mut best: Option<(u16, u16)> = None;
+
+        for (&(supbook_index, name_index), extern_name) in &self.namex_extern_names {
+            if normalize_key(&extern_name.name) != normalized_name {
+                continue;
+            }
+
+            let Some(supbook) = self.namex_supbooks.get(supbook_index as usize) else {
+                continue;
+            };
+            match (normalized_book.as_deref(), &supbook.kind) {
+                // Disallow implicit binding to external workbook names when the formula text does
+                // not specify a workbook prefix.
+                (None, SupBookKind::ExternalWorkbook) => continue,
+                (Some(book), SupBookKind::ExternalWorkbook | SupBookKind::Unknown) => {
+                    let display = display_supbook_name(&supbook.raw_name);
+                    if normalize_key(&display) != book {
+                        continue;
+                    }
+                }
+                (Some(_), _) => continue,
+                (None, _) => {}
+            }
+
+            if let Some(wanted_sheet) = sheet {
+                let Some(scope_sheet) = extern_name.scope_sheet else {
+                    continue;
+                };
+                let Some(sheets) = self.namex_supbook_sheets.get(supbook_index as usize) else {
+                    continue;
+                };
+                let sheet_name = sheets.get(scope_sheet as usize).or_else(|| {
+                    scope_sheet
+                        .checked_sub(1)
+                        .and_then(|idx| sheets.get(idx as usize))
+                });
+                let Some(sheet_name) = sheet_name else {
+                    continue;
+                };
+                if !sheet_name.eq_ignore_ascii_case(wanted_sheet) {
+                    continue;
+                }
+            } else if workbook.is_some() && extern_name.scope_sheet.is_some() {
+                // Workbook-scoped references should not match sheet-scoped external names.
+                continue;
+            }
+
+            match best {
+                None => best = Some((supbook_index, name_index)),
+                Some((best_supbook, best_name)) => {
+                    if (supbook_index, name_index) < (best_supbook, best_name) {
+                        best = Some((supbook_index, name_index));
+                    }
+                }
+            }
+        }
+
+        let (supbook_index, name_index) = best?;
+
+        // Find an ExternSheet (`ixti`) that points at this SupBook. If the workbook doesn't have an
+        // ExternSheet table we fall back to encoding the SupBook index directly (mirrors
+        // `format_namex`).
+        let ixti = self
+            .namex_ixti_supbooks
+            .iter()
+            .filter_map(|(&ixti, &sb)| (sb == supbook_index).then_some(ixti))
+            .min()
+            .unwrap_or(supbook_index);
+
+        Some((ixti, name_index))
+    }
+
     // --- Tables / structured references -----------------------------------------------
 
     /// Registers an Excel table (ListObject) by id.

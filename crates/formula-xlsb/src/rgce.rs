@@ -2670,10 +2670,6 @@ mod encode_ast {
         rgce: &mut Vec<u8>,
         class: PtgClass,
     ) -> Result<(), EncodeError> {
-        if name.workbook.is_some() {
-            return Err(EncodeError::Unsupported("external workbook defined names"));
-        }
-
         let sheet = match name.sheet.as_ref() {
             None => None,
             Some(fe::SheetRef::Sheet(sheet)) => Some(sheet.as_str()),
@@ -2682,16 +2678,30 @@ mod encode_ast {
             }
         };
 
-        let idx = ctx
-            .name_index(&name.name, sheet)
-            .ok_or_else(|| EncodeError::UnknownName {
-                name: name.name.clone(),
-            })?;
+        // Prefer workbook-defined names over NameX extern names when the formula text has no
+        // workbook prefix.
+        if name.workbook.is_none() {
+            if let Some(idx) = ctx.name_index(&name.name, sheet) {
+                rgce.push(ptg_with_class(PTG_NAME, class));
+                rgce.extend_from_slice(&idx.to_le_bytes());
+                rgce.extend_from_slice(&0u16.to_le_bytes());
+                return Ok(());
+            }
+        }
 
-        rgce.push(ptg_with_class(PTG_NAME, class));
-        rgce.extend_from_slice(&idx.to_le_bytes());
-        rgce.extend_from_slice(&0u16.to_le_bytes());
-        Ok(())
+        // Fallback: encode as a `PtgNameX` external name if present in the workbook's SupBook /
+        // ExternName tables (e.g. add-in names).
+        if let Some((ixti, name_index)) = ctx.namex_ref(name.workbook.as_deref(), sheet, &name.name)
+        {
+            rgce.push(ptg_with_class(PTG_NAMEX, class));
+            rgce.extend_from_slice(&ixti.to_le_bytes());
+            rgce.extend_from_slice(&name_index.to_le_bytes());
+            return Ok(());
+        }
+
+        Err(EncodeError::UnknownName {
+            name: name.name.clone(),
+        })
     }
 
     fn emit_function_call(
