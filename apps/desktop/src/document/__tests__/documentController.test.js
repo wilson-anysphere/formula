@@ -155,6 +155,21 @@ test("setFrozen is undoable", () => {
   assert.deepEqual(doc.getSheetView("Sheet1"), { frozenRows: 2, frozenCols: 1 });
 });
 
+test("setFrozen preserves row/col size overrides", () => {
+  const doc = new DocumentController();
+
+  doc.setColWidth("Sheet1", 0, 120);
+  doc.setRowHeight("Sheet1", 1, 40);
+
+  doc.setFrozen("Sheet1", 2, 1);
+  assert.deepEqual(doc.getSheetView("Sheet1"), {
+    frozenRows: 2,
+    frozenCols: 1,
+    colWidths: { "0": 120 },
+    rowHeights: { "1": 40 },
+  });
+});
+
 test("setColWidth/setRowHeight are undoable", () => {
   const doc = new DocumentController();
 

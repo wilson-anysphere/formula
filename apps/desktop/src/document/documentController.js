@@ -871,9 +871,12 @@ export class DocumentController {
    */
   setFrozen(sheetId, frozenRows, frozenCols, options = {}) {
     const before = this.model.getSheetView(sheetId);
-    const after = normalizeSheetViewState({ frozenRows, frozenCols });
-    if (sheetViewStateEquals(before, after)) return;
-    this.#applyUserSheetViewDeltas([{ sheetId, before, after }], options);
+    const after = cloneSheetViewState(before);
+    after.frozenRows = frozenRows;
+    after.frozenCols = frozenCols;
+    const normalized = normalizeSheetViewState(after);
+    if (sheetViewStateEquals(before, normalized)) return;
+    this.#applyUserSheetViewDeltas([{ sheetId, before, after: normalized }], options);
   }
 
   /**
