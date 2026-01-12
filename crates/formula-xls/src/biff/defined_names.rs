@@ -1584,4 +1584,43 @@ mod tests {
         assert_eq!(parsed.names[0].refers_to, "1");
         assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
     }
+
+    #[test]
+    fn builtin_name_falls_back_to_chkey_when_rgchname_missing() {
+        // Malformed files in the wild may set `fBuiltin` but omit the single-byte built-in id that
+        // should be stored in `rgchName` (by setting `cch=0`). In that case we fall back to `chKey`
+        // as a best-effort source of the id so the name can still be recognized.
+        let rgce: Vec<u8> = vec![0x1E, 0x01, 0x00]; // PtgInt 1
+
+        let grbit = NAME_FLAG_BUILTIN;
+        let ch_key = 0x06u8; // Print_Area
+        let cch = 0u8; // missing built-in id in rgchName
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&grbit.to_le_bytes());
+        header.push(ch_key); // chKey
+        header.push(cch); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab (workbook scope)
+        header.extend_from_slice(&[0, 0, 0, 0]); // no optional strings
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &[header, rgce.clone()].concat()),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+        assert_eq!(parsed.names.len(), 1);
+        assert_eq!(parsed.names[0].name, formula_model::XLNM_PRINT_AREA);
+        assert_eq!(parsed.names[0].builtin_id, Some(ch_key));
+        assert_eq!(parsed.names[0].itab, 0);
+        assert_eq!(parsed.names[0].scope_sheet, None);
+        assert_eq!(parsed.names[0].rgce, rgce);
+        assert_eq!(parsed.names[0].refers_to, "1");
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+    }
 }
