@@ -29,6 +29,7 @@ mod compare;
 mod content_types;
 pub mod conditional_formatting;
 mod formula_text;
+mod macro_repair;
 mod macro_strip;
 mod model_package;
 pub mod openxml;
