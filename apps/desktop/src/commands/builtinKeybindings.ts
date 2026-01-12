@@ -12,6 +12,8 @@ export type BuiltinKeybinding = {
 
 // Spreadsheet-affecting shortcuts should fail closed when the focus/edit context keys
 // are missing during startup. Prefer explicit `== true/false` checks over `!foo`.
+const WHEN_UNDO_REDO =
+  "focus.inTextInput == false && (spreadsheet.isEditing == false || spreadsheet.formulaBarFormulaEditing == true)";
 const WHEN_SPREADSHEET_READY = "spreadsheet.isEditing == false && focus.inTextInput == false";
 const WHEN_SHEET_NAVIGATION =
   "focus.inSheetTabRename == false && (focus.inTextInput == false || spreadsheet.formulaBarFormulaEditing == true)";
@@ -66,19 +68,19 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     command: "edit.undo",
     key: "ctrl+z",
     mac: "cmd+z",
-    when: WHEN_SPREADSHEET_READY,
+    when: WHEN_UNDO_REDO,
   },
   {
     command: "edit.redo",
     key: "ctrl+y",
     mac: "cmd+shift+z",
-    when: WHEN_SPREADSHEET_READY,
+    when: WHEN_UNDO_REDO,
   },
   {
     command: "edit.redo",
     key: "ctrl+shift+z",
     mac: "cmd+shift+z",
-    when: WHEN_SPREADSHEET_READY,
+    when: WHEN_UNDO_REDO,
   },
   {
     command: "view.toggleShowFormulas",

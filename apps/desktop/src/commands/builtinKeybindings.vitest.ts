@@ -46,6 +46,10 @@ describe("builtin keybinding catalog", () => {
     expect(typeof copyWhen).toBe("string");
     expect(evaluateWhenClause(copyWhen, emptyLookup)).toBe(false);
 
+    const undoWhen = builtinKeybindings.find((kb) => kb.command === "edit.undo" && kb.key === "ctrl+z")?.when;
+    expect(typeof undoWhen).toBe("string");
+    expect(evaluateWhenClause(undoWhen, emptyLookup)).toBe(false);
+
     const paletteWhen = builtinKeybindings.find((kb) => kb.command === "workbench.showCommandPalette" && kb.key === "ctrl+shift+p")
       ?.when;
     expect(typeof paletteWhen).toBe("string");
@@ -66,6 +70,17 @@ describe("builtin keybinding catalog", () => {
     contextKeys.batch({ "spreadsheet.isEditing": false, "focus.inTextInput": false });
     expect(evaluateWhenClause(copyWhen, lookup)).toBe(true);
     expect(evaluateWhenClause(saveWhen, lookup)).toBe(true);
+
+    // Undo should work normally when not editing, and also during formula-bar formula-editing
+    // when focus temporarily moves back to the grid (range selection mode).
+    contextKeys.batch({ "spreadsheet.isEditing": false, "focus.inTextInput": false, "spreadsheet.formulaBarFormulaEditing": false });
+    expect(evaluateWhenClause(undoWhen, lookup)).toBe(true);
+
+    contextKeys.batch({ "spreadsheet.isEditing": true, "focus.inTextInput": false, "spreadsheet.formulaBarFormulaEditing": false });
+    expect(evaluateWhenClause(undoWhen, lookup)).toBe(false);
+
+    contextKeys.batch({ "spreadsheet.isEditing": true, "focus.inTextInput": false, "spreadsheet.formulaBarFormulaEditing": true });
+    expect(evaluateWhenClause(undoWhen, lookup)).toBe(true);
 
     contextKeys.set("focus.inTextInput", true);
     expect(evaluateWhenClause(copyWhen, lookup)).toBe(false);
