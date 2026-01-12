@@ -182,4 +182,97 @@ test.describe("external hyperlink opening", () => {
     expect(shellCalls).toEqual([]);
     expect(urlAfter).toBe(urlBefore);
   });
+
+  test("untrusted protocols prompt and can be canceled", async ({ page }) => {
+    await gotoDesktop(page);
+    await waitForIdle(page);
+
+    await page.evaluate(() => {
+      (window as any).__shellOpenCalls = [];
+      (window as any).__confirmCalls = [];
+
+      window.confirm = (message?: string) => {
+        (window as any).__confirmCalls.push(message ?? "");
+        return false;
+      };
+
+      (window as any).__TAURI__ = {
+        plugin: {
+          shell: {
+            open: (url: string) => {
+              (window as any).__shellOpenCalls.push(url);
+              return Promise.resolve();
+            },
+          },
+        },
+      };
+
+      const a = document.createElement("a");
+      a.id = "e2e-external-anchor-ftp-cancel";
+      a.href = "ftp://example.com/resource";
+      a.textContent = "ftp link";
+      document.body.appendChild(a);
+    });
+
+    const urlBefore = page.url();
+    await page.click("#e2e-external-anchor-ftp-cancel");
+
+    await page.waitForFunction(() => (window as any).__confirmCalls?.length === 1);
+
+    const [shellCalls, confirmCalls, urlAfter] = await Promise.all([
+      page.evaluate(() => (window as any).__shellOpenCalls),
+      page.evaluate(() => (window as any).__confirmCalls),
+      page.url(),
+    ]);
+
+    expect(confirmCalls).toHaveLength(1);
+    expect(shellCalls).toEqual([]);
+    expect(urlAfter).toBe(urlBefore);
+  });
+
+  test("untrusted protocols prompt and open via shell when confirmed", async ({ page }) => {
+    await gotoDesktop(page);
+    await waitForIdle(page);
+
+    await page.evaluate(() => {
+      (window as any).__shellOpenCalls = [];
+      (window as any).__confirmCalls = [];
+
+      window.confirm = (message?: string) => {
+        (window as any).__confirmCalls.push(message ?? "");
+        return true;
+      };
+
+      (window as any).__TAURI__ = {
+        plugin: {
+          shell: {
+            open: (url: string) => {
+              (window as any).__shellOpenCalls.push(url);
+              return Promise.resolve();
+            },
+          },
+        },
+      };
+
+      const a = document.createElement("a");
+      a.id = "e2e-external-anchor-ftp-ok";
+      a.href = "ftp://example.com/resource";
+      a.textContent = "ftp link";
+      document.body.appendChild(a);
+    });
+
+    const urlBefore = page.url();
+    await page.click("#e2e-external-anchor-ftp-ok");
+    await page.waitForFunction(() => (window as any).__shellOpenCalls?.length === 1);
+
+    const [shellCalls, confirmCalls, urlAfter] = await Promise.all([
+      page.evaluate(() => (window as any).__shellOpenCalls),
+      page.evaluate(() => (window as any).__confirmCalls),
+      page.url(),
+    ]);
+
+    expect(confirmCalls).toHaveLength(1);
+    expect(shellCalls).toEqual(["ftp://example.com/resource"]);
+    expect(urlAfter).toBe(urlBefore);
+  });
 });
