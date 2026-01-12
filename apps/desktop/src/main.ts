@@ -1,6 +1,7 @@
 import { SpreadsheetApp } from "./app/spreadsheetApp";
 import "./styles/tokens.css";
 import "./styles/ui.css";
+import "./styles/command-palette.css";
 import "./styles/workspace.css";
 
 import { ThemeController } from "./theme/themeController.js";
@@ -1678,14 +1679,10 @@ if (
   // --- Command palette (minimal) ------------------------------------------------
 
   const paletteOverlay = document.createElement("div");
-  paletteOverlay.style.position = "fixed";
-  paletteOverlay.style.inset = "0";
-  paletteOverlay.style.display = "none";
-  paletteOverlay.style.alignItems = "flex-start";
-  paletteOverlay.style.justifyContent = "center";
-  paletteOverlay.style.paddingTop = "80px";
-  paletteOverlay.style.background = "var(--dialog-backdrop)";
-  paletteOverlay.style.zIndex = "1000";
+  paletteOverlay.className = "command-palette-overlay";
+  paletteOverlay.hidden = true;
+  paletteOverlay.setAttribute("role", "dialog");
+  paletteOverlay.setAttribute("aria-modal", "true");
 
   const palette = document.createElement("div");
   palette.className = "command-palette";
@@ -1699,6 +1696,9 @@ if (
   const paletteList = document.createElement("ul");
   paletteList.className = "command-palette__list";
   paletteList.dataset.testid = "command-palette-list";
+  // The command palette is a modal dialog, so keep at least two tabbable targets
+  // (input + list) to support a basic focus trap.
+  paletteList.tabIndex = 0;
 
   palette.appendChild(paletteInput);
   palette.appendChild(paletteList);
@@ -1832,14 +1832,16 @@ if (
     paletteQuery = "";
     paletteSelected = 0;
     paletteInput.value = "";
-    paletteOverlay.style.display = "flex";
+    paletteOverlay.hidden = false;
+    document.addEventListener("focusin", handlePaletteDocumentFocusIn);
     renderPalette();
     paletteInput.focus();
     paletteInput.select();
   }
 
   function closePalette(): void {
-    paletteOverlay.style.display = "none";
+    paletteOverlay.hidden = true;
+    document.removeEventListener("focusin", handlePaletteDocumentFocusIn);
     // Best-effort: return focus to the grid.
     app.focus();
   }
@@ -1848,13 +1850,52 @@ if (
     if (e.target === paletteOverlay) closePalette();
   });
 
+  function handlePaletteDocumentFocusIn(e: FocusEvent): void {
+    if (paletteOverlay.hidden) return;
+    const target = e.target as Node | null;
+    if (!target) return;
+    if (paletteOverlay.contains(target)) return;
+    // If focus escapes the modal dialog, bring it back to the input.
+    paletteInput.focus();
+  }
+
+  paletteOverlay.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    if (paletteOverlay.hidden) return;
+
+    const focusable = [paletteInput, paletteList].filter((el) => !el.hasAttribute("disabled"));
+    if (focusable.length === 0) return;
+    if (focusable.length === 1) {
+      e.preventDefault();
+      focusable[0]!.focus();
+      return;
+    }
+
+    const first = focusable[0]!;
+    const last = focusable[focusable.length - 1]!;
+    const active = document.activeElement as HTMLElement | null;
+
+    if (e.shiftKey) {
+      if (!active || active === first) {
+        e.preventDefault();
+        last.focus();
+      }
+      return;
+    }
+
+    if (!active || active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
+
   paletteInput.addEventListener("input", () => {
     paletteQuery = paletteInput.value;
     paletteSelected = 0;
     renderPalette();
   });
 
-  paletteInput.addEventListener("keydown", (e) => {
+  function handlePaletteKeydown(e: KeyboardEvent): void {
     if (e.key === "Escape") {
       e.preventDefault();
       closePalette();
@@ -1881,7 +1922,10 @@ if (
       closePalette();
       cmd.run();
     }
-  });
+  }
+
+  paletteInput.addEventListener("keydown", handlePaletteKeydown);
+  paletteList.addEventListener("keydown", handlePaletteKeydown);
 
   openCommandPalette = openPalette;
 
