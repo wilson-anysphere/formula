@@ -337,6 +337,7 @@ cannot reliably resolve relative imports, the browser entrypoint (`manifest.brow
   (`apps/desktop/src/panels/marketplace/getMarketplaceBaseUrl.ts`):
   - override via `localStorage["formula:marketplace:baseUrl"]`
   - override via `VITE_FORMULA_MARKETPLACE_BASE_URL`
+  - origin-only values (e.g. `https://marketplace.formula.app`) are normalized to `.../api` for convenience
   - default: `"/api"` in dev/e2e, `https://marketplace.formula.app/api` in production builds
 - The WebView CSP must allow outbound connections to:
   - the marketplace origin (for installs/updates), and
@@ -1304,6 +1305,7 @@ In Formula Desktop, the effective base URL comes from `getMarketplaceBaseUrl()`
 
 - override via `localStorage["formula:marketplace:baseUrl"]`
 - override via `VITE_FORMULA_MARKETPLACE_BASE_URL`
+- origin-only values (e.g. `https://marketplace.formula.app`) are normalized to `.../api` for convenience
 - default: `"/api"` in dev/e2e, `https://marketplace.formula.app/api` in production builds
 
 Quick override (DevTools):
