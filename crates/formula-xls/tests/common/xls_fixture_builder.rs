@@ -36,6 +36,7 @@ const RECORD_MERGEDCELLS: u16 = 0x00E5;
 const RECORD_BLANK: u16 = 0x0201;
 const RECORD_NUMBER: u16 = 0x0203;
 const RECORD_HLINK: u16 = 0x01B8;
+const RECORD_WSBOOL: u16 = 0x0081;
 const RECORD_ROW: u16 = 0x0208;
 const RECORD_COLINFO: u16 = 0x007D;
 
@@ -1824,6 +1825,10 @@ fn build_outline_sheet_stream(xf: u16) -> Vec<u8> {
     push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
 
     push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // WSBOOL: keep Excel's default worksheet boolean options (matches real fixtures).
+    // This ensures the importer correctly interprets `summaryBelow/summaryRight` from BIFF.
+    push_record(&mut sheet, RECORD_WSBOOL, &0x0C01u16.to_le_bytes());
 
     // Outline rows:
     // - Rows 2-3 (1-based) are detail rows: outline level 1 and hidden (collapsed).

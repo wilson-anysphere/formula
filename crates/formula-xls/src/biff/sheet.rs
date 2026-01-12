@@ -62,9 +62,17 @@ const COLINFO_OPTION_OUTLINE_LEVEL_MASK: u16 = 0x0700;
 const COLINFO_OPTION_OUTLINE_LEVEL_SHIFT: u16 = 8;
 const COLINFO_OPTION_COLLAPSED: u16 = 0x1000;
 
-const WSBOOL_OPTION_ROW_SUMMARY_BELOW: u16 = 0x0040;
-const WSBOOL_OPTION_COL_SUMMARY_RIGHT: u16 = 0x0080;
-const WSBOOL_OPTION_SHOW_OUTLINE_SYMBOLS: u16 = 0x0200;
+// WSBOOL (0x0081) is a bitfield of worksheet boolean properties.
+//
+// Note: In BIFF8, the outline-related flags use inverted semantics:
+// - When the bit is set, Excel places the summary *above/left* (non-default).
+// - When the bit is clear, Excel uses the default "summary below/right" behaviour.
+//
+// Empirically, Excel-generated `.xls` fixtures use `WSBOOL=0x0C01` with these bits cleared,
+// corresponding to the OOXML defaults (`summaryBelow=true`, `summaryRight=true`).
+const WSBOOL_OPTION_ROW_SUMMARY_ABOVE: u16 = 0x0008;
+const WSBOOL_OPTION_COL_SUMMARY_LEFT: u16 = 0x0010;
+const WSBOOL_OPTION_HIDE_OUTLINE_SYMBOLS: u16 = 0x0040;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct SheetRowProperties {
@@ -526,10 +534,10 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                     continue;
                 }
                 let options = u16::from_le_bytes([data[0], data[1]]);
-                props.outline_pr.summary_below = (options & WSBOOL_OPTION_ROW_SUMMARY_BELOW) != 0;
-                props.outline_pr.summary_right = (options & WSBOOL_OPTION_COL_SUMMARY_RIGHT) != 0;
+                props.outline_pr.summary_below = (options & WSBOOL_OPTION_ROW_SUMMARY_ABOVE) == 0;
+                props.outline_pr.summary_right = (options & WSBOOL_OPTION_COL_SUMMARY_LEFT) == 0;
                 props.outline_pr.show_outline_symbols =
-                    (options & WSBOOL_OPTION_SHOW_OUTLINE_SYMBOLS) != 0;
+                    (options & WSBOOL_OPTION_HIDE_OUTLINE_SYMBOLS) == 0;
             }
             // EOF terminates the sheet substream.
             records::RECORD_EOF => {
