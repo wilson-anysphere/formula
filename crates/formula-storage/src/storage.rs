@@ -1413,7 +1413,7 @@ impl Storage {
     /// `sheet_ids_in_order` is treated as a partial ordering: any workbook sheets not present in
     /// the list are appended in their current order.
     pub fn reorder_sheets(&self, workbook_id: Uuid, sheet_ids_in_order: &[Uuid]) -> Result<()> {
-        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let mut conn = lock_unpoisoned(&self.conn);
         let tx = conn.transaction()?;
 
         let sheets = self.list_sheets_tx(&tx, workbook_id)?;
