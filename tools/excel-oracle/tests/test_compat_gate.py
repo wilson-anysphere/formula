@@ -6,7 +6,10 @@ import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
+from unittest import mock
 
 
 class CompatGateDatasetSelectionTests(unittest.TestCase):
@@ -208,6 +211,49 @@ class CompatGateTierPresetTests(unittest.TestCase):
         self.assertEqual(cmd.count("--include-tag"), 2)
         self.assertIn("add", cmd)
         self.assertIn("cmp", cmd)
+
+
+class CompatGateDryRunTests(unittest.TestCase):
+    def _load_compat_gate(self):
+        compat_gate_py = Path(__file__).resolve().parents[1] / "compat_gate.py"
+        self.assertTrue(compat_gate_py.is_file(), f"compat_gate.py not found at {compat_gate_py}")
+
+        spec = importlib.util.spec_from_file_location("excel_oracle_compat_gate_dry_run", compat_gate_py)
+        assert spec is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+
+    def test_dry_run_does_not_invoke_subprocesses(self) -> None:
+        compat_gate = self._load_compat_gate()
+        stdout = StringIO()
+
+        repo_root = Path(__file__).resolve().parents[3]
+        old_cwd = Path.cwd()
+        old_argv = sys.argv[:]
+        try:
+            os.chdir(repo_root)
+            sys.argv = [
+                "compat_gate.py",
+                "--tier",
+                "smoke",
+                "--max-cases",
+                "1",
+                "--dry-run",
+            ]
+            with mock.patch.object(compat_gate.subprocess, "run") as run_mock, redirect_stdout(stdout):
+                rc = compat_gate.main()
+            run_mock.assert_not_called()
+            self.assertEqual(rc, 0)
+        finally:
+            sys.argv = old_argv
+            os.chdir(old_cwd)
+
+        out = stdout.getvalue()
+        self.assertIn("engine_cmd:", out)
+        self.assertIn("compare_cmd:", out)
 
 
 if __name__ == "__main__":

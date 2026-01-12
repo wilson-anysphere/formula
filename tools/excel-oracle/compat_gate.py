@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -328,6 +329,11 @@ def main() -> int:
         default=0.0,
         help="Fail if mismatches / total exceeds this threshold (default 0).",
     )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the engine/compare commands and exit without running them.",
+    )
     args = p.parse_args()
 
     cases_path = Path(args.cases)
@@ -430,8 +436,6 @@ def main() -> int:
         use_cargo_agent=use_cargo_agent,
     )
 
-    subprocess.run(engine_cmd, check=True, cwd=repo_root, env=env)
-
     compare_cmd = _build_compare_cmd(
         cases_path=cases_path,
         expected_path=expected_path,
@@ -446,6 +450,25 @@ def main() -> int:
         tag_abs_tol=tag_abs_tol,
         tag_rel_tol=tag_rel_tol,
     )
+
+    if args.dry_run:
+        def fmt(cmd: list[str]) -> str:
+            # Print a shell-ready representation (useful for copy/paste).
+            return " ".join(shlex.quote(part) for part in cmd)
+
+        print(f"cases: {cases_path}")
+        print(f"expected: {expected_path}")
+        print(f"actual: {actual_path}")
+        print(f"report: {report_path}")
+        print()
+        print("engine_cmd:")
+        print(fmt(engine_cmd))
+        print()
+        print("compare_cmd:")
+        print(fmt(compare_cmd))
+        return 0
+
+    subprocess.run(engine_cmd, check=True, cwd=repo_root, env=env)
 
     proc = subprocess.run(compare_cmd)
 
