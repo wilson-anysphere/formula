@@ -3554,6 +3554,16 @@ impl Engine {
                             lexical_scopes,
                         )
                     }
+                    crate::Expr::Binary(b) if b.op == crate::BinaryOp::Union => {
+                        // Multi-area reference definitions (e.g. `Sheet1!A1,Sheet1!B1`) can be
+                        // lowered to a bytecode `MultiRangeRef`.
+                        self.extract_static_ref_expr_for_bytecode(
+                            &ast.expr,
+                            sheet_id,
+                            visiting,
+                            lexical_scopes,
+                        )
+                    }
                     crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
                         // Reference definitions must be a direct cell/range reference.
                         if !matches!(
@@ -3620,6 +3630,25 @@ impl Engine {
             crate::Expr::CellRef(r) => Some(crate::Expr::CellRef(
                 self.normalize_cell_ref_for_bytecode(r, current_sheet)?,
             )),
+            crate::Expr::Binary(b) if b.op == crate::BinaryOp::Union => {
+                let left = self.extract_static_ref_expr_for_bytecode(
+                    &b.left,
+                    current_sheet,
+                    visiting,
+                    lexical_scopes,
+                )?;
+                let right = self.extract_static_ref_expr_for_bytecode(
+                    &b.right,
+                    current_sheet,
+                    visiting,
+                    lexical_scopes,
+                )?;
+                Some(crate::Expr::Binary(crate::BinaryExpr {
+                    op: crate::BinaryOp::Union,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }))
+            }
             crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
                 // Preserve unprefixed endpoints when the opposite endpoint carries a sheet prefix
                 // (e.g. the parser represents `Sheet1!A1:B2` as `Sheet1!A1` + `B2`). This keeps
