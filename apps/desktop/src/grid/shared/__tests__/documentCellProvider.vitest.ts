@@ -607,6 +607,40 @@ describe("DocumentCellProvider formatting integration", () => {
     expect(getCellSpy).toHaveBeenCalledTimes(3);
   });
 
+  it("does not drop cached cells for large invalidations that do not intersect the cached region", () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", "A1", "cached");
+
+    const headerRows = 1;
+    const headerCols = 1;
+    const docRows = 2000;
+    const docCols = 2000;
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows,
+      headerCols,
+      rowCount: docRows + headerRows,
+      colCount: docCols + headerCols,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const getCellSpy = vi.spyOn(doc, "getCell");
+
+    // Prime cache for A1.
+    expect(provider.getCell(headerRows + 0, headerCols + 0)?.value).toBe("cached");
+    expect(getCellSpy).toHaveBeenCalledTimes(1);
+
+    // Invalidate a large 300x300 region far away from A1. This is >50k cells, so we should
+    // avoid clearing the whole sheet cache (A1 remains cached).
+    provider.invalidateDocCells({ startRow: 500, endRow: 800, startCol: 500, endCol: 800 });
+
+    expect(provider.getCell(headerRows + 0, headerCols + 0)?.value).toBe("cached");
+    expect(getCellSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps other rows cached when invalidating multiple full-width rows", () => {
     const doc = new DocumentController();
     doc.setCellValue("Sheet1", "A1", "row1");

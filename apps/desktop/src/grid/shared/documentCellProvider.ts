@@ -454,14 +454,14 @@ export class DocumentCellProvider implements CellProvider {
     const cache = this.sheetCaches.get(sheetId);
 
     // Strategy:
-    // - Small regions: delete each affected cell key directly.
-    // - Stripe-like regions (few rows or few columns) that may cover enormous sheet area:
-    //   scan the bounded LRU cache and evict only matching entries.
-    // - Everything else: clear the active sheet cache (still bounded) to avoid expensive iteration.
+    // - Direct-evict per-cell cache keys for invalidations up to `maxDirectEvictions`.
+    // - For larger invalidations, scan the bounded LRU cache and evict only matching entries.
+    //
+    // Scanning stays cheap because the provider cache is capped (`SHEET_CACHE_MAX_SIZE`), and it
+    // avoids dropping unrelated cached cells when a user formats a large rectangle far away from
+    // the current viewport.
     const maxDirectEvictions = 50_000;
-    const maxAxisSpanForKeyScan = 64;
     const shouldEvictDirectly = cellCount <= maxDirectEvictions;
-    const shouldScanKeys = !shouldEvictDirectly && (height <= maxAxisSpanForKeyScan || width <= maxAxisSpanForKeyScan);
 
     if (cache) {
       if (shouldEvictDirectly) {
@@ -471,7 +471,7 @@ export class DocumentCellProvider implements CellProvider {
             cache.delete(base + c);
           }
         }
-      } else if (shouldScanKeys) {
+      } else {
         for (const key of cache.keys()) {
           const row = Math.floor(key / CACHE_KEY_COL_STRIDE);
           const col = key - row * CACHE_KEY_COL_STRIDE;
@@ -479,19 +479,12 @@ export class DocumentCellProvider implements CellProvider {
           if (col < gridRange.startCol || col >= gridRange.endCol) continue;
           cache.delete(key);
         }
-      } else {
-        this.sheetCaches.delete(sheetId);
-        if (this.lastSheetId === sheetId) {
-          this.lastSheetId = null;
-          this.lastSheetCache = null;
-        }
       }
-    } else if (!shouldEvictDirectly) {
-      this.sheetCaches.delete(sheetId);
-      if (this.lastSheetId === sheetId) {
-        this.lastSheetId = null;
-        this.lastSheetCache = null;
-      }
+    } else if (this.lastSheetId === sheetId) {
+      // Should be rare (we normally keep a cache per active sheet), but keep the last-sheet
+      // fast path consistent if something cleared the map entry.
+      this.lastSheetId = null;
+      this.lastSheetCache = null;
     }
 
     for (const listener of this.listeners) listener({ type: "cells", range: gridRange });
