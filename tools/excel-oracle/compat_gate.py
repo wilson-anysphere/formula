@@ -106,6 +106,9 @@ def _default_expected_dataset(*, cases_path: Path) -> Path:
             # Multiple Excel versions/builds can share the same corpus hash.
             # Keep this deterministic by selecting the lexicographically last filename
             # (version/build are embedded in the name).
+            non_unknown = [p for p in candidates if "-unknown-build-unknown-" not in p.name]
+            if non_unknown:
+                return non_unknown[-1]
             return candidates[-1]
 
     pinned = Path("tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json")

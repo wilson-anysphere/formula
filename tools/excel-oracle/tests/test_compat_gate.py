@@ -50,6 +50,32 @@ class CompatGateDatasetSelectionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_default_expected_dataset_prefers_real_excel_over_unknown(self) -> None:
+        compat_gate = self._load_compat_gate()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            old_cwd = Path.cwd()
+            try:
+                os.chdir(tmp_path)
+
+                cases_path = tmp_path / "cases.json"
+                cases_path.write_text('{"schemaVersion":1,"cases":[]}\n', encoding="utf-8", newline="\n")
+                sha8 = hashlib.sha256(cases_path.read_bytes()).hexdigest()[:8]
+
+                versioned_dir = tmp_path / "tests/compatibility/excel-oracle/datasets/versioned"
+                versioned_dir.mkdir(parents=True, exist_ok=True)
+
+                unknown = versioned_dir / f"excel-unknown-build-unknown-cases-{sha8}.json"
+                real = versioned_dir / f"excel-16.0-build-2-cases-{sha8}.json"
+                unknown.write_text("{}", encoding="utf-8", newline="\n")
+                real.write_text("{}", encoding="utf-8", newline="\n")
+
+                selected = compat_gate._default_expected_dataset(cases_path=cases_path)
+                self.assertEqual(selected.resolve(), real.resolve())
+            finally:
+                os.chdir(old_cwd)
+
     def test_default_expected_dataset_falls_back_to_pinned(self) -> None:
         compat_gate = self._load_compat_gate()
 
