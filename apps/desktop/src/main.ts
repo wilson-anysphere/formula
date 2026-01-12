@@ -1400,7 +1400,7 @@ function installSheetStoreDocSync(): void {
     () => app.getCurrentSheetId(),
     (sheetId) => {
       app.activateSheet(sheetId);
-      app.focus();
+      restoreFocusAfterSheetNavigation();
     },
   );
   sheetStoreDocSyncStore = workbookSheetStore;
@@ -1690,7 +1690,7 @@ async function handleAddSheet(): Promise<void> {
       doc.getCell(id, { row: 0, col: 0 });
       doc.markDirty();
       app.activateSheet(id);
-      app.focus();
+      restoreFocusAfterSheetNavigation();
       return;
     }
 
@@ -3084,6 +3084,7 @@ if (
     commandRegistry,
     app,
     layoutController,
+    focusAfterSheetNavigation: restoreFocusAfterSheetNavigation,
     getVisibleSheetIds: () => workbookSheetStore.listVisible().map((sheet) => sheet.id),
     ensureExtensionsLoaded: () => ensureExtensionsLoadedRef?.() ?? Promise.resolve(),
     onExtensionsLoaded: () => {

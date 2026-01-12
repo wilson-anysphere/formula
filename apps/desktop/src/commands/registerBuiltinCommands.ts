@@ -14,6 +14,14 @@ export function registerBuiltinCommands(params: {
   ensureExtensionsLoaded?: (() => Promise<void>) | null;
   onExtensionsLoaded?: (() => void) | null;
   /**
+   * Optional focus restoration hook after sheet navigation actions.
+   *
+   * The desktop shell can use this to avoid stealing focus while the user is in
+   * inline rename mode or while menus are open, while still ensuring normal sheet
+   * switching leaves the grid ready for typing/shortcuts.
+   */
+  focusAfterSheetNavigation?: (() => void) | null;
+  /**
    * Optional source of truth for the current visible sheet order (e.g. the UI's sheet store).
    * When provided, sheet navigation commands (Ctrl/Cmd+PgUp/PgDn) use this list so they match
    * the order the user sees in the tab strip.
@@ -26,6 +34,7 @@ export function registerBuiltinCommands(params: {
     layoutController,
     ensureExtensionsLoaded = null,
     onExtensionsLoaded = null,
+    focusAfterSheetNavigation = null,
     getVisibleSheetIds = null,
   } = params;
 
@@ -55,7 +64,11 @@ export function registerBuiltinCommands(params: {
     const next = sheetIds[nextIndex];
     if (!next || next === active) return;
     app.activateSheet(next);
-    app.focus();
+    if (focusAfterSheetNavigation) {
+      focusAfterSheetNavigation();
+    } else {
+      app.focusAfterSheetNavigation();
+    }
   };
 
   commandRegistry.registerBuiltinCommand(
