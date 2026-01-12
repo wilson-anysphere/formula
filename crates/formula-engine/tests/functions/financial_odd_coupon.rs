@@ -62,16 +62,14 @@ fn coupon_period_e(
     _system: ExcelDateSystem,
 ) -> f64 {
     let freq = frequency as f64;
-    // Keep in sync with `coupon_schedule::coupon_period_e`.
+    // Keep in sync with the source-of-truth:
+    // `crates/formula-engine/src/functions/financial/coupon_schedule.rs::coupon_period_e`.
     //
     // Note: basis=4 uses European 30/360 (DAYS360(..., TRUE)) for day counts like `A`, but Excel
     // models the coupon period length `E` used by COUPDAYS (and reused by the odd-coupon bond
     // functions) as a fixed `360/frequency` (even when `DAYS360(PCD, NCD, TRUE)` differs for some
     // end-of-month schedules involving February).
     match basis {
-        // NOTE: Keep this test-side model aligned with the engine's COUP* helper
-        // (`coupon_schedule::coupon_period_e`). Source-of-truth:
-        // `crates/formula-engine/src/functions/financial/coupon_schedule.rs::coupon_period_e`.
         1 => (ncd - pcd) as f64,
         0 | 2 | 4 => 360.0 / freq,
         3 => 365.0 / freq,
@@ -4094,10 +4092,11 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
             let days360_eu =
                 date_time::days360(prev_coupon, first_coupon, true, system).unwrap() as f64;
             assert_close(days360_eu, 182.0, 0.0);
+            let e_fixed = 360.0 / (frequency as f64);
             let e4 = coupon_period_e(prev_coupon, first_coupon, 4, frequency, system);
-            assert_close(e4, 180.0, 0.0);
+            assert_close(e4, e_fixed, 0.0);
             assert!(
-                (days360_eu - e4).abs() > 0.0,
+                (days360_eu - e_fixed).abs() > 0.0,
                 "expected DAYS360_EU(PCD,NCD) != E for this scenario"
             );
         }
@@ -4193,10 +4192,11 @@ fn oddlprice_matches_excel_model_for_30_360_bases() {
     let prev_coupon = coupon_date_with_eom(last_interest, -months_per_period, eom, system);
     let days360_eu = date_time::days360(prev_coupon, last_interest, true, system).unwrap() as f64;
     assert_close(days360_eu, 178.0, 0.0);
+    let e_fixed = 360.0 / (frequency as f64);
     let e4 = coupon_period_e(prev_coupon, last_interest, 4, frequency, system);
-    assert_close(e4, 180.0, 0.0);
+    assert_close(e4, e_fixed, 0.0);
     assert!(
-        (days360_eu - e4).abs() > 0.0,
+        (days360_eu - e_fixed).abs() > 0.0,
         "expected DAYS360_EU(PCD,NCD) != E for this scenario"
     );
 

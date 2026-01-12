@@ -27,6 +27,7 @@ fn coupon_schedule(
 ) -> ExcelResult<CouponSchedule> {
     let (pcd, ncd, n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
 
+    // Coupon period length `E` (days).
     let e = coupon_period_e(pcd, ncd, frequency, basis, system)?;
     let a = days_between(pcd, settlement, basis, system)? as f64;
     let dsc = match basis {

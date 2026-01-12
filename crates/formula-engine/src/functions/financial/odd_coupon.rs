@@ -264,11 +264,11 @@ fn coupon_period_e(
     freq: f64,
     system: ExcelDateSystem,
 ) -> ExcelResult<f64> {
-    // `freq` is the number of coupon payments per year. Reuse the shared COUP* helper to ensure
-    // `E` conventions stay in sync across regular and odd coupon bond implementations.
-    //
-    // `freq` has already been validated as one of {1, 2, 4} by `normalize_frequency`.
     let frequency = freq as i32;
+
+    // `freq` is the number of coupon payments per year.
+    // `freq` has already been validated as one of {1, 2, 4} by `normalize_frequency`.
+    // Reuse the shared COUP* helper to keep `E` conventions aligned with regular bond functions.
     super::coupon_schedule::coupon_period_e(pcd, ncd, frequency, basis, system)
 }
 
@@ -280,12 +280,10 @@ mod tests {
     #[test]
     fn odd_coupon_e_matches_coupdays_convention_for_basis_4() {
         // Regression test for basis=4 (30E/360):
-        // - COUPDAYBS uses the European DAYS360 method (TRUE) for day counts like `A`.
-        // - COUPDAYS (and the odd-coupon bond functions via `coupon_schedule::coupon_period_e`)
-        //   model the coupon period length `E` as a fixed `360/frequency`.
-        //
-        // This intentionally diverges from `DAYS360(PCD, NCD, TRUE)` for some end-of-month schedules
-        // involving February (e.g. Feb 28 -> Aug 31 yields 182, not 180).
+        // - day counts use the European DAYS360 method (TRUE)
+        // - but the coupon period length `E` is still modeled as a fixed `360/frequency`, which can
+        //   differ from `DAYS360(PCD, NCD, TRUE)` for some end-of-month schedules involving
+        //   February (e.g. Feb 28 -> Aug 31 yields 182, not 180).
         let system = ExcelDateSystem::EXCEL_1900;
         let pcd = ymd_to_serial(ExcelDate::new(2001, 2, 28), system).unwrap();
         let ncd = ymd_to_serial(ExcelDate::new(2001, 8, 31), system).unwrap();
@@ -298,7 +296,7 @@ mod tests {
         assert_eq!(days360, 182);
 
         let e = coupon_period_e(pcd, ncd, basis, freq, system).unwrap();
-        assert_eq!(e, 180.0);
+        assert_eq!(e, 360.0 / (frequency as f64));
         assert_ne!(e as i64, days360);
 
         // COUPDAYS should use the same modeled coupon-period length.

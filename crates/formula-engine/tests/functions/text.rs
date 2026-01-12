@@ -168,6 +168,26 @@ fn text_formats_record_display_string() {
 }
 
 #[test]
+fn text_formats_entity_display_string_with_numeric_format() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Entity(EntityValue::new("hello")));
+    assert_eq!(
+        sheet.eval(r#"=TEXT(A1,"0.00")"#),
+        Value::Text("hello".to_string())
+    );
+}
+
+#[test]
+fn text_formats_record_display_string_with_numeric_format() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Record(RecordValue::new("rec")));
+    assert_eq!(
+        sheet.eval(r#"=TEXT(A1,"0.00")"#),
+        Value::Text("rec".to_string())
+    );
+}
+
+#[test]
 fn textjoin_includes_entity_display_string() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", Value::Entity(EntityValue::new("hello")));
@@ -191,6 +211,16 @@ fn textjoin_includes_record_display_string() {
 fn textjoin_ignores_empty_entity_display_string_when_requested() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", Value::Entity(EntityValue::new("")));
+    assert_eq!(
+        sheet.eval(r#"=TEXTJOIN(",",TRUE,A1,"x")"#),
+        Value::Text("x".to_string())
+    );
+}
+
+#[test]
+fn textjoin_ignores_empty_record_display_string_when_requested() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Record(RecordValue::new("")));
     assert_eq!(
         sheet.eval(r#"=TEXTJOIN(",",TRUE,A1,"x")"#),
         Value::Text("x".to_string())
