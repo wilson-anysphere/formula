@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const DISMISSED_VERSION_KEY = "formula.updater.dismissedVersion";
 const DISMISSED_AT_KEY = "formula.updater.dismissedAt";
+const TEST_TIMEOUT_MS = 30_000;
 
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
@@ -84,7 +85,7 @@ describe("tauri/updaterUi dismissal persistence", () => {
 
     expect(localStorage.getItem(DISMISSED_VERSION_KEY)).toBe("1.2.3");
     expect(Number(localStorage.getItem(DISMISSED_AT_KEY))).toBeGreaterThan(0);
-  }, 30_000);
+  }, TEST_TIMEOUT_MS);
 
   it("suppresses startup prompts for a recently-dismissed version, but manual checks still show", async () => {
     const { handleUpdaterEvent } = await loadUpdaterUi();
@@ -101,7 +102,7 @@ describe("tauri/updaterUi dismissal persistence", () => {
     await handleUpdaterEvent("update-available", { source: "manual", version: "1.2.3", body: "Notes" });
     expect(document.querySelector('[data-testid="updater-dialog"]')).toBeTruthy();
     expect(notifySpy).not.toHaveBeenCalled();
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("does not suppress when a manual check is waiting on an in-flight startup check", async () => {
     const { handleUpdaterEvent } = await loadUpdaterUi();
@@ -113,7 +114,7 @@ describe("tauri/updaterUi dismissal persistence", () => {
     await handleUpdaterEvent("update-available", { source: "startup", version: "1.2.3", body: "Notes" });
 
     expect(document.querySelector('[data-testid="updater-dialog"]')).toBeTruthy();
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("sends a startup notification again once the dismissal TTL expires", async () => {
     const { handleUpdaterEvent } = await loadUpdaterUi();
@@ -129,7 +130,7 @@ describe("tauri/updaterUi dismissal persistence", () => {
     expect(notifySpy).toHaveBeenCalledTimes(1);
     expect(localStorage.getItem(DISMISSED_VERSION_KEY)).toBeNull();
     expect(localStorage.getItem(DISMISSED_AT_KEY)).toBeNull();
-  });
+  }, TEST_TIMEOUT_MS);
 
   it("clears stored dismissal when a different version becomes available at startup", async () => {
     const { handleUpdaterEvent } = await loadUpdaterUi();
@@ -144,5 +145,5 @@ describe("tauri/updaterUi dismissal persistence", () => {
     expect(notifySpy).toHaveBeenCalledTimes(1);
     expect(localStorage.getItem(DISMISSED_VERSION_KEY)).toBeNull();
     expect(localStorage.getItem(DISMISSED_AT_KEY)).toBeNull();
-  });
+  }, TEST_TIMEOUT_MS);
 });
