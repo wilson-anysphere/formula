@@ -76,6 +76,12 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: null,
   },
   {
+    command: "ai.inlineEdit",
+    key: "ctrl+k",
+    mac: "cmd+k",
+    when: null,
+  },
+  {
     command: "clipboard.pasteSpecial",
     key: "ctrl+shift+v",
     mac: "cmd+shift+v",

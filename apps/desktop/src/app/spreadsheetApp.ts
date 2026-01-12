@@ -3076,6 +3076,14 @@ export class SpreadsheetApp {
     return this.commentMetaByCoord.has(cell.row * COMMENT_COORD_COL_STRIDE + cell.col);
   }
 
+  openInlineAiEdit(): void {
+    // Match the Cmd/Ctrl+K guard behavior (see `onKeyDown`).
+    if (this.inlineEditController.isOpen()) return;
+    // Inline edit should not trigger while the formula bar is actively editing.
+    if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
+    this.inlineEditController.open();
+  }
+
   toggleCommentsPanel(): void {
     this.commentsPanelVisible = !this.commentsPanelVisible;
     this.commentsPanel.classList.toggle("comments-panel--visible", this.commentsPanelVisible);

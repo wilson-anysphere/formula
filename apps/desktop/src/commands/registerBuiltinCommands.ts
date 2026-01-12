@@ -167,6 +167,18 @@ export function registerBuiltinCommands(params: {
   );
 
   commandRegistry.registerBuiltinCommand(
+    "ai.inlineEdit",
+    "Inline AI Edit…",
+    () => app.openInlineAiEdit(),
+    {
+      category: "AI",
+      icon: null,
+      description: "Use AI to transform the current selection",
+      keywords: ["ai", "inline edit", "transform"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
     "view.insertPivotTable",
     t("command.view.insertPivotTable"),
     () => {
