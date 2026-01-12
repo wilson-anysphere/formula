@@ -30,6 +30,7 @@ This document is a “what’s real in the repo” reference for contributors.
     - `apps/desktop/src-tauri/src/path_scope.rs` (`PathScopePolicy`, used by path-taking commands like `open_workbook`)
     - `apps/desktop/src-tauri/src/fs_scope.rs` (lower-level canonicalization + scope helpers used by some commands)
   - Custom `asset:` protocol handler (COEP/CORP): `apps/desktop/src-tauri/src/asset_protocol.rs`
+  - Stable webview origin helper (used for `asset:` CORS hardening): `apps/desktop/src-tauri/src/tauri_origin.rs`
   - Tray: `apps/desktop/src-tauri/src/tray.rs`
   - Tray status (icon + tooltip updates): `apps/desktop/src-tauri/src/tray_status.rs`
   - App menu: `apps/desktop/src-tauri/src/menu.rs`
@@ -171,6 +172,9 @@ How this is (currently) handled in the repo:
   - Additionally, the desktop shell overrides the `asset:` protocol handler (see `apps/desktop/src-tauri/src/asset_protocol.rs`)
     to attach `Cross-Origin-Resource-Policy: cross-origin` so `convertFileSrc(...)` URLs can still be embedded when
     `Cross-Origin-Embedder-Policy: require-corp` is enabled.
+    - For security, it does **not** set `Access-Control-Allow-Origin: *`; it sets `Access-Control-Allow-Origin` to the
+      **stable initial webview origin** (mirroring Tauri’s upstream `window_origin` behavior) so an external navigation
+      cannot gain CORS access to arbitrary `asset://…` files. See `apps/desktop/src-tauri/src/tauri_origin.rs`.
   - If isolation is missing in a production desktop build, the UI logs an error and shows a long-lived toast (see
     `warnIfMissingCrossOriginIsolationInTauriProd()` in `apps/desktop/src/main.ts`).
 
