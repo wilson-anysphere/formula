@@ -1,0 +1,1 @@
+import "./shortcutSearch.test.js";
