@@ -1435,6 +1435,7 @@ pub fn lex_formula(formula: String, opts: Option<JsValue>) -> Result<JsValue, Js
                 formula_engine::TokenKind::Intersect(raw) => {
                     ("intersect".to_string(), Some(JsonValue::String(raw)))
                 }
+                formula_engine::TokenKind::Dot => ("dot".to_string(), None),
                 formula_engine::TokenKind::LParen => ("lParen".to_string(), None),
                 formula_engine::TokenKind::RParen => ("rParen".to_string(), None),
                 formula_engine::TokenKind::LBrace => ("lBrace".to_string(), None),
