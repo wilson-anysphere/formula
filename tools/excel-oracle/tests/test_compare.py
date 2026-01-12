@@ -30,6 +30,7 @@ class ComparePartialDatasetsTests(unittest.TestCase):
                         "outputCell": "C1",
                         "inputs": [],
                         "tags": ["tag-b"],
+                        "description": "Case B description",
                     },
                 ],
             }
@@ -110,6 +111,7 @@ class ComparePartialDatasetsTests(unittest.TestCase):
             self.assertEqual(mismatches[0]["tags"], ["tag-b"])
             self.assertEqual(mismatches[0]["actual"], {"t": "n", "v": 4})
             self.assertEqual(mismatches[0]["outputCell"], "C1")
+            self.assertEqual(mismatches[0]["description"], "Case B description")
             self.assertEqual(mismatches[0]["actualAddress"], "C1")
             self.assertEqual(mismatches[0]["actualDisplayText"], "4")
 

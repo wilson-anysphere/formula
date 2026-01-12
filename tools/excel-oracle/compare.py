@@ -388,6 +388,9 @@ def main() -> int:
             output_cell = _maybe_nonempty_str(case.get("outputCell"))
             if output_cell is not None:
                 entry["outputCell"] = output_cell
+            description = _maybe_nonempty_str(case.get("description"))
+            if description is not None:
+                entry["description"] = description
 
             if isinstance(act, dict):
                 # When the expected dataset is missing a case (common when new deterministic cases
@@ -421,6 +424,9 @@ def main() -> int:
             output_cell = _maybe_nonempty_str(case.get("outputCell"))
             if output_cell is not None:
                 entry["outputCell"] = output_cell
+            description = _maybe_nonempty_str(case.get("description"))
+            if description is not None:
+                entry["description"] = description
 
             if isinstance(exp, dict):
                 expected_address = _maybe_nonempty_str(exp.get("address"))
@@ -460,6 +466,9 @@ def main() -> int:
                 output_cell = _maybe_nonempty_str(case.get("outputCell"))
                 if output_cell is not None:
                     entry["outputCell"] = output_cell
+                description = _maybe_nonempty_str(case.get("description"))
+                if description is not None:
+                    entry["description"] = description
 
                 if isinstance(exp, dict):
                     expected_address = _maybe_nonempty_str(exp.get("address"))
