@@ -688,10 +688,10 @@ High-level contents (see the file for the exhaustive list):
   - close flow: `close-prep`, `close-requested`
   - open flow: `open-file`, `file-dropped`
   - deep links / OAuth: `oauth-redirect`
-  - native menu bar: `menu-*` events
-  - tray + shortcuts: `tray-*`, `shortcut-*`
-  - startup timing instrumentation: `startup:*` events
-  - updater: `update-*` events
+  - native menu bar events (e.g. `menu-open`, `menu-save`, `menu-check-updates`)
+  - tray + shortcuts (e.g. `tray-open`, `shortcut-command-palette`)
+  - startup timing instrumentation (e.g. `startup:webview-loaded`, `startup:tti`)
+  - updater events (e.g. `update-check-started`, `update-available`)
 - `event:allow-emit` includes acknowledgements and check-mode signals:
   - `open-file-ready`, `oauth-redirect-ready`
   - `close-prep-done`, `close-handled`
