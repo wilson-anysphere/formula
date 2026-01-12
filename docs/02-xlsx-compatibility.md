@@ -414,7 +414,9 @@ See also:
 `xl/richData/richValueRel.xml`:
 
 ```xml
-<!-- Root name and namespace are version-dependent. Three variants are observed in-repo. -->
+<!-- Root name and namespace are version-dependent.
+     Three fixture-backed variants are observed in the in-repo `.xlsx` fixtures; tests may use additional
+     arbitrary namespaces, so treat namespace URIs as opaque. -->
 
 <!-- `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` -->
 <richValueRel xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2"

@@ -52,9 +52,9 @@ xl/
     ├── rdrichvalue.xml                 # rdRichValue variant rich values (<rv> + positional <v> fields)
     ├── rdrichvaluestructure.xml        # rdRichValue variant structure table (ordered keys for <v> positions)
     ├── rdRichValueTypes.xml            # rdRichValue variant type/key flags (often present)
-    ├── richValueRel.xml                # Relationship-slot table (root/name/namespace varies)
+    ├── richValueRel.xml                # Relationship-slot table (name/root/namespace varies; can be numbered/custom in some producers/tests)
     └── _rels/
-        └── richValueRel.xml.rels       # OPC relationships: rId -> ../media/image*.png
+        └── richValueRel.xml.rels       # OPC relationships for the relationship-slot table (e.g. richValueRel.xml.rels or richValueRel1.xml.rels)
 xl/media/
 └── image*.{png,jpg,...}                # Binary image payload
 ```
@@ -101,11 +101,11 @@ At a high level:
 sheetN.xml: <c vm="VM_INDEX">…</c>
   └─> xl/metadata.xml: valueMetadata[VM_INDEX]   (vm can be 0-based or 1-based; treat as opaque)
          └─> RV_INDEX (resolved best-effort; in this repo’s fixtures: rc/@v -> <futureMetadata name="XLRICHVALUE"> -> <xlrd:rvb i="..."/>)
-                 └─> xl/richData/richValue*.xml / richValues*.xml (or xl/richData/rdrichvalue.xml): <rv> entry at RV_INDEX
-                        └─> (image payload references REL_SLOT_INDEX)
-                              └─> xl/richData/richValueRel.xml: <rel> at REL_SLOT_INDEX => r:id="rIdX"
-                                    └─> xl/richData/_rels/richValueRel.xml.rels: Relationship Id="rIdX"
-                                         └─> Target="../media/imageY.png" => xl/media/imageY.png bytes
+                  └─> xl/richData/richValue*.xml / richValues*.xml (or xl/richData/rdrichvalue.xml): <rv> entry at RV_INDEX
+                         └─> (image payload references REL_SLOT_INDEX)
+                               └─> xl/richData/richValueRel*.xml: <rel> at REL_SLOT_INDEX => r:id="rIdX"
+                                     └─> xl/richData/_rels/richValueRel*.xml.rels: Relationship Id="rIdX"
+                                          └─> Target="../media/imageY.png" => xl/media/imageY.png bytes
 ```
 
 ### Indexing notes (practical assumptions)

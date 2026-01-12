@@ -30,11 +30,11 @@ When a workbook contains at least one RichData value (including images-in-cell),
 xl/
   richData/
     richValue.xml              # or: richValues.xml (naming varies); or: rdrichvalue.xml
-    richValueRel.xml
+    richValueRel.xml           # relationship-slot table (filename varies across producers/tests)
     richValueTypes.xml        # optional (not present in all workbooks); or: rdRichValueTypes.xml
     richValueStructure.xml    # optional (not present in all workbooks); or: rdrichvaluestructure.xml
   richData/_rels/
-    richValueRel.xml.rels   # required if richValueRel.xml contains r:id entries
+    richValueRel.xml.rels      # `.rels` for the relationship-slot table part (required if it contains `r:id` entries)
 ```
 
 Notes:
@@ -53,6 +53,10 @@ Notes:
   * “Excel-like” naming: `richValue.xml`, `richValueTypes.xml`, `richValueStructure.xml`
   * Plural “richValues” naming (observed in tests; not currently observed in the Excel fixtures in this repo):
     * `richValues.xml`, `richValues1.xml`, ...
+  * The relationship-slot table is usually `richValueRel.xml`, but tests also construct workbooks where it is
+    numbered (`richValueRel1.xml`) or custom (e.g. `customRichValueRel.xml`) and referenced via relationships
+    (from `workbook.xml.rels`, `metadata.xml.rels`, and/or the rich value part’s `.rels`). Prefer
+    relationship-based discovery over hardcoded filenames.
   * “rdRichValue” naming (observed in the real Excel fixture `fixtures/xlsx/basic/image-in-cell.xlsx`
     and in `rust_xlsxwriter` output in this repo):
     * `rdrichvalue.xml`
@@ -967,7 +971,9 @@ Excel uses OPC relationships to connect:
 * `xl/workbook.xml` → `xl/metadata.xml` (worksheet cells only carry `vm`/`cm` indices; the actual mapping tables live in metadata).
 * `xl/workbook.xml` → `xl/richData/*` (the rich value tables; often directly related from the workbook for in-cell images).
 * (Sometimes) `xl/metadata.xml` → `xl/richData/*` via `xl/_rels/metadata.xml.rels`.
-* `xl/richData/richValueRel.xml` → external OPC targets (commonly `xl/media/*` images) via `xl/richData/_rels/richValueRel.xml.rels`.
+* The rich value relationship-slot table part (often `xl/richData/richValueRel.xml`) → external OPC targets
+  (commonly `xl/media/*` images) via its `.rels` part under `xl/richData/_rels/`
+  (e.g. `richValueRel.xml.rels`).
 
 The workbook → metadata relationship uses a standard SpreadsheetML relationship type URI. Two variants are
 observed in this repo:
@@ -1168,8 +1174,11 @@ For images-in-cell, the minimum viable read path usually looks like:
    * For the `rdRichValue*` naming variant (observed in `fixtures/xlsx/basic/image-in-cell.xlsx`), the
      analogous structure table is `xl/richData/rdrichvaluestructure.xml` (which defines ordered `<k>` keys
      for positional `<v>` fields).
-5. Parse `richValueRel.xml` into `rel_index -> rId`.
-6. Parse `xl/richData/_rels/richValueRel.xml.rels` into `rId -> target` (image path).
+5. Parse the rich-value relationship-slot table (often named `richValueRel.xml`) into `rel_index -> rId`.
+6. Parse its `.rels` part (e.g. `xl/richData/_rels/richValueRel.xml.rels`) into `rId -> target` (image path).
+   * Some producers/tests emit `Relationship/@Target` values with URI fragments (e.g. `../media/image1.png#frag`)
+     or “wrong-but-recoverable” relative paths (e.g. `media/image1.png`). Strip fragments and resolve targets
+     best-effort.
 7. Parse the rich value store (`richValue*.xml` and/or `rdrichvalue.xml`) into a table of
    `rich_value_index -> {type_id, payload...}`.
    * For the `rdrichvalue.xml` variant, interpret positional `<v>` fields using
@@ -1181,7 +1190,7 @@ For images-in-cell, the minimum viable read path usually looks like:
 
 For writing, the safest approach is typically “append-only”:
 
-* Append new relationships to `richValueRel.xml` + `.rels`
+* Append new relationships to the relationship-slot table part (often `richValueRel.xml`) + its `.rels`
 * Append new rich values to `richValue.xml`
 * Avoid renumbering existing indices unless you fully rebuild all referencing metadata
 
