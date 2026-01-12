@@ -212,19 +212,34 @@ fn accrint_treats_blank_and_missing_optional_args_as_defaults() {
 fn coup_functions_reject_invalid_inputs_with_num_error() {
     let mut sheet = TestSheet::new();
 
-    // settlement >= maturity
-    assert_eq!(
-        sheet.eval("=COUPDAYS(DATE(2025,1,1),DATE(2025,1,1),2,0)"),
-        Value::Error(ErrorKind::Num)
-    );
-    // invalid frequency
-    assert_eq!(
-        sheet.eval("=COUPDAYS(DATE(2024,1,1),DATE(2025,1,1),3,0)"),
-        Value::Error(ErrorKind::Num)
-    );
-    // invalid basis
-    assert_eq!(
-        sheet.eval("=COUPDAYS(DATE(2024,1,1),DATE(2025,1,1),2,99)"),
-        Value::Error(ErrorKind::Num)
-    );
+    for func in [
+        "COUPDAYBS",
+        "COUPDAYS",
+        "COUPDAYSNC",
+        "COUPNCD",
+        "COUPNUM",
+        "COUPPCD",
+    ] {
+        // settlement >= maturity
+        assert_eq!(
+            sheet.eval(&format!(
+                "={func}(DATE(2025,1,1),DATE(2025,1,1),2,0)"
+            )),
+            Value::Error(ErrorKind::Num)
+        );
+        // invalid frequency
+        assert_eq!(
+            sheet.eval(&format!(
+                "={func}(DATE(2024,1,1),DATE(2025,1,1),3,0)"
+            )),
+            Value::Error(ErrorKind::Num)
+        );
+        // invalid basis
+        assert_eq!(
+            sheet.eval(&format!(
+                "={func}(DATE(2024,1,1),DATE(2025,1,1),2,99)"
+            )),
+            Value::Error(ErrorKind::Num)
+        );
+    }
 }
