@@ -611,7 +611,6 @@ fn normalize_engine_value(value: &EngineValue) -> NormalizedValue {
         EngineValue::Entity(v) => NormalizedValue::Text(v.display.clone()),
         EngineValue::Record(v) => NormalizedValue::Text(v.display.clone()),
         EngineValue::Error(e) => NormalizedValue::Error(e.as_code().to_string()),
-        EngineValue::Record(_) | EngineValue::Entity(_) => NormalizedValue::Blank,
         EngineValue::Reference(_)
         | EngineValue::ReferenceUnion(_)
         | EngineValue::Array(_)

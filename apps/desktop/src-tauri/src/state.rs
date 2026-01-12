@@ -3644,7 +3644,6 @@ fn engine_value_to_scalar(value: EngineValue) -> CellScalar {
         EngineValue::Record(v) => CellScalar::Text(v.display),
         EngineValue::Bool(b) => CellScalar::Bool(b),
         EngineValue::Error(e) => CellScalar::Error(e.as_code().to_string()),
-        EngineValue::Record(_) | EngineValue::Entity(_) => CellScalar::Error("#VALUE!".to_string()),
         // Reference values are not meant to be stored directly in cells; when they
         // leak out as a final value we treat them like Excel does (a #VALUE! error).
         EngineValue::Reference(_) | EngineValue::ReferenceUnion(_) => {

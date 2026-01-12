@@ -127,9 +127,6 @@ impl From<Value> for EncodedValue {
                 }
                 EncodedValue::Array { rows }
             }
-            Value::Record(_) | Value::Entity(_) => {
-                EncodedValue::engine_error("unexpected record/entity value")
-            }
             Value::Reference(_) | Value::ReferenceUnion(_) => {
                 EncodedValue::engine_error("unexpected reference value")
             }
@@ -354,7 +351,6 @@ fn main() -> Result<()> {
             Value::Error(e) => e.as_code().to_string(),
             Value::Lambda(_) => "#CALC!".to_string(),
             Value::Array(arr) => arr.top_left().to_string(),
-            Value::Record(_) | Value::Entity(_) => "#VALUE!".to_string(),
             Value::Reference(_) | Value::ReferenceUnion(_) => "#VALUE!".to_string(),
             Value::Spill { .. } => "#SPILL!".to_string(),
         };
