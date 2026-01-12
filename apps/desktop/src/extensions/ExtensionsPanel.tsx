@@ -155,7 +155,7 @@ export function ExtensionsPanel({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
         <button
           type="button"
           data-testid="reset-all-extension-permissions"
@@ -181,6 +181,31 @@ export function ExtensionsPanel({
           }}
         >
           Reset all permissions
+        </button>
+        <button
+          type="button"
+          data-testid="refresh-extension-permissions"
+          disabled={busy === "refresh"}
+          onClick={() => {
+            void (async () => {
+              setBusy("refresh");
+              try {
+                await refreshPermissions();
+              } finally {
+                setBusy(null);
+              }
+            })();
+          }}
+          style={{
+            padding: "8px 10px",
+            borderRadius: "10px",
+            border: "1px solid var(--border)",
+            background: "var(--bg-secondary)",
+            color: "var(--text-primary)",
+            cursor: "pointer",
+          }}
+        >
+          Refresh
         </button>
       </div>
 
