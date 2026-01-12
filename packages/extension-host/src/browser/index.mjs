@@ -2168,6 +2168,30 @@ class BrowserExtensionHost {
     return name;
   }
 
+  _resolveSheetIdSync(sheetName) {
+    if (sheetName == null) return this._activeSheetId ?? "sheet1";
+    const name = String(sheetName).trim();
+    if (!name) return this._activeSheetId ?? "sheet1";
+
+    const candidateLists = [
+      typeof this._spreadsheet.listSheets === "function" ? this._spreadsheet.listSheets() : null,
+      Array.isArray(this._sheets) ? this._sheets : null
+    ];
+
+    for (const list of candidateLists) {
+      if (!Array.isArray(list)) continue;
+      for (const sheet of list) {
+        if (!sheet || typeof sheet !== "object") continue;
+        const id = sheet.id != null ? String(sheet.id).trim() : "";
+        const sheetDisplayName = sheet.name != null ? String(sheet.name).trim() : "";
+        if (!id) continue;
+        if (sheetDisplayName === name || id === name) return id;
+      }
+    }
+
+    return name;
+  }
+
   _taintExtensionRange(extension, range) {
     try {
       extension.taintedRanges = addTaintedRangeToList(extension.taintedRanges, range);
@@ -2422,7 +2446,31 @@ class BrowserExtensionHost {
           Object.prototype.hasOwnProperty.call(selection, "startCol") &&
           Object.prototype.hasOwnProperty.call(selection, "endRow") &&
           Object.prototype.hasOwnProperty.call(selection, "endCol");
-        if (!looksLikeRange) return;
+
+        let range = null;
+        if (looksLikeRange) {
+          range = {
+            startRow: selection.startRow,
+            startCol: selection.startCol,
+            endRow: selection.endRow,
+            endCol: selection.endCol
+          };
+        } else if (typeof selection?.address === "string" && selection.address.trim()) {
+          try {
+            const { sheetName: addrSheetName, ref: addrRef } = this._splitSheetQualifier(selection.address);
+            range = this._parseA1RangeRef(addrRef);
+            if (addrSheetName != null) {
+              const resolved = this._resolveSheetIdSync(addrSheetName);
+              if (typeof resolved === "string" && resolved.trim()) {
+                // eslint-disable-next-line no-param-reassign
+                data = { ...(data ?? {}), sheetId: resolved.trim() };
+              }
+            }
+          } catch {
+            range = null;
+          }
+        }
+        if (!range) return;
 
         const sheetId =
           (typeof data?.sheetId === "string" && data.sheetId.trim()) ||
@@ -2434,18 +2482,41 @@ class BrowserExtensionHost {
 
         this._taintExtensionRange(extension, {
           sheetId,
-          startRow: selection.startRow,
-          startCol: selection.startCol,
-          endRow: selection.endRow,
-          endCol: selection.endCol
+          startRow: range.startRow,
+          startCol: range.startCol,
+          endRow: range.endRow,
+          endCol: range.endCol
         });
         return;
       }
 
       if (evt === "cellChanged") {
         if (!data || typeof data !== "object") return;
-        if (!Object.prototype.hasOwnProperty.call(data, "row")) return;
-        if (!Object.prototype.hasOwnProperty.call(data, "col")) return;
+        const hasRow = Object.prototype.hasOwnProperty.call(data, "row");
+        const hasCol = Object.prototype.hasOwnProperty.call(data, "col");
+
+        let row = hasRow ? data.row : null;
+        let col = hasCol ? data.col : null;
+
+        if ((row == null || col == null) && typeof data?.address === "string" && data.address.trim()) {
+          try {
+            const { sheetName: addrSheetName, ref: addrRef } = this._splitSheetQualifier(data.address);
+            const parsed = this._parseA1CellRef(addrRef);
+            row = parsed.row;
+            col = parsed.col;
+            if (addrSheetName != null) {
+              const resolved = this._resolveSheetIdSync(addrSheetName);
+              if (typeof resolved === "string" && resolved.trim()) {
+                // eslint-disable-next-line no-param-reassign
+                data = { ...(data ?? {}), sheetId: resolved.trim() };
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        if (row == null || col == null) return;
 
         const sheetId =
           (typeof data?.sheetId === "string" && data.sheetId.trim()) ||
@@ -2456,10 +2527,10 @@ class BrowserExtensionHost {
 
         this._taintExtensionRange(extension, {
           sheetId,
-          startRow: data.row,
-          startCol: data.col,
-          endRow: data.row,
-          endCol: data.col
+          startRow: row,
+          startCol: col,
+          endRow: row,
+          endCol: col
         });
       }
     } catch {

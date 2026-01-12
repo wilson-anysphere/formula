@@ -351,6 +351,51 @@ test("BrowserExtensionHost: selectionChanged taints using active-sheet fallback 
   ]);
 });
 
+test("BrowserExtensionHost: selectionChanged taints using selection.address when coords are missing", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async setCell() {},
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.selection-event-address-taint";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "selection-event-address-taint",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: [],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+
+  host._broadcastEvent("selectionChanged", {
+    selection: { address: "A1:B2", values: [[1, 2], [3, 4]] },
+  });
+
+  assert.deepEqual(sortRanges(extension.taintedRanges), [
+    { sheetId: "sheet1", startRow: 0, startCol: 0, endRow: 1, endCol: 1 },
+  ]);
+});
+
 test("BrowserExtensionHost: cellChanged taints using active-sheet fallback when sheetId omitted", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
@@ -392,6 +437,49 @@ test("BrowserExtensionHost: cellChanged taints using active-sheet fallback when 
 
   assert.deepEqual(sortRanges(extension.taintedRanges), [
     { sheetId: "sheet2", startRow: 9, startCol: 8, endRow: 9, endCol: 8 },
+  ]);
+});
+
+test("BrowserExtensionHost: cellChanged taints using address when row/col are missing", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async setCell() {},
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.cell-event-address-taint";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "cell-event-address-taint",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: [],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+
+  host._broadcastEvent("cellChanged", { address: "B2", value: "x" });
+
+  assert.deepEqual(sortRanges(extension.taintedRanges), [
+    { sheetId: "sheet1", startRow: 1, startCol: 1, endRow: 1, endCol: 1 },
   ]);
 });
 
