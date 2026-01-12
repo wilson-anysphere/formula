@@ -270,12 +270,35 @@ export namespace config {
 }
 
 export namespace events {
+  /**
+   * Fired when the active selection changes.
+   *
+   * Note: in desktop builds with DLP enabled, receiving selection/cell values via events may
+   * participate in clipboard taint tracking.
+   */
   function onSelectionChanged(callback: (e: { sheetId?: string; selection: Range }) => void): Disposable;
+  /**
+   * Fired when a cell value changes.
+   *
+   * Note: in desktop builds with DLP enabled, receiving selection/cell values via events may
+   * participate in clipboard taint tracking.
+   */
   function onCellChanged(
     callback: (e: { sheetId?: string; row: number; col: number; value: CellValue }) => void
   ): Disposable;
   function onSheetActivated(callback: (e: { sheet: Sheet }) => void): Disposable;
+  /**
+   * Fired after a workbook is opened/created/closed.
+   *
+   * In desktop builds this is emitted by both UI and extension-initiated workbook operations.
+   */
   function onWorkbookOpened(callback: (e: { workbook: Workbook }) => void): Disposable;
+  /**
+   * Fired before a workbook save occurs.
+   *
+   * In desktop builds, saving an unsaved workbook may prompt for a Save As path. In that case
+   * the event is emitted only once the path is chosen (so cancelling the dialog does not fire).
+   */
   function onBeforeSave(callback: (e: { workbook: Workbook }) => void): Disposable;
   function onViewActivated(callback: (e: { viewId: string }) => void): Disposable;
 }
