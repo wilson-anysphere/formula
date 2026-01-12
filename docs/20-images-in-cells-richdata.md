@@ -312,6 +312,33 @@ Implementation guidance:
 * When parsing, do not hardcode exact Type URIs; match by resolved `Target` path when necessary and preserve unknown relationship types.
 * When writing new files, prefer the Excel-like layering (`workbook.xml` → `metadata.xml` → `richData/*`) and keep Type URIs stable (but be prepared that Excel may rewrite them).
 
+#### Minimal `.rels` skeletons (best-effort)
+
+`xl/_rels/workbook.xml.rels` (workbook → metadata; Type URI likely standard OpenXML, but verify):
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <!-- ...other workbook relationships... -->
+  <Relationship
+    Id="rIdMeta"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"
+    Target="metadata.xml"/>
+</Relationships>
+```
+
+`xl/_rels/metadata.xml.rels` (metadata → richData tables; Type URIs are Microsoft-specific and unverified):
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdRichValue"          Type="http://schemas.microsoft.com/office/.../relationships/richValue"          Target="richData/richValue.xml"/>
+  <Relationship Id="rIdRichValueRel"       Type="http://schemas.microsoft.com/office/.../relationships/richValueRel"       Target="richData/richValueRel.xml"/>
+  <Relationship Id="rIdRichValueTypes"     Type="http://schemas.microsoft.com/office/.../relationships/richValueTypes"     Target="richData/richValueTypes.xml"/>
+  <Relationship Id="rIdRichValueStructure" Type="http://schemas.microsoft.com/office/.../relationships/richValueStructure" Target="richData/richValueStructure.xml"/>
+</Relationships>
+```
+
 ### `[Content_Types].xml` overrides (likely)
 
 Excel adds explicit `<Override>` entries for each richData part. Exact `ContentType` strings are not yet verified here; likely patterns:
