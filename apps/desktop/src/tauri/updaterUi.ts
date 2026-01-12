@@ -7,6 +7,10 @@ import { installUpdateAndRestart } from "./updater";
 
 export const FORMULA_RELEASES_URL = "https://github.com/wilson-anysphere/formula/releases";
 
+export const UPDATER_DISMISSED_VERSION_KEY = "formula.updater.dismissedVersion";
+export const UPDATER_DISMISSED_AT_KEY = "formula.updater.dismissedAt";
+const UPDATER_DISMISSAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 type UpdaterEventName =
   | "update-check-already-running"
   | "update-check-started"
@@ -32,6 +36,10 @@ type UpdaterEventPayload = {
 };
 
 type TauriListen = (event: string, handler: (event: any) => void) => Promise<() => void>;
+
+type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+type DismissalRecord = { version: string; dismissedAtMs: number };
 
 type UpdaterDownloadProgress = {
   downloaded?: number;
@@ -78,6 +86,94 @@ let progressTotal: number | null = null;
 let progressPercent: number | null = null;
 
 let updateDialogShownForVersion: string | null = null;
+
+function getLocalStorageOrNull(): StorageLike | null {
+  try {
+    // Prefer `window.localStorage` when available (jsdom/webview), but fall back to
+    // `globalThis.localStorage`. Node 22+ ships an experimental localStorage accessor that throws
+    // unless started with `--localstorage-file`, so probe before returning.
+    const storage =
+      (typeof window !== "undefined" ? ((window as any).localStorage as StorageLike | undefined) : undefined) ??
+      ((globalThis as any).localStorage as StorageLike | undefined) ??
+      null;
+    if (!storage) return null;
+    storage.getItem("formula.updater.storageProbe");
+    return storage;
+  } catch {
+    return null;
+  }
+}
+
+function readUpdaterDismissal(storage: StorageLike): DismissalRecord | null {
+  try {
+    const version = storage.getItem(UPDATER_DISMISSED_VERSION_KEY);
+    if (typeof version !== "string" || version.trim() === "") return null;
+    const dismissedAtRaw = storage.getItem(UPDATER_DISMISSED_AT_KEY);
+    const dismissedAtMs = Number(dismissedAtRaw);
+    if (!Number.isFinite(dismissedAtMs)) return null;
+    return { version: version.trim(), dismissedAtMs };
+  } catch {
+    return null;
+  }
+}
+
+function clearUpdaterDismissal(storage: StorageLike): void {
+  try {
+    storage.removeItem(UPDATER_DISMISSED_VERSION_KEY);
+    storage.removeItem(UPDATER_DISMISSED_AT_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function setUpdaterDismissal(storage: StorageLike, version: string): void {
+  if (!version.trim()) return;
+  try {
+    storage.setItem(UPDATER_DISMISSED_VERSION_KEY, version.trim());
+    storage.setItem(UPDATER_DISMISSED_AT_KEY, String(Date.now()));
+  } catch {
+    // ignore
+  }
+}
+
+function shouldSuppressStartupUpdatePrompt(version: string): boolean {
+  const storage = getLocalStorageOrNull();
+  if (!storage) return false;
+
+  const record = readUpdaterDismissal(storage);
+  if (!record) return false;
+
+  // New version => reset suppression.
+  if (record.version !== version) {
+    clearUpdaterDismissal(storage);
+    return false;
+  }
+
+  const ageMs = Date.now() - record.dismissedAtMs;
+  if (!Number.isFinite(ageMs) || ageMs < 0) {
+    clearUpdaterDismissal(storage);
+    return false;
+  }
+
+  if (ageMs < UPDATER_DISMISSAL_TTL_MS) return true;
+
+  clearUpdaterDismissal(storage);
+  return false;
+}
+
+function persistDismissalForCurrentUpdate(): void {
+  const version = updateInfo?.version ?? "";
+  if (!version.trim()) return;
+  const storage = getLocalStorageOrNull();
+  if (!storage) return;
+  setUpdaterDismissal(storage, version);
+}
+
+function clearDismissalOnUpdateInitiated(): void {
+  const storage = getLocalStorageOrNull();
+  if (!storage) return;
+  clearUpdaterDismissal(storage);
+}
 
 // If the user triggers a manual check while a background (startup) check is already in-flight,
 // the backend emits `update-check-already-running`. Track that a manual request is "waiting" so
@@ -401,11 +497,13 @@ function ensureUpdateDialog(): DialogElements {
     }
     // Allow ESC to behave like "Later".
     e.preventDefault();
+    persistDismissalForCurrentUpdate();
     safeClose(dialog, "later");
   });
 
   laterBtn.addEventListener("click", () => {
     if (downloadInFlight) return;
+    persistDismissalForCurrentUpdate();
     safeClose(dialog, "later");
   });
 
@@ -416,11 +514,13 @@ function ensureUpdateDialog(): DialogElements {
   });
 
   downloadBtn.addEventListener("click", () => {
+    clearDismissalOnUpdateInitiated();
     void startUpdateDownload();
   });
 
   restartBtn.addEventListener("click", () => {
     void (async () => {
+      clearDismissalOnUpdateInitiated();
       lastUpdateError = null;
       renderUpdateDialog();
       // Keep the dialog open if the restart was cancelled (e.g. user hit "Cancel"
@@ -574,6 +674,9 @@ async function startUpdateDownload(): Promise<void> {
   if (downloadInFlight) return;
   if (!updateInfo) return;
 
+  // The user initiated an update download; clear any persisted "Later" suppression.
+  clearDismissalOnUpdateInitiated();
+
   const updater = getUpdaterApiOrNull();
   if (!updater) {
     console.warn("Updater API not available; cannot download update.");
@@ -696,6 +799,21 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
           ? payload.version.trim()
           : "unknown";
       const body = typeof payload?.body === "string" && payload.body.trim() !== "" ? payload.body : null;
+
+      // If a new version is available, drop any persisted "Later" suppression from prior versions.
+      const storage = getLocalStorageOrNull();
+      if (storage) {
+        const record = readUpdaterDismissal(storage);
+        if (record && record.version !== version) {
+          clearUpdaterDismissal(storage);
+        }
+      }
+
+      // Suppress repeat startup prompts for the same version if the user recently
+      // clicked "Later" (persisted across launches). Manual checks always surface the update.
+      if (source === "startup" && shouldSuppressStartupUpdatePrompt(version)) {
+        break;
+      }
 
       // Avoid repeatedly showing the startup prompt for the same version.
       if (source !== "manual" && updateDialogShownForVersion === version) break;
