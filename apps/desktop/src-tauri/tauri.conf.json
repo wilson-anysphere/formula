@@ -64,6 +64,11 @@
         "ext": ["csv"],
         "name": "CSV File",
         "role": "Editor"
+      },
+      {
+        "ext": ["parquet"],
+        "name": "Parquet File",
+        "role": "Editor"
       }
     ],
     "linux": {

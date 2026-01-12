@@ -34,6 +34,8 @@ desktop = [
     "dep:gdk",
     "dep:glib",
     "dep:gdk-pixbuf",
+    # Desktop builds should be able to open `.parquet` files out of the box.
+    "parquet",
 ]
 # Enable Parquet/Arrow-backed columnar imports.
 #
