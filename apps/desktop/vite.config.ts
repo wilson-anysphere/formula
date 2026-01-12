@@ -124,7 +124,12 @@ export default defineConfig({
       ["src/panels/ai-audit/AIAuditPanel.vitest.ts", "jsdom"],
       ["src/command-palette/commandPaletteController.vitest.ts", "jsdom"],
     ],
-    include: ["src/**/*.vitest.ts", "src/ai/tools/**/*.test.ts", "src/editor/cellEditorOverlay.f4.test.ts"],
+    include: [
+      "src/**/*.vitest.ts",
+      "src/ai/tools/**/*.test.ts",
+      "src/editor/cellEditorOverlay.f4.test.ts",
+      "src/ai/inline-edit/__tests__/**/*.test.ts",
+    ],
     exclude: ["tests/**", "node_modules/**"],
   },
 });
