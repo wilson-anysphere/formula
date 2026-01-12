@@ -394,13 +394,204 @@ async function filterTypeScriptImportTests(files, extensions = ["ts", "tsx"]) {
   const tsImportRe = new RegExp(
     `from\\s+["'][^"']+\\.(${extGroup})["']|import\\(\\s*["'][^"']+\\.(${extGroup})["']\\s*\\)`,
   );
+
+  // When TypeScript execution is unavailable (older Node versions without `--experimental-strip-types`
+  // and without a TS transpile loader), we still want to skip suites that depend on workspace packages
+  // whose entrypoints are authored as `.ts`/`.tsx` (even if the test itself doesn't import a `.ts`
+  // file directly).
+  //
+  // We only do this extra analysis when we're filtering `.ts` imports (not when we're *only* filtering
+  // `.tsx` imports due to strip-types limitations).
+  const shouldDetectWorkspaceTypeScriptEntrypoints = extensions.includes("ts");
+  const workspacePackages = shouldDetectWorkspaceTypeScriptEntrypoints ? await loadWorkspacePackageEntrypoints() : null;
+  const importFromRe = /\b(?:import|export)\s+(type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
+  const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
+  const dynamicImportRe = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
+  const requireCallRe = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
+
+  /**
+   * @param {string} specifier
+   * @returns {{ packageName: string, exportKey: string } | null}
+   */
+  function parseWorkspaceSpecifier(specifier) {
+    if (!specifier.startsWith("@formula/")) return null;
+    const parts = specifier.split("/");
+    if (parts.length < 2) return null;
+    const packageName = `${parts[0]}/${parts[1]}`;
+    const subpath = parts.slice(2).join("/");
+    const exportKey = subpath ? `./${subpath}` : ".";
+    return { packageName, exportKey };
+  }
+
+  /**
+   * @param {any} exportsMap
+   * @param {string} exportKey
+   * @param {string | null} main
+   */
+  function resolveExportPath(exportsMap, exportKey, main) {
+    /**
+     * @param {any} entry
+     * @returns {string | null}
+     */
+    function pickExportPath(entry) {
+      if (typeof entry === "string") return entry;
+      if (Array.isArray(entry)) {
+        for (const item of entry) {
+          const picked = pickExportPath(item);
+          if (picked) return picked;
+        }
+        return null;
+      }
+      if (entry && typeof entry === "object") {
+        // Prefer Node's default ESM condition order.
+        if (typeof entry.node === "string") return entry.node;
+        if (typeof entry.import === "string") return entry.import;
+        if (typeof entry.default === "string") return entry.default;
+        if (typeof entry.require === "string") return entry.require;
+
+        // Fall back to searching nested condition objects.
+        for (const value of Object.values(entry)) {
+          const picked = pickExportPath(value);
+          if (picked) return picked;
+        }
+      }
+      return null;
+    }
+
+    let target = null;
+    if (exportsMap) {
+      if (typeof exportsMap === "string") {
+        if (exportKey === ".") target = exportsMap;
+      } else if (exportsMap && typeof exportsMap === "object") {
+        const keys = Object.keys(exportsMap);
+        const looksLikeSubpathMap = keys.some((k) => k === "." || k.startsWith("./"));
+        if (looksLikeSubpathMap) {
+          target = pickExportPath(exportsMap?.[exportKey]);
+        } else if (exportKey === ".") {
+          target = pickExportPath(exportsMap);
+        }
+      }
+    }
+
+    if (!target && exportKey === "." && typeof main === "string") target = main;
+    return target;
+  }
+
+  /**
+   * @param {string} text
+   */
+  function importsWorkspaceTypeScriptEntrypoint(text) {
+    if (!workspacePackages) return false;
+    /** @type {string[]} */
+    const specifiers = [];
+    for (const match of text.matchAll(importFromRe)) specifiers.push(match[2]);
+    for (const match of text.matchAll(sideEffectImportRe)) specifiers.push(match[1]);
+    for (const match of text.matchAll(dynamicImportRe)) specifiers.push(match[1]);
+    for (const match of text.matchAll(requireCallRe)) specifiers.push(match[1]);
+
+    for (const specifier of specifiers) {
+      if (!specifier) continue;
+      const parsed = parseWorkspaceSpecifier(specifier);
+      if (!parsed) continue;
+      const info = workspacePackages.get(parsed.packageName);
+      if (!info) continue;
+      const resolved = resolveExportPath(info.exports, parsed.exportKey, info.main);
+      if (!resolved) continue;
+      if (resolved.endsWith(".ts") || resolved.endsWith(".tsx")) return true;
+    }
+
+    return false;
+  }
+
   for (const file of files) {
     const text = await readFile(file, "utf8").catch(() => "");
     // Heuristic: skip tests that import TypeScript modules when the runtime can't execute them.
     if (tsImportRe.test(text)) continue;
+    if (shouldDetectWorkspaceTypeScriptEntrypoints && importsWorkspaceTypeScriptEntrypoint(text)) continue;
     out.push(file);
   }
   return out;
+}
+
+/**
+ * Load workspace package entrypoints by scanning `package.json` files under `packages/`.
+ *
+ * This is used only when TypeScript execution is unavailable, so we can skip node:test
+ * suites that import workspace packages authored as `.ts`/`.tsx`.
+ *
+ * @returns {Promise<Map<string, { exports: any, main: string | null }>>}
+ */
+/** @type {Promise<Map<string, { exports: any, main: string | null }>> | null} */
+var workspacePackageEntrypointsPromise;
+async function loadWorkspacePackageEntrypoints() {
+  if (workspacePackageEntrypointsPromise) return workspacePackageEntrypointsPromise;
+  workspacePackageEntrypointsPromise = (async () => {
+    /** @type {string[]} */
+    const packageJsonFiles = [];
+    await collectPackageJsonFiles(path.join(repoRoot, "packages"), packageJsonFiles);
+
+    /** @type {Map<string, { exports: any, main: string | null }>} */
+    const out = new Map();
+    for (const file of packageJsonFiles) {
+      const raw = await readFile(file, "utf8").catch(() => null);
+      if (!raw) continue;
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+      if (!parsed || typeof parsed !== "object") continue;
+      if (typeof parsed.name !== "string") continue;
+      if (out.has(parsed.name)) continue;
+      out.set(parsed.name, {
+        exports: parsed.exports ?? null,
+        main: typeof parsed.main === "string" ? parsed.main : null,
+      });
+    }
+
+    return out;
+  })();
+  return workspacePackageEntrypointsPromise;
+}
+
+/**
+ * @param {string} dir
+ * @param {string[]} out
+ */
+async function collectPackageJsonFiles(dir, out) {
+  const entries = await readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    // Skip node_modules and other generated output.
+    if (
+      entry.name === ".git" ||
+      entry.name === "node_modules" ||
+      entry.name === "dist" ||
+      entry.name === "coverage" ||
+      entry.name === "target" ||
+      entry.name === "build" ||
+      entry.name === ".turbo" ||
+      entry.name === ".pnpm-store" ||
+      entry.name === ".cache" ||
+      entry.name === ".vite" ||
+      entry.name === "playwright-report" ||
+      entry.name === "test-results" ||
+      entry.name === "security-report" ||
+      entry.name.startsWith(".tmp")
+    ) {
+      continue;
+    }
+
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await collectPackageJsonFiles(fullPath, out);
+      continue;
+    }
+
+    if (!entry.isFile()) continue;
+    if (entry.name !== "package.json") continue;
+    out.push(fullPath);
+  }
 }
 
 /**
