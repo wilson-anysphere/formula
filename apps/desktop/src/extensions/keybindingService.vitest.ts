@@ -6,6 +6,7 @@ import { KeybindingService } from "./keybindingService.js";
 
 function makeKeydownEvent(opts: {
   key: string;
+  code?: string;
   ctrlKey?: boolean;
   metaKey?: boolean;
   shiftKey?: boolean;
@@ -14,6 +15,7 @@ function makeKeydownEvent(opts: {
 }): KeyboardEvent {
   const event: any = {
     key: opts.key,
+    code: opts.code ?? "",
     ctrlKey: Boolean(opts.ctrlKey),
     metaKey: Boolean(opts.metaKey),
     shiftKey: Boolean(opts.shiftKey),
@@ -100,5 +102,25 @@ describe("KeybindingService", () => {
     expect(event.defaultPrevented).toBe(false);
     expect(extRun).not.toHaveBeenCalled();
   });
-});
 
+  it("matches shifted punctuation keybindings via KeyboardEvent.code fallback", async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const extRun = vi.fn();
+    commandRegistry.setExtensionCommands(
+      [{ extensionId: "ext", command: "ext.punct", title: "Ext" }],
+      async () => extRun(),
+    );
+
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
+    service.setExtensionKeybindings([{ extensionId: "ext", command: "ext.punct", key: "ctrl+shift+;", mac: null, when: null }]);
+
+    const event = makeKeydownEvent({ key: ":", code: "Semicolon", ctrlKey: true, shiftKey: true });
+    const handled = await service.dispatchKeydown(event);
+
+    expect(handled).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+    expect(extRun).toHaveBeenCalledTimes(1);
+  });
+});
