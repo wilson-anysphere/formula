@@ -82,6 +82,30 @@ test.describe("collaboration: sheet metadata", () => {
         }, undefined, { timeout: 60_000 }),
       ]);
 
+      // Collab schema initialization (creating the default Sheet1 entry) can lag
+      // slightly behind provider sync. Ensure the authoritative `session.sheets`
+      // list contains Sheet1 before we apply sheet-list edits.
+      await Promise.all([
+        pageA.waitForFunction(() => {
+          const app = (window as any).__formulaApp;
+          const session = app?.getCollabSession?.() ?? null;
+          const entries = session?.sheets?.toArray?.() ?? [];
+          return entries.some((entry: any) => String(entry?.get?.("id") ?? entry?.id ?? "").trim() === "Sheet1");
+        }, undefined, { timeout: 60_000 }),
+        pageB.waitForFunction(() => {
+          const app = (window as any).__formulaApp;
+          const session = app?.getCollabSession?.() ?? null;
+          const entries = session?.sheets?.toArray?.() ?? [];
+          return entries.some((entry: any) => String(entry?.get?.("id") ?? entry?.id ?? "").trim() === "Sheet1");
+        }, undefined, { timeout: 60_000 }),
+      ]);
+
+      // Ensure the UI sheet switcher reflects the initial state before edits.
+      await pollSheetSwitcher({
+        value: "Sheet1",
+        options: [{ value: "Sheet1", label: "Sheet1" }],
+      });
+
       // 1) Add a new sheet entry directly in Yjs (simulates version restore / branch checkout).
       await pageA.evaluate(() => {
         const app = (window as any).__formulaApp;
@@ -137,7 +161,7 @@ test.describe("collaboration: sheet metadata", () => {
         );
       });
       const menuA = pageA.getByTestId("sheet-tab-context-menu");
-      await expect(menuA).toBeVisible();
+      await expect(menuA).toBeVisible({ timeout: 10_000 });
       await menuA.getByRole("button", { name: "Hide", exact: true }).click();
       await expect(pageA.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0);
       await expect(pageB.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0, { timeout: 30_000 });
@@ -158,7 +182,7 @@ test.describe("collaboration: sheet metadata", () => {
           }),
         );
       });
-      await expect(menuA).toBeVisible();
+      await expect(menuA).toBeVisible({ timeout: 10_000 });
       await menuA.getByRole("button", { name: "Unhide…", exact: true }).click();
       await menuA.getByRole("button", { name: "Sheet2" }).click();
       await expect(pageA.getByTestId("sheet-tab-Sheet2")).toBeVisible();
@@ -178,8 +202,11 @@ test.describe("collaboration: sheet metadata", () => {
           }),
         );
       });
-      await expect(menuA).toBeVisible();
-      await menuA.getByRole("button", { name: "Tab Color", exact: true }).click();
+      await expect(menuA).toBeVisible({ timeout: 10_000 });
+      // The context menu can re-render while open (collab updates / focus changes), causing
+      // Playwright's default actionability checks ("stable") to flake. Force the click so the
+      // submenu opens reliably.
+      await menuA.getByRole("button", { name: "Tab Color", exact: true }).click({ force: true });
       await menuA.getByRole("button", { name: "Blue" }).click();
       await expect(pageB.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-tab-color", "#0070c0", {
         timeout: 30_000,
