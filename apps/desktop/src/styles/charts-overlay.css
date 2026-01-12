@@ -29,6 +29,19 @@
   height: 0;
 }
 
+/* Shared-grid overlay stacking: charts above cells, selection above charts. */
+.chart-layer--shared {
+  z-index: 2;
+}
+
+.grid-canvas--shared-selection {
+  z-index: 3;
+}
+
+.outline-layer--shared {
+  z-index: 4;
+}
+
 /* Modifier classes exist for debugging hooks / future styling extensions. */
 .chart-pane--top-left,
 .chart-pane--top-right,

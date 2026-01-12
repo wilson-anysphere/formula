@@ -1042,11 +1042,11 @@ export class SpreadsheetApp {
       this.sharedGridZoom = this.sharedGrid.renderer.getZoom();
 
       // Keep legacy overlay ordering: charts above cells, selection above charts.
-      this.chartLayer.style.zIndex = "2";
-      this.selectionCanvas.style.zIndex = "3";
+      this.chartLayer.classList.add("chart-layer--shared");
+      this.selectionCanvas.classList.add("grid-canvas--shared-selection");
       // Outline toggles are DOM overlays; ensure they remain clickable above the
       // shared selection canvas.
-      this.outlineLayer.style.zIndex = "4";
+      this.outlineLayer.classList.add("outline-layer--shared");
 
       this.initSharedChartPanes();
     }
