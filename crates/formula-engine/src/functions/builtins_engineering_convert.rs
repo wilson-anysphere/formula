@@ -28,11 +28,11 @@ fn convert_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Num);
     }
 
-    let from_unit = match eval_scalar_arg(ctx, &args[1]).coerce_to_string() {
+    let from_unit = match eval_scalar_arg(ctx, &args[1]).coerce_to_string_with_ctx(ctx) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
-    let to_unit = match eval_scalar_arg(ctx, &args[2]).coerce_to_string() {
+    let to_unit = match eval_scalar_arg(ctx, &args[2]).coerce_to_string_with_ctx(ctx) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
@@ -42,4 +42,3 @@ fn convert_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => Value::Error(e),
     }
 }
-
