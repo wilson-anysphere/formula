@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
-use tokio::sync::Notify;
+use tokio::sync::{Mutex, Notify};
 
 static UPDATE_CHECK_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 static UPDATE_DOWNLOAD_STATE: OnceLock<Mutex<UpdateDownloadState>> = OnceLock::new();
@@ -80,7 +80,7 @@ pub fn spawn_update_check(app: &AppHandle, source: UpdateCheckSource) {
                     // Start a best-effort background download so the user can apply the update
                     // immediately once they approve a restart.
                     if matches!(source, UpdateCheckSource::Startup) {
-                        spawn_update_download(&handle, source, update);
+                        spawn_update_download(&handle, source, update).await;
                     }
                 }
                 Ok(None) => {
@@ -108,7 +108,7 @@ pub fn spawn_update_check(app: &AppHandle, source: UpdateCheckSource) {
     });
 }
 
-fn spawn_update_download(
+async fn spawn_update_download(
     app: &AppHandle,
     source: UpdateCheckSource,
     update: tauri_plugin_updater::Update,
@@ -116,9 +116,7 @@ fn spawn_update_download(
     let version = update.version.clone();
 
     {
-        let mut state = update_download_state()
-            .lock()
-            .unwrap_or_else(|err| err.into_inner());
+        let mut state = update_download_state().lock().await;
 
         if state
             .downloaded
@@ -177,9 +175,7 @@ fn spawn_update_download(
         match download_result {
             Ok(bytes) => {
                 let notify = {
-                    let mut state = update_download_state()
-                        .lock()
-                        .unwrap_or_else(|err| err.into_inner());
+                    let mut state = update_download_state().lock().await;
                     state.in_flight = false;
                     if state.downloading_version.as_deref() == Some(version.as_str()) {
                         state.downloading_version = None;
@@ -203,9 +199,7 @@ fn spawn_update_download(
             Err(err) => {
                 let msg = err.to_string();
                 let notify = {
-                    let mut state = update_download_state()
-                        .lock()
-                        .unwrap_or_else(|err| err.into_inner());
+                    let mut state = update_download_state().lock().await;
                     state.in_flight = false;
                     if state.downloading_version.as_deref() == Some(version.as_str()) {
                         state.downloading_version = None;
@@ -235,16 +229,12 @@ pub async fn install_downloaded_update(_app: AppHandle) -> Result<(), String> {
         // Create the wait handle *before* checking state so we can't miss a `notify_waiters()`
         // that happens between observing `in_flight` and calling `.notified().await`.
         let notify = {
-            let state = update_download_state()
-                .lock()
-                .unwrap_or_else(|err| err.into_inner());
+            let state = update_download_state().lock().await;
             state.notify.clone()
         };
         let notified = notify.notified();
 
-        let mut state = update_download_state()
-            .lock()
-            .unwrap_or_else(|err| err.into_inner());
+        let mut state = update_download_state().lock().await;
 
         // If we already have a downloaded update, attempt to install it.
         //
