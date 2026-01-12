@@ -239,8 +239,15 @@ Key components:
    - The marketplace serves `.fextpkg` bytes plus integrity headers (`X-Package-Sha256`, signature metadata, etc).
    - `WebExtensionManager` verifies the download **in the WebView** (SHA-256 + Ed25519 signature verification) using
      the publisher public key(s) returned by the marketplace (`publisherKeys` / `publisherPublicKeyPem`).
+   - `WebExtensionManager.install(...)` also enforces marketplace security metadata:
+     - refuses installs for `blocked` or `malicious` extensions
+     - refuses installs when the publisher is revoked (or when all publisher signing keys are revoked)
+     - warns on `deprecated` extensions (optional confirmation callback)
+   - Package scan status (`download.scanStatus` / `X-Package-Scan-Status`) is subject to a client policy:
+     - default: **enforce** (refuse) in production builds, **allow** (warn-only) in dev/test builds
+     - configurable via install options / env overrides
    - The installer also verifies the manifest id/version match the requested `{id, version}`, and (when present)
-     checks `X-Package-Files-Sha256` against the verified package file inventory.
+      checks `X-Package-Files-Sha256` against the verified package file inventory.
 3. **Persist**: verified package bytes + verification metadata are stored in IndexedDB (`formula.webExtensions`).
 4. **Load into runtime**:
    - `WebExtensionManager.loadInstalled(id)` materializes the verified browser entrypoint as a `blob:` module URL.
