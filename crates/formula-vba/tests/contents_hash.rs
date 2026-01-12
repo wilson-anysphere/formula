@@ -1010,6 +1010,99 @@ fn content_hash_md5_matches_md5_of_content_normalized_data() {
 }
 
 #[test]
+fn content_normalized_data_respects_module_text_offset_when_stream_has_prefix() {
+    // Real module streams can contain a binary header prefix before the MS-OVBA CompressedContainer.
+    // The module's MODULETEXTOFFSET / TextOffset record (0x0031) indicates where the compressed
+    // source begins.
+    let prefix_len = 20usize;
+    let prefix = vec![0x00u8; prefix_len]; // avoid 0x01 so decompressing from offset 0 fails
+
+    // Include an Attribute line so we also exercise source normalization (Attribute stripping).
+    let module_code = concat!(
+        "Attribute VB_Name = \"Module1\"\r\n",
+        "Sub Hello()\r\n",
+        "End Sub\r\n",
+    );
+    let module_container = compress_container(module_code.as_bytes());
+
+    let mut module_stream = prefix.clone();
+    module_stream.extend_from_slice(&module_container);
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0019, b"Module1"); // MODULENAME
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name); // MODULESTREAMNAME
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE
+        push_record(
+            &mut out,
+            0x0031, // MODULETEXTOFFSET / TextOffset
+            &(prefix_len as u32).to_le_bytes(),
+        );
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_stream).expect("write module");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+    assert_eq!(normalized, b"Sub Hello()\r\nEnd Sub\r\n".to_vec());
+
+    // If TextOffset is wrong, decompression should fail (proves we actually respect the 0x0031
+    // record and don't just scan the stream for a compressed container signature).
+    let dir_decompressed_wrong_offset = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0019, b"Module1");
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // wrong: should be prefix_len
+        out
+    };
+    let dir_container_wrong_offset = compress_container(&dir_decompressed_wrong_offset);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container_wrong_offset)
+            .expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_stream).expect("write module");
+    }
+    let vba_bin_wrong_offset = ole.into_inner().into_inner();
+
+    let err = content_normalized_data(&vba_bin_wrong_offset).expect_err("expected error");
+    assert!(
+        matches!(
+            err,
+            formula_vba::ParseError::Compression(formula_vba::CompressionError::InvalidSignature(
+                0x00
+            ))
+        ),
+        "unexpected error for wrong TextOffset: {err:?}"
+    );
+}
+
+#[test]
 fn content_normalized_data_respects_module_text_offset_even_if_header_looks_like_container() {
     // When MODULETEXTOFFSET is present, we should use it directly (rather than scanning for a
     // compressed-container signature).
