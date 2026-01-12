@@ -451,34 +451,38 @@ test.describe("split view", () => {
       .toBeCloseTo(secondaryScrollY, 1);
   });
 
-  test("dragging a range in the secondary pane inserts it into the formula bar", async ({ page }) => {
-    await gotoDesktop(page, "/?grid=shared");
-    await waitForIdle(page);
+  const modes = ["legacy", "shared"] as const;
 
-    await page.getByTestId("split-vertical").click();
-    await expect(page.getByTestId("grid-secondary")).toBeVisible();
+  for (const mode of modes) {
+    test(`dragging a range in the secondary pane inserts it into the formula bar (${mode})`, async ({ page }) => {
+      await gotoDesktop(page, `/?grid=${mode}`);
+      await waitForIdle(page);
 
-    // Select C1 in the primary pane (same offsets as formula-bar.spec.ts).
-    await page.click("#grid", { position: { x: 260, y: 40 } });
-    await expect(page.getByTestId("active-cell")).toHaveText("C1");
+      await page.getByTestId("split-vertical").click();
+      await expect(page.getByTestId("grid-secondary")).toBeVisible();
 
-    // Start editing in the formula bar.
-    await page.getByTestId("formula-highlight").click();
-    const input = page.getByTestId("formula-input");
-    await expect(input).toBeVisible();
-    await input.fill("=SUM(");
+      // Select C1 in the primary pane (same offsets as formula-bar.spec.ts).
+      await page.click("#grid", { position: { x: 260, y: 40 } });
+      await expect(page.getByTestId("active-cell")).toHaveText("C1");
 
-    // Drag select A1:A2 in the secondary pane to insert a range reference.
-    const gridBox = await page.locator("#grid-secondary").boundingBox();
-    if (!gridBox) throw new Error("Missing grid-secondary bounding box");
+      // Start editing in the formula bar.
+      await page.getByTestId("formula-highlight").click();
+      const input = page.getByTestId("formula-input");
+      await expect(input).toBeVisible();
+      await input.fill("=SUM(");
 
-    await page.mouse.move(gridBox.x + 60, gridBox.y + 40);
-    await page.mouse.down();
-    await page.mouse.move(gridBox.x + 60, gridBox.y + 64);
-    await page.mouse.up();
+      // Drag select A1:A2 in the secondary pane to insert a range reference.
+      const gridBox = await page.locator("#grid-secondary").boundingBox();
+      if (!gridBox) throw new Error("Missing grid-secondary bounding box");
 
-    await expect(input).toHaveValue("=SUM(A1:A2");
-  });
+      await page.mouse.move(gridBox.x + 60, gridBox.y + 40);
+      await page.mouse.down();
+      await page.mouse.move(gridBox.x + 60, gridBox.y + 64);
+      await page.mouse.up();
+
+      await expect(input).toHaveValue("=SUM(A1:A2");
+    });
+  }
 });
 
 test.describe("split view / shared grid zoom", () => {

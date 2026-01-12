@@ -2750,11 +2750,11 @@ export class SpreadsheetApp {
   }
 
   private sharedHeaderRows(): number {
-    return this.sharedGrid ? 1 : 0;
+    return 1;
   }
 
   private sharedHeaderCols(): number {
-    return this.sharedGrid ? 1 : 0;
+    return 1;
   }
 
   private docCellFromGridCell(cell: { row: number; col: number }): CellCoord {
