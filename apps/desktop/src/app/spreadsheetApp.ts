@@ -3444,6 +3444,13 @@ export class SpreadsheetApp {
 
   private onSharedPointerMove(e: PointerEvent): void {
     if (!this.sharedGrid) return;
+    // Shared-grid pointermove listener exists only for hover tooltips. Touch pointers
+    // do not have a hover state, so skip all work to avoid unnecessary overhead
+    // during touch scroll/pan interactions.
+    if (e.pointerType === "touch") {
+      if (this.lastHoveredCommentCellKey != null) this.hideCommentTooltip();
+      return;
+    }
     // Fast path: if there are no comments indexed for the active sheet, we never
     // need to pick cells or update the tooltip.
     if (this.commentMetaByCoord.size === 0) {
