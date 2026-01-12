@@ -199,11 +199,14 @@ impl RecordValue {
         let field = self.display_field.as_deref()?;
         let value = self.fields.get(field)?;
         match value {
+            CellValue::Empty => Some(String::new()),
             CellValue::String(s) => Some(s.clone()),
             CellValue::Number(n) => Some(n.to_string()),
             CellValue::Boolean(b) => Some(if *b { "TRUE" } else { "FALSE" }.to_string()),
             CellValue::Error(e) => Some(e.as_str().to_string()),
             CellValue::RichText(rt) => Some(rt.text.clone()),
+            CellValue::Entity(entity) => Some(entity.display_value.clone()),
+            CellValue::Record(record) => Some(record.to_string()),
             _ => None,
         }
     }

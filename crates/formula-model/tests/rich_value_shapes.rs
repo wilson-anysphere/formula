@@ -159,3 +159,64 @@ fn record_json_without_display_value_deserializes_and_uses_display_field_for_dis
     let display = format_cell_display(&value, None, &options);
     assert_eq!(display.text, "Ada");
 }
+
+#[test]
+fn record_json_display_field_can_point_to_entity() {
+    let json = r#"
+    {
+      "type": "record",
+      "value": {
+        "fields": {
+          "company": {
+            "type": "entity",
+            "value": { "displayValue": "Apple" }
+          }
+        },
+        "displayField": "company"
+      }
+    }
+    "#;
+
+    let value: CellValue = serde_json::from_str(json).unwrap();
+    let options = FormatOptions::default();
+    let display = format_cell_display(&value, None, &options);
+    assert_eq!(display.text, "Apple");
+
+    match &value {
+        CellValue::Record(record) => assert_eq!(record.to_string(), "Apple"),
+        other => panic!("expected record, got {other:?}"),
+    }
+}
+
+#[test]
+fn record_json_display_field_can_point_to_nested_record() {
+    let json = r#"
+    {
+      "type": "record",
+      "value": {
+        "fields": {
+          "person": {
+            "type": "record",
+            "value": {
+              "fields": {
+                "name": { "type": "string", "value": "Ada" }
+              },
+              "displayField": "name"
+            }
+          }
+        },
+        "displayField": "person"
+      }
+    }
+    "#;
+
+    let value: CellValue = serde_json::from_str(json).unwrap();
+    let options = FormatOptions::default();
+    let display = format_cell_display(&value, None, &options);
+    assert_eq!(display.text, "Ada");
+
+    match &value {
+        CellValue::Record(record) => assert_eq!(record.to_string(), "Ada"),
+        other => panic!("expected record, got {other:?}"),
+    }
+}

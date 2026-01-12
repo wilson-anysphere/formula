@@ -469,10 +469,13 @@ fn is_blank(candidate: &CellValue) -> bool {
             if let Some(field) = r.display_field.as_deref() {
                 if let Some(value) = r.fields.get(field) {
                     return match value {
+                        CellValue::Empty => true,
                         CellValue::String(s) => s.is_empty(),
                         CellValue::RichText(rt) => rt.text.is_empty(),
                         // Scalar display strings for these variants are always non-empty.
                         CellValue::Number(_) | CellValue::Boolean(_) | CellValue::Error(_) => false,
+                        CellValue::Entity(entity) => entity.display_value.is_empty(),
+                        CellValue::Record(record) => record.to_string().is_empty(),
                         // Non-scalar displayField values fall back to `display_value`.
                         _ => r.display_value.is_empty(),
                     };

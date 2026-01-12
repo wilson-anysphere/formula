@@ -34,6 +34,7 @@ pub fn format_cell_display(
                 .as_deref()
                 .and_then(|field| record.fields.get(field))
                 .and_then(|value| match value {
+                    CellValue::Empty => Some(""),
                     CellValue::String(s) => Some(s.as_str()),
                     CellValue::Number(n) => {
                         display_buf =
@@ -46,6 +47,11 @@ pub fn format_cell_display(
                     }
                     CellValue::Error(e) => Some(e.as_str()),
                     CellValue::RichText(rt) => Some(rt.text.as_str()),
+                    CellValue::Entity(entity) => Some(entity.display_value.as_str()),
+                    CellValue::Record(record) => {
+                        display_buf = Some(record.to_string());
+                        display_buf.as_deref()
+                    }
                     _ => None,
                 })
                 .or_else(|| (!record.display_value.is_empty()).then_some(record.display_value.as_str()))

@@ -215,6 +215,28 @@ fn allow_blank_treats_empty_rich_display_string_as_blank() {
 }
 
 #[test]
+fn allow_blank_does_not_treat_record_display_field_entity_as_blank() {
+    let ctx = TestCtx;
+
+    let mut rule = dv(
+        DataValidationKind::Whole,
+        Some(DataValidationOperator::Between),
+        "1",
+        Some("10"),
+    );
+    rule.allow_blank = true;
+
+    let record = CellValue::Record(
+        RecordValue::default()
+            .with_display_field("company")
+            .with_field("company", CellValue::Entity(EntityValue::new("Apple"))),
+    );
+    let result = validate_value(&rule, &record, &ctx);
+    assert_eq!(result.ok, false);
+    assert_eq!(result.error_kind, Some(DataValidationErrorKind::TypeMismatch));
+}
+
+#[test]
 fn list_validation_supports_constants_and_callback_sources() {
     let ctx = TestCtx;
 
