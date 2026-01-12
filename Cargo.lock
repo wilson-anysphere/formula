@@ -2103,6 +2103,7 @@ dependencies = [
  "formula-model",
  "formula-vba",
  "insta",
+ "openssl",
  "pretty_assertions",
  "quick-xml 0.37.5",
  "roxmltree",

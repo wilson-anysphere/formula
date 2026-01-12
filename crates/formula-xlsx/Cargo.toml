@@ -28,3 +28,13 @@ rust_xlsxwriter = "0.70"
 formula-engine = { path = "../formula-engine" }
 tempfile = "3.10"
 xlsx-diff = { path = "../xlsx-diff" }
+
+[target.'cfg(all(not(target_arch = "wasm32"), windows))'.dev-dependencies]
+# Match `formula-vba`'s OpenSSL setup so developers/CI don't need a system-wide OpenSSL install.
+openssl = { version = "0.10", features = ["vendored"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), target_os = "macos"))'.dev-dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(any(windows, target_os = "macos"))))'.dev-dependencies]
+openssl = "0.10"

@@ -312,6 +312,20 @@ impl XlsxPackage {
         self.part("xl/vbaProject.bin")
     }
 
+    /// Returns the raw `xl/vbaProjectSignature.bin` payload when present.
+    ///
+    /// Some XLSM producers store VBA signature streams in a separate OPC part
+    /// (`vbaProjectSignature.bin`) instead of embedding them inside
+    /// `vbaProject.bin`.
+    pub fn vba_project_signature_bin(&self) -> Option<&[u8]> {
+        self.part("xl/vbaProjectSignature.bin")
+    }
+
+    /// Returns the optional `xl/vbaData.xml` payload when present.
+    pub fn vba_data_xml(&self) -> Option<&[u8]> {
+        self.part("xl/vbaData.xml")
+    }
+
     /// Parse the workbook theme palette from `xl/theme/theme1.xml` (if present).
     pub fn theme_palette(&self) -> Result<Option<ThemePalette>, XlsxError> {
         let Some(theme_xml) = self.part("xl/theme/theme1.xml") else {
