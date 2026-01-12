@@ -419,6 +419,38 @@ test.describe("tauri workbook integration", () => {
       return calls.find((call: any) => call?.cmd === "move_sheet") ?? null;
     });
     expect(moveCall?.args).toEqual({ sheet_id: "Sheet4", to_index: 2 });
+
+    // Undo should restore the original ordering, and the doc->store sync should persist the reorder
+    // back into the backend (Sheet4 back to index 3, counting hidden sheets).
+    const beforeUndo = await page.evaluate(() => (window as any).__tauriInvokeCalls?.length ?? 0);
+    await page.evaluate(async () => {
+      const registry = (window as any).__formulaCommandRegistry;
+      await registry.executeCommand("edit.undo");
+      await (window as any).__formulaApp.whenIdle();
+    });
+
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          Array.from(document.querySelectorAll("#sheet-tabs .sheet-tabs [data-sheet-id]"))
+            .map((el) => (el as HTMLElement).getAttribute("data-sheet-id"))
+            .filter(Boolean),
+        ),
+      )
+      .toEqual(["Sheet1", "Sheet3", "Sheet4"]);
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (beforeUndo) =>
+            ((window as any).__tauriInvokeCalls ?? []).slice(beforeUndo).some((c: any) => {
+              if (c?.cmd !== "move_sheet") return false;
+              return c?.args?.sheet_id === "Sheet4" && c?.args?.to_index === 3;
+            }),
+          beforeUndo,
+        ),
+      )
+      .toBe(true);
   });
 
   test("veryHidden sheets are excluded and not offered in the unhide menu", async ({ page }) => {
