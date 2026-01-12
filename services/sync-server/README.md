@@ -20,6 +20,9 @@ Required environment variables:
 
 - `SYNC_SERVER_HOST` (default: `127.0.0.1`)
 - `SYNC_SERVER_PORT` (default: `1234`)
+- `SYNC_SERVER_TRUST_PROXY` (default: `false`) – when running behind a reverse proxy, set this to
+  `true` so rate limiting and per-IP connection limits use the `x-forwarded-for` header.
+  **Only enable this when the proxy is trusted** (otherwise clients can spoof their IP).
 - Authentication (pick one):
   - Opaque token:
     - `SYNC_SERVER_AUTH_TOKEN` (opaque token)
