@@ -975,6 +975,94 @@ fn bytecode_backend_supports_3d_sheet_span_references() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_and_or_over_3d_sheet_spans() {
+    fn setup(engine: &mut Engine) {
+        // Ensure the sheet span exists so the bytecode lowerer can resolve the sheet names.
+        for sheet in ["Sheet1", "Sheet2", "Sheet3"] {
+            engine.ensure_sheet(sheet);
+        }
+        engine
+            .set_cell_formula("Sheet1", "B1", "=AND(Sheet1:Sheet3!A1)")
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", "B2", "=OR(Sheet1:Sheet3!A1)")
+            .unwrap();
+    }
+
+    let cases: Vec<([Option<Value>; 3], Value, Value)> = vec![
+        // All referenced cells blank => no values => AND=TRUE, OR=FALSE.
+        ([None, None, None], Value::Bool(true), Value::Bool(false)),
+        // Text values in 3D references are treated like text in ranges (ignored).
+        (
+            [Some(Value::Text("hello".to_string())), None, None],
+            Value::Bool(true),
+            Value::Bool(false),
+        ),
+        // Numbers/bools across sheets participate.
+        (
+            [
+                Some(Value::Number(1.0)),
+                Some(Value::Number(0.0)),
+                Some(Value::Number(1.0)),
+            ],
+            Value::Bool(false),
+            Value::Bool(true),
+        ),
+        // Errors in the referenced cells propagate.
+        (
+            [
+                Some(Value::Number(1.0)),
+                Some(Value::Error(ErrorKind::Div0)),
+                Some(Value::Number(1.0)),
+            ],
+            Value::Error(ErrorKind::Div0),
+            Value::Error(ErrorKind::Div0),
+        ),
+    ];
+
+    for (values, expected_and, expected_or) in cases {
+        let mut bytecode_engine = Engine::new();
+        setup(&mut bytecode_engine);
+        assert_eq!(
+            bytecode_engine.bytecode_program_count(),
+            2,
+            "expected AND/OR formulas to compile to bytecode"
+        );
+
+        for (sheet, value) in ["Sheet1", "Sheet2", "Sheet3"].into_iter().zip(values.iter()) {
+            match value {
+                None => bytecode_engine.clear_cell(sheet, "A1").unwrap(),
+                Some(v) => bytecode_engine.set_cell_value(sheet, "A1", v.clone()).unwrap(),
+            }
+        }
+
+        bytecode_engine.recalculate_single_threaded();
+        let bc_and = bytecode_engine.get_cell_value("Sheet1", "B1");
+        let bc_or = bytecode_engine.get_cell_value("Sheet1", "B2");
+
+        let mut ast_engine = Engine::new();
+        ast_engine.set_bytecode_enabled(false);
+        setup(&mut ast_engine);
+
+        for (sheet, value) in ["Sheet1", "Sheet2", "Sheet3"].into_iter().zip(values.iter()) {
+            match value {
+                None => ast_engine.clear_cell(sheet, "A1").unwrap(),
+                Some(v) => ast_engine.set_cell_value(sheet, "A1", v.clone()).unwrap(),
+            }
+        }
+
+        ast_engine.recalculate_single_threaded();
+        let ast_and = ast_engine.get_cell_value("Sheet1", "B1");
+        let ast_or = ast_engine.get_cell_value("Sheet1", "B2");
+
+        assert_eq!(bc_and, ast_and, "AND mismatch");
+        assert_eq!(bc_or, ast_or, "OR mismatch");
+        assert_eq!(bc_and, expected_and, "unexpected AND result");
+        assert_eq!(bc_or, expected_or, "unexpected OR result");
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_counta_and_countblank() {
     let mut engine = Engine::new();
 

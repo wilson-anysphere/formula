@@ -1836,6 +1836,46 @@ fn and_range(
     all_true: &mut bool,
     any: &mut bool,
 ) -> Option<ErrorKind> {
+    if !range_in_bounds(grid, range) {
+        return Some(ErrorKind::Ref);
+    }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let mut best_error: Option<(i32, i32, ErrorKind)> = None;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                match v {
+                    Value::Error(e) => record_error_row_major(&mut best_error, coord, e),
+                    Value::Number(n) => {
+                        *any = true;
+                        if n == 0.0 {
+                            *all_true = false;
+                        }
+                    }
+                    Value::Bool(b) => {
+                        *any = true;
+                        if !b {
+                            *all_true = false;
+                        }
+                    }
+                    // Text/blanks in references are ignored.
+                    Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+            if let Some((_, _, err)) = best_error {
+                return Some(err);
+            }
+            return None;
+        }
+    }
+
     for row in range.row_start..=range.row_end {
         for col in range.col_start..=range.col_end {
             match grid.get_value(CellCoord { row, col }) {
@@ -1871,6 +1911,46 @@ fn or_range(
     any_true: &mut bool,
     any: &mut bool,
 ) -> Option<ErrorKind> {
+    if !range_in_bounds(grid, range) {
+        return Some(ErrorKind::Ref);
+    }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let mut best_error: Option<(i32, i32, ErrorKind)> = None;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                match v {
+                    Value::Error(e) => record_error_row_major(&mut best_error, coord, e),
+                    Value::Number(n) => {
+                        *any = true;
+                        if n != 0.0 {
+                            *any_true = true;
+                        }
+                    }
+                    Value::Bool(b) => {
+                        *any = true;
+                        if b {
+                            *any_true = true;
+                        }
+                    }
+                    // Text/blanks in references are ignored.
+                    Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+            if let Some((_, _, err)) = best_error {
+                return Some(err);
+            }
+            return None;
+        }
+    }
+
     for row in range.row_start..=range.row_end {
         for col in range.col_start..=range.col_end {
             match grid.get_value(CellCoord { row, col }) {
@@ -1924,6 +2004,46 @@ fn and_range_on_sheet(
     all_true: &mut bool,
     any: &mut bool,
 ) -> Option<ErrorKind> {
+    if !range_in_bounds_on_sheet(grid, sheet, range) {
+        return Some(ErrorKind::Ref);
+    }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
+            let mut best_error: Option<(i32, i32, ErrorKind)> = None;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                match v {
+                    Value::Error(e) => record_error_row_major(&mut best_error, coord, e),
+                    Value::Number(n) => {
+                        *any = true;
+                        if n == 0.0 {
+                            *all_true = false;
+                        }
+                    }
+                    Value::Bool(b) => {
+                        *any = true;
+                        if !b {
+                            *all_true = false;
+                        }
+                    }
+                    // Text/blanks in references are ignored.
+                    Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+            if let Some((_, _, err)) = best_error {
+                return Some(err);
+            }
+            return None;
+        }
+    }
+
     for row in range.row_start..=range.row_end {
         for col in range.col_start..=range.col_end {
             match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
@@ -1977,6 +2097,46 @@ fn or_range_on_sheet(
     any_true: &mut bool,
     any: &mut bool,
 ) -> Option<ErrorKind> {
+    if !range_in_bounds_on_sheet(grid, sheet, range) {
+        return Some(ErrorKind::Ref);
+    }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
+            let mut best_error: Option<(i32, i32, ErrorKind)> = None;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                match v {
+                    Value::Error(e) => record_error_row_major(&mut best_error, coord, e),
+                    Value::Number(n) => {
+                        *any = true;
+                        if n != 0.0 {
+                            *any_true = true;
+                        }
+                    }
+                    Value::Bool(b) => {
+                        *any = true;
+                        if b {
+                            *any_true = true;
+                        }
+                    }
+                    // Text/blanks in references are ignored.
+                    Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+            if let Some((_, _, err)) = best_error {
+                return Some(err);
+            }
+            return None;
+        }
+    }
+
     for row in range.row_start..=range.row_end {
         for col in range.col_start..=range.col_end {
             match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
@@ -4872,6 +5032,24 @@ fn record_error_col_major(
         Some((best_col, best_row, _)) => {
             if (coord.col, coord.row) < (*best_col, *best_row) {
                 *best = Some((coord.col, coord.row, err));
+            }
+        }
+    }
+}
+
+#[inline]
+fn record_error_row_major(
+    best: &mut Option<(i32, i32, ErrorKind)>,
+    coord: CellCoord,
+    err: ErrorKind,
+) {
+    // The dense AND/OR reference paths scan rows outermost and columns innermost. Preserve that
+    // precedence by selecting the error with the smallest (row, col) coordinate.
+    match best {
+        None => *best = Some((coord.row, coord.col, err)),
+        Some((best_row, best_col, _)) => {
+            if (coord.row, coord.col) < (*best_row, *best_col) {
+                *best = Some((coord.row, coord.col, err));
             }
         }
     }
