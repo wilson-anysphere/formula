@@ -205,9 +205,9 @@ export function installCommandRecentsTracker(
     const commandId = String(evt.commandId ?? "").trim();
     if (!commandId) return;
     if (ignore.has(commandId)) return;
-    // The registry only includes `error` on failure, but use property presence (not value)
-    // so `throw undefined` doesn't accidentally count as a successful execution.
-    if ("error" in evt) return;
+    // Only record successful executions. `CommandRegistry` emits either `{ result }` or `{ error }`.
+    // Use result presence, not `evt.error == null`, so `throw undefined` doesn't count as success.
+    if (!("result" in evt)) return;
     recordCommandRecent(storage, commandId, {
       maxEntries,
       nowMs: now(),
