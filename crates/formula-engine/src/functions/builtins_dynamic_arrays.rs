@@ -1019,7 +1019,12 @@ fn randarray_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         None => return Value::Error(ErrorKind::Num),
     };
 
-    let mut values = Vec::with_capacity(total);
+    // Use a fallible reservation to avoid aborting the process if a user asks for an
+    // unreasonably large array (or if memory is exhausted).
+    let mut values = Vec::new();
+    if values.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
     if whole_number {
         let low_f = min.ceil();
         let high_f = max.floor();
