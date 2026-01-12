@@ -26,5 +26,32 @@ test.describe("non-collab: beforeunload unsaved-changes prompt", () => {
 
     expect(beforeUnloadDialogs).toBeGreaterThan(0);
   });
-});
 
+  test("shows a beforeunload confirm dialog when the document is dirty from a sheet rename", async ({ page }) => {
+    await gotoDesktop(page);
+
+    const tab = page.getByTestId("sheet-tab-Sheet1");
+    await expect(tab).toBeVisible();
+
+    await tab.dblclick();
+    const input = tab.locator("input.sheet-tab__input");
+    await expect(input).toBeVisible();
+
+    await input.fill("RenamedSheet1");
+    await input.press("Enter");
+
+    await expect(tab.locator(".sheet-tab__name")).toHaveText("RenamedSheet1");
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
+
+    let beforeUnloadDialogs = 0;
+    page.on("dialog", async (dialog) => {
+      if (dialog.type() === "beforeunload") beforeUnloadDialogs += 1;
+      await dialog.accept();
+    });
+
+    await page.reload();
+    await waitForDesktopReady(page);
+
+    expect(beforeUnloadDialogs).toBeGreaterThan(0);
+  });
+});
