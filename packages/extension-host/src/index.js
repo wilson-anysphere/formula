@@ -224,6 +224,7 @@ class ExtensionHost {
       "extension-data"
     );
     this._spreadsheet = spreadsheet;
+    this._spreadsheetDisposables = [];
     this._workbook = { name: "MockWorkbook", path: null };
 
     // Security baseline: host-level permissions and audit logging for extension runtime.
@@ -246,9 +247,26 @@ class ExtensionHost {
     // intentionally runs with a locked-down `require` implementation.
     this._apiModulePath = path.resolve(__dirname, "../../extension-api/src/runtime.js");
 
-    this._spreadsheet.onSelectionChanged?.((e) => this._broadcastEvent("selectionChanged", e));
-    this._spreadsheet.onCellChanged?.((e) => this._broadcastEvent("cellChanged", e));
-    this._spreadsheet.onSheetActivated?.((e) => this._broadcastEvent("sheetActivated", e));
+    const trackSpreadsheetDisposable = (candidate) => {
+      if (!candidate) return;
+      if (typeof candidate === "function") {
+        this._spreadsheetDisposables.push(candidate);
+        return;
+      }
+      if (candidate && typeof candidate === "object" && typeof candidate.dispose === "function") {
+        this._spreadsheetDisposables.push(() => {
+          try {
+            candidate.dispose();
+          } catch {
+            // ignore
+          }
+        });
+      }
+    };
+
+    trackSpreadsheetDisposable(this._spreadsheet.onSelectionChanged?.((e) => this._broadcastEvent("selectionChanged", e)));
+    trackSpreadsheetDisposable(this._spreadsheet.onCellChanged?.((e) => this._broadcastEvent("cellChanged", e)));
+    trackSpreadsheetDisposable(this._spreadsheet.onSheetActivated?.((e) => this._broadcastEvent("sheetActivated", e)));
   }
 
   _waitForPanelHtml(panelId, timeoutMs = 5000) {
@@ -817,6 +835,22 @@ class ExtensionHost {
   }
 
   async dispose() {
+    // Best-effort: ensure spreadsheet event subscriptions are cleaned up so callers that
+    // create/destroy multiple hosts do not leak listeners.
+    try {
+      const disposables = Array.isArray(this._spreadsheetDisposables) ? this._spreadsheetDisposables : [];
+      this._spreadsheetDisposables = [];
+      for (const dispose of disposables) {
+        try {
+          if (typeof dispose === "function") dispose();
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     const extensions = [...this._extensions.values()];
     this._extensions.clear();
     this._commands.clear();
