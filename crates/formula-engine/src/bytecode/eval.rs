@@ -714,6 +714,46 @@ mod tests {
     }
 
     #[test]
+    fn vm_choose_parses_text_index_and_is_lazy() {
+        let origin = CellCoord::new(0, 0);
+        let locale = crate::LocaleConfig::en_us();
+
+        // Excel parses a numeric index from text.
+        // Ensure we still short-circuit the unselected branch.
+        let expr = super::super::parse_formula("=CHOOSE(\"2\", A1, 7)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+
+        assert_eq!(value, Value::Number(7.0));
+        assert_eq!(grid.reads(), 0, "unused CHOOSE branch should not be evaluated");
+    }
+
+    #[test]
+    fn vm_choose_range_index_returns_spill_without_evaluating_choices() {
+        let origin = CellCoord::new(0, 0);
+        let locale = crate::LocaleConfig::en_us();
+
+        // Bytecode coercion treats ranges/arrays in scalar contexts as a spill attempt.
+        // CHOOSE should surface that error without evaluating any branch expressions.
+        let expr = super::super::parse_formula("=CHOOSE(A1:A2, A1, 7)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+
+        assert_eq!(value, Value::Error(super::super::ErrorKind::Spill));
+        assert_eq!(
+            grid.reads(),
+            0,
+            "CHOOSE branches should not be evaluated when index is a spill error"
+        );
+    }
+
+    #[test]
     fn vm_short_circuits_ifs_branches() {
         let origin = CellCoord::new(0, 0);
         let expr = super::super::parse_formula("=IFS(FALSE, 1/0, TRUE, 9)", origin).expect("parse");
