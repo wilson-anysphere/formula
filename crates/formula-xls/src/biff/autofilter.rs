@@ -36,14 +36,23 @@ const STR_FLAG_RICH_TEXT: u8 = 0x08;
 // BIFF8 formula tokens for 2D/3D references.
 const PTG_REF: [u8; 3] = [0x24, 0x44, 0x64];
 const PTG_AREA: [u8; 3] = [0x25, 0x45, 0x65];
+// Relative 2D references (`PtgRefN` / `PtgAreaN`) can appear in NAME rgce streams.
+const PTG_REFN: [u8; 3] = [0x2C, 0x4C, 0x6C];
+const PTG_AREAN: [u8; 3] = [0x2D, 0x4D, 0x6D];
 const PTG_REF3D: [u8; 3] = [0x3A, 0x5A, 0x7A];
 const PTG_AREA3D: [u8; 3] = [0x3B, 0x5B, 0x7B];
+const PTG_REFN3D: [u8; 3] = [0x3E, 0x5E, 0x7E];
+const PTG_AREAN3D: [u8; 3] = [0x3F, 0x5F, 0x7F];
 
 // BIFF8 worksheets (`.xls`) are limited to 256 columns (A..IV). Column indices are stored in a
 // 2-byte field that also contains relative/absolute flags; in practice only the low 8 bits are
 // meaningful for `.xls` column indices. Some producers also use `0x3FFF` as a "max column"
 // sentinel; masking to 8 bits maps that to `0x00FF` (IV), matching Excel's limits.
 const BIFF8_COL_INDEX_MASK: u16 = 0x00FF;
+// Relative reference ptgs encode a 14-bit signed column offset in the low bits of the column field.
+const BIFF8_COL_INDEX_MASK_14: u16 = 0x3FFF;
+const ROW_RELATIVE_BIT: u16 = 0x4000;
+const COL_RELATIVE_BIT: u16 = 0x8000;
 #[derive(Debug, Default)]
 pub(crate) struct ParsedFilterDatabaseRanges {
     /// Mapping from 0-based BIFF sheet index to the AutoFilter range.
@@ -471,6 +480,12 @@ fn decode_filter_database_rgce(
     } else if PTG_REF.contains(&ptg) {
         let (range, used) = decode_ptg_ref(rgce.get(pos..).unwrap_or_default())?;
         (None, range, used)
+    } else if PTG_AREAN.contains(&ptg) {
+        let (range, used) = decode_ptg_area_n(rgce.get(pos..).unwrap_or_default())?;
+        (None, range, used)
+    } else if PTG_REFN.contains(&ptg) {
+        let (range, used) = decode_ptg_ref_n(rgce.get(pos..).unwrap_or_default())?;
+        (None, range, used)
     } else if PTG_AREA3D.contains(&ptg) {
         let (sheet, range, used) = decode_ptg_area3d(
             rgce.get(pos..).unwrap_or_default(),
@@ -481,6 +496,22 @@ fn decode_filter_database_rgce(
         (sheet, range, used)
     } else if PTG_REF3D.contains(&ptg) {
         let (sheet, range, used) = decode_ptg_ref3d(
+            rgce.get(pos..).unwrap_or_default(),
+            externsheets,
+            internal_supbook_index,
+            sheet_count,
+        )?;
+        (sheet, range, used)
+    } else if PTG_AREAN3D.contains(&ptg) {
+        let (sheet, range, used) = decode_ptg_area_n3d(
+            rgce.get(pos..).unwrap_or_default(),
+            externsheets,
+            internal_supbook_index,
+            sheet_count,
+        )?;
+        (sheet, range, used)
+    } else if PTG_REFN3D.contains(&ptg) {
+        let (sheet, range, used) = decode_ptg_ref_n3d(
             rgce.get(pos..).unwrap_or_default(),
             externsheets,
             internal_supbook_index,
@@ -593,6 +624,137 @@ fn decode_ptg_area(payload: &[u8]) -> Result<(Range, usize), String> {
         ),
         8,
     ))
+}
+
+fn sign_extend_14(v: u16) -> i16 {
+    debug_assert!(v <= BIFF8_COL_INDEX_MASK_14);
+    // 14-bit two's complement. If bit13 is set, treat as negative.
+    if (v & 0x2000) != 0 {
+        (v | 0xC000) as i16
+    } else {
+        v as i16
+    }
+}
+
+fn decode_ptg_ref_n(payload: &[u8]) -> Result<(Range, usize), String> {
+    if payload.len() < 4 {
+        return Err("truncated PtgRefN token".to_string());
+    }
+    let row_raw = u16::from_le_bytes([payload[0], payload[1]]);
+    let col_field = u16::from_le_bytes([payload[2], payload[3]]);
+
+    let row_relative = (col_field & ROW_RELATIVE_BIT) != 0;
+    let col_relative = (col_field & COL_RELATIVE_BIT) != 0;
+    let col_raw = col_field & BIFF8_COL_INDEX_MASK_14;
+
+    // Best-effort: decode relative tokens using A1 (0,0) as the origin.
+    let row_i64 = if row_relative {
+        row_raw as i16 as i64
+    } else {
+        row_raw as i64
+    };
+    let col_i64 = if col_relative {
+        sign_extend_14(col_raw) as i64
+    } else {
+        // `.xls` sheets only support 256 columns; ignore any high bits.
+        (col_raw & BIFF8_COL_INDEX_MASK) as i64
+    };
+
+    if row_i64 < 0 || col_i64 < 0 {
+        return Err("PtgRefN produced out-of-bounds reference".to_string());
+    }
+
+    let row = row_i64 as u32;
+    let col = col_i64 as u32;
+    Ok((
+        Range::new(CellRef::new(row, col), CellRef::new(row, col)),
+        4,
+    ))
+}
+
+fn decode_ptg_area_n(payload: &[u8]) -> Result<(Range, usize), String> {
+    if payload.len() < 8 {
+        return Err("truncated PtgAreaN token".to_string());
+    }
+    let row_first_raw = u16::from_le_bytes([payload[0], payload[1]]);
+    let row_last_raw = u16::from_le_bytes([payload[2], payload[3]]);
+    let col_first_field = u16::from_le_bytes([payload[4], payload[5]]);
+    let col_last_field = u16::from_le_bytes([payload[6], payload[7]]);
+
+    let row_first_relative = (col_first_field & ROW_RELATIVE_BIT) != 0;
+    let col_first_relative = (col_first_field & COL_RELATIVE_BIT) != 0;
+    let row_last_relative = (col_last_field & ROW_RELATIVE_BIT) != 0;
+    let col_last_relative = (col_last_field & COL_RELATIVE_BIT) != 0;
+
+    let col_first_raw = col_first_field & BIFF8_COL_INDEX_MASK_14;
+    let col_last_raw = col_last_field & BIFF8_COL_INDEX_MASK_14;
+
+    // Best-effort: decode relative tokens using A1 (0,0) as the origin.
+    let row_first_i64 = if row_first_relative {
+        row_first_raw as i16 as i64
+    } else {
+        row_first_raw as i64
+    };
+    let row_last_i64 = if row_last_relative {
+        row_last_raw as i16 as i64
+    } else {
+        row_last_raw as i64
+    };
+
+    let col_first_i64 = if col_first_relative {
+        sign_extend_14(col_first_raw) as i64
+    } else {
+        (col_first_raw & BIFF8_COL_INDEX_MASK) as i64
+    };
+    let col_last_i64 = if col_last_relative {
+        sign_extend_14(col_last_raw) as i64
+    } else {
+        (col_last_raw & BIFF8_COL_INDEX_MASK) as i64
+    };
+
+    if row_first_i64 < 0 || row_last_i64 < 0 || col_first_i64 < 0 || col_last_i64 < 0 {
+        return Err("PtgAreaN produced out-of-bounds area".to_string());
+    }
+
+    Ok((
+        Range::new(
+            CellRef::new(row_first_i64 as u32, col_first_i64 as u32),
+            CellRef::new(row_last_i64 as u32, col_last_i64 as u32),
+        ),
+        8,
+    ))
+}
+
+fn decode_ptg_ref_n3d(
+    payload: &[u8],
+    externsheets: &[externsheet::ExternSheetEntry],
+    internal_supbook_index: Option<u16>,
+    sheet_count: Option<usize>,
+) -> Result<(Option<usize>, Range, usize), String> {
+    if payload.len() < 6 {
+        return Err("truncated PtgRefN3d token".to_string());
+    }
+    let ixti = u16::from_le_bytes([payload[0], payload[1]]);
+    let (range, _) = decode_ptg_ref_n(&payload[2..])?;
+    let sheet =
+        resolve_ixti_to_internal_sheet(ixti, externsheets, internal_supbook_index, sheet_count);
+    Ok((sheet, range, 6))
+}
+
+fn decode_ptg_area_n3d(
+    payload: &[u8],
+    externsheets: &[externsheet::ExternSheetEntry],
+    internal_supbook_index: Option<u16>,
+    sheet_count: Option<usize>,
+) -> Result<(Option<usize>, Range, usize), String> {
+    if payload.len() < 10 {
+        return Err("truncated PtgAreaN3d token".to_string());
+    }
+    let ixti = u16::from_le_bytes([payload[0], payload[1]]);
+    let (range, _) = decode_ptg_area_n(&payload[2..])?;
+    let sheet =
+        resolve_ixti_to_internal_sheet(ixti, externsheets, internal_supbook_index, sheet_count);
+    Ok((sheet, range, 10))
 }
 
 fn decode_ptg_ref3d(
@@ -742,6 +904,46 @@ mod tests {
     }
 
     #[test]
+    fn decodes_filter_database_arean_relative_to_a1() {
+        // Relative reference ptgs (`PtgAreaN`) can appear in NAME rgce streams. When the origin cell
+        // is unknown, we interpret offsets relative to A1 (0,0).
+        let mut rgce = Vec::new();
+        rgce.push(0x2D); // PtgAreaN
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst (offset 0)
+        rgce.extend_from_slice(&2u16.to_le_bytes()); // rwLast (offset 2)
+        let col_first_field: u16 = 0xC000 | 0; // A, row+col relative
+        let col_last_field: u16 = 0xC000 | 1; // B, row+col relative
+        rgce.extend_from_slice(&col_first_field.to_le_bytes());
+        rgce.extend_from_slice(&col_last_field.to_le_bytes());
+
+        let mut name_data = Vec::new();
+        name_data.extend_from_slice(&NAME_FLAG_BUILTIN.to_le_bytes()); // grbit (builtin)
+        name_data.push(0); // chKey
+        name_data.push(1); // cch (builtin id length)
+        name_data.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        name_data.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        name_data.extend_from_slice(&1u16.to_le_bytes()); // itab (sheet 1)
+        name_data.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu..cchStatusText
+        name_data.push(BUILTIN_NAME_FILTER_DATABASE); // built-in name id
+        name_data.extend_from_slice(&rgce);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_globals()),
+            record(RECORD_NAME, &name_data),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_filter_database_ranges(&stream, BiffVersion::Biff8, 1252, Some(1))
+            .expect("parse");
+
+        assert_eq!(
+            parsed.by_sheet.get(&0).copied(),
+            Some(Range::new(CellRef::new(0, 0), CellRef::new(2, 1)))
+        );
+    }
+
+    #[test]
     fn decodes_filter_database_area_with_trailing_ptg_paren() {
         // Some producers may wrap the reference with an explicit PtgParen token.
         let mut rgce = Vec::new();
@@ -789,7 +991,7 @@ mod tests {
         rgce.extend_from_slice(&4u16.to_le_bytes()); // rwLast
         rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
         rgce.extend_from_slice(&2u16.to_le_bytes()); // colLast
-        // PtgAttr: [0x19][grbit][wAttr]
+                                                     // PtgAttr: [0x19][grbit][wAttr]
         rgce.push(0x19);
         rgce.push(0x00); // grbit
         rgce.extend_from_slice(&0u16.to_le_bytes()); // wAttr
@@ -1031,6 +1233,84 @@ mod tests {
             rgce.extend_from_slice(&4u16.to_le_bytes()); // rwLast
             rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
             rgce.extend_from_slice(&2u16.to_le_bytes()); // colLast
+
+            let mut data = Vec::new();
+            data.extend_from_slice(&NAME_FLAG_BUILTIN.to_le_bytes()); // grbit (builtin)
+            data.push(0); // chKey
+            data.push(1); // cch (builtin id length)
+            data.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+            data.extend_from_slice(&0u16.to_le_bytes()); // ixals
+            data.extend_from_slice(&0u16.to_le_bytes()); // itab (workbook-scope)
+            data.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu..cchStatusText
+            data.push(BUILTIN_NAME_FILTER_DATABASE); // built-in name id
+            data.extend_from_slice(&rgce);
+            record(RECORD_NAME, &data)
+        };
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_globals()),
+            supbook_external,
+            supbook_internal,
+            externsheet_first,
+            externsheet_continue,
+            name,
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_filter_database_ranges(&stream, BiffVersion::Biff8, 1252, Some(1))
+            .expect("parse");
+
+        assert_eq!(
+            parsed.by_sheet.get(&0).copied(),
+            Some(Range::new(CellRef::new(0, 0), CellRef::new(4, 2)))
+        );
+    }
+
+    #[test]
+    fn decodes_workbook_scope_filter_database_via_externsheet_ptgarean3d() {
+        // Same as `PtgArea3d`, but using the relative/absolute area token `PtgAreaN3d` (0x3F).
+        //
+        // When the origin cell is unknown, relative offsets are interpreted relative to A1 (0,0).
+        let supbook_external = {
+            let mut data = Vec::new();
+            data.extend_from_slice(&1u16.to_le_bytes()); // ctab
+            data.extend_from_slice(&3u16.to_le_bytes()); // cch
+            data.push(0); // flags (compressed)
+            data.extend_from_slice(b"ext"); // virtPath
+            record(RECORD_SUPBOOK, &data)
+        };
+        let supbook_internal = {
+            let mut data = Vec::new();
+            data.extend_from_slice(&1u16.to_le_bytes()); // ctab
+            data.extend_from_slice(&1u16.to_le_bytes()); // cch
+            data.push(0); // flags (compressed)
+            data.push(0x01); // virtPath marker
+            record(RECORD_SUPBOOK, &data)
+        };
+
+        let externsheet_full = {
+            let mut data = Vec::new();
+            data.extend_from_slice(&1u16.to_le_bytes()); // cXTI
+            data.extend_from_slice(&1u16.to_le_bytes()); // iSupBook (internal SUPBOOK index)
+            data.extend_from_slice(&0u16.to_le_bytes()); // itabFirst
+            data.extend_from_slice(&0u16.to_le_bytes()); // itabLast
+            data
+        };
+        let externsheet_first = record(RECORD_EXTERNSHEET, &externsheet_full[..3]);
+        let externsheet_continue = record(records::RECORD_CONTINUE, &externsheet_full[3..]);
+
+        let name = {
+            // rgce = [ptgAreaN3d][ixti=0][rwFirst=0][rwLast=4][colFirst=0][colLast=2], all relative.
+            let mut rgce = Vec::new();
+            rgce.push(0x3F); // PtgAreaN3d
+            rgce.extend_from_slice(&0u16.to_le_bytes()); // ixti
+            rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+            rgce.extend_from_slice(&4u16.to_le_bytes()); // rwLast
+            let col_first_field: u16 = 0xC000 | 0; // A, row+col relative
+            let col_last_field: u16 = 0xC000 | 2; // C, row+col relative
+            rgce.extend_from_slice(&col_first_field.to_le_bytes());
+            rgce.extend_from_slice(&col_last_field.to_le_bytes());
 
             let mut data = Vec::new();
             data.extend_from_slice(&NAME_FLAG_BUILTIN.to_le_bytes()); // grbit (builtin)
