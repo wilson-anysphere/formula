@@ -112,7 +112,8 @@ pub fn extract_rich_cell_images(
         return Ok(HashMap::new());
     }
 
-    let Some(rich_value_rel_rels_bytes) = pkg.part("xl/richData/_rels/richValueRel.xml.rels") else {
+    let Some(rich_value_rel_rels_bytes) = pkg.part("xl/richData/_rels/richValueRel.xml.rels")
+    else {
         return Ok(HashMap::new());
     };
     let rid_to_target = parse_rich_value_rel_rels(rich_value_rel_rels_bytes)?;
@@ -185,7 +186,10 @@ fn parse_metadata_vm_mapping_fallback(bytes: &[u8]) -> Result<HashMap<u32, u32>,
     })?;
 
     let mut rvb_rich_value_indices: Vec<u32> = Vec::new();
-    for node in doc.descendants().filter(|n| n.is_element() && n.tag_name().name() == "rvb") {
+    for node in doc
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "rvb")
+    {
         let Some(i_attr) = node.attribute("i") else {
             continue;
         };
@@ -381,7 +385,10 @@ fn parse_rich_value_rel_rids(bytes: &[u8]) -> Result<Vec<String>, RichDataError>
     {
         // Typically emitted as `r:id="rId..."`, but accept a few variants.
         let Some(rid) = rel
-            .attribute(("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id"))
+            .attribute((
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+                "id",
+            ))
             .or_else(|| rel.attribute("r:id"))
             .or_else(|| rel.attribute("id"))
         else {

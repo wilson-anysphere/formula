@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::io::{Cursor, Read, Seek, SeekFrom};
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::File;
+use std::io::{Cursor, Read, Seek, SeekFrom};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
@@ -100,7 +100,9 @@ pub fn read_workbook_model_from_bytes(bytes: &[u8]) -> Result<Workbook, ReadErro
 
 /// Read an XLSX workbook model directly from a seekable reader without inflating
 /// the entire XLSX package (or every ZIP part) into memory.
-pub fn read_workbook_model_from_reader<R: Read + Seek>(mut reader: R) -> Result<Workbook, ReadError> {
+pub fn read_workbook_model_from_reader<R: Read + Seek>(
+    mut reader: R,
+) -> Result<Workbook, ReadError> {
     // Ensure we start from the beginning; callers may pass a reused reader.
     reader.seek(SeekFrom::Start(0))?;
     let mut archive = ZipArchive::new(reader)?;
@@ -172,10 +174,9 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
             _ => SheetVisibility::Visible,
         };
 
-        let sheet_xml = read_zip_part_optional(archive, &sheet.path)?
-            .ok_or(ReadError::MissingPart(
-                "worksheet part referenced from workbook.xml.rels",
-            ))?;
+        let sheet_xml = read_zip_part_optional(archive, &sheet.path)?.ok_or(
+            ReadError::MissingPart("worksheet part referenced from workbook.xml.rels"),
+        )?;
 
         // Worksheet-level metadata lives inside the worksheet part (and sometimes its .rels).
         let sheet_xml_str = std::str::from_utf8(&sheet_xml)?;
@@ -267,7 +268,12 @@ fn attach_tables_from_parts<R: Read + Seek>(
         worksheet_part,
         worksheet_xml,
         worksheet_rels_xml,
-        |target| read_zip_part_optional(archive, target).ok().flatten().map(Cow::Owned),
+        |target| {
+            read_zip_part_optional(archive, target)
+                .ok()
+                .flatten()
+                .map(Cow::Owned)
+        },
     );
 }
 
@@ -464,8 +470,8 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
 
         // Conditional formatting. Parsed via a streaming extractor so we don't DOM-parse the
         // full worksheet XML.
-        let parsed_cf = parse_worksheet_conditional_formatting_streaming(sheet_xml_str)
-            .unwrap_or_default();
+        let parsed_cf =
+            parse_worksheet_conditional_formatting_streaming(sheet_xml_str).unwrap_or_default();
         if !parsed_cf.rules.is_empty() {
             ws.conditional_formatting_rules = parsed_cf.rules;
             let dxfs = conditional_formatting_dxfs
@@ -506,13 +512,11 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             AutoFilterParseError::InvalidRef(e) => ReadError::InvalidRangeRef(e.to_string()),
         })?;
 
-        attach_tables_from_part_getter(
-            ws,
-            &sheet.path,
-            sheet_xml,
-            rels_xml_bytes,
-            |target| parts.get(target).map(|bytes| Cow::Borrowed(bytes.as_slice())),
-        );
+        attach_tables_from_part_getter(ws, &sheet.path, sheet_xml, rels_xml_bytes, |target| {
+            parts
+                .get(target)
+                .map(|bytes| Cow::Borrowed(bytes.as_slice()))
+        });
 
         parse_worksheet_into_model(
             ws,
@@ -719,9 +723,7 @@ impl MetadataPart {
                     in_mdr = false;
                     current_mdr_idx = None;
                 }
-                Event::Start(e)
-                    if in_metadata_records && e.local_name().as_ref() == b"mdr" =>
-                {
+                Event::Start(e) if in_metadata_records && e.local_name().as_ref() == b"mdr" => {
                     in_mdr = true;
                     current_mdr_idx = Some(next_mdr_idx);
                     next_mdr_idx = next_mdr_idx.saturating_add(1);
@@ -757,11 +759,7 @@ impl MetadataPart {
                         let attr = attr?;
                         let key = crate::openxml::local_name(attr.key.as_ref());
                         if key == b"i" || key == b"idx" || key == b"index" || key == b"v" {
-                            rich_idx = attr
-                                .unescape_value()?
-                                .into_owned()
-                                .parse::<u32>()
-                                .ok();
+                            rich_idx = attr.unescape_value()?.into_owned().parse::<u32>().ok();
                             if rich_idx.is_some() {
                                 break;
                             }
@@ -804,18 +802,10 @@ impl MetadataPart {
                         let attr = attr?;
                         match crate::openxml::local_name(attr.key.as_ref()) {
                             b"t" => {
-                                t = attr
-                                    .unescape_value()?
-                                    .into_owned()
-                                    .parse::<u32>()
-                                    .ok();
+                                t = attr.unescape_value()?.into_owned().parse::<u32>().ok();
                             }
                             b"v" => {
-                                v = attr
-                                    .unescape_value()?
-                                    .into_owned()
-                                    .parse::<u32>()
-                                    .ok();
+                                v = attr.unescape_value()?.into_owned().parse::<u32>().ok();
                             }
                             _ => {}
                         }
@@ -839,8 +829,10 @@ impl MetadataPart {
     }
 
     fn vm_to_rich_value_index(&self, vm: u32) -> Option<u32> {
-        self.vm_to_rich_value_index_with_candidate(vm)
-            .or_else(|| vm.checked_sub(1).and_then(|vm| self.vm_to_rich_value_index_with_candidate(vm)))
+        self.vm_to_rich_value_index_with_candidate(vm).or_else(|| {
+            vm.checked_sub(1)
+                .and_then(|vm| self.vm_to_rich_value_index_with_candidate(vm))
+        })
     }
 
     fn vm_to_rich_value_index_with_candidate(&self, vm_idx: u32) -> Option<u32> {
@@ -850,7 +842,9 @@ impl MetadataPart {
         // to any record if we don't know the type.
         for pass in 0..2 {
             for (t, v) in rc_refs {
-                if pass == 0 && !self.rich_type_indices.is_empty() && !self.rich_type_indices.contains(t)
+                if pass == 0
+                    && !self.rich_type_indices.is_empty()
+                    && !self.rich_type_indices.contains(t)
                 {
                     continue;
                 }
@@ -1219,7 +1213,9 @@ fn parse_worksheet_into_model(
                 drop(e);
             }
 
-            Event::Start(e) | Event::Empty(e) if in_sheet_view && e.local_name().as_ref() == b"pane" => {
+            Event::Start(e) | Event::Empty(e)
+                if in_sheet_view && e.local_name().as_ref() == b"pane" =>
+            {
                 let mut state: Option<String> = None;
                 let mut x_split: Option<u32> = None;
                 let mut y_split: Option<u32> = None;
@@ -1239,7 +1235,9 @@ fn parse_worksheet_into_model(
                 }
             }
 
-            Event::Start(e) | Event::Empty(e) if in_sheet_data && e.local_name().as_ref() == b"row" => {
+            Event::Start(e) | Event::Empty(e)
+                if in_sheet_data && e.local_name().as_ref() == b"row" =>
+            {
                 let mut row_1_based: Option<u32> = None;
                 let mut height: Option<f32> = None;
                 let mut custom_height: Option<bool> = None;
@@ -1311,18 +1309,10 @@ fn parse_worksheet_into_model(
                             current_style = styles_part.style_id_for_xf(xf_index);
                         }
                         b"cm" => {
-                            current_cm = attr
-                                .unescape_value()?
-                                .into_owned()
-                                .parse::<u32>()
-                                .ok();
+                            current_cm = attr.unescape_value()?.into_owned().parse::<u32>().ok();
                         }
                         b"vm" => {
-                            current_vm = attr
-                                .unescape_value()?
-                                .into_owned()
-                                .parse::<u32>()
-                                .ok();
+                            current_vm = attr.unescape_value()?.into_owned().parse::<u32>().ok();
                         }
                         _ => {}
                     }
