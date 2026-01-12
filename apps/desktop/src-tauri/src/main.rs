@@ -421,20 +421,70 @@ fn signature_status(
     vba_project_bin: &[u8],
     vba_project_signature_bin: Option<&[u8]>,
 ) -> commands::MacroSignatureStatus {
-    let parsed = match vba_project_signature_bin {
-        Some(sig_part) => {
-            formula_vba::verify_vba_digital_signature_with_project(vba_project_bin, sig_part)
-                .ok()
-                .flatten()
-                .or_else(|| {
-                    formula_vba::verify_vba_digital_signature(vba_project_bin)
-                        .ok()
-                        .flatten()
-                })
+    // Match `formula_xlsx::XlsxPackage::verify_vba_digital_signature` behavior:
+    // - Prefer the signature-part signature when it cryptographically verifies.
+    // - Otherwise, fall back to an embedded signature inside `vbaProject.bin`.
+    // - If neither verifies, return the best-effort signature info (parse errors included).
+    let mut signature_part_result: Option<formula_vba::VbaDigitalSignature> = None;
+    if let Some(sig_part) = vba_project_signature_bin {
+        match formula_vba::verify_vba_digital_signature_with_project(vba_project_bin, sig_part) {
+            Ok(Some(sig)) => signature_part_result = Some(sig),
+            Ok(None) => {}
+            Err(_) => {
+                // Not an OLE container: fall back to verifying the part bytes as a raw PKCS#7/CMS
+                // signature blob.
+                let (verification, signer_subject) =
+                    formula_vba::verify_vba_signature_blob(sig_part);
+                signature_part_result = Some(formula_vba::VbaDigitalSignature {
+                    stream_path: "xl/vbaProjectSignature.bin".to_string(),
+                    stream_kind: formula_vba::VbaSignatureStreamKind::Unknown,
+                    signer_subject,
+                    signature: sig_part.to_vec(),
+                    verification,
+                    binding: formula_vba::VbaSignatureBinding::Unknown,
+                });
+            }
         }
-        None => formula_vba::verify_vba_digital_signature(vba_project_bin)
-            .ok()
-            .flatten(),
+    }
+
+    if let Some(sig) = signature_part_result.as_mut() {
+        if sig.verification == formula_vba::VbaSignatureVerification::SignedVerified
+            && sig.binding == formula_vba::VbaSignatureBinding::Unknown
+        {
+            sig.binding = match formula_vba::verify_vba_project_signature_binding(
+                vba_project_bin,
+                &sig.signature,
+            ) {
+                Ok(binding) => match binding {
+                    formula_vba::VbaProjectBindingVerification::BoundVerified(_) => {
+                        formula_vba::VbaSignatureBinding::Bound
+                    }
+                    formula_vba::VbaProjectBindingVerification::BoundMismatch(_) => {
+                        formula_vba::VbaSignatureBinding::NotBound
+                    }
+                    formula_vba::VbaProjectBindingVerification::BoundUnknown(_) => {
+                        formula_vba::VbaSignatureBinding::Unknown
+                    }
+                },
+                Err(_) => formula_vba::VbaSignatureBinding::Unknown,
+            };
+        }
+    }
+
+    let embedded = formula_vba::verify_vba_digital_signature(vba_project_bin)
+        .ok()
+        .flatten();
+
+    let parsed = if signature_part_result.as_ref().is_some_and(|sig| {
+        sig.verification == formula_vba::VbaSignatureVerification::SignedVerified
+    }) {
+        signature_part_result
+    } else if embedded.as_ref().is_some_and(|sig| {
+        sig.verification == formula_vba::VbaSignatureVerification::SignedVerified
+    }) {
+        embedded
+    } else {
+        signature_part_result.or(embedded)
     };
 
     match parsed {

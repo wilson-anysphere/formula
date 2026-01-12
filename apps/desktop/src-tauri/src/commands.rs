@@ -429,6 +429,8 @@ use crate::file_io::read_workbook;
 #[cfg(feature = "desktop")]
 use crate::ipc_origin;
 #[cfg(feature = "desktop")]
+use crate::macro_trust::SharedMacroTrustStore;
+#[cfg(feature = "desktop")]
 use crate::persistence::{
     autosave_db_path_for_new_workbook, autosave_db_path_for_workbook, WorkbookPersistenceLocation,
 };
@@ -438,8 +440,6 @@ use crate::state::SharedAppState;
 use crate::state::{AppState, AppStateError, CellUpdateData};
 #[cfg(any(feature = "desktop", test))]
 use crate::{file_io::Workbook, macro_trust::compute_macro_fingerprint};
-#[cfg(feature = "desktop")]
-use crate::macro_trust::SharedMacroTrustStore;
 #[cfg(any(feature = "desktop", test))]
 use std::path::PathBuf;
 #[cfg(feature = "desktop")]
@@ -529,11 +529,9 @@ pub async fn open_workbook(
     ipc_origin::ensure_trusted_origin(&url, "workbook opening", ipc_origin::Verb::Is)?;
 
     let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
-    let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
-        std::path::Path::new(&path),
-        &allowed_roots,
-    )
-    .map_err(|e| e.to_string())?;
+    let resolved =
+        crate::fs_scope::canonicalize_in_allowed_roots(std::path::Path::new(&path), &allowed_roots)
+            .map_err(|e| e.to_string())?;
     let resolved_str = resolved.to_string_lossy().to_string();
 
     let workbook = read_workbook(resolved).await.map_err(|e| e.to_string())?;
@@ -655,7 +653,10 @@ pub async fn add_sheet_with_id(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn reorder_sheets(sheet_ids: Vec<String>, state: State<'_, SharedAppState>) -> Result<(), String> {
+pub async fn reorder_sheets(
+    sheet_ids: Vec<String>,
+    state: State<'_, SharedAppState>,
+) -> Result<(), String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
@@ -787,7 +788,10 @@ pub async fn move_sheet(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn delete_sheet(sheet_id: String, state: State<'_, SharedAppState>) -> Result<(), String> {
+pub async fn delete_sheet(
+    sheet_id: String,
+    state: State<'_, SharedAppState>,
+) -> Result<(), String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
@@ -839,8 +843,8 @@ pub async fn read_text_file(window: tauri::WebviewWindow, path: String) -> Resul
 
         read_text_file_blocking(&resolved)
     })
-        .await
-        .map_err(|e| e.to_string())?
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1141,11 +1145,7 @@ pub async fn power_query_cache_key_get_or_create(
         ipc_origin::Verb::Is,
     )?;
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_trusted_origin(
-        &url,
-        "power query cache key access",
-        ipc_origin::Verb::Is,
-    )?;
+    ipc_origin::ensure_trusted_origin(&url, "power query cache key access", ipc_origin::Verb::Is)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryCacheKeyStore::open_default();
@@ -1262,11 +1262,7 @@ pub async fn power_query_refresh_state_get(
         ipc_origin::Verb::Is,
     )?;
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_trusted_origin(
-        &url,
-        "power query refresh state",
-        ipc_origin::Verb::Is,
-    )?;
+    ipc_origin::ensure_trusted_origin(&url, "power query refresh state", ipc_origin::Verb::Is)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryRefreshStateStore::open_default().map_err(|e| e.to_string())?;
@@ -1290,11 +1286,7 @@ pub async fn power_query_refresh_state_set(
         ipc_origin::Verb::Is,
     )?;
     let url = window.url().map_err(|err| err.to_string())?;
-    ipc_origin::ensure_trusted_origin(
-        &url,
-        "power query refresh state",
-        ipc_origin::Verb::Is,
-    )?;
+    ipc_origin::ensure_trusted_origin(&url, "power query refresh state", ipc_origin::Verb::Is)?;
 
     crate::power_query_validation::validate_power_query_refresh_state_payload(&state)
         .map_err(|e| e.to_string())?;
@@ -1528,7 +1520,8 @@ pub async fn save_workbook(
         // Fall back to the storage->model export path for non-XLSX origins (csv/xls) and
         // for new workbooks without an `origin_xlsx_bytes` baseline.
         let bytes = if workbook.origin_xlsx_bytes.is_some() {
-            crate::file_io::write_xlsx_blocking(&resolved_path, &workbook).map_err(|e| e.to_string())?
+            crate::file_io::write_xlsx_blocking(&resolved_path, &workbook)
+                .map_err(|e| e.to_string())?
         } else {
             crate::persistence::write_xlsx_from_storage(
                 &storage,
@@ -2383,31 +2376,86 @@ fn build_macro_security_status(
         // instead of re-reading the original package.
         let mut sig_part_fallback: Option<Vec<u8>> = None;
         if workbook.vba_project_signature_bin.is_none() {
-            sig_part_fallback = workbook
-                .origin_xlsx_bytes
-                .as_deref()
-                .and_then(|origin| {
-                    formula_xlsx::read_part_from_reader(
-                        std::io::Cursor::new(origin),
-                        "xl/vbaProjectSignature.bin",
-                    )
-                    .ok()
-                    .flatten()
-                });
+            sig_part_fallback = workbook.origin_xlsx_bytes.as_deref().and_then(|origin| {
+                formula_xlsx::read_part_from_reader(
+                    std::io::Cursor::new(origin),
+                    "xl/vbaProjectSignature.bin",
+                )
+                .ok()
+                .flatten()
+            });
         }
         let sig_part = workbook
             .vba_project_signature_bin
             .as_deref()
             .or(sig_part_fallback.as_deref());
-        let parsed = match sig_part {
-            Some(sig_part) => match formula_vba::verify_vba_digital_signature_with_project(vba_bin, sig_part) {
-                Ok(Some(sig)) => Some(sig),
-                Ok(None) | Err(_) => formula_vba::verify_vba_digital_signature(vba_bin)
-                    .ok()
-                    .flatten(),
-            },
-            None => formula_vba::verify_vba_digital_signature(vba_bin).ok().flatten(),
+
+        // Match `formula_xlsx::XlsxPackage::verify_vba_digital_signature` behavior:
+        // - Prefer the signature-part signature when it cryptographically verifies.
+        // - Otherwise, fall back to an embedded signature inside `vbaProject.bin`.
+        // - If neither verifies, return the best-effort signature info (parse errors included).
+        let mut signature_part_result: Option<formula_vba::VbaDigitalSignature> = None;
+        if let Some(sig_part) = sig_part {
+            match formula_vba::verify_vba_digital_signature_with_project(vba_bin, sig_part) {
+                Ok(Some(sig)) => signature_part_result = Some(sig),
+                Ok(None) => {}
+                Err(_) => {
+                    // Not an OLE container: fall back to verifying the part bytes as a raw PKCS#7/CMS
+                    // signature blob.
+                    let (verification, signer_subject) =
+                        formula_vba::verify_vba_signature_blob(sig_part);
+                    signature_part_result = Some(formula_vba::VbaDigitalSignature {
+                        stream_path: "xl/vbaProjectSignature.bin".to_string(),
+                        stream_kind: formula_vba::VbaSignatureStreamKind::Unknown,
+                        signer_subject,
+                        signature: sig_part.to_vec(),
+                        verification,
+                        binding: formula_vba::VbaSignatureBinding::Unknown,
+                    });
+                }
+            }
+        }
+
+        if let Some(sig) = signature_part_result.as_mut() {
+            if sig.verification == formula_vba::VbaSignatureVerification::SignedVerified
+                && sig.binding == formula_vba::VbaSignatureBinding::Unknown
+            {
+                sig.binding = match formula_vba::verify_vba_project_signature_binding(
+                    vba_bin,
+                    &sig.signature,
+                ) {
+                    Ok(binding) => match binding {
+                        formula_vba::VbaProjectBindingVerification::BoundVerified(_) => {
+                            formula_vba::VbaSignatureBinding::Bound
+                        }
+                        formula_vba::VbaProjectBindingVerification::BoundMismatch(_) => {
+                            formula_vba::VbaSignatureBinding::NotBound
+                        }
+                        formula_vba::VbaProjectBindingVerification::BoundUnknown(_) => {
+                            formula_vba::VbaSignatureBinding::Unknown
+                        }
+                    },
+                    Err(_) => formula_vba::VbaSignatureBinding::Unknown,
+                };
+            }
+        }
+
+        let embedded = formula_vba::verify_vba_digital_signature(vba_bin)
+            .ok()
+            .flatten();
+
+        let parsed = if signature_part_result.as_ref().is_some_and(|sig| {
+            sig.verification == formula_vba::VbaSignatureVerification::SignedVerified
+        }) {
+            signature_part_result
+        } else if embedded.as_ref().is_some_and(|sig| {
+            sig.verification == formula_vba::VbaSignatureVerification::SignedVerified
+        }) {
+            embedded
+        } else {
+            signature_part_result.or(embedded)
         };
+
         Some(match parsed {
             Some(sig) => MacroSignatureInfo {
                 status: match sig.verification {
@@ -4145,11 +4193,14 @@ pub async fn open_external_url(window: tauri::Window, url: String) -> Result<(),
             return Err("main webview window not available".to_string());
         };
         let origin_url = webview.url().map_err(|err| err.to_string())?;
-        ipc_origin::ensure_trusted_origin(&origin_url, "external URL opening", ipc_origin::Verb::Is)?;
+        ipc_origin::ensure_trusted_origin(
+            &origin_url,
+            "external URL opening",
+            ipc_origin::Verb::Is,
+        )?;
     }
 
-    let parsed =
-        tauri::Url::parse(url.trim()).map_err(|err| format!("Invalid URL: {err}"))?;
+    let parsed = tauri::Url::parse(url.trim()).map_err(|err| format!("Invalid URL: {err}"))?;
 
     // SECURITY: enforce a strict scheme allowlist at the Rust boundary so a compromised webview
     // cannot use this command as an "open arbitrary protocol" primitive.
@@ -4520,7 +4571,10 @@ pub async fn marketplace_search(
     if !response.status().is_success() {
         return Err(format!("Marketplace search failed ({})", response.status()));
     }
-    response.json::<JsonValue>().await.map_err(|e| e.to_string())
+    response
+        .json::<JsonValue>()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(feature = "desktop")]
@@ -4564,7 +4618,10 @@ pub async fn marketplace_get_extension(
             response.status()
         ));
     }
-    let json = response.json::<JsonValue>().await.map_err(|e| e.to_string())?;
+    let json = response
+        .json::<JsonValue>()
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(Some(json))
 }
 
@@ -4923,8 +4980,30 @@ mod tests {
     }
 
     #[test]
+    fn macro_security_status_supports_raw_vba_project_signature_part_bytes() {
+        // Some XLSM producers store `xl/vbaProjectSignature.bin` as a *raw* PKCS#7/CMS blob (not an
+        // OLE container). When the bytes are invalid, the status should be a parse error (not
+        // silently treated as unsigned).
+        let signature_part = b"not-a-valid-pkcs7".to_vec();
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.vba_project_bin = Some(vec![1, 2, 3]);
+        workbook.vba_project_signature_bin = Some(signature_part);
+        workbook.origin_xlsx_bytes = None;
+
+        let trust_store = crate::macro_trust::MacroTrustStore::new_ephemeral();
+        let status =
+            build_macro_security_status(&mut workbook, None, &trust_store).expect("macro status");
+        let sig = status.signature.expect("signature info present");
+        assert_eq!(sig.status, MacroSignatureStatus::SignedParseError);
+    }
+
+    #[test]
     fn normalize_tab_color_rgb_accepts_rgb_and_argb_hex() {
-        assert_eq!(normalize_tab_color_rgb("ff00ff").expect("normalize RRGGBB"), "FFFF00FF");
+        assert_eq!(
+            normalize_tab_color_rgb("ff00ff").expect("normalize RRGGBB"),
+            "FFFF00FF"
+        );
         assert_eq!(
             normalize_tab_color_rgb("#ff00ff").expect("normalize #RRGGBB"),
             "FFFF00FF"
@@ -5198,7 +5277,8 @@ mod tests {
             "unexpected error: {err}"
         );
 
-        let err = read_binary_file_range_blocking(path, 0, 1).expect_err("expected directory read to fail");
+        let err = read_binary_file_range_blocking(path, 0, 1)
+            .expect_err("expected directory read to fail");
         assert!(
             err.contains("Path is not a regular file"),
             "unexpected error: {err}"
@@ -5266,10 +5346,7 @@ export default async function main(ctx) {{
         );
 
         let result = run_typescript_migration_script(&mut state, &code);
-        assert!(
-            !result.ok,
-            "expected script to fail due to size limits"
-        );
+        assert!(!result.ok, "expected script to fail due to size limits");
         let err = result.error.unwrap_or_default();
         assert!(
             err.contains("too large") || err.contains("max"),
