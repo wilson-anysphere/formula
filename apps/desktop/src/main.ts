@@ -2651,6 +2651,10 @@ if (
     // independent of cell contents. Even when we reuse the primary grid's provider, we still
     // need to re-apply the current sheet's view state (e.g. when switching sheets).
     secondaryGridView.syncSheetViewFromDocument();
+    // Reference highlights are derived from the formula bar draft; recompute when the active sheet
+    // changes so the secondary pane matches the primary pane behavior (only show highlights that
+    // belong to the currently-visible sheet).
+    syncSecondaryGridReferenceHighlights();
     const sharedProvider = (app as any).sharedProvider ?? null;
     // In shared-grid mode we reuse the primary provider, and SpreadsheetApp already
     // invalidates it on sheet changes / show-formulas toggles. Avoid extra churn.
