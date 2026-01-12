@@ -102,6 +102,7 @@ const MAX_KEYBOARD_FORMATTING_CELLS = 50_000;
 // Encode (row, col) into a single numeric key for allocation-free lookups.
 // `16_384` matches Excel's maximum column count, so the mapping is collision-free for Excel-sized sheets.
 const COMMENT_COORD_COL_STRIDE = 16_384;
+const COMPUTED_COORD_COL_STRIDE = COMMENT_COORD_COL_STRIDE;
 // Plain A1 address (with optional `$` absolute markers) without sheet qualification.
 const A1_CELL_REF_RE = /^\$?[A-Za-z]+\$?[1-9][0-9]*$/;
 
@@ -394,6 +395,7 @@ export class SpreadsheetApp {
   private sheetId = "Sheet1";
   private readonly idle = new IdleTracker();
   private readonly computedValues = new Map<string, SpreadsheetValue>();
+  private readonly computedValuesByCoord = new Map<string, Map<number, SpreadsheetValue>>();
   private uiReady = false;
   private readonly sheetNameResolver: SheetNameResolver | null;
   private readonly gridMode: DesktopGridMode;
@@ -2465,6 +2467,7 @@ export class SpreadsheetApp {
       // Ensure any in-flight sync operations finish before we replace the workbook.
       await this.wasmSyncPromise;
       this.computedValues.clear();
+      this.computedValuesByCoord.clear();
       this.document.applyState(snapshot);
       const sheetIds = this.document.getSheetIds();
       if (sheetIds.length > 0 && !sheetIds.includes(this.sheetId)) {
@@ -2528,6 +2531,7 @@ export class SpreadsheetApp {
             for (let attempt = 0; attempt < 2; attempt += 1) {
               changedDuringInit = false;
               this.computedValues.clear();
+              this.computedValuesByCoord.clear();
               const changes = await engineHydrateFromDocument(engine, this.document);
               this.applyComputedChanges(changes);
               if (!changedDuringInit) break;
@@ -2544,6 +2548,7 @@ export class SpreadsheetApp {
 
               if (source === "applyState") {
                 this.computedValues.clear();
+                this.computedValuesByCoord.clear();
                 void this.enqueueWasmSync(async (worker) => {
                   const changes = await engineHydrateFromDocument(worker, this.document);
                   this.applyComputedChanges(changes);
@@ -2582,14 +2587,15 @@ export class SpreadsheetApp {
              const changes = await engineHydrateFromDocument(worker, this.document);
              this.applyComputedChanges(changes);
            });
-         } catch {
-           // Ignore initialization failures (e.g. missing WASM bundle).
-           engine?.terminate();
-           this.wasmEngine = null;
-           this.wasmUnsubscribe?.();
-           this.wasmUnsubscribe = null;
-           this.computedValues.clear();
-         }
+          } catch {
+            // Ignore initialization failures (e.g. missing WASM bundle).
+            engine?.terminate();
+            this.wasmEngine = null;
+            this.wasmUnsubscribe?.();
+            this.wasmUnsubscribe = null;
+            this.computedValues.clear();
+            this.computedValuesByCoord.clear();
+          }
       })
       .catch(() => {
         // Ignore WASM init failures; the app continues to function using the in-process mock engine.
@@ -7565,15 +7571,27 @@ export class SpreadsheetApp {
   }
 
   private getCellComputedValueForSheetInternal(sheetId: string, cell: CellCoord): SpreadsheetValue {
-    const address = cellToA1(cell);
-    const cacheKey = this.computedKey(sheetId, address);
-
     // The WASM engine currently cannot resolve sheet-qualified references (e.g. `Sheet2!A1`),
     // so when multiple sheets exist we fall back to the in-process evaluator for *all* formulas
     // to keep dependent values consistent.
     const useEngineCache = this.document.getSheetIds().length <= 1;
-    if (useEngineCache && this.computedValues.has(cacheKey)) {
-      return this.computedValues.get(cacheKey) ?? null;
+    if (useEngineCache) {
+      // Hot path: shared-grid rendering calls this for *every* formula cell in view.
+      // Avoid allocating A1/key strings on cache hits by using a numeric `{row,col}` cache.
+      const sheetCache = this.computedValuesByCoord.get(sheetId);
+      if (sheetCache && cell.col >= 0 && cell.col < COMPUTED_COORD_COL_STRIDE && cell.row >= 0) {
+        const key = cell.row * COMPUTED_COORD_COL_STRIDE + cell.col;
+        if (sheetCache.has(key)) {
+          return sheetCache.get(key) ?? null;
+        }
+      }
+
+      // Backwards/defensive fallback: string-keyed cache.
+      const address = cellToA1(cell);
+      const cacheKey = this.computedKey(sheetId, address);
+      if (this.computedValues.has(cacheKey)) {
+        return this.computedValues.get(cacheKey) ?? null;
+      }
     }
 
     const memo = new Map<string, SpreadsheetValue>();
@@ -7613,9 +7631,43 @@ export class SpreadsheetApp {
     if (!Array.isArray(changes)) return;
     for (const change of changes) {
       const ref = change as EngineCellRef;
-      const sheetId = typeof ref.sheetId === "string" ? ref.sheetId : this.sheetId;
-      if (!isInteger(ref.row) || !isInteger(ref.col)) continue;
-      const address = cellToA1({ row: ref.row, col: ref.col });
+
+      let sheetId = typeof ref.sheet === "string" ? ref.sheet : undefined;
+      if (!sheetId && typeof ref.sheetId === "string") sheetId = ref.sheetId;
+      if (!sheetId) sheetId = this.sheetId;
+
+      let address = typeof ref.address === "string" ? ref.address : undefined;
+
+      // Support "Sheet1!A1" style addresses if a sheet name was embedded.
+      if (address && address.includes("!")) {
+        const [maybeSheet, cell] = address.split("!", 2);
+        if (maybeSheet && cell) {
+          sheetId = this.resolveSheetIdByName(maybeSheet) ?? maybeSheet;
+          address = cell;
+        }
+      }
+
+      let row = isInteger(ref.row) ? ref.row : undefined;
+      let col = isInteger(ref.col) ? ref.col : undefined;
+      if ((row === undefined || col === undefined) && address) {
+        try {
+          const parsed = fromA1A1(address);
+          row = parsed.row0;
+          col = parsed.col0;
+        } catch {
+          // ignore parse errors
+        }
+      }
+
+      if (row !== undefined && col !== undefined && col >= 0 && col < COMPUTED_COORD_COL_STRIDE) {
+        const key = row * COMPUTED_COORD_COL_STRIDE + col;
+        this.computedValuesByCoord.get(sheetId)?.delete(key);
+      }
+
+      if (!address && row !== undefined && col !== undefined) {
+        address = cellToA1({ row, col });
+      }
+      if (!address) continue;
       this.computedValues.delete(this.computedKey(sheetId, address));
     }
   }
@@ -7646,12 +7698,34 @@ export class SpreadsheetApp {
         }
       }
 
+      let row = isInteger(ref.row) ? ref.row : undefined;
+      let col = isInteger(ref.col) ? ref.col : undefined;
+      if ((row === undefined || col === undefined) && address) {
+        try {
+          const parsed = fromA1A1(address);
+          row = parsed.row0;
+          col = parsed.col0;
+        } catch {
+          // ignore parse errors
+        }
+      }
+
       let value = ref.value;
       // Some engine implementations omit `value` entirely to represent an empty cell.
       // Treat missing values as null so we don't keep stale computed results around.
       if (value === undefined) value = null;
       if (value !== null && typeof value !== "number" && typeof value !== "string" && typeof value !== "boolean") {
         continue;
+      }
+
+      if (row !== undefined && col !== undefined && col >= 0 && col < COMPUTED_COORD_COL_STRIDE) {
+        const key = row * COMPUTED_COORD_COL_STRIDE + col;
+        let sheetCache = this.computedValuesByCoord.get(sheetId);
+        if (!sheetCache) {
+          sheetCache = new Map();
+          this.computedValuesByCoord.set(sheetId, sheetCache);
+        }
+        sheetCache.set(key, value);
       }
 
       this.computedValues.set(this.computedKey(sheetId, address), value);
