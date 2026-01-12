@@ -8,23 +8,55 @@ const XL_UDF_PREFIX: &str = "_xludf.";
 //
 // Keep this list sorted (ASCII) for maintainability.
 const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
+    "ACOT",
+    "ACOTH",
     "AGGREGATE",
+    "BETA.DIST",
+    "BETA.INV",
+    "BINOM.DIST",
+    "BINOM.DIST.RANGE",
+    "BINOM.INV",
     "BYCOL",
     "BYROW",
     "CEILING.MATH",
     "CEILING.PRECISE",
+    "CHISQ.DIST",
+    "CHISQ.DIST.RT",
+    "CHISQ.INV",
+    "CHISQ.INV.RT",
+    "CHISQ.TEST",
     "CHOOSECOLS",
     "CHOOSEROWS",
+    "COMBINA",
     "CONCAT",
+    "CONFIDENCE.NORM",
+    "CONFIDENCE.T",
+    "COT",
+    "COTH",
     "COVARIANCE.P",
     "COVARIANCE.S",
+    "CSC",
+    "CSCH",
+    "DAYS",
     "DROP",
     "EXPAND",
+    "EXPON.DIST",
+    "F.DIST",
+    "F.DIST.RT",
+    "F.INV",
+    "F.INV.RT",
+    "F.TEST",
     "FILTER",
     "FLOOR.MATH",
     "FLOOR.PRECISE",
     "FORECAST.LINEAR",
+    "GAMMA",
+    "GAMMA.DIST",
+    "GAMMA.INV",
+    "GAMMALN.PRECISE",
+    "GAUSS",
     "HSTACK",
+    "HYPGEOM.DIST",
     "IFNA",
     "IFS",
     "IMAGE",
@@ -34,27 +66,51 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "ISOWEEKNUM",
     "LAMBDA",
     "LET",
+    "LOGNORM.DIST",
+    "LOGNORM.INV",
     "MAKEARRAY",
     "MAP",
+    "MAXIFS",
+    "MINIFS",
     "MODE.MULT",
     "MODE.SNGL",
+    "NEGBINOM.DIST",
     "NETWORKDAYS.INTL",
+    "NORM.DIST",
+    "NORM.INV",
+    "NORM.S.DIST",
+    "NORM.S.INV",
     "NUMBERVALUE",
     "PERCENTILE.EXC",
     "PERCENTILE.INC",
+    "PERCENTRANK.EXC",
+    "PERCENTRANK.INC",
+    "PERMUTATIONA",
+    "PHI",
+    "POISSON.DIST",
     "QUARTILE.EXC",
     "QUARTILE.INC",
     "RANDARRAY",
     "RANK.AVG",
     "RANK.EQ",
     "REDUCE",
+    "RRI",
     "SCAN",
+    "SEC",
+    "SECH",
     "SEQUENCE",
+    "SKEW.P",
     "SORT",
     "SORTBY",
     "STDEV.P",
     "STDEV.S",
     "SWITCH",
+    "T.DIST",
+    "T.DIST.2T",
+    "T.DIST.RT",
+    "T.INV",
+    "T.INV.2T",
+    "T.TEST",
     "TAKE",
     "TEXTAFTER",
     "TEXTBEFORE",
@@ -67,11 +123,14 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "VAR.P",
     "VAR.S",
     "VSTACK",
+    "WEIBULL.DIST",
     "WORKDAY.INTL",
     "WRAPCOLS",
     "WRAPROWS",
     "XLOOKUP",
     "XMATCH",
+    "XOR",
+    "Z.TEST",
 ];
 
 pub(crate) fn normalize_display_formula(input: &str) -> String {
@@ -247,6 +306,7 @@ fn is_ident_byte(b: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn normalize_display_formula_strips_leading_equals_and_trims() {
@@ -293,6 +353,26 @@ mod tests {
     }
 
     #[test]
+    fn xlfn_required_functions_are_sorted_and_unique() {
+        let mut prev: Option<&str> = None;
+        let mut seen = HashSet::with_capacity(XL_FN_REQUIRED_FUNCTIONS.len());
+
+        for &name in XL_FN_REQUIRED_FUNCTIONS {
+            if let Some(prev) = prev {
+                assert!(
+                    prev < name,
+                    "XL_FN_REQUIRED_FUNCTIONS must be ASCII-sorted; found out-of-order entries: {prev} then {name}"
+                );
+            }
+            assert!(
+                seen.insert(name),
+                "XL_FN_REQUIRED_FUNCTIONS must not contain duplicates; duplicate entry: {name}"
+            );
+            prev = Some(name);
+        }
+    }
+
+    #[test]
     fn add_xlfn_prefixes_roundtrips_known_functions() {
         let input = r#"CONCAT("_xlfn.",SEQUENCE(1))"#;
         let expected = r#"_xlfn.CONCAT("_xlfn.",_xlfn.SEQUENCE(1))"#;
@@ -332,6 +412,20 @@ mod tests {
     fn add_xlfn_prefixes_prefixes_valuetotext() {
         let input = r#"VALUETOTEXT(1)"#;
         let expected = r#"_xlfn.VALUETOTEXT(1)"#;
+        assert_eq!(add_xlfn_prefixes(input), expected);
+    }
+
+    #[test]
+    fn add_xlfn_prefixes_prefixes_maxifs_and_minifs() {
+        let input = r#"MAXIFS(A1:A3,B1:B3,1)+MINIFS(A1:A3,B1:B3,1)"#;
+        let expected = r#"_xlfn.MAXIFS(A1:A3,B1:B3,1)+_xlfn.MINIFS(A1:A3,B1:B3,1)"#;
+        assert_eq!(add_xlfn_prefixes(input), expected);
+    }
+
+    #[test]
+    fn add_xlfn_prefixes_prefixes_xor() {
+        let input = r#"XOR(TRUE,FALSE)"#;
+        let expected = r#"_xlfn.XOR(TRUE,FALSE)"#;
         assert_eq!(add_xlfn_prefixes(input), expected);
     }
 
