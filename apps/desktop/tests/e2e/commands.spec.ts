@@ -6,6 +6,10 @@ test.describe("Built-in commands", () => {
   test("view.toggleShowFormulas toggles between computed value and formula text", async ({ page }) => {
     await gotoDesktop(page);
 
+    // `__formulaCommandRegistry` is assigned later in `main.ts` than `__formulaApp`.
+    // Wait explicitly so the test doesn't race startup.
+    await page.waitForFunction(() => Boolean((window as any).__formulaCommandRegistry), undefined, { timeout: 10_000 });
+
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const app: any = (window as any).__formulaApp;
@@ -13,6 +17,7 @@ test.describe("Built-in commands", () => {
       const doc = app.getDocument();
       const sheetId = app.getCurrentSheetId();
       doc.setCellFormula(sheetId, { row: 0, col: 0 }, "=1+1");
+      app.refresh();
     });
 
     const before = await page.evaluate(async () => {
@@ -51,4 +56,3 @@ test.describe("Built-in commands", () => {
     expect(final).toBe("2");
   });
 });
-
