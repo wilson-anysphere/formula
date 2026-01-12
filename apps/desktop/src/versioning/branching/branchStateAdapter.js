@@ -16,6 +16,48 @@ const structuredCloneFn =
 const MASKED_CELL_VALUE = "###";
 
 /**
+ * Best-effort access to DocumentController sheet metadata.
+ *
+ * Task 201 adds authoritative sheet metadata (order + display names) to
+ * DocumentController. This adapter needs to work both before and after that
+ * change lands, so we feature-detect common access patterns.
+ *
+ * @param {any} doc
+ * @param {string} sheetId
+ * @returns {any}
+ */
+function getDocumentControllerSheetMeta(doc, sheetId) {
+  if (!doc || typeof doc !== "object") return null;
+
+  // Preferred API (post-Task 201).
+  if (typeof doc.getSheetMeta === "function") {
+    try {
+      return doc.getSheetMeta(sheetId);
+    } catch {
+      return null;
+    }
+  }
+
+  // Alternate method naming (defensive).
+  if (typeof doc.getSheetMetadata === "function") {
+    try {
+      return doc.getSheetMetadata(sheetId);
+    } catch {
+      return null;
+    }
+  }
+
+  // Fallback: direct map/object on the controller instance.
+  const byId = doc.sheetMetaById ?? doc.sheetMetadataById ?? doc.sheetMeta ?? null;
+  if (byId && typeof byId === "object") {
+    if (byId instanceof Map) return byId.get(sheetId) ?? null;
+    return byId[sheetId] ?? null;
+  }
+
+  return null;
+}
+
+/**
  * @template T
  * @param {T} value
  * @returns {T}
@@ -138,7 +180,9 @@ function parseRowColKey(key) {
  * @returns {DocumentState}
  */
 export function documentControllerToBranchState(doc) {
-  const sheetIds = doc.getSheetIds().slice().sort();
+  // Preserve the DocumentController's canonical sheet order (Task 201).
+  // Do not sort lexicographically, as that loses user-visible tab ordering.
+  const sheetIds = doc.getSheetIds().slice();
   /** @type {Record<string, any>} */
   const metaById = {};
   /** @type {Record<string, Record<string, BranchCell>>} */
@@ -172,7 +216,14 @@ export function documentControllerToBranchState(doc) {
     }
 
     cells[sheetId] = outSheet;
-    // DocumentController doesn't currently track display names separately from ids.
+    const sheetMeta = getDocumentControllerSheetMeta(doc, sheetId);
+    const name =
+      typeof sheetMeta?.name === "string" && sheetMeta.name.length > 0
+        ? sheetMeta.name
+        : typeof sheetMeta?.displayName === "string" && sheetMeta.displayName.length > 0
+          ? sheetMeta.displayName
+          : sheetId;
+
     const rawView = doc.getSheetView(sheetId);
     /** @type {Record<string, any>} */
     const view = cloneJsonish(rawView);
@@ -185,7 +236,10 @@ export function documentControllerToBranchState(doc) {
     //
     // Backwards compatibility: if these fields are absent, treat as no defaults.
     const defaultFormat =
-      branchFormatFromDocFormat(doc, rawView?.defaultFormat ?? rawView?.defaultStyleId ?? rawView?.sheetFormat ?? rawView?.sheetStyleId) ??
+      branchFormatFromDocFormat(
+        doc,
+        rawView?.defaultFormat ?? rawView?.defaultStyleId ?? rawView?.sheetFormat ?? rawView?.sheetStyleId,
+      ) ??
       // New DocumentController layered formatting stores these on the sheet model directly:
       // - `sheet.sheetStyleId` (style id)
       // - `sheet.sheetFormat` (style object, legacy)
@@ -221,7 +275,7 @@ export function documentControllerToBranchState(doc) {
       delete view.colFormats;
     }
 
-    metaById[sheetId] = { id: sheetId, name: sheetId, view };
+    metaById[sheetId] = { id: sheetId, name, view };
   }
 
   /** @type {DocumentState} */
@@ -251,8 +305,10 @@ export function applyBranchStateToDocumentController(doc, state) {
 
   const sheets = sheetIds.map((sheetId) => {
     const cellMap = normalized.cells[sheetId] ?? {};
-    const meta = normalized.sheets.metaById[sheetId] ?? { id: sheetId, name: sheetId, view: { frozenRows: 0, frozenCols: 0 } };
+    const meta =
+      normalized.sheets.metaById[sheetId] ?? { id: sheetId, name: sheetId, view: { frozenRows: 0, frozenCols: 0 } };
     const view = meta.view ?? { frozenRows: 0, frozenCols: 0 };
+    const name = typeof meta.name === "string" && meta.name.length > 0 ? meta.name : sheetId;
     /** @type {Array<{ row: number, col: number, value: any, formula: string | null, format: any }>} */
     const cells = [];
 
@@ -286,6 +342,11 @@ export function applyBranchStateToDocumentController(doc, state) {
     /** @type {Record<string, any>} */
     const outSheet = {
       id: sheetId,
+      name,
+      // Include both the legacy top-level fields (consumed by DocumentController.applyState
+      // today) and the nested `view` object (used by BranchService/Yjs schema) so we
+      // can round-trip per-sheet UI state and migrate snapshot consumers safely.
+      view: cloneJsonish(view),
       frozenRows: view.frozenRows ?? 0,
       frozenCols: view.frozenCols ?? 0,
       colWidths: view.colWidths,
