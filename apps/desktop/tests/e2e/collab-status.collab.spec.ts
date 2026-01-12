@@ -61,5 +61,18 @@ test.describe("collab status indicator (collab mode)", () => {
     await expect(page2.getByTestId("collab-status")).toHaveAttribute("data-collab-sync", "synced", { timeout: 30_000 });
     await expect(page.getByTestId("collab-status")).toHaveAttribute("data-collab-conn", "connected");
     await expect(page2.getByTestId("collab-status")).toHaveAttribute("data-collab-conn", "connected");
+
+    // Toggling network offline should transition to a disconnected/reconnecting state.
+    await page.context().setOffline(true);
+    await expect
+      .poll(async () => page.getByTestId("collab-status").getAttribute("data-collab-conn"))
+      .not.toBe("connected");
+    await expect
+      .poll(async () => page2.getByTestId("collab-status").getAttribute("data-collab-conn"))
+      .not.toBe("connected");
+
+    await page.context().setOffline(false);
+    await expect(page.getByTestId("collab-status")).toHaveAttribute("data-collab-sync", "synced", { timeout: 60_000 });
+    await expect(page2.getByTestId("collab-status")).toHaveAttribute("data-collab-sync", "synced", { timeout: 60_000 });
   });
 });
