@@ -110,7 +110,8 @@ caller_jobs_env="${FORMULA_CARGO_JOBS:-${FORMULA_CARGO_TEST_JOBS:-}}"
 jobs="${FORMULA_CARGO_JOBS:-${CARGO_BUILD_JOBS:-4}}"
 # Guardrails: reject/avoid dangerous values from generic env vars.
 #
-# - `cargo -j0` means "use the Cargo default" (typically nproc), which is unsafe on multi-agent hosts.
+# - Cargo rejects 0 jobs (e.g. `-j0` or `CARGO_BUILD_JOBS=0`) with "jobs may not be 0".
+#   Treat that as invalid/unset and fall back to a safe default.
 # - Extremely large `CARGO_BUILD_JOBS` values (often set globally) can cause rustc stampedes and
 #   `EAGAIN` thread/process spawn failures even under RLIMIT_AS.
 #
