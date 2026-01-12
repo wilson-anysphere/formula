@@ -158,7 +158,8 @@ export interface AiChatOrchestratorOptions {
    * Context builder used to produce schema-first + RAG workbook context per message.
    *
    * If omitted, the orchestrator will create a default desktop RAG service backed
-   * by a persistent sqlite vector store (stored in LocalStorage).
+   * by a persistent sqlite vector store (stored in LocalStorage) and
+   * deterministic hash embeddings (offline; no API keys / local model configuration).
    */
   contextManager?: ContextManager;
   ragService?: DesktopRagService;

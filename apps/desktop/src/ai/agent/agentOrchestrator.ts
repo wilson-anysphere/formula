@@ -121,6 +121,12 @@ export interface RunAgentTaskParams {
   model?: string;
 
   ragService?: DesktopRagService;
+  /**
+   * Options for the default desktop workbook RAG service (if `ragService` is not provided).
+   *
+   * Note: Desktop workbook RAG uses deterministic hash embeddings by design
+   * (offline; no API keys / local model configuration).
+   */
   ragOptions?: Omit<DesktopRagServiceOptions, "documentController" | "workbookId">;
   /**
    * Optional override for the model context window used to budget prompts.
