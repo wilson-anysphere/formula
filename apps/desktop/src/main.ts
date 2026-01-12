@@ -350,9 +350,9 @@ if (!gridRoot) {
   throw new Error("Missing #grid container");
 }
 
-const titlebarRoot = document.getElementById("titlebar");
+const titlebarRoot = document.getElementById("titlebar-root");
 if (!titlebarRoot) {
-  throw new Error("Missing #titlebar container");
+  throw new Error("Missing #titlebar-root container");
 }
 const titlebarRootEl = titlebarRoot;
 
@@ -507,8 +507,43 @@ const onRedo = () => {
   app.focus();
 };
 
+function basename(path: string): string {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/g, "");
+  const parts = normalized.split("/");
+  return parts[parts.length - 1] || path;
+}
+
+function computeTitlebarDocumentName(): string {
+  const isTauri = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+  if (!isTauri) return "Untitled";
+  if (!activeWorkbook?.path) return "Untitled";
+  return basename(activeWorkbook.path);
+}
+
 const buildTitlebarProps = () => ({
-  actions: [],
+  documentName: computeTitlebarDocumentName(),
+  actions: [
+    {
+      label: "Save",
+      ariaLabel: "Save document",
+      onClick: () => {
+        if (typeof (globalThis as any).__TAURI__?.core?.invoke !== "function") {
+          showToast("Save is only available in the desktop app.");
+          return;
+        }
+        void handleSave().catch((err) => {
+          console.error("Failed to save workbook:", err);
+          showToast(`Failed to save workbook: ${String(err)}`, "error");
+        });
+      },
+    },
+    {
+      label: "Share",
+      ariaLabel: "Share document",
+      variant: "primary" as const,
+      onClick: () => showToast("Share is not implemented yet."),
+    },
+  ],
   undoRedo: {
     ...app.getUndoRedoState(),
     onUndo,
@@ -518,14 +553,14 @@ const buildTitlebarProps = () => ({
 
 const titlebar = mountTitlebar(titlebarRootEl, buildTitlebarProps());
 
-const syncTitlebarUndoRedo = () => {
+const syncTitlebar = () => {
   titlebar.update(buildTitlebarProps());
 };
 
-const unsubscribeTitlebarHistory = app.getDocument().on("history", () => syncTitlebarUndoRedo());
+const unsubscribeTitlebarHistory = app.getDocument().on("history", () => syncTitlebar());
 const unsubscribeTitlebarEditState = app.onEditStateChange((isEditing) => {
   statusMode.textContent = isEditing ? "Edit" : "Ready";
-  syncTitlebarUndoRedo();
+  syncTitlebar();
 });
 window.addEventListener("unload", () => {
   unsubscribeTitlebarHistory();
@@ -4804,6 +4839,7 @@ async function openWorkbookFromPath(path: string): Promise<void> {
       // Ignore extension host errors; workbook open should still succeed.
     }
     activePanelWorkbookId = activeWorkbook.path ?? activeWorkbook.origin_path ?? path;
+    syncTitlebar();
     startPowerQueryService();
     rerenderLayout?.();
 
@@ -4933,6 +4969,7 @@ async function handleSaveAsPath(
   }
   activeWorkbook = { ...activeWorkbook, path };
   app.getDocument().markSaved();
+  syncTitlebar();
 
   await copyPowerQueryPersistence(previousPanelWorkbookId, path);
   activePanelWorkbookId = path;
@@ -4979,6 +5016,7 @@ async function handleNewWorkbook(): Promise<void> {
       // Ignore extension host errors; new workbook should still succeed.
     }
     activePanelWorkbookId = nextPanelWorkbookId;
+    syncTitlebar();
     startPowerQueryService();
     rerenderLayout?.();
 
