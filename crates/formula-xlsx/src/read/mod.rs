@@ -1230,6 +1230,19 @@ impl MetadataPart {
     }
 
     fn value_metadata_block_by_vm_index(&self, vm_idx: u32) -> Option<&ValueMetadataBlock> {
+        // Excel emits `c/@vm` as a 1-based index into `<valueMetadata><bk>` (with some producers
+        // observed to be off-by-one / 0-based). Prefer `vm-1` (1-based) and fall back to `vm`
+        // (0-based) when the preferred lookup fails.
+        vm_idx
+            .checked_sub(1)
+            .and_then(|idx| self.value_metadata_block_by_vm_index_candidate(idx))
+            .or_else(|| self.value_metadata_block_by_vm_index_candidate(vm_idx))
+    }
+
+    fn value_metadata_block_by_vm_index_candidate(
+        &self,
+        vm_idx: u32,
+    ) -> Option<&ValueMetadataBlock> {
         // Walk blocks cumulatively to support run-length encoding via `bk/@count`.
         let mut cursor: u32 = 0;
         for block in &self.value_metadata {

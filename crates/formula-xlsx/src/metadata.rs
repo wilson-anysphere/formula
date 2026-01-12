@@ -17,9 +17,12 @@
 //! - Inside the futureMetadata `<bk>`, an extension element (commonly `xlrd:rvb`) has an `i="N"`
 //!   attribute, where `N` is the rich value record index.
 //!
-//! Real-world files sometimes vary between 0-based and 1-based indices. The resolver uses a
-//! defensive strategy: it tries the raw index as 0-based first, and falls back to `raw - 1` if the
-//! initial candidate doesn't resolve.
+//! Real-world files sometimes vary between 0-based and 1-based indices.
+//!
+//! For `c/@vm` and `c/@cm`, Excel uses 1-based indices. Some producers have been observed to emit
+//! 0-based indices, or to be off-by-one. To be resilient when both interpretations are plausible,
+//! this module prefers the 1-based interpretation (`idx - 1`) for `vm/cm` and falls back to
+//! 0-based (`idx`) when the preferred lookup fails.
 
 use std::collections::BTreeMap;
 use std::io::Cursor;
@@ -72,17 +75,19 @@ impl MetadataPart {
     /// Lookup a cell metadata block by index.
     ///
     /// Excel's indexing has historically been ambiguous across parts. To be resilient we attempt
-    /// `idx` as 0-based first, then fall back to `idx-1` when the direct lookup fails.
+    /// `idx` as 1-based first (`idx-1`), then fall back to `idx` as 0-based when the preferred
+    /// lookup fails.
     pub fn cell_block_by_index(&self, idx: u32) -> Option<&MetadataBlock> {
-        self.block_by_index(&self.cell_metadata, idx)
+        self.block_by_index_one_based_preferred(&self.cell_metadata, idx)
     }
 
     /// Lookup a value metadata block by index.
     ///
     /// Excel's indexing has historically been ambiguous across parts. To be resilient we attempt
-    /// `idx` as 0-based first, then fall back to `idx-1` when the direct lookup fails.
+    /// `idx` as 1-based first (`idx-1`), then fall back to `idx` as 0-based when the preferred
+    /// lookup fails.
     pub fn value_block_by_index(&self, idx: u32) -> Option<&MetadataBlock> {
-        self.block_by_index(&self.value_metadata, idx)
+        self.block_by_index_one_based_preferred(&self.value_metadata, idx)
     }
 
     /// Lookup a future-metadata block by index (`<futureMetadata>` `<bk>`).
@@ -93,6 +98,16 @@ impl MetadataPart {
     fn block_by_index<'a, T>(&'a self, blocks: &'a [RepeatedBlock<T>], idx: u32) -> Option<&'a T> {
         self.block_by_index_candidate(blocks, idx)
             .or_else(|| idx.checked_sub(1).and_then(|i| self.block_by_index_candidate(blocks, i)))
+    }
+
+    fn block_by_index_one_based_preferred<'a, T>(
+        &'a self,
+        blocks: &'a [RepeatedBlock<T>],
+        idx: u32,
+    ) -> Option<&'a T> {
+        idx.checked_sub(1)
+            .and_then(|i| self.block_by_index_candidate(blocks, i))
+            .or_else(|| self.block_by_index_candidate(blocks, idx))
     }
 
     fn block_by_index_candidate<'a, T>(
@@ -710,7 +725,7 @@ mod tests {
     }
 
     #[test]
-    fn index_helpers_try_zero_based_then_one_based_fallback() {
+    fn index_helpers_prefer_one_based_for_cm_vm_and_fallback_to_zero_based() {
         let xml = r#"<metadata>
   <cellMetadata>
     <bk><rc t="0" v="1"/></bk>
@@ -723,7 +738,7 @@ mod tests {
 
         let doc = parse_metadata_xml(xml.as_bytes()).expect("parse metadata.xml");
 
-        // 0-based direct lookup
+        // Still resolves `0` via 0-based lookup (the preferred 1-based candidate is out of range).
         assert_eq!(
             doc.cell_block_by_index(0)
                 .unwrap()
@@ -733,17 +748,17 @@ mod tests {
             Some(MetadataRecord { t: 0, v: 1 })
         );
 
-        // Still 0-based when it exists.
+        // Prefer 1-based (`idx-1`) for cm/vm: `1` resolves to the first block.
         assert_eq!(
             doc.cell_block_by_index(1)
                 .unwrap()
                 .records
                 .first()
                 .copied(),
-            Some(MetadataRecord { t: 1, v: 2 })
+            Some(MetadataRecord { t: 0, v: 1 })
         );
 
-        // Fallback `idx-1` when `idx` is out of range.
+        // And `2` resolves to the second block.
         assert_eq!(
             doc.cell_block_by_index(2)
                 .unwrap()
@@ -753,8 +768,10 @@ mod tests {
             Some(MetadataRecord { t: 1, v: 2 })
         );
 
+        assert!(doc.cell_block_by_index(3).is_none());
+
         assert!(doc.value_block_by_index(0).is_some());
-        assert!(doc.value_block_by_index(1).is_some()); // fallback to idx-1
+        assert!(doc.value_block_by_index(1).is_some()); // 1-based (`idx-1`)
         assert!(doc.value_block_by_index(2).is_none());
     }
 
