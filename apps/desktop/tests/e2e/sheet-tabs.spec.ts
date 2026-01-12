@@ -274,4 +274,24 @@ test.describe("sheet tabs", () => {
 
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
   });
+
+  test("switching sheets restores grid focus for immediate keyboard editing", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Start with focus on the grid.
+    await page.click("#grid", { position: { x: 5, y: 5 } });
+
+    // Lazily create Sheet2 so there's another tab to switch to.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
+    });
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    // Switching sheets should behave like navigation and leave the grid ready
+    // for keyboard-driven workflows (Excel-like).
+    await page.getByTestId("sheet-tab-Sheet2").click();
+    await page.keyboard.press("F2");
+    await expect(page.locator("textarea.cell-editor")).toBeVisible();
+  });
 });

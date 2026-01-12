@@ -1344,6 +1344,28 @@ function listDocumentSheetIds(): string[] {
   const sheetIds = app.getDocument().getSheetIds();
   return sheetIds.length > 0 ? sheetIds : ["Sheet1"];
 }
+function shouldRestoreFocusAfterSheetNavigation(): boolean {
+  // If the user is currently renaming a sheet tab inline, do not steal focus away
+  // from the input (Excel-like).
+  const active = document.activeElement;
+  if (active instanceof HTMLInputElement && sheetTabsRootEl.contains(active)) {
+    return false;
+  }
+
+  // If a context menu is open, let it manage focus and restore it when the menu closes.
+  // (Some menus intentionally trap focus while open for accessibility.)
+  const contextMenu = document.querySelector<HTMLElement>('[data-testid="context-menu"]');
+  if (contextMenu && contextMenu.style.display !== "none") {
+    return false;
+  }
+
+  return true;
+}
+
+function restoreFocusAfterSheetNavigation(): void {
+  if (!shouldRestoreFocusAfterSheetNavigation()) return;
+  app.focusAfterSheetNavigation();
+}
 
 function installSheetStoreDocSync(): void {
   // In collab mode, the sheet list is driven by the Yjs workbook schema (`session.sheets`).
@@ -1523,7 +1545,7 @@ async function handleAddSheet(): Promise<void> {
       doc.getCell(id, { row: 0, col: 0 });
       doc.markDirty();
       app.activateSheet(id);
-      app.focus();
+      restoreFocusAfterSheetNavigation();
       return;
     }
 
@@ -1535,7 +1557,7 @@ async function handleAddSheet(): Promise<void> {
     doc.getCell(newSheetId, { row: 0, col: 0 });
     doc.markDirty();
     app.activateSheet(newSheetId);
-    app.focus();
+    restoreFocusAfterSheetNavigation();
   } catch (err) {
     showToast(`Failed to add sheet: ${String((err as any)?.message ?? err)}`, "error");
   } finally {
@@ -1554,7 +1576,7 @@ function renderSheetTabs(): void {
       activeSheetId: app.getCurrentSheetId(),
       onActivateSheet: (sheetId: string) => {
         app.activateSheet(sheetId);
-        app.focus();
+        restoreFocusAfterSheetNavigation();
       },
       onAddSheet: handleAddSheet,
       onError: (message: string) => showToast(message, "error"),
@@ -2553,7 +2575,7 @@ if (
         throw new Error(`Unknown sheet: ${String(name)}`);
       }
       app.activateSheet(sheetId);
-      app.focus();
+      restoreFocusAfterSheetNavigation();
       return { id: sheetId, name: workbookSheetStore.getName(sheetId) ?? sheetId };
     },
     async createSheet(name: string) {
@@ -2586,7 +2608,7 @@ if (
         // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
         doc.getCell(id, { row: 0, col: 0 });
         app.activateSheet(id);
-        app.focus();
+        restoreFocusAfterSheetNavigation();
 
         // Note: `??` cannot be mixed with `||` without parentheses (syntax error in JS).
         return { id, name: workbookSheetStore.getName(id) ?? (resolvedName || sheetName || id) };
@@ -2599,7 +2621,7 @@ if (
       workbookSheetStore.addAfter(activeId, { id: newSheetId, name: sheetName });
       doc.getCell(newSheetId, { row: 0, col: 0 });
       app.activateSheet(newSheetId);
-      app.focus();
+      restoreFocusAfterSheetNavigation();
       return { id: newSheetId, name: workbookSheetStore.getName(newSheetId) ?? sheetName };
     },
     async renameSheet(_oldName: string, _newName: string) {
@@ -5985,7 +6007,7 @@ function renderSheetSwitcher(sheets: { id: string; name: string }[], activeId: s
 
 sheetSwitcherEl.addEventListener("change", () => {
   app.activateSheet(sheetSwitcherEl.value);
-  app.focus();
+  restoreFocusAfterSheetNavigation();
 });
 
 type TauriListen = (event: string, handler: (event: any) => void) => Promise<() => void>;

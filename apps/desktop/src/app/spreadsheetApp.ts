@@ -1710,6 +1710,33 @@ export class SpreadsheetApp {
     this.root.focus();
   }
 
+  /**
+   * Focus the formula bar input, if present.
+   *
+   * This is intentionally public so UI chrome (e.g. sheet tabs) can preserve
+   * "formula-bar-driven navigation" workflows while the user is selecting ranges
+   * across sheets.
+   */
+  focusFormulaBar(): void {
+    this.formulaBar?.focus();
+  }
+
+  /**
+   * After a sheet activation that was triggered by navigation UI (tabs, sheet switcher,
+   * overflow menu, Ctrl+PgUp/PgDn, etc.), restore focus to the appropriate editing surface.
+   *
+   * - Default: focus the grid so the user can immediately type or use shortcuts.
+   * - While actively editing a formula in the formula bar (range selection mode): keep the
+   *   formula bar focused so sheet switching doesn't interrupt formula editing.
+   */
+  focusAfterSheetNavigation(): void {
+    if (this.formulaBar?.isFormulaEditing()) {
+      this.formulaBar.focus();
+      return;
+    }
+    this.focus();
+  }
+
   isCellEditorOpen(): boolean {
     return this.editor.isOpen();
   }
@@ -1800,7 +1827,6 @@ export class SpreadsheetApp {
     // UX flows; avoid double-refreshing by calling the underlying mutation directly here.
     this.clearSelectionContentsInternal();
     this.refresh();
-    this.focus();
   }
 
   async whenIdle(): Promise<void> {
@@ -6281,6 +6307,21 @@ export class SpreadsheetApp {
       if (this.sharedGrid) this.syncSharedGridSelectionFromState();
       this.renderSelection();
       this.updateStatus();
+      return;
+    }
+
+    // Sheet navigation (Excel-style): Ctrl+PgUp / Ctrl+PgDn.
+    if (primary && !e.altKey && (e.key === "PageUp" || e.key === "PageDown")) {
+      e.preventDefault();
+      const sheetIds = this.document.getSheetIds();
+      const sheets = sheetIds.length > 0 ? sheetIds : ["Sheet1"];
+      const idx = sheets.indexOf(this.sheetId);
+      if (idx === -1 || sheets.length === 0) return;
+      const delta = e.key === "PageUp" ? -1 : 1;
+      const next = sheets[(idx + delta + sheets.length) % sheets.length];
+      if (!next || next === this.sheetId) return;
+      this.activateSheet(next);
+      this.focusAfterSheetNavigation();
       return;
     }
 
