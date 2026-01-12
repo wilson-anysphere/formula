@@ -354,11 +354,14 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
 
     // ---- Expected normalized transcript ----
     //
-    // `legacy_contents_hash_v3 = SHA-256(ProjectNormalizedData)`
+    // This test targets `contents_hash_v3`, which computes the MS-OVBA v3 `ContentsHashV3` value:
+    //
+    // `ContentsHashV3 = SHA-256(ProjectNormalizedData)`
     // `ProjectNormalizedData = (filtered PROJECT stream properties) || V3ContentNormalizedData || FormsNormalizedData`
     //
-    // Note: MS-OVBA/MS-OSHARED describe an MD5-based digest used for VBA signature binding in some
-    // contexts; this test targets the current SHA-256-based helper.
+    // Note: signature binding verification may use other digest algorithms (inferred from the
+    // signed digest bytes) for robustness; `contents_hash_v3` always computes the spec-defined
+    // SHA-256 digest.
     //
     // V3ContentNormalizedData includes (for procedural modules) `MODULETYPE.Id || MODULETYPE.Reserved`
     // followed by LF-normalized module source (Attribute filtering per MS-OVBA §2.4.2.5), and the
