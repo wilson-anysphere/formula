@@ -132,6 +132,22 @@ export type ToolExecutionResult = { [K in ToolName]: ToolExecutionResultBase<K> 
 
 export interface ToolExecutorOptions {
   default_sheet?: string;
+  /**
+   * Optional sheet name resolver.
+   *
+   * Some host applications keep a stable internal sheet id even after a user renames the
+   * sheet (id != display name). In those cases, tools may receive A1 references that use
+   * the *display name* (e.g. "Budget!A1") while internal systems (SpreadsheetApi/DLP)
+   * expect the stable id (e.g. "Sheet2").
+   *
+   * When provided, ToolExecutor will:
+   * - canonicalize parsed sheet tokens to stable ids before calling SpreadsheetApi and evaluating DLP
+   * - format tool result A1 references using the display name for readability
+   */
+  sheet_name_resolver?: {
+    getSheetIdByName(name: string): string | null;
+    getSheetNameById(id: string): string | null;
+  } | null;
   allow_external_data?: boolean;
   allowed_external_hosts?: string[];
   max_external_bytes?: number;
@@ -223,8 +239,21 @@ export class ToolExecutor {
 
   constructor(spreadsheet: SpreadsheetApi, options: ToolExecutorOptions = {}) {
     this.spreadsheet = spreadsheet;
+    const sheetNameResolver = options.sheet_name_resolver ?? null;
+    const canonicalizeSheetId = (sheet: string) => {
+      const raw = String(sheet ?? "").trim();
+      if (!raw) return raw;
+      if (!sheetNameResolver) return raw;
+      return sheetNameResolver.getSheetIdByName(raw) ?? raw;
+    };
+    const canonicalDefaultSheet = canonicalizeSheetId(options.default_sheet ?? "Sheet1");
+    const canonicalDlpSheetId =
+      options.dlp && typeof options.dlp.sheet_id === "string" && options.dlp.sheet_id.trim()
+        ? canonicalizeSheetId(options.dlp.sheet_id)
+        : undefined;
     this.options = {
-      default_sheet: options.default_sheet ?? "Sheet1",
+      default_sheet: canonicalDefaultSheet || "Sheet1",
+      sheet_name_resolver: sheetNameResolver,
       allow_external_data: options.allow_external_data ?? false,
       allowed_external_hosts: (options.allowed_external_hosts ?? [])
         .map((host) => String(host).trim().toLowerCase())
@@ -234,8 +263,48 @@ export class ToolExecutor {
       max_read_range_chars: options.max_read_range_chars ?? 200_000,
       max_filter_range_matching_rows: options.max_filter_range_matching_rows ?? 1_000,
       max_detect_anomalies: options.max_detect_anomalies ?? 1_000,
-      dlp: options.dlp
+      dlp:
+        options.dlp && canonicalDlpSheetId
+          ? {
+              ...options.dlp,
+              sheet_id: canonicalDlpSheetId
+            }
+          : options.dlp
     };
+  }
+
+  private resolveSheetId(sheetNameOrId: string): string {
+    const trimmed = String(sheetNameOrId ?? "").trim();
+    if (!trimmed) return trimmed;
+    const resolver = this.options.sheet_name_resolver;
+    if (!resolver) return trimmed;
+    return resolver.getSheetIdByName(trimmed) ?? trimmed;
+  }
+
+  private displaySheetName(sheetId: string): string {
+    const resolver = this.options.sheet_name_resolver;
+    if (!resolver) return sheetId;
+    return resolver.getSheetNameById(sheetId) ?? sheetId;
+  }
+
+  private parseRange(ref: unknown, defaultSheet: string): ReturnType<typeof parseA1Range> {
+    const parsed = parseA1Range(ref as any, defaultSheet);
+    const sheet = this.resolveSheetId(parsed.sheet);
+    return sheet === parsed.sheet ? parsed : { ...parsed, sheet };
+  }
+
+  private parseCell(ref: unknown, defaultSheet: string): ReturnType<typeof parseA1Cell> {
+    const parsed = parseA1Cell(ref as any, defaultSheet);
+    const sheet = this.resolveSheetId(parsed.sheet);
+    return sheet === parsed.sheet ? parsed : { ...parsed, sheet };
+  }
+
+  private formatRangeForUser(range: ReturnType<typeof parseA1Range>): string {
+    return formatA1Range({ ...range, sheet: this.displaySheetName(range.sheet) });
+  }
+
+  private formatCellForUser(cell: ReturnType<typeof parseA1Cell>): string {
+    return formatA1Cell({ ...cell, sheet: this.displaySheetName(cell.sheet) });
   }
 
   async execute(call: UnknownToolCall): Promise<ToolExecutionResult> {
@@ -302,12 +371,12 @@ export class ToolExecutor {
   }
 
   private readRange(params: any): ToolResultDataByName["read_range"] {
-    const range = parseA1Range(params.range, this.options.default_sheet);
+    const range = this.parseRange(params.range, this.options.default_sheet);
     const requestedCells = rangeCellCount(range);
     if (requestedCells > this.options.max_read_range_cells) {
       throw toolError(
         "permission_denied",
-        `read_range requested ${requestedCells} cells (${formatA1Range(range)}), which exceeds max_read_range_cells (${this.options.max_read_range_cells}). Request a smaller range or increase max_read_range_cells.`
+        `read_range requested ${requestedCells} cells (${this.formatRangeForUser(range)}), which exceeds max_read_range_cells (${this.options.max_read_range_cells}). Request a smaller range or increase max_read_range_cells.`
       );
     }
 
@@ -321,7 +390,7 @@ export class ToolExecutor {
       });
       throw toolError(
         "permission_denied",
-        `DLP policy blocks reading ${formatA1Range(range)} via read_range (ai.cloudProcessing).`
+        `DLP policy blocks reading ${this.formatRangeForUser(range)} via read_range (ai.cloudProcessing).`
       );
     }
 
@@ -334,8 +403,9 @@ export class ToolExecutor {
       if (dlp) {
         this.logToolDlpDecision({ tool: "read_range", range, dlp, redactedCellCount: 0 });
       }
-      enforceReadRangeCharLimit({ range, values, formulas, maxChars: this.options.max_read_range_chars });
-      return { range: formatA1Range(range), values, ...(formulas ? { formulas } : {}) };
+      const rangeForUser = { ...range, sheet: this.displaySheetName(range.sheet) };
+      enforceReadRangeCharLimit({ range: rangeForUser, values, formulas, maxChars: this.options.max_read_range_chars });
+      return { range: this.formatRangeForUser(range), values, ...(formulas ? { formulas } : {}) };
     }
 
     const cellDecisionCache = new Map<string, boolean>();
@@ -373,12 +443,13 @@ export class ToolExecutor {
       : undefined;
 
     this.logToolDlpDecision({ tool: "read_range", range, dlp, redactedCellCount });
-    enforceReadRangeCharLimit({ range, values, formulas, maxChars: this.options.max_read_range_chars });
-    return { range: formatA1Range(range), values, ...(formulas ? { formulas } : {}) };
+    const rangeForUser = { ...range, sheet: this.displaySheetName(range.sheet) };
+    enforceReadRangeCharLimit({ range: rangeForUser, values, formulas, maxChars: this.options.max_read_range_chars });
+    return { range: this.formatRangeForUser(range), values, ...(formulas ? { formulas } : {}) };
   }
 
   private writeCell(params: any): ToolResultDataByName["write_cell"] {
-    const address = parseA1Cell(params.cell, this.options.default_sheet);
+    const address = this.parseCell(params.cell, this.options.default_sheet);
     const range = { sheet: address.sheet, startRow: address.row, endRow: address.row, startCol: address.col, endCol: address.col };
     const dlp = this.evaluateDlpForRange("write_cell", range);
     const shouldMaskChanged = Boolean(dlp && dlp.decision.decision !== DLP_DECISION.ALLOW);
@@ -402,11 +473,11 @@ export class ToolExecutor {
     });
     const changed = shouldMaskChanged ? true : !cellsEqual(before!, this.spreadsheet.getCell(address));
     if (dlp) this.logToolDlpDecision({ tool: "write_cell", range, dlp, redactedCellCount: shouldMaskChanged ? 1 : 0 });
-    return { cell: formatA1Cell(address), changed };
+    return { cell: this.formatCellForUser(address), changed };
   }
 
   private setRange(params: any): ToolResultDataByName["set_range"] {
-    const range = parseA1Range(params.range, this.options.default_sheet);
+    const range = this.parseRange(params.range, this.options.default_sheet);
     const interpretAs: "auto" | "value" | "formula" = params.interpret_as ?? "auto";
 
     const rowCount = Array.isArray(params.values) ? params.values.length : 0;
@@ -452,7 +523,7 @@ export class ToolExecutor {
     this.refreshPivotsForRange(targetRange);
     const sizeRows = targetRange.endRow - targetRange.startRow + 1;
     const sizeCols = targetRange.endCol - targetRange.startCol + 1;
-    return { range: formatA1Range(targetRange), updated_cells: sizeRows * sizeCols };
+    return { range: this.formatRangeForUser(targetRange), updated_cells: sizeRows * sizeCols };
   }
 
   private applyFormulaColumn(params: any): ToolResultDataByName["apply_formula_column"] {
@@ -474,7 +545,7 @@ export class ToolExecutor {
       this.logToolDlpDecision({ tool: "apply_formula_column", range, dlp, redactedCellCount: 0 });
       throw toolError(
         "permission_denied",
-        `DLP policy blocks applying formulas to ${formatA1Range(range)} via apply_formula_column (ai.cloudProcessing).`
+        `DLP policy blocks applying formulas to ${this.formatRangeForUser(range)} via apply_formula_column (ai.cloudProcessing).`
       );
     }
 
@@ -495,12 +566,12 @@ export class ToolExecutor {
     });
 
     if (dlp) this.logToolDlpDecision({ tool: "apply_formula_column", range, dlp, redactedCellCount: 0 });
-    return { sheet, column, start_row: startRow, end_row: endRow, updated_cells: updated };
+    return { sheet: this.displaySheetName(sheet), column, start_row: startRow, end_row: endRow, updated_cells: updated };
   }
 
   private createPivotTable(params: any): ToolResultDataByName["create_pivot_table"] {
-    const source = parseA1Range(params.source_range, this.options.default_sheet);
-    const destination = parseA1Cell(params.destination, this.options.default_sheet);
+    const source = this.parseRange(params.source_range, this.options.default_sheet);
+    const destination = this.parseCell(params.destination, this.options.default_sheet);
 
     const sourceCells = this.spreadsheet.readRange(source);
     const dlp = this.evaluateDlpForRange("create_pivot_table", source);
@@ -508,7 +579,7 @@ export class ToolExecutor {
       this.logToolDlpDecision({ tool: "create_pivot_table", range: source, dlp, redactedCellCount: 0 });
       throw toolError(
         "permission_denied",
-        `DLP policy blocks creating a pivot table from ${formatA1Range(source)} (ai.cloudProcessing).`
+        `DLP policy blocks creating a pivot table from ${this.formatRangeForUser(source)} (ai.cloudProcessing).`
       );
     }
 
@@ -568,8 +639,8 @@ export class ToolExecutor {
     if (dlp) this.logToolDlpDecision({ tool: "create_pivot_table", range: source, dlp, redactedCellCount });
     return {
       status: "ok",
-      source_range: formatA1Range(source),
-      destination_range: formatA1Range(outRange),
+      source_range: this.formatRangeForUser(source),
+      destination_range: this.formatRangeForUser(outRange),
       written_cells: rowCount * colCount,
       shape: { rows: rowCount, cols: colCount }
     };
@@ -581,13 +652,17 @@ export class ToolExecutor {
     }
 
     const chartType = params.chart_type as ChartType;
-    const dataRangeParsed = parseA1Range(params.data_range, this.options.default_sheet);
-    const dataRange = formatA1Range(dataRangeParsed);
+    const dataRangeParsed = this.parseRange(params.data_range, this.options.default_sheet);
+    const dataRangeForHost = formatA1Range(dataRangeParsed);
+    const dataRangeForUser = this.formatRangeForUser(dataRangeParsed);
 
-    let position: string | undefined;
+    let positionForHost: string | undefined;
+    let positionForUser: string | undefined;
     if (params.position != null && String(params.position).trim() !== "") {
       try {
-        position = formatA1Range(parseA1Range(String(params.position), dataRangeParsed.sheet));
+        const positionParsed = this.parseRange(String(params.position), dataRangeParsed.sheet);
+        positionForHost = formatA1Range(positionParsed);
+        positionForUser = this.formatRangeForUser(positionParsed);
       } catch (error) {
         throw toolError(
           "validation_error",
@@ -601,9 +676,9 @@ export class ToolExecutor {
 
     const spec: CreateChartSpec = {
       chart_type: chartType,
-      data_range: dataRange,
+      data_range: dataRangeForHost,
       ...(title ? { title } : {}),
-      ...(position ? { position } : {})
+      ...(positionForHost ? { position: positionForHost } : {})
     };
 
     const result = this.spreadsheet.createChart(spec) as CreateChartResult;
@@ -615,20 +690,20 @@ export class ToolExecutor {
       status: "ok",
       chart_id: result.chart_id,
       chart_type: chartType,
-      data_range: dataRange,
+      data_range: dataRangeForUser,
       ...(title ? { title } : {}),
-      ...(position ? { position } : {})
+      ...(positionForUser ? { position: positionForUser } : {})
     };
   }
 
   private sortRange(params: any): ToolResultDataByName["sort_range"] {
-    const range = parseA1Range(params.range, this.options.default_sheet);
+    const range = this.parseRange(params.range, this.options.default_sheet);
     const dlp = this.evaluateDlpForRange("sort_range", range);
     if (dlp && dlp.decision.decision !== DLP_DECISION.ALLOW) {
       this.logToolDlpDecision({ tool: "sort_range", range, dlp, redactedCellCount: 0 });
       throw toolError(
         "permission_denied",
-        `DLP policy blocks sorting ${formatA1Range(range)} via sort_range (ai.cloudProcessing).`
+        `DLP policy blocks sorting ${this.formatRangeForUser(range)} via sort_range (ai.cloudProcessing).`
       );
     }
     const hasHeader = Boolean(params.has_header);
@@ -662,17 +737,17 @@ export class ToolExecutor {
     this.refreshPivotsForRange(range);
 
     if (dlp) this.logToolDlpDecision({ tool: "sort_range", range, dlp, redactedCellCount: 0 });
-    return { range: formatA1Range(range), sorted_rows: body.length };
+    return { range: this.formatRangeForUser(range), sorted_rows: body.length };
   }
 
   private filterRange(params: any): ToolResultDataByName["filter_range"] {
-    const range = parseA1Range(params.range, this.options.default_sheet);
+    const range = this.parseRange(params.range, this.options.default_sheet);
     const dlp = this.evaluateDlpForRange("filter_range", range);
     if (dlp && dlp.decision.decision === DLP_DECISION.BLOCK) {
       this.logToolDlpDecision({ tool: "filter_range", range, dlp, redactedCellCount: 0 });
       throw toolError(
         "permission_denied",
-        `DLP policy blocks filtering ${formatA1Range(range)} via filter_range (ai.cloudProcessing).`
+        `DLP policy blocks filtering ${this.formatRangeForUser(range)} via filter_range (ai.cloudProcessing).`
       );
     }
     const hasHeader = Boolean(params.has_header);
@@ -714,18 +789,23 @@ export class ToolExecutor {
 
     if (dlp) this.logToolDlpDecision({ tool: "filter_range", range, dlp, redactedCellCount: 0 });
     const truncated = matchCount > matchingRows.length;
-    return { range: formatA1Range(range), matching_rows: matchingRows, count: matchCount, ...(truncated ? { truncated } : {}) };
+    return {
+      range: this.formatRangeForUser(range),
+      matching_rows: matchingRows,
+      count: matchCount,
+      ...(truncated ? { truncated } : {})
+    };
   }
 
   private applyFormatting(params: any): ToolResultDataByName["apply_formatting"] {
-    const range = parseA1Range(params.range, this.options.default_sheet);
+    const range = this.parseRange(params.range, this.options.default_sheet);
     const formatted = this.spreadsheet.applyFormatting(range, params.format);
-    return { range: formatA1Range(range), formatted_cells: formatted };
+    return { range: this.formatRangeForUser(range), formatted_cells: formatted };
   }
 
   private detectAnomalies(params: any): ToolResultDataByName["detect_anomalies"] {
-    const range = parseA1Range(params.range, this.options.default_sheet);
-    const formattedRange = formatA1Range(range);
+    const range = this.parseRange(params.range, this.options.default_sheet);
+    const formattedRange = this.formatRangeForUser(range);
     const method = (params.method ?? "zscore") as "zscore" | "iqr" | "isolation_forest";
     const dlp = this.evaluateDlpForRange("detect_anomalies", range);
     if (dlp && dlp.decision.decision === DLP_DECISION.BLOCK) {
@@ -763,7 +843,7 @@ export class ToolExecutor {
         const numeric = toNumber(cell);
         if (numeric === null) continue;
         entries.push({
-          cell: formatA1Cell({ sheet: range.sheet, row: range.startRow + r, col: range.startCol + c }),
+          cell: this.formatCellForUser({ sheet: range.sheet, row: range.startRow + r, col: range.startCol + c }),
           value: numeric
         });
       }
@@ -878,13 +958,13 @@ export class ToolExecutor {
   }
 
   private computeStatistics(params: any): ToolResultDataByName["compute_statistics"] {
-    const range = parseA1Range(params.range, this.options.default_sheet);
+    const range = this.parseRange(params.range, this.options.default_sheet);
     const dlp = this.evaluateDlpForRange("compute_statistics", range);
     if (dlp && dlp.decision.decision === DLP_DECISION.BLOCK) {
       this.logToolDlpDecision({ tool: "compute_statistics", range, dlp, redactedCellCount: 0 });
       throw toolError(
         "permission_denied",
-        `DLP policy blocks analyzing ${formatA1Range(range)} via compute_statistics (ai.cloudProcessing).`
+        `DLP policy blocks analyzing ${this.formatRangeForUser(range)} via compute_statistics (ai.cloudProcessing).`
       );
     }
     const measures: string[] = params.measures ?? [];
@@ -990,7 +1070,7 @@ export class ToolExecutor {
     }
 
     if (dlp) this.logToolDlpDecision({ tool: "compute_statistics", range, dlp, redactedCellCount });
-    return { range: formatA1Range(range), statistics: stats };
+    return { range: this.formatRangeForUser(range), statistics: stats };
   }
 
   private evaluateDlpForRange(tool: ToolName, range: ReturnType<typeof parseA1Range>): null | {
@@ -1317,7 +1397,7 @@ export class ToolExecutor {
       throw toolError("runtime_error", `External fetch failed with HTTP ${statusCode}`);
     }
 
-    const destination = parseA1Cell(params.destination, this.options.default_sheet);
+    const destination = this.parseCell(params.destination, this.options.default_sheet);
     const bodyBytes = await readResponseBytes(response, this.options.max_external_bytes);
     const fetchedAtMs = Date.now();
     const contentLengthBytes = bodyBytes.byteLength;
@@ -1334,7 +1414,7 @@ export class ToolExecutor {
       });
       return {
         url: safeUrlForProvenance(currentUrl),
-        destination: formatA1Cell(destination),
+        destination: this.formatCellForUser(destination),
         written_cells: 1,
         shape: { rows: 1, cols: 1 },
         fetched_at_ms: fetchedAtMs,
@@ -1360,7 +1440,7 @@ export class ToolExecutor {
 
     return {
       url: safeUrlForProvenance(currentUrl),
-      destination: formatA1Cell(destination),
+      destination: this.formatCellForUser(destination),
       written_cells: table.length * (table[0]?.length ?? 0),
       shape: { rows: table.length, cols: table[0]?.length ?? 0 },
       fetched_at_ms: fetchedAtMs,

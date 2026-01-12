@@ -160,7 +160,9 @@ export class InlineEditController {
         this.options.reserveForOutputTokens ?? getDefaultReserveForOutputTokens("inline_edit", contextWindowTokens);
       const keepLastMessages = this.options.keepLastMessages ?? 20;
 
-      const baseApi = new DocumentControllerSpreadsheetApi(this.options.document);
+      const baseApi = new DocumentControllerSpreadsheetApi(this.options.document, {
+        sheetNameResolver: this.options.sheetNameResolver ?? null
+      });
       const api = createAbortableSpreadsheetApi(baseApi, signal);
 
       const selectionRef = `${params.sheetId}!${rangeToA1(params.range)}`;
@@ -215,6 +217,7 @@ export class InlineEditController {
       const toolPolicy = getDesktopToolPolicy({ mode: "inline_edit", prompt: params.prompt });
       const toolExecutor = new SpreadsheetLLMToolExecutor(api, {
         default_sheet: params.sheetId,
+        sheet_name_resolver: this.options.sheetNameResolver ?? null,
         require_approval_for_mutations: true,
         toolPolicy,
         dlp
@@ -283,7 +286,7 @@ export class InlineEditController {
             const preview = await this.previewEngine.generatePreview(
               [{ name: call.name, parameters: call.arguments } as any],
               api,
-              { default_sheet: params.sheetId }
+              { default_sheet: params.sheetId, sheet_name_resolver: this.options.sheetNameResolver ?? null }
             );
             throwIfAborted(signal);
             const approved = await this.overlay.requestApproval(preview);

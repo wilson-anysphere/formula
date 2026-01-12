@@ -79,14 +79,16 @@ export type AiChatAttachment =
 function selectionFromAttachments(
   attachments: AiChatAttachment[],
   defaultSheetId: string,
+  sheetNameResolver?: SheetNameResolver | null,
 ): { sheetId: string; range: Range } | undefined {
   const rangeAttachment = attachments.find((a) => a.type === "range" && typeof a.reference === "string");
   if (!rangeAttachment) return undefined;
 
   try {
     const parsed = parseA1Range(rangeAttachment.reference, defaultSheetId);
+    const sheetId = sheetNameResolver?.getSheetIdByName(parsed.sheet) ?? parsed.sheet;
     return {
-      sheetId: parsed.sheet,
+      sheetId,
       range: {
         startRow: parsed.startRow - 1,
         endRow: parsed.endRow - 1,
@@ -397,7 +399,8 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
 
     const activeSheetId = options.getActiveSheetId?.() ?? "Sheet1";
     const attachments = params.attachments ?? [];
-    const selectedRange = selectionFromAttachments(attachments, activeSheetId) ?? options.getSelectedRange?.() ?? undefined;
+    const selectedRange =
+      selectionFromAttachments(attachments, activeSheetId, options.sheetNameResolver) ?? options.getSelectedRange?.() ?? undefined;
 
     const dlp = maybeGetAiCloudDlpOptions({ documentId: options.workbookId, sheetId: activeSheetId }) ?? undefined;
 
@@ -450,6 +453,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
       ...(options.toolExecutorOptions ?? {}),
       toolPolicy,
       default_sheet: activeSheetId,
+      sheet_name_resolver: options.toolExecutorOptions?.sheet_name_resolver ?? options.sheetNameResolver ?? null,
       require_approval_for_mutations: true,
       dlp
     });
@@ -469,7 +473,10 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     const requireApproval = createPreviewApprovalHandler({
       spreadsheet,
       preview_options: options.previewOptions,
-      executor_options: { default_sheet: activeSheetId },
+      executor_options: {
+        default_sheet: activeSheetId,
+        sheet_name_resolver: options.toolExecutorOptions?.sheet_name_resolver ?? options.sheetNameResolver ?? null
+      },
       on_approval_required: async (request: PreviewApprovalRequest) => {
         return (
           options.onApprovalRequired?.({

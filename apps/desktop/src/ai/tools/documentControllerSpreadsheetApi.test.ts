@@ -711,4 +711,59 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(result.data?.values).toEqual([["ok", "[REDACTED]", 123]]);
     expect(result.data?.formulas).toEqual([[null, "[REDACTED]", null]]);
   });
+
+  it("read_range DLP redaction still applies when the tool call uses a display sheet name", async () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet2", "A1", "ok");
+    controller.setCellValue("Sheet2", "B1", "secret");
+    controller.setCellValue("Sheet2", "C1", 123);
+
+    const sheetNames = new Map<string, string>([["Sheet2", "Budget"]]);
+    const sheetNameResolver = createSheetNameResolverFromIdToNameMap(sheetNames);
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    const executor = new ToolExecutor(api, {
+      default_sheet: "Sheet2",
+      sheet_name_resolver: sheetNameResolver,
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true
+            }
+          }
+        },
+        classification_records: [
+          {
+            selector: {
+              scope: CLASSIFICATION_SCOPE.CELL,
+              documentId: "doc-1",
+              sheetId: "Sheet2",
+              row: 0,
+              col: 1
+            },
+            classification: { level: "Restricted", labels: [] }
+          }
+        ]
+      }
+    });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Budget!A1:C1", include_formulas: true }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    expect(result.data?.range).toBe("Budget!A1:C1");
+    expect(result.data?.values).toEqual([["ok", "[REDACTED]", 123]]);
+    expect(result.data?.formulas).toEqual([[null, "[REDACTED]", null]]);
+  });
 });

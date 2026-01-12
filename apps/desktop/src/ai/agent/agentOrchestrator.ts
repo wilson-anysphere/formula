@@ -303,6 +303,7 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
 
     const toolExecutor = new SpreadsheetLLMToolExecutor(spreadsheet, {
       default_sheet: defaultSheetId,
+      sheet_name_resolver: params.sheetNameResolver ?? null,
       require_approval_for_mutations: true,
       dlp,
       toolPolicy
@@ -445,7 +446,8 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       throwIfCancelled();
       const preview = await guard(
         previewEngine.generatePreview([{ name: call.name, parameters: call.arguments }], spreadsheet, {
-          default_sheet: defaultSheetId
+          default_sheet: defaultSheetId,
+          sheet_name_resolver: params.sheetNameResolver ?? null
         })
       );
       if (!preview.requires_approval) return true;
