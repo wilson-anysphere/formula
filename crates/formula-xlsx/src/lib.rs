@@ -434,6 +434,31 @@ impl XlsxDocument {
                     meta.raw_value = Some(idx.to_string());
                 }
             }
+            (Some(CellValueKind::SharedString { index }), CellValue::Image(image))
+                if image
+                    .alt_text
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .is_some_and(|alt| {
+                        self.shared_strings
+                            .get(*index as usize)
+                            .is_some_and(|rt| rt.text.as_str() == alt)
+                    }) =>
+            {
+                // Preserve the original shared string index when the degraded display text is
+                // unchanged. This avoids switching between duplicate shared string entries that
+                // may differ only in unsupported substructures (phonetic runs, extLst, etc.).
+                let idx = *index;
+                let raw_matches = meta
+                    .raw_value
+                    .as_deref()
+                    .and_then(|raw| raw.trim().parse::<u32>().ok())
+                    .is_some_and(|raw| raw == idx);
+                meta.value_kind = Some(CellValueKind::SharedString { index: idx });
+                if !raw_matches {
+                    meta.raw_value = Some(idx.to_string());
+                }
+            }
             (Some(CellValueKind::SharedString { index }), CellValue::RichText(rich))
                 if self
                     .shared_strings
@@ -580,6 +605,28 @@ impl XlsxDocument {
                         .shared_strings
                         .get(*index as usize)
                         .is_some_and(|rt| rt.text.as_str() == s.as_str()) =>
+                {
+                    let idx = *index;
+                    let raw_matches = meta
+                        .raw_value
+                        .as_deref()
+                        .and_then(|raw| raw.trim().parse::<u32>().ok())
+                        .is_some_and(|raw| raw == idx);
+                    meta.value_kind = Some(CellValueKind::SharedString { index: idx });
+                    if !raw_matches {
+                        meta.raw_value = Some(idx.to_string());
+                    }
+                }
+                (Some(CellValueKind::SharedString { index }), CellValue::Image(image))
+                    if image
+                        .alt_text
+                        .as_deref()
+                        .filter(|s| !s.is_empty())
+                        .is_some_and(|alt| {
+                            self.shared_strings
+                                .get(*index as usize)
+                                .is_some_and(|rt| rt.text.as_str() == alt)
+                        }) =>
                 {
                     let idx = *index;
                     let raw_matches = meta
