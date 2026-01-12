@@ -178,6 +178,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
     let mut offset = 0usize;
     let mut in_sheet_data = false;
     let mut current_row: Option<u32> = None;
+    let mut row_template: Option<Vec<u8>> = None;
     let mut dim_record: Option<DimensionRecordInfo> = None;
     let mut dim_additions: Option<Bounds> = None;
 
@@ -208,18 +209,18 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                 let c1 = read_u32(payload, 8)?;
                 let c2 = read_u32(payload, 12)?;
 
-                 // Record offsets may diverge from the input stream once we start patching and/or
-                 // inserting records. Capture the output offset before writing the raw DIMENSION
-                 // record so we can patch the payload in-place later even if BrtWsDim appears
-                 // after other rewritten records (non-standard but possible in malformed streams).
-                 let out_record_start = writer.bytes_written();
-                 dim_record = Some(DimensionRecordInfo {
-                     out_payload_offset: out_record_start
-                         .checked_add(header_len)
-                         .ok_or(Error::UnexpectedEof)?,
-                     r1,
-                     r2,
-                     c1,
+                // Record offsets may diverge from the input stream once we start patching and/or
+                // inserting records. Capture the output offset before writing the raw DIMENSION
+                // record so we can patch the payload in-place later even if BrtWsDim appears
+                // after other rewritten records (non-standard but possible in malformed streams).
+                let out_record_start = writer.bytes_written();
+                dim_record = Some(DimensionRecordInfo {
+                    out_payload_offset: out_record_start
+                        .checked_add(header_len)
+                        .ok_or(Error::UnexpectedEof)?,
+                    r1,
+                    r2,
+                    c1,
                     c2,
                 });
                 writer.write_raw(&sheet_bin[record_start..record_end])?;
@@ -246,6 +247,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                     // And append any remaining missing rows/cells.
                     let _ = flush_remaining_rows(
                         &mut writer,
+                        row_template.as_deref(),
                         edits,
                         &mut applied,
                         &ordered_edits,
@@ -271,10 +273,15 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                     )?;
                 }
 
+                if row_template.is_none() && payload.len() >= 4 {
+                    row_template = Some(payload.to_vec());
+                }
+
                 let row = read_u32(payload, 0)?;
                 // Insert any missing rows before this one (row-major order).
                 let _ = flush_missing_rows_before(
                     &mut writer,
+                    row_template.as_deref(),
                     edits,
                     &mut applied,
                     &ordered_edits,
@@ -471,6 +478,7 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
         }
         let _ = flush_remaining_rows(
             &mut writer,
+            row_template.as_deref(),
             edits,
             &mut applied,
             &ordered_edits,
@@ -569,8 +577,33 @@ fn insertion_is_noop(edit: &CellEdit) -> bool {
         && matches!(edit.new_value, CellValue::Blank)
 }
 
+fn write_row_record<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    row: u32,
+    template: Option<&[u8]>,
+) -> Result<(), Error> {
+    if let Some(template) = template {
+        if template.len() >= 4 {
+            let len = u32::try_from(template.len()).map_err(|_| {
+                Error::Io(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "ROW record template payload length does not fit in u32",
+                ))
+            })?;
+            writer.write_record_header(biff12::ROW, len)?;
+            writer.write_u32(row)?;
+            writer.write_raw(&template[4..])?;
+            return Ok(());
+        }
+    }
+
+    writer.write_record(biff12::ROW, &row.to_le_bytes())?;
+    Ok(())
+}
+
 fn flush_missing_rows_before<W: io::Write>(
     writer: &mut Biff12Writer<W>,
+    row_template: Option<&[u8]>,
     edits: &[CellEdit],
     applied: &mut [bool],
     ordered: &[usize],
@@ -635,7 +668,7 @@ fn flush_missing_rows_before<W: io::Write>(
             continue;
         }
 
-        writer.write_record(biff12::ROW, &row.to_le_bytes())?;
+        write_row_record(writer, row, row_template)?;
         wrote_any = true;
 
         while *cursor < ordered.len() {
@@ -761,6 +794,7 @@ fn flush_remaining_cells_in_row<W: io::Write>(
 
 fn flush_remaining_rows<W: io::Write>(
     writer: &mut Biff12Writer<W>,
+    row_template: Option<&[u8]>,
     edits: &[CellEdit],
     applied: &mut [bool],
     ordered: &[usize],
@@ -817,7 +851,7 @@ fn flush_remaining_rows<W: io::Write>(
             continue;
         }
 
-        writer.write_record(biff12::ROW, &row.to_le_bytes())?;
+        write_row_record(writer, row, row_template)?;
         wrote_any = true;
 
         while *cursor < ordered.len() {

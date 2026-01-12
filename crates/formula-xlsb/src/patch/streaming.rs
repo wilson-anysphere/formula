@@ -67,6 +67,7 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
 
     let mut in_sheet_data = false;
     let mut current_row: Option<u32> = None;
+    let mut row_template: Option<Vec<u8>> = None;
     let mut dim_additions: Option<super::Bounds> = None;
     let mut changed = false;
 
@@ -138,6 +139,7 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                     }
                     if super::flush_remaining_rows(
                         &mut writer,
+                        row_template.as_deref(),
                         edits,
                         &mut applied,
                         &ordered_edits,
@@ -169,11 +171,15 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                 }
 
                 let payload = read_payload(&mut input, len)?;
+                if row_template.is_none() && payload.len() >= 4 {
+                    row_template = Some(payload.clone());
+                }
                 let row = super::read_u32(&payload, 0)?;
 
                 // Insert any missing rows before this one (row-major order).
                 if super::flush_missing_rows_before(
                     &mut writer,
+                    row_template.as_deref(),
                     edits,
                     &mut applied,
                     &ordered_edits,
@@ -417,6 +423,7 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
         }
         if super::flush_remaining_rows(
             &mut writer,
+            row_template.as_deref(),
             edits,
             &mut applied,
             &ordered_edits,

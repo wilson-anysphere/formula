@@ -16,6 +16,7 @@ pub struct XlsbFixtureBuilder {
     shared_strings: Vec<String>,
     // row -> (col -> cell)
     cells: BTreeMap<u32, BTreeMap<u32, CellSpec>>,
+    row_record_trailing_bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +53,7 @@ impl XlsbFixtureBuilder {
             sheet_name: "Sheet1".to_string(),
             shared_strings: Vec::new(),
             cells: BTreeMap::new(),
+            row_record_trailing_bytes: Vec::new(),
         }
     }
 
@@ -63,6 +65,10 @@ impl XlsbFixtureBuilder {
 
     pub fn set_sheet_name(&mut self, name: &str) {
         self.sheet_name = name.to_string();
+    }
+
+    pub fn set_row_record_trailing_bytes(&mut self, bytes: Vec<u8>) {
+        self.row_record_trailing_bytes = bytes;
     }
 
     pub fn set_cell_number(&mut self, row: u32, col: u32, v: f64) {
@@ -163,7 +169,7 @@ impl XlsbFixtureBuilder {
     /// Build a full `.xlsb` (ZIP) into memory.
     pub fn build_bytes(&self) -> Vec<u8> {
         let workbook_bin = build_workbook_bin(&self.sheet_name);
-        let sheet1_bin = build_sheet_bin(&self.cells);
+        let sheet1_bin = build_sheet_bin(&self.cells, &self.row_record_trailing_bytes);
         let shared_strings_bin = if self.shared_strings.is_empty() {
             None
         } else {
@@ -390,7 +396,10 @@ fn build_workbook_bin(sheet_name: &str) -> Vec<u8> {
     out
 }
 
-fn build_sheet_bin(cells: &BTreeMap<u32, BTreeMap<u32, CellSpec>>) -> Vec<u8> {
+fn build_sheet_bin(
+    cells: &BTreeMap<u32, BTreeMap<u32, CellSpec>>,
+    row_record_trailing_bytes: &[u8],
+) -> Vec<u8> {
     let mut out = Vec::<u8>::new();
 
     write_record(&mut out, biff12::WORKSHEET, &[]);
@@ -406,7 +415,14 @@ fn build_sheet_bin(cells: &BTreeMap<u32, BTreeMap<u32, CellSpec>>) -> Vec<u8> {
     write_record(&mut out, biff12::SHEETDATA, &[]);
 
     for (row, cols) in cells {
-        write_record(&mut out, biff12::ROW, &row.to_le_bytes());
+        if row_record_trailing_bytes.is_empty() {
+            write_record(&mut out, biff12::ROW, &row.to_le_bytes());
+        } else {
+            let mut payload = Vec::with_capacity(4 + row_record_trailing_bytes.len());
+            payload.extend_from_slice(&row.to_le_bytes());
+            payload.extend_from_slice(row_record_trailing_bytes);
+            write_record(&mut out, biff12::ROW, &payload);
+        }
         for (col, cell) in cols {
             match cell {
                 CellSpec::Blank => {
