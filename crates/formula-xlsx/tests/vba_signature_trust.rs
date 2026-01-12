@@ -193,6 +193,48 @@ fn embedded_signature_stream_trust_is_reported() {
 }
 
 #[test]
+fn embedded_signature_stream_trust_is_reported_with_leading_slash_part_names() {
+    // Some producers incorrectly store OPC part names with a leading `/` in the ZIP.
+    // Ensure signature verification and trust evaluation still work.
+    let pkcs7 = make_pkcs7_signed_message(b"formula-xlsx-trust-test");
+    let vba_project_bin = build_vba_project_bin_with_signature(&pkcs7);
+    let zip_bytes = build_zip(&[("/xl/vbaProject.bin", &vba_project_bin)]);
+
+    let pkg = XlsxPackage::from_bytes(&zip_bytes).expect("read package");
+
+    let signer_der = X509::from_pem(TEST_CERT_PEM.as_bytes())
+        .expect("parse test certificate")
+        .to_der()
+        .expect("convert test certificate to DER");
+    let wrong_root_der = make_unrelated_root_cert_der();
+
+    let sig = pkg
+        .verify_vba_digital_signature_with_trust(&VbaSignatureTrustOptions::default())
+        .expect("verify signature")
+        .expect("signature should be present");
+    assert_eq!(sig.signature.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.cert_trust, VbaCertificateTrust::Unknown);
+
+    let sig = pkg
+        .verify_vba_digital_signature_with_trust(&VbaSignatureTrustOptions {
+            trusted_root_certs_der: vec![signer_der.clone()],
+        })
+        .expect("verify signature")
+        .expect("signature should be present");
+    assert_eq!(sig.signature.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.cert_trust, VbaCertificateTrust::Trusted);
+
+    let sig = pkg
+        .verify_vba_digital_signature_with_trust(&VbaSignatureTrustOptions {
+            trusted_root_certs_der: vec![wrong_root_der],
+        })
+        .expect("verify signature")
+        .expect("signature should be present");
+    assert_eq!(sig.signature.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.cert_trust, VbaCertificateTrust::Untrusted);
+}
+
+#[test]
 fn external_signature_part_trust_is_reported() {
     let pkcs7 = make_pkcs7_signed_message(b"formula-xlsx-trust-test");
 
@@ -209,6 +251,58 @@ fn external_signature_part_trust_is_reported() {
         ("xl/vbaProject.bin", &vba_project_bin),
         ("xl/_rels/vbaProject.bin.rels", vba_rels),
         ("xl/vbaProjectSignature.bin", &pkcs7),
+    ]);
+    let pkg = XlsxPackage::from_bytes(&zip_bytes).expect("read package");
+
+    let signer_der = X509::from_pem(TEST_CERT_PEM.as_bytes())
+        .expect("parse test certificate")
+        .to_der()
+        .expect("convert test certificate to DER");
+    let wrong_root_der = make_unrelated_root_cert_der();
+
+    let sig = pkg
+        .verify_vba_digital_signature_with_trust(&VbaSignatureTrustOptions::default())
+        .expect("verify signature")
+        .expect("signature should be present");
+    assert_eq!(sig.signature.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.cert_trust, VbaCertificateTrust::Unknown);
+
+    let sig = pkg
+        .verify_vba_digital_signature_with_trust(&VbaSignatureTrustOptions {
+            trusted_root_certs_der: vec![signer_der.clone()],
+        })
+        .expect("verify signature")
+        .expect("signature should be present");
+    assert_eq!(sig.signature.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.cert_trust, VbaCertificateTrust::Trusted);
+
+    let sig = pkg
+        .verify_vba_digital_signature_with_trust(&VbaSignatureTrustOptions {
+            trusted_root_certs_der: vec![wrong_root_der],
+        })
+        .expect("verify signature")
+        .expect("signature should be present");
+    assert_eq!(sig.signature.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.cert_trust, VbaCertificateTrust::Untrusted);
+}
+
+#[test]
+fn external_signature_part_trust_is_reported_with_leading_slash_part_names() {
+    let pkcs7 = make_pkcs7_signed_message(b"formula-xlsx-trust-test");
+
+    // `xl/vbaProject.bin` must be a valid OLE file (even if unsigned) so the fallback embedded
+    // signature scan can run without errors.
+    let vba_project_bin = build_empty_ole();
+
+    let vba_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature" Target="vbaProjectSignature.bin"/>
+</Relationships>"#;
+
+    let zip_bytes = build_zip(&[
+        ("/xl/vbaProject.bin", &vba_project_bin),
+        ("/xl/_rels/vbaProject.bin.rels", vba_rels),
+        ("/xl/vbaProjectSignature.bin", &pkcs7),
     ]);
     let pkg = XlsxPackage::from_bytes(&zip_bytes).expect("read package");
 

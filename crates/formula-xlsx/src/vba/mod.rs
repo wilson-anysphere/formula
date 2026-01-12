@@ -19,7 +19,7 @@ const VBA_PROJECT_SIGNATURE_REL_TYPE: &str =
 impl XlsxPackage {
     /// Parse and return a structured VBA project model (for UI display).
     pub fn vba_project(&self) -> Result<Option<VBAProject>, formula_vba::ParseError> {
-        let Some(bin) = self.vba_project_bin() else {
+        let Some(bin) = get_part(self.parts_map(), VBA_PROJECT_BIN) else {
             return Ok(None);
         };
         Ok(Some(VBAProject::parse(bin)?))
@@ -67,13 +67,13 @@ impl XlsxPackage {
     pub fn vba_project_signature_binding(
         &self,
     ) -> Result<Option<formula_vba::VbaProjectBindingVerification>, SignatureError> {
-        let Some(project_ole) = self.vba_project_bin() else {
+        let parts = self.parts_map();
+        let Some(project_ole) = get_part(parts, VBA_PROJECT_BIN) else {
             return Ok(None);
         };
 
-        let parts = self.parts_map();
         let signature_bytes = resolve_vba_signature_part_name(parts)
-            .and_then(|name| parts.get(&name).map(|v| v.as_slice()))
+            .and_then(|name| get_part(parts, &name))
             .unwrap_or(project_ole);
 
         Ok(Some(formula_vba::verify_vba_project_signature_binding(
@@ -86,7 +86,7 @@ impl XlsxPackage {
 impl XlsxDocument {
     /// Parse and return a structured VBA project model (for UI display).
     pub fn vba_project(&self) -> Result<Option<VBAProject>, formula_vba::ParseError> {
-        let Some(bin) = self.parts().get(VBA_PROJECT_BIN) else {
+        let Some(bin) = get_part(self.parts(), VBA_PROJECT_BIN) else {
             return Ok(None);
         };
         Ok(Some(VBAProject::parse(bin)?))
@@ -124,12 +124,12 @@ impl XlsxDocument {
         &self,
     ) -> Result<Option<formula_vba::VbaProjectBindingVerification>, SignatureError> {
         let parts = self.parts();
-        let Some(project_ole) = parts.get("xl/vbaProject.bin") else {
+        let Some(project_ole) = get_part(parts, VBA_PROJECT_BIN) else {
             return Ok(None);
         };
 
         let signature_bytes = resolve_vba_signature_part_name(parts)
-            .and_then(|name| parts.get(&name).map(|v| v.as_slice()))
+            .and_then(|name| get_part(parts, &name))
             .unwrap_or(project_ole);
 
         Ok(Some(formula_vba::verify_vba_project_signature_binding(
@@ -143,7 +143,7 @@ fn parse_vba_digital_signature_from_parts(
     parts: &BTreeMap<String, Vec<u8>>,
 ) -> Result<Option<VbaDigitalSignature>, SignatureError> {
     if let Some(signature_part_name) = resolve_vba_signature_part_name(parts) {
-        if let Some(bytes) = parts.get(&signature_part_name) {
+        if let Some(bytes) = get_part(parts, &signature_part_name) {
             match formula_vba::parse_vba_digital_signature(bytes) {
                 Ok(Some(mut sig)) => {
                     sig.stream_path = format!("{signature_part_name}:{}", sig.stream_path);
@@ -173,7 +173,7 @@ fn parse_vba_digital_signature_from_parts(
         }
     }
 
-    let Some(vba_bin) = parts.get(VBA_PROJECT_BIN) else {
+    let Some(vba_bin) = get_part(parts, VBA_PROJECT_BIN) else {
         return Ok(None);
     };
     formula_vba::parse_vba_digital_signature(vba_bin)
@@ -184,10 +184,10 @@ fn verify_vba_digital_signature_from_parts(
 ) -> Result<Option<VbaDigitalSignature>, SignatureError> {
     let signature_part_name = resolve_vba_signature_part_name(parts);
     let mut signature_part_result: Option<VbaDigitalSignature> = None;
-    let vba_project_bin = parts.get(VBA_PROJECT_BIN).map(Vec::as_slice);
+    let vba_project_bin = get_part(parts, VBA_PROJECT_BIN);
 
     if let Some(signature_part_name) = signature_part_name {
-        if let Some(bytes) = parts.get(&signature_part_name) {
+        if let Some(bytes) = get_part(parts, &signature_part_name) {
             // Attempt to treat the part as an OLE/CFB container first (the most common format).
             let verified = match vba_project_bin {
                 Some(vba_project_bin) => {
@@ -286,7 +286,7 @@ fn verify_vba_digital_signature_with_trust_from_parts(
 ) -> Result<Option<formula_vba::VbaDigitalSignatureTrusted>, formula_vba::SignatureError> {
     // Unlike the non-trusty helper, require that the workbook actually contains a VBA project.
     // Trust-center semantics are only meaningful in the context of `xl/vbaProject.bin`.
-    let Some(vba_project_bin) = parts.get(VBA_PROJECT_BIN) else {
+    let Some(vba_project_bin) = get_part(parts, VBA_PROJECT_BIN) else {
         return Ok(None);
     };
 
@@ -294,7 +294,7 @@ fn verify_vba_digital_signature_with_trust_from_parts(
     let mut signature_part_result: Option<formula_vba::VbaDigitalSignatureTrusted> = None;
 
     if let Some(signature_part_name) = signature_part_name {
-        if let Some(bytes) = parts.get(&signature_part_name) {
+        if let Some(bytes) = get_part(parts, &signature_part_name) {
             // Attempt to treat the part as an OLE/CFB container first (the most common format).
             match formula_vba::verify_vba_digital_signature_with_project(vba_project_bin, bytes) {
                 Ok(Some(mut sig)) => {
@@ -391,7 +391,7 @@ fn verify_vba_digital_signature_with_trust_from_parts(
 
 fn resolve_vba_signature_part_name(parts: &BTreeMap<String, Vec<u8>>) -> Option<String> {
     // Prefer explicit relationship resolution when available.
-    if let Some(rels_bytes) = parts.get(VBA_PROJECT_BIN_RELS) {
+    if let Some(rels_bytes) = get_part(parts, VBA_PROJECT_BIN_RELS) {
         if let Ok(rels) = crate::openxml::parse_relationships(rels_bytes) {
             for rel in rels {
                 if rel
@@ -408,7 +408,7 @@ fn resolve_vba_signature_part_name(parts: &BTreeMap<String, Vec<u8>>) -> Option<
 
                 let target = strip_fragment(&rel.target);
                 let resolved = crate::path::resolve_target(VBA_PROJECT_BIN, target);
-                if parts.contains_key(&resolved) {
+                if get_part(parts, &resolved).is_some() {
                     return Some(resolved);
                 }
             }
@@ -416,7 +416,7 @@ fn resolve_vba_signature_part_name(parts: &BTreeMap<String, Vec<u8>>) -> Option<
     }
 
     // Default part name used by Excel.
-    if parts.contains_key(VBA_PROJECT_SIGNATURE_BIN) {
+    if get_part(parts, VBA_PROJECT_SIGNATURE_BIN).is_some() {
         return Some(VBA_PROJECT_SIGNATURE_BIN.to_string());
     }
 
@@ -425,4 +425,22 @@ fn resolve_vba_signature_part_name(parts: &BTreeMap<String, Vec<u8>>) -> Option<
 
 fn strip_fragment(target: &str) -> &str {
     target.split_once('#').map(|(t, _)| t).unwrap_or(target)
+}
+
+fn get_part<'a>(parts: &'a BTreeMap<String, Vec<u8>>, name: &str) -> Option<&'a [u8]> {
+    parts
+        .get(name)
+        .map(Vec::as_slice)
+        .or_else(|| name.strip_prefix('/').and_then(|name| parts.get(name).map(Vec::as_slice)))
+        .or_else(|| {
+            if name.starts_with('/') {
+                return None;
+            }
+            // Some producers incorrectly store OPC part names with a leading `/` in the ZIP.
+            // Preserve exact names for round-trip, but make lookups resilient.
+            let mut with_slash = String::with_capacity(name.len() + 1);
+            with_slash.push('/');
+            with_slash.push_str(name);
+            parts.get(with_slash.as_str()).map(Vec::as_slice)
+        })
 }
