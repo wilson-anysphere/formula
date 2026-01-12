@@ -123,7 +123,19 @@ impl WorkbookArchive {
                 continue;
             }
 
-            let name = file.name().to_string();
+            // ZIP entry names in valid XLSB packages should not start with `/`, but some producers
+            // emit them. Normalize entry names so diffing doesn't report spurious missing/extra
+            // parts when one side uses a leading slash.
+            //
+            // Keep the original name as a fallback key if normalization would collide with an
+            // existing part (e.g. both `xl/workbook.bin` and `/xl/workbook.bin` exist).
+            let original_name = file.name();
+            let name = normalize_zip_entry_name(original_name);
+            let name = if parts.contains_key(&name) && name != original_name {
+                original_name.to_string()
+            } else {
+                name
+            };
             let mut buf = Vec::with_capacity(file.size() as usize);
             file.read_to_end(&mut buf)
                 .with_context(|| format!("read part {name}"))?;
@@ -146,6 +158,16 @@ impl WorkbookArchive {
     pub fn get(&self, name: &str) -> Option<&[u8]> {
         self.parts.get(name).map(|v| v.as_slice())
     }
+}
+
+fn normalize_zip_entry_name(name: &str) -> String {
+    let mut normalized = name.trim_start_matches('/');
+    let replaced;
+    if normalized.contains('\\') {
+        replaced = normalized.replace('\\', "/");
+        normalized = &replaced;
+    }
+    normalized.to_string()
 }
 
 #[derive(Debug, Clone, Default)]
