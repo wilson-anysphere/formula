@@ -803,7 +803,7 @@ function rgbHexToArgb(rgb: string): string | null {
 
 function applyFormattingToSelection(
   label: string,
-  fn: (doc: DocumentController, sheetId: string, ranges: CellRange[]) => void,
+  fn: (doc: DocumentController, sheetId: string, ranges: CellRange[]) => void | boolean,
   options: { forceBatch?: boolean } = {},
 ): void {
   const doc = app.getDocument();
@@ -822,8 +822,10 @@ function applyFormattingToSelection(
 
   if (shouldBatch) doc.beginBatch({ label });
   let committed = false;
+  let applied = true;
   try {
-    fn(doc, sheetId, ranges);
+    const result = fn(doc, sheetId, ranges);
+    if (result === false) applied = false;
     committed = true;
   } finally {
     if (!shouldBatch) {
@@ -832,6 +834,13 @@ function applyFormattingToSelection(
       doc.endBatch();
     } else {
       doc.cancelBatch();
+    }
+  }
+  if (!applied) {
+    try {
+      showToast("Formatting could not be applied to the full selection. Try selecting fewer cells/rows.", "warning");
+    } catch {
+      // `showToast` requires a #toast-root; unit tests don't always include it.
     }
   }
   app.focus();
@@ -6342,9 +6351,12 @@ mountRibbon(ribbonReactRoot, {
       })();
       if (!fontName) return;
       applyFormattingToSelection("Font", (doc, sheetId, ranges) => {
+        let applied = true;
         for (const range of ranges) {
-          doc.setRangeFormat(sheetId, range, { font: { name: fontName } }, { label: "Font" });
+          const ok = doc.setRangeFormat(sheetId, range, { font: { name: fontName } }, { label: "Font" });
+          if (ok === false) applied = false;
         }
+        return applied;
       });
       return;
     }
@@ -6383,9 +6395,12 @@ mountRibbon(ribbonReactRoot, {
 
       if (preset === "none" || preset === "noFill") {
         applyFormattingToSelection("Fill color", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { fill: null }, { label: "Fill color" });
+            const ok = doc.setRangeFormat(sheetId, range, { fill: null }, { label: "Fill color" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       }
@@ -6420,9 +6435,12 @@ mountRibbon(ribbonReactRoot, {
 
       if (preset === "automatic") {
         applyFormattingToSelection("Font color", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { font: { color: null } }, { label: "Font color" });
+            const ok = doc.setRangeFormat(sheetId, range, { font: { color: null } }, { label: "Font color" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       }
@@ -6438,9 +6456,12 @@ mountRibbon(ribbonReactRoot, {
       const kind = commandId.slice(clearPrefix.length);
       if (kind === "clearFormats") {
         applyFormattingToSelection("Clear formats", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, null, { label: "Clear formats" });
+            const ok = doc.setRangeFormat(sheetId, range, null, { label: "Clear formats" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       }
