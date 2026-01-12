@@ -2,10 +2,11 @@ import { expect, test } from "@playwright/test";
 
 import { gotoDesktop } from "./helpers";
 
-function installTauriStubForTests() {
+function installTauriStubForTests(options: { usedRange?: { start_row: number; end_row: number; start_col: number; end_col: number } } = {}) {
   const listeners: Record<string, any> = {};
   (window as any).__tauriListeners = listeners;
   (window as any).__tauriInvokeCalls = [];
+  const usedRange = options.usedRange ?? { start_row: 0, end_row: 0, start_col: 0, end_col: 0 };
 
   const pushCall = (cmd: string, args: any) => {
     (window as any).__tauriInvokeCalls.push({ cmd, args });
@@ -21,10 +22,10 @@ function installTauriStubForTests() {
               path: args?.path ?? null,
               origin_path: args?.path ?? null,
               sheets: [{ id: "Sheet1", name: "Sheet1" }],
-            };
+              };
 
           case "get_sheet_used_range":
-            return { start_row: 0, end_row: 0, start_col: 0, end_col: 0 };
+            return usedRange;
 
           case "get_range": {
             const startRow = Number(args?.start_row ?? 0);
@@ -111,6 +112,53 @@ test.describe("tauri workbook integration", () => {
 
     const a1 = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
     expect(a1).toBe("Hello");
+  });
+
+  test("warns when workbook exceeds the current load limit", async ({ page }) => {
+    await page.addInitScript(installTauriStubForTests, {
+      // Exceeds the default maxRows cap (10,000). Keep end_col small so the test avoids
+      // large range allocations.
+      usedRange: { start_row: 0, end_row: 10_000, start_col: 0, end_col: 0 },
+    });
+
+    await gotoDesktop(page);
+
+    // Clear any startup toasts so we can assert on the truncation warning cleanly.
+    await page.evaluate(() => {
+      document.getElementById("toast-root")?.replaceChildren();
+    });
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
+    });
+
+    await expect(page.getByTestId("toast-root")).toContainText(
+      "Workbook is larger than the current load limit; only the first 10000 rows and 200 columns were loaded.",
+      { timeout: 30_000 },
+    );
+  });
+
+  test("load limits can be overridden via query params", async ({ page }) => {
+    await page.addInitScript(installTauriStubForTests, {
+      usedRange: { start_row: 0, end_row: 10, start_col: 0, end_col: 0 },
+    });
+
+    await gotoDesktop(page, "/?maxRows=5&maxCols=6");
+
+    await page.evaluate(() => {
+      document.getElementById("toast-root")?.replaceChildren();
+    });
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
+    });
+
+    await expect(page.getByTestId("toast-root")).toContainText(
+      "Workbook is larger than the current load limit; only the first 5 rows and 6 columns were loaded.",
+      { timeout: 30_000 },
+    );
   });
 
   test("sheet add button calls backend add_sheet and uses returned id for subsequent sync", async ({ page }) => {
