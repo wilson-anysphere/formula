@@ -4845,6 +4845,37 @@ fn bytecode_backend_sheet_qualified_defined_name_constant_on_other_sheet_bypasse
 }
 
 #[test]
+fn bytecode_backend_sheet_qualified_defined_name_falls_back_to_workbook_constant() {
+    // `Sheet2!RATE` should resolve to the workbook-scoped defined name when no sheet-scoped name
+    // exists for that sheet. This should still bypass LET locals and be bytecode-eligible via
+    // constant inlining.
+    let mut engine = Engine::new();
+    engine.ensure_sheet("Sheet2");
+    engine
+        .define_name(
+            "RATE",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(0.1)),
+        )
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(RATE, 1, Sheet2!RATE*2+RATE)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let via_bytecode = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(via_bytecode, Value::Number(1.2));
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "A1");
+
+    assert_eq!(via_bytecode, via_ast);
+}
+
+#[test]
 fn bytecode_backend_sheet_qualified_defined_name_static_ref_bypasses_let_locals() {
     // Same as the constant case, but for reference defined names that are inlined to static
     // cell/range references for bytecode eligibility.
