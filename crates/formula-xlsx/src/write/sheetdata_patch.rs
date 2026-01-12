@@ -868,12 +868,16 @@ fn write_updated_cell<W: Write>(
         .unwrap_or(tags.t.as_str());
 
     let mut preserved_attrs: Vec<(String, String)> = Vec::new();
+    let mut original_has_vm = false;
     if let Some(start) = original_start {
         for attr in start.attributes() {
             let attr = attr?;
             match attr.key.as_ref() {
                 b"r" | b"s" | b"t" => {}
                 _ => {
+                    if attr.key.as_ref() == b"vm" {
+                        original_has_vm = true;
+                    }
                     let key = std::str::from_utf8(attr.key.as_ref())
                         .unwrap_or("")
                         .to_string();
@@ -975,13 +979,13 @@ fn write_updated_cell<W: Write>(
     }
     // `vm="..."` is a SpreadsheetML value-metadata pointer (typically into `xl/metadata.xml`).
     //
-    // Excel uses this for rich value types (linked data types, embedded images, etc), which are
-    // often represented in the cell by a `#VALUE!` cached value placeholder. If the caller edits
-    // the cell into a normal value, we must drop `vm` to avoid leaving a dangling value-metadata
-    // reference.
-    let preserve_vm = matches!(cell.value, CellValue::Error(ErrorValue::Value));
-    if preserve_vm {
-        if let Some(vm) = &meta_vm {
+    // Excel uses this for rich value types (linked data types, embedded images, etc). If the
+    // caller edits a cell that previously had a `vm` pointer into a normal value, we must drop
+    // `vm` to avoid leaving a dangling value-metadata reference.
+    let patch_is_rich_value_placeholder = matches!(cell.value, CellValue::Error(ErrorValue::Value));
+    let drop_vm = original_has_vm && !patch_is_rich_value_placeholder;
+    if let Some(vm) = &meta_vm {
+        if !drop_vm {
             c_start.push_attribute(("vm", vm.as_str()));
         }
     }
@@ -989,7 +993,7 @@ fn write_updated_cell<W: Write>(
         c_start.push_attribute(("cm", cm.as_str()));
     }
     for (k, v) in &preserved_attrs {
-        if k == "vm" && !preserve_vm {
+        if k == "vm" && drop_vm {
             continue;
         }
         c_start.push_attribute((k.as_str(), v.as_str()));

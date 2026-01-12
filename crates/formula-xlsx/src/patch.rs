@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use formula_model::rich_text::{RichText, RichTextRunStyle};
-use formula_model::{CellRef, CellValue, StyleTable};
+use formula_model::{CellRef, CellValue, ErrorValue, StyleTable};
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
 
@@ -1720,9 +1720,6 @@ fn patch_cell_element(
     let t_tag = prefixed_tag(prefix_str, "t");
 
     let patch_value = if clear_value { None } else { patch_value };
-    let drop_vm = update_value
-        && matches!(&existing.value, ExistingCellValue::Error(e) if e.trim() == "#VALUE!")
-        && !matches!(patch_value, Some(CellValue::Error(err)) if err.as_str() == "#VALUE!");
     let (new_t, body_kind) = if update_value {
         cell_representation_for_patch(
             patch_value,
@@ -1742,6 +1739,10 @@ fn patch_cell_element(
         }
     }
 
+    let patch_is_rich_value_placeholder =
+        matches!(patch_value, Some(CellValue::Error(ErrorValue::Value)));
+    let drop_vm = update_value && !patch_is_rich_value_placeholder;
+
     let mut c = BytesStart::new(cell_tag.as_str());
     let mut has_r = false;
     for attr in original_start.attributes() {
@@ -1749,6 +1750,10 @@ fn patch_cell_element(
         match attr.key.as_ref() {
             b"s" if style_override.is_some() => continue,
             b"t" if update_value => continue,
+            // `vm` points into `xl/metadata.xml` richData/value metadata. Excel uses this for
+            // "place in cell" images and other rich values. When patching a cell's value to
+            // anything other than the rich-value placeholder error (`#VALUE!` / `ErrorValue::Value`),
+            // drop `vm` so the cell no longer points at stale metadata.
             b"vm" if drop_vm => continue,
             b"r" => has_r = true,
             _ => {}

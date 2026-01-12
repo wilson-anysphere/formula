@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Seek, Write};
 
 use formula_model::rich_text::RichText;
-use formula_model::{CellRef, CellValue, StyleTable};
+use formula_model::{CellRef, CellValue, ErrorValue, StyleTable};
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
 use thiserror::Error;
@@ -3532,19 +3532,11 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         inner_buf.clear();
     }
 
-    // Some Excel features (notably images-in-cell) represent a placeholder cell as
-    // `t="e" <v>#VALUE!</v> vm="..."`. When patching away from the placeholder semantics (e.g. to
-    // a number), we must drop `vm` or Excel may treat the cell as a rich-data placeholder.
-    let existing_value_is_value_error = if existing_t.as_deref() == Some("e") {
-        extract_cell_v_text(&inner_events)?.is_some_and(|v| v.trim() == "#VALUE!")
-    } else {
-        false
-    };
-    let patch_value_is_value_error = matches!(
-        patch.value,
-        CellValue::Error(formula_model::ErrorValue::Value)
-    );
-    let drop_vm = has_vm && existing_value_is_value_error && !patch_value_is_value_error;
+    // `vm` points into `xl/metadata.xml` richData/value metadata. When patching a cell's value to
+    // anything other than the rich-value placeholder error (`#VALUE!` / `ErrorValue::Value`),
+    // drop `vm` so the cell no longer points at stale metadata.
+    let patch_value_is_value_error = matches!(patch.value, CellValue::Error(ErrorValue::Value));
+    let drop_vm = has_vm && !patch_value_is_value_error;
 
     let mut c = BytesStart::new(cell_tag.as_str());
     let mut has_r = false;
@@ -3602,34 +3594,6 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     )?;
     writer.write_event(Event::End(BytesEnd::new(cell_tag.as_str())))?;
     Ok(())
-}
-
-fn extract_cell_v_text(events: &[Event<'static>]) -> Result<Option<String>, StreamingPatchError> {
-    let mut in_v = false;
-    let mut out = String::new();
-
-    for ev in events {
-        match ev {
-            Event::Start(e) if local_name(e.name().as_ref()) == b"v" => {
-                in_v = true;
-                out.clear();
-            }
-            Event::End(e) if local_name(e.name().as_ref()) == b"v" => {
-                if in_v {
-                    return Ok(Some(out));
-                }
-                in_v = false;
-            }
-            Event::Empty(e) if local_name(e.name().as_ref()) == b"v" => {
-                return Ok(Some(String::new()))
-            }
-            Event::Text(t) if in_v => out.push_str(&t.unescape()?.into_owned()),
-            Event::CData(t) if in_v => out.push_str(&String::from_utf8_lossy(t.as_ref())),
-            _ => {}
-        }
-    }
-
-    Ok(None)
 }
 
 fn write_patched_cell_children<W: Write>(
@@ -3898,6 +3862,23 @@ fn write_patched_cell<W: Write>(
         _ => None,
     };
     let mut existing_t: Option<String> = None;
+    let drop_vm = if let Some(orig) = original {
+        let mut has_vm = false;
+        for attr in orig.attributes() {
+            let attr = attr?;
+            if attr.key.as_ref() == b"t" {
+                existing_t = Some(attr.unescape_value()?.into_owned());
+            }
+            if attr.key.as_ref() == b"vm" {
+                has_vm = true;
+            }
+        }
+        let patch_is_rich_value_placeholder =
+            matches!(patch.value, CellValue::Error(ErrorValue::Value));
+        has_vm && !patch_is_rich_value_placeholder
+    } else {
+        false
+    };
     let shared_string_idx = patch.shared_string_idx;
 
     let cell_tag_owned = match original {
@@ -3918,10 +3899,12 @@ fn write_patched_cell<W: Write>(
         for attr in orig.attributes() {
             let attr = attr?;
             if attr.key.as_ref() == b"t" {
-                existing_t = Some(attr.unescape_value()?.into_owned());
                 continue;
             }
             if attr.key.as_ref() == b"s" && style_override.is_some() {
+                continue;
+            }
+            if attr.key.as_ref() == b"vm" && drop_vm {
                 continue;
             }
             if attr.key.as_ref() == b"r" {
