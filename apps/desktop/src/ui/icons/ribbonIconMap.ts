@@ -177,6 +177,7 @@ export const ribbonIconMap = {
   "file.info.protectWorkbook": LockIcon,
   "file.info.inspectWorkbook": FindIcon,
   "file.info.manageWorkbook": FolderIcon,
+  "file.info.manageWorkbook.versions": ClockIcon,
   "file.open.open": FolderIcon,
   "file.open.recent": ClockIcon,
   "file.open.pinned": PinIcon,
