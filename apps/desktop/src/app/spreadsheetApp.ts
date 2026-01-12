@@ -8185,6 +8185,8 @@ export class SpreadsheetApp {
 
   private invalidateComputedValues(changes: unknown): void {
     if (!Array.isArray(changes)) return;
+    let lastSheetId: string | null = null;
+    let lastSheetCache: Map<number, SpreadsheetValue> | null = null;
     for (const change of changes) {
       const ref = change as EngineCellRef;
 
@@ -8217,7 +8219,11 @@ export class SpreadsheetApp {
 
       if (row !== undefined && col !== undefined && col >= 0 && col < COMPUTED_COORD_COL_STRIDE) {
         const key = row * COMPUTED_COORD_COL_STRIDE + col;
-        this.computedValuesByCoord.get(sheetId)?.delete(key);
+        if (sheetId !== lastSheetId) {
+          lastSheetId = sheetId;
+          lastSheetCache = this.computedValuesByCoord.get(sheetId) ?? null;
+        }
+        lastSheetCache?.delete(key);
       }
     }
   }
