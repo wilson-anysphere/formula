@@ -198,13 +198,21 @@ mod gtk_backend {
                     .or_else(|| match targets.as_deref() {
                         Some(targets) => choose_best_target(targets, &["text/plain"])
                             .and_then(|t| wait_for_utf8_targets(clipboard, &[t], usize::MAX)),
-                        None => wait_for_utf8_targets(clipboard, &["text/plain"], usize::MAX),
+                        None => wait_for_utf8_targets(
+                            clipboard,
+                            &["text/plain", "text/plain;charset=utf-8"],
+                            usize::MAX,
+                        ),
                     });
                 let html = match targets.as_deref() {
                     Some(targets) => choose_best_target(targets, &["text/html"])
                         .and_then(|t| wait_for_utf8_targets(clipboard, &[t], MAX_RICH_TEXT_BYTES)),
                     // If target enumeration isn't available, fall back to the canonical target.
-                    None => wait_for_utf8_targets(clipboard, &["text/html"], MAX_RICH_TEXT_BYTES),
+                    None => wait_for_utf8_targets(
+                        clipboard,
+                        &["text/html", "text/html;charset=utf-8"],
+                        MAX_RICH_TEXT_BYTES,
+                    ),
                 };
                 let rtf = match targets.as_deref() {
                     Some(targets) => choose_best_target(
@@ -214,7 +222,12 @@ mod gtk_backend {
                     .and_then(|t| wait_for_utf8_targets(clipboard, &[t], MAX_RICH_TEXT_BYTES)),
                     None => wait_for_utf8_targets(
                         clipboard,
-                        &["text/rtf", "application/rtf", "application/x-rtf"],
+                        &[
+                            "text/rtf",
+                            "text/rtf;charset=utf-8",
+                            "application/rtf",
+                            "application/x-rtf",
+                        ],
                         MAX_RICH_TEXT_BYTES,
                     ),
                 };
