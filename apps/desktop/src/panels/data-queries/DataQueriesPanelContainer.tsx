@@ -295,7 +295,8 @@ export function DataQueriesPanelContainer(props: Props) {
             dest.start &&
             typeof dest.start === "object" &&
             typeof dest.start.row === "number" &&
-            typeof dest.start.col === "number";
+            typeof dest.start.col === "number" &&
+            typeof dest.includeHeader === "boolean";
           // If there's no destination, the refresh finishes at "completed" (no apply phase),
           // so clear the in-flight handle to allow subsequent manual refreshes.
           if (!hasSheetDestination) {
