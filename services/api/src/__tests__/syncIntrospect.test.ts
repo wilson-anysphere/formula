@@ -569,4 +569,90 @@ describe("internal sync token introspection", () => {
     },
     15_000
   );
-});
+
+  it(
+    "rejects introspection for session-issued tokens when org membership is removed",
+    async () => {
+      const aliceRegister = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "alice-introspect-org-member@example.com",
+          password: "password1234",
+          name: "Alice Org Member",
+          orgName: "Acme Org Member"
+        }
+      });
+      expect(aliceRegister.statusCode).toBe(200);
+      const aliceCookie = extractCookie(aliceRegister.headers["set-cookie"]);
+      const orgId = (aliceRegister.json() as any).organization.id as string;
+
+      const bobRegister = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "bob-introspect-org-member@example.com",
+          password: "password1234",
+          name: "Bob Org Member"
+        }
+      });
+      expect(bobRegister.statusCode).toBe(200);
+      const bobId = (bobRegister.json() as any).user.id as string;
+      const bobCookie = extractCookie(bobRegister.headers["set-cookie"]);
+
+      const createDoc = await app.inject({
+        method: "POST",
+        url: "/docs",
+        headers: { cookie: aliceCookie },
+        payload: { orgId, title: "Org member removal doc" }
+      });
+      expect(createDoc.statusCode).toBe(200);
+      const docId = (createDoc.json() as any).document.id as string;
+
+      const inviteBob = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/invite`,
+        headers: { cookie: aliceCookie },
+        payload: { email: "bob-introspect-org-member@example.com", role: "editor" }
+      });
+      expect(inviteBob.statusCode).toBe(200);
+
+      const syncTokenRes = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/sync-token`,
+        headers: { cookie: bobCookie }
+      });
+      expect(syncTokenRes.statusCode).toBe(200);
+      const syncToken = (syncTokenRes.json() as any).token as string;
+
+      const introspectOk = await app.inject({
+        method: "POST",
+        url: "/internal/sync/introspect",
+        headers: { "x-internal-admin-token": config.internalAdminToken! },
+        payload: { token: syncToken, docId }
+      });
+      expect(introspectOk.statusCode).toBe(200);
+      expect(introspectOk.json()).toMatchObject({ ok: true, active: true, userId: bobId, orgId });
+
+      await db.query("DELETE FROM org_members WHERE org_id = $1 AND user_id = $2", [orgId, bobId]);
+
+      const introspectRemoved = await app.inject({
+        method: "POST",
+        url: "/internal/sync/introspect",
+        headers: { "x-internal-admin-token": config.internalAdminToken! },
+        payload: { token: syncToken, docId }
+      });
+      expect(introspectRemoved.statusCode).toBe(200);
+      expect(introspectRemoved.json()).toMatchObject({
+        ok: false,
+        active: false,
+        error: "forbidden",
+        reason: "not_org_member",
+        userId: bobId,
+        orgId,
+        role: "editor"
+      });
+    },
+    15_000
+  );
+}); 

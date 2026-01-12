@@ -62,13 +62,16 @@ async function getDocMembership(
   orgId: string;
   deletedAt: Date | null;
   role: DocumentRole | null;
+  orgMemberRole: string | null;
   ipAllowlist: unknown;
 }> {
   const result = await request.server.db.query(
     `
-      SELECT d.org_id, d.deleted_at, dm.role, os.ip_allowlist
+      SELECT d.org_id, d.deleted_at, dm.role, om.role AS org_member_role, os.ip_allowlist
       FROM documents d
       LEFT JOIN org_settings os ON os.org_id = d.org_id
+      LEFT JOIN org_members om
+        ON om.org_id = d.org_id AND om.user_id = $2
       LEFT JOIN document_members dm
         ON dm.document_id = d.id AND dm.user_id = $2
       WHERE d.id = $1
@@ -78,11 +81,23 @@ async function getDocMembership(
   );
 
   if (result.rowCount !== 1) {
-    return { orgId: "", deletedAt: null, role: null, ipAllowlist: null };
+    return { orgId: "", deletedAt: null, role: null, orgMemberRole: null, ipAllowlist: null };
   }
 
-  const row = result.rows[0] as { org_id: string; deleted_at: Date | null; role: DocumentRole | null; ip_allowlist: unknown };
-  return { orgId: row.org_id, deletedAt: row.deleted_at, role: row.role, ipAllowlist: row.ip_allowlist };
+  const row = result.rows[0] as {
+    org_id: string;
+    deleted_at: Date | null;
+    role: DocumentRole | null;
+    org_member_role: string | null;
+    ip_allowlist: unknown;
+  };
+  return {
+    orgId: row.org_id,
+    deletedAt: row.deleted_at,
+    role: row.role,
+    orgMemberRole: row.org_member_role,
+    ipAllowlist: row.ip_allowlist
+  };
 }
 
 async function requireDocRole(
@@ -112,6 +127,11 @@ async function requireDocRole(
       membership.ipAllowlist
     ))
   ) {
+    return null;
+  }
+
+  if (!membership.orgMemberRole) {
+    reply.code(403).send({ error: "forbidden" });
     return null;
   }
 

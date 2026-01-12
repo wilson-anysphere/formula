@@ -193,9 +193,17 @@ export async function introspectSyncToken(
 
   const docRes = await db.query(
     `
-      SELECT d.org_id, d.deleted_at, dm.role AS member_role, os.ip_allowlist, os.require_mfa
+      SELECT
+        d.org_id,
+        d.deleted_at,
+        dm.role AS member_role,
+        os.ip_allowlist,
+        os.require_mfa,
+        om.role AS org_member_role
       FROM documents d
       JOIN org_settings os ON os.org_id = d.org_id
+      LEFT JOIN org_members om
+        ON om.org_id = d.org_id AND om.user_id = $2
       LEFT JOIN document_members dm
         ON dm.document_id = d.id AND dm.user_id = $2
       WHERE d.id = $1
@@ -214,6 +222,7 @@ export async function introspectSyncToken(
     member_role: unknown;
     ip_allowlist: unknown;
     require_mfa: unknown;
+    org_member_role: unknown;
   };
 
   if (row.org_id !== orgId) {
@@ -233,6 +242,11 @@ export async function introspectSyncToken(
       role,
       sessionId: claims.sessionId
     };
+  }
+
+  const isOrgMember = typeof row.org_member_role === "string" && row.org_member_role.length > 0;
+  if (!isOrgMember) {
+    return { active: false, reason: "not_org_member", userId, orgId, role };
   }
 
   const memberRoleParsed = RoleSchema.safeParse(row.member_role);
