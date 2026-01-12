@@ -614,6 +614,9 @@ def main() -> int:
         lines.append(f"* Mismatches: {summary.get('mismatches')}")
         lines.append(f"* Mismatch rate: {summary.get('mismatchRate')}")
         lines.append(f"* Max mismatch rate: {summary.get('maxMismatchRate')}")
+        cases_sha = summary.get("casesSha256")
+        if isinstance(cases_sha, str) and cases_sha:
+            lines.append(f"* casesSha256: `{cases_sha}`")
         lines.append(f"* absTol: {summary.get('absTol')}")
         lines.append(f"* relTol: {summary.get('relTol')}")
         tag_abs_tol = summary.get("tagAbsTol")
@@ -646,6 +649,19 @@ def main() -> int:
         else:
             lines.append("* Max cases: all")
         lines.append("")
+
+        reason_counts = summary.get("reasonCounts")
+        if isinstance(reason_counts, dict) and reason_counts:
+            lines.append("## Reason counts")
+            lines.append("")
+            lines.append("| Reason | Count |")
+            lines.append("| --- | ---: |")
+            for reason, count in sorted(
+                ((k, v) for k, v in reason_counts.items() if isinstance(k, str) and isinstance(v, int)),
+                key=lambda kv: (-kv[1], kv[0]),
+            ):
+                lines.append(f"| `{reason}` | {count} |")
+            lines.append("")
 
         tag_summary = summary.get("tagSummary")
         if isinstance(tag_summary, list) and tag_summary:
