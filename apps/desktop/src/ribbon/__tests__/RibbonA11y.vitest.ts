@@ -43,6 +43,31 @@ function getActivePanel(container: HTMLElement): HTMLElement {
 }
 
 describe("Ribbon a11y + keyboard navigation", () => {
+  it("wires tabs to tabpanels via aria-controls / aria-labelledby", () => {
+    const { container, root } = renderRibbon();
+
+    const tablist = container.querySelector('[role="tablist"]');
+    expect(tablist).toBeInstanceOf(HTMLElement);
+
+    const tabs = getTabs(container);
+    expect(tabs.length).toBeGreaterThan(0);
+
+    for (const tab of tabs) {
+      const controls = tab.getAttribute("aria-controls");
+      expect(controls).toBeTruthy();
+
+      const panel = container.querySelector(`#${controls}`) as HTMLElement | null;
+      expect(panel).toBeInstanceOf(HTMLElement);
+      if (!panel) continue;
+
+      expect(panel.getAttribute("role")).toBe("tabpanel");
+      expect(panel.getAttribute("aria-labelledby")).toBe(tab.id);
+      expect(panel.tabIndex).toBe(-1);
+    }
+
+    act(() => root.unmount());
+  });
+
   it("uses roving tabindex for tabs", () => {
     const { container, root } = renderRibbon();
 
