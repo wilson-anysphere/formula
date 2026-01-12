@@ -37,6 +37,7 @@ pub mod drawingml;
 pub mod drawings;
 pub mod hyperlinks;
 pub mod merge_cells;
+pub mod metadata;
 pub mod minimal;
 pub mod outline;
 pub mod theme;
