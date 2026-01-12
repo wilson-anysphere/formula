@@ -849,11 +849,11 @@ export class SpreadsheetApp {
     void this.initWasmEngine();
 
     this.gridCanvas = document.createElement("canvas");
-    this.gridCanvas.className = "grid-canvas";
+    this.gridCanvas.className = "grid-canvas grid-canvas--base";
     this.gridCanvas.setAttribute("aria-hidden", "true");
 
     this.chartLayer = document.createElement("div");
-    this.chartLayer.className = "chart-layer";
+    this.chartLayer.className = "chart-layer chart-layer--overlay";
     this.chartLayer.setAttribute("aria-hidden", "true");
     if (this.gridMode === "shared") {
       // Shared-grid overlay stacking is expressed via CSS classes (see charts-overlay.css).
@@ -861,20 +861,20 @@ export class SpreadsheetApp {
     }
 
     this.referenceCanvas = document.createElement("canvas");
-    this.referenceCanvas.className = "grid-canvas";
+    this.referenceCanvas.className = "grid-canvas grid-canvas--content";
     this.referenceCanvas.setAttribute("aria-hidden", "true");
     this.auditingCanvas = document.createElement("canvas");
-    this.auditingCanvas.className = "grid-canvas";
+    this.auditingCanvas.className = "grid-canvas grid-canvas--auditing";
     this.auditingCanvas.setAttribute("aria-hidden", "true");
     if (collabEnabled && this.gridMode !== "shared") {
       // Remote presence overlays should render above auditing highlights but below
       // the local selection layer.
       this.presenceCanvas = document.createElement("canvas");
-      this.presenceCanvas.className = "grid-canvas";
+      this.presenceCanvas.className = "grid-canvas grid-canvas--presence";
       this.presenceCanvas.setAttribute("aria-hidden", "true");
     }
     this.selectionCanvas = document.createElement("canvas");
-    this.selectionCanvas.className = "grid-canvas";
+    this.selectionCanvas.className = "grid-canvas grid-canvas--selection";
     this.selectionCanvas.setAttribute("aria-hidden", "true");
     if (this.gridMode === "shared") {
       // Shared-grid overlay stacking is expressed via CSS classes (see charts-overlay.css).

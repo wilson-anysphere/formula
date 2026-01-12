@@ -105,15 +105,15 @@ export class SecondaryGridView {
     this.container.replaceChildren();
 
     const gridCanvas = document.createElement("canvas");
-    gridCanvas.className = "grid-canvas";
+    gridCanvas.className = "grid-canvas grid-canvas--base";
     gridCanvas.setAttribute("aria-hidden", "true");
 
     const contentCanvas = document.createElement("canvas");
-    contentCanvas.className = "grid-canvas";
+    contentCanvas.className = "grid-canvas grid-canvas--content";
     contentCanvas.setAttribute("aria-hidden", "true");
 
     const selectionCanvas = document.createElement("canvas");
-    selectionCanvas.className = "grid-canvas";
+    selectionCanvas.className = "grid-canvas grid-canvas--selection";
     selectionCanvas.setAttribute("aria-hidden", "true");
 
     this.container.appendChild(gridCanvas);
