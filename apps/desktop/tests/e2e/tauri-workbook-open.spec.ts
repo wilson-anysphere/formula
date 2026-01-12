@@ -474,6 +474,7 @@ test.describe("tauri workbook integration", () => {
     await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
     const menu = page.getByTestId("sheet-tab-context-menu");
     await expect(menu).toBeVisible();
+    // "Unhide…" also contains "Hide" in its accessible name; require an exact match.
     await menu.getByRole("button", { name: "Hide", exact: true }).click();
 
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveCount(0);
@@ -510,10 +511,19 @@ test.describe("tauri workbook integration", () => {
       .toBe(1);
 
     // Set tab color for Sheet1.
-    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
+    // Open via synthetic contextmenu event and use arrow navigation to avoid pointer-driven
+    // scrolling that can close the menu (ContextMenu closes on window scroll/wheel events).
+    await page
+      .getByTestId("sheet-tab-Sheet1")
+      .dispatchEvent("contextmenu", { button: 2, clientX: 0, clientY: 0, bubbles: true, cancelable: true });
     await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Tab Color", exact: true }).click();
-    await menu.getByRole("button", { name: "Red" }).click();
+    await page.keyboard.press("ArrowDown"); // Rename -> Hide
+    await page.keyboard.press("ArrowDown"); // Hide -> Tab Color
+    await page.keyboard.press("ArrowRight"); // Open submenu.
+    const submenu = menu.locator(".context-menu__submenu");
+    await expect(submenu).toBeVisible();
+    await page.keyboard.press("ArrowDown"); // No Color -> Red
+    await page.keyboard.press("Enter");
 
     await expect
       .poll(() =>
