@@ -216,11 +216,20 @@ Frontend event contract (emitted by `apps/desktop/src-tauri/src/updater.rs`):
 - `update-available` – payload: `{ source, version, body? }`
 - `update-not-available` – payload: `{ source }`
 - `update-check-error` – payload: `{ source, message }`
+- `update-download-started` – payload: `{ source, version }` (best-effort background download)
+- `update-download-progress` – payload: `{ source, version, chunkLength, downloaded, total?, percent? }`
+- `update-downloaded` – payload: `{ source, version }`
+- `update-download-error` – payload: `{ source, version, message }`
 
 The Rust host guards updater checks with a single in-flight flag so **only one network check runs at a
 time**. If a check is already running, additional **manual** triggers emit
 `update-check-already-running` so the UI can show “Already checking…”. Additional **startup** triggers
 are ignored silently.
+
+When an update is found, the backend also starts a **best-effort background download** so the user can
+restart/apply without waiting for a second download. The frontend consumes `update-downloaded` by
+showing a lightweight “Update ready to install” toast and uses the `install_downloaded_update` command
+as part of the restart-to-install flow (falling back to the updater plugin API if needed).
 
 Release CI note: when `plugins.updater.active=true`, tagged releases will fail if `pubkey`/`endpoints`
 are still placeholders. You can validate locally with `node scripts/check-updater-config.mjs`.
@@ -512,6 +521,7 @@ The command list is large; below are the “core” ones most contributors will 
   - VBA event hooks: `fire_workbook_open`, `fire_workbook_before_close`, `fire_worksheet_change`, `fire_selection_change`
 - **Updates**
   - `check_for_updates` (triggers `updater::spawn_update_check(...)`; used by the command palette / manual update checks)
+  - `install_downloaded_update` (installs the already-downloaded update bytes from the backend’s background download; used by the updater restart flow)
 - **Lifecycle**
   - `quit_app` (hard-exits the process; used by the tray/menu quit flow)
   - `restart_app` (Tauri-managed restart/exit; intended for updater install flows so Tauri/plugins can shut down cleanly)
@@ -559,6 +569,10 @@ Events emitted by the Rust host (see `main.rs`, `menu.rs`, `tray.rs`, `updater.r
   - `update-not-available` (payload: `{ source }`)
   - `update-check-error` (payload: `{ source, message }`)
   - `update-available` (payload: `{ source, version, body }`)
+  - `update-download-started` (payload: `{ source, version }`)
+  - `update-download-progress` (payload: `{ source, version, chunkLength, downloaded, total?, percent? }`)
+  - `update-downloaded` (payload: `{ source, version }`)
+  - `update-download-error` (payload: `{ source, version, message }`)
 
 Updater events are consumed by the desktop frontend in `apps/desktop/src/tauri/updaterUi.ts` (installed
 from `apps/desktop/src/main.ts`).
@@ -568,7 +582,9 @@ Updater UX responsibilities:
 - **Manual checks** (`source: "manual"`): show in-app feedback (toasts + focus the window), and show the
   update dialog when an update is available.
 - **Startup checks** (`source: "startup"`): show a **system notification only** when an update is available
-  (no in-app dialog/toasts).
+  (no in-app dialog). The backend also starts a best-effort background download; once it completes
+  (`update-downloaded`), the frontend shows an in-app “Update ready to install” toast so the user can
+  restart/apply when convenient.
   - If the user triggers "Check for Updates" while a startup check is already in-flight, the backend may
     later emit a completion event with `source: "startup"`. The frontend treats that result as manual UX
     so the user still sees the expected dialog/toasts.
