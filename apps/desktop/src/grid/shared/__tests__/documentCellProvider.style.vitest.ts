@@ -174,6 +174,36 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     expect(style.wrapMode).toBeUndefined();
   });
 
+  it("allows UI patches to clear an imported snake_case alignment.horizontal_alignment", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    doc.setCellValue(sheetId, "A1", "Aligned");
+    // Imported formula-model style (snake_case).
+    doc.setRangeFormat(sheetId, "A1", { alignment: { horizontal_alignment: "right" }, font: { bold: true } });
+    // User clears alignment back to "General" (null in UI patch representation).
+    doc.setRangeFormat(sheetId, "A1", { alignment: { horizontal: null } });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell).not.toBeNull();
+    // Bold is preserved...
+    expect((cell as any).style?.fontWeight).toBe("700");
+    // ...but the explicit null alignment should clear the imported horizontal_alignment.
+    expect((cell as any).style?.textAlign).toBeUndefined();
+    expect((cell as any).style?.horizontalAlign).toBeUndefined();
+  });
+
   it("maps a variety of Excel border styles into grid border primitives", () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";

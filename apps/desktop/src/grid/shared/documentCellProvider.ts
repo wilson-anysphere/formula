@@ -424,16 +424,23 @@ export class DocumentCellProvider implements CellProvider {
     if (typeof rawNumberFormat === "string" && rawNumberFormat.trim() !== "") out.numberFormat = rawNumberFormat;
 
     const alignment = isPlainObject(docStyle.alignment) ? docStyle.alignment : null;
-    const horizontalRaw =
-      alignment?.horizontal ??
-      (alignment as any)?.horizontal_align ??
-      (alignment as any)?.horizontal_alignment ??
-      (alignment as any)?.horizontalAlign ??
-      (alignment as any)?.horizontalAlignment ??
-      (docStyle as any).horizontalAlign ??
-      (docStyle as any).horizontal_align ??
-      (docStyle as any).horizontalAlignment ??
-      (docStyle as any).horizontal_alignment;
+    // Horizontal alignment may exist in several shapes depending on provenance:
+    // - UI patches: `alignment.horizontal`
+    // - formula-model/XLSX import: `alignment.horizontal_alignment` / `horizontal_align`
+    // - legacy/clipboard-ish flat keys: `horizontal_align` etc.
+    //
+    // When the UI explicitly sets `alignment.horizontal: null` to clear the imported alignment,
+    // treat that as authoritative and do not fall back to snake_case/flat keys.
+    let horizontalRaw: unknown = undefined;
+    if (hasOwn(alignment, "horizontal")) horizontalRaw = (alignment as any).horizontal;
+    else if (hasOwn(alignment, "horizontal_align")) horizontalRaw = (alignment as any).horizontal_align;
+    else if (hasOwn(alignment, "horizontal_alignment")) horizontalRaw = (alignment as any).horizontal_alignment;
+    else if (hasOwn(alignment, "horizontalAlign")) horizontalRaw = (alignment as any).horizontalAlign;
+    else if (hasOwn(alignment, "horizontalAlignment")) horizontalRaw = (alignment as any).horizontalAlignment;
+    else if (hasOwn(docStyle, "horizontalAlign")) horizontalRaw = (docStyle as any).horizontalAlign;
+    else if (hasOwn(docStyle, "horizontal_align")) horizontalRaw = (docStyle as any).horizontal_align;
+    else if (hasOwn(docStyle, "horizontalAlignment")) horizontalRaw = (docStyle as any).horizontalAlignment;
+    else if (hasOwn(docStyle, "horizontal_alignment")) horizontalRaw = (docStyle as any).horizontal_alignment;
 
     const horizontal = typeof horizontalRaw === "string" ? horizontalRaw.toLowerCase() : null;
     if (horizontal === "center") out.textAlign = "center";
