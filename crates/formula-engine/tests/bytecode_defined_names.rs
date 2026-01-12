@@ -177,3 +177,28 @@ fn bytecode_inlines_defined_name_constants_inside_array_literals() {
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
 }
+
+#[test]
+fn bytecode_inlines_defined_name_constants_inside_concat_binary_op() {
+    let mut engine = Engine::new();
+
+    engine
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(1.0)),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=X&\"a\"")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("1a".to_string())
+    );
+}

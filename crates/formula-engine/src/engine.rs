@@ -6272,7 +6272,7 @@ fn rewrite_defined_name_constants_for_bytecode(
             crate::Expr::Binary(b) => {
                 if matches!(
                     b.op,
-                    crate::BinaryOp::Union | crate::BinaryOp::Intersect | crate::BinaryOp::Concat
+                    crate::BinaryOp::Union | crate::BinaryOp::Intersect
                 ) {
                     return None;
                 }
