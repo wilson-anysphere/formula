@@ -18,8 +18,10 @@ use crate::{
 /// - For legacy VBA signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`), Office
 ///   stores a 16-byte **MD5** digest for binding even when `DigestInfo.digestAlgorithm` indicates
 ///   SHA-256 (MS-OSHARED §4.3).
-/// - For v3 signature streams (`\x05DigitalSignatureExt`), binding uses MS-OVBA `ContentsHashV3`:
-///   32-byte `SHA-256(ProjectNormalizedData)`.
+/// - For v3 signature streams (`\x05DigitalSignatureExt`), the signed binding digest bytes are
+///   commonly 32-byte SHA-256, but MS-OVBA v3 is defined in terms of hashing
+///   `ContentBuffer = V3ContentNormalizedData || ProjectNormalizedData` with a generic hash function
+///   (SHA-256 is common in the wild, but not a spec-level constant for all producers).
 ///
 /// https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,7 +30,8 @@ pub enum DigestAlg {
     Md5,
     /// SHA-1 (supported for debugging/tests; not expected for Office-produced VBA signature binding).
     Sha1,
-    /// SHA-256 (used by `\x05DigitalSignatureExt` / `ContentsHashV3` binding digests).
+    /// SHA-256 (commonly observed for `\x05DigitalSignatureExt` binding digests; used by
+    /// [`crate::contents_hash_v3`]).
     Sha256,
 }
 
@@ -107,8 +110,11 @@ pub fn compute_vba_project_digest(
 /// - `FormsNormalizedData`
 ///
 /// The transcript is hashed using the requested `alg` (MD5/SHA-1/SHA-256).
-/// Spec-correct `DigitalSignatureExt` binding uses `ContentsHashV3 = SHA-256(ProjectNormalizedData)`;
-/// other algorithms are useful for debugging/out-of-spec comparisons.
+///
+/// Note: real-world `DigitalSignatureExt` signatures most commonly use a 32-byte SHA-256 binding
+/// digest, but MS-OVBA v3 is defined in terms of hashing
+/// `ContentBuffer = V3ContentNormalizedData || ProjectNormalizedData` with a generic hash function
+/// and producers may vary.
 pub fn compute_vba_project_digest_v3(
     vba_project_bin: &[u8],
     alg: DigestAlg,

@@ -62,8 +62,10 @@ fn run() -> Result<(), String> {
     // - For legacy signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`), Office
     //   uses a 16-byte MD5 binding digest per MS-OSHARED §4.3 even when
     //   `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256.
-    // - For the v3 `\x05DigitalSignatureExt` stream, binding uses MS-OVBA `ContentsHashV3`:
-    //   `ContentsHashV3 = SHA-256(ProjectNormalizedData)` (32 bytes).
+    // - For the v3 `\x05DigitalSignatureExt` stream, MS-OVBA §2.4.2.7 defines the v3 content-hash
+    //   input as:
+    //   `ContentBuffer = V3ContentNormalizedData || ProjectNormalizedData`
+    //   and hashes it with a generic `Hash(ContentBuffer)` function (SHA-256 is common in the wild).
     //
     // This tool is a debugging helper that prints MD5/SHA-256 digests over the repo's
     // v3 `project_normalized_data_v3_transcript` transcript. SHA-256 output corresponds to

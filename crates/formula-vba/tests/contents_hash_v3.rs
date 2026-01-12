@@ -355,15 +355,16 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
 
     // ---- Expected normalized transcript ----
     //
-    // This test targets `contents_hash_v3`, which computes `ContentsHashV3` as:
+    // This test targets `contents_hash_v3`, which in this crate computes a 32-byte SHA-256 digest
+    // over the `project_normalized_data_v3_transcript` transcript.
     //
-    // `ContentsHashV3 = SHA-256(ProjectNormalizedData)`
+    // Note: MS-OVBA v3 defines `ContentBuffer = V3ContentNormalizedData || ProjectNormalizedData`
+    // and hashes it with a generic `Hash(ContentBuffer)` function. `project_normalized_data_v3_transcript`
+    // is a library-specific transcript:
     //
-    // where `ProjectNormalizedData` is the transcript returned by `project_normalized_data_v3_transcript`:
+    // `(filtered PROJECT stream lines) || V3ContentNormalizedData || FormsNormalizedData`.
     //
-    // `ProjectNormalizedData = (filtered PROJECT stream properties) || V3ContentNormalizedData || FormsNormalizedData`
-    //
-    // See `docs/vba-digital-signatures.md` for background and transcript details.
+    // See `docs/vba-digital-signatures.md` for background and spec vs implementation notes.
     //
     // V3ContentNormalizedData includes (for procedural modules) `MODULETYPE.Id || MODULETYPE.Reserved`
     // followed by LF-normalized module source (Attribute filtering per MS-OVBA §2.4.2.5), and the
@@ -398,7 +399,7 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
     expected.extend(std::iter::repeat_n(0u8, 1023 - designer_bytes.len()));
 
     let actual_project_normalized = project_normalized_data_v3_transcript(&vba_project_bin)
-        .expect("ProjectNormalizedData v3");
+        .expect("project_normalized_data_v3_transcript");
     assert_eq!(
         actual_project_normalized, expected,
         "expected project_normalized_data_v3_transcript bytes to match expected construction"

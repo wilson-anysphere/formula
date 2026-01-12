@@ -2332,16 +2332,19 @@ fn append_v3_module(
     Ok(())
 }
 
-/// Build the v3 `ProjectNormalizedData` transcript used for `DigitalSignatureExt` binding.
+/// Build `formula-vba`'s current v3 signature-binding transcript for a `vbaProject.bin`.
 ///
-/// Transcript:
+/// Important: despite the historical naming, this is **not** MS-OVBA §2.4.2.6 `ProjectNormalizedData`
+/// (`NormalizeProjectStream`), and the concatenation order does not match MS-OVBA §2.4.2.7
+/// (`ContentBuffer = V3ContentNormalizedData || ProjectNormalizedData`).
 ///
-/// `ProjectNormalizedData = (filtered PROJECT stream properties; [Workspace] ignored)
-///                         || V3ContentNormalizedData || FormsNormalizedData`
+/// Current `formula-vba` transcript (best-effort):
+/// `(filtered PROJECT stream lines) || V3ContentNormalizedData || FormsNormalizedData`.
 ///
-/// This is hashed as `ContentsHashV3 = SHA-256(ProjectNormalizedData)` by [`contents_hash_v3`].
+/// This is hashed as a 32-byte SHA-256 by [`contents_hash_v3`] (common `DigitalSignatureExt`
+/// behavior).
 ///
-/// Spec reference: MS-OVBA §2.4.2.6/§2.4.2.7.
+/// Spec reference: MS-OVBA §2.4.2 ("Contents Hash" version 3).
 pub fn project_normalized_data_v3_transcript(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
     // Normalize/filter the textual `PROJECT` stream for v3 binding. MS-OVBA v3 binds the signature
     // not just to module content, but also to a filtered subset of the `PROJECT` stream properties
@@ -2453,7 +2456,9 @@ fn is_excluded_key(key: &[u8]) -> bool {
 //
 /// Compute a SHA-256 digest over [`project_normalized_data_v3_transcript`]'s transcript.
 ///
-/// This returns MS-OVBA v3 `ContentsHashV3` (the SHA-256 digest of v3 `ProjectNormalizedData`).
+/// This is a convenience/helper API: real-world `\x05DigitalSignatureExt` signatures most commonly
+/// use a 32-byte SHA-256 binding digest, but MS-OVBA v3 is defined in terms of hashing a
+/// `ContentBuffer` (`V3ContentNormalizedData || ProjectNormalizedData`) and producers may vary.
 ///
 /// For other algorithms (debugging/out-of-spec), callers can use
 /// [`crate::compute_vba_project_digest_v3`].

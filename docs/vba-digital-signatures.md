@@ -26,9 +26,12 @@ API notes:
       `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256.
       - Practical implication: do not select the v1/v2 binding algorithm from the OID; always compute
         **MD5** over the correct MS-OVBA transcript and compare it to the 16 digest bytes.
-    - For `DigitalSignatureExt` (MS-OVBA v3), binding uses `ContentsHashV3` (32-byte
-      `SHA-256(ProjectNormalizedData)`). Some producers emit inconsistent OIDs, so verifiers should
-      compare digest bytes to the computed `ContentsHashV3` rather than trusting the OID.
+    - For `DigitalSignatureExt` (MS-OVBA v3), binding uses the MS-OVBA v3 content-hash transcript
+      (`ContentBuffer = V3ContentNormalizedData || ProjectNormalizedData`, MS-OVBA §2.4.2.7). In the
+      wild, the signed digest bytes are commonly 32-byte SHA-256. Some producers emit inconsistent
+      digest algorithm OIDs, so verifiers should compare digest bytes rather than trusting the OID.
+      `formula-vba` currently compares the signed digest bytes to `contents_hash_v3` (a SHA-256 helper
+      over `project_normalized_data_v3_transcript`; see below).
 - PKCS#7/CMS verification is *internal* signature verification only: by default we do **not**
   validate the signer certificate chain (OpenSSL `NOVERIFY`). If you need opt-in “trusted publisher”
   evaluation, use `formula_vba::verify_vba_digital_signature_with_trust` with an explicit root
@@ -157,9 +160,10 @@ specific VBA project.
 
 - For legacy v1/v2 streams (`DigitalSignature` / `DigitalSignatureEx`), `digest_bytes` are always a
   16-byte MD5 per MS-OSHARED §4.3, so the OID is informational only for binding.
-- For v3 streams (`DigitalSignatureExt`), binding uses `ContentsHashV3` (32-byte
-  `SHA-256(ProjectNormalizedData)`). Some producers emit inconsistent digest algorithm OIDs, so
-  verifiers should compare digest bytes rather than trusting the OID.
+- For v3 streams (`DigitalSignatureExt`), binding uses the MS-OVBA v3 content-hash transcript
+  (`ContentBuffer = V3ContentNormalizedData || ProjectNormalizedData`, MS-OVBA §2.4.2.7). The signed
+  digest bytes are commonly 32-byte SHA-256, but producers can vary. Some producers emit inconsistent
+  digest algorithm OIDs, so verifiers should compare digest bytes rather than trusting the OID.
 
 ### Relevant ASN.1 shapes (high level)
 
@@ -225,7 +229,9 @@ Practical implications:
 
 - Legacy `\x05DigitalSignature` / `\x05DigitalSignatureEx`: **always a 16-byte MD5** (the “VBA project
   source hash”) per MS-OSHARED §4.3, even when `DigestInfo.digestAlgorithm.algorithm` is SHA-256.
-- V3 `\x05DigitalSignatureExt`: **`ContentsHashV3`** (`SHA-256(ProjectNormalizedData)`, 32 bytes).
+- V3 `\x05DigitalSignatureExt`: the MS-OVBA v3 content hash (MS-OVBA §2.4.2.7) computed over:
+  `ContentBuffer = V3ContentNormalizedData || ProjectNormalizedData`.
+  In the wild, digest bytes are commonly 32-byte SHA-256.
 
 The `DigestInfo` *algorithm OID* is not authoritative for binding:
 
@@ -254,8 +260,9 @@ At a high level:
 - **v1 / `DigitalSignature`**: `ContentHash = MD5(ContentNormalizedData)` (MS-OVBA §2.4.2.3)
 - **v2 / `DigitalSignatureEx`**: `AgileContentHash = MD5(ContentNormalizedData || FormsNormalizedData)`
   (MS-OVBA §2.4.2.4)
-- **v3 / `DigitalSignatureExt`**: `ContentsHashV3 = SHA-256(ProjectNormalizedData)` (MS-OVBA §2.4.2.7)
-  - where `ProjectNormalizedData = (filtered PROJECT stream properties) || V3ContentNormalizedData || FormsNormalizedData`
+- **v3 / `DigitalSignatureExt`**: `ContentBuffer = V3ContentNormalizedData || ProjectNormalizedData`;
+  `V3ContentHash = Hash(ContentBuffer)` (MS-OVBA §2.4.2.7)
+  - `Hash` is generic in the spec (SHA-256 is common in the wild, but not a spec-guaranteed constant).
 
 Reference record handling note:
 
@@ -293,46 +300,59 @@ module stream (`VBA/<ModuleStreamName>`). Key points from the MS-OVBA §2.4.2.5 
 
 #### ProjectNormalizedData (MS-OVBA §2.4.2.6, `NormalizeProjectStream`)
 
-`ProjectNormalizedData` (MS-OVBA §2.4.2.6) incorporates a normalized/filtered subset of the textual
-`PROJECT` stream properties and explicitly ignores the optional `[Workspace]` / ProjectWorkspace
-section so machine-local state does not affect hashing/signature binding.
+`ProjectNormalizedData` (MS-OVBA §2.4.2.6) is derived from the textual `PROJECT` stream (not from
+`VBA/dir` records).
 
-In this repo, v3 `PROJECT` stream filtering is implemented by
-`normalize_project_stream_properties_v3` (`crates/formula-vba/src/contents_hash.rs`) as:
+Key points from the MS-OVBA §2.4.2.6 pseudocode (`NormalizeProjectStream`):
 
-- Split on NWLN (CRLF or LFCR; tolerate lone CR/LF)
-- Trim ASCII whitespace from each line and strip a leading UTF-8 BOM if present
-- Ignore the `[Host Extender Info]` header line, but include its `key=value` lines
-- Stop at the first other bracketed section header (this ignores `[Workspace]` and any later sections)
-- For each remaining non-empty line containing `=`, parse `key` as the trimmed left-hand side
-  - Exclude keys: `ID`, `Document`, `DocModule`, `CMG`, `DPB`, `GC`, `ProtectionState`, `Password`,
-    `VisibilityState` (case-insensitive)
-  - Emit the full trimmed `key=value` line bytes and terminate the line with `CRLF`
+- The `PROJECT` stream is line-oriented and split on MS-OVBA `NWLN` (CRLF or LFCR; some writers may
+  emit lone CR or lone LF).
+- `ProjectProperties` is the initial block of `key=value` lines before the first `[Section]` header.
+  For each property:
+  - Exclude properties: `ID`, `Document`, `CMG`, `DPB`, `GC` (case-insensitive).
+  - Strip surrounding quotes from the value.
+  - Append property **name bytes then value bytes** (no `=` and no newline).
+  - If the property is `BaseClass=...` (a designer module identifier), first append
+    `NormalizeDesignerStorage(BaseClass)` *before* appending the `BaseClass` name/value token bytes.
+- The optional `[Host Extender Info]` section contributes by appending:
+  - the literal bytes `Host Extender Info`, and
+  - each `HostExtenderRef=...` line **without** `NWLN` terminators.
+- The optional `ProjectWorkspace` / `[Workspace]` section is explicitly ignored so machine-local
+  state does not affect hashing/signature binding.
 
-#### ContentsHashV3 (MS-OVBA §2.4.2.7)
+#### V3 Content Hash / v3 ContentBuffer (MS-OVBA §2.4.2.7)
 
-MS-OVBA v3 defines the binding digest (`ContentsHashV3`) as SHA-256 over v3 `ProjectNormalizedData`:
+MS-OVBA v3 defines the content-hash input as:
 
 ```text
-ProjectNormalizedData = (filtered PROJECT stream properties; `[Workspace]` ignored) || V3ContentNormalizedData || FormsNormalizedData
-ContentsHashV3        = SHA-256(ProjectNormalizedData)
+ContentBuffer = V3ContentNormalizedData || ProjectNormalizedData
+V3ContentHash = Hash(ContentBuffer)
 ```
+
+Where `Hash` is the digest function used for the signature binding digest (SHA-256 is common in the
+wild for `DigitalSignatureExt`, but not a spec-guaranteed constant).
 
 ### `formula-vba` implementation notes (v3)
 
-In this repo:
+`formula-vba`’s v3 signature binding support is currently **best-effort**:
 
-- `formula_vba::v3_content_normalized_data` builds `V3ContentNormalizedData`
-  (`crates/formula-vba/src/contents_hash.rs`)
-- `formula_vba::project_normalized_data_v3_transcript` builds v3 `ProjectNormalizedData`
-  (`crates/formula-vba/src/contents_hash.rs`)
-- `formula_vba::contents_hash_v3()` computes `ContentsHashV3 = SHA-256(ProjectNormalizedData)` and is
-  used for `\x05DigitalSignatureExt` binding (`crates/formula-vba/src/contents_hash.rs`)
-- `formula_vba::forms_normalized_data` builds `FormsNormalizedData`
-  (`crates/formula-vba/src/normalized_data.rs`)
-- `formula_vba::project_normalized_data_v3_dir_records` (alias: `project_normalized_data_v3`) is a
-  metadata-only dir-record transcript derived from selected `VBA/dir` records (useful for
-  debugging/spec work; not the full v3 binding transcript) (`crates/formula-vba/src/project_normalized_data.rs`)
+- `formula_vba::v3_content_normalized_data` aims to implement MS-OVBA §2.4.2.5
+  (`V3ContentNormalizedData`).
+- `formula_vba::project_normalized_data_v3_transcript` returns a **library-specific** transcript:
+  `(filtered PROJECT stream lines) || V3ContentNormalizedData || FormsNormalizedData`.
+  - This does **not** match MS-OVBA §2.4.2.6 `ProjectNormalizedData` nor MS-OVBA §2.4.2.7
+    `ContentBuffer = V3ContentNormalizedData || ProjectNormalizedData`.
+- `formula_vba::contents_hash_v3` computes **SHA-256** over `project_normalized_data_v3_transcript`
+  (a common `DigitalSignatureExt` behavior).
+  - For other algorithms (debugging / non-standard producers), use
+    `formula_vba::compute_vba_project_digest_v3` with an explicit `DigestAlg`.
+- `formula_vba::forms_normalized_data` implements `FormsNormalizedData` (MS-OVBA §2.4.2.2; used by
+  v2 / `DigitalSignatureEx` in the spec, and also included in `formula-vba`'s current
+  `project_normalized_data_v3_transcript`).
+- `formula_vba::project_normalized_data_v3` (alias: `project_normalized_data_v3_dir_records`) is a
+  metadata-only transcript derived from a selected allowlist of `VBA/dir` records. It is useful for
+  debugging/tests, but it is **not** MS-OVBA §2.4.2.6 `ProjectNormalizedData` and is not used for v3
+  binding.
 
 #### `formula_vba::project_normalized_data_v3_dir_records` helper (dir record allowlist)
 
@@ -414,14 +434,21 @@ For the ANSI `MODULESTREAMNAME` record (`0x001A`), some producers append a trail
 To bind the signature to the VBA project contents, `formula-vba`:
 
 1. Extracts the signed digest bytes from the signature payload.
-2. Computes the appropriate Contents Hash transcript (v1/v2/v3) for the current project.
+2. Computes the appropriate Contents Hash transcript:
+   - v1/v2: per MS-OVBA §2.4.2.1/§2.4.2.2
+   - v3: best-effort. MS-OVBA defines `ContentBuffer = V3ContentNormalizedData || ProjectNormalizedData`,
+     but `formula-vba` currently uses `project_normalized_data_v3_transcript` (see notes above).
 3. Computes digest bytes for that transcript:
    - v1 (`DigitalSignature`): compute **MD5** of `ContentNormalizedData` (MS-OSHARED §4.3; ignore the
       `DigestInfo` OID for binding)
    - v2 (`DigitalSignatureEx`): compute **MD5** of (`ContentNormalizedData || FormsNormalizedData`)
       (MS-OSHARED §4.3; ignore the `DigestInfo` OID for binding)
-   - v3 (`DigitalSignatureExt`): compute **SHA-256** (`ContentsHashV3`) via
-      `formula_vba::contents_hash_v3` (ignore the `DigestInfo` OID for binding)
+   - v3 (`DigitalSignatureExt`): compute the digest of the v3 binding transcript. `formula-vba`
+     currently uses **SHA-256** via `formula_vba::contents_hash_v3` (a helper over
+     `project_normalized_data_v3_transcript`) and compares digest bytes (the OID is surfaced for
+     debugging only).
+     - For other algorithms (debugging / non-standard producers), use
+       `formula_vba::compute_vba_project_digest_v3`.
    - When the signature stream kind is unknown (for example, a raw PKCS#7/CMS blob from
       `vbaProjectSignature.bin`), `formula-vba` best-effort attempts v3 binding first, then falls back
       to legacy binding.
@@ -453,8 +480,9 @@ If you need to update or extend signature handling, start with:
   - MS-OVBA normalized-data transcript builders
 - `crates/formula-vba/src/project_digest.rs`
   - `compute_vba_project_digest` (hash over `ContentNormalizedData || FormsNormalizedData`; equivalent to v1 when `FormsNormalizedData` is empty; strict transcript-only, no raw-stream fallback)
-  - `compute_vba_project_digest_v3` (computes a digest over v3 `ProjectNormalizedData` using a chosen
-    algorithm; spec-correct `DigitalSignatureExt` binding uses `ContentsHashV3 = SHA-256(ProjectNormalizedData)`)
+  - `compute_vba_project_digest_v3` (hash over `formula-vba`'s current v3 transcript
+    `project_normalized_data_v3_transcript` with a caller-selected algorithm; useful for
+    debugging/compatibility)
 
 ## Tests / examples in this repo
 
