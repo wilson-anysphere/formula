@@ -189,20 +189,26 @@ This definition matches the needs of `PRICE`/`YIELD`/`DURATION` where “remaini
 
 `DSC` (days from settlement to the next coupon) follows an Excel quirk:
 
-- basis `0`/`4` (30/360): **`COUPDAYSNC` is not `DAYS360(settlement, NCD, ...)`**. Excel treats `E`
-  as a fixed `360/f` model-period and defines `DSC = E - A` (so `A + DSC = E` for any settlement
-  date within the coupon period).
+- basis `0` (US/NASD 30/360): **`COUPDAYSNC` is not `DAYS360(settlement, NCD, FALSE)`**. Excel
+  models `E` as a fixed `360/f` coupon period and defines `DSC = E - A` (so `A + DSC = E` for any
+  settlement date within the coupon period).
+- basis `4` (European 30/360): Excel models `E` as `DAYS360(PCD, NCD, TRUE)` (so `E` can differ from
+  `360/f`) and also defines `DSC = E - A`. With European 30/360’s additivity, this matches
+  `DAYS360(settlement, NCD, TRUE)` as well.
 - basis `1`/`2`/`3`: `DSC = NCD - settlement` (actual days).
 
 ### Computing `E` (days in coupon period)
 
 `E` is **not always** `days_between(PCD, NCD, basis)` in Excel. Excel uses basis-specific conventions:
 
-- basis `0`/`2`/`4`: `E = 360 / f` (constant)
+- basis `0`/`2`: `E = 360 / f` (constant)
 - basis `3`: `E = 365 / f` (constant)
 - basis `1`: `E = actual_days(NCD - PCD)` (variable, depends on the coupon period)
+- basis `4`: `E = DAYS360(PCD, NCD, TRUE)` (European 30/360 day count, variable)
 
-This convention is important because for basis `2`/`3` you can have `A + DSC != E` (since `A`/`DSC` are actual days but `E` is a fixed “model year” fraction), while for basis `0`/`4` (30/360) Excel keeps additivity by defining `DSC = E - A`.
+This convention is important because for basis `2`/`3` you can have `A + DSC != E` (since `A`/`DSC`
+are actual days but `E` is a fixed “model year” fraction), while for basis `0` and `4` (30/360)
+Excel keeps additivity by defining `DSC = E - A`.
 
 ---
 
