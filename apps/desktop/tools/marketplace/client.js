@@ -1,3 +1,9 @@
+// Deprecated / Node-only marketplace client used by Node test harnesses and legacy tooling.
+// The production Desktop (Tauri/WebView) runtime uses `packages/extension-marketplace/src/MarketplaceClient.ts`.
+//
+// NOTE: This client expects `baseUrl` to be the marketplace origin (e.g. `https://marketplace.formula.app`), and it
+// appends `/api/...` internally.
+
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";

@@ -1,3 +1,7 @@
+// Deprecated / Node-only extension host manager used by Node-based tooling/tests.
+// Not used by the Desktop/Tauri renderer (`apps/desktop/src/**`).
+// For the production WebView runtime, see `apps/desktop/src/extensions/extensionHostManager.ts`.
+
 import * as fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -42,14 +46,16 @@ async function atomicWriteJson(filePath, data) {
 }
 
 /**
- * Desktop runtime shim that keeps a single `ExtensionHost` instance alive and
- * loads marketplace-installed extensions into it.
+ * Deprecated / Node-only extension host manager used by Node-based tooling/tests.
  *
- * - Extensions are installed/extracted by `apps/desktop/tools/marketplace/extensionManager.js`
- * - The installed list is stored in `ExtensionManager.statePath`
- * - This manager reads that state file at startup and calls `ExtensionHost.loadExtension(...)`
+ * The production Desktop (Tauri/WebView) extension runtime runs inside the WebView using:
  *
- * This module is intentionally Node-only (uses `worker_threads` via `@formula/extension-host`).
+ * - `BrowserExtensionHost` (Web Worker runtime)
+ * - `WebExtensionManager` (IndexedDB-backed installer/store)
+ * - Desktop integration: `apps/desktop/src/extensions/extensionHostManager.ts`
+ *
+ * This module wires the Node `ExtensionHost` to filesystem-extracted marketplace installs and therefore relies on Node
+ * APIs (`worker_threads`, `fs`).
  */
 export class ExtensionHostManager {
   /**

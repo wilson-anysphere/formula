@@ -1,3 +1,9 @@
+// Deprecated / Node-only marketplace installer used by Node test harnesses and earlier experiments.
+// The production Desktop (Tauri/WebView) extension runtime is browser-based and uses:
+// - `WebExtensionManager` (IndexedDB installer/store) in `packages/extension-marketplace`
+// - `BrowserExtensionHost` (Web Worker runtime) in `packages/extension-host/src/browser`
+// This file is not imported by the desktop renderer (`apps/desktop/src/**`).
+
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";

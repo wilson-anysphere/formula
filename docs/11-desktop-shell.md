@@ -104,6 +104,8 @@ Rationale:
 - The Rust engine runs as **WebAssembly inside a module Worker**, so CSP must allow:
   - `script-src 'wasm-unsafe-eval'` for WASM compilation/instantiation.
   - `worker-src 'self' blob:` for module workers (Vite may use `blob:` URLs for worker bootstrapping).
+- The extension runtime (`BrowserExtensionHost`) also runs each extension in a **module Worker** loaded from an in-memory
+  `blob:`/`data:` module URL, so CSP must allow `worker-src blob:` and `script-src blob: data:`.
 - We also rely on `script-src 'unsafe-eval'` for the scripting sandbox (`new Function`-based evaluation in a Worker).
 - `connect-src` stays narrow but must allow:
   - `https:` for remote APIs and user-driven Power Query fetches.
