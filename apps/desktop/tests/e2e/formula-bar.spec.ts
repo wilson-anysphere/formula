@@ -143,7 +143,7 @@ test.describe("formula bar editing + range insertion", () => {
       expect(c1Value).toBe("7");
     });
 
-    test(`Ctrl/Cmd+PgDn does not switch sheets while editing a formula and keeps the formula bar focused (${mode})`, async ({
+    test(`Ctrl/Cmd+PgDn does not switch sheets while editing a formula (formula bar focused) (${mode})`, async ({
       page,
     }) => {
       await gotoDesktop(page, `/?grid=${mode}`);
@@ -165,14 +165,23 @@ test.describe("formula bar editing + range insertion", () => {
       await expect(input).toBeVisible();
       await input.fill("=");
 
-      // Ctrl/Cmd+PgDn is a global sheet navigation shortcut, but the app intentionally
-      // does not steal it from text inputs (including the formula bar).
-      const modifier = process.platform === "darwin" ? "Meta" : "Control";
-      await page.keyboard.press(`${modifier}+PageDown`);
+      // Ctrl/Cmd+PgDn should NOT switch sheets while the user is editing text in the formula bar.
+      // Dispatch synthetically to avoid any browser tab-switching shortcuts.
+      const ctrlKey = process.platform !== "darwin";
+      const metaKey = process.platform === "darwin";
+      await page.evaluate(
+        ({ ctrlKey, metaKey }) => {
+          const input = document.querySelector('[data-testid="formula-input"]') as HTMLTextAreaElement | null;
+          if (!input) throw new Error("Missing formula bar input");
+          const evt = new KeyboardEvent("keydown", { key: "PageDown", ctrlKey, metaKey, bubbles: true, cancelable: true });
+          input.dispatchEvent(evt);
+        },
+        { ctrlKey, metaKey },
+      );
       await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
       await expect(input).toBeFocused();
 
-      // Picking a cell should still insert a reference into the formula.
+      // Picking a cell should insert a reference from the current sheet.
       // Click inside A1 (avoid the shared-grid corner header/select-all region).
       await page.click("#grid", { position: { x: 80, y: 40 } });
       await expect(input).toHaveValue("=A1");
