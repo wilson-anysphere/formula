@@ -70,4 +70,12 @@ describe("computeSelectionFormatState", () => {
     const state = computeSelectionFormatState(doc, "Sheet1", [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }]);
     expect(state.numberFormat).toBe("0.00");
   });
+
+  it("uses effective formatting for row-level alignment overrides", () => {
+    const doc = new DocumentController();
+    doc.setRowFormat("Sheet1", 0, { alignment: { horizontal: "center" } });
+
+    const state = computeSelectionFormatState(doc, "Sheet1", [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }]);
+    expect(state.align).toBe("center");
+  });
 });
