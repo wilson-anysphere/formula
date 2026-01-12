@@ -186,3 +186,36 @@ test("CollabSession undo works when the cells root was created by a different Yj
   session.destroy();
   doc.destroy();
 });
+
+test("CollabSession undo scopeNames works when an additional root was created by a different Yjs instance (CJS Doc.getMap)", async () => {
+  const Ycjs = requireYjsCjs();
+
+  const doc = new Y.Doc();
+
+  // Simulate an eager foreign instantiation of a root map that we want to include
+  // in the undo scope.
+  const foreignExtra = Ycjs.Doc.prototype.getMap.call(doc, "extraUndoScope");
+  foreignExtra.set("k", 0);
+
+  const session = createCollabSession({ doc, undo: { scopeNames: ["extraUndoScope"] } });
+
+  // Regression: session construction should not throw "different constructor" and
+  // the root should be accessible via the local `doc.getMap`.
+  const extra = doc.getMap("extraUndoScope");
+  assert.ok(extra instanceof Y.Map);
+  assert.equal(extra.get("k"), 0);
+
+  session.undo?.transact?.(() => {
+    extra.set("k", 1);
+  });
+  session.undo?.stopCapturing();
+
+  assert.equal(extra.get("k"), 1);
+  assert.equal(session.undo?.canUndo(), true);
+
+  session.undo?.undo();
+  assert.equal(extra.get("k"), 0);
+
+  session.destroy();
+  doc.destroy();
+});

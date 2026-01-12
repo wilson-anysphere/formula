@@ -61,6 +61,29 @@ function getYArray(value: unknown): any | null {
   return maybe;
 }
 
+function getYText(value: unknown): any | null {
+  if (value instanceof Y.Text) return value;
+  if (!value || typeof value !== "object") return null;
+  const maybe = value as any;
+  // See `getYMap` above for rationale.
+  if (typeof maybe.toDelta !== "function") return null;
+  if (typeof maybe.applyDelta !== "function") return null;
+  if (typeof maybe.insert !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
+  return maybe;
+}
+
+function isYAbstractType(value: unknown): boolean {
+  if (value instanceof Y.AbstractType) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = value as any;
+  if (typeof maybe.observeDeep !== "function") return false;
+  if (typeof maybe.unobserveDeep !== "function") return false;
+  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
+}
+
 function replaceForeignRootType<T extends Y.AbstractType<any>>(params: {
   doc: Y.Doc;
   name: string;
@@ -96,6 +119,35 @@ function replaceForeignRootType<T extends Y.AbstractType<any>>(params: {
   doc.share.set(name, t as any);
   (t as any)._integrate(doc as any, null);
   return t;
+}
+
+function getMapRoot<T = unknown>(doc: Y.Doc, name: string): Y.Map<T> {
+  const existing = doc.share.get(name);
+  if (!existing) return doc.getMap<T>(name);
+
+  const map = getYMap(existing);
+  if (map) {
+    return map instanceof Y.Map
+      ? (map as Y.Map<T>)
+      : (replaceForeignRootType({ doc, name, existing: map, create: () => new Y.Map() }) as any);
+  }
+
+  const array = getYArray(existing);
+  if (array) {
+    throw new Error(`Yjs root schema mismatch for "${name}": expected a Y.Map but found a Y.Array`);
+  }
+
+  const text = getYText(existing);
+  if (text) {
+    throw new Error(`Yjs root schema mismatch for "${name}": expected a Y.Map but found a Y.Text`);
+  }
+
+  if (existing instanceof Y.AbstractType) return doc.getMap<T>(name);
+  if (isYAbstractType(existing)) {
+    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() }) as any;
+  }
+
+  throw new Error(`Unsupported Yjs root type for "${name}": ${existing?.constructor?.name ?? typeof existing}`);
 }
 
 function getCommentsRootForUndoScope(doc: Y.Doc): Y.AbstractType<any> {
@@ -135,10 +187,10 @@ function getCommentsRootForUndoScope(doc: Y.Doc): Y.AbstractType<any> {
         const placeholder = existing as any;
         const hasStart = placeholder?._start != null; // sequence item => likely array
         const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
-        const kind = hasStart && mapSize === 0 ? "array" : "map";
-        root = kind === "array" ? doc.getArray("comments") : doc.getMap("comments");
-      }
+      const kind = hasStart && mapSize === 0 ? "array" : "map";
+      root = kind === "array" ? doc.getArray("comments") : doc.getMap("comments");
     }
+  }
   }
 
   // If updates were applied using a different Yjs module instance (e.g. y-websocket
@@ -941,7 +993,7 @@ export class CollabSession {
       const builtInScopeNames = new Set(["cells", "sheets", "metadata", "namedRanges", "comments", "cellStructuralOps"]);
       for (const name of options.undo.scopeNames ?? []) {
         if (!name || builtInScopeNames.has(name)) continue;
-        scope.add(this.doc.getMap(name));
+        scope.add(getMapRoot(this.doc, name));
       }
 
       if (typeof options.undo.includeRoots === "function") {
