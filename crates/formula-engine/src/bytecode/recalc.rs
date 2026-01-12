@@ -238,6 +238,12 @@ mod tests {
         locale_config.decimal_separator = de_de_locale.separators.decimal_sep;
         locale_config.thousands_separator = Some(de_de_locale.separators.thousands_sep);
 
+        // Keep the bytecode function runtime's locale config in sync with the value-locale
+        // configured above so any criteria parsing inside quoted strings matches Excel.
+        let mut locale_config = crate::LocaleConfig::en_us();
+        locale_config.decimal_separator = ValueLocaleConfig::de_de().separators.decimal_sep;
+        locale_config.thousands_separator = Some(ValueLocaleConfig::de_de().separators.thousands_sep);
+
         let mut vm = Vm::with_capacity(32);
         let de_de_value = vm.eval(&program, &empty_grid, origin, &locale_config);
         let en_us_value = vm.eval_with_coercion_context(
