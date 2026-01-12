@@ -106,6 +106,51 @@ fn parse_allow_invoke_permission_commands(permission_file: &JsonValue) -> BTreeS
     panic!("permission file missing `allow-invoke` permission entry")
 }
 
+fn parse_core_allow_invoke_commands(capability_file: &JsonValue) -> Option<BTreeSet<String>> {
+    let permissions = capability_file
+        .get("permissions")
+        .and_then(|p| p.as_array())
+        .unwrap_or_else(|| panic!("capability missing `permissions` array"));
+
+    let Some(core_allow_invoke) = permissions.iter().find(|p| {
+        p.get("identifier")
+            .and_then(|v| v.as_str())
+            .is_some_and(|id| id == "core:allow-invoke")
+    }) else {
+        return None;
+    };
+
+    let allow = core_allow_invoke
+        .get("allow")
+        .and_then(|v| v.as_array())
+        .unwrap_or_else(|| panic!("`core:allow-invoke` must include an `allow` array"));
+    if allow.is_empty() {
+        panic!("`core:allow-invoke` must not have an empty allowlist");
+    }
+
+    let mut commands = BTreeSet::new();
+    for entry in allow {
+        let cmd = entry
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| panic!("`core:allow-invoke` allow entry missing `command`"));
+        assert!(
+            !cmd.trim().is_empty(),
+            "`core:allow-invoke` allow entry command must not be empty"
+        );
+        assert!(
+            !cmd.contains('*'),
+            "`core:allow-invoke` command must not contain wildcard patterns: {cmd}"
+        );
+        assert!(
+            commands.insert(cmd.to_string()),
+            "`core:allow-invoke` contains duplicate command: {cmd}"
+        );
+    }
+
+    Some(commands)
+}
+
 #[test]
 fn tauri_main_capability_scopes_to_main_window() {
     let tauri_conf_path = repo_path("tauri.conf.json");
@@ -169,40 +214,7 @@ fn tauri_main_capability_scopes_to_main_window() {
     // We primarily rely on the application permission defined in `permissions/allow-invoke.json`,
     // but if `core:allow-invoke` is present it must be scoped explicitly (no wildcard/pattern
     // matches).
-    if let Some(core_allow_invoke) = permissions.iter().find(|p| {
-        p.get("identifier")
-            .and_then(|v| v.as_str())
-            .is_some_and(|id| id == "core:allow-invoke")
-    }) {
-        let allow = core_allow_invoke
-            .get("allow")
-            .and_then(|v| v.as_array())
-            .unwrap_or_else(|| panic!("`core:allow-invoke` must include an `allow` array"));
-        assert!(
-            !allow.is_empty(),
-            "`core:allow-invoke` must not have an empty allowlist"
-        );
-
-        let mut commands = BTreeSet::new();
-        for entry in allow {
-            let cmd = entry
-                .get("command")
-                .and_then(|v| v.as_str())
-                .unwrap_or_else(|| panic!("`core:allow-invoke` allow entry missing `command`"));
-            assert!(
-                !cmd.trim().is_empty(),
-                "`core:allow-invoke` allow entry command must not be empty"
-            );
-            assert!(
-                !cmd.contains('*'),
-                "`core:allow-invoke` command must not contain wildcard patterns: {cmd}"
-            );
-            assert!(
-                commands.insert(cmd.to_string()),
-                "`core:allow-invoke` contains duplicate command: {cmd}"
-            );
-        }
-    }
+    let _ = parse_core_allow_invoke_commands(&capability);
 }
 
 #[test]
@@ -237,4 +249,35 @@ fn tauri_ipc_allowlist_matches_registered_invoke_handler_commands() {
          - Update `src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission `commands.allow`) to match the command list in `src-tauri/src/main.rs`.\n\
          - Or, if you removed a command, remove it from both places.\n"
     );
+}
+
+#[test]
+fn tauri_core_allow_invoke_is_subset_of_allow_invoke_permission() {
+    let capability_path = repo_path("capabilities/main.json");
+    let capability_raw = fs::read_to_string(&capability_path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", capability_path.display()));
+    let capability_file: JsonValue =
+        serde_json::from_str(&capability_raw).unwrap_or_else(|err| panic!("invalid JSON: {err}"));
+
+    let Some(core_allow_invoke) = parse_core_allow_invoke_commands(&capability_file) else {
+        // Some toolchains may not expose the `core:allow-invoke` permission.
+        return;
+    };
+
+    let permission_path = repo_path("permissions/allow-invoke.json");
+    let permission_raw = fs::read_to_string(&permission_path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", permission_path.display()));
+    let permission_file: JsonValue =
+        serde_json::from_str(&permission_raw).unwrap_or_else(|err| panic!("invalid JSON: {err}"));
+    let allow_invoke = parse_allow_invoke_permission_commands(&permission_file);
+
+    // `core:allow-invoke` is a defense-in-depth allowlist, but it should never grant
+    // access to a command name that isn't also allowed via the application permission
+    // (`allow-invoke`).
+    for cmd in core_allow_invoke {
+        assert!(
+            allow_invoke.contains(&cmd),
+            "`core:allow-invoke` command `{cmd}` missing from application `allow-invoke` permission"
+        );
+    }
 }
