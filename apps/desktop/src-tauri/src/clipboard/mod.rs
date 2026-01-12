@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 pub mod platform;
 
+mod cf_html;
+
 #[cfg(target_os = "linux")]
 mod linux;
 
