@@ -3643,7 +3643,11 @@ if (
     () => {
       void checkForUpdatesFromCommandPalette().catch((err) => {
         console.error("Failed to check for updates:", err);
-        showToast(`Failed to check for updates: ${String((err as any)?.message ?? err)}`, "error");
+        showToast(
+          tWithVars("updater.checkFailedWithMessage", { message: String((err as any)?.message ?? err) }),
+          "error",
+          { timeoutMs: 10_000 },
+        );
       });
     },
     { category: "Help" },
