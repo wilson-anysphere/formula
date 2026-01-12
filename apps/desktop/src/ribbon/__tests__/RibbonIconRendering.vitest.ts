@@ -64,5 +64,31 @@ describe("Ribbon icon rendering", () => {
 
     act(() => root.unmount());
   });
-});
 
+  it("renders SVG icons for dropdown menu items when their command ids are mapped", async () => {
+    const { container, root } = renderRibbon();
+
+    const viewTab = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find(
+      (tab) => tab.textContent?.trim() === "View",
+    );
+    if (!viewTab) throw new Error("Missing View tab");
+
+    act(() => {
+      viewTab.click();
+    });
+
+    const freezePanes = container.querySelector<HTMLButtonElement>('[data-command-id="view.window.freezePanes"]');
+    expect(freezePanes).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      freezePanes?.click();
+      await Promise.resolve();
+    });
+
+    const freezeTopRow = container.querySelector<HTMLButtonElement>('[data-command-id="view.window.freezePanes.freezeTopRow"]');
+    expect(freezeTopRow).toBeInstanceOf(HTMLButtonElement);
+    expect(freezeTopRow?.querySelector(".ribbon-dropdown__icon svg")).toBeInstanceOf(SVGSVGElement);
+
+    act(() => root.unmount());
+  });
+});
