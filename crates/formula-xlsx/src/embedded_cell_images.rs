@@ -76,6 +76,17 @@ impl XlsxPackage {
             return Ok(HashMap::new());
         }
 
+        fn slot_points_to_image(
+            rich_value_rel_ids: &[String],
+            image_targets_by_rel_id: &HashMap<String, String>,
+            slot: u32,
+        ) -> bool {
+            let Some(rel_id) = rich_value_rel_ids.get(slot as usize) else {
+                return false;
+            };
+            image_targets_by_rel_id.contains_key(rel_id)
+        }
+
         // Optional: value metadata mapping (worksheet `c/@vm` -> rich value index).
         //
         // Some simplified workbooks omit or do not populate `xl/metadata.xml`. In that case we
@@ -113,6 +124,37 @@ impl XlsxPackage {
             if saw_zero { 1 } else { 0 }
         } else {
             0
+        };
+
+        // When we *don't* have `xl/metadata.xml`, we interpret `vm` as a relationship-slot index into
+        // `xl/richData/richValueRel.xml`. Some producers encode this slot index as:
+        // - 0-based (vm="0" for the first slot), or
+        // - 1-based (vm="1" for the first slot).
+        //
+        // To avoid incorrectly biasing toward 1-based indexing in multi-image workbooks, choose the
+        // preferred indexing scheme by scanning all `vm` cells and counting how many would resolve
+        // to an image relationship under each scheme.
+        let prefer_zero_based_vm_slots: bool = if has_vm_mapping {
+            false
+        } else {
+            let mut zero_based_matches: usize = 0;
+            let mut one_based_matches: usize = 0;
+            for sheet in self.worksheet_parts()? {
+                let Some(sheet_xml_bytes) = self.part(&sheet.worksheet_part) else {
+                    continue;
+                };
+                for (_cell_ref, vm) in parse_sheet_vm_image_cells(sheet_xml_bytes)? {
+                    if slot_points_to_image(&rich_value_rel_ids, &image_targets_by_rel_id, vm) {
+                        zero_based_matches = zero_based_matches.saturating_add(1);
+                    }
+                    if let Some(slot) = vm.checked_sub(1) {
+                        if slot_points_to_image(&rich_value_rel_ids, &image_targets_by_rel_id, slot) {
+                            one_based_matches = one_based_matches.saturating_add(1);
+                        }
+                    }
+                }
+            }
+            zero_based_matches > one_based_matches
         };
 
         // Optional: richValue.xml relationship indices (rich value index -> relationship slot).
@@ -203,10 +245,17 @@ impl XlsxPackage {
                     }
                 } else {
                     // No metadata mapping; fall back to interpreting `vm` as a relationship slot.
-                    if vm > 0 {
-                        slot_candidates.push(vm - 1);
+                    if prefer_zero_based_vm_slots {
+                        slot_candidates.push(vm);
+                        if vm > 0 {
+                            slot_candidates.push(vm - 1);
+                        }
+                    } else {
+                        if vm > 0 {
+                            slot_candidates.push(vm - 1);
+                        }
+                        slot_candidates.push(vm);
                     }
-                    slot_candidates.push(vm);
                 }
 
                 // Resolve the first slot candidate that maps to a concrete image part.

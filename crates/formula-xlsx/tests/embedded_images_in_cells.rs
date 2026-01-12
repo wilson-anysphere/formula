@@ -139,6 +139,100 @@ fn build_minimal_vm_indexed_embedded_image_xlsx(png_bytes: &[u8]) -> Vec<u8> {
     zip.finish().unwrap().into_inner()
 }
 
+fn build_minimal_vm_indexed_embedded_images_xlsx_two(
+    img1_bytes: &[u8],
+    img2_bytes: &[u8],
+) -> Vec<u8> {
+    // Same as `build_minimal_vm_indexed_embedded_image_xlsx`, but with two image relationship slots
+    // and worksheet `vm` values encoded as a 0-based index (vm="0", vm="1", ...).
+
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+    let root_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"#;
+
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>"#;
+
+    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" vm="0"/>
+    </row>
+    <row r="2">
+      <c r="A2" vm="1"/>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+    let rich_value_rel_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<richValueRel xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rel r:id="rId1"/>
+  <rel r:id="rId2"/>
+</richValueRel>"#;
+
+    let rich_value_rel_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image2.png"/>
+</Relationships>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+
+    zip.start_file("_rels/.rels", options).unwrap();
+    zip.write_all(root_rels.as_bytes()).unwrap();
+
+    zip.start_file("[Content_Types].xml", options).unwrap();
+    zip.write_all(content_types.as_bytes()).unwrap();
+
+    zip.start_file("xl/workbook.xml", options).unwrap();
+    zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/_rels/workbook.xml.rels", options)
+        .unwrap();
+    zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+    zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+    zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/richData/richValueRel.xml", options)
+        .unwrap();
+    zip.write_all(rich_value_rel_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/richData/_rels/richValueRel.xml.rels", options)
+        .unwrap();
+    zip.write_all(rich_value_rel_rels.as_bytes()).unwrap();
+
+    zip.start_file("xl/media/image1.png", options).unwrap();
+    zip.write_all(img1_bytes).unwrap();
+    zip.start_file("xl/media/image2.png", options).unwrap();
+    zip.write_all(img2_bytes).unwrap();
+
+    zip.finish().unwrap().into_inner()
+}
+
 #[test]
 fn extracts_single_embedded_image_in_cell() {
     let bytes = build_workbook_with_embedded_image(None, false);
@@ -178,6 +272,34 @@ fn extracts_embedded_image_even_without_metadata_xml() {
     let cell_img = images.get(&key).expect("expected A1 embedded image");
     assert_eq!(cell_img.image_part, "xl/media/image1.png");
     assert_eq!(cell_img.image_bytes, png);
+}
+
+#[test]
+fn extracts_embedded_images_without_metadata_when_vm_is_zero_based() {
+    let img1 = b"img1".to_vec();
+    let img2 = b"img2".to_vec();
+    let bytes = build_minimal_vm_indexed_embedded_images_xlsx_two(&img1, &img2);
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read xlsx");
+    assert!(
+        pkg.part("xl/metadata.xml").is_none(),
+        "fixture should omit xl/metadata.xml"
+    );
+
+    let images = pkg
+        .extract_embedded_cell_images()
+        .expect("extract embedded cell images");
+    assert_eq!(images.len(), 2);
+
+    let key_a1 = ("xl/worksheets/sheet1.xml".to_string(), CellRef::new(0, 0));
+    let key_a2 = ("xl/worksheets/sheet1.xml".to_string(), CellRef::new(1, 0));
+
+    let a1 = images.get(&key_a1).expect("expected A1 embedded image");
+    assert_eq!(a1.image_part, "xl/media/image1.png");
+    assert_eq!(a1.image_bytes, img1);
+
+    let a2 = images.get(&key_a2).expect("expected A2 embedded image");
+    assert_eq!(a2.image_part, "xl/media/image2.png");
+    assert_eq!(a2.image_bytes, img2);
 }
 
 #[test]
