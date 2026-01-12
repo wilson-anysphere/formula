@@ -444,4 +444,46 @@ describe("updaterUi (events)", () => {
     expect(window.localStorage.getItem("formula.updater.dismissedVersion")).toBe("9.9.9");
     expect(Number(window.localStorage.getItem("formula.updater.dismissedAt"))).toBeGreaterThan(0);
   });
+
+  it("clears dismissal when the user clicks restart on the update-ready toast", async () => {
+    const store = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+      setItem: (key: string, value: string) => {
+        store.set(String(key), String(value));
+      },
+      removeItem: (key: string) => {
+        store.delete(String(key));
+      },
+    };
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
+
+    document.body.innerHTML = '<div id="toast-root"></div>';
+
+    const { registerAppQuitHandlers } = await import("../appQuit");
+    registerAppQuitHandlers({
+      // Force a confirm prompt and then cancel it so we don't attempt to install.
+      isDirty: () => true,
+      drainBackendSync: vi.fn().mockResolvedValue(undefined),
+      quitApp: vi.fn().mockResolvedValue(undefined),
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    const { handleUpdaterEvent } = await import("../updaterUi");
+    await handleUpdaterEvent("update-downloaded", { source: "startup", version: "9.9.9" });
+
+    // Simulate the user previously dismissing the update prompt.
+    window.localStorage.setItem("formula.updater.dismissedVersion", "9.9.9");
+    window.localStorage.setItem("formula.updater.dismissedAt", String(Date.now()));
+
+    const restartBtn = document.querySelector<HTMLButtonElement>('[data-testid="update-ready-restart"]');
+    expect(restartBtn).not.toBeNull();
+    restartBtn?.click();
+
+    expect(window.localStorage.getItem("formula.updater.dismissedVersion")).toBeNull();
+    expect(window.localStorage.getItem("formula.updater.dismissedAt")).toBeNull();
+
+    registerAppQuitHandlers(null);
+  });
 });

@@ -844,6 +844,8 @@ function showUpdateReadyToast(update: { version: string }): void {
   restartBtn.addEventListener("click", () => {
     void (async () => {
       // Prevent double-click restart attempts.
+      clearDismissalOnUpdateInitiated();
+      lastUpdateError = null;
       restartBtn.disabled = true;
       viewVersionsBtn.disabled = true;
       laterBtn.disabled = true;
