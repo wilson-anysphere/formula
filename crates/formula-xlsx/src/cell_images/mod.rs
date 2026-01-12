@@ -16,7 +16,6 @@ use crate::XlsxError;
 type Result<T> = std::result::Result<T, XlsxError>;
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-const REL_TYPE_IMAGE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 
 /// Best-effort loader for workbook-level "in-cell" images.
 ///
@@ -258,12 +257,7 @@ fn parse_cell_images_part(
             // External relationships are not backed by OPC parts.
             continue;
         }
-        if rel.type_uri != REL_TYPE_IMAGE {
-            // Be conservative: `<a:blip r:embed>` should refer to an image relationship.
-            continue;
-        }
-
-        let target_path = resolve_target(path, &rel.target);
+        let target_path = resolve_target_best_effort(path, &rels_path, &rel.target, parts)?;
 
         let file_name = target_path
             .strip_prefix("xl/media/")
@@ -303,6 +297,39 @@ fn parse_cell_images_part(
         rels_path,
         images,
     })
+}
+
+fn resolve_target_best_effort(
+    source_part: &str,
+    rels_part: &str,
+    target: &str,
+    parts: &BTreeMap<String, Vec<u8>>,
+) -> Result<String> {
+    // OPC relationship targets are typically resolved relative to the source part's directory.
+    // However, some producers appear to emit paths relative to the `.rels` directory instead.
+    // We'll resolve using the standard rule first and fall back to alternative interpretations
+    // only when the referenced part cannot be found.
+    let direct = resolve_target(source_part, target);
+    if parts.contains_key(&direct) {
+        return Ok(direct);
+    }
+
+    // Fallback: treat the target as relative to the relationships part location.
+    let rels_relative = resolve_target(rels_part, target);
+    if parts.contains_key(&rels_relative) {
+        return Ok(rels_relative);
+    }
+
+    // Fallback: if the resolved path accidentally escaped the `xl/` prefix (e.g. `../media/...`
+    // from a workbook-level part), try re-rooting it under `xl/`.
+    if !direct.starts_with("xl/") {
+        let xl_prefixed = format!("xl/{direct}");
+        if parts.contains_key(&xl_prefixed) {
+            return Ok(xl_prefixed);
+        }
+    }
+
+    Err(XlsxError::MissingPart(direct))
 }
 
 fn get_blip_embed_rel_id(blip_node: &roxmltree::Node<'_, '_>) -> Option<String> {

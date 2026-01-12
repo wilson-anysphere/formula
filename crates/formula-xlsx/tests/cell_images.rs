@@ -9,7 +9,7 @@ use zip::ZipWriter;
 use formula_xlsx::cell_images::CellImages;
 use formula_xlsx::XlsxPackage;
 
-fn build_fixture_xlsx() -> (Vec<u8>, Vec<u8>) {
+fn build_fixture_xlsx(image_target: &str) -> (Vec<u8>, Vec<u8>) {
     // 1x1 transparent PNG (same as `drawings_roundtrip.rs`).
     let png_bytes = base64::engine::general_purpose::STANDARD
         .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/58HAQUBAO3+2NoAAAAASUVORK5CYII=")
@@ -50,12 +50,14 @@ fn build_fixture_xlsx() -> (Vec<u8>, Vec<u8>) {
         ),
         (
             "xl/_rels/cellimages.xml.rels".to_string(),
-            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="{image_target}"/>
 </Relationships>
 "#
-            .to_vec(),
+            )
+            .into_bytes(),
         ),
         ("xl/media/image1.png".to_string(), png_bytes.clone()),
     ]
@@ -77,7 +79,7 @@ fn build_fixture_xlsx() -> (Vec<u8>, Vec<u8>) {
 
 #[test]
 fn cell_images_import_loads_referenced_media() {
-    let (bytes, png_bytes) = build_fixture_xlsx();
+    let (bytes, png_bytes) = build_fixture_xlsx("media/image1.png");
     let pkg = XlsxPackage::from_bytes(&bytes).expect("load fixture");
 
     let mut workbook = formula_model::Workbook::new();
@@ -105,3 +107,25 @@ fn cell_images_import_loads_referenced_media() {
     );
 }
 
+#[test]
+fn cell_images_import_tolerates_parent_media_targets() {
+    // Some producers may emit `../media/*` targets for workbook-level parts; tolerate it as a
+    // best-effort fallback when the canonical resolution misses.
+    let (bytes, png_bytes) = build_fixture_xlsx("../media/image1.png");
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("load fixture");
+
+    let mut workbook = formula_model::Workbook::new();
+    let parsed =
+        CellImages::parse_from_parts(pkg.parts_map(), &mut workbook).expect("parse cell images");
+
+    assert_eq!(parsed.parts.len(), 1);
+    assert_eq!(parsed.parts[0].images.len(), 1);
+    assert_eq!(
+        workbook
+            .images
+            .get(&ImageId::new("image1.png"))
+            .expect("image stored")
+            .bytes,
+        png_bytes
+    );
+}
