@@ -139,8 +139,9 @@ describe("CanvasGridRenderer rich text rendering", () => {
     renderer.renderImmediately();
 
     expect(fillTextCalls.length).toBeGreaterThanOrEqual(2);
+    const uniqueFonts = new Set(fillTextCalls.map((c) => c.font));
+    expect(uniqueFonts.size).toBeGreaterThanOrEqual(2);
     // We expect at least one underline stroke from the italic+underline run.
     expect(strokeCalls.length).toBeGreaterThan(0);
   });
 });
-
