@@ -220,4 +220,86 @@ describe("Tauri capabilities", () => {
     // Some Tauri versions may namespace this as a core permission.
     expect(identifiers.some((permission) => permission.startsWith("core:notification:"))).toBe(false);
   });
+
+  it("keeps the Rust invoke_handler allowlist in sync with the frontend's invoke() usage", () => {
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
+
+    const rustMainPath = path.join(root, "apps/desktop/src-tauri/src/main.rs");
+    const rustMainText = readFileSync(rustMainPath, "utf8");
+    const invokeHandlerMatch = rustMainText.match(
+      /\.invoke_handler\s*\(\s*tauri::generate_handler!\[([\s\S]*?)\]\s*\)/m,
+    );
+    expect(invokeHandlerMatch, "expected .invoke_handler(generate_handler![...]) in src-tauri/src/main.rs").toBeTruthy();
+
+    const handlerBody = invokeHandlerMatch![1].replace(/\/\/.*$/gm, "");
+    const rustCommands = handlerBody
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => entry.split("::").at(-1))
+      .filter((cmd): cmd is string => typeof cmd === "string" && cmd.length > 0);
+    const allowlistedCommands = new Set(rustCommands);
+
+    const isRuntimeSource = (filePath: string): boolean => {
+      const normalized = filePath.replace(/\\/g, "/");
+      if (normalized.includes("/__tests__/")) return false;
+      if (normalized.match(/\.(test|spec|vitest)\./)) return false;
+      if (normalized.endsWith(".md")) return false;
+      if (normalized.includes("/src-tauri/capabilities/")) return false;
+      const ext = path.extname(filePath);
+      return ext === ".ts" || ext === ".tsx" || ext === ".js" || ext === ".jsx" || ext === ".mjs";
+    };
+
+    const walk = (dir: string): string[] => {
+      const out: string[] = [];
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === "node_modules" || entry.name === "__tests__") continue;
+          out.push(...walk(full));
+        } else if (entry.isFile()) {
+          if (isRuntimeSource(full)) out.push(full);
+        }
+      }
+      return out;
+    };
+
+    const runtimeFiles = [
+      ...walk(path.join(root, "apps/desktop/src")),
+      ...walk(path.join(root, "packages/extension-marketplace/src")),
+      ...walk(path.join(root, "packages/extension-host/src/browser")),
+      ...walk(path.join(root, "shared/extension-package")),
+    ].sort();
+
+    const runtimeText = runtimeFiles.map((p) => readFileSync(p, "utf8")).join("\n");
+
+    // Capture command invocations from helpers like:
+    // - invoke("...")
+    // - tauriInvoke("...")
+    // - invokeFn("...")
+    // - args.invoke("...") (the `.invoke` segment still matches)
+    const invokedCommands = new Set<string>();
+    const invokeCall = /\b[\w$]*invoke[\w$]*\s*\(\s*(["'])([^"']+)\1/gim;
+    for (const match of runtimeText.matchAll(invokeCall)) {
+      invokedCommands.add(match[2]);
+    }
+
+    // Some code uses indirection (e.g. VBA event macros pass the command name into a helper).
+    // Keep those allowlisted too.
+    {
+      const eventMacrosPath = path.join(root, "apps/desktop/src/macros/event_macros.ts");
+      const eventMacrosText = readFileSync(eventMacrosPath, "utf8");
+      const runEventMacroCall = /runEventMacro\s*\(\s*[^,]+,\s*(["'])([^"']+)\1/gm;
+      for (const match of eventMacrosText.matchAll(runEventMacroCall)) {
+        invokedCommands.add(match[2]);
+      }
+    }
+
+    for (const cmd of invokedCommands) {
+      expect(allowlistedCommands.has(cmd)).toBe(true);
+    }
+
+    // Keep the allowlist as small as possible: it should match actual invoke usage.
+    expect(Array.from(allowlistedCommands).sort()).toEqual(Array.from(invokedCommands).sort());
+  });
 });

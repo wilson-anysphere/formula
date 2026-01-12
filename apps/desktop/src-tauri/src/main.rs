@@ -854,6 +854,10 @@ fn main() {
         //  3) Added to the explicit JS invoke allowlist in
         //     `src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission)
         //
+        // Keep this list minimal: the desktop test
+        // `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` asserts the
+        // `generate_handler![...]` list matches the frontend's `invoke("...")` usage.
+        //
         // Note: we intentionally do not grant the JS shell plugin API (`shell:allow-open`);
         // external URL opening goes through the `open_external_url` Rust command which enforces a
         // scheme allowlist.
@@ -871,10 +875,10 @@ fn main() {
             commands::add_sheet,
             commands::add_sheet_with_id,
             commands::rename_sheet,
-            commands::set_sheet_visibility,
-            commands::set_sheet_tab_color,
             commands::move_sheet,
             commands::delete_sheet,
+            commands::set_sheet_visibility,
+            commands::set_sheet_tab_color,
             commands::read_text_file,
             commands::read_binary_file,
             commands::read_binary_file_range,
@@ -899,7 +903,6 @@ fn main() {
             commands::get_workbook_theme_palette,
             commands::list_defined_names,
             commands::list_tables,
-            commands::get_cell,
             commands::get_precedents,
             commands::get_dependents,
             commands::set_cell,
@@ -909,9 +912,6 @@ fn main() {
             commands::create_pivot_table,
             commands::refresh_pivot_table,
             commands::list_pivot_tables,
-            commands::recalculate,
-            commands::undo,
-            commands::redo,
             commands::get_sheet_print_settings,
             commands::set_sheet_page_setup,
             commands::set_sheet_print_area,
