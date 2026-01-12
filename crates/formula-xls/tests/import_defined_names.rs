@@ -164,6 +164,7 @@ fn imports_defined_names_with_external_workbook_3d_refs() {
         .find(|n| n.name == "ExtSingle")
         .expect("ExtSingle missing");
     assert_eq!(ext_single.refers_to, "'[Book1.xlsx]SheetA'!$A$1");
+    assert_parseable_refers_to(&ext_single.refers_to);
 
     let ext_span = result
         .workbook
@@ -172,6 +173,7 @@ fn imports_defined_names_with_external_workbook_3d_refs() {
         .find(|n| n.name == "ExtSpan")
         .expect("ExtSpan missing");
     assert_eq!(ext_span.refers_to, "'[Book1.xlsx]SheetA:SheetC'!$A$1");
+    assert_parseable_refers_to(&ext_span.refers_to);
 }
 
 #[test]
