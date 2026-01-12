@@ -44,6 +44,19 @@ class OddCouponInvalidScheduleCorpusTests(unittest.TestCase):
         cases = cases_payload.get("cases", [])
         self.assertIsInstance(cases, list, "cases.json top-level 'cases' must be an array")
 
+        invalid_schedule_cases = [
+            c
+            for c in cases
+            if isinstance(c, dict)
+            and isinstance(c.get("tags"), list)
+            and "odd_coupon" in c["tags"]
+            and "invalid_schedule" in c["tags"]
+        ]
+        self.assertTrue(
+            invalid_schedule_cases,
+            "Expected at least one odd_coupon+invalid_schedule case in cases.json",
+        )
+
         canonical_by_id: dict[str, dict] = {
             c["id"]: c for c in cases if isinstance(c, dict) and isinstance(c.get("id"), str)
         }
@@ -51,10 +64,12 @@ class OddCouponInvalidScheduleCorpusTests(unittest.TestCase):
         subset_payload = json.loads(subset_path.read_text(encoding="utf-8"))
         subset_cases = subset_payload.get("cases", [])
         self.assertIsInstance(subset_cases, list, "subset corpus top-level 'cases' must be an array")
-        self.assertGreaterEqual(
-            len(subset_cases),
-            8,
-            "expected odd_coupon_invalid_schedule_cases.json to contain the invalid schedule scenarios",
+        expected_ids = {c.get("id") for c in invalid_schedule_cases if isinstance(c.get("id"), str)}
+        subset_ids = {c.get("id") for c in subset_cases if isinstance(c, dict) and isinstance(c.get("id"), str)}
+        self.assertEqual(
+            subset_ids,
+            expected_ids,
+            "Invalid-schedule subset file must contain exactly the odd_coupon+invalid_schedule case IDs from cases.json",
         )
 
         for c in subset_cases:
@@ -87,4 +102,3 @@ class OddCouponInvalidScheduleCorpusTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
