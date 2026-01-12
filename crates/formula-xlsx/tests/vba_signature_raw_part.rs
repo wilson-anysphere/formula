@@ -2,8 +2,11 @@
 
 use std::io::{Cursor, Write};
 
-use formula_vba::VbaSignatureVerification;
+use formula_vba::{
+    compress_container, content_normalized_data, VbaSignatureBinding, VbaSignatureVerification,
+};
 use formula_xlsx::XlsxPackage;
+use openssl::hash::{hash, MessageDigest};
 use zip::write::FileOptions;
 
 const TEST_KEY_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
@@ -76,6 +79,135 @@ fn make_pkcs7_signed_message(data: &[u8]) -> Vec<u8> {
     pkcs7.to_der().expect("pkcs7 DER")
 }
 
+fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
+    out.extend_from_slice(&id.to_le_bytes());
+    out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    out.extend_from_slice(data);
+}
+
+fn build_minimal_vba_project_bin(module1: &[u8]) -> Vec<u8> {
+    // `content_normalized_data` expects a decompressed-and-parsable `VBA/dir` stream and module
+    // streams containing MS-OVBA compressed containers.
+    let module_container = compress_container(module1);
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        // Minimal module record group.
+        push_record(&mut out, 0x0019, b"Module1"); // MODULENAME
+
+        // MODULESTREAMNAME + reserved u16.
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+
+        // MODULETYPE (standard)
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        // MODULETEXTOFFSET: our module stream is just the compressed container.
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
+
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"Name=\"VBAProject\"\r\nModule=Module1\r\n")
+            .expect("write PROJECT");
+    }
+
+    ole.create_storage("VBA").expect("VBA storage");
+
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+
+    ole.into_inner().into_inner()
+}
+
+fn der_len(len: usize) -> Vec<u8> {
+    if len < 0x80 {
+        return vec![len as u8];
+    }
+    let mut bytes = Vec::new();
+    let mut tmp = len;
+    while tmp > 0 {
+        bytes.push((tmp & 0xFF) as u8);
+        tmp >>= 8;
+    }
+    bytes.reverse();
+    let mut out = Vec::with_capacity(1 + bytes.len());
+    out.push(0x80 | (bytes.len() as u8));
+    out.extend_from_slice(&bytes);
+    out
+}
+
+fn der_tlv(tag: u8, value: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.push(tag);
+    out.extend_from_slice(&der_len(value.len()));
+    out.extend_from_slice(value);
+    out
+}
+
+fn der_sequence(children: &[Vec<u8>]) -> Vec<u8> {
+    let mut value = Vec::new();
+    for child in children {
+        value.extend_from_slice(child);
+    }
+    der_tlv(0x30, &value)
+}
+
+fn der_octet_string(bytes: &[u8]) -> Vec<u8> {
+    der_tlv(0x04, bytes)
+}
+
+fn der_null() -> Vec<u8> {
+    vec![0x05, 0x00]
+}
+
+fn der_oid(oid: &str) -> Vec<u8> {
+    let arcs: Vec<u32> = oid
+        .split('.')
+        .map(|s| s.parse::<u32>().expect("numeric arc"))
+        .collect();
+    assert!(arcs.len() >= 2, "OID needs at least 2 arcs");
+    let mut out = Vec::new();
+    out.push((arcs[0] * 40 + arcs[1]) as u8);
+    for &arc in &arcs[2..] {
+        let mut tmp = arc;
+        let mut buf = Vec::new();
+        buf.push((tmp & 0x7F) as u8);
+        tmp >>= 7;
+        while tmp > 0 {
+            buf.push(((tmp & 0x7F) as u8) | 0x80);
+            tmp >>= 7;
+        }
+        buf.reverse();
+        out.extend_from_slice(&buf);
+    }
+    der_tlv(0x06, &out)
+}
+
+fn make_spc_indirect_data_content_sha256(digest: &[u8]) -> Vec<u8> {
+    // data SpcAttributeTypeAndOptionalValue ::= SEQUENCE { type OBJECT IDENTIFIER, value [0] EXPLICIT ANY OPTIONAL }
+    let data = der_sequence(&[der_oid("1.3.6.1.4.1.311.2.1.15")]);
+
+    // messageDigest DigestInfo ::= SEQUENCE { digestAlgorithm AlgorithmIdentifier, digest OCTET STRING }
+    let alg = der_sequence(&[der_oid("2.16.840.1.101.3.4.2.1"), der_null()]);
+    let digest_info = der_sequence(&[alg, der_octet_string(digest)]);
+
+    der_sequence(&[data, digest_info])
+}
+
 #[test]
 fn verifies_raw_vba_project_signature_part_when_not_ole() {
     let pkcs7 = make_pkcs7_signed_message(b"formula-vba-test");
@@ -122,4 +254,80 @@ fn verifies_raw_vba_project_signature_part_when_not_ole() {
         "expected signer subject to mention test CN, got: {:?}",
         sig.signer_subject
     );
+}
+
+#[test]
+fn verifies_raw_signature_part_binding_against_vba_project_bin() {
+    let module1 = b"Sub Hello()\r\nEnd Sub\r\n";
+    let vba_project_bin = build_minimal_vba_project_bin(module1);
+
+    // Signed digest is MD5(ContentNormalizedData) per MS-OVBA.
+    let normalized = content_normalized_data(&vba_project_bin).expect("content normalized data");
+    let digest = hash(MessageDigest::md5(), &normalized)
+        .expect("md5 digest")
+        .to_vec();
+
+    // Authenticode SpcIndirectDataContent: DigestInfo.algorithm is typically SHA-256 in practice,
+    // but DigestInfo.digest bytes are still the 16-byte MD5 project digest for VBA signatures.
+    let spc = make_spc_indirect_data_content_sha256(&digest);
+    let pkcs7 = make_pkcs7_signed_message(&spc);
+
+    let vba_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature" Target="vbaProjectSignature.bin"/>
+</Relationships>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/vbaProject.bin", options).unwrap();
+    zip.write_all(&vba_project_bin).unwrap();
+
+    zip.start_file("xl/_rels/vbaProject.bin.rels", options).unwrap();
+    zip.write_all(vba_rels).unwrap();
+
+    // Raw PKCS#7 blob: not an OLE container.
+    zip.start_file("xl/vbaProjectSignature.bin", options).unwrap();
+    zip.write_all(&pkcs7).unwrap();
+
+    let bytes = zip.finish().unwrap().into_inner();
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read package");
+
+    let sig = pkg
+        .verify_vba_digital_signature()
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+
+    // Tamper with a covered project stream but keep the signature bytes the same.
+    let mut tampered_module = module1.to_vec();
+    tampered_module[0] ^= 0xFF;
+    let tampered_project = build_minimal_vba_project_bin(&tampered_module);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/vbaProject.bin", options).unwrap();
+    zip.write_all(&tampered_project).unwrap();
+
+    zip.start_file("xl/_rels/vbaProject.bin.rels", options).unwrap();
+    zip.write_all(vba_rels).unwrap();
+
+    zip.start_file("xl/vbaProjectSignature.bin", options).unwrap();
+    zip.write_all(&pkcs7).unwrap();
+
+    let bytes = zip.finish().unwrap().into_inner();
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read tampered package");
+
+    let sig = pkg
+        .verify_vba_digital_signature()
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::NotBound);
 }
