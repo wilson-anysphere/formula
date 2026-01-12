@@ -1004,7 +1004,7 @@ vbaProject.bin (OLE container)
 **Challenges:**
 - Binary format with compression
 - Digital signatures must be preserved (and, for “signed-only” macro trust modes, validated/bound to
-  the MS-OVBA Contents Hash / V3 Content Hash binding digest)
+  the MS-OVBA Contents Hash (v1/v2) / `ContentsHashV3` (v3) binding digest)
 - No standard library for creation (only preservation)
 - Security implications of execution
 
