@@ -62,3 +62,27 @@ test("copyRangeToClipboardPayload preserves column-level numberFormat for date s
   assert.ok(payload.html);
   assert.match(payload.html, /data-number-format="yyyy-mm-dd"/);
 });
+
+test("copyRangeToClipboardPayload uses row-level formats from full-width row selections", () => {
+  const doc = new DocumentController();
+
+  // Full-width row 1: A1:XFD1.
+  doc.setRangeFormat("Sheet1", "A1:XFD1", { font: { bold: true } }, { label: "Bold Row" });
+  assert.equal(doc.getCell("Sheet1", "B1").styleId, 0);
+
+  const payload = copyRangeToClipboardPayload(doc, "Sheet1", "B1");
+  assert.ok(payload.html);
+  assert.match(payload.html, /font-weight:bold/i);
+});
+
+test("copyRangeToClipboardPayload uses sheet-level formats from full-sheet selections", () => {
+  const doc = new DocumentController();
+
+  // Full-sheet selection: A1:XFD1048576.
+  doc.setRangeFormat("Sheet1", "A1:XFD1048576", { font: { bold: true } }, { label: "Bold Sheet" });
+  assert.equal(doc.getCell("Sheet1", "C10").styleId, 0);
+
+  const payload = copyRangeToClipboardPayload(doc, "Sheet1", "C10");
+  assert.ok(payload.html);
+  assert.match(payload.html, /font-weight:bold/i);
+});

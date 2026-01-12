@@ -499,7 +499,7 @@ test("clipboard provider", async (t) => {
         assert.ok(item instanceof MockClipboardItem);
 
         const keys = Object.keys(item.data).sort();
-        assert.deepEqual(keys, ["text/html", "text/plain"].sort());
+        assert.deepEqual(keys, ["text/html", "text/plain", "text/rtf"].sort());
       }
     );
   });
