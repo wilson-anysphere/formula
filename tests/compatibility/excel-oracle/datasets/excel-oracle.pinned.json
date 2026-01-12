@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T13:12:26.332567968Z",
+  "generatedAt": "2026-01-12T13:18:19.889478389Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "ad7b6bfbb5c3b93df3a8c02f53595da81be6ee494a4ae2462e56200c30bd70b0",
-    "count": 1726
+    "sha256": "4ef8696c5f9dcfa58bf7b019c320276fdd88d7a2132e98faeaa11b010f7993db",
+    "count": 1731
   },
   "results": [
     {
@@ -13160,6 +13160,16 @@
       "displayText": "abc"
     },
     {
+      "caseId": "hyperlink_50a1e2786fb7",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "Example"
+      },
+      "address": "C1",
+      "displayText": "Example"
+    },
+    {
       "caseId": "textjoin_6f63b2cb1f9b",
       "outputCell": "C1",
       "result": {
@@ -14335,6 +14345,16 @@
       "displayText": "#N/A"
     },
     {
+      "caseId": "lookup_14d2fce8ebcb",
+      "outputCell": "E1",
+      "result": {
+        "t": "s",
+        "v": "three"
+      },
+      "address": "E1",
+      "displayText": "three"
+    },
+    {
       "caseId": "hlookup_0c04a351e7bf",
       "outputCell": "G1",
       "result": {
@@ -14572,6 +14592,16 @@
         "v": 2.0
       },
       "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "areas_88aea759af4f",
+      "outputCell": "E1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "E1",
       "displayText": "2"
     },
     {
@@ -15829,20 +15859,20 @@
       "outputCell": "C1",
       "result": {
         "t": "n",
-        "v": 100.75597490147861
+        "v": 100.75627837079071
       },
       "address": "C1",
-      "displayText": "100.75597490147861"
+      "displayText": "100.75627837079071"
     },
     {
       "caseId": "oddfyield_basis4_b8c7df4a447f",
       "outputCell": "C1",
       "result": {
         "t": "n",
-        "v": 0.0937828362065177
+        "v": 0.09377829305965153
       },
       "address": "C1",
-      "displayText": "0.0937828362065177"
+      "displayText": "0.09377829305965153"
     },
     {
       "caseId": "oddlprice_basis4_546c496042bd",
@@ -16389,20 +16419,20 @@
       "outputCell": "C1",
       "result": {
         "t": "n",
-        "v": 99.96121968512507
+        "v": 99.96077498435339
       },
       "address": "C1",
-      "displayText": "99.96121968512507"
+      "displayText": "99.96077498435339"
     },
     {
       "caseId": "oddlyield_7091ab544f8f",
       "outputCell": "C1",
       "result": {
         "t": "n",
-        "v": 0.6114824301430252
+        "v": 0.6044549289328661
       },
       "address": "C1",
-      "displayText": "0.6114824301430252"
+      "displayText": "0.6044549289328661"
     },
     {
       "caseId": "npv_b9b2bb2deab1",
@@ -17362,6 +17392,26 @@
       "displayText": "FALSE"
     },
     {
+      "caseId": "isref_241c70b18320",
+      "outputCell": "C1",
+      "result": {
+        "t": "b",
+        "v": true
+      },
+      "address": "C1",
+      "displayText": "TRUE"
+    },
+    {
+      "caseId": "isnontext_4cf8fa084d68",
+      "outputCell": "C1",
+      "result": {
+        "t": "b",
+        "v": false
+      },
+      "address": "C1",
+      "displayText": "FALSE"
+    },
+    {
       "caseId": "islogical_f99dae6e94a9",
       "outputCell": "C1",
       "result": {
@@ -17645,71 +17695,71 @@
       "caseId": "sheet_7dce9a8d409b",
       "outputCell": "C1",
       "result": {
-        "t": "n",
-        "v": 1.0
+        "t": "e",
+        "v": "#NAME?"
       },
       "address": "C1",
-      "displayText": "1"
+      "displayText": "#NAME?"
     },
     {
       "caseId": "sheet_2adbaa985742",
       "outputCell": "C1",
       "result": {
-        "t": "n",
-        "v": 1.0
+        "t": "e",
+        "v": "#NAME?"
       },
       "address": "C1",
-      "displayText": "1"
+      "displayText": "#NAME?"
     },
     {
       "caseId": "sheets_7c3532d7395b",
       "outputCell": "C1",
       "result": {
-        "t": "n",
-        "v": 1.0
+        "t": "e",
+        "v": "#NAME?"
       },
       "address": "C1",
-      "displayText": "1"
+      "displayText": "#NAME?"
     },
     {
       "caseId": "formulatext_e475ecc3e23c",
       "outputCell": "C1",
       "result": {
-        "t": "s",
-        "v": "=1+1"
+        "t": "e",
+        "v": "#NAME?"
       },
       "address": "C1",
-      "displayText": "=1+1"
+      "displayText": "#NAME?"
     },
     {
       "caseId": "formulatext_6e53664936a7",
       "outputCell": "C1",
       "result": {
         "t": "e",
-        "v": "#N/A"
+        "v": "#NAME?"
       },
       "address": "C1",
-      "displayText": "#N/A"
+      "displayText": "#NAME?"
     },
     {
       "caseId": "isformula_de4876bb5980",
       "outputCell": "C1",
       "result": {
-        "t": "b",
-        "v": true
+        "t": "e",
+        "v": "#NAME?"
       },
       "address": "C1",
-      "displayText": "TRUE"
+      "displayText": "#NAME?"
     },
     {
       "caseId": "isformula_86cf6becefe7",
       "outputCell": "C1",
       "result": {
-        "t": "b",
-        "v": false
+        "t": "e",
+        "v": "#NAME?"
       },
       "address": "C1",
-      "displayText": "FALSE"
+      "displayText": "#NAME?"
     },
     {
       "caseId": "lambda_let_541b4e7b019e",

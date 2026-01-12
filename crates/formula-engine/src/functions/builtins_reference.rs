@@ -284,6 +284,31 @@ fn columns_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
 inventory::submit! {
     FunctionSpec {
+        name: "AREAS",
+        min_args: 1,
+        max_args: 1,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any],
+        implementation: areas_fn,
+    }
+}
+
+fn areas_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    match ctx.eval_arg(&args[0]) {
+        ArgValue::Reference(_) => Value::Number(1.0),
+        ArgValue::ReferenceUnion(ranges) => Value::Number(ranges.len() as f64),
+        ArgValue::Scalar(Value::Reference(_)) => Value::Number(1.0),
+        ArgValue::Scalar(Value::ReferenceUnion(ranges)) => Value::Number(ranges.len() as f64),
+        ArgValue::Scalar(Value::Error(e)) => Value::Error(e),
+        ArgValue::Scalar(_) => Value::Error(ErrorKind::Value),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
         name: "ADDRESS",
         min_args: 2,
         max_args: 5,
@@ -313,9 +338,11 @@ fn address_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let sheet_prefix = if args.len() >= 5 && !matches!(args[4], Expr::Blank) {
         match eval_scalar_arg(ctx, &args[4]) {
             Value::Error(e) => return Value::Error(e),
-            Value::Array(_) | Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) | Value::Spill { .. } => {
-                return Value::Error(ErrorKind::Value)
-            }
+            Value::Array(_)
+            | Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             other => {
                 let raw = match other.coerce_to_string_with_ctx(ctx) {
                     Ok(s) => s,
@@ -398,8 +425,10 @@ fn quote_sheet_name(name: &str) -> String {
     let starts_like_r1c1 = matches!(name.chars().next(), Some('R' | 'r' | 'C' | 'c'))
         && matches!(name.chars().nth(1), Some('0'..='9' | '['));
     let looks_like_a1 = crate::eval::parse_a1(name).is_ok();
-    let needs_quote =
-        starts_like_number || starts_like_r1c1 || looks_like_a1 || name.chars().any(|c| !is_ident_cont_char(c));
+    let needs_quote = starts_like_number
+        || starts_like_r1c1
+        || looks_like_a1
+        || name.chars().any(|c| !is_ident_cont_char(c));
 
     if !needs_quote {
         return name.to_string();
@@ -518,7 +547,11 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             SheetReference::SheetRange(start, end) => {
                 let start_id = ctx.resolve_sheet_name(start)?;
                 let end_id = ctx.resolve_sheet_name(end)?;
-                if start_id == end_id { Some(start_id) } else { None }
+                if start_id == end_id {
+                    Some(start_id)
+                } else {
+                    None
+                }
             }
             SheetReference::External(_) => None,
         }

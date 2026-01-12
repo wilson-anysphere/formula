@@ -1,5 +1,5 @@
-use formula_engine::eval::parse_a1;
 use formula_engine::date::ExcelDateSystem;
+use formula_engine::eval::parse_a1;
 use formula_engine::functions::text;
 use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::value::{EntityValue, RecordValue};
@@ -240,6 +240,34 @@ fn concat_and_concatenate_ranges() {
     assert_eq!(
         sheet.eval("=CONCATENATE(A1:A2, \"c\")"),
         Value::Text("ac".to_string())
+    );
+}
+
+#[test]
+fn hyperlink_returns_friendly_name_or_link_location() {
+    let mut sheet = TestSheet::new();
+
+    assert_eq!(
+        sheet.eval("=HYPERLINK(\"https://example.com\")"),
+        Value::Text("https://example.com".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=HYPERLINK(\"https://example.com\",\"Example\")"),
+        Value::Text("Example".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=HYPERLINK(123)"),
+        Value::Text("123".to_string())
+    );
+
+    // Errors propagate from either argument.
+    assert_eq!(
+        sheet.eval("=HYPERLINK(1/0,\"x\")"),
+        Value::Error(ErrorKind::Div0)
+    );
+    assert_eq!(
+        sheet.eval("=HYPERLINK(\"x\",1/0)"),
+        Value::Error(ErrorKind::Div0)
     );
 }
 
@@ -513,8 +541,14 @@ fn text_spills_arrays_elementwise() {
         .unwrap();
     engine.recalculate_single_threaded();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Text("1".to_string()));
-    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Text("2".to_string()));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("1".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Text("2".to_string())
+    );
 }
 
 #[test]

@@ -202,6 +202,206 @@ fn hlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
 inventory::submit! {
     FunctionSpec {
+        name: "LOOKUP",
+        min_args: 2,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Any,
+        arg_types: &[ValueType::Any, ValueType::Any, ValueType::Any],
+        implementation: lookup_fn,
+    }
+}
+
+fn lookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    fn reference_to_1d_values(
+        ctx: &dyn FunctionContext,
+        reference: &Reference,
+    ) -> Result<Vec<Value>, ErrorKind> {
+        let reference = reference.normalized();
+        ctx.record_reference(&reference);
+
+        if reference.start.row == reference.end.row {
+            // Horizontal.
+            let len = (reference.end.col - reference.start.col + 1) as usize;
+            let mut out = Vec::with_capacity(len);
+            for col in reference.start.col..=reference.end.col {
+                out.push(ctx.get_cell_value(
+                    &reference.sheet_id,
+                    crate::eval::CellAddr {
+                        row: reference.start.row,
+                        col,
+                    },
+                ));
+            }
+            return Ok(out);
+        }
+
+        if reference.start.col == reference.end.col {
+            // Vertical.
+            let len = (reference.end.row - reference.start.row + 1) as usize;
+            let mut out = Vec::with_capacity(len);
+            for row in reference.start.row..=reference.end.row {
+                out.push(ctx.get_cell_value(
+                    &reference.sheet_id,
+                    crate::eval::CellAddr {
+                        row,
+                        col: reference.start.col,
+                    },
+                ));
+            }
+            return Ok(out);
+        }
+
+        Err(ErrorKind::Value)
+    }
+
+    fn eval_vector_arg(
+        ctx: &dyn FunctionContext,
+        expr: &CompiledExpr,
+    ) -> Result<Vec<Value>, ErrorKind> {
+        match ctx.eval_arg(expr) {
+            ArgValue::Reference(r) => reference_to_1d_values(ctx, &r),
+            ArgValue::Scalar(Value::Array(arr)) => {
+                if arr.rows != 1 && arr.cols != 1 {
+                    return Err(ErrorKind::Value);
+                }
+                Ok(arr.values)
+            }
+            ArgValue::Scalar(Value::Error(e)) => Err(e),
+            ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => Err(ErrorKind::Value),
+        }
+    }
+
+    fn lookup_array_ref(
+        ctx: &dyn FunctionContext,
+        lookup_value: &Value,
+        reference: &Reference,
+    ) -> Value {
+        let r = reference.normalized();
+        ctx.record_reference(&r);
+
+        let rows = (r.end.row - r.start.row + 1) as usize;
+        let cols = (r.end.col - r.start.col + 1) as usize;
+        if rows == 0 || cols == 0 {
+            return Value::Error(ErrorKind::NA);
+        }
+
+        let search_first_col = rows >= cols;
+        if search_first_col {
+            let mut lookup_vec = Vec::with_capacity(rows);
+            let mut result_vec = Vec::with_capacity(rows);
+            for row in r.start.row..=r.end.row {
+                lookup_vec.push(ctx.get_cell_value(
+                    &r.sheet_id,
+                    crate::eval::CellAddr {
+                        row,
+                        col: r.start.col,
+                    },
+                ));
+                result_vec.push(ctx.get_cell_value(
+                    &r.sheet_id,
+                    crate::eval::CellAddr {
+                        row,
+                        col: r.end.col,
+                    },
+                ));
+            }
+            match lookup::lookup_vector(lookup_value, &lookup_vec, Some(&result_vec)) {
+                Ok(v) => v,
+                Err(e) => Value::Error(e),
+            }
+        } else {
+            let mut lookup_vec = Vec::with_capacity(cols);
+            let mut result_vec = Vec::with_capacity(cols);
+            for col in r.start.col..=r.end.col {
+                lookup_vec.push(ctx.get_cell_value(
+                    &r.sheet_id,
+                    crate::eval::CellAddr {
+                        row: r.start.row,
+                        col,
+                    },
+                ));
+                result_vec.push(ctx.get_cell_value(
+                    &r.sheet_id,
+                    crate::eval::CellAddr {
+                        row: r.end.row,
+                        col,
+                    },
+                ));
+            }
+            match lookup::lookup_vector(lookup_value, &lookup_vec, Some(&result_vec)) {
+                Ok(v) => v,
+                Err(e) => Value::Error(e),
+            }
+        }
+    }
+
+    let lookup_value = eval_scalar_arg(ctx, &args[0]);
+    if let Value::Error(e) = lookup_value {
+        return Value::Error(e);
+    }
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    // Vector form: LOOKUP(lookup_value, lookup_vector, [result_vector])
+    if args.len() == 3 {
+        let lookup_vector = match eval_vector_arg(ctx, &args[1]) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let result_vector = match eval_vector_arg(ctx, &args[2]) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+
+        return match lookup::lookup_vector(&lookup_value, &lookup_vector, Some(&result_vector)) {
+            Ok(v) => v,
+            Err(e) => Value::Error(e),
+        };
+    }
+
+    // 2-arg form: could be vector-form or array-form depending on the shape.
+    match ctx.eval_arg(&args[1]) {
+        ArgValue::Reference(r) => {
+            let r_norm = r.normalized();
+            if r_norm.start.row == r_norm.end.row || r_norm.start.col == r_norm.end.col {
+                // 1D vector.
+                let values = match reference_to_1d_values(ctx, &r_norm) {
+                    Ok(v) => v,
+                    Err(e) => return Value::Error(e),
+                };
+                match lookup::lookup_vector(&lookup_value, &values, None) {
+                    Ok(v) => v,
+                    Err(e) => Value::Error(e),
+                }
+            } else {
+                // 2D array form.
+                lookup_array_ref(ctx, &lookup_value, &r_norm)
+            }
+        }
+        ArgValue::Scalar(Value::Array(arr)) => {
+            if arr.rows != 1 && arr.cols != 1 {
+                return match lookup::lookup_array(&lookup_value, &arr) {
+                    Ok(v) => v,
+                    Err(e) => Value::Error(e),
+                };
+            }
+
+            match lookup::lookup_vector(&lookup_value, &arr.values, None) {
+                Ok(v) => v,
+                Err(e) => Value::Error(e),
+            }
+        }
+        ArgValue::Scalar(Value::Error(e)) => Value::Error(e),
+        ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => Value::Error(ErrorKind::Value),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
         name: "INDEX",
         min_args: 2,
         max_args: 4,
@@ -751,7 +951,9 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
         fn get(&self, ctx: &dyn FunctionContext, row: usize, col: usize) -> Value {
             match self {
-                XlookupReturnArray::Array(arr) => arr.get(row, col).cloned().unwrap_or(Value::Blank),
+                XlookupReturnArray::Array(arr) => {
+                    arr.get(row, col).cloned().unwrap_or(Value::Blank)
+                }
                 XlookupReturnArray::Reference(r) => ctx.get_cell_value(
                     &r.sheet_id,
                     crate::eval::CellAddr {

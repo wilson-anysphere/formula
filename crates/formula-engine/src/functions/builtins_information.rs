@@ -105,6 +105,56 @@ fn istext_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
 inventory::submit! {
     FunctionSpec {
+        name: "ISREF",
+        min_args: 1,
+        max_args: 1,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Bool,
+        arg_types: &[ValueType::Any],
+        implementation: isref_fn,
+    }
+}
+
+fn isref_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    fn is_ref_value(value: &Value) -> bool {
+        matches!(value, Value::Reference(_) | Value::ReferenceUnion(_))
+    }
+
+    match ctx.eval_arg(&args[0]) {
+        ArgValue::Reference(_) | ArgValue::ReferenceUnion(_) => Value::Bool(true),
+        ArgValue::Scalar(v) => match v {
+            Value::Array(arr) => Value::Array(Array::new(
+                arr.rows,
+                arr.cols,
+                arr.iter().map(|v| Value::Bool(is_ref_value(v))).collect(),
+            )),
+            other => Value::Bool(is_ref_value(&other)),
+        },
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "ISNONTEXT",
+        min_args: 1,
+        max_args: 1,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Bool,
+        arg_types: &[ValueType::Any],
+        implementation: isnontext_fn,
+    }
+}
+
+fn isnontext_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    map_arg(ctx, &args[0], |v| Value::Bool(!information::istext(v)))
+}
+
+inventory::submit! {
+    FunctionSpec {
         name: "ISLOGICAL",
         min_args: 1,
         max_args: 1,

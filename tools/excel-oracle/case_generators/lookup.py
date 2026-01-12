@@ -51,6 +51,16 @@ def generate(
             output_cell="E1",
         )
 
+    add_case(
+        cases,
+        prefix="lookup",
+        tags=["lookup", "LOOKUP"],
+        formula="=LOOKUP(4,A1:A5,B1:B5)",
+        inputs=[*table_inputs],
+        output_cell="E1",
+        description="Legacy LOOKUP uses approximate match (exact or next smaller).",
+    )
+
     # HLOOKUP uses a horizontal table (keys in first row).
     h_keys = [1, 2, 3, 10, 20]
     h_vals = ["one", "two", "three", "ten", "twenty"]
@@ -105,4 +115,11 @@ def generate(
     add_case(cases, prefix="column", tags=["ref", "COLUMN"], formula="=COLUMN(C5)")
     add_case(cases, prefix="rows", tags=["ref", "ROWS"], formula="=ROWS(A1:B3)")
     add_case(cases, prefix="columns", tags=["ref", "COLUMNS"], formula="=COLUMNS(A1:B3)")
-
+    add_case(
+        cases,
+        prefix="areas",
+        tags=["ref", "AREAS"],
+        formula="=AREAS((A1:A2,D1:D2))",
+        output_cell="E1",
+        description="AREAS counts the number of reference areas in a union.",
+    )

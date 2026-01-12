@@ -78,13 +78,30 @@ fn rows_and_columns_return_dimensions() {
 }
 
 #[test]
+fn areas_counts_reference_unions() {
+    let mut sheet = TestSheet::new();
+
+    assert_number(&sheet.eval("=AREAS(A1:B2)"), 1.0);
+    assert_number(&sheet.eval("=AREAS((A1:A2,C1:C2))"), 2.0);
+
+    assert_eq!(sheet.eval("=AREAS(1)"), Value::Error(ErrorKind::Value));
+    assert_eq!(sheet.eval("=AREAS(#REF!)"), Value::Error(ErrorKind::Ref));
+}
+
+#[test]
 fn address_formats_a1_and_r1c1_styles() {
     let mut sheet = TestSheet::new();
 
     assert_eq!(sheet.eval("=ADDRESS(1,1)"), Value::Text("$A$1".to_string()));
     assert_eq!(sheet.eval("=ADDRESS(1,1,4)"), Value::Text("A1".to_string()));
-    assert_eq!(sheet.eval("=ADDRESS(1,1,2)"), Value::Text("A$1".to_string()));
-    assert_eq!(sheet.eval("=ADDRESS(1,1,3)"), Value::Text("$A1".to_string()));
+    assert_eq!(
+        sheet.eval("=ADDRESS(1,1,2)"),
+        Value::Text("A$1".to_string())
+    );
+    assert_eq!(
+        sheet.eval("=ADDRESS(1,1,3)"),
+        Value::Text("$A1".to_string())
+    );
 
     assert_eq!(
         sheet.eval("=ADDRESS(1,1,1,FALSE)"),
@@ -121,5 +138,8 @@ fn address_formats_a1_and_r1c1_styles() {
 
     assert_eq!(sheet.eval("=ADDRESS(0,1)"), Value::Error(ErrorKind::Value));
     assert_eq!(sheet.eval("=ADDRESS(1,0)"), Value::Error(ErrorKind::Value));
-    assert_eq!(sheet.eval("=ADDRESS(1,1,0)"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        sheet.eval("=ADDRESS(1,1,0)"),
+        Value::Error(ErrorKind::Value)
+    );
 }

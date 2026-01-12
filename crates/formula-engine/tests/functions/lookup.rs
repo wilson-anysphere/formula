@@ -867,6 +867,91 @@ fn hlookup_supports_wildcard_exact_matching() {
 }
 
 #[test]
+fn lookup_vector_form_is_exact_or_next_smaller_and_returns_last_duplicate() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 2.0);
+    sheet.set("A3", 2.0);
+    sheet.set("A4", 3.0);
+    sheet.set("B1", "one");
+    sheet.set("B2", "two-a");
+    sheet.set("B3", "two-b");
+    sheet.set("B4", "three");
+
+    // Exact match returns last duplicate.
+    assert_eq!(
+        sheet.eval("=LOOKUP(2, A1:A4, B1:B4)"),
+        Value::Text("two-b".to_string())
+    );
+
+    // Approximate match (next smaller).
+    assert_eq!(
+        sheet.eval("=LOOKUP(2.5, A1:A4, B1:B4)"),
+        Value::Text("two-b".to_string())
+    );
+
+    // Out of range low -> #N/A.
+    assert_eq!(
+        sheet.eval("=LOOKUP(0, A1:A4, B1:B4)"),
+        Value::Error(ErrorKind::NA)
+    );
+
+    // Out of range high -> last element.
+    assert_eq!(
+        sheet.eval("=LOOKUP(10, A1:A4, B1:B4)"),
+        Value::Text("three".to_string())
+    );
+
+    // Missing result_vector defaults to lookup_vector.
+    assert_eq!(sheet.eval("=LOOKUP(2.5, A1:A4)"), Value::Number(2.0));
+}
+
+#[test]
+fn lookup_errors_on_mismatched_vector_lengths() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 2.0);
+    sheet.set("B1", 10.0);
+
+    assert_eq!(
+        sheet.eval("=LOOKUP(2, A1:A2, B1:B1)"),
+        Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
+fn lookup_array_form_searches_first_column_for_tall_arrays() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 2.0);
+    sheet.set("A3", 3.0);
+    sheet.set("A4", 4.0);
+    sheet.set("B1", 10.0);
+    sheet.set("B2", 20.0);
+    sheet.set("B3", 30.0);
+    sheet.set("B4", 40.0);
+
+    // Array is 4x2, so LOOKUP searches A1:A4 and returns from B1:B4.
+    assert_eq!(sheet.eval("=LOOKUP(3.5, A1:B4)"), Value::Number(30.0));
+}
+
+#[test]
+fn lookup_array_form_searches_first_row_for_wide_arrays() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("B1", 2.0);
+    sheet.set("C1", 3.0);
+    sheet.set("D1", 4.0);
+    sheet.set("A2", 10.0);
+    sheet.set("B2", 20.0);
+    sheet.set("C2", 30.0);
+    sheet.set("D2", 40.0);
+
+    // Array is 2x4, so LOOKUP searches A1:D1 and returns from A2:D2.
+    assert_eq!(sheet.eval("=LOOKUP(3.5, A1:D2)"), Value::Number(30.0));
+}
+
+#[test]
 fn index_and_match() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", Value::Text("A".to_string()));

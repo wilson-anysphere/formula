@@ -121,9 +121,57 @@ fn n_and_t_match_excel_coercions() {
     assert_number(&sheet.eval("=N(A1)"), 0.0);
     assert_eq!(sheet.eval("=N(#DIV/0!)"), Value::Error(ErrorKind::Div0));
 
-    assert_eq!(sheet.eval("=T(\"hello\")"), Value::Text("hello".to_string()));
+    assert_eq!(
+        sheet.eval("=T(\"hello\")"),
+        Value::Text("hello".to_string())
+    );
     assert_eq!(sheet.eval("=T(5)"), Value::Text(String::new()));
     assert_eq!(sheet.eval("=T(TRUE)"), Value::Text(String::new()));
     assert_eq!(sheet.eval("=T(A1)"), Value::Text("Hello".to_string()));
     assert_eq!(sheet.eval("=T(#DIV/0!)"), Value::Error(ErrorKind::Div0));
+}
+#[test]
+fn isref_detects_references_and_spills_for_array_literals() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "hello");
+
+    assert_eq!(sheet.eval("=ISREF(A1)"), Value::Bool(true));
+    assert_eq!(sheet.eval("=ISREF(1)"), Value::Bool(false));
+    assert_eq!(sheet.eval("=ISREF(#REF!)"), Value::Bool(false));
+    assert_eq!(sheet.eval("=ISREF(INDEX(A1:A1,1,1))"), Value::Bool(true));
+
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=ISREF({1;2})")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "C1").expect("spill range");
+    assert_eq!(start, parse_a1("C1").unwrap());
+    assert_eq!(end, parse_a1("C2").unwrap());
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Bool(false));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Bool(false));
+}
+
+#[test]
+fn isnontext_matches_excel_semantics_and_spills_for_array_literals() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "x");
+    sheet.set("A2", 1.0);
+
+    assert_eq!(sheet.eval("=ISNONTEXT(A1)"), Value::Bool(false));
+    assert_eq!(sheet.eval("=ISNONTEXT(A2)"), Value::Bool(true));
+    assert_eq!(sheet.eval("=ISNONTEXT(#DIV/0!)"), Value::Bool(true));
+
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "D1", "=ISNONTEXT({1;\"x\"})")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "D1").expect("spill range");
+    assert_eq!(start, parse_a1("D1").unwrap());
+    assert_eq!(end, parse_a1("D2").unwrap());
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Bool(true));
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Bool(false));
 }

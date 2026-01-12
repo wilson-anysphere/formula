@@ -218,6 +218,13 @@ def generate(
         inputs=[CellInput("A1", "a"), CellInput("A2", "b")],
     )
 
+    add_case(
+        cases,
+        prefix="hyperlink",
+        tags=["text", "HYPERLINK"],
+        formula='=HYPERLINK("https://example.com","Example")',
+    )
+
     # TEXTJOIN
     textjoin_inputs = [
         CellInput("A1", "a"),

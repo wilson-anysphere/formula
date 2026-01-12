@@ -26047,6 +26047,16 @@
       "id": "concat_new_577bb69cae3a"
     },
     {
+      "formula": "=HYPERLINK(\"https://example.com\",\"Example\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "HYPERLINK"
+      ],
+      "id": "hyperlink_50a1e2786fb7"
+    },
+    {
       "formula": "=TEXTJOIN(\",\",TRUE,A1:A4)",
       "outputCell": "C1",
       "inputs": [
@@ -28792,6 +28802,58 @@
       "id": "index_match_d9885faecbc2"
     },
     {
+      "formula": "=LOOKUP(4,A1:A5,B1:B5)",
+      "outputCell": "E1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        },
+        {
+          "cell": "B1",
+          "value": "one"
+        },
+        {
+          "cell": "A2",
+          "value": 2
+        },
+        {
+          "cell": "B2",
+          "value": "two"
+        },
+        {
+          "cell": "A3",
+          "value": 3
+        },
+        {
+          "cell": "B3",
+          "value": "three"
+        },
+        {
+          "cell": "A4",
+          "value": 10
+        },
+        {
+          "cell": "B4",
+          "value": "ten"
+        },
+        {
+          "cell": "A5",
+          "value": 20
+        },
+        {
+          "cell": "B5",
+          "value": "twenty"
+        }
+      ],
+      "tags": [
+        "lookup",
+        "LOOKUP"
+      ],
+      "description": "Legacy LOOKUP uses approximate match (exact or next smaller).",
+      "id": "lookup_14d2fce8ebcb"
+    },
+    {
       "formula": "=HLOOKUP(F1,A1:E2,2,FALSE)",
       "outputCell": "G1",
       "inputs": [
@@ -29847,6 +29909,17 @@
         "COLUMNS"
       ],
       "id": "columns_f75298ed7dc0"
+    },
+    {
+      "formula": "=AREAS((A1:A2,D1:D2))",
+      "outputCell": "E1",
+      "inputs": [],
+      "tags": [
+        "ref",
+        "AREAS"
+      ],
+      "description": "AREAS counts the number of reference areas in a union.",
+      "id": "areas_88aea759af4f"
     },
     {
       "formula": "=DAVERAGE(A1:D4,\"Salary\",F1:G3)",
@@ -33873,6 +33946,26 @@
         "ISTEXT"
       ],
       "id": "istext_c26fe0c20e94"
+    },
+    {
+      "formula": "=ISREF(A1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "ISREF"
+      ],
+      "id": "isref_241c70b18320"
+    },
+    {
+      "formula": "=ISNONTEXT(\"x\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "ISNONTEXT"
+      ],
+      "id": "isnontext_4cf8fa084d68"
     },
     {
       "formula": "=ISLOGICAL(A1)",

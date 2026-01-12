@@ -96,6 +96,49 @@ fn concatenate_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
 inventory::submit! {
     FunctionSpec {
+        name: "HYPERLINK",
+        min_args: 1,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Text,
+        arg_types: &[ValueType::Any, ValueType::Any],
+        implementation: hyperlink_fn,
+    }
+}
+
+fn hyperlink_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let link_location = eval_scalar_arg(ctx, &args[0]);
+    if let Value::Error(e) = link_location {
+        return Value::Error(e);
+    }
+
+    let friendly_name = match args.get(1) {
+        Some(expr) if matches!(expr, CompiledExpr::Blank) => None,
+        Some(expr) => {
+            let v = eval_scalar_arg(ctx, expr);
+            if let Value::Error(e) = v {
+                return Value::Error(e);
+            }
+            Some(v)
+        }
+        None => None,
+    };
+
+    let display = match friendly_name {
+        Some(v) => v,
+        None => link_location,
+    };
+
+    match display.coerce_to_string() {
+        Ok(s) => Value::Text(s),
+        Err(e) => Value::Error(e),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
         name: "LEFT",
         min_args: 1,
         max_args: 2,

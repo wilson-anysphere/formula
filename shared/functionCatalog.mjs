@@ -161,6 +161,16 @@ export default {
       ]
     },
     {
+      "name": "AREAS",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "ASC",
       "min_args": 1,
       "max_args": 1,
@@ -1618,6 +1628,17 @@ export default {
       ]
     },
     {
+      "name": "HYPERLINK",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "any",
+        "any"
+      ]
+    },
+    {
       "name": "IF",
       "min_args": 2,
       "max_args": 3,
@@ -1995,6 +2016,16 @@ export default {
       ]
     },
     {
+      "name": "ISNONTEXT",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "bool",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "ISNUMBER",
       "min_args": 1,
       "max_args": 1,
@@ -2063,6 +2094,16 @@ export default {
       "return_type": "number",
       "arg_types": [
         "number"
+      ]
+    },
+    {
+      "name": "ISREF",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "bool",
+      "arg_types": [
+        "any"
       ]
     },
     {
@@ -2207,6 +2248,18 @@ export default {
       "return_type": "number",
       "arg_types": [
         "number"
+      ]
+    },
+    {
+      "name": "LOOKUP",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "any",
+        "any"
       ]
     },
     {

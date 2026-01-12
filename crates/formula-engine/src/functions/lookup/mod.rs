@@ -248,8 +248,12 @@ fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
 
     // Blank coerces to the other type for comparisons (Excel semantics).
     match (a, b) {
-        (Value::Blank, Value::Number(y)) => return 0.0_f64.partial_cmp(y).unwrap_or(Ordering::Equal),
-        (Value::Number(x), Value::Blank) => return x.partial_cmp(&0.0_f64).unwrap_or(Ordering::Equal),
+        (Value::Blank, Value::Number(y)) => {
+            return 0.0_f64.partial_cmp(y).unwrap_or(Ordering::Equal)
+        }
+        (Value::Number(x), Value::Blank) => {
+            return x.partial_cmp(&0.0_f64).unwrap_or(Ordering::Equal)
+        }
         (Value::Blank, Value::Bool(y)) => return false.cmp(y),
         (Value::Bool(x), Value::Blank) => return x.cmp(&false),
         (Value::Blank, other) if text_like_str(other).is_some() => {
@@ -294,7 +298,11 @@ fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
     }
 }
 
-fn lower_bound_by(values: &[Value], needle: &Value, cmp: impl Fn(&Value, &Value) -> Ordering) -> usize {
+fn lower_bound_by(
+    values: &[Value],
+    needle: &Value,
+    cmp: impl Fn(&Value, &Value) -> Ordering,
+) -> usize {
     let mut lo = 0usize;
     let mut hi = values.len();
     while lo < hi {
@@ -307,7 +315,11 @@ fn lower_bound_by(values: &[Value], needle: &Value, cmp: impl Fn(&Value, &Value)
     lo
 }
 
-fn upper_bound_by(values: &[Value], needle: &Value, cmp: impl Fn(&Value, &Value) -> Ordering) -> usize {
+fn upper_bound_by(
+    values: &[Value],
+    needle: &Value,
+    cmp: impl Fn(&Value, &Value) -> Ordering,
+) -> usize {
     let mut lo = 0usize;
     let mut hi = values.len();
     while lo < hi {
@@ -476,7 +488,11 @@ fn xmatch_linear(
                                 Ordering::Equal => {
                                     // For "next smaller", choose the last occurrence of the winning
                                     // value (insertion point is after duplicates).
-                                    if idx > best_idx { Some(idx) } else { Some(best_idx) }
+                                    if idx > best_idx {
+                                        Some(idx)
+                                    } else {
+                                        Some(best_idx)
+                                    }
                                 }
                                 Ordering::Less => Some(best_idx),
                             }
@@ -500,7 +516,11 @@ fn xmatch_linear(
                                 Ordering::Equal => {
                                     // For "next larger", choose the first occurrence of the winning
                                     // value (insertion point is before duplicates).
-                                    if idx < best_idx { Some(idx) } else { Some(best_idx) }
+                                    if idx < best_idx {
+                                        Some(idx)
+                                    } else {
+                                        Some(best_idx)
+                                    }
                                 }
                                 Ordering::Greater => Some(best_idx),
                             }
@@ -779,7 +799,12 @@ fn xmatch_binary_accessor(
 ///
 /// Wrapper for the default mode: exact match, searching first-to-last.
 pub fn xmatch(lookup_value: &Value, lookup_array: &[Value]) -> Result<i32, ErrorKind> {
-    xmatch_with_modes(lookup_value, lookup_array, MatchMode::Exact, SearchMode::FirstToLast)
+    xmatch_with_modes(
+        lookup_value,
+        lookup_array,
+        MatchMode::Exact,
+        SearchMode::FirstToLast,
+    )
 }
 
 /// XLOOKUP(lookup_value, lookup_array, return_array, [if_not_found])
@@ -821,6 +846,82 @@ pub fn xlookup_with_modes(
         }
         Err(ErrorKind::NA) => if_not_found.ok_or(ErrorKind::NA),
         Err(e) => Err(e),
+    }
+}
+
+/// LOOKUP(lookup_value, lookup_vector, [result_vector])
+///
+/// Implements Excel's legacy LOOKUP vector form:
+/// - Always uses approximate matching ("exact or next smaller").
+/// - On duplicates, returns the last matching item.
+/// - `result_vector` defaults to `lookup_vector`.
+///
+/// Returns `#N/A` when `lookup_value` is smaller than the smallest item.
+pub fn lookup_vector(
+    lookup_value: &Value,
+    lookup_vector: &[Value],
+    result_vector: Option<&[Value]>,
+) -> Result<Value, ErrorKind> {
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Err(ErrorKind::Value);
+    }
+
+    let result_vector = result_vector.unwrap_or(lookup_vector);
+    if lookup_vector.len() != result_vector.len() {
+        return Err(ErrorKind::Value);
+    }
+
+    let pos = xmatch_with_modes(
+        lookup_value,
+        lookup_vector,
+        MatchMode::ExactOrNextSmaller,
+        SearchMode::BinaryAscending,
+    )?;
+    let idx = usize::try_from(pos - 1).map_err(|_| ErrorKind::Value)?;
+    result_vector.get(idx).cloned().ok_or(ErrorKind::Value)
+}
+
+/// LOOKUP(lookup_value, array)
+///
+/// Implements Excel's legacy LOOKUP array form:
+/// - If `array` has more rows than columns (or is square), search the first column and
+///   return the corresponding value from the last column.
+/// - Otherwise, search the first row and return the corresponding value from the last row.
+pub fn lookup_array(lookup_value: &Value, array: &crate::value::Array) -> Result<Value, ErrorKind> {
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Err(ErrorKind::Value);
+    }
+    if array.rows == 0 || array.cols == 0 {
+        return Err(ErrorKind::NA);
+    }
+
+    let search_first_col = array.rows >= array.cols;
+    if search_first_col {
+        let mut lookup_vec = Vec::with_capacity(array.rows);
+        let mut result_vec = Vec::with_capacity(array.rows);
+        for r in 0..array.rows {
+            lookup_vec.push(array.get(r, 0).cloned().unwrap_or(Value::Blank));
+            result_vec.push(
+                array
+                    .get(r, array.cols.saturating_sub(1))
+                    .cloned()
+                    .unwrap_or(Value::Blank),
+            );
+        }
+        lookup_vector(lookup_value, &lookup_vec, Some(&result_vec))
+    } else {
+        let mut lookup_vec = Vec::with_capacity(array.cols);
+        let mut result_vec = Vec::with_capacity(array.cols);
+        for c in 0..array.cols {
+            lookup_vec.push(array.get(0, c).cloned().unwrap_or(Value::Blank));
+            result_vec.push(
+                array
+                    .get(array.rows.saturating_sub(1), c)
+                    .cloned()
+                    .unwrap_or(Value::Blank),
+            );
+        }
+        lookup_vector(lookup_value, &lookup_vec, Some(&result_vec))
     }
 }
 
@@ -901,7 +1002,11 @@ mod tests {
 
     #[test]
     fn xmatch_wildcard_reverse_search_returns_last_match() {
-        let array = vec![Value::from("apple"), Value::from("banana"), Value::from("apricot")];
+        let array = vec![
+            Value::from("apple"),
+            Value::from("banana"),
+            Value::from("apricot"),
+        ];
         assert_eq!(
             xmatch_with_modes(
                 &Value::from("a*"),

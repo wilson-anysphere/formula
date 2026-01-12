@@ -26,6 +26,8 @@ def generate(
     add_case(cases, prefix="isnumber", tags=["info", "ISNUMBER"], formula="=ISNUMBER(A1)", inputs=[CellInput("A1", "1")])
     add_case(cases, prefix="istext", tags=["info", "ISTEXT"], formula="=ISTEXT(A1)", inputs=[CellInput("A1", "x")])
     add_case(cases, prefix="istext", tags=["info", "ISTEXT"], formula="=ISTEXT(A1)", inputs=[CellInput("A1", 1)])
+    add_case(cases, prefix="isref", tags=["info", "ISREF"], formula="=ISREF(A1)")
+    add_case(cases, prefix="isnontext", tags=["info", "ISNONTEXT"], formula='=ISNONTEXT("x")')
     add_case(cases, prefix="islogical", tags=["info", "ISLOGICAL"], formula="=ISLOGICAL(A1)", inputs=[CellInput("A1", True)])
     add_case(cases, prefix="islogical", tags=["info", "ISLOGICAL"], formula="=ISLOGICAL(A1)", inputs=[CellInput("A1", 0)])
 
