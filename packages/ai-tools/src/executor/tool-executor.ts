@@ -497,17 +497,23 @@ export class ToolExecutor {
       return { range: this.formatRangeForUser(range), values, formulas };
     }
 
-    const values = cells.map((row, r) =>
-      row.map((cell, c) => {
+    const values: CellScalar[][] = [];
+    for (let r = 0; r < cells.length; r += 1) {
+      const row = cells[r] ?? [];
+      const valuesRow: CellScalar[] = [];
+      for (let c = 0; c < row.length; c += 1) {
+        const cell = row[c]!;
         const rowIndex = range.startRow + r;
         const colIndex = range.startCol + c;
         if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
-          redactedCellCount++;
-          return DLP_REDACTION_PLACEHOLDER;
+          redactedCellCount += 1;
+          valuesRow.push(DLP_REDACTION_PLACEHOLDER);
+          continue;
         }
-        return cell.formula ? null : cell.value;
-      })
-    );
+        valuesRow.push(cell.formula ? null : cell.value);
+      }
+      values.push(valuesRow);
+    }
 
     const formulas = undefined;
 
