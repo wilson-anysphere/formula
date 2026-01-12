@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // Include an explicit `.ts` import specifier so the repo's node:test runner can
-// automatically skip this suite when `--experimental-strip-types` is not available.
+// automatically skip this suite when TypeScript execution isn't available.
 import { decryptCellPlaintext as decryptFromTs, encryptCellPlaintext as encryptFromTs } from "../src/index.node.ts";
 
-test("collab-encryption is importable under Node ESM when executing TS sources (strip-types)", async () => {
+test("collab-encryption is importable under Node ESM when executing TS sources directly", async () => {
   const mod = await import("@formula/collab-encryption");
 
   assert.equal(typeof mod.encryptCellPlaintext, "function");
@@ -26,4 +26,3 @@ test("collab-encryption is importable under Node ESM when executing TS sources (
   const decrypted = await mod.decryptCellPlaintext({ encrypted, key, context });
   assert.deepEqual(decrypted, plaintext);
 });
-
