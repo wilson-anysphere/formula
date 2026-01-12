@@ -246,6 +246,14 @@
   overflow: auto;
 }
 
+.dock-panel__body--fill {
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .dock-panel__mount,
 .panel-mount--fill-column {
   height: 100%;

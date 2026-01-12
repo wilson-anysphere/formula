@@ -440,9 +440,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     let instance = reactPanels.get(panelId);
     if (!instance) {
       const container = document.createElement("div");
-      container.style.height = "100%";
-      container.style.display = "flex";
-      container.style.flexDirection = "column";
+      container.className = "dock-panel__mount panel-mount--fill-column";
       instance = { root: createRoot(container), container };
       reactPanels.set(panelId, instance);
     }
@@ -455,9 +453,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     let instance = domPanels.get(panelId);
     if (!instance) {
       const container = document.createElement("div");
-      container.style.height = "100%";
-      container.style.display = "flex";
-      container.style.flexDirection = "column";
+      container.className = "dock-panel__mount panel-mount--fill-column";
       instance = mount(container);
       domPanels.set(panelId, instance);
     }
@@ -467,14 +463,12 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
   }
 
   function makeBodyFillAvailableHeight(body: HTMLDivElement) {
-    body.style.flex = "1";
-    body.style.minHeight = "0";
-    body.style.padding = "0";
-    body.style.display = "flex";
-    body.style.flexDirection = "column";
+    body.classList.add("dock-panel__body--fill");
   }
 
   function renderPanelBody(panelId: string, body: HTMLDivElement) {
+    // Reset any previous renderer-specific body modifiers before applying this panel's layout.
+    body.classList.remove("dock-panel__body--fill");
     const workbookId = options.getWorkbookId?.() ?? options.workbookId;
 
     if (panelId === PanelIds.AI_CHAT) {
