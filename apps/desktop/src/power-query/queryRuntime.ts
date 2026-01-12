@@ -150,6 +150,14 @@ function isQuerySheetDestination(dest: unknown): dest is { sheetId: string; star
 function describeDestination(query: Query): string {
   const dest = isQuerySheetDestination(query.destination) ? query.destination : null;
   if (!dest) return "Not loaded";
+  const lastOutputSize = (dest as any)?.lastOutputSize;
+  const rows = typeof lastOutputSize?.rows === "number" ? lastOutputSize.rows : null;
+  const cols = typeof lastOutputSize?.cols === "number" ? lastOutputSize.cols : null;
+  if (typeof rows === "number" && typeof cols === "number" && Number.isFinite(rows) && Number.isFinite(cols) && rows > 0 && cols > 0) {
+    const start = coordToA1(dest.start.row, dest.start.col);
+    const end = coordToA1(dest.start.row + rows - 1, dest.start.col + cols - 1);
+    return start === end ? `${dest.sheetId}!${start}` : `${dest.sheetId}!${start}:${end}`;
+  }
   return `${dest.sheetId}!${coordToA1(dest.start.row, dest.start.col)}`;
 }
 

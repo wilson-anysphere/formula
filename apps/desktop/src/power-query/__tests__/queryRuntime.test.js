@@ -43,7 +43,7 @@ test("deriveQueryListRows uses runtime + persisted metadata", () => {
       name: "Query 1",
       source: { type: "range", range: { values: [["A"], [1]], hasHeaders: true } },
       steps: [],
-      destination: { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true },
+      destination: { sheetId: "Sheet1", start: { row: 0, col: 0 }, includeHeader: true, lastOutputSize: { rows: 2, cols: 1 } },
       refreshPolicy: { type: "manual" },
     },
     {
@@ -64,7 +64,7 @@ test("deriveQueryListRows uses runtime + persisted metadata", () => {
   assert.equal(rows.length, 2);
 
   const row1 = rows.find((r) => r.id === "q1");
-  assert.equal(row1.destination, "Sheet1!A1");
+  assert.equal(row1.destination, "Sheet1!A1:A2");
   assert.equal(row1.lastRefreshAtMs, 50);
   assert.equal(row1.errorSummary, null);
 
