@@ -137,6 +137,17 @@ fn content_type_overrides(ct_xml: &str) -> Vec<String> {
         .collect()
 }
 
+fn content_type_for_part(ct_xml: &str, part_name: &str) -> Option<String> {
+    let doc = roxmltree::Document::parse(ct_xml).expect("parse [Content_Types].xml");
+    doc.descendants()
+        .find(|n| {
+            n.is_element()
+                && n.tag_name().name() == "Override"
+                && n.attribute("PartName") == Some(part_name)
+        })
+        .and_then(|n| n.attribute("ContentType").map(ToString::to_string))
+}
+
 #[test]
 fn formula_patches_drop_calc_chain_but_preserve_cellimages_parts() -> Result<(), Box<dyn std::error::Error>>
 {
@@ -193,6 +204,11 @@ fn formula_patches_drop_calc_chain_but_preserve_cellimages_parts() -> Result<(),
     assert!(
         overrides.iter().any(|p| p == "/xl/cellimages.xml"),
         "expected [Content_Types].xml to preserve cellimages override (got {ct_xml:?})"
+    );
+    assert_eq!(
+        content_type_for_part(ct_xml, "/xl/cellimages.xml").as_deref(),
+        Some("application/vnd.ms-excel.cellimages+xml"),
+        "expected [Content_Types].xml to preserve cellimages ContentType string (got {ct_xml:?})"
     );
 
     // In-cell image parts must be preserved byte-for-byte.
@@ -251,6 +267,11 @@ fn streaming_formula_patches_drop_calc_chain_but_preserve_cellimages_parts(
     assert!(
         overrides.iter().any(|p| p == "/xl/cellimages.xml"),
         "expected [Content_Types].xml to preserve cellimages override (got {ct_xml:?})"
+    );
+    assert_eq!(
+        content_type_for_part(ct_xml, "/xl/cellimages.xml").as_deref(),
+        Some("application/vnd.ms-excel.cellimages+xml"),
+        "expected [Content_Types].xml to preserve cellimages ContentType string (got {ct_xml:?})"
     );
 
     // In-cell image parts must be preserved byte-for-byte.
