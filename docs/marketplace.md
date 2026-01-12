@@ -75,6 +75,44 @@ Authenticated/mutation endpoints are served with `Cache-Control: no-store`.
 }
 ```
 
+### `GET /api/search` (search)
+
+Search the marketplace for extensions.
+
+**Query parameters**
+
+- `q` (string): free-text query (matches id, name, publisher, tags, etc)
+- `category` (string): filter by category
+- `tag` (string): filter by tag
+- `verified` (boolean): filter to verified publishers/extensions
+- `featured` (boolean): filter to featured extensions
+- `sort` (string): e.g. `relevance|updated|downloads`
+- `limit` (number): max results to return (server clamps)
+- `offset` (number): legacy pagination offset
+- `cursor` (string): opaque cursor for pagination (preferred over `offset`)
+
+**Response**
+
+`200 OK`
+
+```json
+{
+  "total": 123,
+  "results": [/* extension summaries */],
+  "nextCursor": "..."
+}
+```
+
+**Notes**
+
+- Search results are *moderated* and may omit extensions that are:
+  - blocked
+  - malicious
+  - deprecated
+  - published by a revoked publisher
+- Version visibility is also affected by scan status/yanking (e.g. failed scans are hidden).
+- Clients that need authoritative security metadata should call `GET /api/extensions/:id` for a full record.
+
 ### `GET /api/extensions/:id` (extension metadata)
 
 Returns extension metadata, including versions and the publisher signing key(s).
