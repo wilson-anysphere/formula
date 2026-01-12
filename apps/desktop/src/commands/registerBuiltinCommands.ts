@@ -407,6 +407,18 @@ export function registerBuiltinCommands(params: {
   );
 
   commandRegistry.registerBuiltinCommand(
+    "edit.editCell",
+    "Edit Cell",
+    () => app.openCellEditorAtActiveCell(),
+    {
+      category: "Edit",
+      icon: null,
+      description: "Edit the active cell (Excel: F2)",
+      keywords: ["edit", "cell", "f2"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
     "edit.clearContents",
     "Clear Contents",
     () => app.clearContents(),

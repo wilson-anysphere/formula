@@ -20,6 +20,12 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: null,
   },
   {
+    command: "edit.editCell",
+    key: "f2",
+    mac: "f2",
+    when: null,
+  },
+  {
     command: "view.togglePanel.aiChat",
     key: "ctrl+shift+a",
     mac: "cmd+shift+a",

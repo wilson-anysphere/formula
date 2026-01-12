@@ -2552,6 +2552,18 @@ export class SpreadsheetApp {
     this.focus();
   }
 
+  openCellEditorAtActiveCell(): void {
+    if (this.inlineEditController.isOpen()) return;
+    if (this.editor.isOpen()) return;
+    if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
+
+    const cell = this.selection.active;
+    const bounds = this.getCellRect(cell);
+    if (!bounds) return;
+    const initialValue = this.getCellInputText(cell);
+    this.editor.open(cell, bounds, initialValue, { cursor: "end" });
+  }
+
   subscribeSelection(listener: (selection: SelectionState) => void): () => void {
     this.selectionListeners.add(listener);
     listener(this.selection);
