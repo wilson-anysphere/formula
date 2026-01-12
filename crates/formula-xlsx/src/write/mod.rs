@@ -2038,6 +2038,14 @@ fn patch_workbook_xml(
     let mut skipping_workbook_pr = false;
     let mut skipping_calc_pr = false;
     let mut skipping_defined_name: usize = 0;
+
+    let view_window = doc.workbook.view.window.as_ref().filter(|window| {
+        window.x.is_some()
+            || window.y.is_some()
+            || window.width.is_some()
+            || window.height.is_some()
+            || window.state.is_some()
+    });
     loop {
         let event = reader.read_event_into(&mut buf)?;
 
@@ -2159,8 +2167,21 @@ fn patch_workbook_xml(
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                 writer.get_mut().extend_from_slice(b"<");
                 writer.get_mut().extend_from_slice(tag.as_bytes());
+                let mut saw_x_window = false;
+                let mut saw_y_window = false;
+                let mut saw_window_width = false;
+                let mut saw_window_height = false;
+                let mut saw_window_state = false;
                 for attr in e.attributes() {
                     let attr = attr?;
+                    match attr.key.as_ref() {
+                        b"xWindow" => saw_x_window = true,
+                        b"yWindow" => saw_y_window = true,
+                        b"windowWidth" => saw_window_width = true,
+                        b"windowHeight" => saw_window_height = true,
+                        b"windowState" => saw_window_state = true,
+                        _ => {}
+                    }
                     writer.get_mut().push(b' ');
                     writer.get_mut().extend_from_slice(attr.key.as_ref());
                     writer.get_mut().extend_from_slice(b"=\"");
@@ -2181,6 +2202,50 @@ fn patch_workbook_xml(
                                     .unwrap_or_default()
                             })
                         }
+                        b"xWindow" => view_window
+                            .and_then(|window| window.x)
+                            .map(|x| x.to_string())
+                            .unwrap_or_else(|| {
+                                attr.unescape_value()
+                                    .map(|v| v.into_owned())
+                                    .unwrap_or_default()
+                            }),
+                        b"yWindow" => view_window
+                            .and_then(|window| window.y)
+                            .map(|y| y.to_string())
+                            .unwrap_or_else(|| {
+                                attr.unescape_value()
+                                    .map(|v| v.into_owned())
+                                    .unwrap_or_default()
+                            }),
+                        b"windowWidth" => view_window
+                            .and_then(|window| window.width)
+                            .map(|w| w.to_string())
+                            .unwrap_or_else(|| {
+                                attr.unescape_value()
+                                    .map(|v| v.into_owned())
+                                    .unwrap_or_default()
+                            }),
+                        b"windowHeight" => view_window
+                            .and_then(|window| window.height)
+                            .map(|h| h.to_string())
+                            .unwrap_or_else(|| {
+                                attr.unescape_value()
+                                    .map(|v| v.into_owned())
+                                    .unwrap_or_default()
+                            }),
+                        b"windowState" => view_window
+                            .and_then(|window| window.state)
+                            .and_then(|state| match state {
+                                WorkbookWindowState::Normal => None,
+                                WorkbookWindowState::Minimized => Some("minimized".to_string()),
+                                WorkbookWindowState::Maximized => Some("maximized".to_string()),
+                            })
+                            .unwrap_or_else(|| {
+                                attr.unescape_value()
+                                    .map(|v| v.into_owned())
+                                    .unwrap_or_default()
+                            }),
                         _ => attr.unescape_value()?.into_owned(),
                     };
                     writer
@@ -2188,14 +2253,80 @@ fn patch_workbook_xml(
                         .extend_from_slice(escape_attr(&value).as_bytes());
                     writer.get_mut().push(b'"');
                 }
+
+                if let Some(window) = view_window {
+                    if !saw_x_window {
+                        if let Some(x) = window.x {
+                            writer.get_mut().extend_from_slice(b" xWindow=\"");
+                            writer
+                                .get_mut()
+                                .extend_from_slice(escape_attr(&x.to_string()).as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                    }
+                    if !saw_y_window {
+                        if let Some(y) = window.y {
+                            writer.get_mut().extend_from_slice(b" yWindow=\"");
+                            writer
+                                .get_mut()
+                                .extend_from_slice(escape_attr(&y.to_string()).as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                    }
+                    if !saw_window_width {
+                        if let Some(width) = window.width {
+                            writer.get_mut().extend_from_slice(b" windowWidth=\"");
+                            writer
+                                .get_mut()
+                                .extend_from_slice(escape_attr(&width.to_string()).as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                    }
+                    if !saw_window_height {
+                        if let Some(height) = window.height {
+                            writer.get_mut().extend_from_slice(b" windowHeight=\"");
+                            writer
+                                .get_mut()
+                                .extend_from_slice(escape_attr(&height.to_string()).as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                    }
+                    if !saw_window_state {
+                        if let Some(state) = window.state {
+                            let state_str = match state {
+                                WorkbookWindowState::Normal => None,
+                                WorkbookWindowState::Minimized => Some("minimized"),
+                                WorkbookWindowState::Maximized => Some("maximized"),
+                            };
+                            if let Some(state_str) = state_str {
+                                writer.get_mut().extend_from_slice(b" windowState=\"");
+                                writer.get_mut().extend_from_slice(state_str.as_bytes());
+                                writer.get_mut().push(b'"');
+                            }
+                        }
+                    }
+                }
                 writer.get_mut().push(b'>');
             }
             Event::Empty(e) if e.local_name().as_ref() == b"workbookView" => {
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                 writer.get_mut().extend_from_slice(b"<");
                 writer.get_mut().extend_from_slice(tag.as_bytes());
+                let mut saw_x_window = false;
+                let mut saw_y_window = false;
+                let mut saw_window_width = false;
+                let mut saw_window_height = false;
+                let mut saw_window_state = false;
                 for attr in e.attributes() {
                     let attr = attr?;
+                    match attr.key.as_ref() {
+                        b"xWindow" => saw_x_window = true,
+                        b"yWindow" => saw_y_window = true,
+                        b"windowWidth" => saw_window_width = true,
+                        b"windowHeight" => saw_window_height = true,
+                        b"windowState" => saw_window_state = true,
+                        _ => {}
+                    }
                     writer.get_mut().push(b' ');
                     writer.get_mut().extend_from_slice(attr.key.as_ref());
                     writer.get_mut().extend_from_slice(b"=\"");
@@ -2216,12 +2347,109 @@ fn patch_workbook_xml(
                                     .unwrap_or_default()
                             })
                         }
+                        b"xWindow" => view_window
+                            .and_then(|window| window.x)
+                            .map(|x| x.to_string())
+                            .unwrap_or_else(|| {
+                                attr.unescape_value()
+                                    .map(|v| v.into_owned())
+                                    .unwrap_or_default()
+                            }),
+                        b"yWindow" => view_window
+                            .and_then(|window| window.y)
+                            .map(|y| y.to_string())
+                            .unwrap_or_else(|| {
+                                attr.unescape_value()
+                                    .map(|v| v.into_owned())
+                                    .unwrap_or_default()
+                            }),
+                        b"windowWidth" => view_window
+                            .and_then(|window| window.width)
+                            .map(|w| w.to_string())
+                            .unwrap_or_else(|| {
+                                attr.unescape_value()
+                                    .map(|v| v.into_owned())
+                                    .unwrap_or_default()
+                            }),
+                        b"windowHeight" => view_window
+                            .and_then(|window| window.height)
+                            .map(|h| h.to_string())
+                            .unwrap_or_else(|| {
+                                attr.unescape_value()
+                                    .map(|v| v.into_owned())
+                                    .unwrap_or_default()
+                            }),
+                        b"windowState" => view_window
+                            .and_then(|window| window.state)
+                            .and_then(|state| match state {
+                                WorkbookWindowState::Normal => None,
+                                WorkbookWindowState::Minimized => Some("minimized".to_string()),
+                                WorkbookWindowState::Maximized => Some("maximized".to_string()),
+                            })
+                            .unwrap_or_else(|| {
+                                attr.unescape_value()
+                                    .map(|v| v.into_owned())
+                                    .unwrap_or_default()
+                            }),
                         _ => attr.unescape_value()?.into_owned(),
                     };
                     writer
                         .get_mut()
                         .extend_from_slice(escape_attr(&value).as_bytes());
                     writer.get_mut().push(b'"');
+                }
+
+                if let Some(window) = view_window {
+                    if !saw_x_window {
+                        if let Some(x) = window.x {
+                            writer.get_mut().extend_from_slice(b" xWindow=\"");
+                            writer
+                                .get_mut()
+                                .extend_from_slice(escape_attr(&x.to_string()).as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                    }
+                    if !saw_y_window {
+                        if let Some(y) = window.y {
+                            writer.get_mut().extend_from_slice(b" yWindow=\"");
+                            writer
+                                .get_mut()
+                                .extend_from_slice(escape_attr(&y.to_string()).as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                    }
+                    if !saw_window_width {
+                        if let Some(width) = window.width {
+                            writer.get_mut().extend_from_slice(b" windowWidth=\"");
+                            writer
+                                .get_mut()
+                                .extend_from_slice(escape_attr(&width.to_string()).as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                    }
+                    if !saw_window_height {
+                        if let Some(height) = window.height {
+                            writer.get_mut().extend_from_slice(b" windowHeight=\"");
+                            writer
+                                .get_mut()
+                                .extend_from_slice(escape_attr(&height.to_string()).as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                    }
+                    if !saw_window_state {
+                        if let Some(state) = window.state {
+                            let state_str = match state {
+                                WorkbookWindowState::Normal => None,
+                                WorkbookWindowState::Minimized => Some("minimized"),
+                                WorkbookWindowState::Maximized => Some("maximized"),
+                            };
+                            if let Some(state_str) = state_str {
+                                writer.get_mut().extend_from_slice(b" windowState=\"");
+                                writer.get_mut().extend_from_slice(state_str.as_bytes());
+                                writer.get_mut().push(b'"');
+                            }
+                        }
+                    }
                 }
                 writer.get_mut().extend_from_slice(b"/>");
             }
