@@ -6952,8 +6952,11 @@ export class SpreadsheetApp {
       }
     }
 
-    const x = useOffsetCoords ? e.offsetX : e.clientX - this.rootLeft;
-    const y = useOffsetCoords ? e.offsetY : e.clientY - this.rootTop;
+    // During drag selection (pointer capture), use client-relative coordinates so that
+    // moving outside the grid continues to produce out-of-bounds values. This is
+    // required for behaviors like drag auto-scroll.
+    const x = this.dragState ? e.clientX - this.rootLeft : useOffsetCoords ? e.offsetX : e.clientX - this.rootLeft;
+    const y = this.dragState ? e.clientY - this.rootTop : useOffsetCoords ? e.offsetY : e.clientY - this.rootTop;
     if (this.dragPointerPos) {
       this.dragPointerPos.x = x;
       this.dragPointerPos.y = y;
