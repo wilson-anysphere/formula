@@ -56,14 +56,16 @@ pub struct OpenOptions {
     /// Worksheet parts can be very large. If you only need fast read access,
     /// leave this off and rely on re-reading the source file when writing.
     pub preserve_worksheets: bool,
-    /// If true, decode `rgce` formula token streams into best-effort Excel
-    /// formula text during parsing.
+    /// If true, decode parsed formula token streams (`rgce`/`rgcb`) into best-effort Excel formula
+    /// text during parsing.
     ///
-    /// This is enabled by default to preserve historical behavior.
+    /// This is enabled by default to preserve historical behavior. For very large XLSB files,
+    /// decoding every formula can be expensive in CPU (and some allocations). Callers that only
+    /// need raw `rgce`/`rgcb` bytes for evaluation or round-trip preservation can set this to
+    /// `false` to skip decoding.
     ///
-    /// For very large XLSB files, decoding every formula can be expensive in
-    /// both CPU and memory. Callers that only need raw `rgce` bytes (or plan to
-    /// decode later) can set this to `false` to skip decoding.
+    /// When `false`, [`crate::Formula::text`] will always be `None` and
+    /// [`crate::Formula::warnings`] will be empty.
     pub decode_formulas: bool,
 }
 
@@ -194,12 +196,11 @@ impl XlsbWorkbook {
             bytes
         };
 
-        let (mut sheets, workbook_context, workbook_properties, defined_names) =
-            parse_workbook(
-                &mut Cursor::new(&workbook_bin),
-                &workbook_rels,
-                options.decode_formulas,
-            )?;
+        let (mut sheets, workbook_context, workbook_properties, defined_names) = parse_workbook(
+            &mut Cursor::new(&workbook_bin),
+            &workbook_rels,
+            options.decode_formulas,
+        )?;
         let mut workbook_context = workbook_context;
 
         load_table_definitions(&mut zip, &mut workbook_context, &sheets)?;
