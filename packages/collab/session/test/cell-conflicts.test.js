@@ -153,6 +153,58 @@ test("CollabSession cell value conflict monitor still detects conflicts after re
   docB.destroy();
 });
 
+test("CollabSession cell value conflict monitor treats remoteUserId as unknown when modifiedBy isn't updated", async () => {
+  // Ensure deterministic tie-breaking: higher clientID wins.
+  const docA = new Y.Doc();
+  docA.clientID = 1;
+  const docB = new Y.Doc();
+  docB.clientID = 2;
+  let disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    cellValueConflicts: {
+      localUserId: "user-a",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+
+  // Remote doc without a session monitor: will overwrite value but omit modifiedBy updates.
+  const sessionB = createCollabSession({ doc: docB });
+
+  // Establish base.
+  await sessionA.setCellValue("Sheet1:0:0", "base");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "base");
+
+  const cellMapB = sessionB.cells.get("Sheet1:0:0");
+  assert.ok(cellMapB, "expected Yjs cell map to exist");
+  assert.equal(cellMapB.get("modifiedBy"), "user-a");
+
+  // Offline concurrent edits: A writes a value; B writes a value but does not update modifiedBy.
+  disconnect();
+  await sessionA.setCellValue("Sheet1:0:0", "ours");
+  docB.transact(() => {
+    cellMapB.set("value", "theirs");
+    cellMapB.set("modified", Date.now());
+    // Intentionally omit `modifiedBy` so it stays at "user-a".
+  });
+
+  // Reconnect.
+  disconnect = connectDocs(docA, docB);
+
+  assert.ok(conflictsA.length >= 1, "expected at least one conflict to be detected");
+  assert.equal(conflictsA[0].remoteUserId, "", "expected remoteUserId to be unknown when modifiedBy is unchanged");
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
 test("CollabSession cell value conflict monitor does not flag sequential value edits", async () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
