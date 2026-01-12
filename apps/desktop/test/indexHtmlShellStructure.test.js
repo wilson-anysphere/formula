@@ -67,6 +67,24 @@ test("desktop index.html exposes required shell containers and testids", () => {
     `apps/desktop/index.html is missing required shell markup:\\n${missing.map((m) => `- ${m}`).join("\\n")}`,
   );
 
+  // The collaboration indicator is part of the visible status bar (it should not be
+  // hidden inside `.statusbar__debug`, which is display:none in production styles).
+  const collabStatusIndex = html.indexOf('data-testid="collab-status"');
+  const debugIndex = html.indexOf('class="statusbar__debug"');
+  assert.ok(collabStatusIndex >= 0, "Expected data-testid=\"collab-status\" to exist in index.html");
+  assert.ok(debugIndex >= 0, "Expected .statusbar__debug section to exist in index.html");
+  assert.ok(
+    collabStatusIndex < debugIndex,
+    "Expected collab-status indicator to appear in the visible statusbar section (before .statusbar__debug)",
+  );
+
+  // A11y: collab status updates should be announced politely by screen readers.
+  assert.match(
+    html,
+    /data-testid="collab-status"[^>]*\brole="status"/,
+    'Expected collab-status element to include role="status" for accessibility',
+  );
+
   // Debug controls should live in the ribbon (React) rather than being duplicated in the
   // static `index.html` status bar. Duplicating them here causes Playwright strict-mode
   // failures because `getByTestId(...)` matches multiple elements with the same test id.
