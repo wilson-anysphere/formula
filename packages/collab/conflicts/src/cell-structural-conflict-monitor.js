@@ -777,7 +777,10 @@ export class CellStructuralConflictMonitor {
       cellMap.set("value", null);
     } else {
       cellMap.delete("enc");
-      cellMap.delete("formula");
+      // Represent formula clears as an explicit marker rather than deleting the
+      // key entirely. Deletions can erase causal history in the shared CRDT and
+      // make formula/value conflict ordering nondeterministic.
+      cellMap.set("formula", null);
       cellMap.set("value", normalized.value ?? null);
     }
  
