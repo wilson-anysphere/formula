@@ -450,7 +450,13 @@ pub fn verify_vba_digital_signature_bound(
 
         match signature.stream_kind {
             VbaSignatureStreamKind::DigitalSignatureExt => {
-                let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) else {
+                // Prefer selecting the digest algorithm by digest length rather than the OID.
+                // Office VBA signatures sometimes use an inconsistent digest algorithm OID
+                // (see MS-OSHARED §4.3), so the digest length can be a more reliable signal for
+                // MD5/SHA-1/SHA-256.
+                let Some(alg) = digest_alg_from_digest_len(signed.digest.len())
+                    .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid))
+                else {
                     return Ok(Some(VbaDigitalSignatureBound {
                         signature,
                         binding: VbaProjectBindingVerification::BoundUnknown(debug),

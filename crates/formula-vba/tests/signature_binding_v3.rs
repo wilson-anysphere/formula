@@ -373,3 +373,43 @@ fn verify_vba_project_signature_binding_v3_uses_digest_len_when_oid_is_inconsist
         other => panic!("expected BoundVerified, got {other:?}"),
     }
 }
+
+#[test]
+fn verify_vba_digital_signature_bound_v3_uses_digest_len_when_oid_is_inconsistent() {
+    let unsigned = build_minimal_vba_project_bin_v3(None, b"ABC");
+
+    // Compute an MD5 v3 digest, but wrap it in a DigestInfo that *claims* to be SHA-256.
+    //
+    // `verify_vba_digital_signature` already uses digest-length inference for v3 binding; this test
+    // ensures the richer `verify_vba_digital_signature_bound` helper stays consistent.
+    let digest = compute_vba_project_digest_v3(&unsigned, DigestAlg::Md5).expect("digest v3");
+    assert_eq!(digest.len(), 16, "MD5 digest must be 16 bytes");
+
+    let signed_content = build_spc_indirect_data_content_sha256(&digest);
+    let pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&signed_content);
+    let mut signature_stream_payload = signed_content.clone();
+    signature_stream_payload.extend_from_slice(&pkcs7);
+
+    let signed = build_minimal_vba_project_bin_v3(Some(&signature_stream_payload), b"ABC");
+    let bound = verify_vba_digital_signature_bound(&signed)
+        .expect("bound verify")
+        .expect("signature present");
+
+    assert_eq!(bound.signature.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(bound.signature.binding, VbaSignatureBinding::Bound);
+
+    match bound.binding {
+        VbaProjectBindingVerification::BoundVerified(debug) => {
+            assert_eq!(
+                debug.hash_algorithm_oid.as_deref(),
+                Some("2.16.840.1.101.3.4.2.1")
+            );
+            // `hash_algorithm_name` reflects the OID found in the signature, even though the digest
+            // bytes (and therefore the binding digest algorithm) are MD5.
+            assert_eq!(debug.hash_algorithm_name.as_deref(), Some("SHA-256"));
+            assert_eq!(debug.signed_digest.as_deref(), Some(digest.as_slice()));
+            assert_eq!(debug.computed_digest.as_deref(), Some(digest.as_slice()));
+        }
+        other => panic!("expected BoundVerified, got {other:?}"),
+    }
+}
