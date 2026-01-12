@@ -2,7 +2,9 @@
 
 use std::io::{Cursor, Write};
 
-use formula_vba::{verify_vba_digital_signature, VbaSignatureVerification};
+use formula_vba::{
+    extract_signer_certificate_info, verify_vba_digital_signature, VbaSignatureVerification,
+};
 
 const TEST_KEY_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
 MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQC8kN1a0raWt6a7
@@ -94,6 +96,43 @@ fn make_pkcs7_detached_signature(data: &[u8]) -> Vec<u8> {
     )
     .expect("pkcs7 sign");
     pkcs7.to_der().expect("pkcs7 DER")
+}
+
+#[test]
+fn extracts_signer_certificate_metadata_from_pkcs7() {
+    let pkcs7 = make_pkcs7_signed_message(b"formula-vba-test");
+    let info = extract_signer_certificate_info(&pkcs7).expect("expected embedded certificate info");
+
+    assert!(
+        info.subject.contains("Formula VBA Test"),
+        "expected subject to mention test CN, got: {}",
+        info.subject
+    );
+    assert!(
+        !info.issuer.is_empty(),
+        "expected issuer to be present, got empty issuer"
+    );
+    assert_eq!(
+        info.issuer, info.subject,
+        "test certificate is self-signed, expected issuer == subject"
+    );
+    assert_eq!(
+        info.sha256_fingerprint_hex.len(),
+        64,
+        "expected SHA-256 fingerprint to be 64 hex chars, got {}",
+        info.sha256_fingerprint_hex
+    );
+    assert!(
+        info.sha256_fingerprint_hex
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+        "expected lowercase hex fingerprint, got {}",
+        info.sha256_fingerprint_hex
+    );
+    assert!(
+        !info.serial_hex.is_empty(),
+        "expected serial_hex to be non-empty"
+    );
 }
 
 fn build_vba_project_bin_with_signature_streams(streams: &[(&str, &[u8])]) -> Vec<u8> {

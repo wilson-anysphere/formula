@@ -16,8 +16,8 @@ pub use compression::{compress_container, decompress_container, CompressionError
 pub use dir::{DirParseError, DirStream, ModuleRecord, ModuleType};
 pub use ole::{OleError, OleFile};
 pub use signature::{
-    parse_vba_digital_signature, verify_vba_digital_signature, SignatureError, VbaDigitalSignature,
-    VbaSignatureVerification,
+    extract_signer_certificate_info, parse_vba_digital_signature, verify_vba_digital_signature,
+    SignatureError, VbaDigitalSignature, VbaSignatureVerification, VbaSignerCertificateInfo,
 };
 
 use std::collections::BTreeMap;

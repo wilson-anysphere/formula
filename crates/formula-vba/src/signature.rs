@@ -2,6 +2,27 @@ use thiserror::Error;
 
 use crate::{OleError, OleFile};
 
+/// Metadata extracted from the signer certificate embedded in a VBA digital signature.
+///
+/// This is intended for UI display (e.g. Trust Center) and is **best-effort**:
+/// callers should treat it as untrusted metadata unless they separately validate
+/// the signature and certificate chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VbaSignerCertificateInfo {
+    /// Certificate subject (e.g. `CN=...`).
+    pub subject: String,
+    /// Certificate issuer (e.g. `CN=...`).
+    pub issuer: String,
+    /// Serial number encoded as lowercase hexadecimal (no `0x` prefix).
+    pub serial_hex: String,
+    /// SHA-256 fingerprint of the DER-encoded certificate, lowercase hex.
+    pub sha256_fingerprint_hex: String,
+    /// Validity period start time (best-effort).
+    pub not_before: Option<String>,
+    /// Validity period end time (best-effort).
+    pub not_after: Option<String>,
+}
+
 /// Result of inspecting a VBA project's OLE structure for a digital signature.
 ///
 /// Excel stores the VBA project signature in one of the `\u{0005}DigitalSignature*`
@@ -39,6 +60,37 @@ pub enum VbaSignatureVerification {
 pub enum SignatureError {
     #[error("OLE error: {0}")]
     Ole(#[from] OleError),
+}
+
+/// Extract metadata from the signer certificate embedded in a VBA signature blob.
+///
+/// This is a best-effort helper intended for display:
+/// - Returns `None` if we can't find an embedded certificate.
+/// - Does **not** validate the certificate chain.
+/// - On non-wasm targets we prefer extracting the actual signer cert via OpenSSL PKCS#7 parsing.
+/// - On wasm (or as a fallback) we heuristically scan for an embedded DER certificate using
+///   `x509-parser`.
+pub fn extract_signer_certificate_info(signature_blob: &[u8]) -> Option<VbaSignerCertificateInfo> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(der) = extract_signer_certificate_der_from_pkcs7(signature_blob) {
+        if let Some(info) = signer_certificate_info_from_der(&der) {
+            return Some(info);
+        }
+    }
+
+    // Some producers store a raw DER certificate in the signature stream.
+    if let Some(der) = parse_first_embedded_der_certificate(signature_blob) {
+        return signer_certificate_info_from_der(der);
+    }
+
+    // Fallback: scan for embedded certificates inside a CMS/PKCS#7 blob.
+    for der in scan_for_embedded_der_certificates(signature_blob) {
+        if let Some(info) = signer_certificate_info_from_der(der) {
+            return Some(info);
+        }
+    }
+
+    None
 }
 
 /// Best-effort detection + parsing of a VBA digital signature.
@@ -160,6 +212,78 @@ fn signature_path_rank(path: &str) -> u8 {
         .unwrap_or(3)
 }
 
+fn bytes_to_lower_hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        use std::fmt::Write;
+        // Safe to unwrap: writing to a String cannot fail.
+        write!(&mut out, "{:02x}", b).expect("writing to string is infallible");
+    }
+    out
+}
+
+fn signer_certificate_info_from_der(der: &[u8]) -> Option<VbaSignerCertificateInfo> {
+    use sha2::{Digest, Sha256};
+    use x509_parser::prelude::parse_x509_certificate;
+
+    let (_, cert) = parse_x509_certificate(der).ok()?;
+
+    let subject = cert.subject().to_string();
+    let issuer = cert.issuer().to_string();
+
+    // Prefer the raw serial bytes (stable, includes leading zeros if present).
+    // If the parser ever returns an empty serial, normalize to "00".
+    let serial_bytes = cert.raw_serial();
+    let serial_hex = if serial_bytes.is_empty() {
+        "00".to_owned()
+    } else {
+        bytes_to_lower_hex(serial_bytes)
+    };
+
+    let sha256 = Sha256::digest(der);
+    let sha256_fingerprint_hex = bytes_to_lower_hex(&sha256);
+
+    let validity = cert.validity();
+    let not_before = Some(validity.not_before.to_string());
+    let not_after = Some(validity.not_after.to_string());
+
+    Some(VbaSignerCertificateInfo {
+        subject,
+        issuer,
+        serial_hex,
+        sha256_fingerprint_hex,
+        not_before,
+        not_after,
+    })
+}
+
+fn parse_first_embedded_der_certificate(bytes: &[u8]) -> Option<&[u8]> {
+    use x509_parser::prelude::parse_x509_certificate;
+
+    let (rem, _) = parse_x509_certificate(bytes).ok()?;
+    let consumed_len = bytes.len().saturating_sub(rem.len());
+    Some(&bytes[..consumed_len])
+}
+
+fn scan_for_embedded_der_certificates(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
+    use x509_parser::prelude::parse_x509_certificate;
+
+    // Heuristic: certificates are DER-encoded and begin with a SEQUENCE (0x30) tag.
+    // Yield each candidate DER slice that parses as a certificate.
+    (0..bytes.len()).filter_map(move |start| {
+        if bytes[start] != 0x30 {
+            return None;
+        }
+        let slice = &bytes[start..];
+        let (rem, _) = parse_x509_certificate(slice).ok()?;
+        let consumed_len = slice.len().saturating_sub(rem.len());
+        if consumed_len == 0 {
+            return None;
+        }
+        Some(&slice[..consumed_len])
+    })
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn parse_pkcs7_with_offset(signature: &[u8]) -> Option<(openssl::pkcs7::Pkcs7, usize)> {
     use openssl::pkcs7::Pkcs7;
@@ -180,6 +304,36 @@ fn parse_pkcs7_with_offset(signature: &[u8]) -> Option<(openssl::pkcs7::Pkcs7, u
     }
 
     None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn extract_signer_certificate_der_from_pkcs7(bytes: &[u8]) -> Option<Vec<u8>> {
+    use openssl::pkcs7::Pkcs7Flags;
+    use openssl::stack::Stack;
+    use openssl::x509::X509;
+
+    let (pkcs7, _) = parse_pkcs7_with_offset(bytes)?;
+
+    // Prefer the actual signer cert when possible.
+    if let Some(certs) = pkcs7.signed().and_then(|s| s.certificates()) {
+        if let Ok(signers) = pkcs7.signers(certs, Pkcs7Flags::empty()) {
+            if let Some(signer_cert) = signers.get(0) {
+                return signer_cert.to_der().ok();
+            }
+        }
+
+        // Fallback: first embedded certificate.
+        if let Some(cert) = certs.get(0) {
+            return cert.to_der().ok();
+        }
+    }
+
+    // Some PKCS#7 blobs may omit the certificates stack or require a different lookup. As a
+    // last attempt, run `signers` with an empty stack (OpenSSL will try to resolve signer info).
+    let empty = Stack::<X509>::new().ok()?;
+    let signers = pkcs7.signers(&empty, Pkcs7Flags::empty()).ok()?;
+    let signer_cert = signers.get(0)?;
+    signer_cert.to_der().ok()
 }
 
 fn verify_signature_blob(signature: &[u8]) -> VbaSignatureVerification {

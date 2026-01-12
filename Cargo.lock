@@ -1834,6 +1834,7 @@ dependencies = [
  "cfb 0.10.0",
  "encoding_rs",
  "openssl",
+ "sha2",
  "thiserror 1.0.69",
  "x509-parser",
  "zip 2.4.2",
