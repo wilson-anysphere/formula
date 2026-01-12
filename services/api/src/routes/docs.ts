@@ -5,9 +5,9 @@ import { createAuditEvent, writeAuditEvent } from "../audit/audit";
 import { enforceOrgIpAllowlistForSession, enforceOrgIpAllowlistForSessionWithAllowlist } from "../auth/orgIpAllowlist";
 import { requireOrgMfaSatisfied } from "../auth/mfa";
 import { KmsProviderFactory } from "../crypto/kms";
-import { DLP_ACTION, DLP_DECISION, normalizeClassification, normalizeSelector, resolveClassification, selectorKey, validateDlpPolicy } from "../dlp/dlp";
+import { DLP_ACTION, DLP_DECISION, normalizeClassification, normalizeSelector, selectorKey, validateDlpPolicy } from "../dlp/dlp";
 import { evaluateDocumentDlpPolicy } from "../dlp/effective";
-import { normalizeSelectorColumns } from "../dlp/classificationResolver";
+import { getEffectiveClassificationForSelector, normalizeSelectorColumns } from "../dlp/classificationResolver";
 import { createDocumentVersion, encryptDocumentVersionData, getDocumentVersionData } from "../db/documentVersions";
 import { getClientIp, getUserAgent } from "../http/request-meta";
 import { canDocument, type DocumentRole } from "../rbac/roles";
@@ -1390,10 +1390,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
     };
   });
 
-  const ResolveClassificationBody = z.object({
-    selector: z.unknown(),
-    includeMatched: z.boolean().optional()
-  });
+  const ResolveClassificationBody = z.object({ selector: z.unknown() });
 
   app.post("/docs/:docId/classifications/resolve", { preHandler: requireAuth }, async (request, reply) => {
     const docId = (request.params as { docId: string }).docId;
@@ -1416,34 +1413,13 @@ export function registerDocRoutes(app: FastifyInstance): void {
       return reply.code(400).send({ error: "invalid_request", message });
     }
 
-    const res = await app.db.query(
-      `
-        SELECT selector, classification
-        FROM document_classifications
-        WHERE document_id = $1
-      `,
-      [docId]
-    );
-
-    let resolved;
     try {
-      resolved = resolveClassification({
-        querySelector: selector,
-        records: res.rows.map((row) => ({ selector: row.selector, classification: row.classification })),
-        options: {
-          includeMatchedSelectors: Boolean(parsed.data.includeMatched)
-        }
-      });
+      const resolved = await getEffectiveClassificationForSelector(app.db, docId, selector);
+      return reply.send(resolved);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to resolve classification";
       return reply.code(400).send({ error: "invalid_request", message });
     }
-
-    return reply.send({
-      effectiveClassification: resolved.effectiveClassification,
-      matchedCount: resolved.matchedCount,
-      matched: resolved.matchedSelectors
-    });
   });
 
   const UpsertClassificationBody = z.object({

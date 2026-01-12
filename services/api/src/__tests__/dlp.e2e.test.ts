@@ -212,7 +212,7 @@ describe("API e2e: DLP policy + classification endpoints", () => {
   );
 
   it(
-    "resolves effective classification for cell/range selectors (max + label union)",
+    "resolves effective classification with selector precedence and uses aggregate semantics for range evaluation",
     async () => {
       const ownerRegister = await app.inject({
         method: "POST",
@@ -281,30 +281,9 @@ describe("API e2e: DLP policy + classification endpoints", () => {
         payload: { selector: cellSelector },
       });
       expect(resolveCell.statusCode).toBe(200);
-      expect(resolveCell.json()).toMatchObject({
-        effectiveClassification: { level: "Restricted", labels: ["Mask", "PII"] },
-        matchedCount: 2,
-      });
-
-      const resolveCellDebug = await app.inject({
-        method: "POST",
-        url: `/docs/${docId}/classifications/resolve`,
-        headers: { cookie: ownerCookie },
-        payload: { selector: cellSelector, includeMatched: true },
-      });
-      expect(resolveCellDebug.statusCode).toBe(200);
-      const debugJson = resolveCellDebug.json() as any;
-      expect(Array.isArray(debugJson.matched)).toBe(true);
-      expect(debugJson.matched).toHaveLength(2);
-      expect(debugJson.matched[0]).toMatchObject({
-        selectorKey: `cell:${docId}:Sheet1:0,0`,
-        selector: cellSelector,
+      expect(resolveCell.json()).toEqual({
         classification: { level: "Internal", labels: ["Mask"] },
-      });
-      expect(debugJson.matched[1]).toMatchObject({
-        selectorKey: `range:${docId}:Sheet1:0,0:2,2`,
-        selector: rangeSelector,
-        classification: { level: "Restricted", labels: ["PII"] },
+        source: { scope: "cell", selectorKey: `cell:${docId}:Sheet1:0,0` },
       });
 
       const resolveInRange = await app.inject({
@@ -322,9 +301,9 @@ describe("API e2e: DLP policy + classification endpoints", () => {
         },
       });
       expect(resolveInRange.statusCode).toBe(200);
-      expect(resolveInRange.json()).toMatchObject({
-        effectiveClassification: { level: "Restricted", labels: ["PII"] },
-        matchedCount: 1,
+      expect(resolveInRange.json()).toEqual({
+        classification: { level: "Restricted", labels: ["PII"] },
+        source: { scope: "range", selectorKey: `range:${docId}:Sheet1:0,0:2,2` },
       });
       const resolveRange = await app.inject({
         method: "POST",
@@ -340,9 +319,9 @@ describe("API e2e: DLP policy + classification endpoints", () => {
         },
       });
       expect(resolveRange.statusCode).toBe(200);
-      expect(resolveRange.json()).toMatchObject({
-        effectiveClassification: { level: "Restricted", labels: ["Mask", "PII"] },
-        matchedCount: 2,
+      expect(resolveRange.json()).toEqual({
+        classification: { level: "Restricted", labels: ["PII"] },
+        source: { scope: "range", selectorKey: `range:${docId}:Sheet1:0,0:2,2` },
       });
 
       const resolveSubRange = await app.inject({
@@ -359,9 +338,9 @@ describe("API e2e: DLP policy + classification endpoints", () => {
         },
       });
       expect(resolveSubRange.statusCode).toBe(200);
-      expect(resolveSubRange.json()).toMatchObject({
-        effectiveClassification: { level: "Restricted", labels: ["PII"] },
-        matchedCount: 1,
+      expect(resolveSubRange.json()).toEqual({
+        classification: { level: "Restricted", labels: ["PII"] },
+        source: { scope: "range", selectorKey: `range:${docId}:Sheet1:0,0:2,2` },
       });
 
       const evaluateCell = await app.inject({
@@ -375,8 +354,8 @@ describe("API e2e: DLP policy + classification endpoints", () => {
       });
       expect(evaluateCell.statusCode).toBe(200);
       expect(evaluateCell.json()).toMatchObject({
-        decision: "block",
-        classification: { level: "Restricted", labels: ["Mask", "PII"] },
+        decision: "allow",
+        classification: { level: "Internal", labels: ["Mask"] },
         maxAllowed: "Confidential",
       });
 

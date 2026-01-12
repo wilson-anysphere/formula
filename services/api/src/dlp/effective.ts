@@ -113,21 +113,6 @@ async function getEffectiveClassificationForSelectorOrRange(db: DbClient, docId:
       normalized.endCol!
     );
   }
-  if (normalized.scope === "cell") {
-    // DLP enforcement should be conservative: a cell classification should not be able to
-    // weaken a broader range/column/sheet/document restriction. Reuse the aggregate range
-    // classifier for a single cell to ensure we union labels and take the max level across
-    // all overlapping selectors.
-    return getAggregateClassificationForRange(
-      db,
-      docId,
-      normalized.sheetId!,
-      normalized.row!,
-      normalized.col!,
-      normalized.row!,
-      normalized.col!
-    );
-  }
 
   const resolved = await getEffectiveClassificationForSelector(db, docId, selector);
   return resolved.classification;
