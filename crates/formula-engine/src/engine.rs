@@ -4645,7 +4645,11 @@ fn walk_expr_flags(
                 return;
             }
 
-            if name_is_local(lexical_scopes, &name_key) {
+            // LET/LAMBDA lexical bindings are only visible for unqualified identifiers.
+            // If a name reference is explicitly sheet-qualified (e.g. `Sheet1!X`), it should
+            // bypass the local LET/LAMBDA scope and resolve as a defined name.
+            if matches!(nref.sheet, SheetReference::Current) && name_is_local(lexical_scopes, &name_key)
+            {
                 return;
             }
 
@@ -5027,7 +5031,11 @@ fn walk_external_expr(
                 return;
             }
 
-            if name_is_local(lexical_scopes, &name_key) {
+            // LET/LAMBDA lexical bindings are only visible for unqualified identifiers.
+            // Explicit sheet-qualified names (e.g. `Sheet1!X`) should still resolve as defined
+            // names and surface any external precedents.
+            if matches!(nref.sheet, SheetReference::Current) && name_is_local(lexical_scopes, &name_key)
+            {
                 return;
             }
 
@@ -5335,7 +5343,11 @@ fn walk_calc_expr(
             if name_key.is_empty() {
                 return;
             }
-            if name_is_local(lexical_scopes, &name_key) {
+            // LET/LAMBDA lexical bindings are only visible for unqualified identifiers.
+            // Explicit sheet-qualified names (e.g. `Sheet1!X`) should still resolve as defined
+            // names for dependency analysis and dirty propagation.
+            if matches!(nref.sheet, SheetReference::Current) && name_is_local(lexical_scopes, &name_key)
+            {
                 return;
             }
             let visit_key = (sheet, name_key.clone());

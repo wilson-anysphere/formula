@@ -318,6 +318,65 @@ fn lambda_parameter_names_do_not_register_defined_name_dependencies() {
 }
 
 #[test]
+fn let_locals_do_not_shadow_sheet_qualified_defined_name_dependencies() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "B1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 20.0).unwrap();
+
+    engine
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!B1".to_string()),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(X,1,Sheet1!X)")
+        .unwrap();
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(10.0));
+
+    // Updating a precedent referenced from the defined name should dirty the cell even though a LET
+    // binding shadows the unqualified identifier.
+    engine.set_cell_value("Sheet1", "B1", 11.0).unwrap();
+    assert!(
+        engine.is_dirty("Sheet1", "A1"),
+        "sheet-qualified name references should still track defined-name precedents"
+    );
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(11.0));
+
+    // Updating the defined name should dirty the cell and repoint dependencies.
+    engine
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!B2".to_string()),
+        )
+        .unwrap();
+    assert!(
+        engine.is_dirty("Sheet1", "A1"),
+        "changing a defined name should dirty dependents even if a LET binding shadows the identifier"
+    );
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(20.0));
+
+    // Old precedents should no longer dirty the cell...
+    engine.set_cell_value("Sheet1", "B1", 12.0).unwrap();
+    assert!(
+        !engine.is_dirty("Sheet1", "A1"),
+        "dependencies should update after the defined name is repointed"
+    );
+
+    // ...but the new precedent should.
+    engine.set_cell_value("Sheet1", "B2", 21.0).unwrap();
+    assert!(engine.is_dirty("Sheet1", "A1"));
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(21.0));
+}
+
+#[test]
 fn let_and_lambda_locals_do_not_surface_external_precedents() {
     let mut engine = Engine::new();
 
@@ -350,6 +409,32 @@ fn let_and_lambda_locals_do_not_surface_external_precedents() {
             "expected no external precedents for {addr}, got {precedents:?}"
         );
     }
+}
+
+#[test]
+fn let_locals_do_not_shadow_sheet_qualified_external_precedents() {
+    let mut engine = Engine::new();
+
+    engine
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Reference("[Book.xlsx]Sheet1!A1".to_string()),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(X,1,Sheet1!X)")
+        .unwrap();
+
+    let precedents = engine.precedents("Sheet1", "A1").unwrap();
+    assert!(
+        precedents.iter().any(|p| matches!(
+            p,
+            PrecedentNode::ExternalCell { sheet, addr } if sheet == "[Book.xlsx]Sheet1" && addr.row == 0 && addr.col == 0
+        )),
+        "expected external precedent for [Book.xlsx]Sheet1!A1, got {precedents:?}"
+    );
 }
 
 #[test]
