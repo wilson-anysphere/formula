@@ -120,7 +120,17 @@ export async function activate(context) {
 
     // Provide a deterministic 404 fallback for unrelated extension detail requests so we don't
     // accidentally fetch HTML from the dev server.
+    //
+    // NOTE: Playwright route precedence can be subtle when multiple routes match. Use
+    // `route.fallback()` for this test's extension id so the more specific stub handlers
+    // (`/api/extensions/:id` + `/download/:version`) always win.
+    const extensionApiPrefix = `/api/extensions/${encodeURIComponent(extensionId)}`;
     await page.route("**/api/extensions/**", async (route) => {
+      const url = route.request().url();
+      if (url.includes(extensionApiPrefix)) {
+        await route.fallback();
+        return;
+      }
       await route.fulfill({ status: 404, body: "" });
     });
 
@@ -224,4 +234,3 @@ export async function activate(context) {
     }
   });
 });
-
