@@ -75,7 +75,17 @@ test.describe("collab status indicator (collab mode)", () => {
 
     // Ensure the Playwright worker doesn't hang on a still-running child process.
     await new Promise<void>((resolve) => {
-      const timeout = setTimeout(resolve, 5_000);
+      const timeout = setTimeout(() => {
+        // Best-effort: force-kill if graceful shutdown hangs.
+        if (child.exitCode == null && !child.killed) {
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            // ignore
+          }
+        }
+        resolve();
+      }, 5_000);
       child.once("exit", () => {
         clearTimeout(timeout);
         resolve();
