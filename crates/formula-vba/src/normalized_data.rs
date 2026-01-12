@@ -54,8 +54,9 @@ pub fn forms_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseErr
             continue;
         }
 
-        let storage_name = match_designer_module_stream_name(&dir_stream.modules, &module_identifier)
-            .ok_or(ParseError::MissingStream("designer module"))?;
+        let storage_name =
+            match_designer_module_stream_name(&dir_stream.modules, &module_identifier)
+                .ok_or(ParseError::MissingStream("designer module"))?;
 
         // Per MS-OVBA §2.2.10, a designer storage MUST exist at the OLE root with a name equal to
         // MODULESTREAMNAME. We approximate this by requiring at least one stream with that prefix.
@@ -78,9 +79,12 @@ fn parse_project_designer_modules(
     let mut out = Vec::new();
     for line in cow.lines() {
         let line = line.trim_end_matches('\r').trim();
-        let Some(rest) = line.strip_prefix("BaseClass=") else {
+        let Some((key, rest)) = line.split_once('=') else {
             continue;
         };
+        if !key.trim().eq_ignore_ascii_case("BaseClass") {
+            continue;
+        }
         let ident = rest.trim().trim_matches('"');
         if !ident.is_empty() {
             out.push(ident.to_owned());
@@ -160,8 +164,7 @@ fn normalize_storage_into_vec(
             std::collections::hash_map::Entry::Occupied(mut o) => {
                 // If both a stream and a storage exist with the same name (shouldn't happen in a
                 // valid CFB), prefer treating it as a storage so nested children are processed.
-                if matches!(o.get(), Child::Stream { .. })
-                    && matches!(child, Child::Storage { .. })
+                if matches!(o.get(), Child::Stream { .. }) && matches!(child, Child::Storage { .. })
                 {
                     o.insert(child);
                 }
