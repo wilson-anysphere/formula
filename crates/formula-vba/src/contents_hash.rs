@@ -24,6 +24,7 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
     //
     // Note: `VBA/dir` stores records as: u16 id, u32 len, `len` bytes of record data.
     const PROJECTSYSKIND: u16 = 0x0001;
+    const PROJECTCOMPATVERSION: u16 = 0x004A;
     const PROJECTLCID: u16 = 0x0002;
     const PROJECTCODEPAGE: u16 = 0x0003;
     const PROJECTNAME: u16 = 0x0004;
@@ -76,6 +77,7 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
 
         match id {
             PROJECTSYSKIND
+            | PROJECTCOMPATVERSION
             | PROJECTLCID
             | PROJECTLCIDINVOKE
             | PROJECTCODEPAGE

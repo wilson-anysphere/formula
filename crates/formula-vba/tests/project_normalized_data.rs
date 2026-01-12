@@ -53,6 +53,8 @@ fn project_normalized_data_includes_expected_dir_records_and_prefers_unicode_var
 
         // Included: PROJECTSYSKIND
         push_record(&mut out, 0x0001, &1u32.to_le_bytes());
+        // Included (optional): PROJECTCOMPATVERSION
+        push_record(&mut out, 0x004A, &0xDEADBEEFu32.to_le_bytes());
         // Included: PROJECTLCID
         push_record(&mut out, 0x0002, &0x0409u32.to_le_bytes());
         // Included: PROJECTCODEPAGE
@@ -81,6 +83,7 @@ fn project_normalized_data_includes_expected_dir_records_and_prefers_unicode_var
 
     let expected = [
         1u32.to_le_bytes().as_slice(),
+        0xDEADBEEFu32.to_le_bytes().as_slice(),
         0x0409u32.to_le_bytes().as_slice(),
         1252u16.to_le_bytes().as_slice(),
         b"MyProject".as_slice(),
