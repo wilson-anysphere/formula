@@ -170,6 +170,22 @@ export interface ToolExecutorOptions {
    */
   max_read_range_chars?: number;
   /**
+   * Hard cap on the number of cells a tool is allowed to materialize into JS memory
+   * when operating over a full rectangular range.
+   *
+   * Unlike `max_read_range_cells` (which specifically limits `read_range` tool output so
+   * LLM context isn't flooded), this limit applies to *other* tools that internally
+   * call `SpreadsheetApi.readRange` (e.g. `sort_range`, `filter_range`, `detect_anomalies`,
+   * `compute_statistics`, `create_pivot_table`).
+   *
+   * This is a safety guard for Excel-scale sheets: without it, a single tool call could
+   * attempt to allocate millions of cells worth of JS objects, leading to renderer OOMs.
+   *
+   * When exceeded, the tool call returns `ok:false` with `permission_denied` and suggests
+   * requesting a smaller range (or raising this limit explicitly).
+   */
+  max_tool_range_cells?: number;
+  /**
    * Cap the number of matching row indices returned by `filter_range`.
    *
    * The tool still reports the full match count via `count`, but truncates the
@@ -261,6 +277,9 @@ export class ToolExecutor {
       max_external_bytes: options.max_external_bytes ?? 1_000_000,
       max_read_range_cells: options.max_read_range_cells ?? 5_000,
       max_read_range_chars: options.max_read_range_chars ?? 200_000,
+      // Many tool implementations materialize a full `CellData[][]` grid in JS (e.g. sort/filter).
+      // Keep this bounded so Excel-scale grid limits can't trigger catastrophic allocations.
+      max_tool_range_cells: options.max_tool_range_cells ?? 200_000,
       max_filter_range_matching_rows: options.max_filter_range_matching_rows ?? 1_000,
       max_detect_anomalies: options.max_detect_anomalies ?? 1_000,
       dlp:
@@ -271,6 +290,23 @@ export class ToolExecutor {
             }
           : options.dlp
     };
+  }
+
+  private assertRangeWithinMaxToolCells(
+    tool: ToolName,
+    range: { sheet: string; startRow: number; endRow: number; startCol: number; endCol: number },
+    opts: { label?: string } = {},
+  ): void {
+    const maxCells = this.options.max_tool_range_cells;
+    if (!Number.isFinite(maxCells)) return;
+    if (maxCells <= 0) return;
+    const requestedCells = rangeCellCount(range);
+    if (requestedCells <= maxCells) return;
+    const label = opts.label ? `${opts.label} ` : "";
+    throw toolError(
+      "permission_denied",
+      `${tool} ${label}requested ${requestedCells} cells (${this.formatRangeForUser(range)}), which exceeds max_tool_range_cells (${maxCells}). Request a smaller range or increase max_tool_range_cells.`
+    );
   }
 
   private resolveSheetId(sheetNameOrId: string): string {
@@ -499,6 +535,8 @@ export class ToolExecutor {
         }
       : range;
 
+    this.assertRangeWithinMaxToolCells("set_range", targetRange);
+
     const normalizedValues: CellScalar[][] = expanded
       ? params.values.map((row: CellScalar[]) => {
           const next = Array.isArray(row) ? row.slice() : [];
@@ -543,6 +581,7 @@ export class ToolExecutor {
     }
 
     const range = { sheet, startRow, endRow, startCol: colIndex, endCol: colIndex };
+    this.assertRangeWithinMaxToolCells("apply_formula_column", range);
     const dlp = this.evaluateDlpForRange("apply_formula_column", range);
     if (dlp && dlp.decision.decision === DLP_DECISION.BLOCK) {
       this.logToolDlpDecision({ tool: "apply_formula_column", range, dlp, redactedCellCount: 0 });
@@ -576,6 +615,7 @@ export class ToolExecutor {
     const source = this.parseRange(params.source_range, this.options.default_sheet);
     const destination = this.parseCell(params.destination, this.options.default_sheet);
 
+    this.assertRangeWithinMaxToolCells("create_pivot_table", source, { label: "source_range" });
     const sourceCells = this.spreadsheet.readRange(source);
     const dlp = this.evaluateDlpForRange("create_pivot_table", source);
     if (dlp && dlp.decision.decision === DLP_DECISION.BLOCK) {
@@ -624,6 +664,8 @@ export class ToolExecutor {
       endRow: destination.row + rowCount - 1,
       endCol: destination.col + colCount - 1
     };
+
+    this.assertRangeWithinMaxToolCells("create_pivot_table", outRange, { label: "destination_range" });
 
     const cells: CellData[][] = normalized.map((row) => row.map((value) => ({ value })));
     this.spreadsheet.writeRange(outRange, cells);
@@ -701,6 +743,7 @@ export class ToolExecutor {
 
   private sortRange(params: any): ToolResultDataByName["sort_range"] {
     const range = this.parseRange(params.range, this.options.default_sheet);
+    this.assertRangeWithinMaxToolCells("sort_range", range);
     const dlp = this.evaluateDlpForRange("sort_range", range);
     if (dlp && dlp.decision.decision !== DLP_DECISION.ALLOW) {
       this.logToolDlpDecision({ tool: "sort_range", range, dlp, redactedCellCount: 0 });
@@ -745,6 +788,7 @@ export class ToolExecutor {
 
   private filterRange(params: any): ToolResultDataByName["filter_range"] {
     const range = this.parseRange(params.range, this.options.default_sheet);
+    this.assertRangeWithinMaxToolCells("filter_range", range);
     const dlp = this.evaluateDlpForRange("filter_range", range);
     if (dlp && dlp.decision.decision === DLP_DECISION.BLOCK) {
       this.logToolDlpDecision({ tool: "filter_range", range, dlp, redactedCellCount: 0 });
@@ -808,6 +852,7 @@ export class ToolExecutor {
 
   private detectAnomalies(params: any): ToolResultDataByName["detect_anomalies"] {
     const range = this.parseRange(params.range, this.options.default_sheet);
+    this.assertRangeWithinMaxToolCells("detect_anomalies", range);
     const formattedRange = this.formatRangeForUser(range);
     const method = (params.method ?? "zscore") as "zscore" | "iqr" | "isolation_forest";
     const dlp = this.evaluateDlpForRange("detect_anomalies", range);
@@ -962,6 +1007,7 @@ export class ToolExecutor {
 
   private computeStatistics(params: any): ToolResultDataByName["compute_statistics"] {
     const range = this.parseRange(params.range, this.options.default_sheet);
+    this.assertRangeWithinMaxToolCells("compute_statistics", range);
     const dlp = this.evaluateDlpForRange("compute_statistics", range);
     if (dlp && dlp.decision.decision === DLP_DECISION.BLOCK) {
       this.logToolDlpDecision({ tool: "compute_statistics", range, dlp, redactedCellCount: 0 });
@@ -1464,6 +1510,14 @@ export class ToolExecutor {
   }
 
   private refreshPivot(pivot: PivotRegistration): void {
+    const maxCells = this.options.max_tool_range_cells;
+    if (Number.isFinite(maxCells) && maxCells > 0) {
+      // Defensive: pivots are created in-process via `create_pivot_table`, which is
+      // already guarded by `max_tool_range_cells`. Still, this protects us from
+      // unexpected/legacy registrations and prevents a background refresh from
+      // allocating a massive `CellData[][]`.
+      if (rangeCellCount(pivot.source) > maxCells) return;
+    }
     const sourceCells = this.spreadsheet.readRange(pivot.source);
     const dlp = this.evaluateDlpForRange("create_pivot_table", pivot.source);
     if (dlp && dlp.decision.decision === DLP_DECISION.BLOCK) {
@@ -1505,32 +1559,41 @@ export class ToolExecutor {
       endCol: pivot.destination.col + colCount - 1
     };
 
-    const prevRange = pivot.lastDestinationRange;
-    const unionRange = {
-      sheet: pivot.destination.sheet,
-      startRow: pivot.destination.row,
-      startCol: pivot.destination.col,
-      endRow: Math.max(prevRange.endRow, nextRange.endRow),
-      endCol: Math.max(prevRange.endCol, nextRange.endCol)
-    };
-
-    const unionRows = unionRange.endRow - unionRange.startRow + 1;
-    const unionCols = unionRange.endCol - unionRange.startCol + 1;
-
-    /** @type {CellData[][]} */
-    const cells: CellData[][] = [];
-    for (let r = 0; r < unionRows; r++) {
-      const row: CellData[] = [];
-      for (let c = 0; c < unionCols; c++) {
-        const withinNew =
-          r < nextRange.endRow - nextRange.startRow + 1 && c < nextRange.endCol - nextRange.startCol + 1;
-        row.push({ value: withinNew ? normalized[r]?.[c] ?? null : null });
-      }
-      cells.push(row);
+    if (Number.isFinite(maxCells) && maxCells > 0) {
+      // Skip refresh if the next output would exceed our configured safety cap.
+      // This avoids building massive intermediate arrays during background refresh.
+      if (rangeCellCount(nextRange) > maxCells) return;
     }
 
-    this.spreadsheet.writeRange(unionRange, cells);
-    pivot.lastDestinationRange = unionRange;
+    // Pivot refresh clears the previous output range, then writes the new output range.
+    //
+    // We intentionally avoid writing a "union rectangle" of prev+next: if the pivot
+    // changes shape significantly (e.g. wide -> tall), the union rectangle can be
+    // dramatically larger than either range and lead to huge allocations.
+    const prevRange = pivot.lastDestinationRange;
+    const emptyCell: CellData = { value: null };
+
+    if (
+      prevRange.sheet !== nextRange.sheet ||
+      prevRange.startRow !== nextRange.startRow ||
+      prevRange.startCol !== nextRange.startCol ||
+      prevRange.endRow !== nextRange.endRow ||
+      prevRange.endCol !== nextRange.endCol
+    ) {
+      if (Number.isFinite(maxCells) && maxCells > 0) {
+        if (rangeCellCount(prevRange) > maxCells) return;
+      }
+      const prevRows = prevRange.endRow - prevRange.startRow + 1;
+      const prevCols = prevRange.endCol - prevRange.startCol + 1;
+      const clearCells: CellData[][] = Array.from({ length: prevRows }, () =>
+        Array.from({ length: prevCols }, () => emptyCell)
+      );
+      this.spreadsheet.writeRange(prevRange, clearCells);
+    }
+
+    const nextCells: CellData[][] = normalized.map((row) => row.map((value) => ({ value })));
+    this.spreadsheet.writeRange(nextRange, nextCells);
+    pivot.lastDestinationRange = nextRange;
   }
 }
 
