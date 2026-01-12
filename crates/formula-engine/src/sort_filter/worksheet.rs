@@ -421,15 +421,15 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                     Some(CellValue::Text(display.to_string()))
                                 }
                                 // Degrade nested rich values (e.g. records whose display field is
-                                // an entity/record) using the same logic as the main conversion.
-                                //
-                                // Note: `"image"` is handled explicitly above so we can prefer its
-                                // alt text without an extra deserialize roundtrip.
-                                "entity" | "record" => serde_json::from_value(display_value.clone())
-                                    .ok()
-                                    .map(|v: ModelCellValue| model_cell_value_to_sort_value(&v)),
-                                _ => None,
-                            };
+                                 // an entity/record) using the same logic as the main conversion.
+                                 //
+                                 // Note: `"image"` is handled explicitly above so we can prefer its
+                                 // alt text without an extra deserialize roundtrip.
+                                 "entity" | "record" => serde_json::from_value(display_value.clone())
+                                     .ok()
+                                     .map(|v: ModelCellValue| model_cell_value_to_sort_value(&v)),
+                                 _ => None,
+                             };
 
                              if parsed.is_some() {
                                  return parsed;
