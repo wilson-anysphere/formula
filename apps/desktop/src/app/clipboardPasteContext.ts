@@ -1,4 +1,4 @@
-type ClipboardPayload = { text?: string; html?: string };
+type ClipboardPayload = { text?: string; html?: string; rtf?: string };
 
 export type ClipboardCopyContextLike = { payload: ClipboardPayload };
 
@@ -18,6 +18,10 @@ function normalizeClipboardText(text: string): string {
       // detecting "internal" pastes for formula shifting.
       .replace(/\n+$/g, "")
   );
+}
+
+function normalizeClipboardRtf(rtf: string): string {
+  return rtf.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
 }
 
 function hasUsableClipboardContent(content: ClipboardContentLike): boolean {
@@ -40,7 +44,12 @@ export function detectInternalPaste(ctx: ClipboardCopyContextLike | null, conten
   const htmlMatches =
     typeof content.html === "string" && typeof ctx.payload.html === "string" && content.html === ctx.payload.html;
 
-  return textMatches || htmlMatches;
+  const rtfMatches =
+    typeof content.rtf === "string" &&
+    typeof ctx.payload.rtf === "string" &&
+    normalizeClipboardRtf(content.rtf) === normalizeClipboardRtf(ctx.payload.rtf);
+
+  return textMatches || htmlMatches || rtfMatches;
 }
 
 /**
@@ -62,4 +71,3 @@ export function reconcileClipboardCopyContextForPaste<T extends ClipboardCopyCon
 
   return { isInternalPaste, nextContext: ctx };
 }
-

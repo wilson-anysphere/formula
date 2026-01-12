@@ -15,5 +15,17 @@ describe("clipboardPasteContext", () => {
     expect(isInternalPaste).toBe(false);
     expect(nextContext).toBeNull();
   });
-});
 
+  it("treats rtf-only clipboard reads as internal when rtf matches the last internal copy payload", () => {
+    const initialContext = {
+      range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 },
+      payload: { text: "A", html: "<table><tr><td>A</td></tr></table>", rtf: "{\\rtf1\\ansi A}" },
+      cells: [[{ value: "A", formula: null, styleId: 0 }]],
+    };
+
+    const { isInternalPaste, nextContext } = reconcileClipboardCopyContextForPaste(initialContext, { rtf: "{\\rtf1\\ansi A}" });
+
+    expect(isInternalPaste).toBe(true);
+    expect(nextContext).toEqual(initialContext);
+  });
+});
