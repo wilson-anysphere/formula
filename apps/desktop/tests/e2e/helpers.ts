@@ -55,7 +55,7 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
           message.includes("net::ERR_ABORTED") ||
           message.includes("frame was detached"))
       ) {
-        await page.waitForLoadState("load");
+        await page.waitForLoadState("domcontentloaded");
         continue;
       }
       throw err;
