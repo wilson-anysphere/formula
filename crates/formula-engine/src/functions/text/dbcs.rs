@@ -61,12 +61,12 @@ pub(crate) fn lenb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value
 
 pub(crate) fn asc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
-    array_lift::lift1(text, |text| Ok(Value::Text(text.coerce_to_string()?)))
+    array_lift::lift1(text, |text| Ok(Value::Text(text.coerce_to_string_with_ctx(ctx)?)))
 }
 
 pub(crate) fn dbcs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
-    array_lift::lift1(text, |text| Ok(Value::Text(text.coerce_to_string()?)))
+    array_lift::lift1(text, |text| Ok(Value::Text(text.coerce_to_string_with_ctx(ctx)?)))
 }
 
 pub(crate) fn phonetic_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
@@ -75,6 +75,5 @@ pub(crate) fn phonetic_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> V
     // NOTE: Real Excel uses a phonetic guide (furigana) stored in cell metadata,
     // which is not currently modeled in the engine.
     let reference = array_lift::eval_arg(ctx, &args[0]);
-    array_lift::lift1(reference, |v| Ok(Value::Text(v.coerce_to_string()?)))
+    array_lift::lift1(reference, |v| Ok(Value::Text(v.coerce_to_string_with_ctx(ctx)?)))
 }
-

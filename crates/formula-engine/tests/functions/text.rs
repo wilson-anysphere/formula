@@ -500,6 +500,18 @@ fn textsplit_respects_ignore_empty() {
 }
 
 #[test]
+fn textsplit_respects_value_locale_when_coercing_numeric_text() {
+    let mut sheet = TestSheet::new();
+    sheet.set_value_locale(ValueLocaleConfig::de_de());
+    sheet.set_formula("Z1", r#"=TEXTSPLIT(1.5, ",")"#);
+    sheet.recalc();
+
+    // de-DE uses ',' as decimal separator, so TEXTSPLIT sees the coerced text "1,5".
+    assert_eq!(sheet.get("Z1"), Value::Text("1".to_string()));
+    assert_eq!(sheet.get("AA1"), Value::Text("5".to_string()));
+}
+
+#[test]
 fn textsplit_accepts_xlfn_prefix() {
     let mut sheet = TestSheet::new();
     sheet.set_formula("Z1", r#"=_xlfn.TEXTSPLIT("a,b", ",")"#);

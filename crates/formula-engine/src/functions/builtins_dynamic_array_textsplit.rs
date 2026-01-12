@@ -32,7 +32,7 @@ enum MatchMode {
 }
 
 fn textsplit_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let text = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
+    let text = match eval_scalar_arg(ctx, &args[0]).coerce_to_string_with_ctx(ctx) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
@@ -149,11 +149,11 @@ fn eval_delimiter_set(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<
         Value::Array(arr) => {
             let mut out = Vec::with_capacity(arr.values.len());
             for v in arr.iter() {
-                out.push(v.coerce_to_string()?);
+                out.push(v.coerce_to_string_with_ctx(ctx)?);
             }
             Ok(out)
         }
-        other => Ok(vec![other.coerce_to_string()?]),
+        other => Ok(vec![other.coerce_to_string_with_ctx(ctx)?]),
     }
 }
 

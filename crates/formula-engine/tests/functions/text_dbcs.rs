@@ -1,3 +1,4 @@
+use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::{ErrorKind, Value};
 
 use super::harness::TestSheet;
@@ -94,3 +95,9 @@ fn phonetic_propagates_errors() {
     assert_eq!(sheet.eval("=PHONETIC(A1)"), Value::Error(ErrorKind::Div0));
 }
 
+#[test]
+fn phonetic_coerces_numbers_using_value_locale() {
+    let mut sheet = TestSheet::new();
+    sheet.set_value_locale(ValueLocaleConfig::de_de());
+    assert_eq!(sheet.eval("=PHONETIC(1.5)"), Value::Text("1,5".to_string()));
+}
