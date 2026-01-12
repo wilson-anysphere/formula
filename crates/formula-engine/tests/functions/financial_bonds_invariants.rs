@@ -26,6 +26,12 @@ pub(super) fn eval_number_or_skip(sheet: &mut TestSheet, formula: &str) -> Optio
 }
 
 fn coupon_date_from_maturity(maturity: &str, months_per_period: i32, periods_back: i32) -> String {
+    // Excel’s regular coupon schedules are maturity-anchored: starting from `maturity`, you step
+    // backwards in fixed month increments (12/frequency) using `EDATE`. Because `EDATE` clamps to
+    // the end of month when the target month is shorter, `EDATE(maturity, -(k*m))` is *not*
+    // equivalent to `k` repeated steps of `EDATE(..., -m)` in general (e.g. Dec 31 -> Jun 30 ->
+    // Dec 30). Build an explicit nested `EDATE` expression to match the schedule derivation used
+    // by the bond functions.
     debug_assert!(months_per_period > 0);
     debug_assert!(periods_back >= 0);
     let mut expr = maturity.to_string();
