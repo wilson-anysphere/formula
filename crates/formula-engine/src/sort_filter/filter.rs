@@ -539,6 +539,33 @@ mod tests {
     }
 
     #[test]
+    fn locale_aware_date_filter_parses_year_first_dot_separated_dates() {
+        let data = range(vec![
+            vec![CellValue::Text("Val".into())],
+            vec![CellValue::Text("2020.01.01".into())],
+            vec![CellValue::Text("2020.01.02".into())],
+        ]);
+
+        let filter = AutoFilter {
+            range: data.range,
+            columns: BTreeMap::from([(
+                0,
+                ColumnFilter {
+                    join: FilterJoin::Any,
+                    criteria: vec![FilterCriterion::Date(DateComparison::OnDate(
+                        NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+                    ))],
+                },
+            )]),
+        };
+
+        let result =
+            apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::de_de());
+        assert_eq!(result.visible_rows, vec![true, true, false]);
+        assert_eq!(result.hidden_sheet_rows, vec![2]);
+    }
+
+    #[test]
     fn blanks_filter() {
         let data = range(vec![
             vec![CellValue::Text("Val".into())],
