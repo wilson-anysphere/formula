@@ -3540,13 +3540,15 @@ pub fn report_cross_origin_isolation(cross_origin_isolated: bool, shared_array_b
 // platform dispatch and GTK main-thread requirements.
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub fn read_clipboard() -> Result<crate::clipboard::ClipboardContent, String> {
-    crate::clipboard::read().map_err(|e| e.to_string())
+pub async fn read_clipboard() -> Result<crate::clipboard::ClipboardContent, String> {
+    tauri::async_runtime::spawn_blocking(|| crate::clipboard::read().map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub fn write_clipboard(
+pub async fn write_clipboard(
     text: String,
     html: Option<String>,
     rtf: Option<String>,
@@ -3558,7 +3560,9 @@ pub fn write_clipboard(
         rtf,
         image_png_base64,
     };
-    crate::clipboard::write(&payload).map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || crate::clipboard::write(&payload).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
