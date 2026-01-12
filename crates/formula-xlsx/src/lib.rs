@@ -141,7 +141,7 @@ pub use writer::{
 pub use xml::XmlDomError;
 
 use formula_model::rich_text::RichText;
-use formula_model::{CellRef, CellValue, ErrorValue, Workbook, WorksheetId};
+use formula_model::{CellRef, CellValue, Workbook, WorksheetId};
 
 /// Excel date system used to interpret serialized dates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -365,16 +365,25 @@ impl XlsxDocument {
         let Some(sheet) = self.workbook.sheet_mut(sheet_id) else {
             return false;
         };
-
-        let old_is_in_cell_image_placeholder = sheet
+        let was_value_error_placeholder = sheet
             .cell(cell)
-            .is_some_and(|record| matches!(&record.value, CellValue::Error(ErrorValue::Value)));
-        let new_is_in_cell_image_placeholder =
-            matches!(&value, CellValue::Error(ErrorValue::Value));
-        if old_is_in_cell_image_placeholder && !new_is_in_cell_image_placeholder {
+            .is_some_and(|c| matches!(c.value, CellValue::Error(formula_model::ErrorValue::Value)));
+        let is_value_error_placeholder =
+            matches!(value, CellValue::Error(formula_model::ErrorValue::Value));
+
+        // Embedded images-in-cell are represented in the worksheet as a `#VALUE!` placeholder with
+        // a `vm="..."` pointer into `xl/metadata.xml`. If a caller overwrites the cell with a
+        // normal value, drop the vm pointer so Excel doesn't continue treating it as an embedded
+        // image cell.
+        //
+        // This happens before `sheet.set_value` so that clearing a placeholder cell can remove the
+        // corresponding meta entry (since `vm` participates in `keep_due_to_metadata` checks
+        // below).
+        if was_value_error_placeholder && !is_value_error_placeholder {
             if let Some(meta) = self.meta.cell_meta.get_mut(&(sheet_id, cell)) {
                 meta.vm = None;
             }
+            self.meta.rich_value_cells.remove(&(sheet_id, cell));
         }
         sheet.set_value(cell, value.clone());
 
@@ -391,6 +400,14 @@ impl XlsxDocument {
         };
 
         let meta = self.meta.cell_meta.entry((sheet_id, cell)).or_default();
+        if was_value_error_placeholder && !is_value_error_placeholder {
+            // Embedded images-in-cell are represented in the worksheet as a `#VALUE!` placeholder
+            // with a `vm="..."` pointer into `xl/metadata.xml`. If a caller overwrites the cell with
+            // a normal value, drop the vm pointer so Excel doesn't continue treating it as an
+            // embedded image cell.
+            meta.vm = None;
+            self.meta.rich_value_cells.remove(&(sheet_id, cell));
+        }
         match (&meta.value_kind, &cell_record.value) {
             // Preserve less-common/unknown `t=` values by keeping the original type while the
             // model stores the cell value as a string (e.g. `t="d"` uses an ISO-8601 `<v>`).

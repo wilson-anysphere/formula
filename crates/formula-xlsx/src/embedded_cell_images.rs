@@ -238,6 +238,100 @@ impl XlsxPackage {
         let has_rich_value_tables =
             !local_image_by_rich_value_index.is_empty() || !rich_value_rel_indices.is_empty();
 
+        let metadata_bytes = self.part("xl/metadata.xml");
+        let rd_rich_value_bytes = self.part(RD_RICH_VALUE_PART);
+        let rd_rich_value_structure_bytes = self.part(RD_RICH_VALUE_STRUCTURE_PART);
+
+        // Prefer full-fidelity extraction when the complete RichData + metadata pipeline is present.
+        if let (
+            Some(metadata_bytes),
+            Some(rd_rich_value_bytes),
+            Some(rd_rich_value_structure_bytes),
+        ) = (
+            metadata_bytes,
+            rd_rich_value_bytes,
+            rd_rich_value_structure_bytes,
+        ) {
+            // Value metadata mapping: worksheet `c/@vm` -> rich value index.
+            let vm_to_rich_value =
+                crate::rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map(
+                    metadata_bytes,
+                )
+                .map_err(|e| XlsxError::Invalid(format!("failed to parse xl/metadata.xml: {e}")))?;
+
+            if !vm_to_rich_value.is_empty() {
+                if let Some(local_image_structure) =
+                    parse_local_image_structure(rd_rich_value_structure_bytes)?
+                {
+                    let local_image_by_rich_value_index =
+                        parse_local_image_rich_values(rd_rich_value_bytes, &local_image_structure)?;
+
+                    let mut out = HashMap::new();
+                    for sheet in self.worksheet_parts()? {
+                        let Some(sheet_xml_bytes) = self.part(&sheet.worksheet_part) else {
+                            continue;
+                        };
+                        let sheet_xml = std::str::from_utf8(sheet_xml_bytes).map_err(|e| {
+                            XlsxError::Invalid(format!("{} not utf-8: {e}", sheet.worksheet_part))
+                        })?;
+
+                        let sheet_rels_part = rels_for_part(&sheet.worksheet_part);
+                        let sheet_rels_xml = self
+                            .part(&sheet_rels_part)
+                            .and_then(|bytes| std::str::from_utf8(bytes).ok());
+
+                        // Best-effort: if hyperlink parsing fails (malformed file), still extract images.
+                        let hyperlinks = parse_worksheet_hyperlinks(sheet_xml, sheet_rels_xml)
+                            .unwrap_or_default();
+
+                        for (cell_ref, vm) in parse_sheet_vm_image_cells(sheet_xml_bytes)? {
+                            let Some(&rich_value_index) = vm_to_rich_value.get(&vm) else {
+                                continue;
+                            };
+                            let Some(local_image) =
+                                local_image_by_rich_value_index.get(&rich_value_index)
+                            else {
+                                continue;
+                            };
+                            let Some(image_part) = resolve_local_image_identifier_to_image_part(
+                                &rich_value_rel_ids,
+                                &image_targets_by_rel_id,
+                                local_image.local_image_identifier,
+                            ) else {
+                                continue;
+                            };
+
+                            let Some(image_bytes) = self.part(&image_part) else {
+                                continue;
+                            };
+
+                            let hyperlink_target = hyperlinks
+                                .iter()
+                                .find(|link| link.range.contains(cell_ref))
+                                .map(|link| link.target.clone());
+
+                            out.insert(
+                                (sheet.worksheet_part.clone(), cell_ref),
+                                EmbeddedCellImage {
+                                    image_part,
+                                    image_bytes: image_bytes.to_vec(),
+                                    calc_origin: local_image.calc_origin,
+                                    alt_text: local_image.alt_text.clone(),
+                                    hyperlink_target,
+                                },
+                            );
+                        }
+                    }
+
+                    return Ok(out);
+                }
+            }
+        }
+
+        // Best-effort fallback: some files include `xl/richData/richValueRel.xml` + rels but omit
+        // `xl/metadata.xml` or the rich value tables. In that case, attempt to interpret `vm="N"`
+        // as (0-based or 1-based) indices into `richValueRel.xml` and extract whatever image targets
+        // we can resolve.
         let mut out = HashMap::new();
         for worksheet_part in worksheet_parts {
             let Some(sheet_xml_bytes) = self.part(&worksheet_part) else {
@@ -252,7 +346,6 @@ impl XlsxPackage {
                 .part(&sheet_rels_part)
                 .and_then(|bytes| std::str::from_utf8(bytes).ok());
 
-            // Best-effort: if hyperlink parsing fails (malformed file), still extract images.
             let hyperlinks =
                 parse_worksheet_hyperlinks(sheet_xml, sheet_rels_xml).unwrap_or_default();
 
@@ -268,7 +361,9 @@ impl XlsxPackage {
                     None
                 };
 
-                let mut calc_origin: u32 = 0;
+                // Excel has been observed to use `CalcOrigin=5` for in-cell images; treat this as a
+                // reasonable default when rich value tables are missing.
+                let mut calc_origin: u32 = 5;
                 let mut alt_text: Option<String> = None;
 
                 // Determine which relationship-slot index to use for this cell image.
@@ -416,7 +511,9 @@ fn parse_rich_value_rel_ids(xml: &str) -> Result<Vec<String>, XlsxError> {
     Ok(out)
 }
 
-fn parse_rich_value_rel_image_targets(rels_xml: &[u8]) -> Result<HashMap<String, String>, XlsxError> {
+fn parse_rich_value_rel_image_targets(
+    rels_xml: &[u8],
+) -> Result<HashMap<String, String>, XlsxError> {
     let relationships = crate::openxml::parse_relationships(rels_xml)?;
     let mut out = HashMap::new();
     for rel in relationships {
@@ -720,7 +817,10 @@ fn read_text(reader: &mut Reader<Cursor<&[u8]>>, end: QName<'_>) -> Result<Strin
     Ok(text)
 }
 
-fn attr_value(e: &quick_xml::events::BytesStart<'_>, key: &[u8]) -> Result<Option<String>, XlsxError> {
+fn attr_value(
+    e: &quick_xml::events::BytesStart<'_>,
+    key: &[u8],
+) -> Result<Option<String>, XlsxError> {
     for attr in e.attributes().with_checks(false) {
         let attr = attr?;
         if attr.key.as_ref() == key {
