@@ -1,6 +1,10 @@
 use thiserror::Error;
 
-/// Digest extracted from the signed Authenticode `SpcIndirectDataContent`.
+/// Digest extracted from the signed Authenticode / MS-OSHARED signature binding payload.
+///
+/// Office can embed the VBA project digest in either:
+/// - classic Authenticode `SpcIndirectDataContent` (`DigestInfo.digest`), or
+/// - MS-OSHARED `SpcIndirectDataContentV2` (`SigDataV1Serialized.sourceHash`).
 ///
 /// In MS-OVBA terms, this corresponds to the "project digest" binding value
 /// stored inside the VBA digital signature stream.
@@ -24,8 +28,11 @@ pub enum VbaSignatureSignedDigestError {
 const OID_PKCS7_SIGNED_DATA: &[u8] = b"\x2A\x86\x48\x86\xF7\x0D\x01\x07\x02"; // 1.2.840.113549.1.7.2
 const OID_MD5_STR: &str = "1.2.840.113549.2.5";
 
-/// Extract the signed Authenticode file digest (the `DigestInfo` inside
-/// `SpcIndirectDataContent`) from a raw VBA `\x05DigitalSignature*` stream.
+/// Extract the signed VBA project digest from a raw VBA `\x05DigitalSignature*` stream.
+///
+/// This supports both:
+/// - classic Authenticode `SpcIndirectDataContent` (extracts `DigestInfo`), and
+/// - MS-OSHARED `SpcIndirectDataContentV2` (extracts `SigDataV1Serialized.sourceHash`).
 ///
 /// This is a best-effort parser intended for binding verification (MS-OVBA "project digest").
 ///
