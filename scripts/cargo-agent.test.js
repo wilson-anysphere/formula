@@ -233,3 +233,45 @@ test(
     );
   },
 );
+
+test(
+  'cargo_agent rejects invalid FORMULA_CARGO_TEST_JOBS',
+  { skip: !hasBash || !hasCargo },
+  () => {
+    const proc = spawnSync(
+      'bash',
+      [
+        '-lc',
+        'export FORMULA_CARGO_TEST_JOBS=0 && unset FORMULA_CARGO_JOBS && bash scripts/cargo_agent.sh test -h',
+      ],
+      { encoding: 'utf8', cwd: repoRoot },
+    );
+    if (proc.error) throw proc.error;
+    assert.notEqual(proc.status, 0, 'expected non-zero exit for invalid FORMULA_CARGO_TEST_JOBS');
+    assert.ok(
+      proc.stderr.includes('invalid FORMULA_CARGO_TEST_JOBS'),
+      `expected stderr to mention invalid FORMULA_CARGO_TEST_JOBS, got:\n${proc.stderr}`,
+    );
+  },
+);
+
+test(
+  'cargo_agent rejects invalid FORMULA_CARGO_RETRY_ATTEMPTS',
+  { skip: !hasBash || !hasCargo },
+  () => {
+    const proc = spawnSync(
+      'bash',
+      [
+        '-lc',
+        'export FORMULA_CARGO_RETRY_ATTEMPTS=0 && bash scripts/cargo_agent.sh check -h',
+      ],
+      { encoding: 'utf8', cwd: repoRoot },
+    );
+    if (proc.error) throw proc.error;
+    assert.notEqual(proc.status, 0, 'expected non-zero exit for invalid FORMULA_CARGO_RETRY_ATTEMPTS');
+    assert.ok(
+      proc.stderr.includes('invalid FORMULA_CARGO_RETRY_ATTEMPTS'),
+      `expected stderr to mention invalid FORMULA_CARGO_RETRY_ATTEMPTS, got:\n${proc.stderr}`,
+    );
+  },
+);

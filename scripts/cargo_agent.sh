@@ -356,6 +356,10 @@ if [[ "${subcommand}" == "test" ]]; then
   # `FORMULA_CARGO_TEST_JOBS` is set.
   if [[ -z "${explicit_jobs}" ]]; then
     if [[ -n "${FORMULA_CARGO_TEST_JOBS:-}" ]]; then
+      if ! [[ "${FORMULA_CARGO_TEST_JOBS}" =~ ^[0-9]+$ ]] || [[ "${FORMULA_CARGO_TEST_JOBS}" -lt 1 ]]; then
+        echo "cargo_agent: invalid FORMULA_CARGO_TEST_JOBS=${FORMULA_CARGO_TEST_JOBS} (expected integer >= 1)" >&2
+        exit 2
+      fi
       jobs="${FORMULA_CARGO_TEST_JOBS}"
     elif [[ -z "${caller_jobs_env}" ]]; then
       jobs="1"
@@ -565,6 +569,10 @@ fi
 #
 # Retrying after a short backoff usually succeeds once other agents finish their compile/test bursts.
 max_attempts="${FORMULA_CARGO_RETRY_ATTEMPTS:-5}"
+if ! [[ "${max_attempts}" =~ ^[0-9]+$ ]] || [[ "${max_attempts}" -lt 1 ]]; then
+  echo "cargo_agent: invalid FORMULA_CARGO_RETRY_ATTEMPTS=${max_attempts} (expected integer >= 1)" >&2
+  exit 2
+fi
 attempt=1
 disabled_rustc_wrapper_for_retry=false
 while true; do
