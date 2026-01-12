@@ -51,3 +51,55 @@ test("column resize drag + double-click auto-fit updates layout", async ({ page 
   const widthAfterAutoFit = await page.evaluate(() => (window as any).__gridApi.getColWidth(1));
   expect(widthAfterAutoFit).not.toBe(widthAfterDrag);
 });
+
+test("row resize drag + double-click auto-fit updates layout", async ({ page }) => {
+  await page.goto("/?e2e=1");
+
+  await expect(page.getByTestId("engine-status")).toContainText("ready", { timeout: 30_000 });
+
+  await page.waitForFunction(() => {
+    const api = (window as any).__gridApi;
+    return api && typeof api.getCellRect === "function" && typeof api.getRowHeight === "function";
+  });
+
+  await page.evaluate(() => {
+    (window as any).__gridApi.scrollTo(0, 0);
+  });
+
+  const selectionCanvas = page.getByTestId("canvas-grid-selection");
+  const canvasBox = await selectionCanvas.boundingBox();
+  expect(canvasBox).not.toBeNull();
+
+  const beforeRow2 = await page.evaluate(() => (window as any).__gridApi.getCellRect(2, 1));
+  expect(beforeRow2).not.toBeNull();
+
+  const row1HeaderRect = await page.evaluate(() => (window as any).__gridApi.getCellRect(1, 0));
+  expect(row1HeaderRect).not.toBeNull();
+
+  const boundaryX = canvasBox!.x + row1HeaderRect!.x + row1HeaderRect!.width / 2;
+  const boundaryY = canvasBox!.y + row1HeaderRect!.y + row1HeaderRect!.height;
+
+  // Drag the row 1|2 boundary to increase row 1 height.
+  await page.mouse.move(boundaryX, boundaryY);
+  await page.mouse.down();
+  await page.mouse.move(boundaryX, boundaryY + 60);
+  await page.mouse.up();
+
+  const afterRow2 = await page.evaluate(() => (window as any).__gridApi.getCellRect(2, 1));
+  expect(afterRow2).not.toBeNull();
+  expect(afterRow2!.y).toBeGreaterThan(beforeRow2!.y + 40);
+
+  const heightAfterDrag = await page.evaluate(() => (window as any).__gridApi.getRowHeight(1));
+
+  const row1HeaderRectAfterDrag = await page.evaluate(() => (window as any).__gridApi.getCellRect(1, 0));
+  expect(row1HeaderRectAfterDrag).not.toBeNull();
+
+  const boundaryXAfterDrag = canvasBox!.x + row1HeaderRectAfterDrag!.x + row1HeaderRectAfterDrag!.width / 2;
+  const boundaryYAfterDrag = canvasBox!.y + row1HeaderRectAfterDrag!.y + row1HeaderRectAfterDrag!.height;
+
+  // Double click the boundary to auto-fit row 1.
+  await page.mouse.click(boundaryXAfterDrag, boundaryYAfterDrag, { clickCount: 2 });
+
+  const heightAfterAutoFit = await page.evaluate(() => (window as any).__gridApi.getRowHeight(1));
+  expect(heightAfterAutoFit).not.toBe(heightAfterDrag);
+});
