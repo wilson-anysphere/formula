@@ -59,15 +59,18 @@ fn coupon_period_e(
     ncd: i32,
     basis: i32,
     frequency: i32,
-    _system: ExcelDateSystem,
+    system: ExcelDateSystem,
 ) -> f64 {
     let freq = frequency as f64;
     match basis {
-        // NOTE: The formula-engine follows Excel-compatible COUP* conventions where the coupon
-        // period length E is *constant* for the 30/360 bases (0/2/4) and does not depend on
-        // DAYS360(PCD,NCD,method). Source-of-truth:
-        // `crates/formula-engine/src/functions/financial/coupon_schedule.rs::coupon_period_e`.
-        0 | 2 | 4 => 360.0 / freq,
+        0 | 2 => 360.0 / freq,
+        // NOTE: For the regular COUP*/PRICE schedule, Excel models basis 4 (30E/360) coupon
+        // periods as a constant `360/frequency`.
+        //
+        // For odd-coupon bonds (ODDF*/ODDL*), Excel instead uses `DAYS360(PCD, NCD, TRUE)` between
+        // the coupon dates as the coupon-period length `E`. This matters for end-of-month
+        // schedules involving February (e.g. Feb 28 -> Aug 31 yields 182, not 180).
+        4 => days_between(pcd, ncd, 4, system),
         3 => 365.0 / freq,
         1 => (ncd - pcd) as f64,
         _ => panic!("invalid basis {basis}"),
@@ -202,7 +205,7 @@ fn assert_num_error_or_skip(sheet: &mut TestSheet, formula: &str) -> bool {
 }
 
 #[test]
-fn odd_coupon_boundary_date_equalities_return_num_error() {
+fn odd_coupon_boundary_date_validations_match_engine_behavior() {
     let mut sheet = TestSheet::new();
 
     // ODDF* boundaries
@@ -257,18 +260,16 @@ fn odd_coupon_boundary_date_equalities_return_num_error() {
     }
 
     // ODDL* boundaries
-    // last_interest == settlement
-    if !assert_num_error_or_skip(
-        &mut sheet,
-        "=ODDLPRICE(DATE(2020,10,15),DATE(2021,3,1),DATE(2020,10,15),0.05,0.06,100,2,0)",
-    ) {
-        return;
+    // last_interest == settlement is allowed (zero accrued interest).
+    match sheet.eval("=ODDLPRICE(DATE(2020,10,15),DATE(2021,3,1),DATE(2020,10,15),0.05,0.06,100,2,0)") {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Number(n) => assert!(n.is_finite(), "expected finite number, got {n}"),
+        other => panic!("expected number from ODDLPRICE boundary case, got {other:?}"),
     }
-    if !assert_num_error_or_skip(
-        &mut sheet,
-        "=ODDLYIELD(DATE(2020,10,15),DATE(2021,3,1),DATE(2020,10,15),0.05,98,100,2,0)",
-    ) {
-        return;
+    match sheet.eval("=ODDLYIELD(DATE(2020,10,15),DATE(2021,3,1),DATE(2020,10,15),0.05,ODDLPRICE(DATE(2020,10,15),DATE(2021,3,1),DATE(2020,10,15),0.05,0.06,100,2,0),100,2,0)") {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Number(n) => assert!(n.is_finite(), "expected finite number, got {n}"),
+        other => panic!("expected number from ODDLYIELD boundary case, got {other:?}"),
     }
 
     // settlement == maturity
@@ -3942,9 +3943,10 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
     let system = ExcelDateSystem::EXCEL_1900;
     // Month-end / Feb dates so 30/360 US (basis=0) vs European (basis=4) diverge.
     //
-    // Under the engine's COUP* conventions, coupon-period length `E` is constant 360/frequency
-    // for both bases; differences come from the underlying DAYS360 rules (US vs EU), especially
-    // around end-of-month and February handling.
+    // Include two scenarios:
+    // - one where `E` is the "typical" semiannual 180 days for basis=4
+    // - one where the *European* DAYS360 between coupon dates differs from 360/frequency, and
+    //   Excel's odd-coupon pricing uses that DAYS360 value as the coupon-period length `E`.
     let scenarios = [
         // issue=2019-01-31, settlement=2019-02-28, first_coupon=2019-03-31, maturity=2019-09-30
         (
@@ -3953,7 +3955,10 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
             ExcelDate::new(2019, 3, 31),
             ExcelDate::new(2019, 9, 30),
         ),
-        // maturity=2019-02-28 is EOM but not the 31st, exercising EOM-pinned schedules.
+        // maturity=2019-02-28 is EOM, so the maturity-anchored schedule is EOM-pinned:
+        // prev_coupon=2018-02-28, first_coupon=2018-08-31.
+        // For basis=4, DAYS360(2018-02-28, 2018-08-31, method=true) = 182 days (not 180), and
+        // `E` is computed from that DAYS360 period length.
         (
             ExcelDate::new(2018, 1, 31),
             ExcelDate::new(2018, 2, 15),
@@ -3982,6 +3987,21 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
             a0 != a4 || dsc0 != dsc4,
             "expected DAYS360 method=false vs method=true to diverge for this scenario"
         );
+
+        // Guard: ensure we cover a basis=4 schedule where the European DAYS360 between coupon
+        // dates differs from 360/frequency (so we would catch regressions if `E` were accidentally
+        // modeled as 360/frequency).
+        if maturity == ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap() {
+            let months_per_period = 12 / frequency;
+            let eom = is_end_of_month(maturity, system);
+            assert!(eom, "expected maturity to be EOM for this scenario");
+            let coupon_dates = oddf_coupon_schedule(first_coupon, maturity, frequency, system);
+            let n = coupon_dates.len() as i32;
+            let prev_coupon = coupon_date_with_eom(maturity, -(n * months_per_period), eom, system);
+            let days360_eu =
+                date_time::days360(prev_coupon, first_coupon, true, system).unwrap() as f64;
+            assert_close(days360_eu, 182.0, 0.0);
+        }
 
         for basis in [0, 4] {
             let expected = oddf_price_excel_model(
