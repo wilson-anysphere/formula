@@ -73,3 +73,63 @@ test("DocumentControllerBridge create_sheet honors explicit index (0-based) over
   const atEnd = bridge.create_sheet({ name: "AtEnd", index: 99 });
   assert.deepEqual(doc.getSheetIds(), [at0, sheetA, at2, sheetB, sheetC, atEnd]);
 });
+
+test("DocumentControllerBridge get_range_values rejects huge ranges before scanning cells", () => {
+  let scanned = 0;
+  const doc = {
+    getCell() {
+      scanned += 1;
+      throw new Error("Should not scan");
+    },
+  };
+  const bridge = new DocumentControllerBridge(doc, { activeSheetId: "Sheet1" });
+
+  assert.throws(
+    () =>
+      bridge.get_range_values({
+        range: { sheet_id: "Sheet1", start_row: 0, end_row: 7999, start_col: 0, end_col: 25 },
+      }),
+    /get_range_values skipped/i,
+  );
+  assert.equal(scanned, 0);
+});
+
+test("DocumentControllerBridge set_range_values rejects huge scalar fills before materializing a matrix", () => {
+  let wrote = 0;
+  const doc = {
+    setRangeValues() {
+      wrote += 1;
+      throw new Error("Should not write");
+    },
+  };
+  const bridge = new DocumentControllerBridge(doc, { activeSheetId: "Sheet1" });
+
+  assert.throws(
+    () =>
+      bridge.set_range_values({
+        range: { sheet_id: "Sheet1", start_row: 0, end_row: 7999, start_col: 0, end_col: 25 },
+        values: 1,
+      }),
+    /set_range_values skipped/i,
+  );
+  assert.equal(wrote, 0);
+});
+
+test("DocumentControllerBridge set_range_values spills matrix writes when the destination is a single cell", () => {
+  const doc = new DocumentController();
+  const sheetId = doc.addSheet({ sheetId: "sheet_1", name: "Sheet1" });
+  const bridge = new DocumentControllerBridge(doc, { activeSheetId: sheetId });
+
+  bridge.set_range_values({
+    range: { sheet_id: sheetId, start_row: 0, end_row: 0, start_col: 0, end_col: 0 },
+    values: [
+      [1, 2],
+      [3, 4],
+    ],
+  });
+
+  assert.equal(doc.getCell(sheetId, { row: 0, col: 0 }).value, 1);
+  assert.equal(doc.getCell(sheetId, { row: 0, col: 1 }).value, 2);
+  assert.equal(doc.getCell(sheetId, { row: 1, col: 0 }).value, 3);
+  assert.equal(doc.getCell(sheetId, { row: 1, col: 1 }).value, 4);
+});

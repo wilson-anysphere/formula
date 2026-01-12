@@ -560,7 +560,15 @@ export class ToolExecutor {
     const interpretAs: "auto" | "value" | "formula" = params.interpret_as ?? "auto";
 
     const rowCount = Array.isArray(params.values) ? params.values.length : 0;
-    const colCount = rowCount > 0 ? Math.max(...params.values.map((row: any[]) => (Array.isArray(row) ? row.length : 0))) : 0;
+    // Avoid `Math.max(...rows.map(...))` spread: large pastes can include tens of thousands of
+    // rows, which would exceed JS engines' argument limits.
+    let colCount = 0;
+    if (rowCount > 0) {
+      for (const row of params.values as unknown[]) {
+        const len = Array.isArray(row) ? row.length : 0;
+        if (len > colCount) colCount = len;
+      }
+    }
 
     const expanded =
       range.startRow === range.endRow && range.startCol === range.endCol && (rowCount !== 1 || colCount !== 1);
@@ -690,7 +698,10 @@ export class ToolExecutor {
     });
 
     const rowCount = output.length;
-    const colCount = Math.max(1, ...output.map((row) => row.length));
+    let colCount = 1;
+    for (const row of output) {
+      if (row.length > colCount) colCount = row.length;
+    }
     const normalized: CellScalar[][] = output.map((row) => {
       const next = row.slice();
       while (next.length < colCount) next.push(null);
@@ -1098,10 +1109,28 @@ export class ToolExecutor {
           stats.variance = values.length ? variance(values) : null;
           break;
         case "min":
-          stats.min = values.length ? Math.min(...values) : null;
+          if (values.length) {
+            let min = values[0]!;
+            for (let i = 1; i < values.length; i++) {
+              const v = values[i]!;
+              if (v < min) min = v;
+            }
+            stats.min = min;
+          } else {
+            stats.min = null;
+          }
           break;
         case "max":
-          stats.max = values.length ? Math.max(...values) : null;
+          if (values.length) {
+            let max = values[0]!;
+            for (let i = 1; i < values.length; i++) {
+              const v = values[i]!;
+              if (v > max) max = v;
+            }
+            stats.max = max;
+          } else {
+            stats.max = null;
+          }
           break;
         case "quartiles": {
           if (!values.length) {
@@ -1670,7 +1699,10 @@ export class ToolExecutor {
     });
 
     const rowCount = output.length;
-    const colCount = Math.max(1, ...output.map((row) => row.length));
+    let colCount = 1;
+    for (const row of output) {
+      if (row.length > colCount) colCount = row.length;
+    }
     const normalized: CellScalar[][] = output.map((row) => {
       const next = row.slice();
       while (next.length < colCount) next.push(null);
@@ -2504,7 +2536,7 @@ function jsonToTable(payload: unknown, options: { maxCells?: number } = {}): Cel
       return (payload as unknown[]).map((rawRow) => {
         const rowValues = (rawRow as unknown[]).map((value) => normalizeJsonScalar(value));
         if (rowValues.length < normalizedCols) {
-          rowValues.push(...new Array(normalizedCols - rowValues.length).fill(null));
+          while (rowValues.length < normalizedCols) rowValues.push(null);
         }
         return rowValues;
       });

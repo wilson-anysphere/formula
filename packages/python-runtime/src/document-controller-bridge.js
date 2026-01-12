@@ -1,12 +1,35 @@
 function rangeSize(range) {
-  const rowCount = range.end_row - range.start_row + 1;
-  const colCount = range.end_col - range.start_col + 1;
+  const startRow = Number(range?.start_row);
+  const endRow = Number(range?.end_row);
+  const startCol = Number(range?.start_col);
+  const endCol = Number(range?.end_col);
+  const rowCount = Math.max(0, endRow - startRow + 1);
+  const colCount = Math.max(0, endCol - startCol + 1);
   return { rowCount, colCount };
 }
 
 function ensureSingleCell(range) {
   if (range.start_row !== range.end_row || range.start_col !== range.end_col) {
     throw new Error("Expected a single-cell range");
+  }
+}
+
+// Python range APIs frequently return or accept full `Any[][]` matrices. With Excel-scale sheets
+// this can easily allocate millions of JS objects and crash the host. Keep reads/writes bounded
+// by default to match other extension/scripting safety caps.
+const DEFAULT_PYTHON_RANGE_CELL_LIMIT = 200_000;
+
+function assertRangeWithinLimit(range, action) {
+  const { rowCount, colCount } = rangeSize(range);
+  const cellCount = rowCount * colCount;
+  if (!Number.isFinite(cellCount) || cellCount < 0) {
+    throw new Error(`${action} skipped: range size is invalid (rows=${rowCount}, cols=${colCount}).`);
+  }
+  if (cellCount > DEFAULT_PYTHON_RANGE_CELL_LIMIT) {
+    throw new Error(
+      `${action} skipped for range ${range.sheet_id} (${rowCount}x${colCount}=${cellCount} cells). ` +
+        `Limit is ${DEFAULT_PYTHON_RANGE_CELL_LIMIT} cells.`
+    );
   }
 }
 
@@ -183,6 +206,7 @@ export class DocumentControllerBridge {
   }
 
   get_range_values({ range }) {
+    assertRangeWithinLimit(range, "get_range_values");
     const values = [];
     for (let r = range.start_row; r <= range.end_row; r++) {
       const rowVals = [];
@@ -213,22 +237,57 @@ export class DocumentControllerBridge {
   }
 
   set_range_values({ range, values }) {
+    assertRangeWithinLimit(range, "set_range_values");
     const { rowCount, colCount } = rangeSize(range);
+    const isSingleCellRange = rowCount === 1 && colCount === 1;
     let matrix;
 
     if (Array.isArray(values) && Array.isArray(values[0])) {
+      // Validate that the provided 2D array fits inside the declared range. We intentionally
+      // allow short rows (missing values become null), but do not allow writing beyond the
+      // range bounds (which could trigger large allocations by accident).
+      const providedRowCount = values.length;
+      let providedColCount = 0;
+      for (const row of values) {
+        if (!Array.isArray(row)) continue;
+        if (row.length > providedColCount) providedColCount = row.length;
+      }
+      const cellCount = providedRowCount * providedColCount;
+      if (cellCount > DEFAULT_PYTHON_RANGE_CELL_LIMIT) {
+        throw new Error(
+          `set_range_values skipped for values matrix (${providedRowCount}x${providedColCount}=${cellCount} cells). ` +
+            `Limit is ${DEFAULT_PYTHON_RANGE_CELL_LIMIT} cells.`
+        );
+      }
+      // Spill behavior: when the destination is a single cell, treat the range as a start
+      // anchor (matching Excel/VBA semantics) and allow the values matrix to expand the
+      // written rectangle.
+      if (!isSingleCellRange && (providedRowCount > rowCount || providedColCount > colCount)) {
+        throw new Error(
+          `set_range_values values shape (${providedRowCount}x${providedColCount}) exceeds range shape (${rowCount}x${colCount}). ` +
+            `Select a smaller values matrix or a larger destination range.`
+        );
+      }
       matrix = values;
     } else {
-      matrix = Array.from({ length: rowCount }, () => Array.from({ length: colCount }, () => values ?? null));
+      // Scalar fill. Use a shared row buffer to avoid allocating rowCount*colCount JS values.
+      const row = Array.from({ length: colCount }, () => values ?? null);
+      matrix = Array.from({ length: rowCount }, () => row);
     }
 
-    // DocumentController expects a CellRange shape: { start: {row,col}, end: {row,col} }
+    // DocumentController accepts either:
+    // - a CellCoord start cell (range inferred from values dimensions), or
+    // - a CellRange (explicit rectangle).
+    //
+    // Use start-cell semantics for single-cell ranges so 2D assignments "spill" from the anchor cell.
     this.doc.setRangeValues(
       range.sheet_id,
-      {
-        start: { row: range.start_row, col: range.start_col },
-        end: { row: range.end_row, col: range.end_col },
-      },
+      isSingleCellRange && Array.isArray(matrix) && Array.isArray(matrix[0])
+        ? { row: range.start_row, col: range.start_col }
+        : {
+            start: { row: range.start_row, col: range.start_col },
+            end: { row: range.end_row, col: range.end_col },
+          },
       matrix,
     );
     return null;

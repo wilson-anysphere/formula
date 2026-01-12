@@ -218,7 +218,12 @@ export const SetRangeParamsSchema = z
         });
         return;
       }
-      const colCount = Math.max(...data.values.map((row) => row.length));
+      // Avoid `Math.max(...rows)` spread: large pastes/tools can contain tens of thousands of rows,
+      // which would exceed JS engines' argument limits.
+      let colCount = 0;
+      for (const row of data.values) {
+        if (row.length > colCount) colCount = row.length;
+      }
       if (colCount === 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

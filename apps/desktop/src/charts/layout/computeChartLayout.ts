@@ -120,10 +120,11 @@ export function computeChartLayout(
     const entriesText = model.series.map((s, i) => (s.name ?? "").trim() || `Series ${i + 1}`);
     const legendFont = theme.fonts.legend;
     const legendLineHeight = estimateLineHeight(legendFont);
-    const maxLabelWidth = Math.max(
-      0,
-      ...entriesText.map((label) => estimateTextWidth(label, legendFont))
-    );
+    let maxLabelWidth = 0;
+    for (const label of entriesText) {
+      const w = estimateTextWidth(label, legendFont);
+      if (w > maxLabelWidth) maxLabelWidth = w;
+    }
 
     // A simple width heuristic that grows with label length but caps to 40% of the
     // available content width.
@@ -216,7 +217,11 @@ export function computeChartLayout(
     includeZero: model.chartType.kind !== "scatter",
   });
   const yTickLabels = yAxisInfo.ticks.map((v) => formatTickValue(v, yAxisInfo.formatCode));
-  const maxYTickLabelWidth = Math.max(0, ...yTickLabels.map((lbl) => estimateTextWidth(lbl, axisFont)));
+  let maxYTickLabelWidth = 0;
+  for (const lbl of yTickLabels) {
+    const w = estimateTextWidth(lbl, axisFont);
+    if (w > maxYTickLabelWidth) maxYTickLabelWidth = w;
+  }
 
   const axisMarginLeft = Math.max(0, AXIS_TICK_MARK_PX + AXIS_LABEL_GAP_PX + maxYTickLabelWidth);
   const axisMarginBottom = Math.max(0, AXIS_TICK_MARK_PX + AXIS_LABEL_GAP_PX + axisLineHeight);
@@ -333,18 +338,21 @@ function collectNumericValues(model: ChartModel, axis: ChartAxisModel, role: "x"
         // layout engine can still derive a stable numeric domain for the value axis.
         const len = Math.max(cacheLength(s.xValues), cacheLength(s.yValues));
         if (len > 0) {
-          out.push(...Array.from({ length: len }, (_, i) => i + 1));
+          for (let i = 0; i < len; i += 1) out.push(i + 1);
         }
         continue;
       }
-      out.push(...vals);
+      for (const v of vals) out.push(v);
     }
     return out;
   }
 
   // Category charts only have a numeric value axis (y).
   if (role === "y") {
-    for (const s of model.series) out.push(...extractSeriesNumbers(s, "values"));
+    for (const s of model.series) {
+      const vals = extractSeriesNumbers(s, "values");
+      for (const v of vals) out.push(v);
+    }
   }
 
   return out;
@@ -369,8 +377,14 @@ function computeValueAxisInfo(args: {
   const minExplicit = typeof scaling.min === "number" && Number.isFinite(scaling.min);
   const maxExplicit = typeof scaling.max === "number" && Number.isFinite(scaling.max);
 
-  let min = minExplicit ? (scaling.min as number) : Math.min(...values);
-  let max = maxExplicit ? (scaling.max as number) : Math.max(...values);
+  let min = minExplicit ? (scaling.min as number) : Infinity;
+  let max = maxExplicit ? (scaling.max as number) : -Infinity;
+  if (!minExplicit || !maxExplicit) {
+    for (const v of values) {
+      if (!minExplicit && v < min) min = v;
+      if (!maxExplicit && v > max) max = v;
+    }
+  }
 
   // Preserve explicit bounds even if the data cache is empty.
   if (!Number.isFinite(min) && Number.isFinite(max)) min = max - 1;
@@ -570,6 +584,10 @@ function resolveCategories(series: ChartSeriesModel[]): string[] {
   const cats = extractSeriesStrings(first, "categories").filter((s) => s.trim().length > 0);
   if (cats.length) return cats;
 
-  const valuesLen = Math.max(0, ...series.map((s) => extractSeriesNumbers(s, "values").length));
+  let valuesLen = 0;
+  for (const s of series) {
+    const len = extractSeriesNumbers(s, "values").length;
+    if (len > valuesLen) valuesLen = len;
+  }
   return Array.from({ length: valuesLen }, (_, i) => String(i + 1));
 }

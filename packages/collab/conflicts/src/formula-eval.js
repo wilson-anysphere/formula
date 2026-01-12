@@ -1,6 +1,10 @@
 import { colToNumber, numberToCol } from "./cell-ref.js";
 import { parseFormula } from "./formula-parser.js";
 
+// Conflict previews should never attempt to materialize Excel-scale ranges into JS arrays.
+// Keep evaluation bounded so large formulas like `=SUM(A:A)` don't OOM the renderer.
+const DEFAULT_MAX_EVAL_RANGE_CELLS = 200_000;
+
 /**
  * Best-effort evaluator used for conflict previews. It intentionally supports a
  * very small subset of Excel semantics.
@@ -8,6 +12,7 @@ import { parseFormula } from "./formula-parser.js";
  * @param {string} formula
  * @param {object} [opts]
  * @param {(ref: { col: number, row: number }) => any} [opts.getCellValue] 0-based row/col.
+ * @param {number} [opts.maxRangeCells] Maximum number of cells to materialize for a range reference.
  * @returns {{ ok: true, value: any } | { ok: false, error: string }}
  */
 export function tryEvaluateFormula(formula, opts = {}) {
@@ -26,6 +31,8 @@ export function tryEvaluateFormula(formula, opts = {}) {
  * @returns {any}
  */
 function evalAst(ast, opts) {
+  const maxRangeCells = Number.isFinite(opts.maxRangeCells) && opts.maxRangeCells > 0 ? Math.floor(opts.maxRangeCells) : DEFAULT_MAX_EVAL_RANGE_CELLS;
+
   switch (ast.type) {
     case "number":
       return Number.parseFloat(ast.value);
@@ -42,10 +49,24 @@ function evalAst(ast, opts) {
       const startRow = ast.start.row - 1;
       const endRow = ast.end.row - 1;
 
+      const minRow = Math.min(startRow, endRow);
+      const maxRow = Math.max(startRow, endRow);
+      const minCol = Math.min(startCol, endCol);
+      const maxCol = Math.max(startCol, endCol);
+      const rows = maxRow - minRow + 1;
+      const cols = maxCol - minCol + 1;
+      const cellCount = rows * cols;
+      if (!Number.isFinite(cellCount) || cellCount < 0) {
+        throw new Error(`Invalid range size (rows=${rows}, cols=${cols}).`);
+      }
+      if (cellCount > maxRangeCells) {
+        throw new Error(`Range too large to evaluate (${cellCount} cells; max=${maxRangeCells}).`);
+      }
+
       /** @type {Array<any>} */
       const values = [];
-      for (let r = Math.min(startRow, endRow); r <= Math.max(startRow, endRow); r += 1) {
-        for (let c = Math.min(startCol, endCol); c <= Math.max(startCol, endCol); c += 1) {
+      for (let r = minRow; r <= maxRow; r += 1) {
+        for (let c = minCol; c <= maxCol; c += 1) {
           values.push(opts.getCellValue({ col: c, row: r }));
         }
       }
@@ -81,18 +102,67 @@ function evalAst(ast, opts) {
       const name = ast.name.toUpperCase();
       const args = ast.args.map((a) => evalAst(a, opts));
       if (name === "SUM") {
-        const flat = args.flatMap((v) => (Array.isArray(v) ? v : [v]));
-        return flat.reduce((acc, v) => acc + (typeof v === "number" ? v : 0), 0);
+        let sum = 0;
+        for (const arg of args) {
+          if (Array.isArray(arg)) {
+            for (const v of arg) sum += typeof v === "number" ? v : 0;
+          } else {
+            sum += typeof arg === "number" ? arg : 0;
+          }
+        }
+        return sum;
       }
       if (name === "MIN") {
-        const flat = args.flatMap((v) => (Array.isArray(v) ? v : [v])).filter((v) => typeof v === "number");
-        if (flat.length === 0) throw new Error("MIN() with no numeric args");
-        return Math.min(...flat);
+        let min = Number.POSITIVE_INFINITY;
+        let hasNumber = false;
+        for (const arg of args) {
+          if (Array.isArray(arg)) {
+            for (const v of arg) {
+              if (typeof v !== "number") continue;
+              if (!hasNumber) {
+                min = v;
+                hasNumber = true;
+              } else if (v < min) {
+                min = v;
+              }
+            }
+          } else if (typeof arg === "number") {
+            if (!hasNumber) {
+              min = arg;
+              hasNumber = true;
+            } else if (arg < min) {
+              min = arg;
+            }
+          }
+        }
+        if (!hasNumber) throw new Error("MIN() with no numeric args");
+        return min;
       }
       if (name === "MAX") {
-        const flat = args.flatMap((v) => (Array.isArray(v) ? v : [v])).filter((v) => typeof v === "number");
-        if (flat.length === 0) throw new Error("MAX() with no numeric args");
-        return Math.max(...flat);
+        let max = Number.NEGATIVE_INFINITY;
+        let hasNumber = false;
+        for (const arg of args) {
+          if (Array.isArray(arg)) {
+            for (const v of arg) {
+              if (typeof v !== "number") continue;
+              if (!hasNumber) {
+                max = v;
+                hasNumber = true;
+              } else if (v > max) {
+                max = v;
+              }
+            }
+          } else if (typeof arg === "number") {
+            if (!hasNumber) {
+              max = arg;
+              hasNumber = true;
+            } else if (arg > max) {
+              max = arg;
+            }
+          }
+        }
+        if (!hasNumber) throw new Error("MAX() with no numeric args");
+        return max;
       }
       throw new Error(`Unsupported function: ${name}`);
     }
@@ -107,4 +177,3 @@ function evalAst(ast, opts) {
 export function cellRefToA1(ref) {
   return `${numberToCol(ref.col)}${ref.row + 1}`;
 }
-

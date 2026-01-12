@@ -13,6 +13,29 @@ function normalizeSheetNameForCaseInsensitiveCompare(name) {
 }
 
 const EXCEL_MAX_SHEET_NAME_LEN = 31;
+
+// The Python API exposes ranges as full 2D lists. Keep operations bounded so an
+// Excel-scale selection doesn't OOM Node/Pyodide when backed by this in-memory mock.
+const DEFAULT_PYTHON_RANGE_CELL_LIMIT = 200_000;
+
+function rangeCellCount(range) {
+  const rowCount = Math.max(0, range.end_row - range.start_row + 1);
+  const colCount = Math.max(0, range.end_col - range.start_col + 1);
+  return rowCount * colCount;
+}
+
+function assertRangeWithinLimit(range, action) {
+  const cellCount = rangeCellCount(range);
+  if (!Number.isFinite(cellCount) || cellCount < 0) {
+    throw new Error(`${action} skipped: range size is invalid.`);
+  }
+  if (cellCount > DEFAULT_PYTHON_RANGE_CELL_LIMIT) {
+    throw new Error(
+      `${action} skipped for range ${range.sheet_id} (${cellCount} cells). ` +
+        `Limit is ${DEFAULT_PYTHON_RANGE_CELL_LIMIT} cells.`
+    );
+  }
+}
 const INVALID_SHEET_NAME_CHAR_SET = new Set([":", "\\", "/", "?", "*", "[", "]"]);
 
 function validateSheetName(rawName) {
@@ -356,6 +379,7 @@ export class MockWorkbook {
 
   get_range_values({ range }) {
     const { sheet_id, start_row, start_col, end_row, end_col } = range;
+    assertRangeWithinLimit(range, "get_range_values");
     const sheet = this._requireSheet(sheet_id);
     const rows = [];
     for (let r = start_row; r <= end_row; r++) {
@@ -371,9 +395,11 @@ export class MockWorkbook {
 
   set_range_values({ range, values }) {
     const { sheet_id, start_row, start_col, end_row, end_col } = range;
+    assertRangeWithinLimit(range, "set_range_values");
     const sheet = this._requireSheet(sheet_id);
-    const rowCount = end_row - start_row + 1;
-    const colCount = end_col - start_col + 1;
+    let rowCount = end_row - start_row + 1;
+    let colCount = end_col - start_col + 1;
+    const isSingleCellRange = rowCount === 1 && colCount === 1;
 
     if (!Array.isArray(values) || !Array.isArray(values[0])) {
       // Scalar fill.
@@ -385,6 +411,39 @@ export class MockWorkbook {
         }
       }
     } else {
+      const providedRowCount = values.length;
+      let providedColCount = 0;
+      for (const row of values) {
+        if (!Array.isArray(row)) continue;
+        if (row.length > providedColCount) providedColCount = row.length;
+      }
+
+      const providedCellCount = providedRowCount * providedColCount;
+      if (providedCellCount > DEFAULT_PYTHON_RANGE_CELL_LIMIT) {
+        throw new Error(
+          `set_range_values skipped for values matrix (${providedRowCount}x${providedColCount}=${providedCellCount} cells). ` +
+            `Limit is ${DEFAULT_PYTHON_RANGE_CELL_LIMIT} cells.`
+        );
+      }
+
+      // Spill behavior: when the destination is a single cell, treat it as an anchor and expand
+      // to the shape of the provided matrix.
+      if (isSingleCellRange) {
+        rowCount = providedRowCount;
+        colCount = providedColCount;
+        if (rowCount > 0 && colCount > 0) {
+          assertRangeWithinLimit(
+            { sheet_id, start_row, start_col, end_row: start_row + rowCount - 1, end_col: start_col + colCount - 1 },
+            "set_range_values"
+          );
+        }
+      } else if (providedRowCount > rowCount || providedColCount > colCount) {
+        throw new Error(
+          `set_range_values values shape (${providedRowCount}x${providedColCount}) exceeds range shape (${rowCount}x${colCount}). ` +
+            `Select a smaller values matrix or a larger destination range.`
+        );
+      }
+
       for (let r = 0; r < rowCount; r++) {
         for (let c = 0; c < colCount; c++) {
           const key = cellKey(start_row + r, start_col + c);
@@ -401,6 +460,7 @@ export class MockWorkbook {
 
   set_range_format({ range, format }) {
     const { sheet_id, start_row, start_col, end_row, end_col } = range;
+    assertRangeWithinLimit(range, "set_range_format");
     const sheet = this._requireSheet(sheet_id);
     for (let r = start_row; r <= end_row; r++) {
       for (let c = start_col; c <= end_col; c++) {
@@ -423,6 +483,7 @@ export class MockWorkbook {
 
   clear_range({ range }) {
     const { sheet_id, start_row, start_col, end_row, end_col } = range;
+    assertRangeWithinLimit(range, "clear_range");
     const sheet = this._requireSheet(sheet_id);
     for (let r = start_row; r <= end_row; r++) {
       for (let c = start_col; c <= end_col; c++) {

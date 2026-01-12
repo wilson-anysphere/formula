@@ -25,3 +25,22 @@ describe("create_pivot_table aggregation normalization", () => {
   });
 });
 
+describe("set_range schema (large inputs)", () => {
+  it("validates a very tall values matrix without spread argument overflow", () => {
+    // Regression test: `Math.max(...rows.map(r => r.length))` will throw in V8 once the
+    // row count crosses the engine's argument limits.
+    const rows = 130_000;
+    const values: Array<Array<null>> = Array.from({ length: rows }, () => []);
+    values[rows - 1] = [null];
+
+    const call = validateToolCall({
+      name: "set_range",
+      parameters: {
+        range: "Sheet1!A1",
+        values
+      }
+    });
+
+    expect(call.name).toBe("set_range");
+  });
+});

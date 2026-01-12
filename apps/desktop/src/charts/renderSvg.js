@@ -11,7 +11,8 @@ function flatten(range2d) {
   if (!Array.isArray(range2d)) return [];
   const out = [];
   for (const row of range2d) {
-    if (Array.isArray(row)) out.push(...row);
+    if (!Array.isArray(row)) continue;
+    for (const value of row) out.push(value);
   }
   return out;
 }
@@ -94,7 +95,12 @@ function renderBarLineSvg({ width, height, title, kind, series, seriesColors }) 
     : Array.from({ length: series[0]?.values?.length ?? 0 }, (_, i) => String(i + 1));
 
   const numericValues = series.map((s) => s.values.map((v) => (typeof v === "number" ? v : Number(v))));
-  const maxVal = Math.max(0, ...numericValues.flat().filter(Number.isFinite));
+  let maxVal = 0;
+  for (const row of numericValues) {
+    for (const v of row) {
+      if (Number.isFinite(v) && v > maxVal) maxVal = v;
+    }
+  }
 
   const svg = [];
   svg.push(
@@ -245,10 +251,17 @@ function renderScatterSvg({ width, height, title, series, seriesColors }) {
     return placeholderSvg({ width, height, label: "Empty scatter chart" });
   }
 
-  const minX = Math.min(...points.map((p) => p.x));
-  const maxX = Math.max(...points.map((p) => p.x));
-  const minY = Math.min(...points.map((p) => p.y));
-  const maxY = Math.max(...points.map((p) => p.y));
+  let minX = points[0].x;
+  let maxX = points[0].x;
+  let minY = points[0].y;
+  let maxY = points[0].y;
+  for (let i = 1; i < points.length; i += 1) {
+    const p = points[i];
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
 
   const scaleX = (x) =>
     margin.left + ((x - minX) / (maxX - minX || 1)) * plotW;

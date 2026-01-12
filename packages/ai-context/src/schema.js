@@ -264,7 +264,8 @@ function analyzeRegion(sheetValues, normalized, signal) {
   let columnCount = 0;
   for (const row of regionValues) {
     throwIfAborted(signal);
-    columnCount = Math.max(columnCount, row.length);
+    const len = Array.isArray(row) ? row.length : 0;
+    if (len > columnCount) columnCount = len;
   }
 
   const headers = [];

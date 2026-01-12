@@ -2631,7 +2631,13 @@ export class DocumentController {
   setRangeValues(sheetId, rangeOrStart, values, options = {}) {
     if (!Array.isArray(values) || values.length === 0) return;
     const rowCount = values.length;
-    const colCount = Math.max(...values.map((row) => (Array.isArray(row) ? row.length : 0)));
+    // Avoid `Math.max(...rows.map(...))` spread: large writes can include tens of thousands of
+    // rows (e.g. Python scalar fill), which would exceed JS engines' argument limits.
+    let colCount = 0;
+    for (const row of values) {
+      const len = Array.isArray(row) ? row.length : 0;
+      if (len > colCount) colCount = len;
+    }
     if (colCount === 0) return;
 
     /** @type {CellRange} */

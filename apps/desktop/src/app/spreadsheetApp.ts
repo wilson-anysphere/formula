@@ -9268,11 +9268,21 @@ export class SpreadsheetApp {
       const externalGrid = mode === "all" && isInternalPaste ? null : parseClipboardContentToCellGrid(content);
       const internalCells = isInternalPaste ? ctx?.cells : null;
       const rowCount = internalCells ? internalCells.length : externalGrid?.length ?? 0;
-      const colCount = Math.max(
-        0,
-        ...(internalCells ? internalCells.map((row) => row.length) : []),
-        ...(externalGrid ? externalGrid.map((row) => row.length) : [])
-      );
+      // Avoid `Math.max(0, ...rows.map(...))` spread: a tall paste can contain tens of thousands of
+      // rows, which would exceed JS engines' argument limits.
+      let colCount = 0;
+      if (internalCells) {
+        for (const row of internalCells) {
+          const len = Array.isArray(row) ? row.length : 0;
+          if (len > colCount) colCount = len;
+        }
+      }
+      if (externalGrid) {
+        for (const row of externalGrid) {
+          const len = Array.isArray(row) ? row.length : 0;
+          if (len > colCount) colCount = len;
+        }
+      }
       if (rowCount === 0 || colCount === 0) return;
 
       const pastedCellCount = rowCount * colCount;

@@ -1259,7 +1259,12 @@ function EngineDemoApp() {
 
     void (async () => {
       const pasteRows = grid.length;
-      const pasteCols = Math.max(0, ...grid.map((row) => row.length));
+      // Avoid `Math.max(...rows.map(...))` spread: a tall paste can have tens of thousands of rows,
+      // which would exceed JS engines' argument limits.
+      let pasteCols = 0;
+      for (const row of grid) {
+        if (row.length > pasteCols) pasteCols = row.length;
+      }
       if (pasteRows === 0 || pasteCols === 0) return;
 
       const maxRows = Math.max(0, Math.min(pasteRows, rowCount - selection.row));
