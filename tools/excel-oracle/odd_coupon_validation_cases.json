@@ -62,6 +62,22 @@
       "id": "oddlprice_neg_yld_below_minus1_0c820181317f"
     },
     {
+      "formula": "=ODDLPRICE(DATE(2020,8,1),DATE(2021,3,1),DATE(2020,10,15),0.0785,-1.5,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE",
+        "odd_coupon_validation",
+        "neg_yld",
+        "yld_below_minus1",
+        "settlement_before_last_interest"
+      ],
+      "description": "ODDLPRICE with yld=-1.5 and settlement before last_interest (covers the settlement < last_interest pricing path)",
+      "id": "oddlprice_neg_yld_below_minus1_settlement_before_last_interest_3bd6cf92538f"
+    },
+    {
       "formula": "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-2,100,2,0)",
       "outputCell": "C1",
       "inputs": [],
@@ -230,6 +246,22 @@
       ],
       "description": "ODDLYIELD roundtrip: yield from ODDLPRICE at yld=-1.5 (below -1) to confirm Excel allows negative yields in both ODDLPRICE and ODDLYIELD",
       "id": "oddlyield_roundtrip_neg_yld_below_minus1_25cecfd22c8a"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2020,8,1),DATE(2021,3,1),DATE(2020,10,15),0.0785,ODDLPRICE(DATE(2020,8,1),DATE(2021,3,1),DATE(2020,10,15),0.0785,-1.5,100,2,0),100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD",
+        "odd_coupon_validation",
+        "neg_yld",
+        "yld_below_minus1",
+        "settlement_before_last_interest"
+      ],
+      "description": "ODDLYIELD roundtrip: yield from ODDLPRICE at yld=-1.5 with settlement before last_interest (covers the settlement < last_interest path)",
+      "id": "oddlyield_roundtrip_neg_yld_below_minus1_settlement_before_last_interest_f94c98fc0c2b"
     }
   ]
 }

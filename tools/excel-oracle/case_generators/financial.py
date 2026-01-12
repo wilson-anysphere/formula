@@ -983,6 +983,21 @@ def generate(
     )
     add_case(
         cases,
+        prefix="oddlprice_neg_yld_below_minus1_settlement_before_last_interest",
+        tags=[
+            "financial",
+            "odd_coupon",
+            "ODDLPRICE",
+            "odd_coupon_validation",
+            "neg_yld",
+            "yld_below_minus1",
+            "settlement_before_last_interest",
+        ],
+        formula="=ODDLPRICE(DATE(2020,8,1),DATE(2021,3,1),DATE(2020,10,15),0.0785,-1.5,100,2,0)",
+        description="ODDLPRICE with yld=-1.5 and settlement before last_interest (covers the settlement < last_interest pricing path)",
+    )
+    add_case(
+        cases,
         prefix="oddfprice_yld_eq_neg_frequency",
         tags=[
             "financial",
@@ -1110,6 +1125,25 @@ def generate(
             "100,2,0)"
         ),
         description="ODDLYIELD roundtrip: yield from ODDLPRICE at yld=-1.5 (below -1) to confirm Excel allows negative yields in both ODDLPRICE and ODDLYIELD",
+    )
+    add_case(
+        cases,
+        prefix="oddlyield_roundtrip_neg_yld_below_minus1_settlement_before_last_interest",
+        tags=[
+            "financial",
+            "odd_coupon",
+            "ODDLYIELD",
+            "odd_coupon_validation",
+            "neg_yld",
+            "yld_below_minus1",
+            "settlement_before_last_interest",
+        ],
+        formula=(
+            "=ODDLYIELD(DATE(2020,8,1),DATE(2021,3,1),DATE(2020,10,15),0.0785,"
+            "ODDLPRICE(DATE(2020,8,1),DATE(2021,3,1),DATE(2020,10,15),0.0785,-1.5,100,2,0),"
+            "100,2,0)"
+        ),
+        description="ODDLYIELD roundtrip: yield from ODDLPRICE at yld=-1.5 with settlement before last_interest (covers the settlement < last_interest path)",
     )
     add_case(
         cases,
