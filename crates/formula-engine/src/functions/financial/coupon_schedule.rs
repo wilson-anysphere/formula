@@ -238,8 +238,10 @@ pub fn coupdaysnc(
     // This preserves the additivity invariant `A + DSC == E` even though DAYS360 is not additive
     // for some month-end schedules.
     //
-    // For basis=4 (European 30E/360), Excel models `E` as `DAYS360(PCD, NCD, TRUE)`, which can
-    // differ from `360/frequency` for end-of-month schedules involving February.
+    // For basis=4 (European 30E/360), day-counts like `A` use `DAYS360(..., TRUE)`, but Excel still
+    // models the coupon period length `E` used by COUPDAYS/COUPDAYSNC as the fixed
+    // `360/frequency` value. This can therefore differ from `DAYS360(PCD, NCD, TRUE)` for some
+    // end-of-month schedules involving February.
     let dsc = match basis {
         0 | 4 => {
             let e = coupon_period_e(pcd, ncd, frequency, basis, system)?;
