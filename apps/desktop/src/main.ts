@@ -2429,18 +2429,39 @@ window.addEventListener(
     if (!primary) return;
     if (e.shiftKey || e.altKey) return;
     if (e.key !== "PageUp" && e.key !== "PageDown") return;
-    if (app.isEditing()) return;
+    // Ctrl/Cmd+PgUp/PgDn should generally not switch sheets while editing (cell editor,
+    // inline AI edit, etc). Exception: when the formula bar is actively editing we still
+    // allow sheet navigation so users can build cross-sheet references (Excel behavior).
+    const formulaBarEditing = app.isFormulaBarEditing();
+    if (app.isEditing() && !formulaBarEditing) {
+      // Prevent browser tab switching / other defaults while editing spreadsheet content.
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
 
     const target = e.target as EventTarget | null;
     if (target instanceof HTMLElement) {
-      // Let the sheet tab strip (including inline rename state) handle shortcuts when focused.
-      // Only skip when focus is inside the tablist itself; other controls (e.g. the "Add sheet"
-      // button) should still allow Ctrl/Cmd+PgUp/PgDn navigation.
-      if (target.closest?.("#sheet-tabs .sheet-tabs")) return;
+      const tabList = target.closest?.("#sheet-tabs .sheet-tabs");
+      if (tabList) {
+        // Let the sheet tab strip handle shortcuts when focus is on a tab.
+        //
+        // When inline rename is active the focused element is an <input>, and the tab strip
+        // intentionally does not handle Ctrl/Cmd+PgUp/PgDn. In that case, prevent browser
+        // defaults (e.g. tab switching) but keep focus in rename mode.
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) {
+          e.preventDefault();
+        }
+        return;
+      }
 
       // Never steal the shortcut from text inputs / contenteditable surfaces.
       const tag = target.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) {
+        // Exception: allow sheet navigation while the formula bar is editing (range selection).
+        if (!formulaBarEditing || !formulaBarRoot.contains(target)) return;
+      }
     }
 
     const ordered = workbookSheetStore.listVisible();
