@@ -10,7 +10,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "test": "vitest run"
+    "test": "node ../../scripts/run-vitest.mjs"
   },
   "dependencies": {
     "@formula/text-layout": "workspace:*",

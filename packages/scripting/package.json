@@ -21,7 +21,7 @@
     }
   },
   "scripts": {
-    "test": "vitest run -c vitest.config.ts"
+    "test": "node ../../scripts/run-vitest.mjs -c vitest.config.ts"
   },
   "dependencies": {
     "@formula/security": "workspace:*",

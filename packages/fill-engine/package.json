@@ -8,11 +8,10 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "vitest run"
+    "test": "node ../../scripts/run-vitest.mjs"
   },
   "devDependencies": {
     "typescript": "^5.8.2",
     "vitest": "^3.0.7"
   }
 }
-
