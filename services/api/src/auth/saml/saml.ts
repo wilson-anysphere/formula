@@ -652,6 +652,15 @@ export async function samlStart(request: FastifyRequest, reply: FastifyReply): P
     return;
   }
 
+  // Best-effort cleanup so SAML state/cache tables do not grow unbounded when sweeps are disabled.
+  try {
+    await cleanupSamlAuthStates(request.server.db);
+    await cleanupSamlRequestCache(request.server.db);
+    await cleanupSamlAssertionReplays(request.server.db);
+  } catch (err) {
+    request.server.log.warn({ err }, "saml_auth_state_cleanup_failed");
+  }
+
   const provider = await loadOrgProvider(request, orgId, providerId);
   if (!provider) {
     reply.code(404).send({ error: "provider_not_found" });

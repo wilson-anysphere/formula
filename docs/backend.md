@@ -45,7 +45,7 @@ production requires:
 - (Optional, AWS KMS) `AWS_KMS_ENABLED=true` + `AWS_REGION` when using `org_settings.kms_provider = 'aws'`
   - Ensure `@aws-sdk/client-kms` is installed in the API runtime image
 
-For OIDC SSO deployments, also set:
+For SSO deployments (OIDC/SAML), also set:
 
 - `PUBLIC_BASE_URL` to the canonical external API origin (must be `https://...` in production, e.g. `https://api.example.com`)
 
