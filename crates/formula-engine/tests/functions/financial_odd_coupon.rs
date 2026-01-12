@@ -3222,9 +3222,10 @@ fn oddlprice_matches_excel_model_for_actual_day_bases_with_eom_last_interest() {
 fn odd_coupon_bond_functions_reject_non_finite_numeric_inputs() {
     let mut sheet = TestSheet::new();
 
-    sheet.set_formula("A1", "=1E308*1E308"); // +Inf
-    sheet.set_formula("A2", "=A1-A1"); // NaN
-    sheet.recalc();
+    // Use explicit non-finite cell values so the test doesn't depend on the engine's arithmetic
+    // overflow/NaN behavior.
+    sheet.set("A1", Value::Number(f64::INFINITY));
+    sheet.set("A2", Value::Number(f64::NAN));
 
     // Ensure the test is actually exercising non-finite numbers (not pre-coerced errors).
     match sheet.get("A1") {
