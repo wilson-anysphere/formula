@@ -19,13 +19,13 @@ function extractSection(source, startMarker, endMarker) {
 }
 
 test("extension UI dialogs avoid inline style assignments", () => {
-  const uiPath = path.join(__dirname, "..", "src", "extensions", "ui.ts");
+  const uiPath = path.join(__dirname, "..", "src", "extensions", "ui.js");
   const uiSource = fs.readFileSync(uiPath, "utf8");
 
   const inputBoxSection = extractSection(
     uiSource,
     "export async function showInputBox",
-    "type QuickPickItem",
+    "export async function showQuickPick",
   );
   assert.equal(
     /\.style\b/.test(inputBoxSection),
