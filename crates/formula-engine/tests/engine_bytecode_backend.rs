@@ -1192,6 +1192,34 @@ fn bytecode_backend_matches_ast_for_conditional_aggregates_numeric_criteria() {
 }
 
 #[test]
+fn bytecode_backend_compiles_xlfn_prefixed_minmaxifs() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", 5.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 7.0).unwrap();
+
+    engine.set_cell_value("Sheet1", "B1", "A").unwrap();
+    engine.set_cell_value("Sheet1", "B2", "B").unwrap();
+    engine.set_cell_value("Sheet1", "B3", "A").unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "C1", r#"=_xlfn.MINIFS(A1:A3,B1:B3,"A")"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", r#"=_xlfn.MAXIFS(A1:A3,B1:B3,"A")"#)
+        .unwrap();
+
+    // Ensure the prefixed functions compile to bytecode (no AST fallback).
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, r#"=_xlfn.MINIFS(A1:A3,B1:B3,"A")"#, "C1");
+    assert_engine_matches_ast(&engine, r#"=_xlfn.MAXIFS(A1:A3,B1:B3,"A")"#, "C2");
+}
+
+#[test]
 fn bytecode_backend_propagates_error_literals_through_supported_ops() {
     let mut engine = Engine::new();
     engine.set_cell_formula("Sheet1", "A1", "=#N/A+1").unwrap();

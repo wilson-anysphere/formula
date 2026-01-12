@@ -56,7 +56,9 @@ pub enum Function {
 
 impl Function {
     pub fn from_name(name: &str) -> Self {
-        match name.to_ascii_uppercase().as_str() {
+        let upper = name.to_ascii_uppercase();
+        let base = upper.strip_prefix("_XLFN.").unwrap_or(upper.as_str());
+        match base {
             "SUM" => Function::Sum,
             "SUMIF" => Function::SumIf,
             "SUMIFS" => Function::SumIfs,
@@ -83,7 +85,7 @@ impl Function {
             "SIGN" => Function::Sign,
             "CONCAT" => Function::Concat,
             "NOT" => Function::Not,
-            other => Function::Unknown(Arc::from(other)),
+            _ => Function::Unknown(Arc::from(upper)),
         }
     }
 
@@ -361,7 +363,7 @@ impl<'a> Parser<'a> {
         let start = self.pos;
         while let Some(b) = self.peek_byte() {
             match b {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'$' => self.pos += 1,
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'$' | b'.' => self.pos += 1,
                 _ => break,
             }
         }
@@ -415,7 +417,7 @@ impl<'a> Parser<'a> {
             let start2 = self.pos;
             while let Some(b) = self.peek_byte() {
                 match b {
-                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'$' => self.pos += 1,
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'$' | b'.' => self.pos += 1,
                     _ => break,
                 }
             }
