@@ -7,6 +7,27 @@ const DEFAULT_PRODUCTION_BASE_URL = "https://marketplace.formula.app/api";
 function normalizeBaseUrl(value: string): string | null {
   const trimmed = String(value ?? "").trim();
   if (!trimmed) return null;
+
+  // A convenience: users/tests may provide a marketplace *origin* instead of the full
+  // API base path (e.g. "https://marketplace.formula.app" vs ".../api"). In that case,
+  // default the path to `/api` to match the MarketplaceClient contract.
+  try {
+    // Absolute URL.
+    if (/^https?:\/\//i.test(trimmed)) {
+      const url = new URL(trimmed);
+      if (!url.pathname || url.pathname === "/") {
+        url.pathname = "/api";
+      }
+      // Normalize trailing slash (MarketplaceClient expects no trailing slash).
+      return url.toString().replace(/\/$/, "");
+    }
+  } catch {
+    // Ignore URL parsing errors and fall through to the string-based normalization.
+  }
+
+  // Relative path (same-origin).
+  if (trimmed === "/") return "/api";
+
   return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
 }
 

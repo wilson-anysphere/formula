@@ -19,6 +19,17 @@ describe("getMarketplaceBaseUrl", () => {
     ).toBe("https://example.com/api");
   });
 
+  it("normalizes origin overrides to /api", () => {
+    const storage = {
+      getItem(key: string) {
+        if (key === "formula:marketplace:baseUrl") return "https://example.com";
+        return null;
+      },
+    };
+
+    expect(getMarketplaceBaseUrl({ storage, env: { PROD: true } })).toBe("https://example.com/api");
+  });
+
   it("falls back to VITE_FORMULA_MARKETPLACE_BASE_URL", () => {
     const storage = {
       getItem() {
