@@ -28,5 +28,21 @@ export const ar = {
   "clipboard.pasteSpecial.pasteFormats": "لصق التنسيقات",
   "versionHistory.checkpoint": "نقطة حفظ",
   "versionHistory.autoSave": "حفظ تلقائي",
-  "versionHistory.restore": "تمت الاستعادة"
+  "versionHistory.restore": "تمت الاستعادة",
+  "commandCategory.view": "عرض",
+  "commandCategory.ai": "الذكاء الاصطناعي",
+  "command.view.togglePanel.aiChat": "تبديل دردشة الذكاء الاصطناعي",
+  "command.view.togglePanel.aiAudit": "تبديل تدقيق الذكاء الاصطناعي",
+  "command.view.togglePanel.extensions": "تبديل الإضافات",
+  "command.view.togglePanel.macros": "تبديل وحدات الماكرو",
+  "command.view.togglePanel.dataQueries": "تبديل البيانات/الاستعلامات",
+  "command.view.togglePanel.scriptEditor": "تبديل محرر النصوص البرمجية",
+  "command.view.togglePanel.python": "تبديل بايثون",
+  "commandDescription.view.togglePanel.aiChat": "إظهار/إخفاء لوحة دردشة الذكاء الاصطناعي",
+  "commandDescription.view.togglePanel.aiAudit": "إظهار/إخفاء لوحة تدقيق الذكاء الاصطناعي",
+  "commandDescription.view.togglePanel.extensions": "إظهار/إخفاء لوحة الإضافات",
+  "commandDescription.view.togglePanel.macros": "إظهار/إخفاء لوحة وحدات الماكرو",
+  "commandDescription.view.togglePanel.dataQueries": "إظهار/إخفاء لوحة البيانات/الاستعلامات",
+  "commandDescription.view.togglePanel.scriptEditor": "إظهار/إخفاء لوحة محرر النصوص البرمجية",
+  "commandDescription.view.togglePanel.python": "إظهار/إخفاء لوحة بايثون"
 };

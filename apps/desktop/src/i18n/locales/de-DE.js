@@ -28,5 +28,21 @@ export const deDE = {
   "clipboard.pasteSpecial.pasteFormats": "Formate einfügen",
   "versionHistory.checkpoint": "Kontrollpunkt",
   "versionHistory.autoSave": "Auto-Speichern",
-  "versionHistory.restore": "Wiederhergestellt"
+  "versionHistory.restore": "Wiederhergestellt",
+  "commandCategory.view": "Ansicht",
+  "commandCategory.ai": "KI",
+  "command.view.togglePanel.aiChat": "KI-Chat umschalten",
+  "command.view.togglePanel.aiAudit": "KI-Audit umschalten",
+  "command.view.togglePanel.extensions": "Erweiterungen umschalten",
+  "command.view.togglePanel.macros": "Makros umschalten",
+  "command.view.togglePanel.dataQueries": "Daten/Abfragen umschalten",
+  "command.view.togglePanel.scriptEditor": "Script-Editor umschalten",
+  "command.view.togglePanel.python": "Python umschalten",
+  "commandDescription.view.togglePanel.aiChat": "Das KI-Chat-Panel ein-/ausblenden",
+  "commandDescription.view.togglePanel.aiAudit": "Das KI-Audit-Panel ein-/ausblenden",
+  "commandDescription.view.togglePanel.extensions": "Das Erweiterungen-Panel ein-/ausblenden",
+  "commandDescription.view.togglePanel.macros": "Das Makros-Panel ein-/ausblenden",
+  "commandDescription.view.togglePanel.dataQueries": "Das Daten-/Abfragen-Panel ein-/ausblenden",
+  "commandDescription.view.togglePanel.scriptEditor": "Das Script-Editor-Panel ein-/ausblenden",
+  "commandDescription.view.togglePanel.python": "Das Python-Panel ein-/ausblenden"
 };
