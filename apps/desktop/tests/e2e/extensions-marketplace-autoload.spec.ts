@@ -155,7 +155,7 @@ export async function activate(context) {
           "X-Package-Format-Version": "2",
           "X-Publisher": "e2e",
           "X-Publisher-Key-Id": publisherKeyId,
-          "X-Scan-Status": "passed",
+          "X-Package-Scan-Status": "passed",
         },
         body: pkgBytes,
       });
