@@ -1317,15 +1317,15 @@ fn lift_element_at<'a>(value: &'a Value, target: LiftShape, idx: usize) -> &'a V
     }
 }
 
-fn lift2(a: Value, b: Value, f: impl Fn(&Value, &Value) -> Value) -> Value {
-    let Some(shape) = (match lift_dominant_shape(&[&a, &b]) {
+fn lift2(a: &Value, b: &Value, f: impl Fn(&Value, &Value) -> Value) -> Value {
+    let Some(shape) = (match lift_dominant_shape(&[a, b]) {
         Ok(shape) => shape,
         Err(e) => return Value::Error(e),
     }) else {
-        return f(&a, &b);
+        return f(a, b);
     };
 
-    if !lift_broadcast_compatible(&a, shape) || !lift_broadcast_compatible(&b, shape) {
+    if !lift_broadcast_compatible(a, shape) || !lift_broadcast_compatible(b, shape) {
         return Value::Error(ErrorKind::Value);
     }
 
@@ -1335,8 +1335,8 @@ fn lift2(a: Value, b: Value, f: impl Fn(&Value, &Value) -> Value) -> Value {
         return Value::Error(ErrorKind::Num);
     }
     for idx in 0..len {
-        let av = lift_element_at(&a, shape, idx);
-        let bv = lift_element_at(&b, shape, idx);
+        let av = lift_element_at(a, shape, idx);
+        let bv = lift_element_at(b, shape, idx);
         out.push(f(av, bv));
     }
     Value::Array(ArrayValue::new(shape.rows, shape.cols, out))
@@ -3030,22 +3030,34 @@ fn fn_abs(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let v = deref_value_dynamic(args[0].clone(), grid, base);
-    elementwise_unary(&v, |elem| match coerce_to_number(elem) {
+    let f = |elem: &Value| match coerce_to_number(elem) {
         Ok(n) => Value::Number(n.abs()),
         Err(e) => Value::Error(e),
-    })
+    };
+    match &args[0] {
+        Value::Range(_) | Value::MultiRange(_) => {
+            let v = deref_value_dynamic(args[0].clone(), grid, base);
+            elementwise_unary(&v, f)
+        }
+        other => elementwise_unary(other, f),
+    }
 }
 
 fn fn_int(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let v = deref_value_dynamic(args[0].clone(), grid, base);
-    elementwise_unary(&v, |elem| match coerce_to_number(elem) {
+    let f = |elem: &Value| match coerce_to_number(elem) {
         Ok(n) => Value::Number(n.floor()),
         Err(e) => Value::Error(e),
-    })
+    };
+    match &args[0] {
+        Value::Range(_) | Value::MultiRange(_) => {
+            let v = deref_value_dynamic(args[0].clone(), grid, base);
+            elementwise_unary(&v, f)
+        }
+        other => elementwise_unary(other, f),
+    }
 }
 
 fn coerce_to_i64(v: &Value) -> Result<i64, ErrorKind> {
@@ -3099,8 +3111,17 @@ fn fn_round_impl(args: &[Value], mode: RoundMode, grid: &dyn Grid, base: CellCoo
     if args.len() != 2 {
         return Value::Error(ErrorKind::Value);
     }
-    let number = deref_value_dynamic(args[0].clone(), grid, base);
-    let digits = deref_value_dynamic(args[1].clone(), grid, base);
+    let number = match &args[0] {
+        Value::Range(_) | Value::MultiRange(_) => Some(deref_value_dynamic(args[0].clone(), grid, base)),
+        _ => None,
+    };
+    let digits = match &args[1] {
+        Value::Range(_) | Value::MultiRange(_) => Some(deref_value_dynamic(args[1].clone(), grid, base)),
+        _ => None,
+    };
+    let number = number.as_ref().unwrap_or(&args[0]);
+    let digits = digits.as_ref().unwrap_or(&args[1]);
+
     lift2(number, digits, |number, digits| {
         let number = match coerce_to_number(number) {
             Ok(n) => n,
@@ -3130,8 +3151,17 @@ fn fn_mod(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 2 {
         return Value::Error(ErrorKind::Value);
     }
-    let n = deref_value_dynamic(args[0].clone(), grid, base);
-    let d = deref_value_dynamic(args[1].clone(), grid, base);
+    let n = match &args[0] {
+        Value::Range(_) | Value::MultiRange(_) => Some(deref_value_dynamic(args[0].clone(), grid, base)),
+        _ => None,
+    };
+    let d = match &args[1] {
+        Value::Range(_) | Value::MultiRange(_) => Some(deref_value_dynamic(args[1].clone(), grid, base)),
+        _ => None,
+    };
+    let n = n.as_ref().unwrap_or(&args[0]);
+    let d = d.as_ref().unwrap_or(&args[1]);
+
     lift2(n, d, |n, d| {
         let n = match coerce_to_number(n) {
             Ok(n) => n,
@@ -3152,8 +3182,7 @@ fn fn_sign(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    let v = deref_value_dynamic(args[0].clone(), grid, base);
-    elementwise_unary(&v, |elem| {
+    let f = |elem: &Value| {
         let number = match coerce_to_number(elem) {
             Ok(n) => n,
             Err(e) => return Value::Error(e),
@@ -3168,7 +3197,15 @@ fn fn_sign(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         } else {
             Value::Number(0.0)
         }
-    })
+    };
+
+    match &args[0] {
+        Value::Range(_) | Value::MultiRange(_) => {
+            let v = deref_value_dynamic(args[0].clone(), grid, base);
+            elementwise_unary(&v, f)
+        }
+        other => elementwise_unary(other, f),
+    }
 }
 
 fn fn_not(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
