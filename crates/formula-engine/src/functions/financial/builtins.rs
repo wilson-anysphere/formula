@@ -49,7 +49,23 @@ fn collect_npv_values_from_arg(
             Value::Number(n) => Ok(vec![n]),
             Value::Bool(b) => Ok(vec![if b { 1.0 } else { 0.0 }]),
             Value::Blank => Ok(vec![0.0]),
-            Value::Text(s) => Ok(vec![s.trim().parse::<f64>().unwrap_or(0.0)]),
+            Value::Text(s) => {
+                let trimmed = s.trim();
+                if trimmed.is_empty() {
+                    return Ok(vec![0.0]);
+                }
+                match crate::coercion::datetime::parse_value_text(
+                    trimmed,
+                    ctx.value_locale(),
+                    ctx.now_utc(),
+                    ctx.date_system(),
+                ) {
+                    Ok(n) => Ok(vec![n]),
+                    Err(crate::error::ExcelError::Value) => Ok(vec![0.0]),
+                    Err(crate::error::ExcelError::Div0) => Err(ErrorKind::Div0),
+                    Err(crate::error::ExcelError::Num) => Err(ErrorKind::Num),
+                }
+            }
             Value::Reference(_) | Value::ReferenceUnion(_) => Err(ErrorKind::Value),
             Value::Array(arr) => {
                 let mut out = Vec::with_capacity(arr.rows.saturating_mul(arr.cols));
