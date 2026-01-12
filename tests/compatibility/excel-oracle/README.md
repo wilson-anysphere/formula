@@ -68,7 +68,7 @@ Runs a small, high-signal slice of the corpus (fast).
 
 Preset include tags:
 
-`add`, `sub`, `mul`, `div`, `cmp`, `SUM`, `IF`, `IFERROR`, `error`, `range`, `TRANSPOSE`, `SEQUENCE`
+`add`, `sub`, `mul`, `div`, `cmp`, `SUM`, `IF`, `IFERROR`, `error`, `range`, `TRANSPOSE`, `SEQUENCE`, `COUNT`, `COUNTIF`, `TEXT`, `VALUE`, `DATEVALUE`, `WORKDAY`, `NETWORKDAYS`, `XLOOKUP`, `XMATCH`, `FILTER`, `SORT`, `UNIQUE`, `ISERROR`, `coercion`
 
 ```bash
 python tools/excel-oracle/compat_gate.py --tier smoke
@@ -83,7 +83,7 @@ functions/operators in the curated corpus.
 
 Preset include tags:
 
-`arith`, `cmp`, `math`, `agg`, `logical`, `text`, `date`, `lookup`, `spill`, `dynarr`, `error`
+`arith`, `cmp`, `math`, `agg`, `logical`, `text`, `date`, `lookup`, `spill`, `dynarr`, `error`, `info`, `coercion`
 
 ```bash
 python tools/excel-oracle/compat_gate.py --tier p0

@@ -75,6 +75,9 @@ P0_INCLUDE_TAGS = [
     "dynarr",
     # Explicit error cases (and any cases tagged as error).
     "error",
+    # Common info/conversion semantics (ensure p0 is a strict superset of smoke).
+    "info",
+    "coercion",
 ]
 
 _TIER_TO_INCLUDE_TAGS: dict[str, list[str]] = {
