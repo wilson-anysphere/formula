@@ -411,6 +411,17 @@ export class FormulaConflictMonitor {
     const formulaItemId = hasFormulaChange ? getItemId(cellMap, "formula") : null;
     const valueItemId = hasValueChange ? getItemId(cellMap, "value") : null;
 
+    // In formula-only mode, we still need to track formula edits (including clears)
+    // even when they occur alongside value writes (e.g. value writes clearing
+    // formulas via `formula=null` markers). Value edits themselves are only
+    // tracked when value conflict detection is enabled.
+    if (!this.includeValueConflicts) {
+      if (hasFormulaChange) {
+        this._lastLocalFormulaEditByCellKey.set(cellKey, { formula: nextFormula, itemId: formulaItemId });
+      }
+      return;
+    }
+
     /** @type {"formula" | "value" | null} */
     let kind = null;
     if (hasFormulaChange && !hasValueChange) kind = "formula";
