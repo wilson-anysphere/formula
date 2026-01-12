@@ -4425,36 +4425,7 @@ try {
     // `update-check-*` events emitted by the Rust updater wrapper.
   });
 
-  void listen("update-check-started", (event) => {
-    const payload = (event as any)?.payload;
-    if (payload?.source !== "manual") return;
-    showToast("Checking for updates…", "info");
-  });
-
-  void listen("update-check-already-running", (event) => {
-    const payload = (event as any)?.payload;
-    if (payload?.source !== "manual") return;
-    showToast("Already checking for updates…", "info");
-  });
-
-  void listen("update-not-available", (event) => {
-    const payload = (event as any)?.payload;
-    if (payload?.source !== "manual") return;
-    showToast("No updates available", "info");
-  });
-
-  void listen("update-check-error", (event) => {
-    const payload = (event as any)?.payload;
-    if (payload?.source !== "manual") return;
-    const msg = typeof payload?.message === "string" ? payload.message : "Unknown error";
-    showToast(`Update check failed: ${msg}`, "error", { timeoutMs: 10_000 });
-  });
-
-  void listen("update-available", (event) => {
-    const payload = (event as any)?.payload;
-    const version = typeof payload?.version === "string" ? payload.version : null;
-    showToast(version ? `Update available: ${version}` : "Update available", "info", { timeoutMs: 10_000 });
-  });
+  // Updater UI (toasts / dialogs / focus management) is handled by `installUpdaterUi(...)`.
 
   void listen("shortcut-quick-open", () => {
     void promptOpenWorkbook().catch((err) => {
