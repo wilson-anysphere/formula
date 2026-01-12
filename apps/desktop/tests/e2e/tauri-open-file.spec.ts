@@ -202,7 +202,7 @@ test.describe("tauri open-file integration", () => {
     }
 
     await page.evaluate(async () => {
-      const app = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       if (app && typeof app.whenIdle === "function") {
         await app.whenIdle();
       }
@@ -412,13 +412,13 @@ test.describe("tauri open-file integration", () => {
     }
 
     await page.evaluate(async () => {
-      const app = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       if (app && typeof app.whenIdle === "function") {
         await app.whenIdle();
       }
     });
 
-    const a1Value = await page.evaluate(async () => (window as any).__formulaApp.getCellValueA1("A1"));
+    const a1Value = await page.evaluate(async () => (window.__formulaApp as any).getCellValueA1("A1"));
     expect(a1Value).toBe("Second");
 
     const openWorkbookPaths = await page.evaluate(() => {

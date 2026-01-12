@@ -122,11 +122,11 @@ function installTauriStubForTests() {
 
 async function makeDocumentDirty(page: import("@playwright/test").Page): Promise<void> {
   await page.evaluate(() => {
-    const app = (window as any).__formulaApp;
+    const app = window.__formulaApp as any;
     const sheetId = app.getCurrentSheetId();
     app.getDocument().setCellValue(sheetId, "A1", "dirty");
   });
-  await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
+  await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(true);
 }
 
 test.describe("collab: desktop unsaved-change confirmations", () => {
@@ -142,7 +142,7 @@ test.describe("collab: desktop unsaved-change confirmations", () => {
       (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
     });
 
-    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+    await page.waitForFunction(async () => (await (window.__formulaApp as any).getCellValueA1("A1")) === "Hello");
 
     expect(await page.evaluate(() => (window as any).__tauriDialogConfirmCalls.length)).toBe(0);
   });

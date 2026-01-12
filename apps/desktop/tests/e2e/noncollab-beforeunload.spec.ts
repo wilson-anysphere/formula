@@ -11,9 +11,9 @@ test.describe("non-collab: beforeunload unsaved-changes prompt", () => {
     await page.keyboard.press("h");
     await page.keyboard.type("ello");
     await page.keyboard.press("Enter");
-    await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+    await page.evaluate(() => (window.__formulaApp as any).whenIdle());
 
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(true);
 
     let beforeUnloadDialogs = 0;
     page.on("dialog", async (dialog) => {
@@ -42,7 +42,7 @@ test.describe("non-collab: beforeunload unsaved-changes prompt", () => {
     await input.press("Enter");
 
     await expect(tab.locator(".sheet-tab__name")).toHaveText("RenamedSheet1");
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(true);
 
     let beforeUnloadDialogs = 0;
     page.on("dialog", async (dialog) => {
