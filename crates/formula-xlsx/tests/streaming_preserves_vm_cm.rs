@@ -4,6 +4,28 @@ use formula_model::{CellRef, CellValue};
 use formula_xlsx::{patch_xlsx_streaming, WorksheetCellPatch};
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
+fn build_partial_zip_with_vm_cell() -> Vec<u8> {
+    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" vm="1" cm="2"><v>1</v></c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+
+    // Intentionally omit `xl/workbook.xml` and `[Content_Types].xml` to simulate callers patching
+    // an extracted worksheet part.
+    zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+    zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+    zip.finish().unwrap().into_inner()
+}
+
 fn build_minimal_xlsx() -> Vec<u8> {
     // The low-level streaming patcher preserves `vm` when patching "partial" ZIPs that only
     // contain worksheet XML. Include a minimal `[Content_Types].xml` so this fixture exercises
@@ -87,7 +109,7 @@ fn patch_xlsx_streaming_drops_vm_but_preserves_cm_on_existing_cells(
     assert_eq!(
         cell.attribute("vm"),
         None,
-        "vm should be dropped on value edit, got: {sheet_xml}"
+        "vm should be dropped when patching away from rich-value placeholder semantics, got: {sheet_xml}"
     );
     assert_eq!(
         cell.attribute("cm"),
@@ -104,6 +126,50 @@ fn patch_xlsx_streaming_drops_vm_but_preserves_cm_on_existing_cells(
         v, "2",
         "expected patch to update cached value (sanity check), got: {sheet_xml}"
     );
+
+    Ok(())
+}
+
+#[test]
+fn patch_xlsx_streaming_preserves_vm_cm_when_patching_partial_zip(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_partial_zip_with_vm_cell();
+
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        CellRef::from_a1("A1")?,
+        CellValue::Number(2.0),
+        None,
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch])?;
+
+    let mut archive = ZipArchive::new(Cursor::new(out.into_inner()))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+
+    let doc = roxmltree::Document::parse(&sheet_xml)?;
+    let cell = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
+        .ok_or("expected A1 cell")?;
+
+    assert_eq!(
+        cell.attribute("vm"),
+        Some("1"),
+        "expected vm to be preserved when patching an extracted worksheet part, got: {sheet_xml}"
+    );
+    assert_eq!(cell.attribute("cm"), Some("2"));
+
+    let v = cell
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "v")
+        .and_then(|n| n.text())
+        .unwrap_or_default();
+    assert_eq!(v, "2");
 
     Ok(())
 }
