@@ -379,8 +379,9 @@ mod tests {
 
     #[test]
     fn parses_vm_to_rich_value_indices() {
-        // Two metadataTypes to ensure `rc/@t` is interpreted as a 1-based index into the
-        // `<metadataTypes>` list, not hard-coded to `1`.
+        // Two metadataTypes to ensure `rc/@t` is interpreted as an index into the `<metadataTypes>`
+        // list (Excel has been observed to emit both 0-based and 1-based indices here), not
+        // hard-coded to `1`.
         let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
           xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
@@ -407,8 +408,8 @@ mod tests {
   <valueMetadata count="4">
     <bk><rc t="2" v="0"/></bk>
     <bk><rc t="2" v="1"/></bk>
-    <!-- Wrong metadata type; should be ignored. -->
-    <bk><rc t="1" v="0"/></bk>
+    <!-- Wrong metadata type (neither 0-based nor 1-based XLRICHVALUE); should be ignored. -->
+    <bk><rc t="0" v="0"/></bk>
     <!-- Out-of-bounds v; should be ignored. -->
     <bk><rc t="2" v="2"/></bk>
   </valueMetadata>

@@ -508,7 +508,6 @@ impl<'a> CompileCtx<'a> {
             self.program.instrs[idx] = Instruction::new(OpCode::Jump, end_target, 0);
         }
     }
-
     fn compile_switch(&mut self, args: &[Expr]) {
         // SWITCH(expr, value1, result1, [value2, result2], ..., [default])
         if args.len() < 3 {
