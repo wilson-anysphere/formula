@@ -20,10 +20,11 @@ fn encodes_and_decodes_sheet_range_ref_in_function() {
     let mut ctx = WorkbookContext::default();
     ctx.add_extern_sheet("Sheet1", "Sheet3", 1);
 
-    let encoded = encode_rgce_with_context("=SUM(Sheet1:Sheet3!A1)", &ctx, CellCoord::new(0, 0))
-        .expect("encode");
+    let encoded =
+        encode_rgce_with_context("=SUM('Sheet1:Sheet3'!A1)", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
     let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
-    assert_eq!(decoded, "SUM(Sheet1:Sheet3!A1)");
+    assert_eq!(decoded, "SUM('Sheet1:Sheet3'!A1)");
 }
 
 #[test]

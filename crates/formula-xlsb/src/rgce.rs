@@ -392,8 +392,11 @@ fn format_sheet_prefix(first: &str, last: &str) -> String {
     let mut out = String::new();
     if first == last {
         fmt_sheet_name(&mut out, first);
-    } else if sheet_name_needs_quotes(first) || sheet_name_needs_quotes(last) {
-        // Excel quotes the combined `Sheet1:Sheet3` prefix as a single string.
+    } else {
+        // Excel's canonical text format for a 3D sheet range is `Sheet1:Sheet3!A1`, but
+        // `formula-engine` only recognizes a single identifier token before `!`. Since `:` is
+        // invalid in Excel sheet names, we can round-trip through text by always emitting the
+        // combined prefix as one quoted identifier: `'Sheet1:Sheet3'!A1`.
         out.push('\'');
         for ch in format!("{first}:{last}").chars() {
             if ch == '\'' {
@@ -404,10 +407,6 @@ fn format_sheet_prefix(first: &str, last: &str) -> String {
             }
         }
         out.push('\'');
-    } else {
-        out.push_str(first);
-        out.push(':');
-        out.push_str(last);
     }
     out.push('!');
     out
@@ -1093,7 +1092,6 @@ fn decode_rgce_impl(
                 let (first, last) = ctx
                     .extern_sheet_names(ixti)
                     .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
-
                 let prefix = format_sheet_prefix(first, last);
                 let cell = format_cell_ref_from_field(row0, col_field);
                 stack.push(ExprFragment::new(format!("{prefix}{cell}")));
@@ -2583,7 +2581,14 @@ fn emit_ref(r: &Ref, ctx: &WorkbookContext, out: &mut Vec<u8>, class: PtgClass) 
         }
         (Some(sheet), RefKind::Cell(cell)) => {
             let (first, last) = match sheet {
-                SheetSpec::Single(s) => (s.as_str(), s.as_str()),
+                SheetSpec::Single(s) => match s.split_once(':') {
+                    // `formula-engine` only parses a single identifier before `!`, so 3D sheet
+                    // ranges round-trip through text as a single "sheet" string containing `:`
+                    // (e.g. `'Sheet1:Sheet3'!A1`). Since `:` is invalid in Excel sheet names, this
+                    // split is unambiguous.
+                    Some((first, last)) => (first, last),
+                    None => (s.as_str(), s.as_str()),
+                },
                 SheetSpec::Range(a, b) => (a.as_str(), b.as_str()),
             };
             let ixti = ctx
@@ -2596,7 +2601,11 @@ fn emit_ref(r: &Ref, ctx: &WorkbookContext, out: &mut Vec<u8>, class: PtgClass) 
         }
         (Some(sheet), RefKind::Area(a, b)) => {
             let (first, last) = match sheet {
-                SheetSpec::Single(s) => (s.as_str(), s.as_str()),
+                SheetSpec::Single(s) => match s.split_once(':') {
+                    // See the `RefKind::Cell` branch above.
+                    Some((first, last)) => (first, last),
+                    None => (s.as_str(), s.as_str()),
+                },
                 SheetSpec::Range(a, b) => (a.as_str(), b.as_str()),
             };
             let ixti = ctx
