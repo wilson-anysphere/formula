@@ -372,6 +372,9 @@ const sheetNameResolver: SheetNameResolver = {
 // Exposed to Playwright tests via `window.__formulaExtensionHostManager`.
 let extensionHostManagerForE2e: DesktopExtensionHostManager | null = null;
 let sharedContextMenu: ContextMenu | null = null;
+// Secondary grid view (split view) is wired only when the split-pane DOM scaffold exists.
+// Keep a module-scoped reference so file/close commands can commit edits from the secondary pane.
+let secondaryGridView: SecondaryGridView | null = null;
 
 type SheetActivatedEvent = { sheet: { id: string; name: string } };
 const sheetActivatedListeners = new Set<(event: SheetActivatedEvent) => void>();

@@ -7,6 +7,8 @@ function installTauriStubForTests() {
   const listeners: Record<string, any> = {};
   (window as any).__tauriListeners = listeners;
   (window as any).__tauriInvokeCalls = [];
+  (window as any).__tauriDialogConfirmCalls = [];
+  (window as any).__tauriDialogAlertCalls = [];
 
   const pushCall = (cmd: string, args: any) => {
     (window as any).__tauriInvokeCalls.push({ cmd, args });
@@ -93,6 +95,18 @@ function installTauriStubForTests() {
       },
       emit: async () => {},
     },
+    dialog: {
+      confirm: async (message: string) => {
+        (window as any).__tauriDialogConfirmCalls.push(message);
+        return true;
+      },
+      message: async (message: string) => {
+        (window as any).__tauriDialogAlertCalls.push(message);
+      },
+      alert: async (message: string) => {
+        (window as any).__tauriDialogAlertCalls.push(message);
+      },
+    },
     window: {
       getCurrentWebviewWindow: () => ({
         hide: async () => {
@@ -123,12 +137,6 @@ test.describe("collab: desktop unsaved-change confirmations", () => {
     await installCollabSessionStub(page);
     await makeDocumentDirty(page);
 
-    let confirmDialogs = 0;
-    page.on("dialog", async (dialog) => {
-      if (dialog.type() === "confirm") confirmDialogs += 1;
-      await dialog.accept();
-    });
-
     await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
     await page.evaluate(() => {
       (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
@@ -136,7 +144,7 @@ test.describe("collab: desktop unsaved-change confirmations", () => {
 
     await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
 
-    expect(confirmDialogs).toBe(0);
+    expect(await page.evaluate(() => (window as any).__tauriDialogConfirmCalls.length)).toBe(0);
   });
 
   test("does not prompt when creating a new workbook in collab mode", async ({ page }) => {
@@ -145,12 +153,6 @@ test.describe("collab: desktop unsaved-change confirmations", () => {
 
     await installCollabSessionStub(page);
     await makeDocumentDirty(page);
-
-    let confirmDialogs = 0;
-    page.on("dialog", async (dialog) => {
-      if (dialog.type() === "confirm") confirmDialogs += 1;
-      await dialog.accept();
-    });
 
     await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["tray-new"]));
     await page.evaluate(() => {
@@ -165,7 +167,7 @@ test.describe("collab: desktop unsaved-change confirmations", () => {
       )
       .toBe(true);
 
-    expect(confirmDialogs).toBe(0);
+    expect(await page.evaluate(() => (window as any).__tauriDialogConfirmCalls.length)).toBe(0);
   });
 
   test("does not prompt when closing/quitting in collab mode", async ({ page }) => {
@@ -174,12 +176,6 @@ test.describe("collab: desktop unsaved-change confirmations", () => {
 
     await installCollabSessionStub(page);
     await makeDocumentDirty(page);
-
-    let confirmDialogs = 0;
-    page.on("dialog", async (dialog) => {
-      if (dialog.type() === "confirm") confirmDialogs += 1;
-      await dialog.accept();
-    });
 
     await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["menu-close-window"]));
     await page.evaluate(() => {
@@ -200,6 +196,6 @@ test.describe("collab: desktop unsaved-change confirmations", () => {
       )
       .toBe(true);
 
-    expect(confirmDialogs).toBe(0);
+    expect(await page.evaluate(() => (window as any).__tauriDialogConfirmCalls.length)).toBe(0);
   });
 });

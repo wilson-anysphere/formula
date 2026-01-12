@@ -6,6 +6,8 @@ function installTauriStubForTests() {
   const listeners: Record<string, any> = {};
   (window as any).__tauriListeners = listeners;
   (window as any).__tauriInvokeCalls = [];
+  (window as any).__tauriDialogConfirmCalls = [];
+  (window as any).__tauriDialogAlertCalls = [];
 
   const pushCall = (cmd: string, args: any) => {
     (window as any).__tauriInvokeCalls.push({ cmd, args });
@@ -92,6 +94,18 @@ function installTauriStubForTests() {
       },
       emit: async () => {},
     },
+    dialog: {
+      confirm: async (message: string) => {
+        (window as any).__tauriDialogConfirmCalls.push(message);
+        return false;
+      },
+      message: async (message: string) => {
+        (window as any).__tauriDialogAlertCalls.push(message);
+      },
+      alert: async (message: string) => {
+        (window as any).__tauriDialogAlertCalls.push(message);
+      },
+    },
     window: {
       getCurrentWebviewWindow: () => ({
         hide: async () => {
@@ -114,6 +128,20 @@ async function makeDocumentDirty(page: import("@playwright/test").Page): Promise
   await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
 }
 
+async function startInProgressEdit(page: import("@playwright/test").Page, value: string): Promise<void> {
+  // Avoid relying on pointer clicks: canvases in the shared-grid test harness can
+  // intermittently intercept pointer events. Focusing the grid is sufficient to
+  // drive keyboard-based editing (F2).
+  await page.locator("#grid").focus();
+  await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+  await page.keyboard.press("F2");
+  const editor = page.locator("textarea.cell-editor");
+  await expect(editor).toBeVisible();
+  await editor.fill(value);
+  await expect(editor).toHaveValue(value);
+}
+
 test.describe("non-collab: desktop unsaved-change confirmations", () => {
   test("prompts when opening another workbook and respects cancel", async ({ page }) => {
     await page.addInitScript(installTauriStubForTests);
@@ -121,23 +149,14 @@ test.describe("non-collab: desktop unsaved-change confirmations", () => {
 
     await makeDocumentDirty(page);
 
-    let confirmDialogs = 0;
-    page.on("dialog", async (dialog) => {
-      if (dialog.type() === "confirm") {
-        confirmDialogs += 1;
-        await dialog.dismiss();
-        return;
-      }
-      await dialog.accept();
-    });
-
     await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
     await page.evaluate(() => {
       (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
     });
 
     // Confirm was shown, and open was aborted.
-    await expect.poll(() => confirmDialogs).toBe(1);
+    await expect.poll(() => page.evaluate(() => (window as any).__tauriDialogConfirmCalls.length)).toBe(1);
     // Give the queued open-workbook task a moment to run (if it would) after the dialog resolves.
     await page.waitForTimeout(50);
 
@@ -149,21 +168,42 @@ test.describe("non-collab: desktop unsaved-change confirmations", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("dirty");
   });
 
+  test("commits an in-progress edit before prompting to open another workbook", async ({ page }) => {
+    await page.addInitScript(installTauriStubForTests);
+    await gotoDesktop(page);
+
+    // Start editing without committing; the DocumentController should still be clean.
+    await startInProgressEdit(page, "pending");
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
+    });
+
+    // We should prompt to discard changes; without the commit step this would have been clean
+    // and the open would have proceeded without prompting.
+    await expect.poll(() => page.evaluate(() => (window as any).__tauriDialogConfirmCalls.length)).toBe(1);
+    await page.waitForTimeout(50);
+
+    // Open was aborted because the user cancelled.
+    const opened = await page.evaluate(
+      () => ((window as any).__tauriInvokeCalls ?? []).some((c: any) => c.cmd === "open_workbook") ?? false,
+    );
+    expect(opened).toBe(false);
+
+    // The in-progress edit should have been committed (and therefore made the doc dirty).
+    const editor = page.locator("textarea.cell-editor");
+    await expect(editor).toBeHidden();
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("pending");
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
+  });
+
   test("prompts when quitting and respects cancel", async ({ page }) => {
     await page.addInitScript(installTauriStubForTests);
     await gotoDesktop(page);
 
     await makeDocumentDirty(page);
-
-    let confirmDialogs = 0;
-    page.on("dialog", async (dialog) => {
-      if (dialog.type() === "confirm") {
-        confirmDialogs += 1;
-        await dialog.dismiss();
-        return;
-      }
-      await dialog.accept();
-    });
 
     await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["tray-quit"]));
     await page.evaluate(() => {
@@ -171,7 +211,7 @@ test.describe("non-collab: desktop unsaved-change confirmations", () => {
     });
 
     // Confirm was shown, and quit was aborted.
-    await expect.poll(() => confirmDialogs).toBe(1);
+    await expect.poll(() => page.evaluate(() => (window as any).__tauriDialogConfirmCalls.length)).toBe(1);
     await page.waitForTimeout(50);
 
     const quitCalled = await page.evaluate(
