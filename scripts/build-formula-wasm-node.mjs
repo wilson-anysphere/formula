@@ -160,11 +160,11 @@ function buildWithWasmPack() {
   // verbose output.
   const cargoExtraArgs = ["--locked"];
   if (!verbose && !process.stdout.isTTY) cargoExtraArgs.push("--quiet");
-  const rustcWrapper = process.env.RUSTC_WRAPPER ?? process.env.CARGO_BUILD_RUSTC_WRAPPER ?? "";
-  const rustcWorkspaceWrapper =
-    process.env.RUSTC_WORKSPACE_WRAPPER ??
-    process.env.CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER ??
-    "";
+  const rustcWrapperRaw = process.env.RUSTC_WRAPPER ?? process.env.CARGO_BUILD_RUSTC_WRAPPER ?? "";
+  const rustcWorkspaceWrapperRaw =
+    process.env.RUSTC_WORKSPACE_WRAPPER ?? process.env.CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER ?? "";
+  const rustcWrapper = normalizeRustcWrapper(rustcWrapperRaw);
+  const rustcWorkspaceWrapper = normalizeRustcWrapper(rustcWorkspaceWrapperRaw);
 
   // Equivalent to: `wasm-pack build crates/formula-wasm --target nodejs --out-dir pkg-node`
   // but avoids any ambiguity around relative output paths by running from the crate dir.
@@ -173,8 +173,12 @@ function buildWithWasmPack() {
   // When `sccache` is unavailable/misconfigured, wasm-pack builds can fail even for
   // `cargo metadata`/`rustc -vV`. Explicitly setting `RUSTC_WRAPPER=""` disables
   // any configured wrapper unless the user overrides it in the environment.
+  //
+  // NOTE: Cargo treats empty wrapper env vars as "unset" and can fall back to a global
+  // `build.rustc-wrapper` config. To reliably bypass global wrappers we default to using
+  // the `env` wrapper, which simply execs the underlying rustc (`env rustc ...`).
   const wasmPackArgs = ["build", "--target", "nodejs", "--out-dir", "pkg-node", "--dev", ...cargoExtraArgs];
-  const env = {
+  const baseEnv = {
     ...process.env,
     CARGO_HOME: cargoHome,
     // Keep builds safe in high-core-count environments (e.g. agent sandboxes) even
@@ -185,32 +189,38 @@ function buildWithWasmPack() {
     // Rayon defaults to spawning one worker per core; cap it for multi-agent hosts unless
     // callers explicitly override it.
     RAYON_NUM_THREADS: rayonThreads,
-    RUSTC_WRAPPER: rustcWrapper,
-    RUSTC_WORKSPACE_WRAPPER: rustcWorkspaceWrapper,
-    // Cargo can also read wrapper settings via `CARGO_BUILD_RUSTC_WRAPPER`. Set it explicitly so
-    // a global Cargo config (`build.rustc-wrapper`) cannot accidentally re-enable a flaky wrapper
-    // when `RUSTC_WRAPPER` is unset.
-    CARGO_BUILD_RUSTC_WRAPPER: rustcWrapper,
-    CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER: rustcWorkspaceWrapper,
   };
 
-  const res = canUseRunLimited
-    ? spawnSync("bash", [runLimited, "--as", limitAs, "--", "wasm-pack", ...wasmPackArgs], {
-        cwd: crateDir,
-        env,
-        stdio: "inherit",
-      })
-    : spawnSync("wasm-pack", wasmPackArgs, {
-        cwd: crateDir,
-        env,
-        stdio: "inherit",
-      });
-  if (res.error) {
-    throw res.error;
+  const run = (env) =>
+    canUseRunLimited
+      ? spawnSync("bash", [runLimited, "--as", limitAs, "--", "wasm-pack", ...wasmPackArgs], {
+          cwd: crateDir,
+          env,
+          stdio: "inherit",
+        })
+      : spawnSync("wasm-pack", wasmPackArgs, {
+          cwd: crateDir,
+          env,
+          stdio: "inherit",
+        });
+
+  const res = run(withRustcWrappers(baseEnv, rustcWrapper, rustcWorkspaceWrapper));
+  if (res.error) throw res.error;
+  if (res.status === 0) return;
+
+  // If a host-configured sccache daemon dies under load, builds can fail spuriously with
+  // "failed to execute compile" / connection reset errors. Retry once with wrappers disabled
+  // so vitest can proceed (even if caching is unavailable).
+  const wrapperLooksLikeSccache =
+    rustcWrapperRaw.trim().toLowerCase().includes("sccache") || rustcWorkspaceWrapperRaw.trim().toLowerCase().includes("sccache");
+  if (wrapperLooksLikeSccache && process.platform !== "win32") {
+    const fallback = "env";
+    const retry = run(withRustcWrappers(baseEnv, fallback, fallback));
+    if (retry.error) throw retry.error;
+    if (retry.status === 0) return;
   }
-  if (res.status !== 0) {
-    throw new Error(`wasm-pack build failed (exit code ${res.status ?? "unknown"})`);
-  }
+
+  throw new Error(`wasm-pack build failed (exit code ${res.status ?? "unknown"})`);
 }
 
 function assertOutputsExist() {
@@ -246,6 +256,35 @@ function newestInputMtimeMs() {
   }
 
   return newestMtimeMs(inputs);
+}
+
+/**
+ * Normalize a rustc wrapper value for use by Cargo.
+ *
+ * Cargo treats an empty wrapper env var as "unset" and can fall back to a global
+ * `build.rustc-wrapper` config. When no wrapper is provided, use `env` to reliably
+ * bypass any global wrapper configuration.
+ */
+function normalizeRustcWrapper(wrapper) {
+  const trimmed = typeof wrapper === "string" ? wrapper.trim() : "";
+  if (!trimmed) {
+    // `env` exists on Unix-like systems. On Windows we return an empty string and rely on the
+    // existing environment/configuration.
+    return process.platform === "win32" ? "" : "env";
+  }
+  return trimmed;
+}
+
+function withRustcWrappers(baseEnv, rustcWrapper, rustcWorkspaceWrapper) {
+  return {
+    ...baseEnv,
+    RUSTC_WRAPPER: rustcWrapper,
+    RUSTC_WORKSPACE_WRAPPER: rustcWorkspaceWrapper,
+    // Cargo can also read wrapper settings via `CARGO_BUILD_RUSTC_WRAPPER`. Set it explicitly so
+    // a global Cargo config (`build.rustc-wrapper`) cannot accidentally re-enable a flaky wrapper.
+    CARGO_BUILD_RUSTC_WRAPPER: rustcWrapper,
+    CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER: rustcWorkspaceWrapper,
+  };
 }
 
 /**
