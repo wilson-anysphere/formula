@@ -693,6 +693,99 @@ fn odd_coupon_functions_coerce_frequency_like_excel() {
 }
 
 #[test]
+fn odd_coupon_functions_truncate_frequency_like_excel() {
+    let mut sheet = TestSheet::new();
+    // Task: Excel-like truncation/coercion for non-integer `frequency` inputs.
+    //
+    // Excel truncates `frequency` to an integer (towards zero) before validating membership in
+    // {1, 2, 4}.
+
+    // ODDFPRICE: 2.9 truncates to 2.
+    let oddf_baseline_2 = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0)";
+    let oddf_baseline_2_value = match eval_number_or_skip(&mut sheet, oddf_baseline_2) {
+        Some(v) => v,
+        None => return,
+    };
+    let oddf_2_9 =
+        "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2.9,0)";
+    let oddf_2_9_value =
+        eval_number_or_skip(&mut sheet, oddf_2_9).expect("ODDFPRICE should truncate frequency");
+    assert_close(oddf_2_9_value, oddf_baseline_2_value, 1e-9);
+
+    // ODDFPRICE: 1.9 truncates to 1.
+    let oddf_baseline_1 =
+        "=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1,0)";
+    let oddf_baseline_1_value = eval_number_or_skip(&mut sheet, oddf_baseline_1)
+        .expect("ODDFPRICE should accept explicit annual frequency");
+    let oddf_1_9 =
+        "=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1.9,0)";
+    let oddf_1_9_value =
+        eval_number_or_skip(&mut sheet, oddf_1_9).expect("ODDFPRICE should truncate frequency");
+    assert_close(oddf_1_9_value, oddf_baseline_1_value, 1e-9);
+
+    // ODDFPRICE: 4.1 truncates to 4.
+    let oddf_baseline_4 =
+        "=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,15),DATE(2020,1,1),DATE(2020,2,15),0.08,0.07,100,4,0)";
+    let oddf_baseline_4_value = eval_number_or_skip(&mut sheet, oddf_baseline_4)
+        .expect("ODDFPRICE should accept quarterly frequency");
+    let oddf_4_1 =
+        "=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,15),DATE(2020,1,1),DATE(2020,2,15),0.08,0.07,100,4.1,0)";
+    let oddf_4_1_value =
+        eval_number_or_skip(&mut sheet, oddf_4_1).expect("ODDFPRICE should truncate frequency");
+    assert_close(oddf_4_1_value, oddf_baseline_4_value, 1e-9);
+
+    // frequency=0.9 truncates to 0 and should return #NUM!.
+    let oddf_0_9 =
+        "=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,0.9,0)";
+    match sheet.eval(oddf_0_9) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM! for ODDFPRICE frequency=0.9 (trunc->0), got {other:?}"),
+    }
+
+    // Repeat key cases for ODDLPRICE as well.
+    let oddl_baseline_2 =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0)";
+    let oddl_baseline_2_value = match eval_number_or_skip(&mut sheet, oddl_baseline_2) {
+        Some(v) => v,
+        None => return,
+    };
+    let oddl_2_9 =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2.9,0)";
+    let oddl_2_9_value =
+        eval_number_or_skip(&mut sheet, oddl_2_9).expect("ODDLPRICE should truncate frequency");
+    assert_close(oddl_2_9_value, oddl_baseline_2_value, 1e-9);
+
+    let oddl_baseline_1 =
+        "=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,1,0)";
+    let oddl_baseline_1_value = eval_number_or_skip(&mut sheet, oddl_baseline_1)
+        .expect("ODDLPRICE should accept explicit annual frequency");
+    let oddl_1_9 =
+        "=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,1.9,0)";
+    let oddl_1_9_value =
+        eval_number_or_skip(&mut sheet, oddl_1_9).expect("ODDLPRICE should truncate frequency");
+    assert_close(oddl_1_9_value, oddl_baseline_1_value, 1e-9);
+
+    let oddl_baseline_4 =
+        "=ODDLPRICE(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.08,0.07,100,4,0)";
+    let oddl_baseline_4_value = eval_number_or_skip(&mut sheet, oddl_baseline_4)
+        .expect("ODDLPRICE should accept quarterly frequency");
+    let oddl_4_1 =
+        "=ODDLPRICE(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.08,0.07,100,4.1,0)";
+    let oddl_4_1_value =
+        eval_number_or_skip(&mut sheet, oddl_4_1).expect("ODDLPRICE should truncate frequency");
+    assert_close(oddl_4_1_value, oddl_baseline_4_value, 1e-9);
+
+    let oddl_0_9 =
+        "=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,0.9,0)";
+    match sheet.eval(oddl_0_9) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM! for ODDLPRICE frequency=0.9 (trunc->0), got {other:?}"),
+    }
+}
+
+#[test]
 fn odd_coupon_functions_coerce_basis_like_excel() {
     let mut sheet = TestSheet::new();
     // Task: coercion edge cases for `basis`.
@@ -1204,6 +1297,79 @@ fn odd_coupon_yield_functions_floor_time_fractions_in_date_arguments() {
         baseline_oddlyield_value,
         1e-10,
     );
+}
+
+#[test]
+fn odd_coupon_functions_truncate_basis_like_excel() {
+    let mut sheet = TestSheet::new();
+    // Task: Excel-like truncation/coercion for non-integer `basis` inputs.
+    //
+    // Excel truncates `basis` to an integer (towards zero) before validating membership in
+    // {0, 1, 2, 3, 4}.
+
+    let oddf_basis_0 = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0)";
+    let oddf_basis_0_value = match eval_number_or_skip(&mut sheet, oddf_basis_0) {
+        Some(v) => v,
+        None => return,
+    };
+    let oddf_basis_0_9 =
+        "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0.9)";
+    let oddf_basis_0_9_value =
+        eval_number_or_skip(&mut sheet, oddf_basis_0_9).expect("ODDFPRICE should truncate basis");
+    assert_close(oddf_basis_0_9_value, oddf_basis_0_value, 1e-9);
+
+    let oddf_basis_1 =
+        "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,1)";
+    let oddf_basis_1_value =
+        eval_number_or_skip(&mut sheet, oddf_basis_1).expect("ODDFPRICE should accept basis=1");
+    let oddf_basis_1_9 =
+        "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,1.9)";
+    let oddf_basis_1_9_value =
+        eval_number_or_skip(&mut sheet, oddf_basis_1_9).expect("ODDFPRICE should truncate basis");
+    assert_close(oddf_basis_1_9_value, oddf_basis_1_value, 1e-9);
+
+    let oddf_basis_4 =
+        "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,4)";
+    let oddf_basis_4_value =
+        eval_number_or_skip(&mut sheet, oddf_basis_4).expect("ODDFPRICE should accept basis=4");
+    let oddf_basis_4_9 =
+        "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,4.9)";
+    let oddf_basis_4_9_value =
+        eval_number_or_skip(&mut sheet, oddf_basis_4_9).expect("ODDFPRICE should truncate basis");
+    assert_close(oddf_basis_4_9_value, oddf_basis_4_value, 1e-9);
+
+    // Spot-check ODDLPRICE as well.
+    let oddl_basis_0 =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0)";
+    let oddl_basis_0_value = match eval_number_or_skip(&mut sheet, oddl_basis_0) {
+        Some(v) => v,
+        None => return,
+    };
+    let oddl_basis_0_9 =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0.9)";
+    let oddl_basis_0_9_value =
+        eval_number_or_skip(&mut sheet, oddl_basis_0_9).expect("ODDLPRICE should truncate basis");
+    assert_close(oddl_basis_0_9_value, oddl_basis_0_value, 1e-9);
+
+    let oddl_basis_1 =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,1)";
+    let oddl_basis_1_value =
+        eval_number_or_skip(&mut sheet, oddl_basis_1).expect("ODDLPRICE should accept basis=1");
+    let oddl_basis_1_9 =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,1.9)";
+    let oddl_basis_1_9_value =
+        eval_number_or_skip(&mut sheet, oddl_basis_1_9).expect("ODDLPRICE should truncate basis");
+    assert_close(oddl_basis_1_9_value, oddl_basis_1_value, 1e-9);
+
+    let oddl_basis_4 =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,4)";
+    let oddl_basis_4_value =
+        eval_number_or_skip(&mut sheet, oddl_basis_4).expect("ODDLPRICE should accept basis=4");
+    let oddl_basis_4_9 =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,4.9)";
+    let oddl_basis_4_9_value =
+        eval_number_or_skip(&mut sheet, oddl_basis_4_9).expect("ODDLPRICE should truncate basis");
+    assert_close(oddl_basis_4_9_value, oddl_basis_4_value, 1e-9);
 }
 
 #[test]
