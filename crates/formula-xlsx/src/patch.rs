@@ -6,7 +6,7 @@
 //! (charts, pivots, customXml, VBA, etc.) while rewriting only the affected
 //! worksheet XML parts (plus `sharedStrings.xml` / `workbook.xml` when needed).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use formula_model::rich_text::{RichText, RichTextRunStyle};
 use formula_model::{CellRef, CellValue, StyleTable};
@@ -561,13 +561,18 @@ struct WorksheetXmlScan {
     existing_used_range: Option<(u32, u32, u32, u32)>,
 }
 
-fn scan_worksheet_xml(original: &[u8]) -> Result<WorksheetXmlScan, XlsxError> {
+fn scan_worksheet_xml(
+    original: &[u8],
+    target_cells: Option<&HashSet<(u32, u32)>>,
+) -> Result<(WorksheetXmlScan, HashSet<(u32, u32)>), XlsxError> {
     let mut reader = Reader::from_reader(original);
     reader.config_mut().trim_text(true);
 
     let mut scan = WorksheetXmlScan::default();
     let mut in_sheet_data = false;
     let mut buf = Vec::new();
+    let mut found_target_cells: HashSet<(u32, u32)> =
+        HashSet::with_capacity(target_cells.map_or(0, HashSet::len));
 
     let mut min_row = u32::MAX;
     let mut min_col = u32::MAX;
@@ -620,6 +625,11 @@ fn scan_worksheet_xml(original: &[u8]) -> Result<WorksheetXmlScan, XlsxError> {
                             min_col = min_col.min(col_1);
                             max_row = max_row.max(row_1);
                             max_col = max_col.max(col_1);
+                            if target_cells
+                                .is_some_and(|targets| targets.contains(&(cell_ref.row, cell_ref.col)))
+                            {
+                                found_target_cells.insert((cell_ref.row, cell_ref.col));
+                            }
                         }
                         break;
                     }
@@ -669,6 +679,11 @@ fn scan_worksheet_xml(original: &[u8]) -> Result<WorksheetXmlScan, XlsxError> {
                             min_col = min_col.min(col_1);
                             max_row = max_row.max(row_1);
                             max_col = max_col.max(col_1);
+                            if target_cells
+                                .is_some_and(|targets| targets.contains(&(cell_ref.row, cell_ref.col)))
+                            {
+                                found_target_cells.insert((cell_ref.row, cell_ref.col));
+                            }
                         }
                         break;
                     }
@@ -687,7 +702,7 @@ fn scan_worksheet_xml(original: &[u8]) -> Result<WorksheetXmlScan, XlsxError> {
         scan.existing_used_range = Some((min_row, min_col, max_row, max_col));
     }
 
-    Ok(scan)
+    Ok((scan, found_target_cells))
 }
 
 fn patch_worksheet_xml(
@@ -696,34 +711,31 @@ fn patch_worksheet_xml(
     mut shared_strings: Option<&mut SharedStringsState>,
     style_id_to_xf: Option<&HashMap<u32, u32>>,
 ) -> Result<(Vec<u8>, bool), XlsxError> {
-    let scan = scan_worksheet_xml(original)?;
+    let mut non_material_targets: HashSet<(u32, u32)> = HashSet::new();
+    for (cell_ref, patch) in patches.iter() {
+        if !cell_patch_is_material_for_insertion(patch, style_id_to_xf)? {
+            non_material_targets.insert((cell_ref.row, cell_ref.col));
+        }
+    }
+
+    let (scan, existing_non_material_cells) = scan_worksheet_xml(
+        original,
+        (!non_material_targets.is_empty()).then_some(&non_material_targets),
+    )?;
 
     // Drop patches that are guaranteed to be a no-op:
-    // a non-material patch (clear with no value/formula/style) targeting a cell outside the
-    // sheet's existing used-range cannot reference an existing `<c>` element, and since it would
-    // not insert a new cell, it cannot change the worksheet XML.
+    // a non-material patch (clear with no value/formula/style) targeting a missing cell cannot
+    // reference an existing `<c>` element, and since it would not insert a new cell, it cannot
+    // change the worksheet XML.
     let mut effective_patches = WorksheetCellPatches::default();
     for (cell_ref, patch) in patches.iter() {
-        if cell_patch_is_material_for_insertion(patch, style_id_to_xf)? {
+        if cell_patch_is_material_for_insertion(patch, style_id_to_xf)?
+            || existing_non_material_cells.contains(&(cell_ref.row, cell_ref.col))
+        {
             effective_patches
                 .cells
                 .insert((cell_ref.row, cell_ref.col), patch.clone());
             continue;
-        }
-
-        let in_used_range = match scan.existing_used_range {
-            Some((min_row, min_col, max_row, max_col)) => {
-                let row_1 = cell_ref.row + 1;
-                let col_1 = cell_ref.col + 1;
-                row_1 >= min_row && row_1 <= max_row && col_1 >= min_col && col_1 <= max_col
-            }
-            None => false,
-        };
-
-        if in_used_range {
-            effective_patches
-                .cells
-                .insert((cell_ref.row, cell_ref.col), patch.clone());
         }
     }
 

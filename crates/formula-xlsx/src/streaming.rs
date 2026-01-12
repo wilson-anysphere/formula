@@ -806,7 +806,8 @@ pub(crate) struct WorksheetXmlMetadata {
 
 fn scan_worksheet_xml_metadata<R: Read>(
     input: R,
-) -> Result<WorksheetXmlMetadata, StreamingPatchError> {
+    target_cells: Option<&HashSet<(u32, u32)>>,
+) -> Result<(WorksheetXmlMetadata, HashSet<(u32, u32)>), StreamingPatchError> {
     let mut reader = Reader::from_reader(BufReader::new(input));
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
@@ -816,6 +817,8 @@ fn scan_worksheet_xml_metadata<R: Read>(
     let mut has_sheet_pr = false;
     let mut sheet_uses_row_spans = false;
     let mut used_range: Option<PatchBounds> = None;
+    let mut found_target_cells: HashSet<(u32, u32)> =
+        HashSet::with_capacity(target_cells.map_or(0, HashSet::len));
 
     loop {
         match reader.read_event_into(&mut buf)? {
@@ -921,6 +924,10 @@ fn scan_worksheet_xml_metadata<R: Read>(
                             max_col_0: cell_ref.col,
                         },
                     });
+                    if target_cells.is_some_and(|targets| targets.contains(&(cell_ref.row, cell_ref.col)))
+                    {
+                        found_target_cells.insert((cell_ref.row, cell_ref.col));
+                    }
                 }
             }
             Event::Eof => break,
@@ -929,12 +936,15 @@ fn scan_worksheet_xml_metadata<R: Read>(
         buf.clear();
     }
 
-    Ok(WorksheetXmlMetadata {
-        has_dimension,
-        has_sheet_pr,
-        sheet_uses_row_spans,
-        existing_used_range: used_range,
-    })
+    Ok((
+        WorksheetXmlMetadata {
+            has_dimension,
+            has_sheet_pr,
+            sheet_uses_row_spans,
+            existing_used_range: used_range,
+        },
+        found_target_cells,
+    ))
 }
 
 fn patch_wants_shared_string(
@@ -1013,7 +1023,23 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
     let (shared_strings_part, shared_string_indices, shared_strings_updated) =
         plan_shared_strings(archive, patches_by_part, pre_read_parts)?;
 
+    let mut non_material_targets_by_part: HashMap<String, HashSet<(u32, u32)>> = HashMap::new();
+    for (part, patches) in patches_by_part {
+        let mut targets = HashSet::new();
+        for patch in patches {
+            if patch_is_material_for_insertion(patch) {
+                continue;
+            }
+            targets.insert((patch.cell.row, patch.cell.col));
+        }
+        if !targets.is_empty() {
+            non_material_targets_by_part.insert(part.clone(), targets);
+        }
+    }
+
     let mut worksheet_metadata_by_part: HashMap<String, WorksheetXmlMetadata> = HashMap::new();
+    let mut existing_non_material_cells_by_part: HashMap<String, HashSet<(u32, u32)>> =
+        HashMap::new();
     for part in patches_by_part.keys() {
         let mut file = match archive.by_name(part) {
             Ok(file) => file,
@@ -1022,36 +1048,30 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
             }
             Err(err) => return Err(err.into()),
         };
-        worksheet_metadata_by_part.insert(part.clone(), scan_worksheet_xml_metadata(&mut file)?);
+        let target_cells = non_material_targets_by_part.get(part);
+        let (metadata, found_target_cells) =
+            scan_worksheet_xml_metadata(&mut file, target_cells)?;
+        worksheet_metadata_by_part.insert(part.clone(), metadata);
+        if !found_target_cells.is_empty() {
+            existing_non_material_cells_by_part.insert(part.clone(), found_target_cells);
+        }
     }
 
     // Drop patches that are guaranteed to be a no-op:
-    // a non-material patch targeting a cell outside the sheet's existing used-range cannot
-    // reference an existing `<c>` element, so it should not force us to rewrite the worksheet part.
+    // a non-material patch targeting a missing cell cannot reference an existing `<c>` element,
+    // and since it will not insert a new cell, it cannot change the worksheet XML.
     let mut effective_patches_by_part: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
     for (part, patches) in patches_by_part {
-        let used_range = worksheet_metadata_by_part
-            .get(part)
-            .copied()
-            .unwrap_or_default()
-            .existing_used_range;
+        let existing_cells = existing_non_material_cells_by_part.get(part);
         let mut filtered = Vec::new();
         for patch in patches {
             if patch_is_material_for_insertion(patch) {
                 filtered.push(patch.clone());
                 continue;
             }
-
-            let in_used_range = match used_range {
-                Some(bounds) => {
-                    patch.cell.row >= bounds.min_row_0
-                        && patch.cell.row <= bounds.max_row_0
-                        && patch.cell.col >= bounds.min_col_0
-                        && patch.cell.col <= bounds.max_col_0
-                }
-                None => false,
-            };
-            if in_used_range {
+            if existing_cells
+                .is_some_and(|cells| cells.contains(&(patch.cell.row, patch.cell.col)))
+            {
                 filtered.push(patch.clone());
             }
         }
