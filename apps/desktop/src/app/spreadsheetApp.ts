@@ -3907,7 +3907,8 @@ export class SpreadsheetApp {
       // without running the constructor/field initializers, so `this.document` may be undefined.
       const ids = this.document?.getSheetIds?.() ?? [];
       if (ids.includes("Sheet1")) return "Sheet1";
-      return ids[0] ?? this.sheetId || "Sheet1";
+      // When mixing `??` and `||`, parenthesize explicitly to avoid precedence pitfalls.
+      return ids[0] ?? (this.sheetId || "Sheet1");
     })();
 
     for (const comment of this.commentManager.listAll()) {
@@ -8090,9 +8091,9 @@ export class SpreadsheetApp {
       const sheetCache = this.computedValuesByCoord.get(sheetId);
       if (sheetCache && cell.col >= 0 && cell.col < COMPUTED_COORD_COL_STRIDE && cell.row >= 0) {
         const key = cell.row * COMPUTED_COORD_COL_STRIDE + cell.col;
-        if (sheetCache.has(key)) {
-          return sheetCache.get(key) ?? null;
-        }
+        const cached = sheetCache.get(key);
+        // `computedValuesByCoord` never stores `undefined`; a missing entry always returns undefined.
+        if (cached !== undefined) return cached;
       }
     }
 
@@ -8273,9 +8274,9 @@ export class SpreadsheetApp {
       const sheetCache = this.computedValuesByCoord.get(sheetId);
       if (sheetCache && cell.col >= 0 && cell.col < COMPUTED_COORD_COL_STRIDE && cell.row >= 0) {
         const key = cell.row * COMPUTED_COORD_COL_STRIDE + cell.col;
-        if (sheetCache.has(key)) {
-          return sheetCache.get(key) ?? null;
-        }
+        const cached = sheetCache.get(key);
+        // `computedValuesByCoord` never stores `undefined`; a missing entry always returns undefined.
+        if (cached !== undefined) return cached;
       }
     }
 
