@@ -236,7 +236,7 @@ pub struct XlsxDocument {
     parts: BTreeMap<String, Vec<u8>>,
     /// Shared strings in the order they appeared in the file (if present).
     shared_strings: Vec<RichText>,
-    meta: XlsxMeta,
+    pub meta: XlsxMeta,
     calc_affecting_edits: bool,
 }
 
@@ -361,7 +361,12 @@ impl XlsxDocument {
             }
         }
 
-        if meta.value_kind.is_none() && meta.raw_value.is_none() && meta.formula.is_none() {
+        if meta.value_kind.is_none()
+            && meta.raw_value.is_none()
+            && meta.vm.is_none()
+            && meta.cm.is_none()
+            && meta.formula.is_none()
+        {
             self.meta.cell_meta.remove(&(sheet_id, cell));
         }
 
@@ -404,7 +409,11 @@ impl XlsxDocument {
                         }
                     }
 
-                    meta.formula.is_none() && meta.value_kind.is_none() && meta.raw_value.is_none()
+                    meta.formula.is_none()
+                        && meta.value_kind.is_none()
+                        && meta.raw_value.is_none()
+                        && meta.vm.is_none()
+                        && meta.cm.is_none()
                 }
                 None => false,
             };
