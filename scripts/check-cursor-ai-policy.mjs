@@ -273,7 +273,10 @@ function listGitTrackedFiles(rootDir) {
  */
 function gitGrepMatches(rootDir, needles) {
   try {
-    const args = ["-C", rootDir, "grep", "-I", "-n", "-i"];
+    // Use fixed-string matching (`-F`) since we're looking for literal substrings,
+    // not regex patterns. `-z` makes the output robust against filenames that
+    // contain `:` (colon), which would otherwise break `file:line:text` parsing.
+    const args = ["-C", rootDir, "grep", "-I", "-n", "-i", "-F", "-z"];
     for (const needle of needles) {
       args.push("-e", needle);
     }
@@ -289,21 +292,19 @@ function gitGrepMatches(rootDir, needles) {
     if (proc.status !== 0) return null;
 
     const out = String(proc.stdout || "");
-    if (!out.trim()) return [];
+    if (!out) return [];
 
     /** @type {Array<{ file: string, line: number, text: string }>} */
     const matches = [];
     const lines = out.split(/\r?\n/).filter(Boolean);
     for (const raw of lines) {
-      // Format is: file:line:text
-      const first = raw.indexOf(":");
-      if (first === -1) continue;
-      const second = raw.indexOf(":", first + 1);
-      if (second === -1) continue;
-      const file = raw.slice(0, first);
-      const line = Number.parseInt(raw.slice(first + 1, second), 10);
+      // With `-z -n`, format is: `${file}\0${line}\0${text}`.
+      const parts = raw.split("\0");
+      if (parts.length < 3) continue;
+      const file = parts[0];
+      const line = Number.parseInt(parts[1] ?? "", 10);
       if (!Number.isFinite(line)) continue;
-      const text = raw.slice(second + 1);
+      const text = parts.slice(2).join("\0");
       matches.push({ file, line, text });
     }
     return matches;
