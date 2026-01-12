@@ -288,6 +288,52 @@ describe("tauri capability event permissions", () => {
       Array.isArray(allowEmit?.allow) ? allowEmit.allow.map((entry: any) => entry?.event).filter(Boolean) : [],
     );
 
+    // Rust-side event usage:
+    // - `.emit(...)` => must be allowlisted for the frontend to listen
+    // - `.listen(...)` / `.listen_global(...)` => must be allowlisted for the frontend to emit
+    {
+      const rustFiles = runtimeFiles.filter((filePath) => path.extname(filePath) === ".rs");
+      const rustText = rustFiles.map((p) => readFileSync(p, "utf8")).join("\n");
+
+      const constMap = new Map<string, string>();
+      for (const match of rustText.matchAll(/\b(?:pub\s+)?const\s+([A-Z0-9_]+)\s*:\s*&str\s*=\s*"([^"]+)"/g)) {
+        constMap.set(match[1], match[2]);
+      }
+
+      const rustEmits = new Set<string>();
+      for (const match of rustText.matchAll(/\.emit\s*\(\s*"([^"]+)"/g)) {
+        rustEmits.add(match[1]);
+      }
+      for (const match of rustText.matchAll(/\.emit\s*\(\s*([A-Z0-9_]+)\s*,/g)) {
+        const value = constMap.get(match[1]);
+        if (value) rustEmits.add(value);
+      }
+
+      for (const event of rustEmits) {
+        expect(allowListenEvents.has(event)).toBe(true);
+      }
+
+      const rustListens = new Set<string>();
+      for (const match of rustText.matchAll(/\.listen\s*\(\s*"([^"]+)"/g)) {
+        rustListens.add(match[1]);
+      }
+      for (const match of rustText.matchAll(/\.listen\s*\(\s*([A-Z0-9_]+)\s*,/g)) {
+        const value = constMap.get(match[1]);
+        if (value) rustListens.add(value);
+      }
+      for (const match of rustText.matchAll(/\.listen_global\s*\(\s*"([^"]+)"/g)) {
+        rustListens.add(match[1]);
+      }
+      for (const match of rustText.matchAll(/\.listen_global\s*\(\s*([A-Z0-9_]+)\s*,/g)) {
+        const value = constMap.get(match[1]);
+        if (value) rustListens.add(value);
+      }
+
+      for (const event of rustListens) {
+        expect(allowEmitEvents.has(event)).toBe(true);
+      }
+    }
+
     // Some subsystems (e.g. the updater UI) `listen(...)` via an indirection (iterating over a
     // constant list of event names) instead of calling `listen("...")` directly. Keep those
     // allowlisted too.
