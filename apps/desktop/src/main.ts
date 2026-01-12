@@ -49,7 +49,9 @@ import { applyMacroCellUpdates } from "./macros/applyUpdates";
 import { fireWorkbookBeforeCloseBestEffort, installVbaEventMacros } from "./macros/event_macros";
 import { mountScriptEditorPanel } from "./panels/script-editor/index.js";
 import { installUnsavedChangesPrompt } from "./document/index.js";
+import type { DocumentController } from "./document/documentController.js";
 import { DocumentControllerWorkbookAdapter } from "./scripting/documentControllerWorkbookAdapter.js";
+import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize } from "./formatting/selectionSizeGuard.js";
 import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/find-replace/index.js";
 import { t, tWithVars } from "./i18n/index.js";
 import { getOpenFileFilters } from "./file_dialog_filters.js";
@@ -99,7 +101,8 @@ import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js
 import { CommandRegistry } from "./extensions/commandRegistry.js";
 import { createCommandPalette } from "./command-palette/index.js";
 import { registerBuiltinCommands } from "./commands/registerBuiltinCommands.js";
-import type { Range, SelectionState } from "./selection/types";
+import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
+import type { GridLimits, Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
 import { getPasteSpecialMenuItems } from "./clipboard/pasteSpecial.js";
 import { WorkbookSheetStore, generateDefaultSheetName, validateSheetName } from "./sheets/workbookSheetStore";
@@ -698,21 +701,46 @@ window.addEventListener("formula:zoom-changed", () => {
   persistCurrentSharedGridZoom();
 });
 
-function normalizeSelectionRange(range: Range): CellRange {
+function getGridLimitsForFormatting(): GridLimits {
+  const anyApp = app as any;
+  const raw = anyApp.limits ?? { maxRows: 10_000, maxCols: 200 };
+  const maxRows = Number.isInteger(raw?.maxRows) && raw.maxRows > 0 ? raw.maxRows : 10_000;
+  const maxCols = Number.isInteger(raw?.maxCols) && raw.maxCols > 0 ? raw.maxCols : 200;
+  return { maxRows, maxCols };
+}
+
+function normalizeSelectionRange(range: Range): { startRow: number; endRow: number; startCol: number; endCol: number } {
   const startRow = Math.min(range.startRow, range.endRow);
   const endRow = Math.max(range.startRow, range.endRow);
   const startCol = Math.min(range.startCol, range.endCol);
   const endCol = Math.max(range.startCol, range.endCol);
-  return { start: { row: startRow, col: startCol }, end: { row: endRow, col: endCol } };
+  return { startRow, endRow, startCol, endCol };
 }
 
 function selectionRangesForFormatting(): CellRange[] {
+  const limits = getGridLimitsForFormatting();
   const ranges = app.getSelectionRanges();
   if (ranges.length === 0) {
     const cell = app.getActiveCell();
     return [{ start: { row: cell.row, col: cell.col }, end: { row: cell.row, col: cell.col } }];
   }
-  return ranges.map(normalizeSelectionRange);
+
+  // When the UI selection is a full row/column/sheet *within the current grid limits*,
+  // expand it to the canonical Excel bounds so DocumentController can use fast layered
+  // formatting paths (sheet/row/col style ids) without enumerating every cell.
+  return ranges.map((range) => {
+    const r = normalizeSelectionRange(range);
+    const isFullColBand = r.startRow === 0 && r.endRow === limits.maxRows - 1;
+    const isFullRowBand = r.startCol === 0 && r.endCol === limits.maxCols - 1;
+
+    return {
+      start: { row: r.startRow, col: r.startCol },
+      end: {
+        row: isFullColBand ? DEFAULT_GRID_LIMITS.maxRows - 1 : r.endRow,
+        col: isFullRowBand ? DEFAULT_GRID_LIMITS.maxCols - 1 : r.endCol,
+      },
+    };
+  });
 }
 
 function rgbHexToArgb(rgb: string): string | null {
@@ -721,21 +749,38 @@ function rgbHexToArgb(rgb: string): string | null {
   return ["#", "FF", rgb.slice(1)].join("");
 }
 
-function applyToSelection(
+function applyFormattingToSelection(
   label: string,
-  fn: (sheetId: string, ranges: CellRange[]) => void,
+  fn: (doc: DocumentController, sheetId: string, ranges: CellRange[]) => void,
   options: { forceBatch?: boolean } = {},
 ): void {
   const doc = app.getDocument();
   const sheetId = app.getCurrentSheetId();
+  const selection = app.getSelectionRanges();
+  const limits = getGridLimitsForFormatting();
+  const decision = evaluateFormattingSelectionSize(selection, limits, { maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT });
+
+  if (!decision.allowed) {
+    showToast("Selection is too large to format. Try selecting fewer cells or an entire row/column.", "warning");
+    return;
+  }
+
   const ranges = selectionRangesForFormatting();
   const shouldBatch = Boolean(options.forceBatch) || ranges.length > 1;
 
   if (shouldBatch) doc.beginBatch({ label });
+  let committed = false;
   try {
-    fn(sheetId, ranges);
+    fn(doc, sheetId, ranges);
+    committed = true;
   } finally {
-    if (shouldBatch) doc.endBatch();
+    if (!shouldBatch) {
+      // no-op
+    } else if (committed) {
+      doc.endBatch();
+    } else {
+      doc.cancelBatch();
+    }
   }
   app.focus();
 }
@@ -762,7 +807,7 @@ function openColorPicker(
     () => {
       const argb = rgbHexToArgb(input.value);
       if (!argb) return;
-      applyToSelection(label, (sheetId, ranges) => apply(sheetId, ranges, argb));
+      applyFormattingToSelection(label, (_doc, sheetId, ranges) => apply(sheetId, ranges, argb));
     },
     { once: true },
   );
@@ -1099,42 +1144,23 @@ window.addEventListener("keydown", (e) => {
 
   const key = e.key ?? "";
   const keyLower = key.toLowerCase();
-  const sheetId = app.getCurrentSheetId();
-  const doc = app.getDocument();
-  const ranges = selectionRangesForFormatting();
-
-  const runWithOptionalBatch = (label: string, action: () => void): void => {
-    const useBatch = ranges.length > 1;
-    if (useBatch) doc.beginBatch({ label });
-    let committed = false;
-    try {
-      action();
-      committed = true;
-    } finally {
-      if (!useBatch) return;
-      if (committed) doc.endBatch();
-      else doc.cancelBatch();
-    }
-  };
 
   // --- Core formatting (Excel shortcuts) ---------------------------------------
   if (!e.shiftKey) {
     if (keyLower === "b") {
       e.preventDefault();
-      runWithOptionalBatch("Bold", () => toggleBold(doc, sheetId, ranges));
-      app.focus();
+      applyFormattingToSelection("Bold", (doc, sheetId, ranges) => toggleBold(doc, sheetId, ranges));
       return;
     }
-    if (keyLower === "i") {
+    // IMPORTANT: Cmd+I is reserved for the AI sidebar. Only bind italic to Ctrl+I.
+    if (keyLower === "i" && e.ctrlKey && !e.metaKey) {
       e.preventDefault();
-      runWithOptionalBatch("Italic", () => toggleItalic(doc, sheetId, ranges));
-      app.focus();
+      applyFormattingToSelection("Italic", (doc, sheetId, ranges) => toggleItalic(doc, sheetId, ranges));
       return;
     }
     if (keyLower === "u") {
       e.preventDefault();
-      runWithOptionalBatch("Underline", () => toggleUnderline(doc, sheetId, ranges));
-      app.focus();
+      applyFormattingToSelection("Underline", (doc, sheetId, ranges) => toggleUnderline(doc, sheetId, ranges));
       return;
     }
   }
@@ -1153,8 +1179,7 @@ window.addEventListener("keydown", (e) => {
       e.preventDefault();
       const label =
         preset === "currency" ? "Currency format" : preset === "percent" ? "Percentage format" : "Date format";
-      runWithOptionalBatch(label, () => applyNumberFormatPreset(doc, sheetId, ranges, preset));
-      app.focus();
+      applyFormattingToSelection(label, (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, preset));
     }
   }
 });
@@ -3135,33 +3160,16 @@ if (
     },
   });
 
-  const applyToSelectionInCommandBatch = (
-    label: string,
-    apply: (sheetId: string, ranges: CellRange[]) => void,
-  ): void => {
-    const doc = app.getDocument();
-    const sheetId = app.getCurrentSheetId();
-    const ranges = selectionRangesForFormatting();
-    doc.beginBatch({ label });
-    let committed = false;
-    try {
-      apply(sheetId, ranges);
-      committed = true;
-    } finally {
-      if (committed) doc.endBatch();
-      else doc.cancelBatch();
-    }
-    app.focus();
-  };
-
   const commandCategoryFormat = t("commandCategory.format");
 
   commandRegistry.registerBuiltinCommand(
     "format.toggleBold",
     t("command.format.toggleBold"),
     () =>
-      applyToSelectionInCommandBatch(t("command.format.toggleBold"), (sheetId, ranges) =>
-        toggleBold(app.getDocument(), sheetId, ranges),
+      applyFormattingToSelection(
+        t("command.format.toggleBold"),
+        (doc, sheetId, ranges) => toggleBold(doc, sheetId, ranges),
+        { forceBatch: true },
       ),
     { category: commandCategoryFormat },
   );
@@ -3170,8 +3178,10 @@ if (
     "format.toggleItalic",
     t("command.format.toggleItalic"),
     () =>
-      applyToSelectionInCommandBatch(t("command.format.toggleItalic"), (sheetId, ranges) =>
-        toggleItalic(app.getDocument(), sheetId, ranges),
+      applyFormattingToSelection(
+        t("command.format.toggleItalic"),
+        (doc, sheetId, ranges) => toggleItalic(doc, sheetId, ranges),
+        { forceBatch: true },
       ),
     { category: commandCategoryFormat },
   );
@@ -3180,8 +3190,10 @@ if (
     "format.toggleUnderline",
     t("command.format.toggleUnderline"),
     () =>
-      applyToSelectionInCommandBatch(t("command.format.toggleUnderline"), (sheetId, ranges) =>
-        toggleUnderline(app.getDocument(), sheetId, ranges),
+      applyFormattingToSelection(
+        t("command.format.toggleUnderline"),
+        (doc, sheetId, ranges) => toggleUnderline(doc, sheetId, ranges),
+        { forceBatch: true },
       ),
     { category: commandCategoryFormat },
   );
@@ -3190,8 +3202,10 @@ if (
     "format.numberFormat.currency",
     t("command.format.numberFormat.currency"),
     () =>
-      applyToSelectionInCommandBatch(t("command.format.numberFormat.currency"), (sheetId, ranges) =>
-        applyNumberFormatPreset(app.getDocument(), sheetId, ranges, "currency"),
+      applyFormattingToSelection(
+        t("command.format.numberFormat.currency"),
+        (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "currency"),
+        { forceBatch: true },
       ),
     { category: commandCategoryFormat },
   );
@@ -3200,8 +3214,10 @@ if (
     "format.numberFormat.percent",
     t("command.format.numberFormat.percent"),
     () =>
-      applyToSelectionInCommandBatch(t("command.format.numberFormat.percent"), (sheetId, ranges) =>
-        applyNumberFormatPreset(app.getDocument(), sheetId, ranges, "percent"),
+      applyFormattingToSelection(
+        t("command.format.numberFormat.percent"),
+        (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "percent"),
+        { forceBatch: true },
       ),
     { category: commandCategoryFormat },
   );
@@ -3210,8 +3226,10 @@ if (
     "format.numberFormat.date",
     t("command.format.numberFormat.date"),
     () =>
-      applyToSelectionInCommandBatch(t("command.format.numberFormat.date"), (sheetId, ranges) =>
-        applyNumberFormatPreset(app.getDocument(), sheetId, ranges, "date"),
+      applyFormattingToSelection(
+        t("command.format.numberFormat.date"),
+        (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "date"),
+        { forceBatch: true },
       ),
     { category: commandCategoryFormat },
   );
@@ -3239,11 +3257,15 @@ if (
               numberFormat: NUMBER_FORMATS[choice],
             };
 
-      applyToSelectionInCommandBatch("Format Cells", (sheetId, ranges) => {
-        for (const range of ranges) {
-          app.getDocument().setRangeFormat(sheetId, range, patch);
-        }
-      });
+      applyFormattingToSelection(
+        "Format Cells",
+        (doc, sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, patch, { label: "Format Cells" });
+          }
+        },
+        { forceBatch: true },
+      );
     },
     { category: commandCategoryFormat },
   );
@@ -3317,16 +3339,20 @@ if (
       // Font style toggles.
       if (!e.shiftKey && keyLower === "b") {
         e.preventDefault();
+        e.stopPropagation();
         executeCommand("format.toggleBold");
         return;
       }
-      if (!e.shiftKey && keyLower === "i") {
+      // IMPORTANT: Cmd+I is reserved for the AI sidebar. Only bind italic to Ctrl+I.
+      if (!e.shiftKey && keyLower === "i" && e.ctrlKey && !e.metaKey) {
         e.preventDefault();
+        e.stopPropagation();
         executeCommand("format.toggleItalic");
         return;
       }
       if (!e.shiftKey && keyLower === "u") {
         e.preventDefault();
+        e.stopPropagation();
         executeCommand("format.toggleUnderline");
         return;
       }
@@ -3334,6 +3360,7 @@ if (
       // Number formats.
       if (!e.shiftKey && (key === "1" || e.code === "Digit1")) {
         e.preventDefault();
+        e.stopPropagation();
         executeCommand("format.openFormatCells");
         return;
       }
@@ -3349,7 +3376,9 @@ if (
 
         if (preset) {
           e.preventDefault();
+          e.stopPropagation();
           executeCommand(`format.numberFormat.${preset}`);
+          return;
         }
       }
     },
@@ -5373,16 +5402,14 @@ mountRibbon(ribbonRoot, {
         return;
       }
       case "home.font.bold":
-        applyToSelection("Bold", (sheetId, ranges) => toggleBold(app.getDocument(), sheetId, ranges, { next: pressed }));
+        applyFormattingToSelection("Bold", (doc, sheetId, ranges) => toggleBold(doc, sheetId, ranges, { next: pressed }));
         return;
       case "home.font.italic":
-        applyToSelection("Italic", (sheetId, ranges) =>
-          toggleItalic(app.getDocument(), sheetId, ranges, { next: pressed }),
-        );
+        applyFormattingToSelection("Italic", (doc, sheetId, ranges) => toggleItalic(doc, sheetId, ranges, { next: pressed }));
         return;
       case "home.font.underline":
-        applyToSelection("Underline", (sheetId, ranges) =>
-          toggleUnderline(app.getDocument(), sheetId, ranges, { next: pressed }),
+        applyFormattingToSelection("Underline", (doc, sheetId, ranges) =>
+          toggleUnderline(doc, sheetId, ranges, { next: pressed }),
         );
         return;
       case "home.font.strikethrough":
@@ -5394,7 +5421,7 @@ mountRibbon(ribbonRoot, {
         });
         return;
       case "home.alignment.wrapText":
-        applyToSelection("Wrap", (sheetId, ranges) => toggleWrap(app.getDocument(), sheetId, ranges, { next: pressed }));
+        applyFormattingToSelection("Wrap", (doc, sheetId, ranges) => toggleWrap(doc, sheetId, ranges, { next: pressed }));
         return;
       default:
         return;
@@ -5546,7 +5573,7 @@ mountRibbon(ribbonRoot, {
     if (commandId.startsWith(fontSizePrefix)) {
       const size = Number(commandId.slice(fontSizePrefix.length));
       if (!Number.isFinite(size) || size <= 0) return;
-      applyToSelection("Font size", (sheetId, ranges) => setFontSize(doc, sheetId, ranges, size));
+      applyFormattingToSelection("Font size", (_doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, size));
       return;
     }
 
@@ -5575,7 +5602,7 @@ mountRibbon(ribbonRoot, {
       })();
 
       if (preset === "none" || preset === "noFill") {
-        applyToSelection("Fill color", (sheetId, ranges) => {
+        applyFormattingToSelection("Fill color", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { fill: null }, { label: "Fill color" });
           }
@@ -5584,7 +5611,7 @@ mountRibbon(ribbonRoot, {
       }
 
       if (argb) {
-        applyToSelection("Fill color", (sheetId, ranges) => setFillColor(doc, sheetId, ranges, argb));
+        applyFormattingToSelection("Fill color", (_doc, sheetId, ranges) => setFillColor(doc, sheetId, ranges, argb));
       }
       return;
     }
@@ -5612,7 +5639,7 @@ mountRibbon(ribbonRoot, {
       })();
 
       if (preset === "automatic") {
-        applyToSelection("Font color", (sheetId, ranges) => {
+        applyFormattingToSelection("Font color", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { font: { color: null } }, { label: "Font color" });
           }
@@ -5621,7 +5648,7 @@ mountRibbon(ribbonRoot, {
       }
 
       if (argb) {
-        applyToSelection("Font color", (sheetId, ranges) => setFontColor(doc, sheetId, ranges, argb));
+        applyFormattingToSelection("Font color", (_doc, sheetId, ranges) => setFontColor(doc, sheetId, ranges, argb));
       }
       return;
     }
@@ -5630,7 +5657,7 @@ mountRibbon(ribbonRoot, {
     if (commandId.startsWith(clearPrefix)) {
       const kind = commandId.slice(clearPrefix.length);
       if (kind === "clearFormats") {
-        applyToSelection("Clear formats", (sheetId, ranges) => {
+        applyFormattingToSelection("Clear formats", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, null, { label: "Clear formats" });
           }
@@ -5638,7 +5665,7 @@ mountRibbon(ribbonRoot, {
         return;
       }
       if (kind === "clearContents") {
-        applyToSelection("Clear contents", (sheetId, ranges) => {
+        applyFormattingToSelection("Clear contents", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.clearRange(sheetId, range, { label: "Clear contents" });
           }
@@ -5646,9 +5673,9 @@ mountRibbon(ribbonRoot, {
         return;
       }
       if (kind === "clearAll") {
-        applyToSelection(
+        applyFormattingToSelection(
           "Clear all",
-          (sheetId, ranges) => {
+          (doc, sheetId, ranges) => {
             for (const range of ranges) {
               doc.clearRange(sheetId, range, { label: "Clear all" });
               doc.setRangeFormat(sheetId, range, null, { label: "Clear all" });
@@ -5666,7 +5693,7 @@ mountRibbon(ribbonRoot, {
       const kind = commandId.slice(bordersPrefix.length);
       const defaultBorderColor = ["#", "FF", "000000"].join("");
       if (kind === "none") {
-        applyToSelection("Borders", (sheetId, ranges) => {
+        applyFormattingToSelection("Borders", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { border: null }, { label: "Borders" });
           }
@@ -5675,16 +5702,16 @@ mountRibbon(ribbonRoot, {
       }
 
       if (kind === "all") {
-        applyToSelection("Borders", (sheetId, ranges) => applyAllBorders(doc, sheetId, ranges));
+        applyFormattingToSelection("Borders", (_doc, sheetId, ranges) => applyAllBorders(doc, sheetId, ranges));
         return;
       }
 
       if (kind === "outside" || kind === "thickBox") {
         const edgeStyle = kind === "thickBox" ? "thick" : "thin";
         const edge = { style: edgeStyle, color: defaultBorderColor };
-        applyToSelection(
+        applyFormattingToSelection(
           "Borders",
-          (sheetId, ranges) => {
+          (doc, sheetId, ranges) => {
             for (const range of ranges) {
               const startRow = range.start.row;
               const endRow = range.end.row;
@@ -5746,9 +5773,9 @@ mountRibbon(ribbonRoot, {
       })();
 
       if (borderPatch) {
-        applyToSelection(
+        applyFormattingToSelection(
           "Borders",
-          (sheetId, ranges) => {
+          (doc, sheetId, ranges) => {
             for (const range of ranges) {
               const startRow = range.start.row;
               const endRow = range.end.row;
@@ -5783,7 +5810,7 @@ mountRibbon(ribbonRoot, {
     if (commandId.startsWith(numberFormatPrefix)) {
       const kind = commandId.slice(numberFormatPrefix.length);
       if (kind === "general") {
-        applyToSelection("Number format", (sheetId, ranges) => {
+        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { numberFormat: null }, { label: "Number format" });
           }
@@ -5791,7 +5818,7 @@ mountRibbon(ribbonRoot, {
         return;
       }
       if (kind === "number") {
-        applyToSelection("Number format", (sheetId, ranges) => {
+        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { numberFormat: "0.00" }, { label: "Number format" });
           }
@@ -5799,15 +5826,17 @@ mountRibbon(ribbonRoot, {
         return;
       }
       if (kind === "currency" || kind === "accounting") {
-        applyToSelection("Number format", (sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "currency"));
+        applyFormattingToSelection("Number format", (_doc, sheetId, ranges) =>
+          applyNumberFormatPreset(doc, sheetId, ranges, "currency"),
+        );
         return;
       }
       if (kind === "percentage") {
-        applyToSelection("Number format", (sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "percent"));
+        applyFormattingToSelection("Number format", (_doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "percent"));
         return;
       }
       if (kind === "shortDate" || kind === "longDate") {
-        applyToSelection("Number format", (sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "date"));
+        applyFormattingToSelection("Number format", (_doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "date"));
         return;
       }
       return;
@@ -5816,7 +5845,9 @@ mountRibbon(ribbonRoot, {
     const accountingPrefix = "home.number.accounting.";
     if (commandId.startsWith(accountingPrefix)) {
       // For now, treat all accounting currency picks as the default currency preset.
-      applyToSelection("Number format", (sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "currency"));
+      applyFormattingToSelection("Number format", (_doc, sheetId, ranges) =>
+        applyNumberFormatPreset(doc, sheetId, ranges, "currency"),
+      );
       return;
     }
 
@@ -6098,7 +6129,7 @@ mountRibbon(ribbonRoot, {
       case "home.font.borders":
         // This command is a dropdown with menu items; the top-level command is not expected
         // to fire when the menu is present. Keep this as a fallback.
-        applyToSelection("Borders", (sheetId, ranges) => applyAllBorders(doc, sheetId, ranges));
+        applyFormattingToSelection("Borders", (_doc, sheetId, ranges) => applyAllBorders(doc, sheetId, ranges));
         return;
       case "home.font.fontColor":
         openColorPicker(fontColorPicker, "Font color", (sheetId, ranges, argb) =>
@@ -6132,7 +6163,7 @@ mountRibbon(ribbonRoot, {
             { placeHolder: "Font size" },
           );
           if (picked == null) return;
-          applyToSelection("Font size", (sheetId, ranges) => setFontSize(doc, sheetId, ranges, picked));
+          applyFormattingToSelection("Font size", (_doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, picked));
         })();
         return;
 
@@ -6140,7 +6171,7 @@ mountRibbon(ribbonRoot, {
         const current = activeCellFontSizePt();
         const next = stepFontSize(current, "increase");
         if (next !== current) {
-          applyToSelection("Font size", (sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
+          applyFormattingToSelection("Font size", (_doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
         }
         return;
       }
@@ -6149,23 +6180,23 @@ mountRibbon(ribbonRoot, {
         const current = activeCellFontSizePt();
         const next = stepFontSize(current, "decrease");
         if (next !== current) {
-          applyToSelection("Font size", (sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
+          applyFormattingToSelection("Font size", (_doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
         }
         return;
       }
 
       case "home.alignment.alignLeft":
-        applyToSelection("Align left", (sheetId, ranges) => setHorizontalAlign(app.getDocument(), sheetId, ranges, "left"));
+        applyFormattingToSelection("Align left", (doc, sheetId, ranges) => setHorizontalAlign(doc, sheetId, ranges, "left"));
         return;
       case "home.alignment.topAlign":
-        applyToSelection("Vertical align", (sheetId, ranges) => {
+        applyFormattingToSelection("Vertical align", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { alignment: { vertical: "top" } }, { label: "Vertical align" });
           }
         });
         return;
       case "home.alignment.middleAlign":
-        applyToSelection("Vertical align", (sheetId, ranges) => {
+        applyFormattingToSelection("Vertical align", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             // Spreadsheet vertical alignment uses "center" (Excel/OOXML); the grid maps this to CSS middle.
             doc.setRangeFormat(sheetId, range, { alignment: { vertical: "center" } }, { label: "Vertical align" });
@@ -6173,21 +6204,17 @@ mountRibbon(ribbonRoot, {
         });
         return;
       case "home.alignment.bottomAlign":
-        applyToSelection("Vertical align", (sheetId, ranges) => {
+        applyFormattingToSelection("Vertical align", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { alignment: { vertical: "bottom" } }, { label: "Vertical align" });
           }
         });
         return;
       case "home.alignment.center":
-        applyToSelection("Align center", (sheetId, ranges) =>
-          setHorizontalAlign(app.getDocument(), sheetId, ranges, "center"),
-        );
+        applyFormattingToSelection("Align center", (doc, sheetId, ranges) => setHorizontalAlign(doc, sheetId, ranges, "center"));
         return;
       case "home.alignment.alignRight":
-        applyToSelection("Align right", (sheetId, ranges) =>
-          setHorizontalAlign(app.getDocument(), sheetId, ranges, "right"),
-        );
+        applyFormattingToSelection("Align right", (doc, sheetId, ranges) => setHorizontalAlign(doc, sheetId, ranges, "right"));
         return;
       case "home.alignment.orientation.angleCounterclockwise":
         applyToSelection("Text orientation", (sheetId, ranges) => {
@@ -6230,20 +6257,16 @@ mountRibbon(ribbonRoot, {
         return;
 
       case "home.number.percent":
-        applyToSelection("Number format", (sheetId, ranges) =>
-          applyNumberFormatPreset(app.getDocument(), sheetId, ranges, "percent"),
-        );
+        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "percent"));
         return;
       case "home.number.accounting":
-        applyToSelection("Number format", (sheetId, ranges) =>
-          applyNumberFormatPreset(app.getDocument(), sheetId, ranges, "currency"),
-        );
+        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "currency"));
         return;
       case "home.number.date":
-        applyToSelection("Number format", (sheetId, ranges) => applyNumberFormatPreset(app.getDocument(), sheetId, ranges, "date"));
+        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "date"));
         return;
       case "home.number.comma":
-        applyToSelection("Number format", (sheetId, ranges) => {
+        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { numberFormat: "#,##0.00" }, { label: "Number format" });
           }
@@ -6252,7 +6275,7 @@ mountRibbon(ribbonRoot, {
       case "home.number.increaseDecimal": {
         const next = stepDecimalPlacesInNumberFormat(activeCellNumberFormat(), "increase");
         if (!next) return;
-        applyToSelection("Number format", (sheetId, ranges) => {
+        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { numberFormat: next }, { label: "Number format" });
           }
@@ -6262,7 +6285,7 @@ mountRibbon(ribbonRoot, {
       case "home.number.decreaseDecimal": {
         const next = stepDecimalPlacesInNumberFormat(activeCellNumberFormat(), "decrease");
         if (!next) return;
-        applyToSelection("Number format", (sheetId, ranges) => {
+        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { numberFormat: next }, { label: "Number format" });
           }
