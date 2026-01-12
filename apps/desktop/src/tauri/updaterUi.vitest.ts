@@ -14,6 +14,7 @@ describe("tauri/updaterUi", () => {
 
     await openUpdateReleasePage({ releaseUrl: "https://example.com/releases/v1.2.3" });
 
+    expect(invoke).toHaveBeenCalledTimes(1);
     expect(invoke).toHaveBeenCalledWith("open_external_url", { url: "https://example.com/releases/v1.2.3" });
   });
 
@@ -23,6 +24,7 @@ describe("tauri/updaterUi", () => {
 
     await openUpdateReleasePage({ version: "1.2.3", body: "Notes" });
 
+    expect(invoke).toHaveBeenCalledTimes(1);
     expect(invoke).toHaveBeenCalledWith("open_external_url", { url: FORMULA_RELEASES_URL });
   });
 });
