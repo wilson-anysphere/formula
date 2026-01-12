@@ -128,6 +128,36 @@ fn open_workbook_model_xlsm() {
 }
 
 #[test]
+fn open_workbook_model_xltx() {
+    let src = fixture_path("xlsx/basic/basic.xlsx");
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let dst = tmp.path().join("basic.xltx");
+    std::fs::copy(&src, &dst).expect("copy xlsx fixture to .xltx");
+
+    let workbook = formula_io::open_workbook_model(&dst).expect("open workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "Sheet1");
+
+    let sheet = workbook.sheet_by_name("Sheet1").expect("Sheet1 missing");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+}
+
+#[test]
+fn open_workbook_model_xltm_and_xlam() {
+    let src = fixture_path("xlsx/macros/basic.xlsm");
+    let tmp = tempfile::tempdir().expect("temp dir");
+
+    for ext in ["xltm", "xlam"] {
+        let dst = tmp.path().join(format!("basic.{ext}"));
+        std::fs::copy(&src, &dst).expect("copy xlsm fixture to template/add-in extension");
+
+        let workbook = formula_io::open_workbook_model(&dst).expect("open workbook model");
+        assert_eq!(workbook.sheets.len(), 1);
+        assert_eq!(workbook.sheets[0].name, "Sheet1");
+    }
+}
+
+#[test]
 fn open_workbook_model_xlsx_ignores_chart_parts() {
     let path = fixture_path("charts/xlsx/basic-chart.xlsx");
     let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");

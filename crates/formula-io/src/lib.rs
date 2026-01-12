@@ -522,8 +522,8 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
 ///
 /// This is a faster, lower-memory alternative to [`open_workbook`] for read-only/import
 /// workflows:
-/// - For `.xlsx`/`.xlsm`, this uses the streaming reader in `formula-xlsx` and avoids inflating
-///   the entire OPC package into memory.
+/// - For `.xlsx`/`.xlsm`/`.xltx`/`.xltm`/`.xlam`, this uses the streaming reader in `formula-xlsx`
+///   and avoids inflating the entire OPC package into memory.
 /// - For `.xls`, this returns the imported model workbook from `formula-xls`.
 /// - For `.xlsb`, this converts the parsed workbook into a model workbook.
 /// - For `.csv`, this imports the CSV into a columnar-backed worksheet.
