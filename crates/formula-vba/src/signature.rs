@@ -1,8 +1,11 @@
 use thiserror::Error;
 
 use crate::{
-    authenticode::extract_vba_signature_signed_digest, compute_vba_project_digest_v3,
-    contents_hash::content_normalized_data, normalized_data::forms_normalized_data, OleError,
+    authenticode::extract_vba_signature_signed_digest,
+    compute_vba_project_digest_v3,
+    contents_hash::content_normalized_data,
+    normalized_data::forms_normalized_data,
+    OleError,
     OleFile,
 };
 
