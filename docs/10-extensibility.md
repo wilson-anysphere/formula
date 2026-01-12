@@ -52,7 +52,7 @@ the primary boundaries are the WebView’s own process sandbox + the extension w
 The desktop implements a small, VS Code-inspired subset of `when` syntax for menus/keybindings:
 
 - Operators: `&&`, `||`, `!`, parentheses
-- Identifiers (context keys): `sheetName`, `cellHasValue`, `selectionType`, `activeCellA1`, …
+- Identifiers (context keys): `sheetName`, `cellHasValue`, `selectionType`, `activeCellA1`, `commentsPanelVisible`, …
 - Equality: `==` / `!=` against string/number/boolean literals
 
 Built-in keys (desktop UI):
@@ -114,6 +114,7 @@ Extensions can contribute menu items via `contributes.menus` in the manifest (an
 Supported menu locations (desktop UI):
 
 - `cell/context` — the grid (cell) context menu (`contributes.menus["cell/context"]`).
+  - Opened via right-click, or keyboard open (Shift+F10 / Menu key).
   - Extension-contributed items are appended after the built-in clipboard/edit items, separated by a divider.
   - While the menu is open, the desktop re-evaluates `when` clauses as context keys change (e.g. selection changes),
     updating enabled/disabled state live.
