@@ -31,6 +31,16 @@
 .PARAMETER ExcelOutPath
   Where to write the temporary Excel results JSON. If omitted, a temporary file is used.
 
+.PARAMETER MaxCases
+  Optional cap for debugging (passed through to run-excel-oracle.ps1).
+
+.PARAMETER IncludeTags
+  Optional tags to include (passed through to run-excel-oracle.ps1). This can be used instead of
+  a subset corpus by pointing SubsetCasesPath at the canonical cases.json and filtering by tag.
+
+.PARAMETER ExcludeTags
+  Optional tags to exclude (passed through to run-excel-oracle.ps1).
+
 .PARAMETER Visible
   Make Excel visible while running (passed through to run-excel-oracle.ps1).
 #>
@@ -41,6 +51,9 @@ param(
   [string]$CasesPath = "tests/compatibility/excel-oracle/cases.json",
   [string]$PinnedDatasetPath = "tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json",
   [string]$ExcelOutPath = "",
+  [int]$MaxCases = 0,
+  [string[]]$IncludeTags = @(),
+  [string[]]$ExcludeTags = @(),
   [switch]$Visible
 )
 
@@ -79,7 +92,7 @@ if (-not (Test-Path -LiteralPath $pinnedFull)) {
 Push-Location $repoRoot
 try {
   Write-Host "Generating Excel results from subset corpus: $subsetCasesFull"
-  & $excelScript -CasesPath $subsetCasesFull -OutPath $excelResultsFull -Visible:$Visible
+  & $excelScript -CasesPath $subsetCasesFull -OutPath $excelResultsFull -Visible:$Visible -MaxCases $MaxCases -IncludeTags $IncludeTags -ExcludeTags $ExcludeTags
 
   Write-Host ""
   Write-Host "Patching pinned dataset (overwrite existing case IDs) -> $pinnedFull"

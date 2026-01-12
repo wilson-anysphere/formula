@@ -221,6 +221,15 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset
   -SubsetCasesPath tools/excel-oracle/odd_coupon_validation_cases.json
 ```
 
+You can also patch by **tag filter** without a dedicated subset file by running against the
+canonical corpus and passing through `-IncludeTags`/`-ExcludeTags`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset-with-excel.ps1 `
+  -SubsetCasesPath tests/compatibility/excel-oracle/cases.json `
+  -IncludeTags odd_coupon_validation
+```
+
 This script preserves existing results, updates the `caseSet.sha256`/`caseSet.count` metadata, and
 only evaluates missing cases via `crates/formula-excel-oracle`.
 
