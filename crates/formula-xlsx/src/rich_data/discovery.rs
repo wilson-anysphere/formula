@@ -9,16 +9,31 @@ use crate::{path, XlsxError, XlsxPackage};
 ///
 /// If `xl/metadata.xml` is absent, this returns an empty vector.
 pub fn discover_rich_data_part_names(pkg: &XlsxPackage) -> Result<Vec<String>, XlsxError> {
-    if pkg.part("xl/metadata.xml").is_none() {
+    const METADATA_PART: &str = "xl/metadata.xml";
+
+    if pkg.part(METADATA_PART).is_none() {
         return Ok(Vec::new());
     }
 
-    let rels_name = crate::openxml::rels_part_name("xl/metadata.xml");
+    let rels_name = crate::openxml::rels_part_name(METADATA_PART);
     let Some(rels_bytes) = pkg.part(&rels_name) else {
         return Ok(Vec::new());
     };
 
-    let relationships = crate::openxml::parse_relationships(rels_bytes)?;
+    let mut out = discover_rich_data_part_names_from_metadata_rels(METADATA_PART, rels_bytes)?;
+    out.retain(|part| pkg.part(part).is_some());
+    Ok(out)
+}
+
+/// Resolve richData-related relationship targets from a metadata relationship part.
+///
+/// This lower-level helper is useful for callers that already have the `metadata.xml.rels` bytes
+/// (e.g. debug tools working with extracted ZIP entries).
+pub fn discover_rich_data_part_names_from_metadata_rels(
+    metadata_part_name: &str,
+    metadata_rels_xml: &[u8],
+) -> Result<Vec<String>, XlsxError> {
+    let relationships = crate::openxml::parse_relationships(metadata_rels_xml)?;
     let mut out = Vec::new();
     for rel in relationships {
         if rel
@@ -30,11 +45,8 @@ pub fn discover_rich_data_part_names(pkg: &XlsxPackage) -> Result<Vec<String>, X
         }
 
         // Relationship targets are URIs and may include fragments; resolve to an OPC part name.
-        let target = path::resolve_target("xl/metadata.xml", &rel.target);
+        let target = path::resolve_target(metadata_part_name, &rel.target);
         if !target.starts_with("xl/richData/") {
-            continue;
-        }
-        if pkg.part(&target).is_none() {
             continue;
         }
         out.push(target);
@@ -117,19 +129,40 @@ mod tests {
     }
 
     #[test]
-    fn ignores_external_relationships_even_when_target_exists() {
+    fn ignores_external_relationships() {
         let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="urn:example:rich-data" Target="richData/rd1.xml" TargetMode="External"/>
+  <Relationship Id="rId1" Type="urn:example:rich-data" Target="richData/present.xml"/>
+  <Relationship Id="rId2" Type="urn:example:rich-data" Target="richData/external.xml" TargetMode="External"/>
 </Relationships>"#;
 
         let pkg = build_package(&[
             ("xl/metadata.xml", br#"<metadata/>"#),
             ("xl/_rels/metadata.xml.rels", rels),
-            ("xl/richData/rd1.xml", br#"<rd/>"#),
+            ("xl/richData/present.xml", br#"<rd/>"#),
+            ("xl/richData/external.xml", br#"<rd/>"#),
         ]);
 
         let discovered = discover_rich_data_part_names(&pkg).expect("discover rich data");
-        assert!(discovered.is_empty());
+        assert_eq!(discovered, vec!["xl/richData/present.xml".to_string()]);
+    }
+
+    #[test]
+    fn resolves_parent_segments_in_targets() {
+        let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="urn:example:rich-data" Target="../richData/rd2.xml#frag"/>
+  <Relationship Id="rId2" Type="urn:example:rich-data" Target="../richData/rd1.xml"/>
+</Relationships>"#;
+
+        let discovered = discover_rich_data_part_names_from_metadata_rels(
+            "xl/metadata/metadata.xml",
+            rels,
+        )
+        .expect("discover rich data");
+        assert_eq!(
+            discovered,
+            vec!["xl/richData/rd1.xml".to_string(), "xl/richData/rd2.xml".to_string()]
+        );
     }
 }

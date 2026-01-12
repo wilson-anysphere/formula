@@ -29,7 +29,7 @@ mod media_parts;
 mod rich_value_images;
 mod worksheet_scan;
 
-pub use discovery::discover_rich_data_part_names;
+pub use discovery::{discover_rich_data_part_names, discover_rich_data_part_names_from_metadata_rels};
 pub use images::resolve_rich_value_image_targets;
 pub use linked_data_types::{extract_linked_data_types, ExtractedLinkedDataType};
 pub use rich_value::parse_rich_values_xml;

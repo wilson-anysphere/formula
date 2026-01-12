@@ -108,7 +108,10 @@ pub use read::{load_from_bytes, read_workbook_model_from_bytes, read_workbook_mo
 #[cfg(not(target_arch = "wasm32"))]
 pub use reader::{read_workbook, read_workbook_from_reader};
 pub use recalc_policy::RecalcPolicy;
-pub use rich_data::{discover_rich_data_part_names, extract_rich_cell_images, RichDataError};
+pub use rich_data::{
+    discover_rich_data_part_names, discover_rich_data_part_names_from_metadata_rels,
+    extract_rich_cell_images, RichDataError,
+};
 pub use rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map;
 pub use rich_data::resolve_rich_value_image_targets;
 pub use rich_data::{ExtractedRichValueImages, RichValueEntry, RichValueIndex, RichValueWarning};
