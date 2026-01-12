@@ -153,6 +153,7 @@ test.describe("Extensions UI integration", () => {
     expect(cspContent).toContain("default-src 'none'");
     expect(cspContent).toContain("connect-src 'none'");
     expect(cspContent).toContain("frame-src 'none'");
+    expect(cspContent).toContain("script-src blob: data:");
 
     const iframeHandle = await page
       .locator('iframe[data-testid="extension-webview-sampleHello.panel"]')
