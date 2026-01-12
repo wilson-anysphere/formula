@@ -1968,6 +1968,68 @@ mod tests {
     }
 
     #[test]
+    fn window1_all_zero_is_ignored_for_window_geometry() {
+        // Some `.xls` writers emit an all-zero WINDOW1 record. We treat this as missing window
+        // geometry metadata so we don't persist a meaningless 0x0 window.
+        let stream = [
+            record(RECORD_WINDOW1, &[0u8; 18]),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(globals.workbook_window, None);
+        assert!(
+            globals.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            globals.warnings
+        );
+    }
+
+    #[test]
+    fn window1_warns_on_truncated_state_flags_but_imports_geometry() {
+        // WINDOW1 with only the first 8 bytes (x/y/width/height). The parser should warn about the
+        // missing grbit/state and active-tab fields, but still import geometry.
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&10i16.to_le_bytes()); // xWn
+        payload.extend_from_slice(&20i16.to_le_bytes()); // yWn
+        payload.extend_from_slice(&30u16.to_le_bytes()); // dxWn
+        payload.extend_from_slice(&40u16.to_le_bytes()); // dyWn
+
+        let stream = [
+            record(RECORD_WINDOW1, &payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(
+            globals.workbook_window,
+            Some(WorkbookWindow {
+                x: Some(10),
+                y: Some(20),
+                width: Some(30),
+                height: Some(40),
+                state: None
+            })
+        );
+        assert!(
+            globals
+                .warnings
+                .iter()
+                .any(|w| w.contains("WINDOW1 record too short to read window state flags")),
+            "expected WINDOW1-state warning, got {:?}",
+            globals.warnings
+        );
+        assert!(
+            globals
+                .warnings
+                .iter()
+                .any(|w| w.contains("WINDOW1 record too short to read active tab index")),
+            "expected WINDOW1-active-tab warning, got {:?}",
+            globals.warnings
+        );
+    }
+
+    #[test]
     fn workbook_protection_warns_on_truncated_protect_but_continues() {
         // PROTECT record with a 1-byte payload (too short for u16).
         let stream = [
