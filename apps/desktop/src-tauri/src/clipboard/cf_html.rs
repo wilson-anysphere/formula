@@ -168,7 +168,13 @@ pub(crate) fn decode_cf_html_bytes(payload: &[u8]) -> Option<String> {
         parse_offset(bytes, b"EndFragment:"),
     ) {
         if start < end && end <= bytes.len() {
-            return Some(String::from_utf8_lossy(&bytes[start..end]).into_owned());
+            let fragment_bytes = &bytes[start..end];
+            // Some producers incorrectly include the fragment markers in the Start/EndFragment
+            // span; strip them if present.
+            if let Some(fragment) = extract_fragment_markers_bytes(fragment_bytes) {
+                return Some(fragment);
+            }
+            return Some(String::from_utf8_lossy(fragment_bytes).into_owned());
         }
     }
 
@@ -294,6 +300,35 @@ mod tests {
         let payload = "<html><body><!--StartFragment--><p>Hi</p><!--EndFragment--></body></html>\0";
         let decoded = decode_cf_html(payload).expect("decoded");
         assert_eq!(decoded, "<p>Hi</p>");
+    }
+
+    #[test]
+    fn decode_cf_html_bytes_strips_markers_when_offsets_include_them() {
+        let fragment = "<b>Hello</b>";
+        let html_doc = super::wrap_html_fragment(fragment);
+        let html_bytes = html_doc.as_bytes();
+
+        let start_marker_rel = super::find_subslice(html_bytes, super::START_FRAGMENT_MARKER.as_bytes())
+            .expect("start fragment marker");
+        let end_marker_end_rel = super::find_subslice(html_bytes, super::END_FRAGMENT_MARKER.as_bytes())
+            .expect("end fragment marker")
+            + super::END_FRAGMENT_MARKER.len();
+
+        let placeholder = super::build_header(0, 0, 0, 0).expect("placeholder header");
+        let start_html = placeholder.len();
+        let end_html = start_html + html_bytes.len();
+        // Intentionally include the markers inside the fragment offsets.
+        let start_fragment = start_html + start_marker_rel;
+        let end_fragment = start_html + end_marker_end_rel;
+        let header =
+            super::build_header(start_html, end_html, start_fragment, end_fragment).expect("header");
+        debug_assert_eq!(header.len(), start_html);
+
+        let mut payload = header.into_bytes();
+        payload.extend_from_slice(html_bytes);
+
+        let decoded = decode_cf_html_bytes(&payload).expect("decoded");
+        assert_eq!(decoded, fragment);
     }
 
     #[test]
