@@ -106,7 +106,7 @@ Rationale:
 - `connect-src` stays narrow but must allow:
   - `https:` for remote APIs and user-driven Power Query fetches.
   - `wss:` for collaboration WebSocket connections.
-  - loopback (`http://localhost:*`, `http://127.0.0.1:*`, `ws://localhost:*`, `ws://127.0.0.1:*`) for optional local-model providers like Ollama.
+  - loopback (`http://localhost:*`, `http://127.0.0.1:*`, `ws://localhost:*`, `ws://127.0.0.1:*`) for local development services and user-driven fetches to local endpoints.
 
 ### Tauri v2 capabilities (permissions)
 
