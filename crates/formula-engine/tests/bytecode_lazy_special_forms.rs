@@ -25,6 +25,33 @@ impl bytecode::Grid for PanicGrid {
     }
 }
 
+#[derive(Clone, Copy)]
+struct PanicGridWithNumber {
+    number_coord: CellCoord,
+    number: f64,
+    panic_coord: CellCoord,
+}
+
+impl bytecode::Grid for PanicGridWithNumber {
+    fn get_value(&self, coord: CellCoord) -> Value {
+        if coord == self.panic_coord {
+            panic!("attempted to evaluate forbidden cell reference at {coord:?}");
+        }
+        if coord == self.number_coord {
+            return Value::Number(self.number);
+        }
+        Value::Empty
+    }
+
+    fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
+        None
+    }
+
+    fn bounds(&self) -> (i32, i32) {
+        (10, 10)
+    }
+}
+
 #[derive(Clone)]
 struct TextGrid {
     coord: CellCoord,
@@ -134,33 +161,6 @@ fn bytecode_choose_nan_index_is_value_error_and_does_not_evaluate_choices() {
     let expr = bytecode::parse_formula("=CHOOSE(B1, A2, 7)", origin).expect("parse");
     let program = bytecode::Compiler::compile(Arc::from("choose_nan_index"), &expr);
 
-    #[derive(Clone, Copy)]
-    struct PanicGridWithNumber {
-        number_coord: CellCoord,
-        number: f64,
-        panic_coord: CellCoord,
-    }
-
-    impl bytecode::Grid for PanicGridWithNumber {
-        fn get_value(&self, coord: CellCoord) -> Value {
-            if coord == self.panic_coord {
-                panic!("attempted to evaluate forbidden cell reference at {coord:?}");
-            }
-            if coord == self.number_coord {
-                return Value::Number(self.number);
-            }
-            Value::Empty
-        }
-
-        fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
-            None
-        }
-
-        fn bounds(&self) -> (i32, i32) {
-            (10, 10)
-        }
-    }
-
     let grid = PanicGridWithNumber {
         // B1 relative to origin (A1) => (row=0, col=1)
         number_coord: CellCoord::new(0, 1),
@@ -189,33 +189,6 @@ fn bytecode_eval_ast_choose_nan_index_is_value_error_and_does_not_evaluate_choic
     // Use a non-finite cell value for the index so this test doesn't depend on the engine's
     // arithmetic overflow/NaN behavior.
     let expr = bytecode::parse_formula("=CHOOSE(B1, A2, 7)", origin).expect("parse");
-
-    #[derive(Clone, Copy)]
-    struct PanicGridWithNumber {
-        number_coord: CellCoord,
-        number: f64,
-        panic_coord: CellCoord,
-    }
-
-    impl bytecode::Grid for PanicGridWithNumber {
-        fn get_value(&self, coord: CellCoord) -> Value {
-            if coord == self.panic_coord {
-                panic!("attempted to evaluate forbidden cell reference at {coord:?}");
-            }
-            if coord == self.number_coord {
-                return Value::Number(self.number);
-            }
-            Value::Empty
-        }
-
-        fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
-            None
-        }
-
-        fn bounds(&self) -> (i32, i32) {
-            (10, 10)
-        }
-    }
 
     let grid = PanicGridWithNumber {
         // B1 relative to origin (A1) => (row=0, col=1)
