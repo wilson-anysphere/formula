@@ -196,11 +196,25 @@ function createTauriClipboardProvider() {
       const clipboard = globalThis.navigator?.clipboard;
       if (payload.html && typeof ClipboardItem !== "undefined" && clipboard?.write) {
         try {
-          const item = new ClipboardItem({
+          const itemPayload = {
             "text/plain": new Blob([payload.text], { type: "text/plain" }),
             "text/html": new Blob([payload.html], { type: "text/html" }),
-          });
-          await clipboard.write([item]);
+          };
+          if (payload.rtf) itemPayload["text/rtf"] = new Blob([payload.rtf], { type: "text/rtf" });
+
+          try {
+            await clipboard.write([new ClipboardItem(itemPayload)]);
+          } catch {
+            // Some platforms reject unknown/unsupported types. Retry with the formats
+            // we used before introducing RTF so we don't regress HTML clipboard writes.
+            if (payload.rtf) {
+              const fallback = new ClipboardItem({
+                "text/plain": new Blob([payload.text], { type: "text/plain" }),
+                "text/html": new Blob([payload.html], { type: "text/html" }),
+              });
+              await clipboard.write([fallback]);
+            }
+          }
         } catch {
           // Ignore; some platforms deny HTML clipboard writes.
         }
@@ -279,12 +293,32 @@ function createWebClipboardProvider() {
       // Prefer writing both formats when possible.
       if (payload.html && typeof ClipboardItem !== "undefined" && clipboard?.write) {
         try {
-          const item = new ClipboardItem({
+          const itemPayload = {
             "text/plain": new Blob([payload.text], { type: "text/plain" }),
             "text/html": new Blob([payload.html], { type: "text/html" }),
-          });
-          await clipboard.write([item]);
-          return;
+          };
+          if (payload.rtf) itemPayload["text/rtf"] = new Blob([payload.rtf], { type: "text/rtf" });
+
+          try {
+            await clipboard.write([new ClipboardItem(itemPayload)]);
+            return;
+          } catch {
+            // Some platforms reject unknown/unsupported types. Retry with the formats
+            // we used before introducing RTF so we don't regress HTML clipboard writes.
+            if (payload.rtf) {
+              try {
+                const fallback = new ClipboardItem({
+                  "text/plain": new Blob([payload.text], { type: "text/plain" }),
+                  "text/html": new Blob([payload.html], { type: "text/html" }),
+                });
+                await clipboard.write([fallback]);
+                return;
+              } catch {
+                // Fall back to plain text below.
+              }
+            }
+            // Fall back to plain text below.
+          }
         } catch {
           // Fall back to plain text.
         }

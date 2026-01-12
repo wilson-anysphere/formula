@@ -1,6 +1,7 @@
 import { normalizeRange, parseA1, parseRangeA1 } from "../document/coords.js";
 import { t } from "../i18n/index.js";
 import { parseHtmlToCellGrid, serializeCellGridToHtml } from "./html.js";
+import { serializeCellGridToRtf } from "./rtf.js";
 import { parseTsvToCellGrid, serializeCellGridToTsv } from "./tsv.js";
 import { enforceClipboardCopy } from "../dlp/enforceClipboardCopy.js";
 
@@ -340,6 +341,7 @@ export function serializeCellGridToClipboardPayload(grid) {
   return {
     text: serializeCellGridToTsv(grid),
     html: serializeCellGridToHtml(grid),
+    rtf: serializeCellGridToRtf(grid),
   };
 }
 
