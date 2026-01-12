@@ -3,9 +3,17 @@ import type { SheetUsedRange } from "@formula/workbook-backend";
 export const DEFAULT_DESKTOP_LOAD_MAX_ROWS = 10_000;
 export const DEFAULT_DESKTOP_LOAD_MAX_COLS = 200;
 
+export const WORKBOOK_LOAD_MAX_ROWS_STORAGE_KEY = "formula.desktop.workbookLoadMaxRows";
+export const WORKBOOK_LOAD_MAX_COLS_STORAGE_KEY = "formula.desktop.workbookLoadMaxCols";
+
 export type WorkbookLoadLimits = Readonly<{
   maxRows: number;
   maxCols: number;
+}>;
+
+export type WorkbookLoadLimitOverrides = Readonly<{
+  maxRows?: unknown;
+  maxCols?: unknown;
 }>;
 
 function parsePositiveInt(value: unknown): number | null {
@@ -31,7 +39,8 @@ function parsePositiveInt(value: unknown): number | null {
  * Precedence:
  * 1) defaults
  * 2) env vars (DESKTOP_LOAD_MAX_ROWS/COLS)
- * 3) URL query params (?loadMaxRows=…&loadMaxCols=…)
+ * 3) local overrides (e.g. values read from localStorage)
+ * 4) URL query params (?loadMaxRows=…&loadMaxCols=…)
  *
  * Note: for backwards-compatibility we also accept `?maxRows=…&maxCols=…`.
  *
@@ -43,6 +52,7 @@ export function resolveWorkbookLoadLimits(
   options: Readonly<{
     queryString?: string | null;
     env?: Record<string, unknown> | null;
+    overrides?: WorkbookLoadLimitOverrides | null;
     defaults?: WorkbookLoadLimits;
   }> = {},
 ): WorkbookLoadLimits {
@@ -71,6 +81,12 @@ export function resolveWorkbookLoadLimits(
       break;
     }
   }
+
+  const overrides = options.overrides ?? {};
+  const overrideRows = parsePositiveInt(overrides.maxRows);
+  const overrideCols = parsePositiveInt(overrides.maxCols);
+  if (overrideRows != null) maxRows = overrideRows;
+  if (overrideCols != null) maxCols = overrideCols;
 
   const queryString = options.queryString ?? "";
   if (queryString) {

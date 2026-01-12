@@ -147,7 +147,12 @@ import {
   reportStartupWebviewLoaded,
 } from "./tauri/startupMetrics.js";
 import { openExternalHyperlink } from "./hyperlinks/openExternal.js";
-import { clampUsedRange, resolveWorkbookLoadLimits } from "./workbook/load/clampUsedRange.js";
+import {
+  clampUsedRange,
+  resolveWorkbookLoadLimits,
+  WORKBOOK_LOAD_MAX_COLS_STORAGE_KEY,
+  WORKBOOK_LOAD_MAX_ROWS_STORAGE_KEY,
+} from "./workbook/load/clampUsedRange.js";
 import { exportDocumentRangeToCsv } from "./import-export/csv/export.js";
 
 // Best-effort: older desktop builds persisted provider selection + API keys in localStorage.
@@ -220,12 +225,27 @@ warnIfMissingCrossOriginIsolationInTauriProd();
 let workbookSheetStore = new WorkbookSheetStore([{ id: "Sheet1", name: "Sheet1", visibility: "visible" }]);
 
 function getWorkbookLoadLimits(): { maxRows: number; maxCols: number } {
+  const overrides = (() => {
+    try {
+      const storage = globalThis.localStorage;
+      if (!storage) return null;
+      return {
+        maxRows: storage.getItem(WORKBOOK_LOAD_MAX_ROWS_STORAGE_KEY),
+        maxCols: storage.getItem(WORKBOOK_LOAD_MAX_COLS_STORAGE_KEY),
+      };
+    } catch {
+      // Ignore storage errors (disabled storage, etc).
+      return null;
+    }
+  })();
+
   return resolveWorkbookLoadLimits({
     queryString: typeof window !== "undefined" ? window.location.search : "",
     env: {
       ...((import.meta as any).env ?? {}),
       ...(((globalThis as any).process?.env as Record<string, unknown> | undefined) ?? {}),
     },
+    overrides,
   });
 }
 

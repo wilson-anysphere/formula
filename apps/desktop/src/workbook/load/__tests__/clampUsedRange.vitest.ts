@@ -99,6 +99,24 @@ describe("resolveWorkbookLoadLimits", () => {
     expect(limits).toEqual({ maxRows: 123, maxCols: 456 });
   });
 
+  it("uses overrides when provided", () => {
+    const limits = resolveWorkbookLoadLimits({
+      env: { DESKTOP_LOAD_MAX_ROWS: "123", DESKTOP_LOAD_MAX_COLS: "456" },
+      overrides: { maxRows: "111", maxCols: "222" },
+    });
+
+    expect(limits).toEqual({ maxRows: 111, maxCols: 222 });
+  });
+
+  it("prefers query params over overrides", () => {
+    const limits = resolveWorkbookLoadLimits({
+      queryString: "?loadMaxRows=500&loadMaxCols=600",
+      overrides: { maxRows: "111", maxCols: "222" },
+    });
+
+    expect(limits).toEqual({ maxRows: 500, maxCols: 600 });
+  });
+
   it("prefers query params over env vars", () => {
     const limits = resolveWorkbookLoadLimits({
       queryString: "?loadMaxRows=111&loadMaxCols=222",
