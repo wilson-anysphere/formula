@@ -351,7 +351,7 @@ fn dump_project_normalized_data_v3(vba_project_bin: &[u8]) {
         "-- ProjectNormalizedDataV3 (filtered PROJECT stream properties || V3ContentNormalizedData || FormsNormalizedData) --"
     );
 
-    match formula_vba::project_normalized_data_v3(vba_project_bin) {
+    match formula_vba::project_normalized_data_v3_transcript(vba_project_bin) {
         Ok(data) => {
             let n = PREFIX_LEN.min(data.len());
             println!("len: {} bytes", data.len());

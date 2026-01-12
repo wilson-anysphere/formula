@@ -1,7 +1,9 @@
 use std::io::{Cursor, Write};
 
 use encoding_rs::WINDOWS_1251;
-use formula_vba::{compress_container, project_normalized_data_v3, v3_content_normalized_data};
+use formula_vba::{
+    compress_container, project_normalized_data_v3_transcript, v3_content_normalized_data,
+};
 
 fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
     out.extend_from_slice(&id.to_le_bytes());
@@ -195,7 +197,8 @@ fn project_normalized_data_v3_decodes_baseclass_using_project_codepage() {
     }
 
     let vba_bin = ole.into_inner().into_inner();
-    let normalized = project_normalized_data_v3(&vba_bin).expect("ProjectNormalizedDataV3");
+    let normalized =
+        project_normalized_data_v3_transcript(&vba_bin).expect("ProjectNormalizedDataV3");
 
     assert!(
         find_subslice(&normalized, designer_stream_bytes).is_some(),
@@ -316,7 +319,8 @@ fn project_normalized_data_v3_falls_back_to_dir_projectcodepage_when_project_lac
     }
 
     let vba_bin = ole.into_inner().into_inner();
-    let normalized = project_normalized_data_v3(&vba_bin).expect("ProjectNormalizedDataV3");
+    let normalized =
+        project_normalized_data_v3_transcript(&vba_bin).expect("ProjectNormalizedDataV3");
 
     assert!(
         find_subslice(&normalized, designer_stream_bytes).is_some(),

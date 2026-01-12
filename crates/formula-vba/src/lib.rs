@@ -24,13 +24,15 @@ pub use authenticode::{
 pub use compression::{compress_container, decompress_container, CompressionError};
 pub use contents_hash::{
     agile_content_hash_md5, content_hash_md5, content_normalized_data, contents_hash_v3,
-    project_normalized_data, project_normalized_data_v3, v3_content_normalized_data,
+    project_normalized_data, project_normalized_data_v3_transcript, v3_content_normalized_data,
 };
 pub use dir::{DirParseError, DirStream, ModuleRecord, ModuleType};
 pub use normalized_data::forms_normalized_data;
 pub use ole::{OleError, OleFile};
 pub use project_digest::{compute_vba_project_digest, compute_vba_project_digest_v3, DigestAlg};
-pub use project_normalized_data::project_normalized_data_v3_dir_records;
+pub use project_normalized_data::{
+    project_normalized_data_v3, project_normalized_data_v3_dir_records,
+};
 pub use signature::{
     extract_signer_certificate_info, list_vba_digital_signatures,
     parse_and_verify_vba_signature_blob, parse_vba_digital_signature, verify_vba_digital_signature,

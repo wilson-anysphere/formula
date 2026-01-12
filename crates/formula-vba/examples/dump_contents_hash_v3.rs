@@ -3,7 +3,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use formula_vba::{project_normalized_data_v3, v3_content_normalized_data};
+use formula_vba::{project_normalized_data_v3_transcript, v3_content_normalized_data};
 
 const DEFAULT_HEAD_BYTES: usize = 64;
 
@@ -46,8 +46,8 @@ fn run() -> Result<(), String> {
         bytes_to_lower_hex(&v3[..DEFAULT_HEAD_BYTES.min(v3.len())])
     );
 
-    let project = project_normalized_data_v3(&vba_project_bin)
-        .map_err(|e| format!("failed to compute project_normalized_data_v3: {e}"))?;
+    let project = project_normalized_data_v3_transcript(&vba_project_bin)
+        .map_err(|e| format!("failed to compute project_normalized_data_v3_transcript: {e}"))?;
     println!(
         "project_normalized_data_v3: len={} head[0..{}]={}",
         project.len(),

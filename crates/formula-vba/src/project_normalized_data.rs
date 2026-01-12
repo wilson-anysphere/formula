@@ -21,7 +21,10 @@ struct ModuleUnicodePresence {
 /// - v3 module source normalization (`V3ContentNormalizedData`), or
 /// - designer storage bytes (`FormsNormalizedData`).
 ///
-/// For the full v3 signature binding transcripts, see:
+/// For the v3 signature binding transcript used by `ContentsHashV3` / `\x05DigitalSignatureExt`,
+/// use [`crate::project_normalized_data_v3_transcript`].
+///
+/// For legacy/test helpers and building blocks, see:
 /// - [`crate::project_normalized_data`] (MS-OVBA `ProjectNormalizedData`), and
 /// - [`crate::v3_content_normalized_data`] (MS-OVBA `V3ContentNormalizedData`).
 ///
@@ -31,7 +34,7 @@ struct ModuleUnicodePresence {
 ///   *data* is concatenated.
 /// - For string-like fields that have both ANSI/MBCS and Unicode record variants, the Unicode
 ///   record is preferred when present (and the ANSI record is omitted).
-pub fn project_normalized_data_v3_dir_records(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
+pub fn project_normalized_data_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
     let mut ole = OleFile::open(vba_project_bin)?;
 
     let dir_bytes = ole
@@ -142,6 +145,13 @@ pub fn project_normalized_data_v3_dir_records(vba_project_bin: &[u8]) -> Result<
     }
 
     Ok(out)
+}
+
+/// Backwards-compatible alias for [`project_normalized_data_v3`].
+pub fn project_normalized_data_v3_dir_records(
+    vba_project_bin: &[u8],
+) -> Result<Vec<u8>, ParseError> {
+    project_normalized_data_v3(vba_project_bin)
 }
 
 fn scan_unicode_presence(

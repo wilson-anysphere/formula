@@ -4,7 +4,7 @@ use std::io::{Cursor, Write};
 
 use formula_vba::{
     compress_container, contents_hash_v3, extract_vba_signature_signed_digest,
-    project_normalized_data_v3, v3_content_normalized_data, verify_vba_digital_signature,
+    project_normalized_data_v3_transcript, v3_content_normalized_data, verify_vba_digital_signature,
     VbaSignatureBinding, VbaSignatureVerification,
 };
 
@@ -218,8 +218,8 @@ fn digital_signature_ext_binds_using_contents_hash_v3() {
     // The digest should be stable between the unsigned and signed container: signature streams are
     // excluded from the transcript to avoid recursion.
     assert_eq!(
-        project_normalized_data_v3(&unsigned).expect("ProjectNormalizedDataV3(unsigned)"),
-        project_normalized_data_v3(&signed).expect("ProjectNormalizedDataV3(signed)")
+        project_normalized_data_v3_transcript(&unsigned).expect("ProjectNormalizedDataV3(unsigned)"),
+        project_normalized_data_v3_transcript(&signed).expect("ProjectNormalizedDataV3(signed)")
     );
     assert_eq!(
         v3_content_normalized_data(&unsigned).expect("V3ContentNormalizedData(unsigned)"),

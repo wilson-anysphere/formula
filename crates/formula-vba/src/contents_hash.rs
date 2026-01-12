@@ -1709,7 +1709,7 @@ fn append_v3_module(
 /// Build the MS-OVBA §2.4.2 v3 `ProjectNormalizedData` byte sequence for a `vbaProject.bin`.
 ///
 /// Spec reference: MS-OVBA §2.4.2 ("Contents Hash" version 3).
-pub fn project_normalized_data_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
+pub fn project_normalized_data_v3_transcript(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
     // MS-OVBA v3 binds the signature not just to module content, but also to a filtered subset of
     // the textual `PROJECT` stream properties (see §2.4.2.6 "ProjectNormalizedData").
     //
@@ -1825,7 +1825,7 @@ fn normalize_project_stream_properties_v3(project_stream_bytes: &[u8]) -> Vec<u8
 /// `DigestInfo.digestAlgorithm` OID is not authoritative for binding (some producers emit
 /// inconsistent OIDs); verifiers should compare the signed digest bytes to this SHA-256 value.
 pub fn contents_hash_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
-    let normalized = project_normalized_data_v3(vba_project_bin)?;
+    let normalized = project_normalized_data_v3_transcript(vba_project_bin)?;
     Ok(Sha256::digest(&normalized).to_vec())
 }
 

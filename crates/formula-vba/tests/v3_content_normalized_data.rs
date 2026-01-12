@@ -2,7 +2,7 @@ use std::io::{Cursor, Write};
 
 use formula_vba::{
     compress_container, content_normalized_data, contents_hash_v3, forms_normalized_data,
-    project_normalized_data_v3, v3_content_normalized_data,
+    project_normalized_data_v3_transcript, v3_content_normalized_data,
 };
 
 fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
@@ -991,7 +991,8 @@ fn project_normalized_data_v3_appends_padded_forms_normalized_data_when_designer
 
     let content_v3 = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
     let forms = forms_normalized_data(&vba_bin).expect("FormsNormalizedData");
-    let project = project_normalized_data_v3(&vba_bin).expect("ProjectNormalizedData v3");
+    let project =
+        project_normalized_data_v3_transcript(&vba_bin).expect("ProjectNormalizedData v3");
 
     let mut expected_content_v3 = Vec::new();
     expected_content_v3.extend_from_slice(b"Sub FormHello()\nEnd Sub\n\nUserForm1\n");

@@ -2,7 +2,8 @@ use std::io::{Cursor, Write};
 
 use formula_vba::{
     compress_container, contents_hash_v3, project_normalized_data, project_normalized_data_v3,
-    project_normalized_data_v3_dir_records, DirParseError, ParseError,
+    project_normalized_data_v3_dir_records, project_normalized_data_v3_transcript, DirParseError,
+    ParseError,
 };
 
 fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
@@ -338,7 +339,8 @@ fn project_normalized_data_v3_filters_project_stream_properties_and_includes_des
     }
 
     let vba_bin = ole.into_inner().into_inner();
-    let normalized = project_normalized_data_v3(&vba_bin).expect("ProjectNormalizedData v3");
+    let normalized =
+        project_normalized_data_v3_transcript(&vba_bin).expect("ProjectNormalizedData v3");
 
     // Excluded PROJECT properties must not contribute.
     for needle in [
@@ -492,7 +494,8 @@ fn project_normalized_data_v3_ignores_workspace_section_and_excludes_additional_
     }
 
     let vba_bin = ole.into_inner().into_inner();
-    let normalized = project_normalized_data_v3(&vba_bin).expect("ProjectNormalizedData v3");
+    let normalized =
+        project_normalized_data_v3_transcript(&vba_bin).expect("ProjectNormalizedData v3");
 
     // Included properties should appear.
     assert!(

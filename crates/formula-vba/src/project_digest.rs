@@ -5,7 +5,7 @@ use sha2::Sha256;
 
 use crate::{
     content_normalized_data,
-    contents_hash::project_normalized_data_v3,
+    contents_hash::project_normalized_data_v3_transcript,
     forms_normalized_data,
     signature::SignatureError,
     OleError,
@@ -105,7 +105,7 @@ pub fn compute_vba_project_digest(
 /// Compute a digest for v3 (`\x05DigitalSignatureExt`) signature binding.
 ///
 /// This is computed over the v3 `ProjectNormalizedData` transcript produced by
-/// [`project_normalized_data_v3`], which incorporates:
+/// [`project_normalized_data_v3_transcript`], which incorporates:
 /// - filtered `PROJECT` stream properties (excluding keys like `ID`, `Document`, `DocModule`,
 ///   `CMG`, `DPB`, `GC`, and other protection-related fields; ignoring the `[Workspace]` section)
 /// - `V3ContentNormalizedData`
@@ -117,6 +117,10 @@ pub fn compute_vba_project_digest(
 ///
 /// `ContentsHashV3 = SHA-256(ProjectNormalizedData)`
 ///
+/// Where `ProjectNormalizedData` is the deterministic transcript produced by
+/// [`crate::project_normalized_data_v3_transcript`] (filtered `PROJECT` stream properties ||
+/// `V3ContentNormalizedData` || `FormsNormalizedData`).
+///
 /// This helper accepts `alg` for debugging/compatibility checks; callers verifying Office-produced
 /// v3 VBA signatures should typically use `DigestAlg::Sha256` (or [`crate::contents_hash_v3`] for
 /// the spec-defined digest).
@@ -124,7 +128,7 @@ pub fn compute_vba_project_digest_v3(
     vba_project_bin: &[u8],
     alg: DigestAlg,
 ) -> Result<Vec<u8>, ParseError> {
-    let normalized = project_normalized_data_v3(vba_project_bin)?;
+    let normalized = project_normalized_data_v3_transcript(vba_project_bin)?;
     let mut hasher = Hasher::new(alg);
     hasher.update(&normalized);
     Ok(hasher.finalize())
