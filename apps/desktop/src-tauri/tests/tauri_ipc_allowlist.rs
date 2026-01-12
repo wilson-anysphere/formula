@@ -125,6 +125,56 @@ fn parse_capability_allow_invoke_list(capability: &JsonValue) -> BTreeSet<String
 }
 
 #[test]
+fn tauri_main_window_is_scoped_to_main_capability() {
+    // The permissions allowlist only matters if the main webview window is actually
+    // assigned the capability. Keep this wired correctly in config.
+
+    let tauri_conf_path = repo_path("tauri.conf.json");
+    let raw = fs::read_to_string(&tauri_conf_path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", tauri_conf_path.display()));
+
+    let conf: JsonValue =
+        serde_json::from_str(&raw).unwrap_or_else(|err| panic!("invalid JSON: {err}"));
+
+    let windows = conf
+        .get("app")
+        .and_then(|app| app.get("windows"))
+        .and_then(|w| w.as_array())
+        .unwrap_or_else(|| panic!("tauri.conf.json missing `app.windows` array"));
+
+    let main_window = windows
+        .iter()
+        .find(|w| w.get("label").and_then(|v| v.as_str()) == Some("main"))
+        .unwrap_or_else(|| panic!("tauri.conf.json missing main window (label \"main\")"));
+
+    let capabilities = main_window
+        .get("capabilities")
+        .and_then(|c| c.as_array())
+        .unwrap_or_else(|| panic!("tauri.conf.json main window missing `capabilities` array"));
+
+    let has_main_cap = capabilities.iter().any(|c| c.as_str() == Some("main"));
+    assert!(
+        has_main_cap,
+        "tauri.conf.json main window must include `capabilities: [\"main\"]` so the IPC allowlist is enforced"
+    );
+
+    let capability_path = repo_path("capabilities/main.json");
+    let capability_raw = fs::read_to_string(&capability_path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", capability_path.display()));
+    let capability: JsonValue =
+        serde_json::from_str(&capability_raw).unwrap_or_else(|err| panic!("invalid JSON: {err}"));
+
+    let windows = capability
+        .get("windows")
+        .and_then(|w| w.as_array())
+        .unwrap_or_else(|| panic!("capability missing `windows` array"));
+    assert!(
+        windows.iter().any(|w| w.as_str() == Some("main")),
+        "capabilities/main.json must include `windows: [\"main\"]` so it applies to the main window"
+    );
+}
+
+#[test]
 fn tauri_ipc_allowlist_matches_registered_invoke_handler_commands() {
     // The desktop frontend uses `globalThis.__TAURI__.core.invoke(...)` directly.
     // This test ensures we keep the invokable command surface explicit and in sync with

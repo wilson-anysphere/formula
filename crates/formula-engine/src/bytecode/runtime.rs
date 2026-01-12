@@ -1891,6 +1891,7 @@ fn xor_array(a: &ArrayValue, acc: &mut bool) -> Option<ErrorKind> {
     for v in a.iter() {
         match v {
             Value::Error(e) => return Some(*e),
+            // Be tolerant of NaN values (some columnar paths use NaN for blanks/non-numeric).
             Value::Number(n) if n.is_nan() => {}
             Value::Number(n) => {
                 *acc ^= *n != 0.0;
