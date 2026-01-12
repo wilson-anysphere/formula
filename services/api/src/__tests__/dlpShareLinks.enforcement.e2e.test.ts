@@ -359,4 +359,111 @@ describe("API e2e: DLP enforcement on public share links", () => {
       reasonCode: "dlp.blockedByPolicy"
     });
   }, 20_000);
+
+  it("uses the most restrictive classification in the document when evaluating external share links", async () => {
+    const ownerRegister = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "dlp-max-owner@example.com",
+        password: "password1234",
+        name: "Owner",
+        orgName: "DLP Max Org"
+      }
+    });
+    expect(ownerRegister.statusCode).toBe(200);
+    const ownerCookie = extractCookie(ownerRegister.headers["set-cookie"]);
+    const orgId = (ownerRegister.json() as any).organization.id as string;
+
+    const createDoc = await app.inject({
+      method: "POST",
+      url: "/docs",
+      headers: { cookie: ownerCookie },
+      payload: { orgId, title: "DLP max doc" }
+    });
+    expect(createDoc.statusCode).toBe(200);
+    const docId = (createDoc.json() as any).document.id as string;
+
+    const putOrgPolicy = await app.inject({
+      method: "PUT",
+      url: `/orgs/${orgId}/dlp-policy`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            "sharing.externalLink": { maxAllowed: "Internal" }
+          }
+        }
+      }
+    });
+    expect(putOrgPolicy.statusCode).toBe(200);
+
+    // Doc-level classification is Internal...
+    const putDocClassification = await app.inject({
+      method: "PUT",
+      url: `/docs/${docId}/classifications`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        selector: { scope: "document", documentId: docId },
+        classification: { level: "Internal", labels: ["Doc"] }
+      }
+    });
+    expect(putDocClassification.statusCode).toBe(200);
+
+    // ...but a specific cell is Confidential. External links should be evaluated
+    // conservatively using the most restrictive classification in the document.
+    const putCellClassification = await app.inject({
+      method: "PUT",
+      url: `/docs/${docId}/classifications`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        selector: { scope: "cell", documentId: docId, sheetId: "Sheet1", row: 0, col: 0 },
+        classification: { level: "Confidential", labels: ["Cell"] }
+      }
+    });
+    expect(putCellClassification.statusCode).toBe(200);
+
+    const evaluate = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/dlp/evaluate`,
+      headers: { cookie: ownerCookie },
+      payload: { action: "sharing.externalLink" }
+    });
+    expect(evaluate.statusCode).toBe(200);
+    expect(evaluate.json()).toMatchObject({
+      decision: "block",
+      reasonCode: "dlp.blockedByPolicy",
+      classification: { level: "Confidential", labels: ["Cell", "Doc"] },
+      maxAllowed: "Internal"
+    });
+
+    const createLink = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/share-links`,
+      headers: { cookie: ownerCookie },
+      payload: { visibility: "public", role: "viewer" }
+    });
+    expect(createLink.statusCode).toBe(403);
+    // Avoid leaking classification/policy thresholds in the response.
+    expect(createLink.json()).toEqual({ error: "dlp_blocked" });
+
+    const links = await db.query("SELECT id FROM document_share_links WHERE document_id = $1", [docId]);
+    expect(links.rowCount).toBe(0);
+
+    const audit = await db.query(
+      "SELECT event_type, resource_id, details FROM audit_log WHERE event_type = 'dlp.blocked' AND resource_id = $1 ORDER BY created_at DESC LIMIT 1",
+      [docId]
+    );
+    expect(audit.rowCount).toBe(1);
+    expect(audit.rows[0]).toMatchObject({ event_type: "dlp.blocked", resource_id: docId });
+    expect((audit.rows[0] as any).details).toMatchObject({
+      action: "sharing.externalLink",
+      docId,
+      classification: { level: "Confidential", labels: ["Cell", "Doc"] },
+      maxAllowed: "Internal",
+      reasonCode: "dlp.blockedByPolicy"
+    });
+  }, 20_000);
 });
