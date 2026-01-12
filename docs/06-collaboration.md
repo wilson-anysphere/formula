@@ -177,6 +177,10 @@ type SheetViewState = {
   frozenCols: number;
   colWidths?: Record<string, number>;
   rowHeights?: Record<string, number>;
+  // Optional per-sheet and per-axis formatting overrides (BranchService snapshots).
+  defaultFormat?: Record<string, any>;
+  rowFormats?: Record<string, Record<string, any>>;
+  colFormats?: Record<string, Record<string, any>>;
 };
 
 type Sheet = {
@@ -186,10 +190,10 @@ type Sheet = {
 };
 ```
 
-The `SheetViewState` shape matches:
+Implementation references:
 
-- BranchService `SheetViewState`: [`packages/versioning/branches/src/types.js`](../packages/versioning/branches/src/types.js)
-- Desktop `DocumentController` `SheetViewState`: [`apps/desktop/src/document/documentController.js`](../apps/desktop/src/document/documentController.js)
+- BranchService `SheetViewState` (superset, used for versioning/branching snapshots): [`packages/versioning/branches/src/types.js`](../packages/versioning/branches/src/types.js)
+- Desktop `DocumentController` `SheetViewState` (subset: frozen panes + row/col sizes): [`apps/desktop/src/document/documentController.js`](../apps/desktop/src/document/documentController.js)
 
 ---
 
@@ -448,7 +452,9 @@ Per-sheet view state (frozen panes + row/col size overrides) is stored on each s
 
 - `doc.getArray("sheets").get(i).get("view")`
 
-The `view` object uses the same `SheetViewState` shape as BranchService (and desktop `DocumentController`):
+The `view` object uses the `SheetViewState` shape from BranchService. The desktop
+binder/`DocumentController` currently consume the subset of fields related to
+frozen panes + row/col size overrides:
 
 ```ts
 {
