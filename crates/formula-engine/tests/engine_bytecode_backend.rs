@@ -5768,6 +5768,96 @@ fn bytecode_backend_matches_ast_for_common_logical_error_functions() {
 }
 
 #[test]
+fn bytecode_backend_compiles_choose_and_is_lazy() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=CHOOSE(2, 1/0, 5)")
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected CHOOSE formula to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(5.0));
+    assert_engine_matches_ast(&engine, "=CHOOSE(2, 1/0, 5)", "A1");
+}
+
+#[test]
+fn bytecode_backend_choose_out_of_range_returns_value_error() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=CHOOSE(3, 1, 2)")
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected CHOOSE formula to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_engine_matches_ast(&engine, "=CHOOSE(3, 1, 2)", "A1");
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_choose_scalar_index_matrix() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=CHOOSE(1, 10, 20)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=CHOOSE(2, 10, 20)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=CHOOSE(TRUE, 10, 20)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", r#"=CHOOSE("2", 10, 20)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A5", "=CHOOSE(2.9, 10, 20)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A6", "=CHOOSE(0, 10, 20)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A7", r#"=CHOOSE("x", 10, 20)"#)
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(
+        stats.fallback,
+        0,
+        "expected all CHOOSE formulas to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
+    );
+    assert_eq!(stats.total_formula_cells, 7);
+    assert_eq!(stats.compiled, 7);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        ("=CHOOSE(1, 10, 20)", "A1"),
+        ("=CHOOSE(2, 10, 20)", "A2"),
+        ("=CHOOSE(TRUE, 10, 20)", "A3"),
+        (r#"=CHOOSE("2", 10, 20)"#, "A4"),
+        ("=CHOOSE(2.9, 10, 20)", "A5"),
+        ("=CHOOSE(0, 10, 20)", "A6"),
+        (r#"=CHOOSE("x", 10, 20)"#, "A7"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_if_two_arg_default_false_branch_matches_ast() {
     let mut engine = Engine::new();
     engine

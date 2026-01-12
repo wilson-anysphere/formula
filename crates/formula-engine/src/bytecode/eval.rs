@@ -881,10 +881,11 @@ mod tests {
     #[test]
     fn vm_short_circuits_choose_branches() {
         let origin = CellCoord::new(0, 0);
+        let locale = crate::LocaleConfig::en_us();
+
         let expr = super::super::parse_formula("=CHOOSE(2, 1/0, 7)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
         let grid = super::super::grid::ColumnarGrid::new(1, 1);
-        let locale = crate::LocaleConfig::en_us();
 
         let mut vm = Vm::with_capacity(32);
         let value = vm.eval(&program, &grid, 0, origin, &locale);
@@ -937,11 +938,12 @@ mod tests {
     #[test]
     fn vm_choose_out_of_range_returns_value_error_without_evaluating_choices() {
         let origin = CellCoord::new(0, 0);
+        let locale = crate::LocaleConfig::en_us();
+
         // Index 3 is out of range; the choice expressions should not be evaluated.
         let expr = super::super::parse_formula("=CHOOSE(3, 1/0, 7)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
         let grid = super::super::grid::ColumnarGrid::new(1, 1);
-        let locale = crate::LocaleConfig::en_us();
 
         let mut vm = Vm::with_capacity(32);
         let value = vm.eval(&program, &grid, 0, origin, &locale);
@@ -1047,10 +1049,12 @@ mod tests {
     #[test]
     fn vm_short_circuits_ifs_branches() {
         let origin = CellCoord::new(0, 0);
-        let expr = super::super::parse_formula("=IFS(FALSE, 1/0, TRUE, 9)", origin).expect("parse");
+        let locale = crate::LocaleConfig::en_us();
+
+        let expr =
+            super::super::parse_formula("=IFS(FALSE, 1/0, TRUE, 9)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
         let grid = super::super::grid::ColumnarGrid::new(1, 1);
-        let locale = crate::LocaleConfig::en_us();
 
         let mut vm = Vm::with_capacity(32);
         let value = vm.eval(&program, &grid, 0, origin, &locale);
@@ -1060,10 +1064,11 @@ mod tests {
     #[test]
     fn vm_ifs_missing_match_returns_na_without_evaluating_values() {
         let origin = CellCoord::new(0, 0);
+        let locale = crate::LocaleConfig::en_us();
+
         let expr = super::super::parse_formula("=IFS(FALSE, 1/0)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
         let grid = super::super::grid::ColumnarGrid::new(1, 1);
-        let locale = crate::LocaleConfig::en_us();
 
         let mut vm = Vm::with_capacity(32);
         let value = vm.eval(&program, &grid, 0, origin, &locale);
@@ -1073,11 +1078,12 @@ mod tests {
     #[test]
     fn vm_short_circuits_switch_branches() {
         let origin = CellCoord::new(0, 0);
+        let locale = crate::LocaleConfig::en_us();
+
         let expr =
             super::super::parse_formula("=SWITCH(2, 1, 1/0, 2, 8)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
         let grid = super::super::grid::ColumnarGrid::new(1, 1);
-        let locale = crate::LocaleConfig::en_us();
 
         let mut vm = Vm::with_capacity(32);
         let value = vm.eval(&program, &grid, 0, origin, &locale);
@@ -1087,15 +1093,28 @@ mod tests {
     #[test]
     fn vm_does_not_evaluate_unselected_choose_branch() {
         let origin = CellCoord::new(0, 0);
-        let expr = super::super::parse_formula("=CHOOSE(2, A1, 7)", origin).expect("parse");
+        let locale = crate::LocaleConfig::en_us();
+
+        // CHOOSE(1, A1, B1) should not evaluate the non-selected branch.
+        let expr = super::super::parse_formula("=CHOOSE(1, A1, B1)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
 
         let grid = CountingGrid::new(10, 10);
         let mut vm = Vm::with_capacity(32);
-        let locale = crate::LocaleConfig::en_us();
         let value = vm.eval(&program, &grid, 0, origin, &locale);
 
-        assert_eq!(value, Value::Number(7.0));
+        assert_eq!(value, Value::Empty); // A1 is empty.
+        assert_eq!(grid.reads(), 1, "unused CHOOSE branch should not be evaluated");
+
+        // CHOOSE(2, A1, 1) should not evaluate the first branch.
+        let expr = super::super::parse_formula("=CHOOSE(2, A1, 1)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+
+        assert_eq!(value, Value::Number(1.0));
         assert_eq!(grid.reads(), 0, "unused CHOOSE branch should not be evaluated");
     }
 }

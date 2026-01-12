@@ -8086,6 +8086,175 @@ fn bytecode_expr_is_eligible_inner(
         }
     }
 
+    fn choose_index_is_guaranteed_scalar(
+        expr: &bytecode::Expr,
+        lexical_scopes: &mut Vec<HashMap<Arc<str>, BytecodeLocalBindingKind>>,
+    ) -> bool {
+        use bytecode::ast::{Function, UnaryOp};
+
+        match expr {
+            bytecode::Expr::Literal(v) => !matches!(
+                v,
+                bytecode::Value::Array(_) | bytecode::Value::Range(_) | bytecode::Value::MultiRange(_)
+            ),
+            bytecode::Expr::CellRef(_) => true,
+            // Bare range values are not scalar indices (even if they resolve to a single cell).
+            bytecode::Expr::RangeRef(_)
+            | bytecode::Expr::MultiRangeRef(_)
+            | bytecode::Expr::SpillRange(_) => false,
+            bytecode::Expr::NameRef(name) => {
+                matches!(
+                    local_binding_kind(lexical_scopes, name),
+                    Some(BytecodeLocalBindingKind::Scalar | BytecodeLocalBindingKind::RefSingle)
+                )
+            }
+            bytecode::Expr::Unary { op, expr } => match op {
+                UnaryOp::ImplicitIntersection => true,
+                UnaryOp::Plus | UnaryOp::Neg => choose_index_is_guaranteed_scalar(expr, lexical_scopes),
+            },
+            bytecode::Expr::Binary { left, right, .. } => {
+                choose_index_is_guaranteed_scalar(left, lexical_scopes)
+                    && choose_index_is_guaranteed_scalar(right, lexical_scopes)
+            }
+            // Lambda values are scalars (even if they will later coerce to `#VALUE!`).
+            bytecode::Expr::Lambda { .. } => true,
+            bytecode::Expr::Call { callee, args } => {
+                // Conservatively assume the result is scalar only for direct lambda calls where
+                // both the arguments and the lambda body are known to stay scalar.
+                let bytecode::Expr::Lambda { params, body } = callee.as_ref() else {
+                    return false;
+                };
+
+                if !args
+                    .iter()
+                    .all(|arg| choose_index_is_guaranteed_scalar(arg, lexical_scopes))
+                {
+                    return false;
+                }
+
+                lexical_scopes.push(HashMap::new());
+                for p in params.iter() {
+                    lexical_scopes
+                        .last_mut()
+                        .expect("pushed scope")
+                        .insert(p.clone(), BytecodeLocalBindingKind::Scalar);
+                }
+                let ok = choose_index_is_guaranteed_scalar(body, lexical_scopes);
+                lexical_scopes.pop();
+                ok
+            }
+            bytecode::Expr::FuncCall { func, args } => match func {
+                // These control-flow functions can return different expressions depending on runtime
+                // values; treat the result as scalar only if all possible result branches are scalar.
+                Function::If => match args.as_slice() {
+                    [_, t, f] => {
+                        choose_index_is_guaranteed_scalar(t, lexical_scopes)
+                            && choose_index_is_guaranteed_scalar(f, lexical_scopes)
+                    }
+                    [_, t] => choose_index_is_guaranteed_scalar(t, lexical_scopes),
+                    _ => true, // invalid IF => #VALUE! (scalar error)
+                },
+                Function::IfError | Function::IfNa => match args.as_slice() {
+                    [a, b] => {
+                        choose_index_is_guaranteed_scalar(a, lexical_scopes)
+                            && choose_index_is_guaranteed_scalar(b, lexical_scopes)
+                    }
+                    _ => true,
+                },
+                Function::Ifs => {
+                    if args.len() < 2 || args.len() % 2 != 0 {
+                        return true;
+                    }
+                    // Only the value expressions affect the output kind (conditions always coerce to bool).
+                    args.chunks_exact(2).all(|pair| {
+                        choose_index_is_guaranteed_scalar(&pair[1], lexical_scopes)
+                    })
+                }
+                Function::Switch => {
+                    if args.len() < 3 {
+                        return true;
+                    }
+                    let has_default = (args.len() - 1) % 2 != 0;
+                    let pairs_end = if has_default { args.len() - 1 } else { args.len() };
+                    let pairs = &args[1..pairs_end];
+                    if pairs.len() < 2 || pairs.len() % 2 != 0 {
+                        return true;
+                    }
+
+                    // Result expressions must be scalar. Case values don't affect the output kind.
+                    for pair in pairs.chunks_exact(2) {
+                        if !choose_index_is_guaranteed_scalar(&pair[1], lexical_scopes) {
+                            return false;
+                        }
+                    }
+                    if has_default {
+                        choose_index_is_guaranteed_scalar(&args[args.len() - 1], lexical_scopes)
+                    } else {
+                        true
+                    }
+                }
+                Function::Choose => {
+                    if args.len() < 2 || args.len() > 255 {
+                        return true;
+                    }
+                    // Scalar output requires both a scalar index and scalar choices.
+                    if !choose_index_is_guaranteed_scalar(&args[0], lexical_scopes) {
+                        return false;
+                    }
+                    args[1..]
+                        .iter()
+                        .all(|arg| choose_index_is_guaranteed_scalar(arg, lexical_scopes))
+                }
+                Function::Let => {
+                    if args.len() < 3 || args.len() % 2 == 0 {
+                        return true;
+                    }
+                    let last = args.len() - 1;
+                    lexical_scopes.push(HashMap::new());
+                    for pair in args[..last].chunks_exact(2) {
+                        let bytecode::Expr::NameRef(name) = &pair[0] else {
+                            lexical_scopes.pop();
+                            return true;
+                        };
+                        let kind = infer_binding_kind(&pair[1], lexical_scopes);
+                        lexical_scopes
+                            .last_mut()
+                            .expect("pushed scope")
+                            .insert(name.clone(), kind);
+                    }
+                    let ok = choose_index_is_guaranteed_scalar(&args[last], lexical_scopes);
+                    lexical_scopes.pop();
+                    ok
+                }
+                // ROW/COLUMN can return arrays when passed multi-cell references, so only treat them
+                // as scalar indices when the argument is clearly a single-cell reference.
+                Function::Row | Function::Column => match args.as_slice() {
+                    [] => true,
+                    [bytecode::Expr::CellRef(_)] => true,
+                    [bytecode::Expr::RangeRef(r)] => r.start == r.end,
+                    // Multi-range arguments produce #VALUE! (scalar error) in the bytecode runtime.
+                    [bytecode::Expr::MultiRangeRef(_)] => true,
+                    _ => true,
+                },
+                // These functions can return arrays when passed ranges/arrays (they map over the input),
+                // so only allow them as scalar indices when the argument is scalar.
+                Function::IsBlank
+                | Function::IsNumber
+                | Function::IsText
+                | Function::IsLogical
+                | Function::IsErr
+                | Function::ErrorType
+                | Function::N
+                | Function::T => match args.as_slice() {
+                    [arg] => choose_index_is_guaranteed_scalar(arg, lexical_scopes),
+                    _ => true,
+                },
+                // All other supported functions in the bytecode backend return scalars.
+                _ => true,
+            },
+        }
+    }
+
     match expr {
         bytecode::Expr::Literal(v) => match v {
             bytecode::Value::Number(_) | bytecode::Value::Bool(_) => true,
@@ -8190,17 +8359,22 @@ fn bytecode_expr_is_eligible_inner(
                     .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::Choose => {
-                if args.len() < 2 {
+                if args.len() < 2 || args.len() > 255 {
                     return false;
                 }
-                // CHOOSE lazily evaluates one of its value arguments, and can return either a
-                // scalar or a reference depending on context (e.g. `SUM(CHOOSE(1, A1:A3, B1:B3))`).
-                //
-                // Evaluate `index_num` in scalar mode, but gate the value arguments by the caller's
-                // `allow_range` / `allow_array_literals` flags so CHOOSE can return references or
-                // arrays when the surrounding expression allows them.
-                bytecode_expr_is_eligible_inner(&args[0], false, false, lexical_scopes)
-                    && args[1..].iter().all(|arg| {
+
+                // The bytecode backend only supports CHOOSE for scalar indices. If the index can
+                // evaluate to an array, fall back to the AST evaluator.
+                let index_ok =
+                    bytecode_expr_is_eligible_inner(&args[0], false, false, lexical_scopes)
+                        && choose_index_is_guaranteed_scalar(&args[0], lexical_scopes);
+                if !index_ok {
+                    return false;
+                }
+
+                args[1..]
+                    .iter()
+                    .all(|arg| {
                         bytecode_expr_is_eligible_inner(
                             arg,
                             allow_range,

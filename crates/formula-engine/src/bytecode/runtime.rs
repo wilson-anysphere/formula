@@ -484,7 +484,7 @@ fn eval_ast_inner(
                     return Value::Bool(false);
                 }
                 Function::Choose => {
-                    if args.len() < 2 {
+                    if args.len() < 2 || args.len() > 255 {
                         return Value::Error(ErrorKind::Value);
                     }
                     let idx_val = eval_ast_inner(
@@ -3380,27 +3380,6 @@ fn fn_if(args: &[Value]) -> Value {
     }
 }
 
-fn fn_choose(args: &[Value]) -> Value {
-    if args.len() < 2 {
-        return Value::Error(ErrorKind::Value);
-    }
-    let idx = match coerce_to_i64(&args[0]) {
-        Ok(i) => i,
-        Err(e) => return Value::Error(e),
-    };
-    if idx < 1 {
-        return Value::Error(ErrorKind::Value);
-    }
-    let idx_usize = match usize::try_from(idx) {
-        Ok(i) => i,
-        Err(_) => return Value::Error(ErrorKind::Value),
-    };
-    if idx_usize >= args.len() {
-        return Value::Error(ErrorKind::Value);
-    }
-    args[idx_usize].clone()
-}
-
 fn fn_ifs(args: &[Value]) -> Value {
     if args.len() % 2 != 0 {
         return Value::Error(ErrorKind::Value);
@@ -3462,6 +3441,35 @@ fn fn_switch(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return default_val.clone();
     }
     Value::Error(ErrorKind::NA)
+}
+
+fn fn_choose(args: &[Value]) -> Value {
+    // CHOOSE(index, value1, [value2], ...)
+    if args.len() < 2 || args.len() > 255 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let index_value = &args[0];
+    if let Value::Error(e) = index_value {
+        return Value::Error(*e);
+    }
+
+    let idx = match coerce_to_i64(index_value) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    if idx < 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let choice_idx = match usize::try_from(idx - 1) {
+        Ok(v) => v,
+        Err(_) => return Value::Error(ErrorKind::Value),
+    };
+    let Some(v) = args.get(choice_idx + 1) else {
+        return Value::Error(ErrorKind::Value);
+    };
+    v.clone()
 }
 
 fn fn_iferror(args: &[Value]) -> Value {
