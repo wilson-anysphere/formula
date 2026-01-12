@@ -578,8 +578,26 @@ impl XlsbWorkbook {
             };
 
             let coord = (edit.row, edit.col);
-            match cell_records.get(&coord) {
-                Some(record) if record.id == biff12::STRING => {
+            let record = cell_records.get(&coord);
+            let record_id = record.map(|r| r.id);
+            if record_id.is_some_and(is_formula_cell_record) {
+                // Formula records store cached strings inline. Do not treat them as SST references.
+                continue;
+            }
+
+            if record_id == Some(biff12::CELL_ST) {
+                if let Some(record) = record {
+                    if value_edit_is_noop_inline_string(&record.payload, edit)? {
+                        // Preserve a byte-identical worksheet stream for no-op inline-string edits.
+                        // The workbook-level shared-string counts should also remain unchanged in
+                        // this case, since the cell still uses `BrtCellSt` storage.
+                        continue;
+                    }
+                }
+            }
+
+            if record_id == Some(biff12::STRING) {
+                if let Some(record) = record {
                     // Preserve existing `BrtCellIsst` cells as shared-string references. When the
                     // edit is a no-op (text matches the existing shared string) keep the original
                     // `isst` so rich-text / phonetic shared strings stay byte-identical.
@@ -596,15 +614,13 @@ impl XlsbWorkbook {
                             continue;
                         }
                     }
-                    edit.shared_string_index = Some(sst.intern_plain(text)?);
                 }
-                None => {
-                    // Newly inserted text cells can also use the shared string table, since we're
-                    // already updating the shared strings part.
-                    edit.shared_string_index = Some(sst.intern_plain(text)?);
-                }
-                _ => {}
             }
+
+            // When updating a workbook that already has a shared string table, prefer emitting
+            // text cells as shared-string references (BrtCellIsst) so the worksheet stays scalable
+            // and counts in the shared string table remain consistent.
+            edit.shared_string_index = Some(sst.intern_plain(text)?);
         }
 
         let total_ref_delta: i64 = updated_edits

@@ -303,6 +303,113 @@ fn inserting_new_text_cell_uses_shared_string_record_and_updates_shared_strings_
   }
 
 #[test]
+fn patching_existing_numeric_cell_to_text_uses_shared_string_record_and_updates_total_count() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.add_shared_string("Hello");
+    builder.add_shared_string("World");
+    builder.set_cell_sst(0, 0, 0); // A1 = "Hello" via SST
+    builder.set_cell_number(0, 1, 42.0); // B1 = 42.0
+
+    let bytes = builder.build_bytes();
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    let output_path = tmpdir.path().join("output.xlsb");
+    std::fs::write(&input_path, bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open input workbook");
+    wb.save_with_cell_edits_shared_strings(
+        &output_path,
+        0,
+        &[CellEdit {
+            row: 0,
+            col: 1,
+            new_value: CellValue::Text("World".to_string()),
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("save_with_cell_edits_shared_strings");
+
+    let wb2 = XlsbWorkbook::open(&output_path).expect("open output workbook");
+    let sheet = wb2.read_sheet(0).expect("read sheet");
+    let b1 = sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 1)
+        .expect("B1 exists");
+    assert_eq!(b1.value, CellValue::Text("World".to_string()));
+
+    let sheet_bin = read_zip_part(output_path.to_str().unwrap(), "xl/worksheets/sheet1.bin");
+    let (id, payload) = find_cell_record(&sheet_bin, 0, 1).expect("find B1 record");
+    assert_eq!(id, 0x0007, "expected BrtCellIsst/STRING record id");
+    assert_eq!(
+        u32::from_le_bytes(payload[8..12].try_into().unwrap()),
+        1,
+        "expected B1 to reference shared string index 1"
+    );
+
+    let shared_strings_bin = read_zip_part(output_path.to_str().unwrap(), "xl/sharedStrings.bin");
+    let info = read_shared_strings_info(&shared_strings_bin);
+    assert_eq!(info.total_count, Some(2));
+    assert_eq!(info.unique_count, Some(2));
+}
+
+#[test]
+fn patching_inline_string_noop_is_lossless_and_does_not_touch_shared_strings() {
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.add_shared_string("Hello");
+    builder.set_cell_sst(0, 0, 0); // A1 = "Hello" via SST
+    builder.set_cell_inline_string(0, 1, "Hello"); // B1 = "Hello" inline
+
+    let bytes = builder.build_bytes();
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    let output_path = tmpdir.path().join("output.xlsb");
+    std::fs::write(&input_path, &bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open input workbook");
+    wb.save_with_cell_edits_shared_strings(
+        &output_path,
+        0,
+        &[CellEdit {
+            row: 0,
+            col: 1,
+            new_value: CellValue::Text("Hello".to_string()),
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("save_with_cell_edits_shared_strings");
+
+    let report = xlsx_diff::diff_workbooks(&input_path, &output_path).expect("diff workbooks");
+    assert!(
+        report.is_empty(),
+        "expected no OPC part diffs for no-op inline-string edit, got:\n{}",
+        format_report(&report)
+    );
+
+    let out_sheet = read_zip_part(output_path.to_str().unwrap(), "xl/worksheets/sheet1.bin");
+    let out_sst = read_zip_part(output_path.to_str().unwrap(), "xl/sharedStrings.bin");
+    assert_eq!(
+        out_sheet,
+        read_zip_part(input_path.to_str().unwrap(), "xl/worksheets/sheet1.bin"),
+        "expected worksheet part bytes to be identical for a no-op inline-string edit"
+    );
+    assert_eq!(
+        out_sst,
+        read_zip_part(input_path.to_str().unwrap(), "xl/sharedStrings.bin"),
+        "expected sharedStrings.bin bytes to be identical for a no-op inline-string edit"
+    );
+
+    let (id, _payload) = find_cell_record(&out_sheet, 0, 1).expect("find B1 record");
+    assert_eq!(id, 0x0006, "expected BrtCellSt/CELL_ST record id");
+}
+
+#[test]
 fn patching_rich_shared_string_noop_is_lossless() {
     let fixture_path = rich_shared_strings_fixture_path();
     let wb = XlsbWorkbook::open(&fixture_path).expect("open xlsb fixture");
