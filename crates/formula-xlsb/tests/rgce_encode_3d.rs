@@ -38,6 +38,26 @@ fn encodes_and_decodes_workbook_name() {
 }
 
 #[test]
+fn encodes_and_decodes_sheet_scoped_name() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_sheet_name("Sheet2", "MyLocalName", 2);
+
+    let encoded =
+        encode_rgce_with_context("=Sheet2!MyLocalName", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x23, // PtgName
+            0x02, 0x00, 0x00, 0x00, // nameId=2
+            0x00, 0x00, // reserved
+        ]
+    );
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "Sheet2!MyLocalName");
+}
+
+#[test]
 fn unknown_name_is_a_structured_error() {
     let ctx = WorkbookContext::default();
     let err = encode_rgce_with_context("=NoSuchName", &ctx, CellCoord::new(0, 0))
