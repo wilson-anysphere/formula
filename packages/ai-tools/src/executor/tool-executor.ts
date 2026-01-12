@@ -1286,8 +1286,9 @@ export class ToolExecutor {
             const offset = colIndex - startCol;
             if (recordRank > columnRankByOffset[offset]!) columnRankByOffset[offset] = recordRank;
           } else {
-            // Table/columnId selectors require additional context (tableId/columnId) to evaluate.
-            fallbackRecords.push(record);
+            // Table/columnId selectors require table metadata (tableId/columnId) to evaluate.
+            // ToolExecutor currently operates on sheet coordinates only, so these selectors cannot
+            // apply to our per-cell checks and are ignored.
           }
           break;
         }
@@ -1329,7 +1330,7 @@ export class ToolExecutor {
           break;
         }
         default: {
-          fallbackRecords.push(record);
+          // Unknown selector scope: ignore (selectorAppliesToCell would treat it as non-matching).
           break;
         }
       }
@@ -1414,16 +1415,20 @@ export class ToolExecutor {
       return false;
     }
 
-    if (index.rangeRankMax > rank) {
+    const rangeCanAffectDecision =
+      index.rangeRankMax > maxAllowedRank || (!restrictedAllowed && index.rangeRankMax === RESTRICTED_CLASSIFICATION_RANK);
+    if (rangeCanAffectDecision && index.rangeRankMax > rank) {
       for (const record of index.rangeRecords) {
+        if (record.rank <= rank) continue;
         if (row0 < record.startRow || row0 > record.endRow || col0 < record.startCol || col0 > record.endCol) continue;
-        if (record.rank > rank) rank = record.rank;
+        rank = record.rank;
         if (rank === RESTRICTED_CLASSIFICATION_RANK) {
           return restrictedAllowed;
         }
         if (canShortCircuitOverThreshold && rank > maxAllowedRank) {
           return false;
         }
+        if (rank === index.rangeRankMax) break;
       }
     }
 
