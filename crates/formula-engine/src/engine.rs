@@ -8064,10 +8064,14 @@ fn bytecode_expr_is_eligible_inner(
                     bytecode_expr_is_eligible_inner(&args[0], false, false, lexical_scopes);
                 // Restrict to reference-like lookup_array arguments; the bytecode runtime does not
                 // support implicit intersection on arbitrary arrays.
-                let lookup_array_ok = matches!(
-                    args[1],
-                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
-                );
+                //
+                // In addition to direct references (A1:A3), allow spill ranges (A1#) and LET-bound
+                // range locals (LET(a, A1:A3, XMATCH(..., a))).
+                let lookup_array_is_range_like = matches!(args[1], bytecode::Expr::CellRef(_))
+                    || infer_binding_kind(&args[1], lexical_scopes)
+                        == BytecodeLocalBindingKind::Range;
+                let lookup_array_ok = lookup_array_is_range_like
+                    && bytecode_expr_is_eligible_inner(&args[1], true, false, lexical_scopes);
                 let match_mode_ok = args.get(2).map_or(true, |arg| {
                     bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
                 });
@@ -8082,16 +8086,18 @@ fn bytecode_expr_is_eligible_inner(
                 }
                 let lookup_ok =
                     bytecode_expr_is_eligible_inner(&args[0], false, false, lexical_scopes);
-                let lookup_array_ok = matches!(
-                    args[1],
-                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
-                );
+                let lookup_array_is_range_like = matches!(args[1], bytecode::Expr::CellRef(_))
+                    || infer_binding_kind(&args[1], lexical_scopes)
+                        == BytecodeLocalBindingKind::Range;
+                let lookup_array_ok = lookup_array_is_range_like
+                    && bytecode_expr_is_eligible_inner(&args[1], true, false, lexical_scopes);
                 // Bytecode supports XLOOKUP's vector spill semantics (row/column slice) as long as
                 // lookup_array/return_array are reference-like arguments (ranges).
-                let return_array_ok = matches!(
-                    args[2],
-                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
-                );
+                let return_array_is_range_like = matches!(args[2], bytecode::Expr::CellRef(_))
+                    || infer_binding_kind(&args[2], lexical_scopes)
+                        == BytecodeLocalBindingKind::Range;
+                let return_array_ok = return_array_is_range_like
+                    && bytecode_expr_is_eligible_inner(&args[2], true, false, lexical_scopes);
                 let if_not_found_ok = args.get(3).map_or(true, |arg| {
                     bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
                 });

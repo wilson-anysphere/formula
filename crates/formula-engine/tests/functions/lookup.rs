@@ -718,14 +718,18 @@ fn lookup_functions_compile_to_bytecode_backend_with_let_bound_ranges() {
     sheet.set_formula("C1", "=LET(t, A1:B3, VLOOKUP(2, t, 2, FALSE))");
     sheet.set_formula("C2", "=LET(t, D1:F2, HLOOKUP(2, t, 2, FALSE))");
     sheet.set_formula("C3", "=LET(a, A1:A3, MATCH(2, a, 0))");
+    sheet.set_formula("C4", "=LET(a, A1:A3, XMATCH(2, a))");
+    sheet.set_formula("C5", "=LET(a, A1:A3, b, B1:B3, XLOOKUP(2, a, b))");
 
-    assert_eq!(sheet.bytecode_program_count(), 3);
+    assert_eq!(sheet.bytecode_program_count(), 5);
 
     sheet.recalculate();
 
     assert_eq!(sheet.get("C1"), Value::Text("b".to_string()));
     assert_eq!(sheet.get("C2"), Value::Text("b".to_string()));
     assert_eq!(sheet.get("C3"), Value::Number(2.0));
+    assert_eq!(sheet.get("C4"), Value::Number(2.0));
+    assert_eq!(sheet.get("C5"), Value::Text("b".to_string()));
 }
 
 #[test]
@@ -743,14 +747,18 @@ fn lookup_functions_compile_to_bytecode_backend_with_spill_range_tables() {
     sheet.set_formula("D1", "=VLOOKUP(3, A1#, 2, FALSE)");
     sheet.set_formula("D2", "=HLOOKUP(2, A5#, 2, FALSE)");
     sheet.set_formula("D3", "=MATCH(2, A10#, 0)");
+    sheet.set_formula("D4", "=XMATCH(2, A10#)");
+    sheet.set_formula("D5", "=XLOOKUP(2, A10#, A10#)");
 
-    assert_eq!(sheet.bytecode_program_count(), base_programs + 3);
+    assert_eq!(sheet.bytecode_program_count(), base_programs + 5);
 
     sheet.recalculate();
 
     assert_eq!(sheet.get("D1"), Value::Number(4.0));
     assert_eq!(sheet.get("D2"), Value::Number(5.0));
     assert_eq!(sheet.get("D3"), Value::Number(2.0));
+    assert_eq!(sheet.get("D4"), Value::Number(2.0));
+    assert_eq!(sheet.get("D5"), Value::Number(2.0));
 }
 
 #[test]
