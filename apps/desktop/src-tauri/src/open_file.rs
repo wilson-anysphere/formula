@@ -26,6 +26,9 @@ const SUPPORTED_EXTENSIONS: &[&str] = &[
 /// Normalization rules:
 /// - accepts: `xlsx`, `xls`, `xlsm`, `xltx`, `xltm`, `xlam`, `xlsb`, `csv` (case-insensitive)
 ///   - plus `parquet` when compiled with the `parquet` feature
+/// - if the extension is missing/unsupported, performs a lightweight file signature sniff to
+///   detect valid Excel workbooks (OLE `.xls` or ZIP-based `.xlsx`/`.xlsm`/`.xlsb`) so downloads
+///   and renamed files can still be opened via OS open-file events
 /// - handles `file://...` URLs (via [`Url::to_file_path`])
 /// - resolves relative paths using `cwd` when provided (falls back to `std::env::current_dir()`)
 /// - ignores args that look like flags (start with `-`)
