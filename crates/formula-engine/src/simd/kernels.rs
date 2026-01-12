@@ -302,6 +302,130 @@ pub fn sum_count_if_f64(
     (sum, count)
 }
 
+/// MINIFS-style numeric criteria evaluation for column slices.
+///
+/// Returns `Some(min)` when at least one numeric (non-NaN) value satisfied the criteria; otherwise
+/// `None`.
+///
+/// Criteria evaluation follows COUNTIF-style coercion, where blanks are treated as `0`.
+pub fn min_if_f64(
+    values: &[f64],
+    criteria_values: &[f64],
+    criteria: NumericCriteria,
+) -> Option<f64> {
+    debug_assert_eq!(values.len(), criteria_values.len());
+
+    let mut acc = f64x4::from([f64::INFINITY; 4]);
+    let mut saw_value = false;
+
+    let mut i = 0usize;
+    while i + 4 <= values.len() {
+        let mut lanes = [f64::INFINITY; 4];
+        for lane in 0..4 {
+            let mut crit_v = criteria_values[i + lane];
+            if crit_v.is_nan() {
+                crit_v = 0.0;
+            }
+            if !matches_criteria(crit_v, criteria) {
+                continue;
+            }
+
+            let v = values[i + lane];
+            if v.is_nan() {
+                continue;
+            }
+            lanes[lane] = v;
+            saw_value = true;
+        }
+
+        acc = acc.min(f64x4::from(lanes));
+        i += 4;
+    }
+
+    let arr = acc.to_array();
+    let mut best = arr[0].min(arr[1]).min(arr[2]).min(arr[3]);
+
+    for idx in i..values.len() {
+        let mut crit_v = criteria_values[idx];
+        if crit_v.is_nan() {
+            crit_v = 0.0;
+        }
+        if !matches_criteria(crit_v, criteria) {
+            continue;
+        }
+        let v = values[idx];
+        if v.is_nan() {
+            continue;
+        }
+        saw_value = true;
+        best = best.min(v);
+    }
+
+    saw_value.then_some(best)
+}
+
+/// MAXIFS-style numeric criteria evaluation for column slices.
+///
+/// Returns `Some(max)` when at least one numeric (non-NaN) value satisfied the criteria; otherwise
+/// `None`.
+///
+/// Criteria evaluation follows COUNTIF-style coercion, where blanks are treated as `0`.
+pub fn max_if_f64(
+    values: &[f64],
+    criteria_values: &[f64],
+    criteria: NumericCriteria,
+) -> Option<f64> {
+    debug_assert_eq!(values.len(), criteria_values.len());
+
+    let mut acc = f64x4::from([f64::NEG_INFINITY; 4]);
+    let mut saw_value = false;
+
+    let mut i = 0usize;
+    while i + 4 <= values.len() {
+        let mut lanes = [f64::NEG_INFINITY; 4];
+        for lane in 0..4 {
+            let mut crit_v = criteria_values[i + lane];
+            if crit_v.is_nan() {
+                crit_v = 0.0;
+            }
+            if !matches_criteria(crit_v, criteria) {
+                continue;
+            }
+
+            let v = values[i + lane];
+            if v.is_nan() {
+                continue;
+            }
+            lanes[lane] = v;
+            saw_value = true;
+        }
+
+        acc = acc.max(f64x4::from(lanes));
+        i += 4;
+    }
+
+    let arr = acc.to_array();
+    let mut best = arr[0].max(arr[1]).max(arr[2]).max(arr[3]);
+
+    for idx in i..values.len() {
+        let mut crit_v = criteria_values[idx];
+        if crit_v.is_nan() {
+            crit_v = 0.0;
+        }
+        if !matches_criteria(crit_v, criteria) {
+            continue;
+        }
+        let v = values[idx];
+        if v.is_nan() {
+            continue;
+        }
+        saw_value = true;
+        best = best.max(v);
+    }
+
+    saw_value.then_some(best)
+}
+
 pub fn sumproduct_ignore_nan_f64(a: &[f64], b: &[f64]) -> f64 {
     debug_assert_eq!(a.len(), b.len());
 
@@ -438,5 +562,20 @@ mod tests {
         let (s, c) = sum_count_if_f64(&values, &crit, criteria);
         assert_eq!(s, 1.0 + 4.0);
         assert_eq!(c, 2);
+    }
+
+    #[test]
+    fn min_if_and_max_if_match_scalar_logic() {
+        let values = [1.0, f64::NAN, 3.0, 4.0];
+        let crit = [0.0, f64::NAN, 2.0, 0.0];
+        let criteria = NumericCriteria::new(CmpOp::Eq, 0.0);
+
+        assert_eq!(min_if_f64(&values, &crit, criteria), Some(1.0));
+        assert_eq!(max_if_f64(&values, &crit, criteria), Some(4.0));
+
+        let all_blank = [f64::NAN, f64::NAN, f64::NAN];
+        let crit_all_match = [0.0, f64::NAN, 0.0];
+        assert_eq!(min_if_f64(&all_blank, &crit_all_match, criteria), None);
+        assert_eq!(max_if_f64(&all_blank, &crit_all_match, criteria), None);
     }
 }

@@ -2592,6 +2592,14 @@ fn fn_minifs(
                 break;
             }
 
+            if numeric_crits.len() == 1 {
+                if let Some(col_best) = simd::min_if_f64(min_slice, crit_slices[0], numeric_crits[0])
+                {
+                    best = Some(best.map_or(col_best, |b| b.min(col_best)));
+                }
+                continue;
+            }
+
             for idx in 0..min_slice.len() {
                 let mut matches = true;
                 for (slice, crit) in crit_slices.iter().zip(numeric_crits.iter()) {
@@ -2749,6 +2757,15 @@ fn fn_maxifs(
             if crit_slices.len() != crits.len() {
                 slices_ok = false;
                 break;
+            }
+
+            if numeric_crits.len() == 1 {
+                if let Some(col_best) =
+                    simd::max_if_f64(max_slice, crit_slices[0], numeric_crits[0])
+                {
+                    best = Some(best.map_or(col_best, |b| b.max(col_best)));
+                }
+                continue;
             }
 
             for idx in 0..max_slice.len() {
