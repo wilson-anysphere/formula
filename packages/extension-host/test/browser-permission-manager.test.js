@@ -374,3 +374,28 @@ test("browser PermissionManager: revoking the last granted permission removes th
   const stored = JSON.parse(storage.getItem(storageKey));
   assert.deepEqual(stored, { "pub.two": { "cells.write": true } });
 });
+
+test("browser PermissionManager: drops empty permission records during migration", async () => {
+  const { PermissionManager } = await importBrowserPermissionManager();
+
+  const storage = createMemoryStorage();
+  const storageKey = "formula.test.permissions.dropEmpty";
+  storage.setItem(
+    storageKey,
+    JSON.stringify({
+      "pub.empty": {},
+      "pub.other": { clipboard: true }
+    })
+  );
+
+  const pm = new PermissionManager({
+    storage,
+    storageKey,
+    prompt: async () => true
+  });
+
+  assert.deepEqual(await pm.getGrantedPermissions("pub.other"), { clipboard: true });
+
+  const stored = JSON.parse(storage.getItem(storageKey));
+  assert.deepEqual(stored, { "pub.other": { clipboard: true } });
+});

@@ -100,6 +100,10 @@ function normalizePermissionsStore(data) {
 
   for (const [extensionId, record] of Object.entries(data)) {
     const normalized = normalizePermissionRecord(record);
+    if (Object.keys(normalized).length === 0) {
+      migrated = true;
+      continue;
+    }
     out[extensionId] = normalized;
     if (!deepEqual(record, normalized)) migrated = true;
   }

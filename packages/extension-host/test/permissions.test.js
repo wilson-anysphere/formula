@@ -337,3 +337,31 @@ test("permission storage: revoking the last granted permission removes the exten
   const stored = JSON.parse(await fs.readFile(storePath, "utf8"));
   assert.deepEqual(stored, { "pub.two": { "cells.write": true } });
 });
+
+test("permission storage: drops empty permission records during migration", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-perms-drop-empty-"));
+  const storePath = path.join(dir, "permissions.json");
+
+  await fs.writeFile(
+    storePath,
+    JSON.stringify(
+      {
+        "pub.empty": {},
+        "pub.other": { clipboard: true }
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+  const pm = new PermissionManager({
+    storagePath: storePath,
+    prompt: async () => true
+  });
+
+  assert.deepEqual(await pm.getGrantedPermissions("pub.other"), { clipboard: true });
+
+  const stored = JSON.parse(await fs.readFile(storePath, "utf8"));
+  assert.deepEqual(stored, { "pub.other": { clipboard: true } });
+});

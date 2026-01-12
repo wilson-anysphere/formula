@@ -107,6 +107,11 @@ function normalizePermissionsStore(data) {
 
   for (const [extensionId, record] of Object.entries(data)) {
     const normalized = normalizePermissionRecord(record);
+    // Drop empty permission records entirely to avoid persisting noisy `{ "ext": {} }` entries.
+    if (Object.keys(normalized).length === 0) {
+      migrated = true;
+      continue;
+    }
     out[extensionId] = normalized;
     // We migrate whenever the in-memory normalized representation differs from persisted data.
     // A reference inequality check would always flag objects as migrated since we construct a
