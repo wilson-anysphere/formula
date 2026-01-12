@@ -271,4 +271,26 @@ describeWasm("EngineWorker editor tooling RPCs (wasm)", () => {
       engine.terminate();
     }
   });
+
+  it("surfaces a clear error when the options object has an unexpected shape", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      // Common mistake: wrong casing on `localeId`.
+      await expect(engine.lexFormula("=1+2", { localeID: "de-DE" } as any)).rejects.toThrow(
+        /options must be \{ localeId\?: string, referenceStyle\?:/
+      );
+      await expect(engine.parseFormulaPartial("=1+2", undefined, { localeID: "de-DE" } as any)).rejects.toThrow(
+        /options must be \{ localeId\?: string, referenceStyle\?:/
+      );
+    } finally {
+      engine.terminate();
+    }
+  });
 });
