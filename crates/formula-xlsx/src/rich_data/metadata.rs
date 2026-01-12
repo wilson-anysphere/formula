@@ -50,7 +50,12 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
     };
 
     // Excel has been observed to encode `rc/@t` as either 0-based or 1-based indices into the
-    // `<metadataTypes>` list. Accept both for robustness.
+    // `<metadataTypes>` list. The index base appears to be consistent within a file, but accepting
+    // both simultaneously can produce false positives when the metadataTypes list contains multiple
+    // entries (the same `t` number can refer to different types depending on the base).
+    //
+    // To be robust without over-matching, compute both interpretations and pick the one that yields
+    // the most resolved `vm -> richValue` links.
     let Ok(xlrichvalue_t_zero_based) = u32::try_from(xlrichvalue_type_idx) else {
         return Ok(HashMap::new());
     };
@@ -66,28 +71,14 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
         // Some producers omit `<futureMetadata name="XLRICHVALUE">` entirely and instead store the
         // rich value index directly in `<valueMetadata><bk><rc ... v="..."/>`.
         let out = match rc_t_indexing {
-            RcTIndexing::ZeroBased => parse_value_metadata_direct_mappings(
-                &doc,
-                &[xlrichvalue_t_zero_based],
-            ),
-            RcTIndexing::OneBased => parse_value_metadata_direct_mappings(
-                &doc,
-                &[xlrichvalue_t_one_based],
-            ),
+            RcTIndexing::ZeroBased => {
+                parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_zero_based])
+            }
+            RcTIndexing::OneBased => parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_one_based]),
             RcTIndexing::Ambiguous => {
-                // When we can't infer whether rc/@t is 0-based or 1-based, fall back to the
-                // tolerant behavior: accept both and keep whichever mapping we see first for a
-                // given vm entry.
-                let mut merged = parse_value_metadata_direct_mappings(
-                    &doc,
-                    &[xlrichvalue_t_zero_based, xlrichvalue_t_one_based],
-                );
-                if merged.is_empty() {
-                    let a = parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_zero_based]);
-                    let b = parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_one_based]);
-                    merged = if a.len() >= b.len() { a } else { b };
-                }
-                merged
+                let a = parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_zero_based]);
+                let b = parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_one_based]);
+                if b.len() >= a.len() { b } else { a }
             }
         };
         return Ok(out);
@@ -101,31 +92,9 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
             parse_value_metadata_mappings(&doc, &[xlrichvalue_t_one_based], &future_bk_indices)
         }
         RcTIndexing::Ambiguous => {
-            // When we can't infer whether rc/@t is 0-based or 1-based, fall back to the original
-            // tolerant behavior: accept both and keep whichever mapping we see first for a given
-            // vm entry.
-            let mut merged = parse_value_metadata_mappings(
-                &doc,
-                &[xlrichvalue_t_zero_based, xlrichvalue_t_one_based],
-                &future_bk_indices,
-            );
-
-            // If the tolerant parse produces no results, attempt the single-scheme parses anyway.
-            if merged.is_empty() {
-                let a = parse_value_metadata_mappings(
-                    &doc,
-                    &[xlrichvalue_t_zero_based],
-                    &future_bk_indices,
-                );
-                let b = parse_value_metadata_mappings(
-                    &doc,
-                    &[xlrichvalue_t_one_based],
-                    &future_bk_indices,
-                );
-                merged = if a.len() >= b.len() { a } else { b };
-            }
-
-            merged
+            let a = parse_value_metadata_mappings(&doc, &[xlrichvalue_t_zero_based], &future_bk_indices);
+            let b = parse_value_metadata_mappings(&doc, &[xlrichvalue_t_one_based], &future_bk_indices);
+            if b.len() >= a.len() { b } else { a }
         }
     };
 
