@@ -1664,6 +1664,31 @@ fn build_shared_strings_xml(
                         lookup.insert(key, new_index);
                     }
                 }
+                CellValue::Image(image) => {
+                    let Some(text) = image.alt_text.as_deref().filter(|s| !s.is_empty()) else {
+                        continue;
+                    };
+                    ref_count += 1;
+                    if meta
+                        .and_then(|m| m.value_kind.clone())
+                        .and_then(|k| match k {
+                            CellValueKind::SharedString { index } => Some(index),
+                            _ => None,
+                        })
+                        .and_then(|idx| doc.shared_strings.get(idx as usize))
+                        .map(|rt| rt.text.as_str() == text)
+                        .unwrap_or(false)
+                    {
+                        continue;
+                    }
+
+                    let key = SharedStringKey::plain(text);
+                    if !lookup.contains_key(&key) {
+                        let new_index = table.len() as u32;
+                        table.push(RichText::new(text.to_string()));
+                        lookup.insert(key, new_index);
+                    }
+                }
                 CellValue::RichText(rich) => {
                     ref_count += 1;
                     if meta
@@ -3901,6 +3926,39 @@ fn append_cell_xml(
                     }
                 }
             }
+            value @ CellValue::Image(image) => {
+                if let Some(alt) = image.alt_text.as_deref().filter(|s| !s.is_empty()) {
+                    match &value_kind {
+                        CellValueKind::SharedString { .. } => {
+                            let idx = shared_string_index(doc, meta, value, shared_lookup);
+                            out.push_str("<v>");
+                            out.push_str(&idx.to_string());
+                            out.push_str("</v>");
+                        }
+                        CellValueKind::InlineString => {
+                            out.push_str("<is><t");
+                            if needs_space_preserve(alt) {
+                                out.push_str(r#" xml:space="preserve""#);
+                            }
+                            out.push('>');
+                            out.push_str(&escape_text(alt));
+                            out.push_str("</t></is>");
+                        }
+                        CellValueKind::Str => {
+                            out.push_str("<v>");
+                            out.push_str(&escape_text(&raw_or_str(meta, alt)));
+                            out.push_str("</v>");
+                        }
+                        _ => {
+                            // Fallback: treat as shared string.
+                            let idx = shared_string_index(doc, meta, value, shared_lookup);
+                            out.push_str("<v>");
+                            out.push_str(&idx.to_string());
+                            out.push_str("</v>");
+                        }
+                    }
+                }
+            }
             value @ CellValue::RichText(rich) => {
                 // Rich text is stored in the shared strings table.
                 let idx = shared_string_index(doc, meta, value, shared_lookup);
@@ -3927,6 +3985,11 @@ fn infer_value_kind(cell: &formula_model::Cell) -> CellValueKind {
         CellValue::String(_) => CellValueKind::SharedString { index: 0 },
         CellValue::RichText(_) => CellValueKind::SharedString { index: 0 },
         CellValue::Entity(_) | CellValue::Record(_) => CellValueKind::SharedString { index: 0 },
+        CellValue::Image(image)
+            if image.alt_text.as_deref().is_some_and(|s| !s.is_empty()) =>
+        {
+            CellValueKind::SharedString { index: 0 }
+        }
         CellValue::Empty => CellValueKind::Number,
         _ => CellValueKind::Number,
     }
@@ -3967,14 +4030,29 @@ fn value_kind_compatible(kind: &CellValueKind, value: &CellValue) -> bool {
             | CellValue::Entity(_)
             | CellValue::Record(_),
         ) => true,
+        (CellValueKind::SharedString { .. }, CellValue::Image(image))
+            if image.alt_text.as_deref().is_some_and(|s| !s.is_empty()) =>
+        {
+            true
+        }
         (
             CellValueKind::InlineString,
             CellValue::String(_) | CellValue::Entity(_) | CellValue::Record(_),
         ) => true,
+        (CellValueKind::InlineString, CellValue::Image(image))
+            if image.alt_text.as_deref().is_some_and(|s| !s.is_empty()) =>
+        {
+            true
+        }
         (
             CellValueKind::Str,
             CellValue::String(_) | CellValue::Entity(_) | CellValue::Record(_),
         ) => true,
+        (CellValueKind::Str, CellValue::Image(image))
+            if image.alt_text.as_deref().is_some_and(|s| !s.is_empty()) =>
+        {
+            true
+        }
         _ => false,
     }
 }
@@ -4153,6 +4231,27 @@ fn shared_string_index(
                 .copied()
                 .unwrap_or(0)
         }
+        CellValue::Image(image) => match image.alt_text.as_deref().filter(|s| !s.is_empty()) {
+            Some(text) => {
+                if let Some(meta) = meta {
+                    if let Some(CellValueKind::SharedString { index }) = &meta.value_kind {
+                        if doc
+                            .shared_strings
+                            .get(*index as usize)
+                            .map(|rt| rt.text.as_str())
+                            == Some(text)
+                        {
+                            return *index;
+                        }
+                    }
+                }
+                shared_lookup
+                    .get(&SharedStringKey::plain(text))
+                    .copied()
+                    .unwrap_or(0)
+            }
+            None => 0,
+        },
         CellValue::Entity(entity) => {
             let text = entity.display_value.as_str();
             if let Some(meta) = meta {
