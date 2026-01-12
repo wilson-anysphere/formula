@@ -68,4 +68,11 @@ describe("FormulaBarModel", () => {
     expect(parseSheetQualifiedA1Range("Sheet2!A1:B2")).toEqual(parseA1Range("A1:B2"));
     expect(parseSheetQualifiedA1Range("'My Sheet'!A1")).toEqual(parseA1Range("A1"));
   });
+
+  it("treats sheet-qualified ranges as their A1 portion when hovering by cursor", () => {
+    const model = new FormulaBarModel();
+    model.setActiveCell({ address: "C1", input: "=Sheet2!A1:B2", value: null });
+    model.beginEdit();
+    expect(model.hoveredReference()).toEqual(parseA1Range("A1:B2"));
+  });
 });
