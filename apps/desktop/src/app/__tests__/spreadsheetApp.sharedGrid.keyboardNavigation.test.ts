@@ -167,12 +167,36 @@ describe("SpreadsheetApp shared-grid keyboard navigation", () => {
         1,
         Math.floor((viewport.height - viewport.frozenHeight) / sharedGrid.renderer.scroll.rows.defaultSize),
       );
+      const pageCols = Math.max(
+        1,
+        Math.floor((viewport.width - viewport.frozenWidth) / sharedGrid.renderer.scroll.cols.defaultSize),
+      );
 
       expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
 
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", bubbles: true, cancelable: true }));
       expect(app.getActiveCell()).toEqual({ row: pageRows, col: 0 });
       expect(app.getScroll().y).toBeGreaterThan(0);
+
+      // PageUp should move back up by the same amount.
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp", bubbles: true, cancelable: true }));
+      expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
+      expect(app.getScroll().y).toBe(0);
+
+      // Alt+PageDown should page horizontally by approx one viewport.
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", altKey: true, bubbles: true, cancelable: true }));
+      expect(app.getActiveCell()).toEqual({ row: 0, col: pageCols });
+
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", altKey: true, bubbles: true, cancelable: true }));
+      expect(app.getActiveCell()).toEqual({ row: 0, col: Math.min(limits.maxCols - 1, pageCols * 2) });
+
+      // Home should return to the first column (row unchanged).
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true }));
+      expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
+
+      // Return to the original PageDown target so End/Home assertions remain stable.
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", bubbles: true, cancelable: true }));
+      expect(app.getActiveCell()).toEqual({ row: pageRows, col: 0 });
 
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true }));
       expect(app.getActiveCell()).toEqual({ row: pageRows, col: limits.maxCols - 1 });
@@ -188,4 +212,3 @@ describe("SpreadsheetApp shared-grid keyboard navigation", () => {
     }
   });
 });
-
