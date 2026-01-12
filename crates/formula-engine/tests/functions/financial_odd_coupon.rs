@@ -3159,6 +3159,10 @@ fn odd_coupon_bond_yield_can_be_negative() {
         oddl_yld < 0.0 && oddl_yld > -2.0,
         "expected ODDLYIELD to return a negative yield in (-2, 0), got {oddl_yld}"
     );
+    assert!(
+        oddl_yld < -1.0,
+        "expected ODDLYIELD to exercise yields below -1.0 for frequency=2; got {oddl_yld}"
+    );
 }
 
 #[test]
