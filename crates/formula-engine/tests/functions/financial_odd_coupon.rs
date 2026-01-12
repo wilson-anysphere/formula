@@ -62,15 +62,16 @@ fn coupon_period_e(
     system: ExcelDateSystem,
 ) -> f64 {
     let freq = frequency as f64;
+    // Keep in sync with `coupon_schedule::coupon_period_e`.
+    //
+    // Note: basis=4 uses European 30/360 day-count between coupon dates (DAYS360(..., TRUE)).
+    // This can differ from `360/frequency` for some end-of-month schedules involving February
+    // (e.g. Feb 28 -> Aug 31 yields 182, not 180).
     match basis {
         // Keep in sync with the source-of-truth:
         // `crates/formula-engine/src/functions/financial/coupon_schedule.rs::coupon_period_e`.
         1 => (ncd - pcd) as f64,
         0 | 2 => 360.0 / freq,
-        // basis=4: European 30/360 day-count between coupon dates (DAYS360(..., TRUE)).
-        //
-        // This can differ from `360/frequency` for some end-of-month schedules involving
-        // February (e.g. Feb 28 -> Aug 31 yields 182, not 180).
         4 => days_between(pcd, ncd, 4, system),
         3 => 365.0 / freq,
         _ => panic!("invalid basis {basis}"),
@@ -256,7 +257,8 @@ fn odd_coupon_boundary_date_validations_match_engine_behavior() {
     }
 
     // ODDL* boundaries
-    // last_interest == settlement is allowed (zero accrued interest).
+    // settlement == last_interest is allowed (zero accrued interest).
+    // (Also covered by `odd_coupon_date_boundaries.rs`.)
     match sheet.eval("=ODDLPRICE(DATE(2020,10,15),DATE(2021,3,1),DATE(2020,10,15),0.05,0.06,100,2,0)") {
         Value::Error(ErrorKind::Name) => return,
         Value::Number(n) => assert!(n.is_finite(), "expected finite number, got {n}"),
@@ -3970,9 +3972,14 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
     let system = ExcelDateSystem::EXCEL_1900;
     // Month-end / Feb dates so 30/360 US (basis=0) vs European (basis=4) diverge.
     //
+    // Under the engine's COUP* conventions:
+    // - basis=0 uses a fixed `E = 360/frequency`.
+    // - basis=4 uses `E = DAYS360(PCD, NCD, method=true)` (European 30/360), which can differ from
+    //   `360/frequency` for some end-of-month schedules.
+    //
     // Include two scenarios:
     // - one where `E` is the "typical" semiannual 180 days for basis=4
-    // - one where the *European* DAYS360 between coupon dates differs from 360/frequency, and
+    // - one where the European DAYS360 between coupon dates differs from 360/frequency, and
     //   Excel's odd-coupon pricing uses that DAYS360 value as the coupon-period length `E`.
     let scenarios = [
         // issue=2019-01-31, settlement=2019-02-28, first_coupon=2019-03-31, maturity=2019-09-30
