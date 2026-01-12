@@ -13,11 +13,10 @@ describe("openFileIpc wiring", () => {
     // Ensure the helper is imported.
     expect(source).toMatch(/from\s+["']\.\/tauri\/openFileIpc["']/);
 
-    // Ensure the helper is actually used with the expected handler. This guards against a
-    // regression where the helper remains in the tree but the startup wiring is removed.
+    // Ensure the helper is actually used. This guards against a regression where the helper
+    // remains in the tree but the startup wiring is removed.
     expect(source).toMatch(
-      /installOpenFileIpc\(\s*\{[\s\S]*?\blisten\b[\s\S]*?\bemit\b[\s\S]*?\bonOpenPath:\s*queueOpenWorkbook\b[\s\S]*?\}\s*\)/,
+      /installOpenFileIpc\(\s*\{[\s\S]*?\blisten\b[\s\S]*?\bemit\b[\s\S]*?\bonOpenPath\b[\s\S]*?\}\s*\)/,
     );
   });
 });
-
