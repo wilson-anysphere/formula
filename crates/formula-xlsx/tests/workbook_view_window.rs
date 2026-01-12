@@ -1,7 +1,7 @@
 use std::io::{Cursor, Read};
 
 use formula_model::{Workbook, WorkbookWindow, WorkbookWindowState};
-use formula_xlsx::XlsxDocument;
+use formula_xlsx::{load_from_bytes, XlsxDocument};
 use zip::ZipArchive;
 
 fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {
@@ -45,5 +45,23 @@ fn new_document_writes_workbook_view_window_metadata() {
     assert_eq!(workbook_view.attribute("windowWidth"), Some("800"));
     assert_eq!(workbook_view.attribute("windowHeight"), Some("600"));
     assert_eq!(workbook_view.attribute("windowState"), Some("maximized"));
-}
 
+    // Reader should round-trip the same view state into the model.
+    let loaded = load_from_bytes(&bytes).expect("load xlsx");
+    let sheet2_id = loaded
+        .workbook
+        .sheet_by_name("Second")
+        .expect("Second sheet")
+        .id;
+    assert_eq!(loaded.workbook.view.active_sheet_id, Some(sheet2_id));
+    assert_eq!(
+        loaded.workbook.view.window,
+        Some(WorkbookWindow {
+            x: Some(10),
+            y: Some(20),
+            width: Some(800),
+            height: Some(600),
+            state: Some(WorkbookWindowState::Maximized),
+        })
+    );
+}

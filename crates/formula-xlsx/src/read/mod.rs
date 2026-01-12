@@ -10,7 +10,8 @@ use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
 use formula_model::rich_text::RichText;
 use formula_model::{
     normalize_formula_text, Cell, CellRef, CellValue, DefinedNameScope, ErrorValue, Range,
-    SheetProtection, SheetVisibility, Workbook, WorkbookProtection,
+    SheetProtection, SheetVisibility, Workbook, WorkbookProtection, WorkbookWindow,
+    WorkbookWindowState,
 };
 use formula_model::drawings::{ImageData, ImageId};
 use quick_xml::events::attributes::AttrError;
@@ -123,7 +124,7 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
     let workbook_rels = read_zip_part_required(archive, WORKBOOK_RELS_PART)?;
 
     let rels_info = parse_relationships(&workbook_rels)?;
-    let (date_system, _calc_pr, sheets, defined_names, workbook_protection) =
+    let (date_system, _calc_pr, sheets, defined_names, workbook_protection, workbook_view) =
         parse_workbook_metadata(&workbook_xml, &rels_info.id_to_target)?;
     let calc_settings = read_calc_settings_from_workbook_xml(&workbook_xml)?;
 
@@ -241,6 +242,13 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
             metadata_part.as_ref(),
         )?;
     }
+
+    if let Some(active_tab) = workbook_view.active_tab {
+        if let Some(sheet_id) = worksheet_ids_by_index.get(active_tab).copied() {
+            workbook.view.active_sheet_id = Some(sheet_id);
+        }
+    }
+    workbook.view.window = workbook_view.window;
 
     for defined in defined_names {
         let scope = match defined
@@ -448,7 +456,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         .ok_or(ReadError::MissingPart(WORKBOOK_RELS_PART))?;
 
     let rels_info = parse_relationships(workbook_rels)?;
-    let (date_system, calc_pr, sheets, defined_names, workbook_protection) =
+    let (date_system, calc_pr, sheets, defined_names, workbook_protection, workbook_view) =
         parse_workbook_metadata(workbook_xml, &rels_info.id_to_target)?;
     let calc_settings = read_calc_settings_from_workbook_xml(workbook_xml)?;
 
@@ -594,6 +602,13 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             path: sheet.path,
         });
     }
+
+    if let Some(active_tab) = workbook_view.active_tab {
+        if let Some(sheet_id) = worksheet_ids_by_index.get(active_tab).copied() {
+            workbook.view.active_sheet_id = Some(sheet_id);
+        }
+    }
+    workbook.view.window = workbook_view.window;
 
     for defined in defined_names {
         let scope = match defined
@@ -1410,10 +1425,26 @@ struct ParsedDefinedName {
     value: String,
 }
 
+#[derive(Debug, Clone, Default)]
+struct ParsedWorkbookView {
+    active_tab: Option<usize>,
+    window: Option<WorkbookWindow>,
+}
+
 fn parse_workbook_metadata(
     workbook_xml: &[u8],
     rels: &BTreeMap<String, String>,
-) -> Result<(DateSystem, CalcPr, Vec<ParsedSheet>, Vec<ParsedDefinedName>, WorkbookProtection), ReadError>
+) -> Result<
+    (
+        DateSystem,
+        CalcPr,
+        Vec<ParsedSheet>,
+        Vec<ParsedDefinedName>,
+        WorkbookProtection,
+        ParsedWorkbookView,
+    ),
+    ReadError,
+>
 {
     let mut reader = Reader::from_reader(workbook_xml);
     reader.config_mut().trim_text(false);
@@ -1422,6 +1453,7 @@ fn parse_workbook_metadata(
     let mut date_system = DateSystem::V1900;
     let mut calc_pr = CalcPr::default();
     let mut workbook_protection = WorkbookProtection::default();
+    let mut workbook_view = ParsedWorkbookView::default();
     let mut sheets = Vec::new();
     let mut defined_names = Vec::new();
     let mut current_defined: Option<ParsedDefinedName> = None;
@@ -1470,6 +1502,66 @@ fn parse_workbook_metadata(
                                 parse_xml_u16_hex(&value).filter(|hash| *hash != 0);
                         }
                         _ => {}
+                    }
+                }
+            }
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"workbookView" => {
+                let mut saw_window_attr = false;
+                let mut window = workbook_view.window.clone().unwrap_or_default();
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    match attr.key.as_ref() {
+                        b"activeTab" => {
+                            if workbook_view.active_tab.is_none() {
+                                workbook_view.active_tab = attr
+                                    .unescape_value()?
+                                    .into_owned()
+                                    .parse::<usize>()
+                                    .ok();
+                            }
+                        }
+                        b"xWindow" => {
+                            window.x = attr.unescape_value()?.into_owned().parse::<i32>().ok();
+                            saw_window_attr = true;
+                        }
+                        b"yWindow" => {
+                            window.y = attr.unescape_value()?.into_owned().parse::<i32>().ok();
+                            saw_window_attr = true;
+                        }
+                        b"windowWidth" => {
+                            window.width =
+                                attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                            saw_window_attr = true;
+                        }
+                        b"windowHeight" => {
+                            window.height =
+                                attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                            saw_window_attr = true;
+                        }
+                        b"windowState" => {
+                            let state = attr.unescape_value()?.into_owned();
+                            window.state = match state.to_ascii_lowercase().as_str() {
+                                "minimized" => Some(WorkbookWindowState::Minimized),
+                                "maximized" => Some(WorkbookWindowState::Maximized),
+                                "normal" => Some(WorkbookWindowState::Normal),
+                                _ => None,
+                            };
+                            saw_window_attr = true;
+                        }
+                        _ => {}
+                    }
+                }
+
+                if saw_window_attr {
+                    // If the workbook view window is entirely default-ish (all zeros + normal),
+                    // treat it as missing metadata to avoid persisting meaningless 0x0 geometry.
+                    let is_empty = window.x.unwrap_or(0) == 0
+                        && window.y.unwrap_or(0) == 0
+                        && window.width.unwrap_or(0) == 0
+                        && window.height.unwrap_or(0) == 0
+                        && matches!(window.state, None | Some(WorkbookWindowState::Normal));
+                    if !is_empty {
+                        workbook_view.window = Some(window);
                     }
                 }
             }
@@ -1600,7 +1692,14 @@ fn parse_workbook_metadata(
         buf.clear();
     }
 
-    Ok((date_system, calc_pr, sheets, defined_names, workbook_protection))
+    Ok((
+        date_system,
+        calc_pr,
+        sheets,
+        defined_names,
+        workbook_protection,
+        workbook_view,
+    ))
 }
 
 fn parse_worksheet_into_model(

@@ -100,5 +100,17 @@ fn patch_workbook_xml_inserts_workbook_view_window_metadata() {
     assert_eq!(workbook_view.attribute("windowWidth"), Some("800"));
     assert_eq!(workbook_view.attribute("windowHeight"), Some("600"));
     assert_eq!(workbook_view.attribute("windowState"), Some("maximized"));
-}
 
+    // Reader should round-trip the patched window state too.
+    let loaded = load_from_bytes(&saved).expect("load saved");
+    assert_eq!(
+        loaded.workbook.view.window,
+        Some(WorkbookWindow {
+            x: Some(10),
+            y: Some(20),
+            width: Some(800),
+            height: Some(600),
+            state: Some(WorkbookWindowState::Maximized),
+        })
+    );
+}
