@@ -338,12 +338,33 @@ export async function expectSheetPosition(
             if (positionAttr != null && totalAttr != null) {
               const position = Number(positionAttr);
               const total = Number(totalAttr);
-              if (Number.isFinite(position) && Number.isFinite(total)) return { position, total };
+              if (
+                Number.isFinite(position) &&
+                Number.isFinite(total) &&
+                Number.isInteger(position) &&
+                Number.isInteger(total) &&
+                position >= 0 &&
+                total >= 0
+              ) {
+                return { position, total };
+              }
             }
             const raw = (el?.textContent ?? "").trim();
             const nums = raw.match(/\d+/g) ?? [];
             if (nums.length < 2) return null;
-            return { position: Number(nums[0]), total: Number(nums[1]) };
+            const position = Number(nums[0]);
+            const total = Number(nums[1]);
+            if (
+              Number.isFinite(position) &&
+              Number.isFinite(total) &&
+              Number.isInteger(position) &&
+              Number.isInteger(total) &&
+              position >= 0 &&
+              total >= 0
+            ) {
+              return { position, total };
+            }
+            return null;
           });
         } catch {
           return null;
