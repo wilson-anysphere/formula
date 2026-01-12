@@ -39,22 +39,63 @@ const OID_PKCS7_SIGNED_DATA: &[u8] = b"\x2A\x86\x48\x86\xF7\x0D\x01\x07\x02"; //
 pub fn extract_vba_signature_signed_digest(
     signature_stream: &[u8],
 ) -> Result<Option<VbaSignedDigest>, VbaSignatureSignedDigestError> {
-    let Some(pkcs7) = locate_pkcs7_signed_data(signature_stream)? else {
+    let mut candidates = Vec::new();
+
+    // Prefer a deterministic MS-OFFCRYPTO DigSigInfoSerialized location when present.
+    if let Some(info) = crate::offcrypto::parse_digsig_info_serialized(signature_stream) {
+        let end = info.pkcs7_offset.saturating_add(info.pkcs7_len);
+        if end <= signature_stream.len() {
+            candidates.push(Pkcs7Location {
+                der: &signature_stream[info.pkcs7_offset..end],
+                offset: info.pkcs7_offset,
+            });
+        }
+    }
+
+    // Fast path: raw ContentInfo at the start.
+    if signature_stream.first() == Some(&0x30)
+        && looks_like_pkcs7_signed_data_content_info(signature_stream)
+        && !candidates.iter().any(|c| c.offset == 0)
+    {
+        candidates.push(Pkcs7Location {
+            der: signature_stream,
+            offset: 0,
+        });
+    }
+
+    // Fallback: scan for embedded SignedData ContentInfo sequences. This is best-effort: signature
+    // streams can contain *multiple* SignedData blobs (e.g. certificate stores + signature), so we
+    // keep searching until we find one whose eContentType is SpcIndirectDataContent.
+    for offset in 0..signature_stream.len() {
+        if signature_stream[offset] != 0x30 {
+            continue;
+        }
+        if candidates.iter().any(|c| c.offset == offset) {
+            continue;
+        }
+        if looks_like_pkcs7_signed_data_content_info(&signature_stream[offset..]) {
+            candidates.push(Pkcs7Location {
+                der: &signature_stream[offset..],
+                offset,
+            });
+        }
+    }
+
+    if candidates.is_empty() {
         return Ok(None);
-    };
+    }
 
-    let encap = parse_pkcs7_signed_data_encap_content(pkcs7.der)?;
+    let mut last_err = None;
+    for pkcs7 in candidates {
+        match extract_signed_digest_from_pkcs7_location(signature_stream, pkcs7) {
+            Ok(digest) => return Ok(Some(digest)),
+            Err(err) => last_err = Some(err),
+        }
+    }
 
-    let signed_content = if let Some(econtent) = encap.econtent {
-        econtent
-    } else if pkcs7.offset > 0 {
-        signature_stream[..pkcs7.offset].to_vec()
-    } else {
-        return Err(VbaSignatureSignedDigestError::DetachedContentMissing);
-    };
-
-    let digest = parse_spc_indirect_data_content(&signed_content)?;
-    Ok(Some(digest))
+    Err(last_err.unwrap_or_else(|| VbaSignatureSignedDigestError::Der(
+        "no SpcIndirectDataContent digest found in PKCS#7 SignedData candidates".to_owned(),
+    )))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -70,53 +111,28 @@ struct Pkcs7EncapsulatedContent {
     econtent: Option<Vec<u8>>,
 }
 
-fn locate_pkcs7_signed_data<'a>(
-    signature_stream: &'a [u8],
-) -> Result<Option<Pkcs7Location<'a>>, VbaSignatureSignedDigestError> {
-    // Fast path: begins with a SEQUENCE.
-    if signature_stream.first() == Some(&0x30)
-        && looks_like_pkcs7_signed_data_content_info(signature_stream)
-    {
-        let end = signature_stream
-            .len()
-            .saturating_sub(skip_element(signature_stream)?.len());
-        return Ok(Some(Pkcs7Location {
-            der: &signature_stream[..end],
-            offset: 0,
-        }));
-    }
+fn extract_signed_digest_from_pkcs7_location(
+    signature_stream: &[u8],
+    pkcs7: Pkcs7Location<'_>,
+) -> Result<VbaSignedDigest, VbaSignatureSignedDigestError> {
+    // `pkcs7.der` may include trailing bytes (e.g. when scanning through a larger signature stream).
+    // Trim it to exactly one ASN.1 element so BER indefinite-length encodings and appended data don't
+    // interfere with parsing.
+    let der = pkcs7.der;
+    let consumed = der.len().saturating_sub(skip_element(der)?.len());
+    let der = der.get(..consumed).unwrap_or(der);
 
-    // Office commonly wraps the PKCS#7 blob in a [MS-OFFCRYPTO] DigSigInfoSerialized structure.
-    // Parsing the header is deterministic and avoids worst-case behavior from scanning every 0x30.
-    if let Some(info) = crate::offcrypto::parse_digsig_info_serialized(signature_stream) {
-        let end = info.pkcs7_offset.saturating_add(info.pkcs7_len);
-        if end <= signature_stream.len() {
-            return Ok(Some(Pkcs7Location {
-                der: &signature_stream[info.pkcs7_offset..end],
-                offset: info.pkcs7_offset,
-            }));
-        }
-    }
+    let encap = parse_pkcs7_signed_data_encap_content(der)?;
 
-    // Best-effort scan for an embedded ContentInfo SEQUENCE.
-    // We do not rely on DER length decoding here because BER indefinite-length encodings are common
-    // (OpenSSL `-stream`) and some producers prepend a small header/prefix.
-    for offset in 0..signature_stream.len() {
-        if signature_stream[offset] != 0x30 {
-            continue;
-        }
-        if looks_like_pkcs7_signed_data_content_info(&signature_stream[offset..]) {
-            let slice = &signature_stream[offset..];
-            let consumed = slice.len().saturating_sub(skip_element(slice)?.len());
-            let end = offset.saturating_add(consumed).min(signature_stream.len());
-            return Ok(Some(Pkcs7Location {
-                der: &signature_stream[offset..end],
-                offset,
-            }));
-        }
-    }
+    let signed_content = if let Some(econtent) = encap.econtent {
+        econtent
+    } else if pkcs7.offset > 0 {
+        signature_stream[..pkcs7.offset].to_vec()
+    } else {
+        return Err(VbaSignatureSignedDigestError::DetachedContentMissing);
+    };
 
-    Ok(None)
+    parse_spc_indirect_data_content(&signed_content)
 }
 
 fn looks_like_pkcs7_signed_data_content_info(bytes: &[u8]) -> bool {

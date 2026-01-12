@@ -63,3 +63,26 @@ fn extracts_spc_indirect_data_digest_from_signed_vba_fixture() {
     );
     assert_eq!(signed_digest.digest, (0u8..32).collect::<Vec<_>>());
 }
+
+#[test]
+fn extracts_digest_even_when_digsig_header_is_corrupt() {
+    let vba_bin = load_fixture_vba_bin();
+    let sig = parse_vba_digital_signature(&vba_bin)
+        .expect("signature parse should succeed")
+        .expect("signature should be present");
+
+    // Corrupt the DigSigInfoSerialized header length fields so the deterministic unwrapping logic
+    // can't apply, forcing the extractor to fall back to scanning for an embedded CMS SignedData.
+    let mut corrupted = sig.signature.clone();
+    corrupted[0..4].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
+
+    let signed_digest = extract_vba_signature_signed_digest(&corrupted)
+        .expect("digest extraction should succeed")
+        .expect("digest info should be present");
+
+    assert_eq!(
+        signed_digest.digest_algorithm_oid,
+        "2.16.840.1.101.3.4.2.1"
+    );
+    assert_eq!(signed_digest.digest, (0u8..32).collect::<Vec<_>>());
+}
