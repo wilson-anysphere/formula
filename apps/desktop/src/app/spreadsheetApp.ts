@@ -1086,7 +1086,15 @@ export class SpreadsheetApp {
 
   getFrozen(): { frozenRows: number; frozenCols: number } {
     const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
-    return { frozenRows: view?.frozenRows ?? 0, frozenCols: view?.frozenCols ?? 0 };
+    const normalize = (value: unknown, max: number): number => {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return 0;
+      return Math.max(0, Math.min(Math.trunc(num), max));
+    };
+    return {
+      frozenRows: normalize(view?.frozenRows, this.limits.maxRows),
+      frozenCols: normalize(view?.frozenCols, this.limits.maxCols),
+    };
   }
 
   private syncFrozenPanes(): void {
@@ -2638,8 +2646,9 @@ export class SpreadsheetApp {
 
     if (width <= 0 || height <= 0) return null;
 
-    const scrollX = anchor.kind === "absolute" ? this.scrollX : (anchor.fromCol < this.frozenCols ? 0 : this.scrollX);
-    const scrollY = anchor.kind === "absolute" ? this.scrollY : (anchor.fromRow < this.frozenRows ? 0 : this.scrollY);
+    const { frozenRows, frozenCols } = this.getFrozen();
+    const scrollX = anchor.kind === "absolute" ? this.scrollX : (anchor.fromCol < frozenCols ? 0 : this.scrollX);
+    const scrollY = anchor.kind === "absolute" ? this.scrollY : (anchor.fromRow < frozenRows ? 0 : this.scrollY);
 
     return {
       left: left - scrollX,
