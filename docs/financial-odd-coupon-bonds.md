@@ -98,7 +98,7 @@ For quick Windows + Excel runs, use the derived subset corpora:
 - Boundary cases: `tools/excel-oracle/odd_coupon_boundary_cases.json`
 - Negative yield / negative coupon validation: `tools/excel-oracle/odd_coupon_validation_cases.json`
 
-Current engine behavior:
+Current engine behavior (pinned by unit tests and by the CI synthetic excel-oracle baseline):
 
 - **ODDF\*** accepts the boundary equalities:
   - `issue == settlement` (zero accrued interest)
