@@ -258,7 +258,7 @@ V3 spec references:
 - §2.4.2.7 V3 Content Hash:
   https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/601a4412-00cc-46a0-b8e0-3001c011308e
 
-### ProjectNormalizedData (v3) / ContentsHashV3 (MS-OVBA §2.4.2)
+### ProjectNormalizedData (MS-OVBA §2.4.2, ContentsHashV3)
 
 For **v3 / `\x05DigitalSignatureExt`**, MS-OVBA defines the `ContentsHashV3` digest as SHA-256 over
 `ProjectNormalizedData`.
@@ -289,14 +289,14 @@ In this repo:
 - `formula_vba::contents_hash_v3` computes the spec-defined `SHA-256(ProjectNormalizedData)`
   (`crates/formula-vba/src/contents_hash.rs`)
 
-### Dir-record metadata transcript (`project_normalized_data_v3_dir_records`)
+#### Dir-record metadata transcript (`project_normalized_data_v3_dir_records`)
 
 `formula_vba::project_normalized_data_v3_dir_records` is a related helper that emits a
 **metadata-only** transcript derived from selected `VBA/dir` records (project/module metadata, but
 *not* module source normalization and *not* designer storage data). It is useful for debugging and
 for compatibility tests.
 
-#### Dir record format (record header excluded)
+##### Dir record format (record header excluded)
 
 After MS-OVBA decompression, `VBA/dir` is a sequence of:
 
@@ -309,7 +309,7 @@ data: [u8; len]
 `project_normalized_data_v3_dir_records` concatenates **normalized `data` bytes only**. The
 `(id, len)` header bytes are never included.
 
-#### `VBA/dir` record IDs included (project info + module metadata)
+##### `VBA/dir` record IDs included (project info + module metadata)
 
 All records are processed in the **stored order** from `VBA/dir`.
 
@@ -341,7 +341,7 @@ Module metadata records (for each module record group, in stored order; a new mo
 - Non-string module metadata records included verbatim: `0x001E`, `0x0021`, `0x0025`, `0x0028`
   - (e.g. module help context / type / readonly / private flags per MS-OVBA)
 
-#### Unicode-vs-ANSI selection rule + Unicode payload extraction
+##### Unicode-vs-ANSI selection rule + Unicode payload extraction
 
 For string-like fields that have both ANSI/MBCS and Unicode record variants:
 
@@ -351,7 +351,7 @@ For string-like fields that have both ANSI/MBCS and Unicode record variants:
   `formula-vba` strips that internal length prefix only when it is consistent with the record length;
   otherwise it treats the full payload as raw UTF-16LE bytes.
 
-#### `MODULESTREAMNAME` reserved trimming
+##### `MODULESTREAMNAME` reserved trimming
 
 For the ANSI `MODULESTREAMNAME` record (`0x001A`), some producers append a trailing reserved `u16`
 (`0x0000`). `project_normalized_data_v3_dir_records` trims this reserved `u16` before appending the

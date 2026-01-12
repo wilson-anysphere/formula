@@ -303,12 +303,10 @@ fn escape_str(s: &str) -> String {
 fn is_len_prefixed_unicode_record_id(id: u16) -> bool {
     matches!(
         id,
-        // Project Unicode string variants (MS-OVBA v3).
-        0x0040 | 0x0041 | 0x0042 | 0x0043
-            // Module Unicode string variants (MS-OVBA v3).
-            | 0x0047 | 0x0048 | 0x0049
-            // 0x004A is an ID collision: PROJECTCOMPATVERSION vs MODULEHELPFILEPATHUNICODE.
-            | 0x004A
+        // Project Unicode/alternate variants.
+        0x0040 | 0x003C | 0x003D
+            // Module Unicode/alternate variants.
+            | 0x0047 | 0x0032 | 0x0048
     )
 }
 
@@ -318,30 +316,11 @@ fn unicode_record_payload_len_prefixed(data: &[u8]) -> Option<&[u8]> {
     }
     let n = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
     let remaining = data.len() - 4;
-
-    let bytes_by_units = n.checked_mul(2);
-
-    // Prefer interpretations that exactly match the record length.
-    if let Some(bytes) = bytes_by_units {
-        if bytes == remaining {
-            return Some(&data[4..4 + bytes]);
-        }
+    if n == remaining || n.saturating_mul(2) == remaining {
+        Some(&data[4..])
+    } else {
+        None
     }
-    if n == remaining {
-        return Some(&data[4..4 + n]);
-    }
-
-    // Otherwise, prefer UTF-16 code unit count when it fits; fall back to byte count.
-    if let Some(bytes) = bytes_by_units {
-        if bytes <= remaining {
-            return Some(&data[4..4 + bytes]);
-        }
-    }
-    if n <= remaining {
-        return Some(&data[4..4 + n]);
-    }
-
-    None
 }
 
 fn dump_project_normalized_data_v3_dir_records(vba_project_bin: &[u8]) {
