@@ -332,7 +332,7 @@ describe("workbookSync", () => {
     sync.stop();
   });
 
-  it("filters applyState deleted-sheet cell deltas (sheetStructureChanged without sheetMetaDeltas)", async () => {
+  it("filters applyState deleted-sheet cell deltas (persists deletion via delete_sheet)", async () => {
     const document = createMaterializedDocument();
     const sync = startWorkbookSync({ document: document as any });
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
@@ -356,7 +356,10 @@ describe("workbookSync", () => {
     await flushNextTick();
 
     expect(document.getSheetIds()).toEqual(["Sheet1"]);
-    expect(invoke).not.toHaveBeenCalled();
+    // applyState deletes Sheet2 and emits per-cell deltas for its removed cells; workbookSync should
+    // filter those deltas and persist the structural change via the dedicated delete_sheet command.
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("delete_sheet", { sheet_id: "Sheet2" });
 
     sync.stop();
   });
