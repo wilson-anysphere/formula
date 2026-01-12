@@ -40,6 +40,27 @@ inventory::submit! {
     }
 }
 
+fn bytecode_unsupported_test(
+    _ctx: &dyn FunctionContext,
+    _args: &[formula_engine::eval::CompiledExpr],
+) -> Value {
+    Value::Number(1.0)
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "BYTECODE_UNSUPPORTED_TEST",
+        min_args: 0,
+        max_args: 0,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[],
+        implementation: bytecode_unsupported_test,
+    }
+}
+
 fn cell_addr_to_a1(addr: formula_engine::eval::CellAddr) -> String {
     addr.to_a1()
 }
@@ -3607,8 +3628,11 @@ fn bytecode_compile_diagnostics_reports_disabled_reason() {
 #[test]
 fn bytecode_compile_diagnostics_reports_unsupported_function_reason() {
     let mut engine = Engine::new();
-    // SIN is implemented by the AST evaluator but not yet supported by the bytecode backend.
-    engine.set_cell_formula("Sheet1", "A1", "=SIN(0)").unwrap();
+    // Register a test-only function so this test doesn't become stale if/when the bytecode backend
+    // adds more built-in function implementations (e.g. SIN).
+    engine
+        .set_cell_formula("Sheet1", "A1", "=BYTECODE_UNSUPPORTED_TEST()")
+        .unwrap();
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 1);
@@ -3617,7 +3641,9 @@ fn bytecode_compile_diagnostics_reports_unsupported_function_reason() {
     assert_eq!(
         stats
             .fallback_reasons
-            .get(&BytecodeCompileReason::UnsupportedFunction(Arc::from("SIN")))
+            .get(&BytecodeCompileReason::UnsupportedFunction(Arc::from(
+                "BYTECODE_UNSUPPORTED_TEST",
+            )))
             .copied()
             .unwrap_or(0),
         1
@@ -3629,7 +3655,7 @@ fn bytecode_compile_diagnostics_reports_unsupported_function_reason() {
     assert_eq!(report[0].addr, parse_a1("A1").unwrap());
     assert_eq!(
         report[0].reason,
-        BytecodeCompileReason::UnsupportedFunction(Arc::from("SIN"))
+        BytecodeCompileReason::UnsupportedFunction(Arc::from("BYTECODE_UNSUPPORTED_TEST"))
     );
 }
 
