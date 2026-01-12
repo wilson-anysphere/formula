@@ -381,4 +381,126 @@ describe("CanvasGridRenderer side border rendering (Excel-like)", () => {
     expect(hasNormalizedSegment(tieStroke!.segments, { x1: 30.5, y1: 0, x2: 30.5, y2: 10 })).toBe(true);
     expect(gridStrokes.some((stroke) => stroke.strokeStyle === "#123456")).toBe(false);
   });
+
+  it("resolves conflicts between merged perimeter borders and adjacent cell borders (thicker wins)", () => {
+    const merged: CellRange = { startRow: 0, endRow: 2, startCol: 0, endCol: 2 };
+    const contains = (range: CellRange, row: number, col: number) =>
+      row >= range.startRow && row < range.endRow && col >= range.startCol && col < range.endCol;
+    const intersects = (a: CellRange, b: CellRange) =>
+      a.startRow < b.endRow && a.endRow > b.startRow && a.startCol < b.endCol && a.endCol > b.startCol;
+
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        // Merged anchor has a thin red right border on the merged perimeter.
+        if (row === 0 && col === 0) {
+          return { row, col, value: null, style: { borders: { right: { width: 1, style: "solid", color: "#ff0000" } } } };
+        }
+        // Adjacent cell to the right has a thicker blue left border (should win).
+        if ((row === 0 || row === 1) && col === 2) {
+          return { row, col, value: null, style: { borders: { left: { width: 3, style: "solid", color: "#0000ff" } } } };
+        }
+        return { row, col, value: null };
+      },
+      getMergedRangeAt: (row, col) => (contains(merged, row, col) ? merged : null),
+      getMergedRangesInRange: (range) => (intersects(range, merged) ? [merged] : [])
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const { ctx: gridCtx, strokes: gridStrokes } = createRecording2dContext(gridCanvas);
+    const contentCtx = createRecording2dContext(contentCanvas).ctx;
+    const selectionCtx = createRecording2dContext(selectionCanvas).ctx;
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, gridCtx],
+      [contentCanvas, contentCtx],
+      [selectionCanvas, selectionCtx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      return contexts.get(this) ?? createRecording2dContext(this).ctx;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 2,
+      colCount: 3,
+      defaultRowHeight: 10,
+      defaultColWidth: 10
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(200, 100, 1);
+    renderer.renderImmediately();
+
+    // Thick blue border wins, drawn at x=20 with crisp alignment for odd width=3 -> 20.5.
+    const blueStroke = gridStrokes.find((stroke) => stroke.strokeStyle === "#0000ff" && stroke.lineWidth === 3);
+    expect(blueStroke).toBeTruthy();
+    expect(hasNormalizedSegment(blueStroke!.segments, { x1: 20.5, y1: 0, x2: 20.5, y2: 10 })).toBe(true);
+    expect(hasNormalizedSegment(blueStroke!.segments, { x1: 20.5, y1: 10, x2: 20.5, y2: 20 })).toBe(true);
+
+    // Ensure the merged anchor's thin red border did not win.
+    expect(gridStrokes.some((stroke) => stroke.strokeStyle === "#ff0000")).toBe(false);
+  });
+
+  it("applies right/bottom tie-break rules when merged perimeter borders tie with adjacent cells", () => {
+    const merged: CellRange = { startRow: 0, endRow: 2, startCol: 0, endCol: 2 };
+    const contains = (range: CellRange, row: number, col: number) =>
+      row >= range.startRow && row < range.endRow && col >= range.startCol && col < range.endCol;
+    const intersects = (a: CellRange, b: CellRange) =>
+      a.startRow < b.endRow && a.endRow > b.startRow && a.startCol < b.endCol && a.endCol > b.startCol;
+
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        // Merged anchor defines a solid red right border.
+        if (row === 0 && col === 0) {
+          return { row, col, value: null, style: { borders: { right: { width: 1, style: "solid", color: "#ff0000" } } } };
+        }
+        // Adjacent right cell defines an equal-width solid blue left border; tie-break prefers the right cell.
+        if ((row === 0 || row === 1) && col === 2) {
+          return { row, col, value: null, style: { borders: { left: { width: 1, style: "solid", color: "#0000ff" } } } };
+        }
+        return { row, col, value: null };
+      },
+      getMergedRangeAt: (row, col) => (contains(merged, row, col) ? merged : null),
+      getMergedRangesInRange: (range) => (intersects(range, merged) ? [merged] : [])
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const { ctx: gridCtx, strokes: gridStrokes } = createRecording2dContext(gridCanvas);
+    const contentCtx = createRecording2dContext(contentCanvas).ctx;
+    const selectionCtx = createRecording2dContext(selectionCanvas).ctx;
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, gridCtx],
+      [contentCanvas, contentCtx],
+      [selectionCanvas, selectionCtx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      return contexts.get(this) ?? createRecording2dContext(this).ctx;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 2,
+      colCount: 3,
+      defaultRowHeight: 10,
+      defaultColWidth: 10
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(200, 100, 1);
+    renderer.renderImmediately();
+
+    const blueStroke = gridStrokes.find((stroke) => stroke.strokeStyle === "#0000ff" && stroke.lineWidth === 1);
+    expect(blueStroke).toBeTruthy();
+    expect(hasNormalizedSegment(blueStroke!.segments, { x1: 20.5, y1: 0, x2: 20.5, y2: 10 })).toBe(true);
+    expect(hasNormalizedSegment(blueStroke!.segments, { x1: 20.5, y1: 10, x2: 20.5, y2: 20 })).toBe(true);
+
+    expect(gridStrokes.some((stroke) => stroke.strokeStyle === "#ff0000")).toBe(false);
+  });
 });
