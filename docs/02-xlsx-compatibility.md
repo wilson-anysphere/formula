@@ -31,13 +31,13 @@ workbook.xlsx (ZIP archive)
 │   ├── cellImages.xml           # (optional) workbook-level cell image store (alternate mechanism; name/casing varies; not observed in inspected Excel 365 “Place in Cell” fixtures)
 │   ├── calcChain.xml            # Calculation order hints
 │   ├── metadata.xml             # Cell/value metadata (Excel "Rich Data")
-│   ├── richData/                # Excel 365+ rich values (data types, in-cell images; naming varies: richValue* vs rdrichvalue*)
-│   │   ├── rdrichvalue.xml
-│   │   ├── rdrichvaluestructure.xml
-│   │   ├── rdRichValueTypes.xml
-│   │   ├── richValueRel.xml     # Indirection to rich-value relationships (e.g. images)
+│   ├── richData/                # Excel 365+ rich values (data types, in-cell images; naming/casing varies)
+│   │   ├── richValue.xml                # or: rdrichvalue.xml
+│   │   ├── richValueStructure.xml       # or: rdrichvaluestructure.xml
+│   │   ├── richValueTypes.xml           # or: rdRichValueTypes.xml (casing varies)
+│   │   ├── richValueRel.xml             # Indirection to rich-value relationships (e.g. images)
 │   │   └── _rels/
-│   │       └── richValueRel.xml.rels  # richValueRel -> xl/media/* (image binaries)
+│   │       └── richValueRel.xml.rels    # richValueRel -> xl/media/* (image binaries)
 │   ├── theme/
 │   │   └── theme1.xml           # Color/font theme
 │   ├── worksheets/
