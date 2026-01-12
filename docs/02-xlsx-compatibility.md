@@ -303,6 +303,24 @@ Representative `xl/_rels/workbook.xml.rels` snippet:
 </Relationships>
 ```
 
+Another common variant (unprefixed `richValue*.xml` names):
+
+```xml
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <!-- ... -->
+  <Relationship Id="rIdMeta"
+                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"
+                Target="metadata.xml"/>
+
+  <Relationship Id="rIdRV"
+                Type="http://schemas.microsoft.com/office/2017/06/relationships/richValue"
+                Target="richData/richValue.xml"/>
+  <Relationship Id="rIdRel"
+                Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueRel"
+                Target="richData/richValueRel.xml"/>
+</Relationships>
+```
+
 ##### `xl/richData/rdrichvaluetypes.xml` + `xl/richData/rdrichvaluestructure.xml` (type/structure tables)
 
 Excel commonly emits additional Rich Data “schema” parts:
@@ -376,6 +394,19 @@ Workbooks that include in-cell images typically include overrides like:
           ContentType="application/vnd.ms-excel.rdrichvaluetypes+xml"/>
 <Override PartName="/xl/richData/richValueRel.xml"
           ContentType="application/vnd.ms-excel.richValueRel+xml"/>
+```
+
+For the unprefixed `richValue*.xml` naming variant, content types are typically similar (preserve whatever the source workbook uses):
+
+```xml
+<Override PartName="/xl/richData/richValue.xml"
+          ContentType="application/vnd.ms-excel.richvalue+xml"/>
+<Override PartName="/xl/richData/richValueRel.xml"
+          ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
+<Override PartName="/xl/richData/richValueTypes.xml"
+          ContentType="application/vnd.ms-excel.richvaluetypes+xml"/>
+<Override PartName="/xl/richData/richValueStructure.xml"
+          ContentType="application/vnd.ms-excel.richvaluestructure+xml"/>
 ```
 
 ##### Note: `xl/cellImages.xml` is optional (and may not appear in “Place in Cell” files)
