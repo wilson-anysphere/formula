@@ -981,18 +981,10 @@ export function SheetTabStrip({
             }
           }
 
-          const primary = e.ctrlKey || e.metaKey;
-          if (!primary) return;
-          if (e.shiftKey || e.altKey) return;
-          if (e.key !== "PageUp" && e.key !== "PageDown") return;
-          e.preventDefault();
-
-          const idx = visibleSheets.findIndex((s) => s.id === activeSheetId);
-          if (idx === -1) return;
-          const delta = e.key === "PageUp" ? -1 : 1;
-          const next = visibleSheets[(idx + delta + visibleSheets.length) % visibleSheets.length];
-          if (next) void activateSheetWithRenameGuard(next.id);
-        }}
+           // Ctrl/Cmd+PgUp/PgDn sheet navigation is handled globally by the desktop shell's
+           // keybinding/command registry so focus restoration remains consistent across
+           // different UI surfaces.
+         }}
         onDragOver={(e) => {
           if (!isSheetDrag(e.dataTransfer)) return;
           e.preventDefault();

@@ -107,7 +107,7 @@ import { buildContextMenuModel } from "./extensions/contextMenuModel.js";
 import { getPrimaryCommandKeybindingDisplay, type ContributedKeybinding } from "./extensions/keybindings.js";
 import { KeybindingService } from "./extensions/keybindingService.js";
 import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js";
-import { installKeyboardContextKeys } from "./keyboard/installKeyboardContextKeys.js";
+import { installKeyboardContextKeys, KeyboardContextKeyIds } from "./keyboard/installKeyboardContextKeys.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
 import { createCommandPalette, installCommandPaletteRecentsTracking } from "./command-palette/index.js";
 import { registerBuiltinCommands } from "./commands/registerBuiltinCommands.js";
@@ -2453,6 +2453,17 @@ function restoreFocusAfterSheetNavigation(): void {
   app.focusAfterSheetNavigation();
 }
 
+function focusActiveSheetTab(): void {
+  const activeSheetId = app.getCurrentSheetId();
+  const buttons = sheetTabsRootEl.querySelectorAll<HTMLButtonElement>('.sheet-tabs button[role="tab"][data-sheet-id]');
+  for (const btn of buttons) {
+    if (btn.dataset.sheetId === activeSheetId) {
+      btn.focus({ preventScroll: true });
+      return;
+    }
+  }
+}
+
 function installSheetStoreDocSync(): void {
   // In collab mode, the sheet list is driven by the Yjs workbook schema (`session.sheets`).
   // Avoid reconciling the UI sheet store against DocumentController's lazily-created sheets.
@@ -4700,11 +4711,20 @@ if (
 
   extensionHostManagerForE2e = extensionHostManager;
 
+  const focusAfterSheetNavigationFromCommand = (): void => {
+    if (!shouldRestoreFocusAfterSheetNavigation()) return;
+    if (contextKeys.get(KeyboardContextKeyIds.focusInSheetTabs) === true) {
+      focusActiveSheetTab();
+      return;
+    }
+    app.focusAfterSheetNavigation();
+  };
+
   registerBuiltinCommands({
     commandRegistry,
     app,
     layoutController,
-    focusAfterSheetNavigation: restoreFocusAfterSheetNavigation,
+    focusAfterSheetNavigation: focusAfterSheetNavigationFromCommand,
     getVisibleSheetIds: () => listSheetsForUi().map((sheet) => sheet.id),
     ensureExtensionsLoaded: () => ensureExtensionsLoadedRef?.() ?? Promise.resolve(),
     onExtensionsLoaded: () => {

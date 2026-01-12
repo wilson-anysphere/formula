@@ -10,6 +10,7 @@ import type { SpreadsheetApp } from "../app/spreadsheetApp";
  * Keys maintained:
  * - `focus.inTextInput`: `document.activeElement` is INPUT/TEXTAREA/contentEditable
  * - `focus.inFormulaBar`: `document.activeElement` is within the formula bar root
+ * - `focus.inSheetTabs`: `document.activeElement` is within the sheet tab strip (tablist)
  * - `focus.inSheetTabRename`: `document.activeElement` is within sheet tabs root *and* is a text input
  * - `spreadsheet.isEditing`: SpreadsheetApp is editing *or* split-view secondary editor is editing
  * - `spreadsheet.formulaBarEditing`: `app.isFormulaBarEditing()`
@@ -20,6 +21,7 @@ import type { SpreadsheetApp } from "../app/spreadsheetApp";
 export const KeyboardContextKeyIds = {
   focusInTextInput: "focus.inTextInput",
   focusInFormulaBar: "focus.inFormulaBar",
+  focusInSheetTabs: "focus.inSheetTabs",
   focusInSheetTabRename: "focus.inSheetTabRename",
   spreadsheetIsEditing: "spreadsheet.isEditing",
   spreadsheetFormulaBarEditing: "spreadsheet.formulaBarEditing",
@@ -86,8 +88,18 @@ export function installKeyboardContextKeys(params: KeyboardContextKeysParams): K
     const inTextInput = isTextInputLike(active);
 
     const inFormulaBar = safeContains(formulaBarRoot, active);
-    const inSheetTabs = safeContains(sheetTabsRoot, active);
-    const inSheetTabRename = inSheetTabs && inTextInput;
+    const sheetTabStripRoot = (() => {
+      try {
+        // `#sheet-tabs` contains other buttons (add/overflow) that are not part of the tablist.
+        // Prefer scoping to the actual tab strip when available so context keys can discriminate.
+        return sheetTabsRoot.querySelector<HTMLElement>(".sheet-tabs") ?? sheetTabsRoot;
+      } catch {
+        return sheetTabsRoot;
+      }
+    })();
+    const inSheetTabs = safeContains(sheetTabStripRoot, active);
+    const inSheetTabsRoot = safeContains(sheetTabsRoot, active);
+    const inSheetTabRename = inSheetTabsRoot && inTextInput;
 
     const secondaryEditing = isSplitViewSecondaryEditing?.() === true;
     const isEditing = Boolean(app.isEditing() || secondaryEditing);
@@ -95,6 +107,7 @@ export function installKeyboardContextKeys(params: KeyboardContextKeysParams): K
     contextKeys.batch({
       [KeyboardContextKeyIds.focusInTextInput]: inTextInput,
       [KeyboardContextKeyIds.focusInFormulaBar]: inFormulaBar,
+      [KeyboardContextKeyIds.focusInSheetTabs]: inSheetTabs,
       [KeyboardContextKeyIds.focusInSheetTabRename]: inSheetTabRename,
       [KeyboardContextKeyIds.spreadsheetIsEditing]: isEditing,
       [KeyboardContextKeyIds.spreadsheetFormulaBarEditing]: Boolean(app.isFormulaBarEditing()),

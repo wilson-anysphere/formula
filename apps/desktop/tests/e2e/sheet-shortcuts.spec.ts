@@ -74,6 +74,44 @@ test.describe("sheet navigation shortcuts", () => {
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
   });
 
+  test("Ctrl/Cmd+PageDown keeps focus in the sheet tab strip when invoked from a focused tab", async ({ page }) => {
+    await gotoDesktop(page);
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+
+    // Create Sheet2 so sheet navigation is observable.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
+    });
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
+
+    const sheet1Tab = page.getByTestId("sheet-tab-Sheet1");
+    await sheet1Tab.focus();
+    await expect(sheet1Tab).toBeFocused();
+
+    // Dispatch directly so we don't trigger browser tab switching.
+    await page.evaluate((isMac) => {
+      const target = document.activeElement ?? window;
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "PageDown",
+          metaKey: isMac,
+          ctrlKey: !isMac,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, process.platform === "darwin");
+
+    const sheet2Tab = page.getByTestId("sheet-tab-Sheet2");
+    await expect(sheet2Tab).toHaveAttribute("data-active", "true");
+    await expect(sheet2Tab).toBeFocused();
+    await expect
+      .poll(() => page.evaluate(() => Boolean((document.activeElement as HTMLElement | null)?.closest("#sheet-tabs"))))
+      .toBe(true);
+  });
+
   test("Ctrl/Cmd+PageUp/PageDown works while the formula bar is editing a formula (keeps focus)", async ({ page }) => {
     await gotoDesktop(page);
     await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
