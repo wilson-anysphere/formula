@@ -338,7 +338,7 @@ function createTauriClipboardProvider() {
 
           await clipboard.write([new ClipboardItem(itemPayload)]);
         } catch {
-          // Ignore; some platforms deny HTML clipboard writes.
+          // Ignore; some platforms deny rich clipboard writes.
         }
       }
     },
