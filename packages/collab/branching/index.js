@@ -17,14 +17,33 @@ export class CollabBranchingWorkflow {
   #branchService;
   /** @type {string} */
   #rootName;
+  /** @type {any} */
+  #applyOrigin;
 
   /**
-   * @param {{ session: CollabSession, branchService: BranchService, rootName?: string }} input
+   * Origin configuration for checkout/merge:
+   * - default uses a dedicated origin token (`{type:"collab-branching-apply"}`) so bulk
+   *   rewrites aren't captured by collaborative undo tracking (`session.origin`).
+   * - pass `applyWithSessionOrigin: true` (or `applyOrigin: session.origin`) to opt back
+   *   into the historical undoable behavior.
+   *
+   * @param {{
+   *   session: CollabSession,
+   *   branchService: BranchService,
+   *   rootName?: string,
+   *   applyOrigin?: any,
+   *   applyWithSessionOrigin?: boolean,
+   * }} input
    */
-  constructor({ session, branchService, rootName }) {
+  constructor({ session, branchService, rootName, applyOrigin, applyWithSessionOrigin }) {
     this.#session = session;
     this.#branchService = branchService;
     this.#rootName = rootName ?? "branching";
+    this.#applyOrigin = applyWithSessionOrigin
+      ? this.#session.origin
+      : applyOrigin !== undefined
+        ? applyOrigin
+        : { type: "collab-branching-apply" };
   }
 
   /**
@@ -118,7 +137,7 @@ export class CollabBranchingWorkflow {
    */
   async checkoutBranch(actor, { name }) {
     const state = await this.#branchService.checkoutBranch(actor, { name });
-    applyDocumentStateToYjsDoc(this.#session.doc, state, { origin: this.#session.origin });
+    applyDocumentStateToYjsDoc(this.#session.doc, state, { origin: this.#applyOrigin });
     return state;
   }
 
@@ -136,7 +155,7 @@ export class CollabBranchingWorkflow {
    */
   async merge(actor, { sourceBranch, resolutions, message }) {
     const result = await this.#branchService.merge(actor, { sourceBranch, resolutions, message });
-    applyDocumentStateToYjsDoc(this.#session.doc, result.state, { origin: this.#session.origin });
+    applyDocumentStateToYjsDoc(this.#session.doc, result.state, { origin: this.#applyOrigin });
     return result;
   }
 }
