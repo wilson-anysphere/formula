@@ -27,6 +27,7 @@ use crate::shared_strings::parse_shared_strings_xml;
 use crate::sheet_metadata::parse_sheet_tab_color;
 use crate::styles::StylesPart;
 use crate::tables::{parse_table, TABLE_REL_TYPE};
+use crate::zip_util::open_zip_part;
 use crate::{parse_worksheet_hyperlinks, XlsxError};
 use crate::{
     CalcPr, CellMeta, CellValueKind, DateSystem, FormulaMeta, SheetMeta, XlsxDocument, XlsxMeta,
@@ -365,7 +366,7 @@ fn read_zip_part_optional<R: Read + std::io::Seek>(
     archive: &mut ZipArchive<R>,
     name: &str,
 ) -> Result<Option<Vec<u8>>, ReadError> {
-    match archive.by_name(name) {
+    match open_zip_part(archive, name) {
         Ok(mut file) => {
             if file.is_dir() {
                 return Ok(None);
@@ -389,7 +390,11 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         if file.is_dir() {
             continue;
         }
-        let name = file.name().to_string();
+        // ZIP entry names in valid XLSX/XLSM packages should not start with `/`, but tolerate
+        // producers that include it by normalizing to the canonical part name. This keeps all
+        // downstream lookups (which assume `xl/...`) working.
+        let name = file.name();
+        let name = name.strip_prefix('/').unwrap_or(name).to_string();
         let mut buf = Vec::with_capacity(file.size() as usize);
         file.read_to_end(&mut buf)?;
         parts.insert(name, buf);

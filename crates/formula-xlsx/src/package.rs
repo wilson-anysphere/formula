@@ -17,6 +17,7 @@ use crate::sheet_metadata::{
 };
 use crate::{DateSystem, RecalcPolicy};
 use crate::theme::{parse_theme_palette, ThemePalette};
+use crate::zip_util::open_zip_part;
 use formula_model::{CellRef, CellValue, SheetVisibility, StyleTable, TabColor};
 
 /// Excel workbook "kind" that drives the `/xl/workbook.xml` content type override in
@@ -449,10 +450,14 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
         if file.is_dir() {
             continue;
         }
-        part_names.insert(file.name().to_string());
+        // ZIP entry names in valid XLSX/XLSM packages should not start with `/`, but tolerate
+        // producers that include it by normalizing to canonical part names.
+        let name = file.name();
+        let canonical = name.strip_prefix('/').unwrap_or(name);
+        part_names.insert(canonical.to_string());
     }
 
-    let workbook_xml = match zip.by_name("xl/workbook.xml") {
+    let workbook_xml = match open_zip_part(&mut zip, "xl/workbook.xml") {
         Ok(mut file) => {
             let mut buf = Vec::with_capacity(file.size() as usize);
             file.read_to_end(&mut buf)?;
@@ -466,7 +471,7 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
     let workbook_xml = String::from_utf8(workbook_xml)?;
     let sheets = parse_workbook_sheets(&workbook_xml)?;
 
-    let rels_bytes = match zip.by_name("xl/_rels/workbook.xml.rels") {
+    let rels_bytes = match open_zip_part(&mut zip, "xl/_rels/workbook.xml.rels") {
         Ok(mut file) => {
             let mut buf = Vec::with_capacity(file.size() as usize);
             file.read_to_end(&mut buf)?;

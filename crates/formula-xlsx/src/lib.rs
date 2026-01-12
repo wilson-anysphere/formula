@@ -60,6 +60,7 @@ pub mod streaming;
 pub mod styles;
 pub mod tables;
 pub mod theme;
+mod zip_util;
 #[cfg(feature = "vba")]
 pub mod vba;
 mod workbook;

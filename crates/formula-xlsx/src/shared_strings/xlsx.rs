@@ -6,6 +6,8 @@ use thiserror::Error;
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
+use crate::zip_util::open_zip_part;
+
 use super::{parse_shared_strings_xml, write_shared_strings_xml, SharedStrings};
 
 #[derive(Debug, Error)]
@@ -28,7 +30,7 @@ pub fn read_shared_strings_from_xlsx(
 ) -> Result<SharedStrings, SharedStringsXlsxError> {
     let file = File::open(path)?;
     let mut zip = ZipArchive::new(file)?;
-    let mut ss_file = zip.by_name("xl/sharedStrings.xml").map_err(|e| match e {
+    let mut ss_file = open_zip_part(&mut zip, "xl/sharedStrings.xml").map_err(|e| match e {
         zip::result::ZipError::FileNotFound => SharedStringsXlsxError::MissingSharedStrings,
         other => SharedStringsXlsxError::Zip(other),
     })?;
@@ -59,7 +61,7 @@ pub fn write_shared_strings_to_xlsx(
     let mut seen_shared_strings = false;
     for i in 0..input_zip.len() {
         let mut file = input_zip.by_index(i)?;
-        let name = file.name().to_string();
+        let name = file.name().strip_prefix('/').unwrap_or(file.name()).to_string();
 
         if name == "xl/sharedStrings.xml" {
             seen_shared_strings = true;

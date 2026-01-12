@@ -11,6 +11,8 @@ use std::io::{Cursor, Read, Seek, Write};
 use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
 
+use crate::zip_util::open_zip_part;
+
 #[derive(Debug, Clone)]
 enum DefinedNameEdit {
     Set(String),
@@ -170,7 +172,7 @@ fn read_zip_bytes<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     name: &str,
 ) -> Result<Vec<u8>, PrintError> {
-    let mut file = zip.by_name(name)?;
+    let mut file = open_zip_part(zip, name)?;
     let mut buf = Vec::new();
     file.read_to_end(&mut buf)?;
     Ok(buf)

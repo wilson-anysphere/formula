@@ -5,6 +5,8 @@ use std::io::{Read, Seek};
 use thiserror::Error;
 use zip::ZipArchive;
 
+use crate::zip_util::open_zip_part;
+
 #[derive(Debug, Error)]
 pub enum MergeCellsError {
     #[error("xml parse error: {0}")]
@@ -54,7 +56,7 @@ pub fn read_merge_cells_from_xlsx<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     worksheet_path: &str,
 ) -> Result<Vec<Range>, MergeCellsError> {
-    let mut file = archive.by_name(worksheet_path)?;
+    let mut file = open_zip_part(archive, worksheet_path)?;
     let mut xml = String::new();
     file.read_to_string(&mut xml)?;
     read_merge_cells_from_worksheet_xml(&xml)

@@ -555,7 +555,7 @@ fn read_zip_part_optional<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     name: &str,
 ) -> Result<Option<Vec<u8>>, ChartExtractionError> {
-    match archive.by_name(name) {
+    match crate::zip_util::open_zip_part(archive, name) {
         Ok(mut file) => {
             if file.is_dir() {
                 return Ok(None);
