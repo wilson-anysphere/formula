@@ -796,6 +796,105 @@ fn patch_workbook_xml_infers_relationships_prefix_from_sheets_namespace() {
 }
 
 #[test]
+fn patch_workbook_xml_expands_self_closing_prefixed_root() {
+    let mut workbook = formula_model::Workbook::new();
+    workbook.add_sheet("Sheet1".to_string()).unwrap();
+    let doc = crate::XlsxDocument::new(workbook);
+
+    let workbook_xml = format!(
+        r#"<x:workbook xmlns:x="{spreadsheetml}" xmlns:rel="{rels}"/>"#,
+        spreadsheetml = SPREADSHEETML_NS,
+        rels = crate::xml::OFFICE_RELATIONSHIPS_NS
+    );
+
+    let patched = patch_workbook_xml(&doc, workbook_xml.as_bytes(), &doc.meta.sheets)
+        .expect("patch workbook xml");
+    let patched = std::str::from_utf8(&patched).expect("patched xml is utf8");
+
+    Document::parse(patched).expect("patched workbook.xml must parse as XML");
+
+    assert!(
+        patched.contains("<x:workbook") && patched.contains("</x:workbook>"),
+        "expected expanded <x:workbook> root; got:\n{patched}"
+    );
+    assert!(
+        patched.contains("<x:sheets") && patched.contains("<x:sheet"),
+        "expected inserted x:sheets/x:sheet children; got:\n{patched}"
+    );
+    assert!(
+        patched.contains("rel:id="),
+        "expected patched workbook.xml to use rel:id; got:\n{patched}"
+    );
+    assert!(
+        !patched.contains(" r:id="),
+        "must not introduce undeclared r:id attributes; got:\n{patched}"
+    );
+}
+
+#[test]
+fn patch_workbook_xml_expands_self_closing_root_and_declares_r_namespace_when_missing() {
+    let mut workbook = formula_model::Workbook::new();
+    workbook.add_sheet("Sheet1".to_string()).unwrap();
+    let doc = crate::XlsxDocument::new(workbook);
+
+    let workbook_xml = format!(
+        r#"<x:workbook xmlns:x="{spreadsheetml}"/>"#,
+        spreadsheetml = SPREADSHEETML_NS
+    );
+
+    let patched = patch_workbook_xml(&doc, workbook_xml.as_bytes(), &doc.meta.sheets)
+        .expect("patch workbook xml");
+    let patched = std::str::from_utf8(&patched).expect("patched xml is utf8");
+
+    Document::parse(patched).expect("patched workbook.xml must parse as XML");
+
+    assert!(
+        patched.contains(&format!(r#"xmlns:r="{}""#, crate::xml::OFFICE_RELATIONSHIPS_NS)),
+        "expected patched workbook.xml to declare xmlns:r; got:\n{patched}"
+    );
+    assert!(
+        patched.contains(" r:id="),
+        "expected patched workbook.xml to use r:id; got:\n{patched}"
+    );
+    assert!(
+        !patched.contains(" id=\""),
+        "must not fall back to namespace-less id= attributes; got:\n{patched}"
+    );
+}
+
+#[test]
+fn patch_workbook_xml_expands_self_closing_default_namespace_root() {
+    let mut workbook = formula_model::Workbook::new();
+    workbook.add_sheet("Sheet1".to_string()).unwrap();
+    let doc = crate::XlsxDocument::new(workbook);
+
+    let workbook_xml = format!(
+        r#"<workbook xmlns="{spreadsheetml}" xmlns:r="{rels}"/>"#,
+        spreadsheetml = SPREADSHEETML_NS,
+        rels = crate::xml::OFFICE_RELATIONSHIPS_NS
+    );
+
+    let patched = patch_workbook_xml(&doc, workbook_xml.as_bytes(), &doc.meta.sheets)
+        .expect("patch workbook xml");
+    let patched = std::str::from_utf8(&patched).expect("patched xml is utf8");
+
+    Document::parse(patched).expect("patched workbook.xml must parse as XML");
+
+    assert!(
+        patched.contains("<workbook") && patched.contains("</workbook>"),
+        "expected expanded <workbook> root; got:\n{patched}"
+    );
+    assert!(
+        patched.contains("<sheets") && patched.contains("<sheet"),
+        "expected inserted sheets/sheet children; got:\n{patched}"
+    );
+    assert!(
+        patched.contains(" r:id="),
+        "expected inserted sheets to use r:id; got:\n{patched}"
+    );
+}
+
+#[test]
 fn sheet_structure_patchers_expand_self_closing_prefix_only_roots() {
     let workbook_rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <pr:Relationships xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships"/>"#;

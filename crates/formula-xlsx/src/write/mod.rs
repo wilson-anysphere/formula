@@ -2081,7 +2081,173 @@ fn patch_workbook_xml(
                 let ns = crate::xml::workbook_xml_namespaces_from_workbook_start(&e)?;
                 spreadsheetml_prefix = ns.spreadsheetml_prefix;
                 office_rels_prefix = ns.office_relationships_prefix;
-                writer.write_event(Event::Empty(e.into_owned()))?;
+                // Expand self-closing `<workbook/>` roots so we can synthesize required children
+                // like `<workbookPr/>` and `<sheets>...</sheets>`.
+                //
+                // Some producers emit degenerate workbooks that self-close the root element.
+                // If we preserved that byte-for-byte we would have nowhere to insert required
+                // SpreadsheetML children and would output an invalid workbook.
+                let workbook_tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+
+                // Preserve the qualified name + all existing attributes/namespace declarations.
+                writer.get_mut().extend_from_slice(b"<");
+                writer.get_mut().extend_from_slice(workbook_tag.as_bytes());
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr?;
+                    writer.get_mut().push(b' ');
+                    writer.get_mut().extend_from_slice(attr.key.as_ref());
+                    writer.get_mut().extend_from_slice(b"=\"");
+                    writer.get_mut().extend_from_slice(
+                        escape_attr(&attr.unescape_value()?.into_owned()).as_bytes(),
+                    );
+                    writer.get_mut().push(b'"');
+                }
+                writer.get_mut().push(b'>');
+
+                // Always emit a `<workbookPr/>` so Excel considers the workbook structure valid.
+                let workbook_pr_tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "workbookPr");
+                writer.get_mut().extend_from_slice(b"<");
+                writer.get_mut().extend_from_slice(workbook_pr_tag.as_bytes());
+                if doc.meta.date_system == DateSystem::V1904 {
+                    writer.get_mut().extend_from_slice(br#" date1904="1""#);
+                }
+                writer.get_mut().extend_from_slice(b"/>");
+
+                // If the document wants workbookProtection but the original workbook has no
+                // children at all, synthesize it (matching the new-workbook writer behavior).
+                if want_workbook_protection {
+                    let tag =
+                        prefixed_tag(spreadsheetml_prefix.as_deref(), "workbookProtection");
+                    write_new_workbook_protection(doc, &mut writer, tag.as_str())?;
+                    inserted_workbook_protection = true;
+                }
+
+                // Optionally emit bookViews/workbookView when the view is meaningfully non-default
+                // (mirroring `write_workbook_xml` for new workbooks). This is not strictly required
+                // for validity, but keeps `.xls`-imported window metadata round-trippable even when
+                // the workbook root was self-closing.
+                let active_tab_idx = doc
+                    .workbook
+                    .active_sheet_id()
+                    .and_then(|active| sheets.iter().position(|meta| meta.worksheet_id == active))
+                    .unwrap_or(0);
+                let include_book_views = view_window.is_some() || active_tab_idx != 0;
+                if include_book_views {
+                    let book_views_tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "bookViews");
+                    let workbook_view_tag =
+                        prefixed_tag(spreadsheetml_prefix.as_deref(), "workbookView");
+                    writer.get_mut().extend_from_slice(b"<");
+                    writer.get_mut().extend_from_slice(book_views_tag.as_bytes());
+                    writer.get_mut().extend_from_slice(b"><");
+                    writer.get_mut().extend_from_slice(workbook_view_tag.as_bytes());
+                    if active_tab_idx != 0 {
+                        writer.get_mut().extend_from_slice(b" activeTab=\"");
+                        writer
+                            .get_mut()
+                            .extend_from_slice(active_tab_idx.to_string().as_bytes());
+                        writer.get_mut().push(b'"');
+                    }
+                    if let Some(window) = view_window {
+                        if let Some(x) = window.x {
+                            writer.get_mut().extend_from_slice(b" xWindow=\"");
+                            writer.get_mut().extend_from_slice(x.to_string().as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                        if let Some(y) = window.y {
+                            writer.get_mut().extend_from_slice(b" yWindow=\"");
+                            writer.get_mut().extend_from_slice(y.to_string().as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                        if let Some(width) = window.width {
+                            writer.get_mut().extend_from_slice(b" windowWidth=\"");
+                            writer.get_mut().extend_from_slice(width.to_string().as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                        if let Some(height) = window.height {
+                            writer.get_mut().extend_from_slice(b" windowHeight=\"");
+                            writer.get_mut().extend_from_slice(height.to_string().as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                        if let Some(state) = window.state {
+                            match state {
+                                WorkbookWindowState::Normal => {}
+                                WorkbookWindowState::Minimized => {
+                                    writer
+                                        .get_mut()
+                                        .extend_from_slice(br#" windowState="minimized""#);
+                                }
+                                WorkbookWindowState::Maximized => {
+                                    writer
+                                        .get_mut()
+                                        .extend_from_slice(br#" windowState="maximized""#);
+                                }
+                            }
+                        }
+                    }
+                    writer.get_mut().extend_from_slice(b"/></");
+                    writer.get_mut().extend_from_slice(book_views_tag.as_bytes());
+                    writer.get_mut().extend_from_slice(b">");
+                }
+
+                let sheets_tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "sheets");
+                let sheet_tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "sheet");
+                let needs_r_namespace = office_rels_prefix.is_none();
+                if needs_r_namespace {
+                    office_rels_prefix = Some("r".to_string());
+                }
+                let rel_id_attr = prefixed_tag(office_rels_prefix.as_deref(), "id");
+
+                writer.get_mut().extend_from_slice(b"<");
+                writer.get_mut().extend_from_slice(sheets_tag.as_bytes());
+                if needs_r_namespace {
+                    writer.get_mut().extend_from_slice(br#" xmlns:r=""#);
+                    writer
+                        .get_mut()
+                        .extend_from_slice(crate::xml::OFFICE_RELATIONSHIPS_NS.as_bytes());
+                    writer.get_mut().push(b'"');
+                }
+                writer.get_mut().push(b'>');
+                for sheet_meta in sheets {
+                    let sheet = doc.workbook.sheet(sheet_meta.worksheet_id);
+                    let name = sheet.map(|s| s.name.as_str()).unwrap_or("Sheet");
+                    let visibility = sheet.map(|s| s.visibility).unwrap_or(SheetVisibility::Visible);
+                    writer.get_mut().extend_from_slice(b"<");
+                    writer.get_mut().extend_from_slice(sheet_tag.as_bytes());
+                    writer.get_mut().extend_from_slice(b" name=\"");
+                    writer
+                        .get_mut()
+                        .extend_from_slice(escape_attr(name).as_bytes());
+                    writer.get_mut().push(b'"');
+                    writer.get_mut().extend_from_slice(b" sheetId=\"");
+                    writer
+                        .get_mut()
+                        .extend_from_slice(sheet_meta.sheet_id.to_string().as_bytes());
+                    writer.get_mut().push(b'"');
+                    writer.get_mut().push(b' ');
+                    writer.get_mut().extend_from_slice(rel_id_attr.as_bytes());
+                    writer.get_mut().extend_from_slice(b"=\"");
+                    writer.get_mut().extend_from_slice(
+                        escape_attr(&sheet_meta.relationship_id).as_bytes(),
+                    );
+                    writer.get_mut().push(b'"');
+                    match visibility {
+                        SheetVisibility::Visible => {}
+                        SheetVisibility::Hidden => {
+                            writer.get_mut().extend_from_slice(b" state=\"hidden\"");
+                        }
+                        SheetVisibility::VeryHidden => {
+                            writer.get_mut().extend_from_slice(b" state=\"veryHidden\"");
+                        }
+                    }
+                    writer.get_mut().extend_from_slice(b"/>");
+                }
+                writer.get_mut().extend_from_slice(b"</");
+                writer.get_mut().extend_from_slice(sheets_tag.as_bytes());
+                writer.get_mut().extend_from_slice(b">");
+
+                writer.get_mut().extend_from_slice(b"</");
+                writer.get_mut().extend_from_slice(workbook_tag.as_bytes());
+                writer.get_mut().extend_from_slice(b">");
             }
 
             Event::Start(e) if e.local_name().as_ref() == b"workbookPr" => {
