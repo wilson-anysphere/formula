@@ -136,6 +136,8 @@ export async function showInputBox(options = {}) {
       textarea.value = options.value ?? "";
       if (options.placeHolder) textarea.placeholder = options.placeHolder;
       textarea.rows = Math.max(3, options.rows ?? 10);
+      // Style textarea via CSS (see styles/extensions-ui.css); avoid inline styles so the
+      // dialog stays theme/token driven and testable via node/jsdom.
       // The dialog title doubles as the textarea label.
       textarea.setAttribute("aria-labelledby", title.id);
       textarea.dataset.testid = "input-box-field";
