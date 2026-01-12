@@ -117,4 +117,6 @@ Set `PUBLIC_BASE_URL` (example: `https://app.example.com`) in production so the 
 
 ### Rate limiting
 
-The SAML callback endpoint is rate limited per IP to reduce the impact of replay/brute-force attempts.
+The SAML `/start` and `/callback` endpoints are rate limited per IP to reduce the impact of replay/brute-force attempts and redirect-based amplification.
+
+When rate limited, the API returns `429 { error: "too_many_requests" }` and includes a `Retry-After` header (seconds).
