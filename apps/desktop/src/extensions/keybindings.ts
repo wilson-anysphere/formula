@@ -70,13 +70,45 @@ function normalizeEventKey(event: KeyboardEvent): string {
   return normalizeKeyToken(event.key);
 }
 
+const keyTokenToCodeFallback: Record<string, KeyboardEvent["code"]> = {
+  ";": "Semicolon",
+  "=": "Equal",
+  "-": "Minus",
+  "`": "Backquote",
+  "[": "BracketLeft",
+  "]": "BracketRight",
+  "\\": "Backslash",
+  "/": "Slash",
+  ",": "Comma",
+  ".": "Period",
+  "'": "Quote",
+
+  // Digits often produce different characters under Shift (e.g. "1" -> "!"),
+  // but the physical key stays stable via `KeyboardEvent.code`.
+  "0": "Digit0",
+  "1": "Digit1",
+  "2": "Digit2",
+  "3": "Digit3",
+  "4": "Digit4",
+  "5": "Digit5",
+  "6": "Digit6",
+  "7": "Digit7",
+  "8": "Digit8",
+  "9": "Digit9",
+};
+
 export function matchesKeybinding(binding: ParsedKeybinding, event: KeyboardEvent): boolean {
   if (binding.ctrl !== event.ctrlKey) return false;
   if (binding.shift !== event.shiftKey) return false;
   if (binding.alt !== event.altKey) return false;
   if (binding.meta !== event.metaKey) return false;
 
-  return normalizeEventKey(event) === binding.key;
+  if (normalizeEventKey(event) === binding.key) return true;
+
+  const fallbackCode = keyTokenToCodeFallback[binding.key];
+  if (!fallbackCode) return false;
+
+  return event.code === fallbackCode;
 }
 
 export function platformKeybinding(binding: ContributedKeybinding, platform: "mac" | "other"): string {

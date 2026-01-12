@@ -10,10 +10,11 @@ import {
 
 function eventForKey(
   key: string,
-  opts: Partial<Pick<KeyboardEvent, "ctrlKey" | "shiftKey" | "altKey" | "metaKey">> = {},
+  opts: Partial<Pick<KeyboardEvent, "ctrlKey" | "shiftKey" | "altKey" | "metaKey" | "code">> = {},
 ): KeyboardEvent {
   return {
     key,
+    code: "",
     ctrlKey: false,
     shiftKey: false,
     altKey: false,
@@ -76,6 +77,18 @@ describe("keybindings", () => {
     expect(matchesKeybinding(left!, eventForKey("ArrowLeft", { ctrlKey: true }))).toBe(true);
   });
 
+  it("matches shifted punctuation via KeyboardEvent.code fallback (ctrl+shift+;)", () => {
+    const binding = parseKeybinding("cmd", "ctrl+shift+;");
+    expect(binding).not.toBeNull();
+    expect(matchesKeybinding(binding!, eventForKey(":", { ctrlKey: true, shiftKey: true, code: "Semicolon" }))).toBe(true);
+  });
+
+  it("matches shifted punctuation via KeyboardEvent.code fallback (ctrl+shift+=)", () => {
+    const binding = parseKeybinding("cmd", "ctrl+shift+=");
+    expect(binding).not.toBeNull();
+    expect(matchesKeybinding(binding!, eventForKey("+", { ctrlKey: true, shiftKey: true, code: "Equal" }))).toBe(true);
+  });
+
   it("formatKeybindingForDisplay renders mac vs other", () => {
     const binding = parseKeybinding("cmd.test", "ctrl+option+shift+cmd+arrowup")!;
     expect(formatKeybindingForDisplay(binding, "mac")).toMatchInlineSnapshot('"⌃⌥⇧⌘↑"');
@@ -100,3 +113,4 @@ describe("keybindings", () => {
     expect(getPrimaryCommandKeybindingDisplay("cmd.one", index)).toBe("Ctrl+B");
   });
 });
+
