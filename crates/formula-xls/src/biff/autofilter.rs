@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use formula_model::{CellRef, Range, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, XLNM_FILTER_DATABASE};
 
-use super::{records, strings, BiffVersion};
+use super::{externsheet, records, strings, BiffVersion};
 
 // Workbook-global record ids.
 // See [MS-XLS]:
@@ -37,15 +37,6 @@ const PTG_AREA3D: [u8; 3] = [0x3B, 0x5B, 0x7B];
 // meaningful for `.xls` column indices. Some producers also use `0x3FFF` as a "max column"
 // sentinel; masking to 8 bits maps that to `0x00FF` (IV), matching Excel's limits.
 const BIFF8_COL_INDEX_MASK: u16 = 0x00FF;
-
-/// BIFF8 `XTI` entry from the `EXTERNSHEET` record.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Xti {
-    pub(crate) i_sup_book: u16,
-    pub(crate) itab_first: u16,
-    pub(crate) itab_last: u16,
-}
-
 #[derive(Debug, Default)]
 pub(crate) struct ParsedFilterDatabaseRanges {
     /// Mapping from 0-based BIFF sheet index to the AutoFilter range.
@@ -93,7 +84,7 @@ pub(crate) fn parse_biff_filter_database_ranges(
     let mut internal_supbook_index: Option<u16> = None;
 
     // There is typically only one EXTERNSHEET record; keep the last one we see.
-    let mut externsheets: Vec<Xti> = Vec::new();
+    let mut externsheets: Vec<externsheet::ExternSheetEntry> = Vec::new();
 
     let mut filter_database_names: Vec<FilterDatabaseName> = Vec::new();
 
@@ -121,7 +112,12 @@ pub(crate) fn parse_biff_filter_database_ranges(
                 supbook_count = supbook_count.saturating_add(1);
             }
             RECORD_EXTERNSHEET => {
-                externsheets = parse_externsheet_record_best_effort(record.data.as_ref());
+                let parsed = externsheet::parse_biff8_externsheet_record_data(
+                    record.data.as_ref(),
+                    record.offset,
+                );
+                externsheets = parsed.entries;
+                out.warnings.extend(parsed.warnings);
             }
             RECORD_NAME => {
                 match parse_name_record_best_effort(record.data.as_ref(), biff, codepage) {
@@ -186,33 +182,6 @@ pub(crate) fn parse_biff_filter_database_ranges(
     }
 
     Ok(out)
-}
-
-fn parse_externsheet_record_best_effort(data: &[u8]) -> Vec<Xti> {
-    if data.len() < 2 {
-        return Vec::new();
-    }
-    let cxti = u16::from_le_bytes([data[0], data[1]]) as usize;
-    let mut out = Vec::with_capacity(cxti);
-
-    let mut pos = 2usize;
-    let available = data.len().saturating_sub(pos);
-    let max_entries = available / 6;
-    let take = cxti.min(max_entries);
-
-    for _ in 0..take {
-        let i_sup_book = u16::from_le_bytes([data[pos], data[pos + 1]]);
-        let itab_first = u16::from_le_bytes([data[pos + 2], data[pos + 3]]);
-        let itab_last = u16::from_le_bytes([data[pos + 4], data[pos + 5]]);
-        out.push(Xti {
-            i_sup_book,
-            itab_first,
-            itab_last,
-        });
-        pos += 6;
-    }
-
-    out
 }
 
 fn supbook_record_is_internal(data: &[u8], codepage: u16) -> bool {
@@ -466,7 +435,7 @@ fn parse_biff8_unicode_string_no_cch(
 fn decode_filter_database_rgce(
     rgce: &[u8],
     base_sheet: Option<usize>,
-    externsheets: &[Xti],
+    externsheets: &[externsheet::ExternSheetEntry],
     internal_supbook_index: Option<u16>,
     sheet_count: Option<usize>,
 ) -> Result<Option<(usize, Range)>, String> {
@@ -570,7 +539,7 @@ fn decode_ptg_area(payload: &[u8]) -> Result<(Range, usize), String> {
 
 fn decode_ptg_ref3d(
     payload: &[u8],
-    externsheets: &[Xti],
+    externsheets: &[externsheet::ExternSheetEntry],
     internal_supbook_index: Option<u16>,
     sheet_count: Option<usize>,
 ) -> Result<(Option<usize>, Range, usize), String> {
@@ -590,7 +559,7 @@ fn decode_ptg_ref3d(
 
 fn decode_ptg_area3d(
     payload: &[u8],
-    externsheets: &[Xti],
+    externsheets: &[externsheet::ExternSheetEntry],
     internal_supbook_index: Option<u16>,
     sheet_count: Option<usize>,
 ) -> Result<(Option<usize>, Range, usize), String> {
@@ -616,7 +585,7 @@ fn decode_ptg_area3d(
 
 fn resolve_ixti_to_internal_sheet(
     ixti: u16,
-    externsheets: &[Xti],
+    externsheets: &[externsheet::ExternSheetEntry],
     internal_supbook_index: Option<u16>,
     sheet_count: Option<usize>,
 ) -> Option<usize> {
@@ -628,10 +597,10 @@ fn resolve_ixti_to_internal_sheet(
     // - Other writers reference the internal workbook SUPBOOK explicitly via its index.
     //
     // Be permissive and treat either as internal when possible.
-    let is_internal = if xti.i_sup_book == 0 {
+    let is_internal = if xti.supbook == 0 {
         true
     } else if let Some(internal_idx) = internal_supbook_index {
-        xti.i_sup_book == internal_idx
+        xti.supbook == internal_idx
     } else {
         false
     };
@@ -642,6 +611,9 @@ fn resolve_ixti_to_internal_sheet(
         return None;
     }
 
+    if xti.itab_first < 0 {
+        return None;
+    }
     let sheet_idx = xti.itab_first as usize;
     if let Some(count) = sheet_count {
         if sheet_idx >= count {
