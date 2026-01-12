@@ -6781,7 +6781,9 @@ if (
     const pointerId = event.pointerId;
     gridSplitterEl.setPointerCapture(pointerId);
 
-    const rect = gridSplitEl.getBoundingClientRect();
+    // `getBoundingClientRect()` can force layout; defer until the drag actually moves so
+    // clicking the splitter without dragging stays cheap.
+    let rect: DOMRect | null = null;
     const initialRatio = layoutController.layout.splitView.ratio;
     let latestClientX = event.clientX;
     let latestClientY = event.clientY;
@@ -6790,6 +6792,7 @@ if (
     let rafHandle: number | null = null;
 
     const applyRatio = (emit: boolean) => {
+      rect ??= gridSplitEl.getBoundingClientRect();
       const size = direction === "vertical" ? rect.width : rect.height;
       if (size <= 0) return;
       const offset = direction === "vertical" ? latestClientX - rect.left : latestClientY - rect.top;
