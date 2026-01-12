@@ -108,6 +108,13 @@ The user experience must honor Excel's familiar mental model while introducing m
 
 ## Keyboard Shortcuts
 
+### App
+
+| Shortcut | Action |
+|----------|--------|
+| `Cmd+Shift+P` / `Ctrl+Shift+P` | Open command palette |
+| `Cmd+K` / `Ctrl+K` | Inline AI edit (transform selection) |
+
 ### Navigation
 
 | Shortcut | Action |
