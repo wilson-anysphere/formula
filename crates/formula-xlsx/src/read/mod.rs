@@ -568,7 +568,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
 
     // Best-effort in-cell image loader (`xl/cellimages*.xml`). Missing parts or media should not
     // prevent the workbook from loading.
-    let _ = crate::cell_images::CellImages::parse_from_parts(&parts, &mut workbook);
+    crate::cell_images::load_cell_images_from_parts(&parts, &mut workbook);
 
     // Best-effort loader for rich-value-backed images-in-cells that point directly at `xl/media/*`
     // (without a `xl/cellimages.xml` store part).

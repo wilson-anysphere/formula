@@ -579,6 +579,7 @@ fn patch_or_copy_cell<W: Write>(
             if desired_semantics == original {
                 write_events(writer, cell_events)?;
             } else {
+                let value_changed = original.value != desired_semantics.value;
                 write_updated_cell(
                     doc,
                     sheet_meta,
@@ -591,6 +592,7 @@ fn patch_or_copy_cell<W: Write>(
                     writer,
                     cell_ref,
                     desired_cell,
+                    value_changed,
                     cell_events.first(),
                     extract_preserved_cell_children(&cell_events),
                 )?;
@@ -775,6 +777,7 @@ fn write_missing_cells_before_col<W: Write>(
             writer,
             cell_ref,
             cell,
+            true,
             None,
             Vec::new(),
         )?;
@@ -813,6 +816,7 @@ fn write_remaining_cells_in_row<W: Write>(
             writer,
             cell_ref,
             cell,
+            true,
             None,
             Vec::new(),
         )?;
@@ -833,6 +837,7 @@ fn write_updated_cell<W: Write>(
     writer: &mut Writer<W>,
     cell_ref: CellRef,
     cell: &formula_model::Cell,
+    value_changed: bool,
     original_cell_event: Option<&Event<'static>>,
     preserved_children: Vec<Event<'static>>,
 ) -> Result<(), WriteError> {
@@ -969,10 +974,12 @@ fn write_updated_cell<W: Write>(
     }
     // `vm="..."` is a SpreadsheetML value-metadata pointer (typically into `xl/metadata.xml`).
     //
-    // Excel uses this for rich value types (linked data types, embedded images, etc). If the
-    // caller edits a cell that previously had a `vm` pointer into a normal value, we must drop
-    // `vm` to avoid leaving a dangling value-metadata reference.
-    let preserve_vm = matches!(cell.value, CellValue::Error(ErrorValue::Value));
+    // Excel uses this for rich value types (linked data types, embedded images, etc). When the
+    // cell's value changes away from those semantics, drop `vm` to avoid leaving a dangling
+    // value-metadata reference.
+    //
+    // If the value itself hasn't changed (e.g. style-only edits), preserve `vm`.
+    let preserve_vm = !value_changed || matches!(cell.value, CellValue::Error(ErrorValue::Value));
     let drop_vm = original_has_vm && !preserve_vm;
     // If the cell did not previously have a `vm` attribute, populate it from `CellMeta` when set.
     //
