@@ -116,6 +116,8 @@ Supported menu locations (desktop UI):
 - `cell/context` — the grid (cell) context menu (`contributes.menus["cell/context"]`).
   - Opened via right-click, or keyboard open (Shift+F10 / Menu key).
   - Extension-contributed items are appended after the built-in clipboard/edit items, separated by a divider.
+  - Extensions are lazy-loaded for performance; the first time you open the context menu, it may populate extension
+    items asynchronously and update in-place once loading completes.
   - While the menu is open, the desktop re-evaluates `when` clauses as context keys change (e.g. selection changes),
     updating enabled/disabled state live.
 
