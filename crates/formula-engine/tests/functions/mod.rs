@@ -13,6 +13,7 @@ mod financial_cashflows;
 mod financial_dates;
 mod financial_depreciation;
 mod financial_depreciation_ext;
+mod financial_bonds_invariants;
 mod financial_odd_coupon;
 mod financial_french_depreciation;
 mod financial_time_value;
