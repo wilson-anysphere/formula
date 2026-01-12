@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 type CapabilityPermission =
   | string
@@ -200,5 +202,65 @@ describe("tauri capability event permissions", () => {
     // can assert the capability file does not include arbitrary names.)
     expect(listenEvents.has("totally-not-a-real-event")).toBe(false);
     expect(emitEvents.has("totally-not-a-real-event")).toBe(false);
+  });
+
+  it("does not grant event permissions for unused event names", () => {
+    const capabilityUrl = new URL("../../../src-tauri/capabilities/main.json", import.meta.url);
+    const capability = JSON.parse(readFileSync(capabilityUrl, "utf8")) as {
+      permissions?: CapabilityPermission[];
+    };
+
+    const permissions = Array.isArray(capability.permissions) ? capability.permissions : [];
+
+    const allowListen = permissions.find(
+      (p): p is Exclude<CapabilityPermission, string> =>
+        typeof p === "object" && p != null && (p as any).identifier === "event:allow-listen",
+    ) as any;
+    const allowEmit = permissions.find(
+      (p): p is Exclude<CapabilityPermission, string> =>
+        typeof p === "object" && p != null && (p as any).identifier === "event:allow-emit",
+    ) as any;
+
+    const allowlistedEvents = [
+      ...(Array.isArray(allowListen?.allow) ? allowListen.allow.map((entry: any) => entry?.event).filter(Boolean) : []),
+      ...(Array.isArray(allowEmit?.allow) ? allowEmit.allow.map((entry: any) => entry?.event).filter(Boolean) : []),
+    ];
+
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
+
+    const isRuntimeSource = (filePath: string): boolean => {
+      const normalized = filePath.replace(/\\/g, "/");
+      if (normalized.includes("/__tests__/")) return false;
+      if (normalized.match(/\\.(test|spec|vitest)\\./)) return false;
+      if (normalized.endsWith(".md")) return false;
+      if (normalized.includes("/src-tauri/capabilities/")) return false;
+      const ext = path.extname(filePath);
+      return ext === ".ts" || ext === ".tsx" || ext === ".js" || ext === ".jsx" || ext === ".rs";
+    };
+
+    const walk = (dir: string): string[] => {
+      const out: string[] = [];
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === "node_modules" || entry.name === "__tests__") continue;
+          out.push(...walk(full));
+        } else if (entry.isFile()) {
+          if (isRuntimeSource(full)) out.push(full);
+        }
+      }
+      return out;
+    };
+
+    const runtimeFiles = [
+      ...walk(path.join(root, "apps/desktop/src")),
+      ...walk(path.join(root, "apps/desktop/src-tauri/src")),
+    ];
+
+    const runtimeText = runtimeFiles.map((p) => readFileSync(p, "utf8")).join("\n");
+
+    for (const event of allowlistedEvents) {
+      expect(runtimeText.includes(String(event))).toBe(true);
+    }
   });
 });
