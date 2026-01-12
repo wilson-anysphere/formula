@@ -1,8 +1,8 @@
-import type { CellData, CellProvider, CellProviderUpdate, CellRange, CellStyle } from "@formula/grid";
-import { LruCache } from "@formula/grid";
+import type { CellData, CellProvider, CellProviderUpdate, CellRange, CellStyle } from "@formula/grid/node";
+import { LruCache } from "@formula/grid/node";
 import type { DocumentController } from "../../document/documentController.js";
 import { resolveCssVar } from "../../theme/cssVars.js";
-import { formatValueWithNumberFormat } from "../../formatting/numberFormat.js";
+import { formatValueWithNumberFormat } from "../../formatting/numberFormat.ts";
 import { normalizeExcelColorToCss } from "../../shared/colors.js";
 
 type RichTextValue = { text: string; runs?: Array<{ start: number; end: number; style?: Record<string, unknown> }> };
@@ -46,6 +46,23 @@ function toColumnName(col0: number): string {
 export class DocumentCellProvider implements CellProvider {
   private readonly headerStyle: CellStyle = { fontWeight: "600", textAlign: "center" };
   private readonly rowHeaderStyle: CellStyle = { fontWeight: "600", textAlign: "end" };
+  private readonly options: {
+    document: DocumentController;
+    /**
+     * Active sheet id for the grid view.
+     *
+     * The provider is only ever asked for the currently-rendered sheet; callers
+     * should update this when switching sheets.
+     */
+    getSheetId: () => string;
+    headerRows: number;
+    headerCols: number;
+    rowCount: number;
+    colCount: number;
+    showFormulas: () => boolean;
+    getComputedValue: (cell: { row: number; col: number }) => string | number | boolean | null;
+    getCommentMeta?: (row: number, col: number) => { resolved: boolean } | null;
+  };
 
   /**
    * Per-sheet caches avoid `${sheetId}:${row},${col}` string allocations in the hot
@@ -60,25 +77,24 @@ export class DocumentCellProvider implements CellProvider {
   private readonly listeners = new Set<(update: CellProviderUpdate) => void>();
   private unsubscribeDoc: (() => void) | null = null;
 
-  constructor(
-    private readonly options: {
-      document: DocumentController;
-      /**
-       * Active sheet id for the grid view.
-       *
-       * The provider is only ever asked for the currently-rendered sheet; callers
-       * should update this when switching sheets.
-       */
-      getSheetId: () => string;
-      headerRows: number;
-      headerCols: number;
-      rowCount: number;
-      colCount: number;
-      showFormulas: () => boolean;
-      getComputedValue: (cell: { row: number; col: number }) => string | number | boolean | null;
-      getCommentMeta?: (row: number, col: number) => { resolved: boolean } | null;
-    }
-  ) {
+  constructor(options: {
+    document: DocumentController;
+    /**
+     * Active sheet id for the grid view.
+     *
+     * The provider is only ever asked for the currently-rendered sheet; callers
+     * should update this when switching sheets.
+     */
+    getSheetId: () => string;
+    headerRows: number;
+    headerCols: number;
+    rowCount: number;
+    colCount: number;
+    showFormulas: () => boolean;
+    getComputedValue: (cell: { row: number; col: number }) => string | number | boolean | null;
+    getCommentMeta?: (row: number, col: number) => { resolved: boolean } | null;
+  }) {
+    this.options = options;
     // Caches cover cell metadata + value formatting work. Keep each sheet bounded to
     // avoid memory blow-ups on huge scrolls.
   }

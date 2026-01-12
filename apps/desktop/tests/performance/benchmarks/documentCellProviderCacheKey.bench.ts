@@ -1,4 +1,4 @@
-import { LruCache, type CellData } from '@formula/grid';
+import { LruCache, type CellData } from '@formula/grid/node';
 
 import { DocumentCellProvider } from '../../../src/grid/shared/documentCellProvider.ts';
 
@@ -25,18 +25,26 @@ type CellState = { value: unknown; formula: string | null; styleId?: number };
  *   FORMULA_BENCH_DOCUMENT_CELL_PROVIDER=1 pnpm benchmark
  */
 class StringKeyDocumentCellProvider {
-  private readonly cache = new LruCache<string, CellData | null>(50_000);
+  cache = new LruCache<string, CellData | null>(50_000);
+  options: {
+    document: { getCell: (sheetId: string, coord: { row: number; col: number }) => CellState | null };
+    getSheetId: () => string;
+    headerRows: number;
+    headerCols: number;
+    rowCount: number;
+    colCount: number;
+  };
 
-  constructor(
-    private readonly options: {
-      document: { getCell: (sheetId: string, coord: { row: number; col: number }) => CellState | null };
-      getSheetId: () => string;
-      headerRows: number;
-      headerCols: number;
-      rowCount: number;
-      colCount: number;
-    }
-  ) {}
+  constructor(options: {
+    document: { getCell: (sheetId: string, coord: { row: number; col: number }) => CellState | null };
+    getSheetId: () => string;
+    headerRows: number;
+    headerCols: number;
+    rowCount: number;
+    colCount: number;
+  }) {
+    this.options = options;
+  }
 
   getCell(row: number, col: number): CellData | null {
     const { rowCount, colCount } = this.options;
