@@ -60,7 +60,7 @@ fn run() -> Result<(), String> {
     //
     // This tool prints both digests by default so you can compare against the on-disk digest bytes.
     let digest_md5 = {
-        use sha2::Digest as _;
+        use md5::Digest as _;
         md5::Md5::digest(&project)
     };
     let digest_sha256 = {
