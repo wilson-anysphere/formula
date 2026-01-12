@@ -68,6 +68,52 @@ fn real_excel_images_in_cell_roundtrip_preserves_richdata_and_loads_media(
         );
     }
 
+    // Fixture-backed confirmations used by docs/20-images-in-cells.md.
+    //
+    // Workbook relationship type:
+    // - Type="http://schemas.microsoft.com/office/2019/relationships/cellimages"
+    // - Target="cellimages.xml"
+    let workbook_rels_xml = String::from_utf8(zip_part(&fixture_bytes, "xl/_rels/workbook.xml.rels"))?;
+    let workbook_rels_doc = roxmltree::Document::parse(&workbook_rels_xml)?;
+    let cellimages_rel = workbook_rels_doc
+        .descendants()
+        .find(|n| {
+            n.is_element()
+                && n.tag_name().name() == "Relationship"
+                && n.attribute("Target") == Some("cellimages.xml")
+        })
+        .expect("expected workbook.xml.rels Relationship targeting cellimages.xml");
+    assert_eq!(
+        cellimages_rel.attribute("Type"),
+        Some("http://schemas.microsoft.com/office/2019/relationships/cellimages"),
+        "unexpected workbook relationship Type for cellimages.xml: {workbook_rels_xml}"
+    );
+
+    // cellimages.xml root namespace.
+    let cellimages_xml = String::from_utf8(zip_part(&fixture_bytes, "xl/cellimages.xml"))?;
+    let cellimages_doc = roxmltree::Document::parse(&cellimages_xml)?;
+    let cellimages_root = cellimages_doc.root_element();
+    assert_eq!(cellimages_root.tag_name().name(), "cellImages");
+    assert_eq!(
+        cellimages_root.tag_name().namespace(),
+        Some("http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages"),
+        "unexpected cellimages.xml root namespace: {cellimages_xml}"
+    );
+
+    // [Content_Types].xml override for cellimages.xml.
+    let content_types_xml =
+        String::from_utf8(zip_part(&fixture_bytes, "[Content_Types].xml"))?;
+    assert!(
+        content_types_xml.contains("PartName=\"/xl/cellimages.xml\""),
+        "expected [Content_Types].xml to contain an Override for /xl/cellimages.xml, got: {content_types_xml}"
+    );
+    assert!(
+        content_types_xml.contains(
+            "ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml\""
+        ),
+        "expected [Content_Types].xml to use the cellimages content type override observed in Excel, got: {content_types_xml}"
+    );
+
     let sheet_xml = String::from_utf8(zip_part(&fixture_bytes, "xl/worksheets/sheet1.xml"))?;
     assert!(
         sheet_xml.contains(r#"<c r="A1" vm=""#),
