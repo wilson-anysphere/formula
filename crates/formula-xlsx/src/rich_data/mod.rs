@@ -70,10 +70,14 @@ impl XlsxPackage {
     /// Extract in-cell images stored via the Excel rich-data (`xl/metadata.xml` + `xl/richData/*`)
     /// mechanism.
     ///
-    /// This is a convenience wrapper around [`extract_rich_cell_images`], with a fallback for
-    /// legacy/simplified workbooks that omit the `xl/richData/richValue*.xml` parts and instead
-    /// index directly into `xl/richData/richValueRel.xml`.
-    pub fn extract_rich_data_images(&self) -> Result<HashMap<(String, CellRef), Vec<u8>>, XlsxError> {
+    /// Returns a map keyed by `(sheet_name, cell)`.
+    ///
+    /// This is a convenience wrapper around [`crate::rich_data::extract_rich_cell_images`], with a
+    /// fallback for legacy/simplified workbooks that omit the `xl/richData/richValue*.xml` parts
+    /// and instead index directly into `xl/richData/richValueRel.xml`.
+    pub fn extract_rich_cell_images_by_cell(
+        &self,
+    ) -> Result<HashMap<(String, CellRef), Vec<u8>>, XlsxError> {
         let extracted = if self.part_names().any(is_rich_value_part) {
             extract_rich_cell_images(self)
         } else {
