@@ -183,10 +183,8 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
         match reader.read_event_into(buf)? {
             Event::Start(e) if super::local_name(e.name().as_ref()) == b"row" => {
                 let row_num = row_num_from_attrs(&e)?;
-                let has_extra_attrs = row_has_extra_attrs(&e)?;
-                let keep_due_to_row_props = sheet
-                    .row_properties(row_num.saturating_sub(1))
-                    .is_some_and(|props| props.height.is_some() || props.hidden);
+                let has_unknown_attrs = row_has_unknown_attrs(&e)?;
+                let keep_due_to_row_props = sheet.row_properties(row_num.saturating_sub(1)).is_some();
                 write_missing_rows_before(
                     doc,
                     sheet_meta,
@@ -222,7 +220,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                     row_num,
                 )?;
                 let row_bytes = row_writer.into_inner();
-                if has_extra_attrs
+                if has_unknown_attrs
                     || keep_due_to_row_props
                     || outcome.wrote_cell
                     || outcome.wrote_other
@@ -232,10 +230,8 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
             }
             Event::Empty(e) if super::local_name(e.name().as_ref()) == b"row" => {
                 let row_num = row_num_from_attrs(&e)?;
-                let has_extra_attrs = row_has_extra_attrs(&e)?;
-                let keep_due_to_row_props = sheet
-                    .row_properties(row_num.saturating_sub(1))
-                    .is_some_and(|props| props.height.is_some() || props.hidden);
+                let has_unknown_attrs = row_has_unknown_attrs(&e)?;
+                let keep_due_to_row_props = sheet.row_properties(row_num.saturating_sub(1)).is_some();
                 write_missing_rows_before(
                     doc,
                     sheet_meta,
@@ -253,7 +249,7 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                 )?;
 
                 if peek_row(desired_cells, *desired_idx) != Some(row_num) {
-                    if has_extra_attrs || keep_due_to_row_props {
+                    if has_unknown_attrs || keep_due_to_row_props {
                         writer.write_event(Event::Empty(e.into_owned()))?;
                     } else {
                         // Drop empty placeholder rows that were introduced solely to hold cells
@@ -1305,11 +1301,17 @@ fn row_num_from_attrs(e: &BytesStart<'_>) -> Result<u32, WriteError> {
     Ok(0)
 }
 
-fn row_has_extra_attrs(e: &BytesStart<'_>) -> Result<bool, WriteError> {
+fn row_has_unknown_attrs(e: &BytesStart<'_>) -> Result<bool, WriteError> {
     for attr in e.attributes() {
         let attr = attr?;
-        if attr.key.as_ref() != b"r" {
-            return Ok(true);
+        // Attributes we manage from the worksheet model. These should not force retention of an
+        // otherwise-empty row once we rewrite the `<row>` start tag to match the model.
+        //
+        // Anything else (including `spans` and `x14ac:*`) is treated as "unknown" and preserved
+        // byte-for-byte, so we must keep the `<row>` element around.
+        match attr.key.as_ref() {
+            b"r" | b"ht" | b"customHeight" | b"hidden" | b"s" | b"customFormat" => {}
+            _ => return Ok(true),
         }
     }
     Ok(false)
