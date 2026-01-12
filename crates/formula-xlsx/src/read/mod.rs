@@ -489,9 +489,12 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         .as_deref()
         .map(|target| resolve_target(WORKBOOK_PART, target))
         .unwrap_or_else(|| "xl/metadata.xml".to_string());
-    let metadata_part = parts
+    let mut metadata_part = parts
         .get(&metadata_part_name)
         .and_then(|bytes| MetadataPart::parse(bytes).ok());
+    if let Some(metadata_part) = metadata_part.as_mut() {
+        metadata_part.vm_index_base = infer_vm_index_base_for_workbook(&parts, &sheets);
+    }
     let mut sheet_meta: Vec<SheetMeta> = Vec::with_capacity(sheets.len());
     let mut cell_meta = std::collections::HashMap::new();
     let mut rich_value_cells = std::collections::HashMap::new();
@@ -773,6 +776,13 @@ struct MetadataPart {
     /// resolve these indices via the richer DOM-based parser in `crate::rich_data::metadata`.
     /// The mapping is stored in this field so worksheet parsing can remain streaming.
     vm_to_rich_value: HashMap<u32, u32>,
+    /// Best-effort inference of whether worksheet `c/@vm` attributes are 0-based or 1-based.
+    ///
+    /// Excel uses 1-based `vm` indices, but some synthetic fixtures and other producers emit
+    /// 0-based indices. When we can infer the base from the workbook's worksheets, we use it to
+    /// resolve `vm` deterministically without relying on lossy "map both bases into one HashMap"
+    /// tricks.
+    vm_index_base: VmIndexBase,
     /// Metadata type indices that appear to represent rich values.
     rich_type_indices: HashSet<u32>,
     /// Mapping of `metadataRecords` entry index -> rich value record index.
@@ -795,6 +805,19 @@ struct MetadataPart {
     /// Best-effort inference of whether `rc/@t` values are 0-based or 1-based indices into
     /// `<metadataTypes>`.
     rc_t_base: RcIndexBase,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VmIndexBase {
+    ZeroBased,
+    OneBased,
+    Unknown,
+}
+
+impl Default for VmIndexBase {
+    fn default() -> Self {
+        Self::Unknown
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -830,29 +853,8 @@ impl MetadataPart {
         if let Ok(parsed) = crate::rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map(xml)
         {
             if !parsed.is_empty() {
-                // Excel's `vm` appears in the wild as both 0-based and 1-based. To be tolerant,
-                // insert both the original key and its 0-based equivalent.
-                //
-                // Note: `parsed` is a `HashMap`, so iteration order is not deterministic. Insert in
-                // two passes so the canonical (1-based) `vm` keys always win when the shifted
-                // `vm-1` entries collide (e.g. vm=1 and vm=2 both attempt to populate key 1).
-                let mut vm_to_rich_value: HashMap<u32, u32> =
-                    HashMap::with_capacity(parsed.len().saturating_mul(2));
-
-                // Pass 1: canonical keys.
-                for (&vm, &idx) in parsed.iter() {
-                    vm_to_rich_value.entry(vm).or_insert(idx);
-                }
-
-                // Pass 2: tolerate 0-based vm indices.
-                for (vm, idx) in parsed {
-                    if vm > 0 {
-                        vm_to_rich_value.entry(vm - 1).or_insert(idx);
-                    }
-                }
-
                 return Ok(Self {
-                    vm_to_rich_value,
+                    vm_to_rich_value: parsed,
                     ..Default::default()
                 });
             }
@@ -1167,6 +1169,7 @@ impl MetadataPart {
 
         Ok(Self {
             vm_to_rich_value: HashMap::new(),
+            vm_index_base: VmIndexBase::Unknown,
             rich_type_indices,
             rich_value_by_record,
             future_rich_value_by_bk,
@@ -1177,13 +1180,20 @@ impl MetadataPart {
     }
 
     fn vm_to_rich_value_index(&self, vm: u32) -> Option<u32> {
-        if let Some(idx) = self.vm_to_rich_value.get(&vm) {
-            return Some(*idx);
-        }
-        if let Some(vm) = vm.checked_sub(1) {
-            if let Some(idx) = self.vm_to_rich_value.get(&vm) {
-                return Some(*idx);
-            }
+        if !self.vm_to_rich_value.is_empty() {
+            // The DOM-based rich value metadata parser returns a mapping keyed by 1-based `vm`
+            // indices (matching modern Excel). Some producers emit 0-based `vm` values in worksheet
+            // cells. Prefer the inferred base when available, but keep a fallback to the other
+            // interpretation for resilience.
+            let one_based = self.vm_to_rich_value.get(&vm).copied();
+            let zero_based = vm
+                .checked_add(1)
+                .and_then(|vm1| self.vm_to_rich_value.get(&vm1).copied());
+            return match self.vm_index_base {
+                VmIndexBase::ZeroBased => zero_based.or(one_based),
+                VmIndexBase::OneBased => one_based.or(zero_based),
+                VmIndexBase::Unknown => one_based.or(zero_based),
+            };
         }
 
         self.vm_to_rich_value_index_with_candidate(vm).or_else(|| {
@@ -1296,6 +1306,54 @@ impl MetadataPart {
         }
         None
     }
+}
+
+fn infer_vm_index_base_for_workbook(
+    parts: &BTreeMap<String, Vec<u8>>,
+    sheets: &[ParsedSheet],
+) -> VmIndexBase {
+    for sheet in sheets {
+        let Some(bytes) = parts.get(&sheet.path) else {
+            continue;
+        };
+        if worksheet_contains_vm_zero(bytes) {
+            return VmIndexBase::ZeroBased;
+        }
+    }
+    VmIndexBase::OneBased
+}
+
+fn worksheet_contains_vm_zero(xml: &[u8]) -> bool {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e) | Event::Empty(e)) if e.local_name().as_ref() == b"c" => {
+                for attr in e.attributes() {
+                    let Ok(attr) = attr else {
+                        continue;
+                    };
+                    if crate::openxml::local_name(attr.key.as_ref()) != b"vm" {
+                        continue;
+                    }
+                    let Ok(val) = attr.unescape_value() else {
+                        continue;
+                    };
+                    if val.trim() == "0" {
+                        return true;
+                    }
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+        buf.clear();
+    }
+
+    false
 }
 
 fn parse_shared_strings(bytes: &[u8]) -> Result<Vec<RichText>, ReadError> {
