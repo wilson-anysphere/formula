@@ -654,11 +654,28 @@ def generate(
         tags=["stat", "FORECAST.ETS"],
         formula="=FORECAST.ETS(7,{1,2,3,4,5,6},{1,2,3,4,5,6},1)",
     )
+    # Date timelines in Excel often use monthly/quarterly/yearly serials, which are not evenly
+    # spaced in days (28/29/30/31 and 365/366). Include deterministic monthly date timeline cases
+    # to ensure engines handle this common pattern.
+    add_case(
+        cases,
+        prefix="forecast_ets_monthly",
+        tags=["stat", "FORECAST.ETS", "dates"],
+        formula="=FORECAST.ETS(43952,{10,10,10,10},{43831,43862,43891,43922},1)",
+        description="Monthly date serial timeline (2020-01-01..2020-04-01) forecasting 2020-05-01",
+    )
     add_case(
         cases,
         prefix="forecast_ets_confint",
         tags=["stat", "FORECAST.ETS.CONFINT"],
         formula="=FORECAST.ETS.CONFINT(7,{1,2,3,4,5,6},{1,2,3,4,5,6},0.95,1)",
+    )
+    add_case(
+        cases,
+        prefix="forecast_ets_confint_monthly",
+        tags=["stat", "FORECAST.ETS.CONFINT", "dates"],
+        formula="=FORECAST.ETS.CONFINT(43952,{10,10,10,10},{43831,43862,43891,43922},0.95,1)",
+        description="Confidence interval for monthly date serial timeline (perfect fit -> 0)",
     )
     add_case(
         cases,
@@ -668,9 +685,23 @@ def generate(
     )
     add_case(
         cases,
+        prefix="forecast_ets_seasonality_monthly",
+        tags=["stat", "FORECAST.ETS.SEASONALITY", "dates"],
+        formula="=FORECAST.ETS.SEASONALITY({10,10,10,10},{43831,43862,43891,43922})",
+        description="Seasonality detection on a monthly date serial timeline (constant series)",
+    )
+    add_case(
+        cases,
         prefix="forecast_ets_stat",
         tags=["stat", "FORECAST.ETS.STAT"],
         formula="=FORECAST.ETS.STAT({1,2,3,4,5,6},{1,2,3,4,5,6},1,1,1,8)",
+    )
+    add_case(
+        cases,
+        prefix="forecast_ets_stat_monthly",
+        tags=["stat", "FORECAST.ETS.STAT", "dates"],
+        formula="=FORECAST.ETS.STAT({10,10,10,10},{43831,43862,43891,43922},1,1,1,8)",
+        description="RMSE for monthly date serial timeline (perfect fit -> 0)",
     )
 
     # STEYX should be 0 for a perfectly linear relationship (y = 2x + 1).

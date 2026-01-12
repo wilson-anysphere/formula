@@ -477,7 +477,7 @@ impl<'a> CompileCtx<'a> {
                 .instrs
                 .push(Instruction::new(OpCode::JumpIfFalseOrError, 0, 0));
 
-            // Match branch: evaluate and return the selected choice.
+            // Match branch: evaluate the selected value and jump to end.
             self.compile_expr_inner(choice, allow_range);
             let jump_end_idx = self.program.instrs.len();
             self.program
@@ -487,7 +487,6 @@ impl<'a> CompileCtx<'a> {
             let next_case_target = self.program.instrs.len() as u32;
             self.program.instrs[jump_idx] =
                 Instruction::new(OpCode::JumpIfFalseOrError, next_case_target, 0);
-
             jump_if_idxs.push(jump_idx);
             jump_end_idxs.push(jump_end_idx);
         }

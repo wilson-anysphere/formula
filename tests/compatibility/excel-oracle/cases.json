@@ -20544,6 +20544,18 @@
       "id": "forecast_ets_fd60a0f105e9"
     },
     {
+      "formula": "=FORECAST.ETS(43952,{10,10,10,10},{43831,43862,43891,43922},1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "FORECAST.ETS",
+        "dates"
+      ],
+      "description": "Monthly date serial timeline (2020-01-01..2020-04-01) forecasting 2020-05-01",
+      "id": "forecast_ets_monthly_a85a1d4ee073"
+    },
+    {
       "formula": "=FORECAST.ETS.CONFINT(7,{1,2,3,4,5,6},{1,2,3,4,5,6},0.95,1)",
       "outputCell": "C1",
       "inputs": [],
@@ -20552,6 +20564,18 @@
         "FORECAST.ETS.CONFINT"
       ],
       "id": "forecast_ets_confint_8eafb6e3d87f"
+    },
+    {
+      "formula": "=FORECAST.ETS.CONFINT(43952,{10,10,10,10},{43831,43862,43891,43922},0.95,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "FORECAST.ETS.CONFINT",
+        "dates"
+      ],
+      "description": "Confidence interval for monthly date serial timeline (perfect fit -> 0)",
+      "id": "forecast_ets_confint_monthly_a7b2f6ab6f6a"
     },
     {
       "formula": "=FORECAST.ETS.SEASONALITY({10,20,10,20,10,20,10,20},{1,2,3,4,5,6,7,8})",
@@ -20564,6 +20588,18 @@
       "id": "forecast_ets_seasonality_a4855868338a"
     },
     {
+      "formula": "=FORECAST.ETS.SEASONALITY({10,10,10,10},{43831,43862,43891,43922})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "FORECAST.ETS.SEASONALITY",
+        "dates"
+      ],
+      "description": "Seasonality detection on a monthly date serial timeline (constant series)",
+      "id": "forecast_ets_seasonality_monthly_b0903c51d41f"
+    },
+    {
       "formula": "=FORECAST.ETS.STAT({1,2,3,4,5,6},{1,2,3,4,5,6},1,1,1,8)",
       "outputCell": "C1",
       "inputs": [],
@@ -20572,6 +20608,18 @@
         "FORECAST.ETS.STAT"
       ],
       "id": "forecast_ets_stat_c8d98934d450"
+    },
+    {
+      "formula": "=FORECAST.ETS.STAT({10,10,10,10},{43831,43862,43891,43922},1,1,1,8)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "FORECAST.ETS.STAT",
+        "dates"
+      ],
+      "description": "RMSE for monthly date serial timeline (perfect fit -> 0)",
+      "id": "forecast_ets_stat_monthly_f8804c55be98"
     },
     {
       "formula": "=STEYX({3,5,7,9,11},{1,2,3,4,5})",

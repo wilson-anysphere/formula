@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T12:31:40.39696674Z",
+  "generatedAt": "2026-01-12T14:51:40.95326246Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "e6a4724561632ed25037dd86e16177cf6178a3bc3e5f219f07e54093e16091f0",
-    "count": 1750
+    "sha256": "3b4f0fb7c86ef632ebcb157c3b574f739ae90259326f080f9b343e5eb382b23e",
+    "count": 1754
   },
   "results": [
     {
@@ -10140,7 +10140,27 @@
       "displayText": "7"
     },
     {
+      "caseId": "forecast_ets_monthly_a85a1d4ee073",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 10.0
+      },
+      "address": "C1",
+      "displayText": "10"
+    },
+    {
       "caseId": "forecast_ets_confint_8eafb6e3d87f",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0
+      },
+      "address": "C1",
+      "displayText": "0"
+    },
+    {
+      "caseId": "forecast_ets_confint_monthly_a7b2f6ab6f6a",
       "outputCell": "C1",
       "result": {
         "t": "n",
@@ -10160,7 +10180,27 @@
       "displayText": "2"
     },
     {
+      "caseId": "forecast_ets_seasonality_monthly_b0903c51d41f",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
       "caseId": "forecast_ets_stat_c8d98934d450",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0
+      },
+      "address": "C1",
+      "displayText": "0"
+    },
+    {
+      "caseId": "forecast_ets_stat_monthly_f8804c55be98",
       "outputCell": "C1",
       "result": {
         "t": "n",
@@ -10198,6 +10238,94 @@
       },
       "address": "C1",
       "displayText": "10"
+    },
+    {
+      "caseId": "stat_linest_d9c2a8e060fe",
+      "outputCell": "C1",
+      "result": {
+        "t": "arr",
+        "rows": [
+          [
+            {
+              "t": "n",
+              "v": 0.9999999999999994
+            },
+            {
+              "t": "n",
+              "v": 1.4430967688835197e-15
+            }
+          ]
+        ]
+      },
+      "address": "C1:D1",
+      "displayText": "0.9999999999999994"
+    },
+    {
+      "caseId": "stat_logest_8fab3593593b",
+      "outputCell": "C1",
+      "result": {
+        "t": "arr",
+        "rows": [
+          [
+            {
+              "t": "n",
+              "v": 2.999999999999999
+            },
+            {
+              "t": "n",
+              "v": 2.0000000000000013
+            }
+          ]
+        ]
+      },
+      "address": "C1:D1",
+      "displayText": "2.999999999999999"
+    },
+    {
+      "caseId": "stat_trend_af71dd9a2007",
+      "outputCell": "C1",
+      "result": {
+        "t": "arr",
+        "rows": [
+          [
+            {
+              "t": "n",
+              "v": 3.999999999999999
+            }
+          ],
+          [
+            {
+              "t": "n",
+              "v": 4.999999999999999
+            }
+          ]
+        ]
+      },
+      "address": "C1:C2",
+      "displayText": "3.999999999999999"
+    },
+    {
+      "caseId": "stat_growth_750ef3f5abd7",
+      "outputCell": "C1",
+      "result": {
+        "t": "arr",
+        "rows": [
+          [
+            {
+              "t": "n",
+              "v": 53.999999999999986
+            }
+          ],
+          [
+            {
+              "t": "n",
+              "v": 161.99999999999991
+            }
+          ]
+        ]
+      },
+      "address": "C1:C2",
+      "displayText": "53.999999999999986"
     },
     {
       "caseId": "and_95c1b28040be",
@@ -13160,6 +13288,16 @@
       "displayText": "abc"
     },
     {
+      "caseId": "hyperlink_50a1e2786fb7",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "Example"
+      },
+      "address": "C1",
+      "displayText": "Example"
+    },
+    {
       "caseId": "textjoin_6f63b2cb1f9b",
       "outputCell": "C1",
       "result": {
@@ -14045,6 +14183,36 @@
       "displayText": "1"
     },
     {
+      "caseId": "yearfrac_ba1354c3dc19",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "yearfrac_78b8dd66cb86",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "yearfrac_65940c75b82e",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
       "caseId": "iso_weeknum_430750f12da8",
       "outputCell": "C1",
       "result": {
@@ -14305,6 +14473,16 @@
       "displayText": "#N/A"
     },
     {
+      "caseId": "lookup_14d2fce8ebcb",
+      "outputCell": "E1",
+      "result": {
+        "t": "s",
+        "v": "three"
+      },
+      "address": "E1",
+      "displayText": "three"
+    },
+    {
       "caseId": "hlookup_0c04a351e7bf",
       "outputCell": "G1",
       "result": {
@@ -14542,6 +14720,16 @@
         "v": 2.0
       },
       "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "areas_88aea759af4f",
+      "outputCell": "E1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "E1",
       "displayText": "2"
     },
     {
@@ -14845,6 +15033,36 @@
       "displayText": "0.10471306744129724"
     },
     {
+      "caseId": "effect_16547c722a34",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.10250000000000001
+      },
+      "address": "C1",
+      "displayText": "0.10250000000000001"
+    },
+    {
+      "caseId": "effect_1ba508dc7c2c",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.1
+      },
+      "address": "C1",
+      "displayText": "0.1"
+    },
+    {
+      "caseId": "effect_1650c200e327",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.1
+      },
+      "address": "C1",
+      "displayText": "0.1"
+    },
+    {
       "caseId": "nominal_6217933336fb",
       "outputCell": "C1",
       "result": {
@@ -14853,6 +15071,26 @@
       },
       "address": "C1",
       "displayText": "0.0956896851468449"
+    },
+    {
+      "caseId": "nominal_f63f8b09d19a",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0976176963403031
+      },
+      "address": "C1",
+      "displayText": "0.0976176963403031"
+    },
+    {
+      "caseId": "nominal_23b000f92d3f",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.1
+      },
+      "address": "C1",
+      "displayText": "0.1"
     },
     {
       "caseId": "rri_bbd801af55f6",
@@ -14873,6 +15111,66 @@
       },
       "address": "C1",
       "displayText": "3.859866162622662"
+    },
+    {
+      "caseId": "coupdaybs_7dd82a6ce30a",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 164.0
+      },
+      "address": "C1",
+      "displayText": "164"
+    },
+    {
+      "caseId": "coupdays_15fc1f745c8c",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 180.0
+      },
+      "address": "C1",
+      "displayText": "180"
+    },
+    {
+      "caseId": "coupdaysnc_1d753bc1c4dd",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 16.0
+      },
+      "address": "C1",
+      "displayText": "16"
+    },
+    {
+      "caseId": "coupncd_d16b3b0f31ac",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 45474.0
+      },
+      "address": "C1",
+      "displayText": "45474"
+    },
+    {
+      "caseId": "coupnum_d9d412c85981",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "couppcd_fb1f66d541f3",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 45292.0
+      },
+      "address": "C1",
+      "displayText": "45292"
     },
     {
       "caseId": "fvschedule_a45f06da5a3b",
@@ -15085,6 +15383,46 @@
       "displayText": "43845"
     },
     {
+      "caseId": "couppcd_eom_apr30_22cd75e85c72",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 43861.0
+      },
+      "address": "C1",
+      "displayText": "43861"
+    },
+    {
+      "caseId": "coupdays_eom_apr30_f63ac6d593a1",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 90.0
+      },
+      "address": "C1",
+      "displayText": "90"
+    },
+    {
+      "caseId": "couppcd_eom_feb28_8ebc724a184e",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 44074.0
+      },
+      "address": "C1",
+      "displayText": "44074"
+    },
+    {
+      "caseId": "coupdays_eom_feb28_69d7ccd41d35",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 181.0
+      },
+      "address": "C1",
+      "displayText": "181"
+    },
+    {
       "caseId": "disc_816f7b8fb795",
       "outputCell": "C1",
       "result": {
@@ -15216,6 +15554,106 @@
     },
     {
       "caseId": "oddlyield_aa53352d755f",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.14811017424419679
+      },
+      "address": "C1",
+      "displayText": "0.14811017424419679"
+    },
+    {
+      "caseId": "oddfprice_c9dc779e35fe",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 113.59920582823823
+      },
+      "address": "C1",
+      "displayText": "113.59920582823823"
+    },
+    {
+      "caseId": "oddfprice_290c4c942c46",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 103.01773611298864
+      },
+      "address": "C1",
+      "displayText": "103.01773611298864"
+    },
+    {
+      "caseId": "oddfprice_cebf2b38f257",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 103.01773611298864
+      },
+      "address": "C1",
+      "displayText": "103.01773611298864"
+    },
+    {
+      "caseId": "oddlprice_c39c844b3212",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.48044585692473
+      },
+      "address": "C1",
+      "displayText": "100.48044585692473"
+    },
+    {
+      "caseId": "oddlyield_6c295f41d129",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.14811017424419679
+      },
+      "address": "C1",
+      "displayText": "0.14811017424419679"
+    },
+    {
+      "caseId": "oddfprice_ae2720a4ce4e",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 113.59920582823823
+      },
+      "address": "C1",
+      "displayText": "113.59920582823823"
+    },
+    {
+      "caseId": "oddfprice_353923122884",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 113.59771747407882
+      },
+      "address": "C1",
+      "displayText": "113.59771747407882"
+    },
+    {
+      "caseId": "oddfprice_7754bc28b438",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 113.59920582823823
+      },
+      "address": "C1",
+      "displayText": "113.59920582823823"
+    },
+    {
+      "caseId": "oddlprice_c55ee6b33bc8",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.48044585692473
+      },
+      "address": "C1",
+      "displayText": "100.48044585692473"
+    },
+    {
+      "caseId": "oddlyield_f423e1e7fee1",
       "outputCell": "C1",
       "result": {
         "t": "n",
@@ -15383,6 +15821,26 @@
       },
       "address": "C1",
       "displayText": "25"
+    },
+    {
+      "caseId": "accrint_stub_default_b05115a0a863",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 16.666666666666668
+      },
+      "address": "C1",
+      "displayText": "16.666666666666668"
+    },
+    {
+      "caseId": "accrint_stub_true_cf10adfda266",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 41.666666666666664
+      },
+      "address": "C1",
+      "displayText": "41.666666666666664"
     },
     {
       "caseId": "oddfprice_basis0_da0074a10837",
@@ -15585,6 +16043,26 @@
       "displayText": "0.23089149550037363"
     },
     {
+      "caseId": "oddlprice_eom_apr30_basis1_36b354ead5f2",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.10394690232079
+      },
+      "address": "C1",
+      "displayText": "100.10394690232079"
+    },
+    {
+      "caseId": "oddlyield_eom_apr30_basis1_f8402fa8a5fb",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.15667744331501973
+      },
+      "address": "C1",
+      "displayText": "0.15667744331501973"
+    },
+    {
       "caseId": "oddfprice_neg_yld_7d02a1e3e38e",
       "outputCell": "C1",
       "result": {
@@ -15605,6 +16083,66 @@
       "displayText": "102.71450083338773"
     },
     {
+      "caseId": "oddfprice_neg_yld_below_minus1_8890f314c2bb",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 6.910646360118339e+16
+      },
+      "address": "C1",
+      "displayText": "69106463601183390"
+    },
+    {
+      "caseId": "oddlprice_neg_yld_below_minus1_531de1f51df7",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 239.6576768188426
+      },
+      "address": "C1",
+      "displayText": "239.6576768188426"
+    },
+    {
+      "caseId": "oddfprice_yld_eq_neg_frequency_21f09499af95",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#DIV/0!"
+      },
+      "address": "C1",
+      "displayText": "#DIV/0!"
+    },
+    {
+      "caseId": "oddlprice_yld_eq_neg_frequency_c8a196ed4f92",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#DIV/0!"
+      },
+      "address": "C1",
+      "displayText": "#DIV/0!"
+    },
+    {
+      "caseId": "oddfprice_yld_below_neg_frequency_84304fd5a85b",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddlprice_yld_below_neg_frequency_d6b5dc8f7887",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
       "caseId": "oddfprice_neg_rate_4de60a4da4d5",
       "outputCell": "C1",
       "result": {
@@ -15616,6 +16154,26 @@
     },
     {
       "caseId": "oddlprice_neg_rate_f21f6281f932",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddfyield_neg_rate_72af92333e7a",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddlyield_neg_rate_892570c2f519",
       "outputCell": "C1",
       "result": {
         "t": "e",
@@ -15808,21 +16366,21 @@
       "caseId": "oddlprice_settlement_eq_last_interest_2aaeec2068c7",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NUM!"
+        "t": "n",
+        "v": 100.49019607843137
       },
       "address": "C1",
-      "displayText": "#NUM!"
+      "displayText": "100.49019607843137"
     },
     {
       "caseId": "oddlyield_settlement_eq_last_interest_478517910c3d",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NUM!"
+        "t": "n",
+        "v": 0.039999999999999813
       },
       "address": "C1",
-      "displayText": "#NUM!"
+      "displayText": "0.039999999999999813"
     },
     {
       "caseId": "oddlprice_last_interest_eq_maturity_6a12d560c779",
@@ -16069,20 +16627,20 @@
       "outputCell": "C1",
       "result": {
         "t": "n",
-        "v": 99.96121968512507
+        "v": 99.96077498435339
       },
       "address": "C1",
-      "displayText": "99.96121968512507"
+      "displayText": "99.96077498435339"
     },
     {
       "caseId": "oddlyield_7091ab544f8f",
       "outputCell": "C1",
       "result": {
         "t": "n",
-        "v": 0.6114824301430252
+        "v": 0.6044549289328661
       },
       "address": "C1",
-      "displayText": "0.6114824301430252"
+      "displayText": "0.6044549289328661"
     },
     {
       "caseId": "npv_b9b2bb2deab1",
@@ -17042,6 +17600,26 @@
       "displayText": "FALSE"
     },
     {
+      "caseId": "isref_241c70b18320",
+      "outputCell": "C1",
+      "result": {
+        "t": "b",
+        "v": true
+      },
+      "address": "C1",
+      "displayText": "TRUE"
+    },
+    {
+      "caseId": "isnontext_4cf8fa084d68",
+      "outputCell": "C1",
+      "result": {
+        "t": "b",
+        "v": false
+      },
+      "address": "C1",
+      "displayText": "FALSE"
+    },
+    {
       "caseId": "islogical_f99dae6e94a9",
       "outputCell": "C1",
       "result": {
@@ -17615,66 +18193,6 @@
       "displayText": "#NAME?"
     },
     {
-      "caseId": "coupdaybs_7dd82a6ce30a",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 164.0
-      },
-      "address": "C1",
-      "displayText": "164"
-    },
-    {
-      "caseId": "coupdays_15fc1f745c8c",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 180.0
-      },
-      "address": "C1",
-      "displayText": "180"
-    },
-    {
-      "caseId": "coupdaysnc_1d753bc1c4dd",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 16.0
-      },
-      "address": "C1",
-      "displayText": "16"
-    },
-    {
-      "caseId": "coupncd_d16b3b0f31ac",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 45474.0
-      },
-      "address": "C1",
-      "displayText": "45474"
-    },
-    {
-      "caseId": "coupnum_d9d412c85981",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 2.0
-      },
-      "address": "C1",
-      "displayText": "2"
-    },
-    {
-      "caseId": "couppcd_fb1f66d541f3",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 45292.0
-      },
-      "address": "C1",
-      "displayText": "45292"
-    },
-    {
       "caseId": "financial_coupncd_eom_384cda9180e8",
       "outputCell": "A1",
       "result": {
@@ -17743,484 +18261,6 @@
       },
       "address": "A1",
       "displayText": "31"
-    },
-    {
-      "caseId": "stat_linest_d9c2a8e060fe",
-      "outputCell": "C1",
-      "result": {
-        "t": "arr",
-        "rows": [
-          [
-            {
-              "t": "n",
-              "v": 0.9999999999999994
-            },
-            {
-              "t": "n",
-              "v": 1.4430967688835197e-15
-            }
-          ]
-        ]
-      },
-      "address": "C1:D1",
-      "displayText": "0.9999999999999994"
-    },
-    {
-      "caseId": "stat_logest_8fab3593593b",
-      "outputCell": "C1",
-      "result": {
-        "t": "arr",
-        "rows": [
-          [
-            {
-              "t": "n",
-              "v": 2.999999999999999
-            },
-            {
-              "t": "n",
-              "v": 2.0000000000000013
-            }
-          ]
-        ]
-      },
-      "address": "C1:D1",
-      "displayText": "2.999999999999999"
-    },
-    {
-      "caseId": "stat_trend_af71dd9a2007",
-      "outputCell": "C1",
-      "result": {
-        "t": "arr",
-        "rows": [
-          [
-            {
-              "t": "n",
-              "v": 3.999999999999999
-            }
-          ],
-          [
-            {
-              "t": "n",
-              "v": 4.999999999999999
-            }
-          ]
-        ]
-      },
-      "address": "C1:C2",
-      "displayText": "3.999999999999999"
-    },
-    {
-      "caseId": "stat_growth_750ef3f5abd7",
-      "outputCell": "C1",
-      "result": {
-        "t": "arr",
-        "rows": [
-          [
-            {
-              "t": "n",
-              "v": 53.999999999999986
-            }
-          ],
-          [
-            {
-              "t": "n",
-              "v": 161.99999999999991
-            }
-          ]
-        ]
-      },
-      "address": "C1:C2",
-      "displayText": "53.999999999999986"
-    },
-    {
-      "caseId": "hyperlink_50a1e2786fb7",
-      "outputCell": "C1",
-      "result": {
-        "t": "s",
-        "v": "Example"
-      },
-      "address": "C1",
-      "displayText": "Example"
-    },
-    {
-      "caseId": "yearfrac_ba1354c3dc19",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 1.0
-      },
-      "address": "C1",
-      "displayText": "1"
-    },
-    {
-      "caseId": "yearfrac_78b8dd66cb86",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 1.0
-      },
-      "address": "C1",
-      "displayText": "1"
-    },
-    {
-      "caseId": "yearfrac_65940c75b82e",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 1.0
-      },
-      "address": "C1",
-      "displayText": "1"
-    },
-    {
-      "caseId": "lookup_14d2fce8ebcb",
-      "outputCell": "E1",
-      "result": {
-        "t": "s",
-        "v": "three"
-      },
-      "address": "E1",
-      "displayText": "three"
-    },
-    {
-      "caseId": "areas_88aea759af4f",
-      "outputCell": "E1",
-      "result": {
-        "t": "n",
-        "v": 2.0
-      },
-      "address": "E1",
-      "displayText": "2"
-    },
-    {
-      "caseId": "effect_16547c722a34",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.10250000000000001
-      },
-      "address": "C1",
-      "displayText": "0.10250000000000001"
-    },
-    {
-      "caseId": "effect_1ba508dc7c2c",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.1
-      },
-      "address": "C1",
-      "displayText": "0.1"
-    },
-    {
-      "caseId": "effect_1650c200e327",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.1
-      },
-      "address": "C1",
-      "displayText": "0.1"
-    },
-    {
-      "caseId": "nominal_f63f8b09d19a",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.0976176963403031
-      },
-      "address": "C1",
-      "displayText": "0.0976176963403031"
-    },
-    {
-      "caseId": "nominal_23b000f92d3f",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.1
-      },
-      "address": "C1",
-      "displayText": "0.1"
-    },
-    {
-      "caseId": "couppcd_eom_apr30_22cd75e85c72",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 43861.0
-      },
-      "address": "C1",
-      "displayText": "43861"
-    },
-    {
-      "caseId": "coupdays_eom_apr30_f63ac6d593a1",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 90.0
-      },
-      "address": "C1",
-      "displayText": "90"
-    },
-    {
-      "caseId": "couppcd_eom_feb28_8ebc724a184e",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 44074.0
-      },
-      "address": "C1",
-      "displayText": "44074"
-    },
-    {
-      "caseId": "coupdays_eom_feb28_69d7ccd41d35",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 181.0
-      },
-      "address": "C1",
-      "displayText": "181"
-    },
-    {
-      "caseId": "oddfprice_c9dc779e35fe",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 113.59920582823823
-      },
-      "address": "C1",
-      "displayText": "113.59920582823823"
-    },
-    {
-      "caseId": "oddfprice_290c4c942c46",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 103.01773611298864
-      },
-      "address": "C1",
-      "displayText": "103.01773611298864"
-    },
-    {
-      "caseId": "oddfprice_cebf2b38f257",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 103.01773611298864
-      },
-      "address": "C1",
-      "displayText": "103.01773611298864"
-    },
-    {
-      "caseId": "oddlprice_c39c844b3212",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 100.48044585692473
-      },
-      "address": "C1",
-      "displayText": "100.48044585692473"
-    },
-    {
-      "caseId": "oddlyield_6c295f41d129",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.14811017424419679
-      },
-      "address": "C1",
-      "displayText": "0.14811017424419679"
-    },
-    {
-      "caseId": "oddfprice_ae2720a4ce4e",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 113.59920582823823
-      },
-      "address": "C1",
-      "displayText": "113.59920582823823"
-    },
-    {
-      "caseId": "oddfprice_353923122884",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 113.59771747407882
-      },
-      "address": "C1",
-      "displayText": "113.59771747407882"
-    },
-    {
-      "caseId": "oddfprice_7754bc28b438",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 113.59920582823823
-      },
-      "address": "C1",
-      "displayText": "113.59920582823823"
-    },
-    {
-      "caseId": "oddlprice_c55ee6b33bc8",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 100.48044585692473
-      },
-      "address": "C1",
-      "displayText": "100.48044585692473"
-    },
-    {
-      "caseId": "oddlyield_f423e1e7fee1",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.14811017424419679
-      },
-      "address": "C1",
-      "displayText": "0.14811017424419679"
-    },
-    {
-      "caseId": "accrint_stub_default_b05115a0a863",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 16.666666666666668
-      },
-      "address": "C1",
-      "displayText": "16.666666666666668"
-    },
-    {
-      "caseId": "accrint_stub_true_cf10adfda266",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 41.666666666666664
-      },
-      "address": "C1",
-      "displayText": "41.666666666666664"
-    },
-    {
-      "caseId": "oddlprice_eom_apr30_basis1_36b354ead5f2",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 100.10394690232079
-      },
-      "address": "C1",
-      "displayText": "100.10394690232079"
-    },
-    {
-      "caseId": "oddlyield_eom_apr30_basis1_f8402fa8a5fb",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.15667744331501973
-      },
-      "address": "C1",
-      "displayText": "0.15667744331501973"
-    },
-    {
-      "caseId": "oddfprice_neg_yld_below_minus1_8890f314c2bb",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 6.910646360118339e+16
-      },
-      "address": "C1",
-      "displayText": "69106463601183390"
-    },
-    {
-      "caseId": "oddlprice_neg_yld_below_minus1_531de1f51df7",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 239.6576768188426
-      },
-      "address": "C1",
-      "displayText": "239.6576768188426"
-    },
-    {
-      "caseId": "oddfprice_yld_eq_neg_frequency_21f09499af95",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#DIV/0!"
-      },
-      "address": "C1",
-      "displayText": "#DIV/0!"
-    },
-    {
-      "caseId": "oddlprice_yld_eq_neg_frequency_c8a196ed4f92",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#DIV/0!"
-      },
-      "address": "C1",
-      "displayText": "#DIV/0!"
-    },
-    {
-      "caseId": "oddfprice_yld_below_neg_frequency_84304fd5a85b",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
-    },
-    {
-      "caseId": "oddlprice_yld_below_neg_frequency_d6b5dc8f7887",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
-    },
-    {
-      "caseId": "oddfyield_neg_rate_72af92333e7a",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
-    },
-    {
-      "caseId": "oddlyield_neg_rate_892570c2f519",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
-    },
-    {
-      "caseId": "isref_241c70b18320",
-      "outputCell": "C1",
-      "result": {
-        "t": "b",
-        "v": true
-      },
-      "address": "C1",
-      "displayText": "TRUE"
-    },
-    {
-      "caseId": "isnontext_4cf8fa084d68",
-      "outputCell": "C1",
-      "result": {
-        "t": "b",
-        "v": false
-      },
-      "address": "C1",
-      "displayText": "FALSE"
     }
   ]
 }
