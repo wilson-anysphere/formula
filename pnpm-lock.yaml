@@ -254,9 +254,6 @@ importers:
       '@formula/collab-encryption':
         specifier: workspace:*
         version: link:../encryption
-      '@formula/collab-offline':
-        specifier: workspace:*
-        version: link:../offline
       '@formula/collab-persistence':
         specifier: workspace:*
         version: link:../persistence
