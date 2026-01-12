@@ -21,9 +21,9 @@ test("panelBodyRenderer.tsx avoids inline style assignments for dock panel mount
   const source = fs.readFileSync(filePath, "utf8");
 
   assert.equal(
-    source.includes("style={{"),
+    /<[^>]*\bstyle\s*=\s*\{/.test(source),
     false,
-    "panelBodyRenderer.tsx should avoid React inline styles (style={{...}}); use CSS classes instead",
+    "panelBodyRenderer.tsx should avoid React inline styles (style={...}); use CSS classes instead",
   );
   assert.equal(
     /\.style\./.test(source),
