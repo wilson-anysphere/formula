@@ -74,5 +74,70 @@ describe("ContextManager buildWorkbookContext DLP indexing", () => {
     // all classification records for each chunk/hit range.
     expect(effectiveRangeClassification).toHaveBeenCalledTimes(0);
   });
-});
 
+  it("resolves RAG sheet display names back to stable sheet ids for structured DLP enforcement", async () => {
+    const workbookId = "wb-dlp-sheet-resolver";
+    const displayName = "Budget";
+    const stableSheetId = "Sheet2";
+
+    // SpreadsheetApi surface returns display names; internal DLP records use stable ids.
+    const spreadsheet: any = {
+      listSheets: () => [displayName],
+      listNonEmptyCells: (_sheet?: string) => [
+        {
+          address: { sheet: displayName, row: 1, col: 1 },
+          cell: { value: "Header" },
+        },
+        {
+          address: { sheet: displayName, row: 2, col: 1 },
+          cell: { value: "hello" },
+        },
+      ],
+      sheetNameResolver: {
+        getSheetIdByName: (name: string) => (name.trim().toLowerCase() === displayName.toLowerCase() ? stableSheetId : null),
+        getSheetNameById: (id: string) => (id === stableSheetId ? displayName : null),
+      },
+    };
+
+    const classificationRecords = [
+      {
+        selector: { scope: "sheet", documentId: workbookId, sheetId: stableSheetId },
+        classification: { level: "Restricted", labels: [] },
+      },
+    ];
+
+    const embedder = new HashEmbedder({ dimension: 32 });
+    const vectorStore = new InMemoryVectorStore({ dimension: 32 });
+    const cm = new ContextManager({ tokenBudgetTokens: 500, workbookRag: { vectorStore, embedder, topK: 3 } });
+
+    await cm.buildWorkbookContextFromSpreadsheetApi({
+      spreadsheet,
+      workbookId,
+      query: "hello",
+      includePromptContext: false,
+      dlp: {
+        documentId: workbookId,
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Public",
+              allowRestrictedContent: false,
+              redactDisallowed: true,
+            },
+          },
+        },
+        classificationRecords,
+        auditLogger: { log: vi.fn() },
+      },
+    });
+
+    const stored = await vectorStore.list({ workbookId, includeVector: false });
+    expect(stored.length).toBeGreaterThan(0);
+    for (const rec of stored) {
+      expect(rec.metadata?.text).toContain("[REDACTED]");
+      expect(rec.metadata?.text).not.toContain("hello");
+    }
+  });
+});

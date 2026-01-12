@@ -267,6 +267,28 @@ export class ContextManager {
     const classificationRecords =
       dlp?.classificationRecords ?? dlp?.classificationStore?.list(dlp.documentId) ?? [];
 
+    // Some hosts (notably the desktop DocumentController) keep a stable internal sheet id
+    // even after a user renames the sheet. In those cases:
+    // - RAG chunk metadata uses the user-facing display name (better retrieval quality)
+    // - Structured DLP classifications are recorded against the stable sheet id
+    //
+    // When a resolver is provided, map chunk `metadata.sheetName` back to the stable id
+    // before applying structured DLP classification.
+    const dlpSheetNameResolver =
+      (dlp && (dlp.sheetNameResolver ?? dlp.sheet_name_resolver)) || null;
+    const resolveDlpSheetId = (sheetNameOrId) => {
+      const raw = typeof sheetNameOrId === "string" ? sheetNameOrId.trim() : "";
+      if (!raw) return "";
+      if (dlpSheetNameResolver && typeof dlpSheetNameResolver.getSheetIdByName === "function") {
+        try {
+          return dlpSheetNameResolver.getSheetIdByName(raw) ?? raw;
+        } catch {
+          return raw;
+        }
+      }
+      return raw;
+    };
+
     // Large enterprise classification record sets can make per-chunk range classification
     // expensive if we linearly scan `classificationRecords` for every chunk. Build a
     // document-level selector index once and reuse it for all range lookups in this call.
@@ -341,13 +363,14 @@ export class ContextManager {
                 // Fold in structured DLP classifications for the chunk's sheet + rect metadata.
                 let recordClassification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
                 const range = rectToRange(record.metadata?.rect);
-                const sheetName = record.metadata?.sheetName;
-                if (range && sheetName) {
-                  const index = getDlpDocumentIndex();
-                  recordClassification = index
-                    ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId: sheetName, range })
-                    : effectiveRangeClassification({ documentId: dlp.documentId, sheetId: sheetName, range }, classificationRecords);
-                }
+                 const sheetName = record.metadata?.sheetName;
+                 const sheetId = sheetName ? resolveDlpSheetId(sheetName) : "";
+                 if (range && sheetId) {
+                   const index = getDlpDocumentIndex();
+                   recordClassification = index
+                     ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId, range })
+                     : effectiveRangeClassification({ documentId: dlp.documentId, sheetId, range }, classificationRecords);
+                 }
 
                 const classification = maxClassification(recordClassification, heuristicClassification);
 
@@ -468,13 +491,14 @@ export class ContextManager {
       let recordClassification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
       if (dlp) {
         const range = rectToRange(meta.rect);
-        const sheetName = meta.sheetName;
-        if (range && sheetName) {
-          const index = getDlpDocumentIndex();
-          recordClassification = index
-            ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId: sheetName, range })
-            : effectiveRangeClassification({ documentId: dlp.documentId, sheetId: sheetName, range }, classificationRecords);
-        }
+         const sheetName = meta.sheetName;
+         const sheetId = sheetName ? resolveDlpSheetId(sheetName) : "";
+         if (range && sheetId) {
+           const index = getDlpDocumentIndex();
+           recordClassification = index
+             ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId, range })
+             : effectiveRangeClassification({ documentId: dlp.documentId, sheetId, range }, classificationRecords);
+         }
       }
 
       const classification = maxClassification(recordClassification, heuristicClassification);
@@ -701,8 +725,19 @@ export class ContextManager {
     const skipIndexing = (params.skipIndexing ?? false) === true;
     const skipIndexingWithDlp = (params.skipIndexingWithDlp ?? false) === true;
 
+    // Some SpreadsheetApi hosts (desktop DocumentController adapter) can provide a
+    // sheet-name resolver. Thread it through to DLP enforcement so structured
+    // classifications keyed by stable sheet ids can still match RAG chunk metadata
+    // (which uses user-facing sheet names).
+    const spreadsheetResolver =
+      params?.spreadsheet?.sheetNameResolver ?? params?.spreadsheet?.sheet_name_resolver ?? null;
+    const dlp =
+      params.dlp && spreadsheetResolver && !(params.dlp.sheetNameResolver || params.dlp.sheet_name_resolver)
+        ? { ...params.dlp, sheetNameResolver: spreadsheetResolver, sheet_name_resolver: spreadsheetResolver }
+        : params.dlp;
+
     const workbook =
-      skipIndexing && (!params.dlp || skipIndexingWithDlp)
+      skipIndexing && (!dlp || skipIndexingWithDlp)
         ? {
             id: params.workbookId,
             sheets: (params.spreadsheet?.listSheets?.() ?? []).map((name) => ({ name, cells: new Map() })),
@@ -717,7 +752,7 @@ export class ContextManager {
       query: params.query,
       attachments: params.attachments,
       topK: params.topK,
-      dlp: params.dlp,
+      dlp,
       skipIndexing: params.skipIndexing,
       skipIndexingWithDlp: params.skipIndexingWithDlp,
       includePromptContext: params.includePromptContext,
