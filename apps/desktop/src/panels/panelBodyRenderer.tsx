@@ -23,8 +23,7 @@ import { BranchManagerPanel, type Actor as BranchActor } from "./branch-manager/
 import { MergeBranchPanel } from "./branch-manager/MergeBranchPanel.js";
 import { BranchService, YjsBranchStore, applyDocumentStateToYjsDoc, yjsDocToDocumentState } from "../../../../packages/versioning/branches/src/index.js";
 import { getMarketplaceBaseUrl } from "../marketplace/getMarketplaceBaseUrl.js";
-import { MarketplaceClient } from "../../../web/src/marketplace/MarketplaceClient.js";
-import { WebExtensionManager } from "../../../web/src/marketplace/WebExtensionManager.js";
+import { MarketplaceClient, WebExtensionManager } from "@formula/extension-marketplace";
 
 function formatVersionTimestamp(timestampMs: number): string {
   try {
