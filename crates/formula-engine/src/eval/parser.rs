@@ -7,16 +7,7 @@ use crate::eval::ast::{
 };
 use crate::value::ErrorKind;
 use crate::SheetRef;
-use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 use thiserror::Error;
-
-/// Excel limits (0-indexed).
-///
-/// These are used by this lightweight `eval::Parser` lowering pass to expand whole-row/whole-column
-/// references into explicit rectangular ranges. The main `Engine` compiler uses per-sheet worksheet
-/// dimensions instead of these fixed Excel bounds.
-const MAX_ROW_IDX: u32 = EXCEL_MAX_ROWS - 1;
-const MAX_COL_IDX: u32 = EXCEL_MAX_COLS - 1;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum FormulaParseError {
@@ -307,8 +298,10 @@ fn rect_from_col_ref(r: &crate::ColRef) -> Option<RectRef> {
     Some(RectRef {
         sheet,
         start: CellAddr { row: 0, col },
+        // Whole-column references like `A:A` span to the end of the sheet. Use a sentinel that is
+        // resolved against the sheet's runtime dimensions during evaluation.
         end: CellAddr {
-            row: MAX_ROW_IDX,
+            row: CellAddr::SHEET_END,
             col,
         },
     })
@@ -320,9 +313,11 @@ fn rect_from_row_ref(r: &crate::RowRef) -> Option<RectRef> {
     Some(RectRef {
         sheet,
         start: CellAddr { row, col: 0 },
+        // Whole-row references like `1:1` span to the end of the sheet. Use a sentinel that is
+        // resolved against the sheet's runtime dimensions during evaluation.
         end: CellAddr {
             row,
-            col: MAX_COL_IDX,
+            col: CellAddr::SHEET_END,
         },
     })
 }

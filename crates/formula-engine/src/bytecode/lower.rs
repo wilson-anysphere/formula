@@ -2,7 +2,17 @@ use super::ast::{BinaryOp, Expr as BytecodeExpr, Function, UnaryOp};
 use super::value::{
     Array, ErrorKind as BytecodeErrorKind, MultiRangeRef, RangeRef, Ref, SheetRangeRef, Value,
 };
+use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 use std::sync::Arc;
+
+/// Excel's maximum row index (0-indexed) used by the bytecode backend.
+///
+/// The bytecode engine currently assumes Excel's fixed worksheet bounds and is gated to
+/// default-sized sheets (see `Engine::try_compile_bytecode`).
+const EXCEL_MAX_ROW_IDX: i32 = (EXCEL_MAX_ROWS as i32) - 1;
+
+/// Excel's maximum column index (0-indexed) used by the bytecode backend.
+const EXCEL_MAX_COL_IDX: i32 = (EXCEL_MAX_COLS as i32) - 1;
 
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LowerError {
@@ -15,9 +25,6 @@ pub enum LowerError {
     #[error("unknown sheet reference")]
     UnknownSheet,
 }
-
-const EXCEL_MAX_ROWS_I32: i32 = formula_model::EXCEL_MAX_ROWS as i32;
-const EXCEL_MAX_COLS_I32: i32 = formula_model::EXCEL_MAX_COLS as i32;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RefPrefix {
@@ -35,6 +42,32 @@ impl RefPrefix {
             workbook: workbook.clone(),
             sheet: sheet.clone(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RectKind {
+    Cell,
+    /// Whole-column reference (`A:A`) which spans all rows.
+    Col,
+    /// Whole-row reference (`1:1`) which spans all columns.
+    Row,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RectRef {
+    kind: RectKind,
+    start: Ref,
+    end: Ref,
+}
+
+impl RectRef {
+    fn spans_full_rows(&self) -> bool {
+        matches!(self.kind, RectKind::Col)
+    }
+
+    fn spans_full_cols(&self) -> bool {
+        matches!(self.kind, RectKind::Row)
     }
 }
 
@@ -83,17 +116,18 @@ fn expand_sheet_span(
     Ok((start..=end).collect())
 }
 
-fn lower_coord(coord: &crate::Coord, origin: u32) -> (i32, bool) {
+fn lower_coord(coord: &crate::Coord, origin: u32) -> Result<(i32, bool), LowerError> {
     match coord {
         crate::Coord::A1 { index, abs } => {
-            let idx = *index as i32;
+            let idx = i32::try_from(*index).map_err(|_| LowerError::Unsupported)?;
             if *abs {
-                (idx, true)
+                Ok((idx, true))
             } else {
-                (idx - origin as i32, false)
+                let origin = i32::try_from(origin).map_err(|_| LowerError::Unsupported)?;
+                Ok((idx - origin, false))
             }
         }
-        crate::Coord::Offset(delta) => (*delta, false),
+        crate::Coord::Offset(delta) => Ok((*delta, false)),
     }
 }
 
@@ -108,8 +142,8 @@ fn lower_cell_ref(
         current_sheet,
         resolve_sheet,
     )?;
-    let (row, row_abs) = lower_coord(&r.row, origin.row);
-    let (col, col_abs) = lower_coord(&r.col, origin.col);
+    let (row, row_abs) = lower_coord(&r.row, origin.row)?;
+    let (col, col_abs) = lower_coord(&r.col, origin.col)?;
     Ok(Ref::new(row, col, row_abs, col_abs))
 }
 
@@ -144,41 +178,54 @@ fn lower_cell_ref_expr(
     }
 }
 
-#[derive(Debug, Clone)]
-enum RangeEndpoint {
-    Cell(Ref),
-    Col { col: (i32, bool) },
-    Row { row: (i32, bool) },
-}
-
-fn lower_range_endpoint(
+fn lower_rect_ref(
     expr: &crate::Expr,
     origin: crate::CellAddr,
     current_sheet: usize,
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
-) -> Result<(RefPrefix, RangeEndpoint), LowerError> {
+) -> Result<(RefPrefix, RectRef), LowerError> {
     match expr {
-        crate::Expr::CellRef(r) => Ok((
-            RefPrefix::from_parts(&r.workbook, &r.sheet),
-            RangeEndpoint::Cell(lower_cell_ref(r, origin, current_sheet, resolve_sheet)?),
-        )),
+        crate::Expr::CellRef(r) => {
+            let prefix = RefPrefix::from_parts(&r.workbook, &r.sheet);
+            let r = lower_cell_ref(r, origin, current_sheet, resolve_sheet)?;
+            Ok((
+                prefix,
+                RectRef {
+                    kind: RectKind::Cell,
+                    start: r,
+                    end: r,
+                },
+            ))
+        }
         crate::Expr::ColRef(r) => {
             let prefix = RefPrefix::from_parts(&r.workbook, &r.sheet);
             validate_prefix(&prefix, current_sheet, resolve_sheet)?;
+
+            let (col, col_abs) = lower_coord(&r.col, origin.col)?;
+            let start = Ref::new(0, col, true, col_abs);
+            let end = Ref::new(EXCEL_MAX_ROW_IDX, col, true, col_abs);
             Ok((
                 prefix,
-                RangeEndpoint::Col {
-                    col: lower_coord(&r.col, origin.col),
+                RectRef {
+                    kind: RectKind::Col,
+                    start,
+                    end,
                 },
             ))
         }
         crate::Expr::RowRef(r) => {
             let prefix = RefPrefix::from_parts(&r.workbook, &r.sheet);
             validate_prefix(&prefix, current_sheet, resolve_sheet)?;
+
+            let (row, row_abs) = lower_coord(&r.row, origin.row)?;
+            let start = Ref::new(row, 0, row_abs, true);
+            let end = Ref::new(row, EXCEL_MAX_COL_IDX, row_abs, true);
             Ok((
                 prefix,
-                RangeEndpoint::Row {
-                    row: lower_coord(&r.row, origin.row),
+                RectRef {
+                    kind: RectKind::Row,
+                    start,
+                    end,
                 },
             ))
         }
@@ -206,30 +253,39 @@ fn lower_range_ref(
     current_sheet: usize,
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
 ) -> Result<BytecodeExpr, LowerError> {
-    let (left_prefix, left_ep) = lower_range_endpoint(left, origin, current_sheet, resolve_sheet)?;
-    let (right_prefix, right_ep) =
-        lower_range_endpoint(right, origin, current_sheet, resolve_sheet)?;
+    let (left_prefix, left_rect) = lower_rect_ref(left, origin, current_sheet, resolve_sheet)?;
+    let (right_prefix, right_rect) = lower_rect_ref(right, origin, current_sheet, resolve_sheet)?;
     let merged_prefix = merge_range_prefix(&left_prefix, &right_prefix)?;
     validate_prefix(&merged_prefix, current_sheet, resolve_sheet)?;
 
-    let range = match (left_ep, right_ep) {
-        (RangeEndpoint::Cell(a), RangeEndpoint::Cell(b)) => RangeRef::new(a, b),
-        (RangeEndpoint::Col { col: a }, RangeEndpoint::Col { col: b }) => {
-            let (col_a, col_abs_a) = a;
-            let (col_b, col_abs_b) = b;
-            let start = Ref::new(0, col_a, true, col_abs_a);
-            let end = Ref::new(EXCEL_MAX_ROWS_I32 - 1, col_b, true, col_abs_b);
-            RangeRef::new(start, end)
-        }
-        (RangeEndpoint::Row { row: a }, RangeEndpoint::Row { row: b }) => {
-            let (row_a, row_abs_a) = a;
-            let (row_b, row_abs_b) = b;
-            let start = Ref::new(row_a, 0, row_abs_a, true);
-            let end = Ref::new(row_b, EXCEL_MAX_COLS_I32 - 1, row_abs_b, true);
-            RangeRef::new(start, end)
-        }
-        _ => return Err(LowerError::Unsupported),
+    let full_rows = left_rect.spans_full_rows() || right_rect.spans_full_rows();
+    let full_cols = left_rect.spans_full_cols() || right_rect.spans_full_cols();
+
+    let (start_row, start_row_abs) = if full_rows {
+        (0, true)
+    } else {
+        (left_rect.start.row, left_rect.start.row_abs)
     };
+    let (end_row, end_row_abs) = if full_rows {
+        (EXCEL_MAX_ROW_IDX, true)
+    } else {
+        (right_rect.end.row, right_rect.end.row_abs)
+    };
+    let (start_col, start_col_abs) = if full_cols {
+        (0, true)
+    } else {
+        (left_rect.start.col, left_rect.start.col_abs)
+    };
+    let (end_col, end_col_abs) = if full_cols {
+        (EXCEL_MAX_COL_IDX, true)
+    } else {
+        (right_rect.end.col, right_rect.end.col_abs)
+    };
+
+    let range = RangeRef::new(
+        Ref::new(start_row, start_col, start_row_abs, start_col_abs),
+        Ref::new(end_row, end_col, end_row_abs, end_col_abs),
+    );
 
     match merged_prefix.sheet.as_ref() {
         Some(crate::SheetRef::SheetRange { start, end }) => {
@@ -354,6 +410,21 @@ pub fn lower_canonical_expr(
         crate::Expr::Missing => Ok(BytecodeExpr::Literal(Value::Empty)),
         crate::Expr::Array(arr) => Ok(BytecodeExpr::Literal(lower_array_literal(arr)?)),
         crate::Expr::CellRef(r) => lower_cell_ref_expr(r, origin, current_sheet, resolve_sheet),
+        crate::Expr::ColRef(_) | crate::Expr::RowRef(_) => {
+            let (prefix, rect) = lower_rect_ref(expr, origin, current_sheet, resolve_sheet)?;
+            let range = RangeRef::new(rect.start, rect.end);
+            match prefix.sheet.as_ref() {
+                Some(crate::SheetRef::SheetRange { start, end }) => {
+                    let sheets = expand_sheet_span(start, end, resolve_sheet)?;
+                    let areas: Vec<SheetRangeRef> = sheets
+                        .into_iter()
+                        .map(|sheet| SheetRangeRef::new(sheet, range))
+                        .collect();
+                    Ok(BytecodeExpr::MultiRangeRef(MultiRangeRef::new(areas.into())))
+                }
+                _ => Ok(BytecodeExpr::RangeRef(range)),
+            }
+        }
         crate::Expr::Binary(b) => match b.op {
             crate::BinaryOp::Range => {
                 lower_range_ref(&b.left, &b.right, origin, current_sheet, resolve_sheet)
@@ -483,8 +554,6 @@ pub fn lower_canonical_expr(
             Ok(BytecodeExpr::NameRef(Arc::from(key)))
         }
         crate::Expr::FieldAccess(_) => Err(LowerError::Unsupported),
-        crate::Expr::ColRef(_)
-        | crate::Expr::RowRef(_)
-        | crate::Expr::StructuredRef(_) => Err(LowerError::Unsupported),
+        crate::Expr::StructuredRef(_) => Err(LowerError::Unsupported),
     }
 }

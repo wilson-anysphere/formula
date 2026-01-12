@@ -1928,6 +1928,10 @@ impl Engine {
             self.external_value_provider.clone(),
             self.external_data_provider.clone(),
         );
+        let bytecode_default_bounds = snapshot
+            .sheet_dimensions
+            .iter()
+            .all(|(rows, cols)| *rows == EXCEL_MAX_ROWS && *cols == EXCEL_MAX_COLS);
         let mut spill_dirty_roots: Vec<CellId> = Vec::new();
         let mut dynamic_dirty_roots: Vec<CellId> = Vec::new();
 
@@ -1995,21 +1999,37 @@ impl Engine {
                             evaluator.eval_formula(expr)
                         }
                         CompiledFormula::Bytecode(bc) => {
-                            let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
-                            let slice_mode = slice_mode_for_program(&bc.program);
-                            let grid = EngineBytecodeGrid {
-                                snapshot: &snapshot,
-                                sheet: k.sheet,
-                                cols,
-                                cols_by_sheet: &column_cache.by_sheet,
-                                slice_mode,
-                            };
-                            let base = bytecode::CellCoord {
-                                row: k.addr.row as i32,
-                                col: k.addr.col as i32,
-                            };
-                            let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
-                            bytecode_value_to_engine(v)
+                            if !bytecode_default_bounds {
+                                // The bytecode engine assumes Excel's fixed worksheet bounds. When
+                                // any sheet grows beyond the default dimensions, evaluate via the
+                                // AST evaluator so whole-row/whole-column references resolve
+                                // against dynamic sheet sizes.
+                                let evaluator = crate::eval::Evaluator::new_with_date_system_and_locales(
+                                    &snapshot,
+                                    ctx,
+                                    recalc_ctx,
+                                    date_system,
+                                    value_locale,
+                                    locale_config.clone(),
+                                );
+                                evaluator.eval_formula(&bc.ast)
+                            } else {
+                                let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
+                                let slice_mode = slice_mode_for_program(&bc.program);
+                                let grid = EngineBytecodeGrid {
+                                    snapshot: &snapshot,
+                                    sheet: k.sheet,
+                                    cols,
+                                    cols_by_sheet: &column_cache.by_sheet,
+                                    slice_mode,
+                                };
+                                let base = bytecode::CellCoord {
+                                    row: k.addr.row as i32,
+                                    col: k.addr.col as i32,
+                                };
+                                let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
+                                bytecode_value_to_engine(v)
+                            }
                         }
                     };
                     results.push((*k, value));
@@ -2053,30 +2073,37 @@ impl Engine {
                                             (*k, evaluator.eval_formula(expr))
                                         }
                                         CompiledFormula::Bytecode(bc) => {
-                                            let cols = column_cache
-                                                .by_sheet
-                                                .get(k.sheet)
-                                                .unwrap_or(&empty_cols);
-                                            let slice_mode = slice_mode_for_program(&bc.program);
-                                            let grid = EngineBytecodeGrid {
-                                                snapshot: &snapshot,
-                                                sheet: k.sheet,
-                                                cols,
-                                                cols_by_sheet: &column_cache.by_sheet,
-                                                slice_mode,
-                                            };
-                                            let base = bytecode::CellCoord {
-                                                row: k.addr.row as i32,
-                                                col: k.addr.col as i32,
-                                            };
-                                            let v = vm.eval(
-                                                &bc.program,
-                                                &grid,
-                                                k.sheet,
-                                                base,
-                                                &locale_config,
-                                            );
-                                            (*k, bytecode_value_to_engine(v))
+                                            if !bytecode_default_bounds {
+                                                let evaluator =
+                                                    crate::eval::Evaluator::new_with_date_system_and_locales(
+                                                        &snapshot,
+                                                        ctx,
+                                                        recalc_ctx,
+                                                        date_system,
+                                                        value_locale,
+                                                        locale_config.clone(),
+                                                    );
+                                                (*k, evaluator.eval_formula(&bc.ast))
+                                            } else {
+                                                let cols = column_cache
+                                                    .by_sheet
+                                                    .get(k.sheet)
+                                                    .unwrap_or(&empty_cols);
+                                                let slice_mode = slice_mode_for_program(&bc.program);
+                                                let grid = EngineBytecodeGrid {
+                                                    snapshot: &snapshot,
+                                                    sheet: k.sheet,
+                                                    cols,
+                                                    cols_by_sheet: &column_cache.by_sheet,
+                                                    slice_mode,
+                                                };
+                                                let base = bytecode::CellCoord {
+                                                    row: k.addr.row as i32,
+                                                    col: k.addr.col as i32,
+                                                };
+                                                let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
+                                                (*k, bytecode_value_to_engine(v))
+                                            }
                                         }
                                     }
                                 },
@@ -2119,21 +2146,37 @@ impl Engine {
                         evaluator.eval_formula(expr)
                     }
                     CompiledFormula::Bytecode(bc) => {
-                        let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
-                        let slice_mode = slice_mode_for_program(&bc.program);
-                        let grid = EngineBytecodeGrid {
-                            snapshot: &snapshot,
-                            sheet: k.sheet,
-                            cols,
-                            cols_by_sheet: &column_cache.by_sheet,
-                            slice_mode,
-                        };
-                        let base = bytecode::CellCoord {
-                            row: k.addr.row as i32,
-                            col: k.addr.col as i32,
-                        };
-                        let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
-                        bytecode_value_to_engine(v)
+                        if !bytecode_default_bounds {
+                            // The bytecode engine assumes Excel's fixed worksheet bounds. When
+                            // any sheet grows beyond the default dimensions, evaluate via the
+                            // AST evaluator so whole-row/whole-column references resolve
+                            // against dynamic sheet sizes.
+                            let evaluator = crate::eval::Evaluator::new_with_date_system_and_locales(
+                                &snapshot,
+                                ctx,
+                                recalc_ctx,
+                                date_system,
+                                value_locale,
+                                locale_config.clone(),
+                            );
+                            evaluator.eval_formula(&bc.ast)
+                        } else {
+                            let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
+                            let slice_mode = slice_mode_for_program(&bc.program);
+                            let grid = EngineBytecodeGrid {
+                                snapshot: &snapshot,
+                                sheet: k.sheet,
+                                cols,
+                                cols_by_sheet: &column_cache.by_sheet,
+                                slice_mode,
+                            };
+                            let base = bytecode::CellCoord {
+                                row: k.addr.row as i32,
+                                col: k.addr.col as i32,
+                            };
+                            let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
+                            bytecode_value_to_engine(v)
+                        }
                     }
                 };
                 results.push((*k, value));
@@ -2175,23 +2218,36 @@ impl Engine {
                         evaluator.eval_formula(expr)
                     }
                     CompiledFormula::Bytecode(bc) => {
-                        // Dynamic dependency tracing is only supported for AST formulas. Fallback
-                        // to bytecode evaluation without dependency updates.
-                        let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
-                        let slice_mode = slice_mode_for_program(&bc.program);
-                        let grid = EngineBytecodeGrid {
-                            snapshot: &snapshot,
-                            sheet: k.sheet,
-                            cols,
-                            cols_by_sheet: &column_cache.by_sheet,
-                            slice_mode,
-                        };
-                        let base = bytecode::CellCoord {
-                            row: k.addr.row as i32,
-                            col: k.addr.col as i32,
-                        };
-                        let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
-                        bytecode_value_to_engine(v)
+                        if !bytecode_default_bounds {
+                            let evaluator = crate::eval::Evaluator::new_with_date_system_and_locales(
+                                &snapshot,
+                                ctx,
+                                recalc_ctx,
+                                date_system,
+                                value_locale,
+                                locale_config.clone(),
+                            )
+                            .with_dependency_trace(&trace);
+                            evaluator.eval_formula(&bc.ast)
+                        } else {
+                            // Dynamic dependency tracing is only supported for AST formulas. Fallback
+                            // to bytecode evaluation without dependency updates.
+                            let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
+                            let slice_mode = slice_mode_for_program(&bc.program);
+                            let grid = EngineBytecodeGrid {
+                                snapshot: &snapshot,
+                                sheet: k.sheet,
+                                cols,
+                                cols_by_sheet: &column_cache.by_sheet,
+                                slice_mode,
+                            };
+                            let base = bytecode::CellCoord {
+                                row: k.addr.row as i32,
+                                col: k.addr.col as i32,
+                            };
+                            let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
+                            bytecode_value_to_engine(v)
+                        }
                     }
                 };
 
@@ -2572,9 +2628,9 @@ impl Engine {
                     col: end_col,
                 };
 
-                // If the spilled result would extend beyond the sheet's bounds, the origin
-                // evaluates to `#SPILL!` ("Spill range is too big") and no out-of-bounds spill
-                // cells should be materialized.
+                // If the spilled result would extend beyond the sheet bounds, the origin evaluates
+                // to `#SPILL!` ("Spill range is too big") and no out-of-bounds spill cells should
+                // be materialized.
                 if end_row >= sheet_rows || end_col >= sheet_cols {
                     spill_too_big();
                     return;
@@ -2951,10 +3007,9 @@ impl Engine {
 
         let origin_ast = crate::CellAddr::new(key.addr.row, key.addr.col);
         let origin = bytecode::CellCoord {
-            row: key.addr.row as i32,
-            col: key.addr.col as i32,
+            row: i32::try_from(key.addr.row).map_err(|_| BytecodeCompileReason::ExceedsGridLimits)?,
+            col: i32::try_from(key.addr.col).map_err(|_| BytecodeCompileReason::ExceedsGridLimits)?,
         };
-
         // Inline any defined names that resolve to static expressions/values before lowering.
         // This improves bytecode eligibility and keeps the bytecode backend deterministic.
         let expr = self.inline_static_defined_names_for_bytecode(expr, key.sheet);
@@ -2978,6 +3033,7 @@ impl Engine {
         };
 
         let expr_after_structured = maybe_structured_rewritten.as_ref().unwrap_or(&expr);
+
         let mut resolve_sheet = |name: &str| self.workbook.sheet_id(name);
         let rewritten_names =
             rewrite_defined_name_constants_for_bytecode(expr_after_structured, key.sheet, &self.workbook);
@@ -4638,34 +4694,49 @@ fn sheet_id_from_graph(sheet: u32) -> SheetId {
     usize::try_from(sheet).expect("sheet id exceeds usize")
 }
 
-fn sheet_range_to_node(range: SheetRange, workbook: &Workbook) -> PrecedentNode {
-    let sheet = sheet_id_from_graph(range.sheet_id);
-    let (rows, cols) = workbook
+fn clamp_addr_to_sheet_dimensions(workbook: &Workbook, sheet: SheetId, addr: CellAddr) -> CellAddr {
+    let (max_row, max_col) = workbook
         .sheets
         .get(sheet)
-        .map(|s| (s.row_count, s.col_count))
-        .unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS));
-
-    let mut end_row = range.range.end.row;
-    let mut end_col = range.range.end.col;
-    // `u32::MAX` is reserved as a "sheet end" sentinel for full-row/full-column references.
-    if end_row == u32::MAX {
-        end_row = rows.saturating_sub(1);
+        .map(|s| (s.row_count.saturating_sub(1), s.col_count.saturating_sub(1)))
+        .unwrap_or((
+            EXCEL_MAX_ROWS.saturating_sub(1),
+            EXCEL_MAX_COLS.saturating_sub(1),
+        ));
+    CellAddr {
+        row: if addr.row == CellAddr::SHEET_END {
+            max_row
+        } else {
+            addr.row
+        },
+        col: if addr.col == CellAddr::SHEET_END {
+            max_col
+        } else {
+            addr.col
+        },
     }
-    if end_col == u32::MAX {
-        end_col = cols.saturating_sub(1);
-    }
+}
 
+fn sheet_range_to_node(range: SheetRange, workbook: &Workbook) -> PrecedentNode {
+    let sheet = sheet_id_from_graph(range.sheet_id);
     PrecedentNode::Range {
         sheet,
-        start: CellAddr {
-            row: range.range.start.row,
-            col: range.range.start.col,
-        },
-        end: CellAddr {
-            row: end_row,
-            col: end_col,
-        },
+        start: clamp_addr_to_sheet_dimensions(
+            workbook,
+            sheet,
+            CellAddr {
+                row: range.range.start.row,
+                col: range.range.start.col,
+            },
+        ),
+        end: clamp_addr_to_sheet_dimensions(
+            workbook,
+            sheet,
+            CellAddr {
+                row: range.range.end.row,
+                col: range.range.end.col,
+            },
+        ),
     }
 }
 
@@ -6251,10 +6322,17 @@ impl BytecodeColumnCache {
                 continue;
             }
 
-            let base = bytecode::CellCoord {
-                row: key.addr.row as i32,
-                col: key.addr.col as i32,
+            let Ok(base_row) = i32::try_from(key.addr.row) else {
+                continue;
             };
+            let Ok(base_col) = i32::try_from(key.addr.col) else {
+                continue;
+            };
+            let base = bytecode::CellCoord {
+                row: base_row,
+                col: base_col,
+            };
+
             for (idx, range) in bc.program.range_refs.iter().enumerate() {
                 if !used.get(idx).copied().unwrap_or(false) {
                     continue;
@@ -6438,11 +6516,15 @@ impl BytecodeColumnCache {
                 let Some(sheet_cols) = by_sheet.get_mut(key.sheet) else {
                     continue;
                 };
-                let col = key.addr.col as i32;
+                let Ok(col) = i32::try_from(key.addr.col) else {
+                    continue;
+                };
                 let Some(column) = sheet_cols.get_mut(&col) else {
                     continue;
                 };
-                let row = key.addr.row as i32;
+                let Ok(row) = i32::try_from(key.addr.row) else {
+                    continue;
+                };
                 let idx = column.segments.partition_point(|seg| seg.row_end() < row);
                 if idx >= column.segments.len() {
                     continue;

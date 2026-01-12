@@ -398,6 +398,74 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         });
     }
 
+    fn resolve_range_bounds(
+        &self,
+        sheet_id: &FnSheetId,
+        start: CellAddr,
+        end: CellAddr,
+    ) -> Option<(CellAddr, CellAddr)> {
+        let (rows, cols) = match sheet_id {
+            FnSheetId::Local(id) => {
+                if !self.resolver.sheet_exists(*id) {
+                    return None;
+                }
+                self.resolver.sheet_dimensions(*id)
+            }
+            // External workbooks do not expose dimensions via the ValueResolver interface, so
+            // treat the bounds as unknown and only resolve whole-row/whole-column sentinels using
+            // Excel's default grid size.
+            FnSheetId::External(_) => (formula_model::EXCEL_MAX_ROWS, formula_model::EXCEL_MAX_COLS),
+        };
+        let max_row = rows.saturating_sub(1);
+        let max_col = cols.saturating_sub(1);
+
+        let start = CellAddr {
+            row: if start.row == CellAddr::SHEET_END { max_row } else { start.row },
+            col: if start.col == CellAddr::SHEET_END { max_col } else { start.col },
+        };
+        let end = CellAddr {
+            row: if end.row == CellAddr::SHEET_END { max_row } else { end.row },
+            col: if end.col == CellAddr::SHEET_END { max_col } else { end.col },
+        };
+
+        if matches!(sheet_id, FnSheetId::Local(_))
+            && (start.row >= rows || end.row >= rows || start.col >= cols || end.col >= cols)
+        {
+            return None;
+        }
+        Some((start, end))
+    }
+
+    fn function_result_to_eval_value(&self, value: Value) -> EvalValue {
+        match value {
+            Value::Reference(r) => {
+                let Some((start, end)) = self.resolve_range_bounds(&r.sheet_id, r.start, r.end) else {
+                    return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                };
+                EvalValue::Reference(vec![ResolvedRange {
+                    sheet_id: r.sheet_id,
+                    start,
+                    end,
+                }])
+            }
+            Value::ReferenceUnion(ranges) => {
+                let mut out = Vec::with_capacity(ranges.len());
+                for r in ranges {
+                    let Some((start, end)) = self.resolve_range_bounds(&r.sheet_id, r.start, r.end) else {
+                        return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
+                    };
+                    out.push(ResolvedRange {
+                        sheet_id: r.sheet_id,
+                        start,
+                        end,
+                    });
+                }
+                EvalValue::Reference(out)
+            }
+            other => EvalValue::Scalar(other),
+        }
+    }
+
     /// Evaluate a compiled AST as a scalar formula result.
     pub fn eval_formula(&self, expr: &CompiledExpr) -> Value {
         match self.eval_value(expr) {
@@ -436,14 +504,11 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                         if matches!(&sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id)) {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         }
-                        if !self.reference_endpoints_in_bounds(&sheet_id, r.addr, r.addr) {
+                        let Some((start, end)) = self.resolve_range_bounds(&sheet_id, r.addr, r.addr)
+                        else {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
-                        }
-                        ranges.push(ResolvedRange {
-                            sheet_id,
-                            start: r.addr,
-                            end: r.addr,
-                        });
+                        };
+                        ranges.push(ResolvedRange { sheet_id, start, end });
                     }
                     EvalValue::Reference(ranges)
                 }
@@ -456,14 +521,11 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                         if matches!(&sheet_id, FnSheetId::Local(id) if !self.resolver.sheet_exists(*id)) {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
                         }
-                        if !self.reference_endpoints_in_bounds(&sheet_id, r.start, r.end) {
+                        let Some((start, end)) = self.resolve_range_bounds(&sheet_id, r.start, r.end)
+                        else {
                             return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
-                        }
-                        ranges.push(ResolvedRange {
-                            sheet_id,
-                            start: r.start,
-                            end: r.end,
-                        });
+                        };
+                        ranges.push(ResolvedRange { sheet_id, start, end });
                     }
                     EvalValue::Reference(ranges)
                 }
@@ -571,36 +633,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             }
             Expr::FunctionCall { name, args, .. } => {
                 let value = self.eval_function_call(name, args);
-                match value {
-                    Value::Reference(r) => {
-                        if !self.reference_endpoints_in_bounds(&r.sheet_id, r.start, r.end) {
-                            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
-                        }
-                        EvalValue::Reference(vec![ResolvedRange {
-                            sheet_id: r.sheet_id,
-                            start: r.start,
-                            end: r.end,
-                        }])
-                    }
-                    Value::ReferenceUnion(ranges) => {
-                        if ranges.iter().any(|r| {
-                            !self.reference_endpoints_in_bounds(&r.sheet_id, r.start, r.end)
-                        }) {
-                            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
-                        }
-                        EvalValue::Reference(
-                            ranges
-                                .into_iter()
-                                .map(|r| ResolvedRange {
-                                    sheet_id: r.sheet_id,
-                                    start: r.start,
-                                    end: r.end,
-                                })
-                                .collect(),
-                        )
-                    }
-                    other => EvalValue::Scalar(other),
-                }
+                self.function_result_to_eval_value(value)
             }
             Expr::Call { callee, args } => {
                 let call_name = match callee.as_ref() {
@@ -614,36 +647,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                 };
 
                 let value = self.call_value_as_function(call_name, callee_value, args);
-                match value {
-                    Value::Reference(r) => {
-                        if !self.reference_endpoints_in_bounds(&r.sheet_id, r.start, r.end) {
-                            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
-                        }
-                        EvalValue::Reference(vec![ResolvedRange {
-                            sheet_id: r.sheet_id,
-                            start: r.start,
-                            end: r.end,
-                        }])
-                    }
-                    Value::ReferenceUnion(ranges) => {
-                        if ranges.iter().any(|r| {
-                            !self.reference_endpoints_in_bounds(&r.sheet_id, r.start, r.end)
-                        }) {
-                            return EvalValue::Scalar(Value::Error(ErrorKind::Ref));
-                        }
-                        EvalValue::Reference(
-                            ranges
-                                .into_iter()
-                                .map(|r| ResolvedRange {
-                                    sheet_id: r.sheet_id,
-                                    start: r.start,
-                                    end: r.end,
-                                })
-                                .collect(),
-                        )
-                    }
-                    other => EvalValue::Scalar(other),
-                }
+                self.function_result_to_eval_value(value)
             }
             Expr::ImplicitIntersection(inner) => {
                 let v = self.eval_value(inner);

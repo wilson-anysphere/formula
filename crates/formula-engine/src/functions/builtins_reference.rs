@@ -72,7 +72,10 @@ fn offset_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     // Sheet dimensions are dynamic in this engine, so we only validate that the coordinates are
     // representable and non-negative here; the evaluator will apply sheet-dimension-based bounds
     // checks uniformly for all reference values (including those produced by OFFSET).
-    let within_u32 = |n: i64| n >= 0 && n <= (u32::MAX as i64);
+    //
+    // `u32::MAX` is reserved as a sheet-end sentinel for whole-row/whole-column references, so
+    // disallow it here (OFFSET should return `#REF!` rather than silently snapping to sheet end).
+    let within_u32 = |n: i64| n >= 0 && n < (crate::eval::CellAddr::SHEET_END as i64);
     if !within_u32(start_row)
         || !within_u32(start_col)
         || !within_u32(end_row)
@@ -329,13 +332,16 @@ fn address_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         None
     };
 
+    let current_sheet = crate::functions::SheetId::Local(ctx.current_sheet_id());
+    let (sheet_rows, sheet_cols) = ctx.sheet_dimensions(&current_sheet);
+
     let base = array_lift::lift4(row_num, col_num, abs_num, a1, |row, col, abs, a1| {
         let row_num = row.coerce_to_i64()?;
         let col_num = col.coerce_to_i64()?;
-        if row_num < 1 || row_num > formula_model::EXCEL_MAX_ROWS as i64 {
+        if row_num < 1 || row_num > sheet_rows as i64 {
             return Err(ErrorKind::Value);
         }
-        if col_num < 1 || col_num > formula_model::EXCEL_MAX_COLS as i64 {
+        if col_num < 1 || col_num > sheet_cols as i64 {
             return Err(ErrorKind::Value);
         }
 

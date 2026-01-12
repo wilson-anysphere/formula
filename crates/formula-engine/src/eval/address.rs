@@ -8,6 +8,12 @@ pub struct CellAddr {
 }
 
 impl CellAddr {
+    /// Sentinel value used in range endpoints to indicate "the last row/column of the sheet".
+    ///
+    /// This value is never produced by [`parse_a1`]: the largest valid A1 row is `u32::MAX`
+    /// (1-indexed), which parses to `u32::MAX - 1` when stored 0-indexed.
+    pub const SHEET_END: u32 = u32::MAX;
+
     /// Formats this 0-indexed address into an Excel-style A1 string (e.g. `A1`, `BC32`).
     #[must_use]
     pub fn to_a1(self) -> String {
