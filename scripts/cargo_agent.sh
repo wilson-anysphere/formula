@@ -13,6 +13,7 @@ set -euo pipefail
 #   scripts/cargo_agent.sh test --lib
 #   scripts/cargo_agent.sh test -p formula-engine
 #   scripts/cargo_agent.sh check
+#   scripts/cargo_agent.sh fmt -- --check
 #
 # Environment:
 #   FORMULA_CARGO_JOBS       cargo build jobs (default: 4)
@@ -31,6 +32,7 @@ Examples:
   scripts/cargo_agent.sh build --release
   scripts/cargo_agent.sh test --lib
   scripts/cargo_agent.sh test -p formula-engine
+  scripts/cargo_agent.sh fmt -- --check
 
 Environment:
   FORMULA_CARGO_JOBS         cargo -j value (default: 4)
@@ -89,6 +91,11 @@ fi
 jobs="${FORMULA_CARGO_JOBS:-4}"
 limit_as="${FORMULA_CARGO_LIMIT_AS:-12G}"
 
+# Cargo also supports configuring the default parallelism via `CARGO_BUILD_JOBS`.
+# Export it so commands that *don't* accept `-j` (e.g. `cargo fmt`, `cargo clean`)
+# still inherit our safe default.
+export CARGO_BUILD_JOBS="${jobs}"
+
 # Rayon: default to a small thread pool on high-core agent hosts.
 #
 # Rayon defaults to spawning one worker per core. On our multi-agent machines this can
@@ -118,7 +125,16 @@ if [[ "${subcommand}" == "test" && -z "${RUST_TEST_THREADS:-}" ]]; then
   export RUST_TEST_THREADS="${rust_test_threads}"
 fi
 
-cargo_cmd=(cargo "${subcommand}" -j "${jobs}" "$@")
+# Only some Cargo subcommands accept `-j/--jobs`. `cargo fmt`, `cargo clean`, etc
+# reject it, and we want `cargo_agent.sh` to be usable for *any* cargo invocation.
+case "${subcommand}" in
+  bench|build|check|clippy|doc|install|run|rustc|test)
+    cargo_cmd=(cargo "${subcommand}" -j "${jobs}" "$@")
+    ;;
+  *)
+    cargo_cmd=(cargo "${subcommand}" "$@")
+    ;;
+esac
 
 echo "cargo_agent: jobs=${jobs} as=${limit_as} test_threads=${RUST_TEST_THREADS:-auto}" >&2
 
