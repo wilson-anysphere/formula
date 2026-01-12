@@ -1205,6 +1205,34 @@ pub fn build_out_of_bounds_hyperlink_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing an external hyperlink with a `textMark` (location)
+/// sub-address. The importer should preserve this by appending it as a `#fragment` to the URL.
+pub fn build_external_hyperlink_with_location_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_hyperlink_workbook_stream(
+        "ExternalLoc",
+        hlink_external_url_with_location(
+            0,
+            0,
+            0,
+            0,
+            "https://example.com",
+            "#Section1",
+            "Example",
+            "Example tooltip",
+        ),
+    );
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture where the HLINK payload is split across a `CONTINUE` record.
 pub fn build_continued_hyperlink_fixture_xls() -> Vec<u8> {
     let url = format!("https://example.com/{}", "a".repeat(200));
@@ -1439,6 +1467,59 @@ fn hlink_external_url(
         out.extend_from_slice(&code_unit.to_le_bytes());
     }
 
+    write_hyperlink_string(&mut out, tooltip);
+
+    out
+}
+
+fn hlink_external_url_with_location(
+    rw_first: u16,
+    rw_last: u16,
+    col_first: u16,
+    col_last: u16,
+    url: &str,
+    location: &str,
+    display: &str,
+    tooltip: &str,
+) -> Vec<u8> {
+    const STREAM_VERSION: u32 = 2;
+    const LINK_OPTS_HAS_MONIKER: u32 = 0x0000_0001;
+    const LINK_OPTS_HAS_LOCATION: u32 = 0x0000_0008;
+    const LINK_OPTS_HAS_DISPLAY: u32 = 0x0000_0010;
+    const LINK_OPTS_HAS_TOOLTIP: u32 = 0x0000_0020;
+
+    // URL moniker CLSID: 79EAC9E0-BAF9-11CE-8C82-00AA004BA90B (COM GUID little-endian fields).
+    const CLSID_URL_MONIKER: [u8; 16] = [
+        0xE0, 0xC9, 0xEA, 0x79, 0xF9, 0xBA, 0xCE, 0x11, 0x8C, 0x82, 0x00, 0xAA, 0x00, 0x4B,
+        0xA9, 0x0B,
+    ];
+
+    let link_opts =
+        LINK_OPTS_HAS_MONIKER | LINK_OPTS_HAS_LOCATION | LINK_OPTS_HAS_DISPLAY | LINK_OPTS_HAS_TOOLTIP;
+
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&rw_first.to_le_bytes());
+    out.extend_from_slice(&rw_last.to_le_bytes());
+    out.extend_from_slice(&col_first.to_le_bytes());
+    out.extend_from_slice(&col_last.to_le_bytes());
+
+    out.extend_from_slice(&[0u8; 16]); // hyperlink GUID (unused)
+    out.extend_from_slice(&STREAM_VERSION.to_le_bytes());
+    out.extend_from_slice(&link_opts.to_le_bytes());
+
+    write_hyperlink_string(&mut out, display);
+
+    // URL moniker: CLSID + length (bytes) + UTF-16LE URL (NUL terminated).
+    out.extend_from_slice(&CLSID_URL_MONIKER);
+    let mut url_utf16: Vec<u16> = url.encode_utf16().collect();
+    url_utf16.push(0); // NUL terminator
+    let url_bytes_len: u32 = (url_utf16.len() * 2) as u32;
+    out.extend_from_slice(&url_bytes_len.to_le_bytes());
+    for code_unit in url_utf16 {
+        out.extend_from_slice(&code_unit.to_le_bytes());
+    }
+
+    write_hyperlink_string(&mut out, location);
     write_hyperlink_string(&mut out, tooltip);
 
     out

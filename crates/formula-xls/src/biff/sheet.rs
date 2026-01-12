@@ -866,7 +866,19 @@ fn decode_hlink_record(data: &[u8], codepage: u16) -> Result<Option<Hyperlink>, 
             .ok_or_else(|| "HLINK offset overflow".to_string())?;
     }
 
-    let target = if let Some(uri) = uri {
+    let target = if let Some(mut uri) = uri {
+        // Some hyperlink types (notably file links) include both a moniker (base URL/path) and a
+        // text mark (sub-address). Preserve that information by encoding the text mark as a URL
+        // fragment when possible (e.g. `file:///...#Sheet2!A1`). This matches the common XLSX
+        // representation where external hyperlink `Target` may include a fragment.
+        if let Some(mark) = text_mark.as_deref() {
+            let fragment = mark.trim().trim_start_matches('#');
+            if !fragment.is_empty() && !uri.contains('#') {
+                uri.push('#');
+                uri.push_str(fragment);
+            }
+        }
+
         if uri.to_ascii_lowercase().starts_with("mailto:") {
             HyperlinkTarget::Email { uri }
         } else {

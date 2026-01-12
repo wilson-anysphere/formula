@@ -169,3 +169,24 @@ fn ignores_out_of_bounds_hyperlink_anchors() {
         sheet.hyperlinks
     );
 }
+
+#[test]
+fn preserves_external_hyperlink_location_as_fragment() {
+    let bytes = xls_fixture_builder::build_external_hyperlink_with_location_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("ExternalLoc")
+        .expect("ExternalLoc missing");
+    assert_eq!(sheet.hyperlinks.len(), 1);
+    let link = &sheet.hyperlinks[0];
+
+    assert_eq!(link.range, Range::from_a1("A1").unwrap());
+    assert_eq!(
+        link.target,
+        HyperlinkTarget::ExternalUrl {
+            uri: "https://example.com#Section1".to_string()
+        }
+    );
+}
