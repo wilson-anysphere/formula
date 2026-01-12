@@ -258,7 +258,7 @@ impl<'a> CompileCtx<'a> {
                     self.program.instrs[jump_idx] =
                         Instruction::new(OpCode::JumpIfNotNaError, end_target, 0);
                 }
-                Function::Choose => self.compile_choose(args),
+                Function::Choose => self.compile_choose(args, allow_range),
                 Function::Switch => self.compile_switch(args),
                 _ => {
                     for (arg_idx, arg) in args.iter().enumerate() {
@@ -378,6 +378,106 @@ impl<'a> CompileCtx<'a> {
 
         // If no condition is true, IFS returns #N/A.
         self.push_error_const(ErrorKind::NA);
+        let end_target = self.program.instrs.len() as u32;
+
+        for idx in jump_if_idxs {
+            let a = self.program.instrs[idx].a();
+            self.program.instrs[idx] = Instruction::new(OpCode::JumpIfFalseOrError, a, end_target);
+        }
+        for idx in jump_end_idxs {
+            self.program.instrs[idx] = Instruction::new(OpCode::Jump, end_target, 0);
+        }
+    }
+
+    fn compile_choose(&mut self, args: &[Expr], allow_range: bool) {
+        // CHOOSE(index_num, value1, [value2], ...)
+        //
+        // Excel evaluates `index_num` first and then lazily evaluates only the selected branch.
+        // This is important for both performance and semantics:
+        // `CHOOSE(2, 1/0, 7)` must return 7, not #DIV/0!.
+        if args.len() < 2 {
+            self.push_error_const(ErrorKind::Value);
+            return;
+        }
+
+        // Evaluate the index expression once, coerce it to an integer (Excel truncates via
+        // `coerce_to_i64`, which is equivalent to `INT` for non-negative indices), and store it in
+        // a temp local so we can compare it against multiple branch constants without re-evaluating
+        // it.
+        self.compile_expr_inner(&args[0], false);
+        let int_func = intern_func(self.program, Function::Int);
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::CallFunc, int_func, 1));
+        let idx_local = self.alloc_temp_local("\u{0}CHOOSE_INDEX");
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::StoreLocal, idx_local, 0));
+
+        // If the coerced index is an error, return it without evaluating any branch expressions.
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::LoadLocal, idx_local, 0));
+        let jump_not_error_idx = self.program.instrs.len();
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::JumpIfNotError, 0, 0));
+        // Error path: reload the error and jump to end.
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::LoadLocal, idx_local, 0));
+        let jump_error_end_idx = self.program.instrs.len();
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::Jump, 0, 0));
+
+        let cases_start = self.program.instrs.len() as u32;
+        self.program.instrs[jump_not_error_idx] =
+            Instruction::new(OpCode::JumpIfNotError, cases_start, 0);
+
+        let mut jump_if_idxs: Vec<usize> = Vec::new();
+        let mut jump_end_idxs: Vec<usize> = vec![jump_error_end_idx];
+
+        for (idx, choice) in args[1..].iter().enumerate() {
+            if idx != 0 {
+                self.program
+                    .instrs
+                    .push(Instruction::new(OpCode::LoadLocal, idx_local, 0));
+            }
+
+            // Compare the index against the 1-based branch number.
+            let const_idx = self.program.consts.len() as u32;
+            self.program
+                .consts
+                .push(ConstValue::Value(Value::Number((idx + 1) as f64)));
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::PushConst, const_idx, 0));
+            self.program.instrs.push(Instruction::new(OpCode::Eq, 0, 0));
+
+            let jump_idx = self.program.instrs.len();
+            // Patched below: a=next_case_target, b=end_target (for error propagation).
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::JumpIfFalseOrError, 0, 0));
+
+            // Match branch: evaluate and return the selected choice.
+            self.compile_expr_inner(choice, allow_range);
+            let jump_end_idx = self.program.instrs.len();
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::Jump, 0, 0));
+
+            let next_case_target = self.program.instrs.len() as u32;
+            self.program.instrs[jump_idx] =
+                Instruction::new(OpCode::JumpIfFalseOrError, next_case_target, 0);
+
+            jump_if_idxs.push(jump_idx);
+            jump_end_idxs.push(jump_end_idx);
+        }
+
+        // If no branch matches (including idx < 1 or idx > choices.len()), CHOOSE returns #VALUE!.
+        self.push_error_const(ErrorKind::Value);
         let end_target = self.program.instrs.len() as u32;
 
         for idx in jump_if_idxs {
