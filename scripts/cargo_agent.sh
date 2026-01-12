@@ -17,6 +17,7 @@ set -euo pipefail
 #
 # Environment:
 #   FORMULA_CARGO_JOBS       cargo build jobs (default: 4)
+#   FORMULA_CARGO_TEST_JOBS  cargo build jobs for `cargo test` (default: 1 unless FORMULA_CARGO_JOBS is set)
 #   FORMULA_CARGO_LIMIT_AS   Address-space cap (default: 14G)
 #   FORMULA_RUST_TEST_THREADS  Default RUST_TEST_THREADS for cargo test (default: min(nproc, 16))
 #   FORMULA_RAYON_NUM_THREADS  Default RAYON_NUM_THREADS (default: FORMULA_CARGO_JOBS)
@@ -39,6 +40,7 @@ Examples:
 
 Environment:
   FORMULA_CARGO_JOBS         cargo -j value (default: 4)
+  FORMULA_CARGO_TEST_JOBS    cargo -j value for `cargo test` (default: 1 unless FORMULA_CARGO_JOBS is set)
   FORMULA_CARGO_LIMIT_AS     Address-space cap (default: 14G)
   FORMULA_RUST_TEST_THREADS  RUST_TEST_THREADS for cargo test (default: min(nproc, 16))
   FORMULA_RAYON_NUM_THREADS  RAYON_NUM_THREADS (default: FORMULA_CARGO_JOBS)
@@ -103,13 +105,13 @@ fi
 #
 # Prefer the wrapper-specific override, but fall back to the standard Cargo env var so
 # `source scripts/agent-init.sh` (which sets `CARGO_BUILD_JOBS`) influences the wrapper too.
-caller_jobs_env="${FORMULA_CARGO_JOBS:-${CARGO_BUILD_JOBS:-}}"
+caller_jobs_env="${FORMULA_CARGO_JOBS:-${FORMULA_CARGO_TEST_JOBS:-}}"
 jobs="${FORMULA_CARGO_JOBS:-${CARGO_BUILD_JOBS:-4}}"
 limit_as="${FORMULA_CARGO_LIMIT_AS:-14G}"
 
 # Note: For `cargo test`, this wrapper may override the above `jobs` default to `1` (unless callers
-# explicitly configure `FORMULA_CARGO_JOBS`/`CARGO_BUILD_JOBS`). This avoids sporadic rustc thread
-# spawn failures under high system load on multi-agent hosts.
+# explicitly configure `FORMULA_CARGO_JOBS` / `FORMULA_CARGO_TEST_JOBS`). This avoids sporadic rustc
+# thread spawn failures under high system load on multi-agent hosts.
 
 # Record whether the caller explicitly configured Rayon thread counts before we set any defaults.
 orig_rayon_num_threads="${RAYON_NUM_THREADS:-}"
@@ -330,8 +332,13 @@ fi
 # Further reduce concurrency for test runs when callers haven't explicitly opted into
 # higher parallelism. This avoids sporadic rustc panics like:
 # "failed to spawn helper thread: Resource temporarily unavailable" (EAGAIN)
-if [[ "${subcommand}" == "test" && -z "${caller_jobs_env}" ]]; then
-  jobs="1"
+if [[ "${subcommand}" == "test" ]]; then
+  if [[ -n "${FORMULA_CARGO_TEST_JOBS:-}" ]]; then
+    jobs="${FORMULA_CARGO_TEST_JOBS}"
+  elif [[ -z "${caller_jobs_env}" ]]; then
+    jobs="1"
+  fi
+
   export CARGO_BUILD_JOBS="${jobs}"
   if [[ -z "${orig_rayon_num_threads}" && -z "${orig_formula_rayon_num_threads}" ]]; then
     export RAYON_NUM_THREADS="${jobs}"
