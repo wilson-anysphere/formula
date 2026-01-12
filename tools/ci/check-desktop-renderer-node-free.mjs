@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { builtinModules } from "node:module";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 /**
  * Guardrail: the Tauri desktop renderer bundle must stay Node-free.
@@ -16,7 +17,9 @@ import process from "node:process";
  * - imports code from `apps/desktop/tools/**` or `apps/desktop/scripts/**` (Node-only tooling)
  */
 
-const repoRoot = process.cwd();
+// Resolve repo root relative to this script so callers don't have to `cd` first.
+// (`pnpm -w lint` runs from the repo root today, but this makes the guard more robust.)
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const desktopSrcDir = path.join(repoRoot, "apps", "desktop", "src");
 const desktopToolsDir = path.join(repoRoot, "apps", "desktop", "tools");
 const desktopScriptsDir = path.join(repoRoot, "apps", "desktop", "scripts");
