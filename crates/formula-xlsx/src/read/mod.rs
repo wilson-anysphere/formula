@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Cursor, Read, Seek, SeekFrom};
 #[cfg(not(target_arch = "wasm32"))]
@@ -225,6 +226,24 @@ fn attach_tables_from_parts<R: Read + Seek>(
     worksheet_rels_xml: Option<&[u8]>,
     archive: &mut ZipArchive<R>,
 ) {
+    attach_tables_from_part_getter(
+        worksheet,
+        worksheet_part,
+        worksheet_xml,
+        worksheet_rels_xml,
+        |target| read_zip_part_optional(archive, target).ok().flatten().map(Cow::Owned),
+    );
+}
+
+fn attach_tables_from_part_getter<'a, F>(
+    worksheet: &mut formula_model::Worksheet,
+    worksheet_part: &str,
+    worksheet_xml: &[u8],
+    worksheet_rels_xml: Option<&[u8]>,
+    mut get_part: F,
+) where
+    F: FnMut(&str) -> Option<Cow<'a, [u8]>>,
+{
     let table_rel_ids = match parse_table_part_ids(worksheet_xml) {
         Ok(ids) => ids,
         Err(_) => Vec::new(),
@@ -267,12 +286,12 @@ fn attach_tables_from_parts<R: Read + Seek>(
         }
 
         let target = resolve_target(worksheet_part, &rel.target);
-        let table_bytes = match read_zip_part_optional(archive, &target) {
-            Ok(Some(bytes)) => bytes,
-            _ => continue,
+        let table_bytes = match get_part(&target) {
+            Some(bytes) => bytes,
+            None => continue,
         };
 
-        let table_xml = match std::str::from_utf8(&table_bytes) {
+        let table_xml = match std::str::from_utf8(table_bytes.as_ref()) {
             Ok(xml) => xml,
             Err(_) => continue,
         };
@@ -412,10 +431,8 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
 
         // Hyperlinks.
         let rels_part = rels_for_part(&sheet.path);
-        let rels_xml = parts
-            .get(&rels_part)
-            .map(|bytes| std::str::from_utf8(bytes))
-            .transpose()?;
+        let rels_xml_bytes = parts.get(&rels_part).map(|bytes| bytes.as_slice());
+        let rels_xml = rels_xml_bytes.map(std::str::from_utf8).transpose()?;
         ws.hyperlinks = parse_worksheet_hyperlinks(sheet_xml_str, rels_xml)?;
 
         // Worksheet autoFilter.
@@ -427,6 +444,14 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             }
             AutoFilterParseError::InvalidRef(e) => ReadError::InvalidRangeRef(e.to_string()),
         })?;
+
+        attach_tables_from_part_getter(
+            ws,
+            &sheet.path,
+            sheet_xml,
+            rels_xml_bytes,
+            |target| parts.get(target).map(|bytes| Cow::Borrowed(bytes.as_slice())),
+        );
 
         parse_worksheet_into_model(
             ws,
