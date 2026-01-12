@@ -12,6 +12,20 @@ struct ModuleInfo {
     text_offset: Option<usize>,
 }
 
+// MS-OVBA §2.4.2.5 DefaultAttributes list (byte-equality, NOT case-insensitive compare).
+const V3_DEFAULT_ATTRIBUTES: [&[u8]; 7] = [
+    b"Attribute VB_Base = \"0{00020820-0000-0000-C000-000000000046}\"",
+    b"Attribute VB_GlobalNameSpace = False",
+    b"Attribute VB_Creatable = False",
+    b"Attribute VB_PredeclaredId = True",
+    b"Attribute VB_Exposed = True",
+    b"Attribute VB_TemplateDerived = False",
+    b"Attribute VB_Customizable = True",
+];
+
+// MS-OVBA §2.4.2.5: case-insensitive prefix for skipping VB_Name lines.
+const V3_VB_NAME_PREFIX: &[u8] = b"Attribute VB_Name = ";
+
 /// Build the MS-OVBA `ProjectNormalizedData` byte sequence (used by "Contents Hash V3").
 ///
 /// This is derived from the decompressed `VBA/dir` stream by iterating records in stored order and
@@ -955,11 +969,9 @@ pub fn agile_content_hash_md5(vba_project_bin: &[u8]) -> Result<Option<[u8; 16]>
 struct ModuleInfoV3 {
     stream_name: String,
     text_offset: Option<usize>,
-    // Bytes contributed to V3ContentNormalizedData before the module's normalized source code.
-    //
-    // We keep this as raw bytes (as stored in the decompressed `VBA/dir` record payloads) to match
-    // the MS-OVBA transcript semantics and avoid codepage decoding concerns.
-    transcript_prefix: Vec<u8>,
+    name_bytes: Vec<u8>,
+    name_unicode_bytes: Option<Vec<u8>>,
+    type_record_reserved: Option<[u8; 2]>,
 }
 
 /// Build the MS-OVBA §2.4.2 V3 "V3ContentNormalizedData" byte sequence for a VBA project.
@@ -1056,14 +1068,20 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                 if let Some(m) = current_module.take() {
                     append_v3_module(&mut out, &mut ole, &m)?;
                 }
-                let name = decode_dir_string(data, encoding);
-                let mut transcript_prefix = Vec::new();
-                transcript_prefix.extend_from_slice(data);
                 current_module = Some(ModuleInfoV3 {
-                    stream_name: name,
+                    stream_name: decode_dir_string(data, encoding),
                     text_offset: None,
-                    transcript_prefix,
+                    name_bytes: data.to_vec(),
+                    name_unicode_bytes: None,
+                    type_record_reserved: None,
                 });
+            }
+
+            // MODULENAMEUNICODE
+            0x0047 => {
+                if let Some(m) = current_module.as_mut() {
+                    m.name_unicode_bytes = Some(data.to_vec());
+                }
             }
 
             // MODULESTREAMNAME. Some files include a reserved u16 at the end.
@@ -1071,7 +1089,6 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                 if let Some(m) = current_module.as_mut() {
                     let trimmed = trim_reserved_u16(data);
                     m.stream_name = decode_dir_string(trimmed, encoding);
-                    m.transcript_prefix.extend_from_slice(trimmed);
                 }
             }
 
@@ -1086,12 +1103,12 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
             // `TypeRecord.Id (u16 LE) || TypeRecord.Reserved (u16 LE)`.
             0x0021 => {
                 if let Some(m) = current_module.as_mut() {
-                    m.transcript_prefix.extend_from_slice(&0x0021u16.to_le_bytes());
-                    if data.len() >= 2 {
-                        m.transcript_prefix.extend_from_slice(&data[..2]);
+                    let reserved = if data.len() >= 2 {
+                        [data[0], data[1]]
                     } else {
-                        m.transcript_prefix.extend_from_slice(&0u16.to_le_bytes());
-                    }
+                        [0u8, 0u8]
+                    };
+                    m.type_record_reserved = Some(reserved);
                 }
             }
             0x0022 => {
@@ -1125,7 +1142,11 @@ fn append_v3_module(
     ole: &mut OleFile,
     module: &ModuleInfoV3,
 ) -> Result<(), ParseError> {
-    out.extend_from_slice(&module.transcript_prefix);
+    // MS-OVBA §2.4.2.5: Include the module's TypeRecord only when its record id is 0x0021.
+    if let Some(reserved) = module.type_record_reserved {
+        out.extend_from_slice(&0x0021u16.to_le_bytes());
+        out.extend_from_slice(&reserved);
+    }
 
     let stream_path = format!("VBA/{}", module.stream_name);
     let module_stream = ole
@@ -1138,7 +1159,12 @@ fn append_v3_module(
     let text_offset = text_offset.min(module_stream.len());
     let source_container = &module_stream[text_offset..];
     let source = decompress_container(source_container)?;
-    out.extend_from_slice(&normalize_module_source(&source));
+
+    let module_name = module
+        .name_unicode_bytes
+        .as_deref()
+        .unwrap_or(&module.name_bytes);
+    append_v3_normalized_module_source(&source, module_name, out);
     Ok(())
 }
 
@@ -1295,6 +1321,62 @@ fn guess_text_offset(module_stream: &[u8]) -> usize {
     0
 }
 
+fn append_v3_normalized_module_source(source: &[u8], module_name: &[u8], out: &mut Vec<u8>) {
+    // MS-OVBA §2.4.2.5 `HashModuleNameFlag` is set when at least one line contributes.
+    let mut hash_module_name_flag = false;
+
+    let mut text_buffer: Vec<u8> = Vec::new();
+    let mut previous_char: u8 = 0;
+
+    for &ch in source {
+        if ch == b'\r' || (ch == b'\n' && previous_char != b'\r') {
+            hash_module_name_flag |= append_v3_line(&text_buffer, out);
+            text_buffer.clear();
+            previous_char = ch;
+            continue;
+        }
+
+        if ch == b'\n' && previous_char == b'\r' {
+            // Ignore the LF of CRLF; keep PreviousChar as 0x0D (matches MS-OVBA pseudocode).
+            continue;
+        }
+
+        text_buffer.push(ch);
+        previous_char = ch;
+    }
+
+    // Process the trailing (possibly empty) line.
+    hash_module_name_flag |= append_v3_line(&text_buffer, out);
+
+    if hash_module_name_flag {
+        out.extend_from_slice(module_name);
+        out.push(b'\n');
+    }
+}
+
+fn append_v3_line(line: &[u8], out: &mut Vec<u8>) -> bool {
+    let is_attribute = starts_with_ignore_ascii_case(line, b"attribute");
+    if !is_attribute {
+        out.extend_from_slice(line);
+        out.push(b'\n');
+        return true;
+    }
+
+    // Skip `Attribute VB_Name = ...` lines.
+    if starts_with_ignore_ascii_case(line, V3_VB_NAME_PREFIX) {
+        return false;
+    }
+
+    // Skip DefaultAttributes lines by exact byte equality (case-sensitive).
+    if V3_DEFAULT_ATTRIBUTES.iter().any(|&a| line == a) {
+        return false;
+    }
+
+    out.extend_from_slice(line);
+    out.push(b'\n');
+    true
+}
+
 fn normalize_module_source(bytes: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(bytes.len());
 
@@ -1350,6 +1432,17 @@ fn is_attribute_line(line: &[u8]) -> bool {
         return true;
     }
     matches!(line[keyword.len()], b' ' | b'\t')
+}
+
+fn starts_with_ignore_ascii_case(haystack: &[u8], needle: &[u8]) -> bool {
+    if haystack.len() < needle.len() {
+        return false;
+    }
+    haystack
+        .iter()
+        .take(needle.len())
+        .zip(needle.iter())
+        .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
 }
 fn decode_dir_string(bytes: &[u8], encoding: &'static Encoding) -> String {
     // MS-OVBA dir strings are generally stored using the project codepage, but some records may

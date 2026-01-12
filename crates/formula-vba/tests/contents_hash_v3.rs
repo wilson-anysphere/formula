@@ -401,7 +401,7 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
     // Module source includes:
     // - an Attribute line that must be stripped
     // - mixed newline styles (CRLF / CR-only / lone-LF)
-    // - a final line without a newline terminator (must be normalized to CRLF)
+    // - a final line without a newline terminator (must be normalized to LF)
     let module_source = concat!(
         "Attribute VB_Name = \"Module1\"\r\n",
         "Option Explicit\r",
@@ -420,32 +420,30 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
     // ContentsHashV3 = SHA-256(ProjectNormalizedData) (v3 uses SHA-256, not MD5)
     // ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData
     //
-    // V3ContentNormalizedData includes module identity/metadata (`MODULENAME`, `MODULESTREAMNAME`
-    // sans the reserved u16, and for procedural modules `MODULETYPE.Id || MODULETYPE.Reserved`)
-    // followed by the module's normalized source.
+    // V3ContentNormalizedData includes (for procedural modules) `MODULETYPE.Id || MODULETYPE.Reserved`
+    // followed by LF-normalized module source (Attribute filtering per MS-OVBA §2.4.2.5), and the
+    // module name + LF when `HashModuleNameFlag` becomes true.
     let mut expected = Vec::new();
 
-    // Module1 prefix: MODULENAME || MODULESTREAMNAME(trimmed) || (TypeRecord.Id || Reserved)
-    expected.extend_from_slice(b"Module1");
-    expected.extend_from_slice(b"Module1");
+    // Module1 prefix: (TypeRecord.Id || Reserved)
     expected.extend_from_slice(&0x0021u16.to_le_bytes());
     expected.extend_from_slice(&0u16.to_le_bytes());
 
     // Module1 normalized source.
     expected.extend_from_slice(
         concat!(
-            "Option Explicit\r\n",
-            "Print \"Attribute\"\r\n",
-            "Sub Foo()\r\n",
-            "End Sub\r\n",
+            "Option Explicit\n",
+            "Print \"Attribute\"\n",
+            "Sub Foo()\n",
+            "End Sub\n",
+            "Module1\n",
         )
         .as_bytes(),
     );
 
-    // UserForm1 prefix + source (non-procedural: TypeRecord bytes omitted).
-    expected.extend_from_slice(b"UserForm1");
-    expected.extend_from_slice(b"UserForm1");
-    expected.extend_from_slice(b"Sub FormHello()\r\nEnd Sub\r\n");
+    // UserForm1 source (non-procedural: TypeRecord bytes omitted). Ends with CRLF in the fixture,
+    // and MS-OVBA §2.4.2.5 line splitting appends a trailing empty line, so we expect the extra LF.
+    expected.extend_from_slice(b"Sub FormHello()\nEnd Sub\n\nUserForm1\n");
 
     // FormsNormalizedData: one 1023-byte block for the designer stream.
     expected.extend_from_slice(designer_bytes);
@@ -467,9 +465,9 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
     // Hard-coded expected digest bytes to keep this test deterministic and to catch
     // accidental transcript changes.
     let expected_digest: [u8; 32] = [
-        0x73, 0x4a, 0xac, 0x16, 0x7e, 0x11, 0xbd, 0x56, 0x0b, 0x99, 0xf1, 0x64, 0xf5, 0xbe,
-        0x14, 0x9b, 0x87, 0x58, 0xb2, 0xd0, 0xda, 0x28, 0xe7, 0x9b, 0x71, 0xb8, 0x8d, 0x75,
-        0x8c, 0x76, 0xc1, 0xb5,
+        0x77, 0xa1, 0x5f, 0xfb, 0xd5, 0x8b, 0x3e, 0xb6, 0xfc, 0x09, 0x2d, 0x11, 0x01, 0x03,
+        0xa3, 0xdd, 0xe3, 0x73, 0xf0, 0x5b, 0x51, 0xb9, 0xf1, 0xc2, 0xb0, 0x97, 0x1e, 0xe4,
+        0x99, 0x27, 0x27, 0x7c,
     ];
     assert_eq!(
         expected_digest_from_transcript.as_slice(),

@@ -33,8 +33,10 @@ fn v3_content_normalized_data_module_order_and_module_type_record_rules() {
     let module_nonproc_name = "ModuleA";
 
     // Distinct module source markers so we can assert ordering in the output.
-    let module_proc_code = b"'PROC-MODULE\r\nSub Proc()\r\nEnd Sub\r\n";
-    let module_nonproc_code = b"'NONPROC-MODULE\r\nSub NonProc()\r\nEnd Sub\r\n";
+    // Do not end the module with a trailing newline so the V3 normalization logic doesn't append
+    // an extra empty line before `HashModuleNameFlag` causes the module name to be appended.
+    let module_proc_code = b"'PROC-MODULE\r\nSub Proc()\r\nEnd Sub";
+    let module_nonproc_code = b"'NONPROC-MODULE\r\nSub NonProc()\r\nEnd Sub";
 
     let module_proc_container = compress_container(module_proc_code);
     let module_nonproc_container = compress_container(module_nonproc_code);
@@ -95,10 +97,13 @@ fn v3_content_normalized_data_module_order_and_module_type_record_rules() {
     let normalized = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
 
     // ---- Module ordering: stored order (ModuleB then ModuleA) ----
-    let pos_proc =
-        find_subslice(&normalized, module_proc_code).expect("procedural module code present");
-    let pos_nonproc = find_subslice(&normalized, module_nonproc_code)
-        .expect("non-procedural module code present");
+    let module_proc_expected = b"'PROC-MODULE\nSub Proc()\nEnd Sub\nModuleB\n";
+    let module_nonproc_expected = b"'NONPROC-MODULE\nSub NonProc()\nEnd Sub\nModuleA\n";
+
+    let pos_proc = find_subslice(&normalized, module_proc_expected)
+        .expect("procedural module code present (normalized + module name)");
+    let pos_nonproc = find_subslice(&normalized, module_nonproc_expected)
+        .expect("non-procedural module code present (normalized + module name)");
     assert!(
         pos_proc < pos_nonproc,
         "expected ModuleB bytes to appear before ModuleA bytes in V3ContentNormalizedData"
@@ -133,3 +138,82 @@ fn v3_content_normalized_data_module_order_and_module_type_record_rules() {
     );
 }
 
+#[test]
+fn v3_content_normalized_data_module_source_normalization_defaultattributes_and_vb_name() {
+    // MS-OVBA §2.4.2.5 module normalization edge cases:
+    // - `Attribute VB_Name = ...` lines are skipped (case-insensitive prefix match).
+    // - DefaultAttributes filtering is based on **byte-equality** against the 7 constant strings
+    //   (i.e. NOT a case-insensitive compare).
+    // - Output uses LF-only line endings.
+    // - When at least one line is included, the module name is appended once, followed by LF
+    //   (`HashModuleNameFlag` behavior).
+    let module_name = "Module1";
+
+    let module_code = concat!(
+        // Skipped (VB_Name)
+        "Attribute VB_Name = \"Module1\"\r\n",
+        // Skipped (exact DefaultAttributes match)
+        "Attribute VB_GlobalNameSpace = False\r\n",
+        // Included: starts with `attribute` but differs by case from DefaultAttributes.
+        "attribute VB_GlobalNameSpace = False\r\n",
+        // Included: non-attribute code lines.
+        "Option Explicit\r",
+        "Sub Foo()\n",
+        // No trailing newline; normalization should still include it with an LF.
+        "End Sub",
+    );
+
+    let module_container = compress_container(module_code.as_bytes());
+
+    // Minimal decompressed `VBA/dir` stream describing a single module at offset 0.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0019, module_name.as_bytes()); // MODULENAME
+
+        // MODULESTREAMNAME + reserved u16.
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(module_name.as_bytes());
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+
+        // Use a non-procedural MODULETYPE record id so there is no binary transcript prefix before
+        // the normalized module lines.
+        push_record(&mut out, 0x0022, &0u16.to_le_bytes());
+
+        // MODULETEXTOFFSET: our module stream is just the compressed container.
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let normalized = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
+
+    let expected = concat!(
+        "attribute VB_GlobalNameSpace = False\n",
+        "Option Explicit\n",
+        "Sub Foo()\n",
+        "End Sub\n",
+        "Module1\n",
+    )
+    .as_bytes()
+    .to_vec();
+
+    assert_eq!(normalized, expected);
+    assert!(
+        !normalized.contains(&b'\r'),
+        "expected LF-only output (no CR bytes)"
+    );
+}

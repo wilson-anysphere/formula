@@ -218,14 +218,14 @@ fn v3_content_normalized_data_includes_module_metadata_even_without_designers() 
     let content = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
     assert_eq!(content, b"Sub Foo()\r\nEnd Sub\r\n".to_vec());
 
-    // Per MS-OVBA v3, the module transcript includes:
-    // MODULENAME || MODULESTREAMNAME(trimmed) || (TypeRecord.Id || Reserved if Id==0x0021) || normalized_source
+    // Per MS-OVBA §2.4.2.5, the module transcript includes:
+    // - (TypeRecord.Id || Reserved) when TypeRecord.Id == 0x0021
+    // - LF-normalized module source with Attribute filtering
+    // - a trailing module name + LF when `HashModuleNameFlag` becomes true
     let mut expected = Vec::new();
-    expected.extend_from_slice(b"Module1");
-    expected.extend_from_slice(b"Module1");
     expected.extend_from_slice(&0x0021u16.to_le_bytes());
     expected.extend_from_slice(&0u16.to_le_bytes());
-    expected.extend_from_slice(b"Sub Foo()\r\nEnd Sub\r\n");
+    expected.extend_from_slice(b"Sub Foo()\nEnd Sub\n\nModule1\n");
 
     assert_ne!(
         v3, content,
@@ -243,9 +243,7 @@ fn project_normalized_data_v3_appends_padded_forms_normalized_data_when_designer
     let project = project_normalized_data_v3(&vba_bin).expect("ProjectNormalizedData v3");
 
     let mut expected_content_v3 = Vec::new();
-    expected_content_v3.extend_from_slice(b"UserForm1");
-    expected_content_v3.extend_from_slice(b"UserForm1");
-    expected_content_v3.extend_from_slice(b"Sub FormHello()\r\nEnd Sub\r\n");
+    expected_content_v3.extend_from_slice(b"Sub FormHello()\nEnd Sub\n\nUserForm1\n");
     assert_eq!(content_v3, expected_content_v3);
 
     let mut expected_forms = Vec::new();
