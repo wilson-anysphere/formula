@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { SheetMeta, TabColor, WorkbookSheetStore } from "./workbookSheetStore";
 
@@ -26,13 +26,14 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
   const visibleSheets = useMemo(() => sheets.filter((s) => s.visibility === "visible"), [sheets]);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const dragSheetIdRef = useRef<string | null>(null);
   const autoScrollRef = useRef<{ raf: number | null; direction: -1 | 0 | 1 }>({ raf: null, direction: 0 });
+  const activeTabRef = useRef<HTMLButtonElement | null>(null);
 
   const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null!);
+  const [canScroll, setCanScroll] = useState<{ left: boolean; right: boolean }>({ left: false, right: false });
 
   const stopAutoScroll = () => {
     const raf = autoScrollRef.current.raf;
@@ -147,11 +148,47 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
     }
   };
 
+  const updateScrollButtons = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) {
+      setCanScroll({ left: false, right: false });
+      return;
+    }
+    const maxScrollLeft = el.scrollWidth - el.clientWidth;
+    setCanScroll({
+      left: el.scrollLeft > 0,
+      right: el.scrollLeft < maxScrollLeft - 1,
+    });
+  }, []);
+
   const scrollTabsBy = (delta: number) => {
     const el = containerRef.current;
     if (!el) return;
     el.scrollBy({ left: delta, behavior: "smooth" });
   };
+
+  useEffect(() => {
+    updateScrollButtons();
+  }, [updateScrollButtons, visibleSheets.length]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    updateScrollButtons();
+    const onScroll = () => updateScrollButtons();
+    el.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [updateScrollButtons]);
+
+  useEffect(() => {
+    // Keep the active tab visible when switching sheets via keyboard or programmatically.
+    if (editingSheetId) return;
+    activeTabRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeSheetId, editingSheetId, visibleSheets.length]);
 
   return (
     <>
@@ -161,6 +198,7 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
           className="sheet-nav-btn"
           aria-label="Scroll sheet tabs left"
           onClick={() => scrollTabsBy(-120)}
+          disabled={!canScroll.left}
         >
           ‹
         </button>
@@ -169,6 +207,7 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
           className="sheet-nav-btn"
           aria-label="Scroll sheet tabs right"
           onClick={() => scrollTabsBy(120)}
+          disabled={!canScroll.right}
         >
           ›
         </button>
@@ -178,6 +217,8 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
         className="sheet-tabs"
         ref={containerRef}
         tabIndex={0}
+        role="tablist"
+        aria-label="Sheets"
         onKeyDown={(e) => {
           if (e.defaultPrevented) return;
           const primary = e.ctrlKey || e.metaKey;
@@ -223,6 +264,7 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
             draftName={draftName}
             renameError={editingSheetId === sheet.id ? renameError : null}
             renameInputRef={renameInputRef}
+            tabRef={sheet.id === activeSheetId ? activeTabRef : undefined}
             onActivate={() => onActivateSheet(sheet.id)}
             onBeginRename={() => {
               setEditingSheetId(sheet.id);
@@ -236,11 +278,9 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
             }}
             onDraftNameChange={setDraftName}
             onDragStart={() => {
-              dragSheetIdRef.current = sheet.id;
               stopAutoScroll();
             }}
             onDragEnd={() => {
-              dragSheetIdRef.current = null;
               stopAutoScroll();
             }}
             onDropOnTab={(e) => {
@@ -281,6 +321,7 @@ function SheetTab(props: {
   draftName: string;
   renameError: string | null;
   renameInputRef: React.RefObject<HTMLInputElement>;
+  tabRef?: React.Ref<HTMLButtonElement>;
   onActivate: () => void;
   onBeginRename: () => void;
   onCommitRename: () => void;
@@ -299,7 +340,10 @@ function SheetTab(props: {
       data-testid={`sheet-tab-${sheet.id}`}
       data-sheet-id={sheet.id}
       data-active={active ? "true" : "false"}
+      role="tab"
+      aria-selected={active ? "true" : "false"}
       draggable={!editing}
+      ref={props.tabRef}
       onClick={() => {
         if (!editing) props.onActivate();
       }}
