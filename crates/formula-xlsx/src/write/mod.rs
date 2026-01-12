@@ -3276,6 +3276,17 @@ fn append_cell_xml(
     let meta = lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
     let value_kind = effective_value_kind(meta, cell);
 
+    // `vm`/`cm` are SpreadsheetML cell metadata pointers used for rich values (e.g. images-in-cell).
+    // When rendering sheetData from the in-memory model (as opposed to patching an existing file),
+    // we emit these attributes directly from `CellMeta` so callers can round-trip or synthesize
+    // rich-data workbooks.
+    if let Some(vm) = meta.and_then(|m| m.vm.as_deref()).filter(|s| !s.is_empty()) {
+        out.push_str(&format!(r#" vm="{}""#, escape_attr(vm)));
+    }
+    if let Some(cm) = meta.and_then(|m| m.cm.as_deref()).filter(|s| !s.is_empty()) {
+        out.push_str(&format!(r#" cm="{}""#, escape_attr(cm)));
+    }
+
     let meta_sheet_id = cell_meta_sheet_ids
         .get(&sheet_meta.worksheet_id)
         .copied()
