@@ -1853,6 +1853,78 @@ fn project_normalized_data_decodes_baseclass_value_using_project_stream_codepage
 }
 
 #[test]
+fn project_normalized_data_falls_back_to_dir_projectcodepage_for_baseclass_value_decoding() {
+    // Regression: If the PROJECT stream lacks a `CodePage=` line, we should fall back to
+    // PROJECTCODEPAGE (0x0003) from `VBA/dir` when decoding non-ASCII BaseClass values for designer
+    // lookup.
+
+    let module_name = "Форма1";
+    let (module_name_bytes, _, _) = WINDOWS_1251.encode(module_name);
+
+    // Encode the PROJECT stream as Windows-1251 but *do not* include CodePage=.
+    let project_stream_text = format!("BaseClass={module_name}\r\n");
+    let (project_stream_bytes, _, _) = WINDOWS_1251.encode(&project_stream_text);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(project_stream_bytes.as_ref())
+            .expect("write PROJECT");
+    }
+
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let dir_decompressed = {
+            let mut out = Vec::new();
+            push_record(&mut out, 0x0003, &1251u16.to_le_bytes()); // PROJECTCODEPAGE
+
+            // Module record group for the designer module referenced by BaseClass=...
+            push_record(&mut out, 0x0019, module_name_bytes.as_ref()); // MODULENAME
+            let mut stream_name = Vec::new();
+            stream_name.extend_from_slice(module_name_bytes.as_ref());
+            stream_name.extend_from_slice(&0u16.to_le_bytes()); // reserved u16
+            push_record(&mut out, 0x001A, &stream_name); // MODULESTREAMNAME
+            push_record(&mut out, 0x0021, &3u16.to_le_bytes()); // MODULETYPE (UserForm)
+
+            out
+        };
+        let dir_container = compress_container(&dir_decompressed);
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    ole.create_storage(module_name).expect("designer storage");
+    {
+        let mut s = ole
+            .create_stream(format!("{module_name}/Payload"))
+            .expect("designer stream");
+        s.write_all(b"R").expect("write designer bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized = project_normalized_data(&vba_project_bin).expect("ProjectNormalizedData");
+
+    let mut expected_padded = Vec::new();
+    expected_padded.extend_from_slice(b"R");
+    expected_padded.extend(std::iter::repeat_n(0u8, 1022));
+
+    let mut expected_tokens = Vec::new();
+    expected_tokens.extend_from_slice(b"BaseClass");
+    expected_tokens.extend_from_slice(module_name_bytes.as_ref());
+
+    let idx_designer =
+        find_subslice(&normalized, &expected_padded).expect("expected designer bytes");
+    let idx_tokens =
+        find_subslice(&normalized, &expected_tokens).expect("expected BaseClass tokens");
+    assert!(
+        idx_designer < idx_tokens,
+        "expected designer bytes to appear before BaseClass property tokens"
+    );
+}
+
+#[test]
 fn project_normalized_data_resolves_designer_storage_using_modulestreamnameunicode_record() {
     // Regression: BaseClass=... identifies a designer module by MODULENAME, but the corresponding
     // designer *storage* name can come from MODULESTREAMNAMEUNICODE (0x0032) rather than the ANSI
