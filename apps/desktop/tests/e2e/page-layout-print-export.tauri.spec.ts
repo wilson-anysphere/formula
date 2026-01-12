@@ -130,6 +130,57 @@ test.describe("Page Layout print/export wiring (tauri)", () => {
     await page.locator("dialog.page-setup-dialog").getByRole("button", { name: "Close" }).click();
     await expect(page.locator("dialog.page-setup-dialog")).toHaveCount(0);
 
+    // --- Page Setup dropdown wiring (margins/orientation/size) -----------------
+    const countInvokes = (cmd: string) =>
+      page.evaluate((name) => {
+        const invokes = (window as any).__tauriInvokes ?? [];
+        if (!Array.isArray(invokes)) return 0;
+        return invokes.filter((entry: any) => entry?.cmd === name).length;
+      }, cmd);
+
+    const waitForInvokeCount = async (cmd: string, prevCount: number) => {
+      await page.waitForFunction(
+        ({ name, prev }) => {
+          const invokes = (window as any).__tauriInvokes ?? [];
+          if (!Array.isArray(invokes)) return false;
+          return invokes.filter((entry: any) => entry?.cmd === name).length > prev;
+        },
+        { name: cmd, prev: prevCount },
+      );
+    };
+
+    const lastInvoke = (cmd: string) =>
+      page.evaluate((name) => {
+        const invokes = (window as any).__tauriInvokes ?? [];
+        if (!Array.isArray(invokes)) return null;
+        const matches = invokes.filter((entry: any) => entry?.cmd === name);
+        return matches.length > 0 ? matches[matches.length - 1] : null;
+      }, cmd);
+
+    // Margins preset (Narrow).
+    const beforeMargins = await countInvokes("set_sheet_page_setup");
+    await ribbon.getByRole("button", { name: "Margins", exact: true }).click();
+    await ribbon.getByRole("menuitem", { name: "Narrow Margins", exact: true }).click();
+    await waitForInvokeCount("set_sheet_page_setup", beforeMargins);
+    const marginsCall = await lastInvoke("set_sheet_page_setup");
+    expect(marginsCall?.args?.page_setup?.margins?.left).toBe(0.25);
+
+    // Orientation preset (Landscape).
+    const beforeOrientation = await countInvokes("set_sheet_page_setup");
+    await ribbon.getByRole("button", { name: "Orientation", exact: true }).click();
+    await ribbon.getByRole("menuitem", { name: "Landscape", exact: true }).click();
+    await waitForInvokeCount("set_sheet_page_setup", beforeOrientation);
+    const orientationCall = await lastInvoke("set_sheet_page_setup");
+    expect(orientationCall?.args?.page_setup?.orientation).toBe("landscape");
+
+    // Paper size preset (A4).
+    const beforeSize = await countInvokes("set_sheet_page_setup");
+    await ribbon.getByRole("button", { name: "Size", exact: true }).click();
+    await ribbon.getByRole("menuitem", { name: "A4", exact: true }).click();
+    await waitForInvokeCount("set_sheet_page_setup", beforeSize);
+    const sizeCall = await lastInvoke("set_sheet_page_setup");
+    expect(sizeCall?.args?.page_setup?.paper_size).toBe(9);
+
     // --- Print area wiring -----------------------------------------------------
     await ribbon.getByTestId("ribbon-set-print-area").click();
     await page.waitForFunction(
@@ -140,6 +191,14 @@ test.describe("Page Layout print/export wiring (tauri)", () => {
     await page.waitForFunction(
       () => (window as any).__tauriInvokes?.some((e: any) => e?.cmd === "set_sheet_print_area" && e?.args?.print_area === null),
     );
+
+    // Print Area dropdown wiring (Add to Print Area).
+    const beforeAddTo = await countInvokes("set_sheet_print_area");
+    await ribbon.getByRole("button", { name: "Print Area", exact: true }).click();
+    await ribbon.getByRole("menuitem", { name: "Add to Print Area", exact: true }).click();
+    await waitForInvokeCount("set_sheet_print_area", beforeAddTo);
+    const addToCall = await lastInvoke("set_sheet_print_area");
+    expect(Array.isArray(addToCall?.args?.print_area)).toBe(true);
 
     // --- Export PDF wiring -----------------------------------------------------
     await ribbon.getByTestId("ribbon-export-pdf").click();

@@ -11,10 +11,15 @@ test.describe("Page Layout print/export (web fallback)", () => {
 
     await ribbon.getByRole("tab", { name: "Page Layout" }).click();
 
+    // Dropdown controls (no stable test ids yet).
+    await expect(ribbon.getByRole("button", { name: "Margins", exact: true })).toBeDisabled();
+    await expect(ribbon.getByRole("button", { name: "Orientation", exact: true })).toBeDisabled();
+    await expect(ribbon.getByRole("button", { name: "Size", exact: true })).toBeDisabled();
+    await expect(ribbon.getByRole("button", { name: "Print Area", exact: true })).toBeDisabled();
+
     await expect(ribbon.getByTestId("ribbon-page-setup")).toBeDisabled();
     await expect(ribbon.getByTestId("ribbon-set-print-area")).toBeDisabled();
     await expect(ribbon.getByTestId("ribbon-clear-print-area")).toBeDisabled();
     await expect(ribbon.getByTestId("ribbon-export-pdf")).toBeDisabled();
   });
 });
-
