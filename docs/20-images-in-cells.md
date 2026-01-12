@@ -322,9 +322,17 @@ Representative snippet (from the unit tests in `crates/formula-xlsx/src/rich_dat
 ```
 
 Other observed `xl/metadata.xml` shapes exist. For example, `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
-contains a `<valueMetadata>` table but **no** `<futureMetadata>` block; Formula currently treats these
-schemas as opaque and focuses on round-trip preservation (with best-effort extraction utilities in
-`crates/formula-xlsx/src/rich_data/mod.rs`).
+contains a `<valueMetadata>` table but **no** `<futureMetadata>` block.
+
+In that fixture:
+
+- Worksheet cells use `vm="0"` (0-based).
+- The `<rc v="0"/>` value appears to directly reference the rich value index (0-based) into
+  `xl/richData/richValue.xml`.
+
+See [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md) for the exact XML and
+namespaces observed in that fixture. Formula currently treats these schemas as opaque and focuses on
+round-trip preservation (with best-effort extraction utilities in `crates/formula-xlsx/src/rich_data/mod.rs`).
 
 ## `xl/cellImages.xml` (a.k.a. `xl/cellimages.xml`)
 

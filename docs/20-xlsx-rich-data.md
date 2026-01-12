@@ -306,7 +306,7 @@ The following example is *synthetic* but demonstrates the mapping.
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheetData>
     <row r="2">
-      <!-- vm="1" => the first valueMetadata record in xl/metadata.xml -->
+      <!-- vm selects a valueMetadata record in xl/metadata.xml (often 1-based, but 0-based is also observed) -->
       <c r="B2" vm="1">
         <!-- The cell's plain <v> is not the image payload.
              The image binding is driven by vm + metadata.xml. -->
@@ -347,7 +347,7 @@ This is where Excel binds a cell’s `vm` index to a rich value index via the ri
     </bk>
   </futureMetadata>
 
-  <!-- vm="1" points at the first (1st) value-metadata record. -->
+  <!-- vm="1" points at the first (1st) value-metadata record in 1-based files (0-based is also observed). -->
   <valueMetadata count="1">
     <bk>
       <!-- Record 1: type t="1" (metadataTypes[0]) and v="0" (futureMetadata bk[0]) -->
