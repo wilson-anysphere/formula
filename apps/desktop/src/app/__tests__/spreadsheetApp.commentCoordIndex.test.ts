@@ -42,4 +42,28 @@ describe("SpreadsheetApp.reindexCommentCells", () => {
 
     expect(invalidateAll).toHaveBeenCalledTimes(1);
   });
+
+  it("does not populate coord indexes for non-A1 cellRefs", () => {
+    const comments = [{ cellRef: "Sheet1!A1", resolved: false, content: "Bad ref" }];
+
+    const app = Object.create(SpreadsheetApp.prototype) as SpreadsheetApp;
+    (app as any).commentCells = new Set<string>();
+    (app as any).commentMeta = new Map<string, { resolved: boolean }>();
+    (app as any).commentMetaByCoord = new Map<number, { resolved: boolean }>();
+    (app as any).commentPreviewByCoord = new Map<number, string>();
+    (app as any).commentManager = { listAll: () => comments };
+
+    const invalidateAll = vi.fn();
+    (app as any).sharedProvider = { invalidateAll };
+
+    (app as any).reindexCommentCells();
+
+    expect((app as any).commentCells.has("Sheet1!A1")).toBe(true);
+    expect((app as any).commentMeta.get("Sheet1!A1")).toEqual({ resolved: false });
+
+    expect((app as any).commentMetaByCoord.size).toBe(0);
+    expect((app as any).commentPreviewByCoord.size).toBe(0);
+
+    expect(invalidateAll).toHaveBeenCalledTimes(1);
+  });
 });
