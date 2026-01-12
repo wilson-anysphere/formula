@@ -4898,11 +4898,72 @@ impl BytecodeColumnCache {
         snapshot: &Snapshot,
         tasks: &[(CellKey, CompiledFormula)],
     ) -> Self {
+        #[derive(Clone, Copy, Debug)]
+        enum StackValue {
+            Range(usize),
+            Other,
+        }
+
+        fn range_refs_used_by_functions(program: &bytecode::Program) -> Vec<bool> {
+            let mut used = vec![false; program.range_refs.len()];
+            let mut stack: Vec<StackValue> = Vec::new();
+
+            for inst in program.instrs() {
+                match inst.op() {
+                    bytecode::OpCode::PushConst | bytecode::OpCode::LoadCell => {
+                        stack.push(StackValue::Other);
+                    }
+                    bytecode::OpCode::LoadRange => {
+                        stack.push(StackValue::Range(inst.a() as usize));
+                    }
+                    bytecode::OpCode::UnaryPlus
+                    | bytecode::OpCode::UnaryNeg
+                    | bytecode::OpCode::ImplicitIntersection => {
+                        let _ = stack.pop();
+                        stack.push(StackValue::Other);
+                    }
+                    bytecode::OpCode::Add
+                    | bytecode::OpCode::Sub
+                    | bytecode::OpCode::Mul
+                    | bytecode::OpCode::Div
+                    | bytecode::OpCode::Pow
+                    | bytecode::OpCode::Eq
+                    | bytecode::OpCode::Ne
+                    | bytecode::OpCode::Lt
+                    | bytecode::OpCode::Le
+                    | bytecode::OpCode::Gt
+                    | bytecode::OpCode::Ge => {
+                        let _ = stack.pop();
+                        let _ = stack.pop();
+                        stack.push(StackValue::Other);
+                    }
+                    bytecode::OpCode::CallFunc => {
+                        let argc = inst.b() as usize;
+                        for _ in 0..argc {
+                            match stack.pop().unwrap_or(StackValue::Other) {
+                                StackValue::Range(idx) => {
+                                    if idx < used.len() {
+                                        used[idx] = true;
+                                    }
+                                }
+                                StackValue::Other => {}
+                            }
+                        }
+                        stack.push(StackValue::Other);
+                    }
+                }
+            }
+
+            used
+        }
+
         // Collect row windows for each referenced column so the cache can build compact
         // columnar buffers. This avoids allocating/scanning from row 0 (e.g. `A900000:A900010`),
         // and also avoids spanning huge gaps when formulas reference multiple disjoint windows.
         let mut row_ranges_by_col: Vec<HashMap<i32, Vec<(i32, i32)>>> =
             vec![HashMap::new(); sheet_count];
+
+        let mut range_usage_cache: HashMap<usize, Vec<bool>> = HashMap::new();
 
         for (key, compiled) in tasks {
             let CompiledFormula::Bytecode(bc) = compiled else {
@@ -4913,11 +4974,24 @@ impl BytecodeColumnCache {
                 continue;
             }
 
+            let program_key = Arc::as_ptr(&bc.program) as usize;
+            let used = range_usage_cache
+                .entry(program_key)
+                .or_insert_with(|| range_refs_used_by_functions(&bc.program));
+            if !used.iter().any(|v| *v) {
+                // Ranges that are only used for implicit intersection don't require a columnar
+                // cache because evaluation can fetch a single cell via `get_value`.
+                continue;
+            }
+
             let base = bytecode::CellCoord {
                 row: key.addr.row as i32,
                 col: key.addr.col as i32,
             };
-            for range in &bc.program.range_refs {
+            for (idx, range) in bc.program.range_refs.iter().enumerate() {
+                if !used.get(idx).copied().unwrap_or(false) {
+                    continue;
+                }
                 let resolved = range.resolve(base);
                 if resolved.row_start < 0
                     || resolved.col_start < 0
@@ -6951,6 +7025,44 @@ mod tests {
         let seg = &col.segments[0];
         assert_eq!(seg.row_start, 0);
         assert_eq!(seg.values[4], 42.0);
+    }
+
+    #[test]
+    fn bytecode_column_cache_ignores_ranges_used_only_for_implicit_intersection() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "B1", "=@A1:A10")
+            .unwrap();
+
+        assert_eq!(
+            engine.bytecode_program_count(),
+            1,
+            "implicit intersection formulas should compile to bytecode"
+        );
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let key = CellKey {
+            sheet: sheet_id,
+            addr: parse_a1("B1").unwrap(),
+        };
+        let compiled = engine
+            .workbook
+            .get_cell(key)
+            .and_then(|c| c.compiled.clone())
+            .expect("compiled formula stored");
+
+        let snapshot = Snapshot::from_workbook(
+            &engine.workbook,
+            &engine.spills,
+            engine.external_value_provider.clone(),
+        );
+        let column_cache =
+            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
+
+        assert!(
+            column_cache.by_sheet[sheet_id].is_empty(),
+            "implicit intersection ranges should not force column cache allocation"
+        );
     }
 
     #[test]
