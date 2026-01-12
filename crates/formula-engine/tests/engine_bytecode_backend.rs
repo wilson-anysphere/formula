@@ -1800,6 +1800,48 @@ fn bytecode_backend_sumproduct_broadcasts_single_cell_ranges() {
 }
 
 #[test]
+fn bytecode_backend_sumproduct_preserves_error_precedence_for_broadcast_ranges() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_value("Sheet1", "A1", Value::Error(ErrorKind::Value))
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "B1", Value::Error(ErrorKind::Div0))
+        .unwrap();
+    engine.set_cell_value("Sheet1", "B2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 3.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SUMPRODUCT(B1:B3,A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", "=SUMPRODUCT(A1,B1:B3)")
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        2,
+        "expected SUMPRODUCT broadcast formulas to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+
+    // With broadcast, error precedence should follow per-index coercion order: coerce the first
+    // argument before the second for each element.
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Error(ErrorKind::Div0)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C2"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_engine_matches_ast(&engine, "=SUMPRODUCT(B1:B3,A1)", "C1");
+    assert_engine_matches_ast(&engine, "=SUMPRODUCT(A1,B1:B3)", "C2");
+}
+
+#[test]
 fn bytecode_backend_sumproduct_flattens_mismatched_range_shapes_by_length() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();

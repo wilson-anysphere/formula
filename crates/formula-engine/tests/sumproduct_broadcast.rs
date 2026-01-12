@@ -19,6 +19,15 @@ impl ValueResolver for EngineResolver<'_> {
         sheet_id == 0
     }
 
+    fn sheet_dimensions(&self, sheet_id: usize) -> (u32, u32) {
+        match sheet_id {
+            // Keep the test grid small so whole-column references like `A:A` don't require
+            // iterating Excel's full 1,048,576-row default.
+            0 => (100, 26),
+            _ => (0, 0),
+        }
+    }
+
     fn get_cell_value(&self, sheet_id: usize, addr: formula_engine::eval::CellAddr) -> Value {
         let sheet = match sheet_id {
             0 => "Sheet1",
@@ -116,5 +125,23 @@ fn sumproduct_preserves_error_precedence_for_broadcast_references() {
     assert_eq!(
         eval_via_ast(&engine, "=SUMPRODUCT(A1,B1:B3)", "Z1"),
         Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
+fn sumproduct_accepts_whole_column_references() {
+    let mut engine = Engine::new();
+    set_value(&mut engine, "A1", 2.0);
+    set_value(&mut engine, "A2", 3.0);
+    set_value(&mut engine, "A3", 4.0);
+    set_value(&mut engine, "B1", 1.0);
+    set_value(&mut engine, "B2", 2.0);
+    set_value(&mut engine, "B3", 3.0);
+
+    // `A:A` / `B:B` use sheet-end sentinels at parse time. The evaluator resolves those against
+    // `ValueResolver::sheet_dimensions`, so this test also covers that integration.
+    assert_eq!(
+        eval_via_ast(&engine, "=SUMPRODUCT(A:A,B:B)", "Z1"),
+        Value::Number(20.0)
     );
 }
