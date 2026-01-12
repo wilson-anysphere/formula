@@ -1231,4 +1231,182 @@ mod tests {
             .expect("missing definedName");
         assert_eq!(defined_name.tag_name().namespace(), Some(SPREADSHEETML_NS));
     }
+
+    #[test]
+    fn update_workbook_xml_expands_self_closing_prefixed_defined_names_and_inserts_defined_name() {
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:definedNames/>
+</x:workbook>"#;
+
+        let edits: HashMap<(String, usize), DefinedNameEdit> = HashMap::from([(
+            ("_xlnm.Print_Area".to_string(), 0),
+            DefinedNameEdit::Set("Sheet1!$A$1:$B$2".to_string()),
+        )]);
+
+        let updated = update_workbook_xml(workbook_xml, &edits).unwrap();
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        // The existing self-closing `<x:definedNames/>` should be expanded, not duplicated.
+        assert!(updated_str.contains("<x:definedNames>"));
+        assert!(updated_str.contains("</x:definedNames>"));
+        assert!(!updated_str.contains("<x:definedNames/>"));
+
+        // Inserted tags must use the SpreadsheetML prefix (`x:` here).
+        assert!(updated_str.contains("<x:definedName"));
+        assert!(updated_str.contains("</x:definedName>"));
+        assert!(!updated_str.contains("<definedNames"));
+        assert!(!updated_str.contains("<definedName"));
+
+        // Ensure output is well-formed and namespace-correct.
+        let doc = roxmltree::Document::parse(updated_str).unwrap();
+        let root = doc.root_element();
+        assert_eq!(root.tag_name().name(), "workbook");
+        assert_eq!(root.tag_name().namespace(), Some(SPREADSHEETML_NS));
+
+        let defined_names: Vec<_> = root
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name() == "definedNames")
+            .collect();
+        assert_eq!(defined_names.len(), 1, "expected exactly one <definedNames> element");
+        assert_eq!(
+            defined_names[0].tag_name().namespace(),
+            Some(SPREADSHEETML_NS)
+        );
+
+        let defined_name = defined_names[0]
+            .children()
+            .find(|n| n.is_element() && n.tag_name().name() == "definedName")
+            .expect("missing inserted definedName");
+        assert_eq!(defined_name.tag_name().namespace(), Some(SPREADSHEETML_NS));
+        assert_eq!(defined_name.attribute("name"), Some("_xlnm.Print_Area"));
+        assert_eq!(defined_name.attribute("localSheetId"), Some("0"));
+        assert_eq!(defined_name.text(), Some("Sheet1!$A$1:$B$2"));
+    }
+
+    #[test]
+    fn update_workbook_xml_expands_self_closing_default_ns_defined_name_on_set() {
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <definedNames>
+    <definedName name="_xlnm.Print_Titles" localSheetId="0"/>
+  </definedNames>
+</workbook>"#;
+
+        let edits: HashMap<(String, usize), DefinedNameEdit> = HashMap::from([(
+            ("_xlnm.Print_Titles".to_string(), 0),
+            DefinedNameEdit::Set("Sheet1!$1:$1".to_string()),
+        )]);
+
+        let updated = update_workbook_xml(workbook_xml, &edits).unwrap();
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        // The self-closing element should now have an explicit end tag.
+        assert!(updated_str.contains("</definedName>"));
+
+        // With SpreadsheetML as the default namespace, tags should remain unprefixed.
+        assert!(!updated_str.contains("<x:definedName"));
+        assert!(!updated_str.contains("<x:definedNames"));
+
+        let doc = roxmltree::Document::parse(updated_str).unwrap();
+        let root = doc.root_element();
+        assert_eq!(root.tag_name().name(), "workbook");
+        assert_eq!(root.tag_name().namespace(), Some(SPREADSHEETML_NS));
+
+        let defined_name = root
+            .descendants()
+            .find(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "definedName"
+                    && n.attribute("name") == Some("_xlnm.Print_Titles")
+                    && n.attribute("localSheetId") == Some("0")
+            })
+            .expect("missing definedName");
+        assert_eq!(defined_name.tag_name().namespace(), Some(SPREADSHEETML_NS));
+        assert_eq!(defined_name.text(), Some("Sheet1!$1:$1"));
+    }
+
+    #[test]
+    fn update_workbook_xml_expands_self_closing_prefixed_defined_name_on_set() {
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:definedNames>
+    <x:definedName name="_xlnm.Print_Titles" localSheetId="0"/>
+  </x:definedNames>
+</x:workbook>"#;
+
+        let edits: HashMap<(String, usize), DefinedNameEdit> = HashMap::from([(
+            ("_xlnm.Print_Titles".to_string(), 0),
+            DefinedNameEdit::Set("Sheet1!$1:$1".to_string()),
+        )]);
+
+        let updated = update_workbook_xml(workbook_xml, &edits).unwrap();
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        // The self-closing element should now have an explicit end tag (and remain prefixed).
+        assert!(updated_str.contains("</x:definedName>"));
+
+        // Do not introduce unprefixed SpreadsheetML tags.
+        assert!(!updated_str.contains("<definedNames"));
+        assert!(!updated_str.contains("<definedName"));
+
+        let doc = roxmltree::Document::parse(updated_str).unwrap();
+        let root = doc.root_element();
+        assert_eq!(root.tag_name().name(), "workbook");
+        assert_eq!(root.tag_name().namespace(), Some(SPREADSHEETML_NS));
+
+        let defined_name = root
+            .descendants()
+            .find(|n| {
+                n.is_element()
+                    && n.tag_name().name() == "definedName"
+                    && n.attribute("name") == Some("_xlnm.Print_Titles")
+                    && n.attribute("localSheetId") == Some("0")
+            })
+            .expect("missing definedName");
+        assert_eq!(defined_name.tag_name().namespace(), Some(SPREADSHEETML_NS));
+        assert_eq!(defined_name.text(), Some("Sheet1!$1:$1"));
+    }
+
+    #[test]
+    fn update_workbook_xml_removes_self_closing_prefixed_defined_name_on_remove() {
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:definedNames>
+    <x:definedName name="_xlnm.Print_Area" localSheetId="0"/>
+    <x:definedName name="_xlnm.Print_Titles" localSheetId="0">Sheet1!$1:$1</x:definedName>
+  </x:definedNames>
+</x:workbook>"#;
+
+        let edits: HashMap<(String, usize), DefinedNameEdit> = HashMap::from([(
+            ("_xlnm.Print_Area".to_string(), 0),
+            DefinedNameEdit::Remove,
+        )]);
+
+        let updated = update_workbook_xml(workbook_xml, &edits).unwrap();
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        // Do not introduce unprefixed SpreadsheetML tags.
+        assert!(!updated_str.contains("<definedNames"));
+        assert!(!updated_str.contains("<definedName"));
+
+        let doc = roxmltree::Document::parse(updated_str).unwrap();
+        let root = doc.root_element();
+
+        let removed = root.descendants().find(|n| {
+            n.is_element()
+                && n.tag_name().name() == "definedName"
+                && n.attribute("name") == Some("_xlnm.Print_Area")
+                && n.attribute("localSheetId") == Some("0")
+        });
+        assert!(removed.is_none(), "expected definedName to be removed");
+
+        let kept = root.descendants().find(|n| {
+            n.is_element()
+                && n.tag_name().name() == "definedName"
+                && n.attribute("name") == Some("_xlnm.Print_Titles")
+                && n.attribute("localSheetId") == Some("0")
+        });
+        assert!(kept.is_some(), "expected unrelated definedName to remain");
+    }
 }
