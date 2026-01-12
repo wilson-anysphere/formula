@@ -7,6 +7,19 @@ const { validateExtensionManifest } = require("../../../shared/extension-manifes
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
 
+function looksLikePemPrivateKey(value) {
+  const text = String(value ?? "").trim();
+  return text.startsWith("-----BEGIN") && text.includes("PRIVATE KEY");
+}
+
+async function resolvePrivateKeyPem(privateKeyPemOrPath) {
+  const raw = String(privateKeyPemOrPath ?? "");
+  const trimmed = raw.trim();
+  if (!trimmed) throw new Error("privateKeyPemOrPath must be a non-empty string");
+  if (looksLikePemPrivateKey(trimmed)) return trimmed;
+  return await fs.readFile(raw, "utf8");
+}
+
 function validateManifest(manifest) {
   if (!manifest || typeof manifest !== "object") throw new Error("Manifest must be an object");
 
@@ -77,11 +90,7 @@ async function packageExtension(extensionDir, { privateKeyPem, formatVersion = 2
 }
 
 async function signExtensionPackage(packageBytes, privateKeyPemOrPath) {
-  let privateKeyPem = privateKeyPemOrPath;
-  const looksLikePem = String(privateKeyPemOrPath).trim().startsWith("-----BEGIN");
-  if (!looksLikePem && (privateKeyPemOrPath.includes(path.sep) || privateKeyPemOrPath.includes(".pem"))) {
-    privateKeyPem = await fs.readFile(privateKeyPemOrPath, "utf8");
-  }
+  const privateKeyPem = await resolvePrivateKeyPem(privateKeyPemOrPath);
   return signBytes(packageBytes, privateKeyPem);
 }
 
@@ -110,11 +119,7 @@ async function publishExtension({ extensionDir, marketplaceUrl, token, privateKe
     return withoutTrailingSlash;
   })();
 
-  let privateKeyPem = privateKeyPemOrPath;
-  const looksLikePem = String(privateKeyPemOrPath).trim().startsWith("-----BEGIN");
-  if (!looksLikePem && (privateKeyPemOrPath.includes(path.sep) || privateKeyPemOrPath.includes(".pem"))) {
-    privateKeyPem = await fs.readFile(privateKeyPemOrPath, "utf8");
-  }
+  const privateKeyPem = await resolvePrivateKeyPem(privateKeyPemOrPath);
 
   const { manifest, packageBytes, signatureBase64 } = await packageExtension(extensionDir, { privateKeyPem, formatVersion });
 

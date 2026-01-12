@@ -105,6 +105,19 @@ function createWorkerTerminatedError({ extensionId, reason, cause }) {
   return err;
 }
 
+function isEagainWorkerInitError(error) {
+  if (!error || typeof error !== "object") return false;
+  const msg = typeof error.message === "string" ? error.message : String(error.message ?? "");
+  // Node wraps uv_thread_create failures for Worker threads as `ERR_WORKER_INIT_FAILED` with a
+  // message like "EAGAIN". Under heavy CI/agent load this can be transient (system-wide thread
+  // exhaustion), so we treat it as retryable.
+  return error.code === "ERR_WORKER_INIT_FAILED" && /\bEAGAIN\b/.test(msg);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 class ExtensionHost {
   constructor({
     engineVersion = "1.0.0",
@@ -126,6 +139,7 @@ class ExtensionHost {
     this._contextMenus = new Map(); // registrationId -> { id, extensionId, menuId, items }
     this._customFunctions = new Map(); // functionName -> extensionId
     this._dataConnectors = new Map(); // connectorId -> extensionId
+    this._panelHtmlWaiters = new Map(); // panelId -> Set<{ resolve, reject, timeout }>
     this._messages = [];
     this._clipboardText = "";
     this._activationTimeoutMs = Number.isFinite(activationTimeoutMs)
@@ -174,6 +188,65 @@ class ExtensionHost {
     this._spreadsheet.onSelectionChanged?.((e) => this._broadcastEvent("selectionChanged", e));
     this._spreadsheet.onCellChanged?.((e) => this._broadcastEvent("cellChanged", e));
     this._spreadsheet.onSheetActivated?.((e) => this._broadcastEvent("sheetActivated", e));
+  }
+
+  _waitForPanelHtml(panelId, timeoutMs = 5000) {
+    const id = String(panelId);
+    const existing = this._panels.get(id);
+    if (existing && typeof existing.html === "string" && existing.html.length > 0) {
+      return Promise.resolve(existing.html);
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout =
+        timeoutMs > 0
+          ? setTimeout(() => {
+              const waiters = this._panelHtmlWaiters.get(id);
+              if (waiters) {
+                for (const waiter of waiters) {
+                  if (waiter.resolve === resolve) {
+                    waiters.delete(waiter);
+                    break;
+                  }
+                }
+                if (waiters.size === 0) this._panelHtmlWaiters.delete(id);
+              }
+              reject(new Error(`Timed out waiting for panel HTML: ${id}`));
+            }, timeoutMs)
+          : null;
+
+      const record = { resolve, reject, timeout };
+      let waiters = this._panelHtmlWaiters.get(id);
+      if (!waiters) {
+        waiters = new Set();
+        this._panelHtmlWaiters.set(id, waiters);
+      }
+      waiters.add(record);
+    });
+  }
+
+  _resolvePanelHtmlWaiters(panelId) {
+    const id = String(panelId);
+    const panel = this._panels.get(id);
+    if (!panel || typeof panel.html !== "string" || panel.html.length === 0) return;
+    const waiters = this._panelHtmlWaiters.get(id);
+    if (!waiters) return;
+    this._panelHtmlWaiters.delete(id);
+    for (const waiter of waiters) {
+      if (waiter.timeout) clearTimeout(waiter.timeout);
+      waiter.resolve(panel.html);
+    }
+  }
+
+  _rejectPanelHtmlWaiters(panelId, error) {
+    const id = String(panelId);
+    const waiters = this._panelHtmlWaiters.get(id);
+    if (!waiters) return;
+    this._panelHtmlWaiters.delete(id);
+    for (const waiter of waiters) {
+      if (waiter.timeout) clearTimeout(waiter.timeout);
+      waiter.reject(error);
+    }
   }
 
   get spreadsheet() {
@@ -238,6 +311,7 @@ class ExtensionHost {
       active: false,
       registeredCommands: new Set(),
       pendingRequests: new Map(),
+      workerSpawn: null,
       workerTermination: null,
       workerData: {
         extensionId,
@@ -270,7 +344,7 @@ class ExtensionHost {
     }
 
     this._extensions.set(extensionId, extension);
-    this._spawnWorker(extension);
+    await this._spawnWorker(extension);
 
     return extensionId;
   }
@@ -364,15 +438,25 @@ class ExtensionHost {
       }
     }
 
+    const panelReadyTasks = [];
     for (const extension of targets) {
       if (!extension.active) {
         await this._activateExtension(extension, activationEvent);
+      }
+      // If the view corresponds to a contributed panel, wait for it to render so callers can
+      // treat `activateView()` as "ready to show" (important for flaky/shared test runners).
+      if ((extension.manifest.contributes.panels ?? []).some((p) => p.id === viewId)) {
+        panelReadyTasks.push(this._waitForPanelHtml(viewId, this._activationTimeoutMs));
       }
     }
 
     // Match the browser host behavior: view activation is broadcast to all loaded extensions
     // (active listeners can filter by viewId).
     this._broadcastEvent("viewActivated", { viewId });
+
+    if (panelReadyTasks.length > 0) {
+      await Promise.all(panelReadyTasks);
+    }
   }
 
   async activateCustomFunction(functionName) {
@@ -672,6 +756,14 @@ class ExtensionHost {
     this._contextMenus.clear();
     this._customFunctions.clear();
     this._dataConnectors.clear();
+    // Best-effort: reject any pending panel render waits so dispose doesn't hang.
+    for (const [panelId, waiters] of this._panelHtmlWaiters.entries()) {
+      for (const waiter of waiters) {
+        if (waiter.timeout) clearTimeout(waiter.timeout);
+        waiter.reject(new Error(`ExtensionHost disposed while waiting for panel HTML: ${panelId}`));
+      }
+    }
+    this._panelHtmlWaiters.clear();
     this._messages = [];
 
     await Promise.allSettled(
@@ -691,7 +783,7 @@ class ExtensionHost {
       cause: new Error("Extension reloaded")
     });
 
-    this._spawnWorker(extension);
+    await this._spawnWorker(extension);
   }
 
   async unloadExtension(extensionId) {
@@ -803,28 +895,54 @@ class ExtensionHost {
   }
 
   _spawnWorker(extension) {
-    if (extension.worker) return;
+    if (extension.worker) return Promise.resolve();
+    if (extension.workerSpawn) return extension.workerSpawn;
 
-    const options = {
-      workerData: extension.workerData
-    };
+    extension.workerSpawn = (async () => {
+      const resourceLimits = this._getWorkerResourceLimits();
+      const optionsBase = {
+        workerData: extension.workerData,
+        ...(resourceLimits ? { resourceLimits } : {})
+      };
 
-    const resourceLimits = this._getWorkerResourceLimits();
-    if (resourceLimits) options.resourceLimits = resourceLimits;
+      // Retry transient EAGAIN failures. Keep the delays small: this is only meant to smooth over
+      // temporary system-wide thread exhaustion on shared runners.
+      const maxAttempts = 8;
+      let delayMs = 10;
 
-    const worker = new Worker(this._workerScriptPath, options);
-    extension.worker = worker;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          const worker = new Worker(this._workerScriptPath, optionsBase);
+          extension.worker = worker;
 
-    worker.on("message", (msg) => this._handleWorkerMessage(extension, worker, msg));
-    worker.on("error", (err) => this._handleWorkerCrash(extension, worker, err));
-    worker.on("exit", (code) => {
-      if (worker !== extension.worker) return;
-      const err =
-        code === 0
-          ? new Error("Worker exited")
-          : new Error(`Worker exited with code ${code ?? "unknown"}`);
-      void this._terminateWorker(extension, { reason: "exit", cause: err });
+          worker.on("message", (msg) => this._handleWorkerMessage(extension, worker, msg));
+          worker.on("error", (err) => this._handleWorkerCrash(extension, worker, err));
+          worker.on("exit", (code) => {
+            if (worker !== extension.worker) return;
+            const err =
+              code === 0
+                ? new Error("Worker exited")
+                : new Error(`Worker exited with code ${code ?? "unknown"}`);
+            void this._terminateWorker(extension, { reason: "exit", cause: err });
+          });
+
+          return;
+        } catch (error) {
+          if (!isEagainWorkerInitError(error) || attempt === maxAttempts) {
+            throw error;
+          }
+          await sleep(delayMs);
+          delayMs = Math.min(250, delayMs * 2);
+        }
+      }
+    })();
+
+    extension.workerSpawn = extension.workerSpawn.finally(() => {
+      // Clear the spawn lock for future restarts.
+      extension.workerSpawn = null;
     });
+
+    return extension.workerSpawn;
   }
 
   async _ensureWorker(extension) {
@@ -839,7 +957,7 @@ class ExtensionHost {
 
     // A fresh worker always starts inactive until we successfully activate.
     extension.active = false;
-    this._spawnWorker(extension);
+    await this._spawnWorker(extension);
   }
 
   _requestFromWorker(extension, message, { timeoutMs, operation }) {
@@ -906,7 +1024,10 @@ class ExtensionHost {
 
     // Remove panels owned by this extension worker; they can no longer receive messages.
     for (const [panelId, panel] of this._panels.entries()) {
-      if (panel?.extensionId === extension.id) this._panels.delete(panelId);
+      if (panel?.extensionId === extension.id) {
+        this._panels.delete(panelId);
+        this._rejectPanelHtmlWaiters(panelId, createWorkerTerminatedError({ extensionId: extension.id, reason, cause }));
+      }
     }
 
     // Remove context menus registered by this extension worker; they would otherwise leak.
@@ -1215,6 +1336,7 @@ class ExtensionHost {
         const panel = this._panels.get(panelId);
         if (!panel) throw new Error(`Unknown panel: ${panelId}`);
         panel.html = html;
+        this._resolvePanelHtmlWaiters(panelId);
         return null;
       }
       case "ui.postMessageToPanel": {
@@ -1231,6 +1353,7 @@ class ExtensionHost {
       case "ui.disposePanel": {
         const panelId = String(args[0]);
         this._panels.delete(panelId);
+        this._rejectPanelHtmlWaiters(panelId, new Error(`Panel disposed: ${panelId}`));
         return null;
       }
 
