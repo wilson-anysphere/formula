@@ -5918,21 +5918,14 @@ export class SpreadsheetApp {
     const padding = 2;
     const thickness = this.scrollbarThickness;
 
-    const layout = {
-      showV,
-      showH,
-      rowHeaderWidth: this.rowHeaderWidth,
-      colHeaderHeight: this.colHeaderHeight,
-      thickness
-    };
     const prevLayout = this.lastScrollbarLayout;
     const layoutChanged =
       prevLayout === null ||
-      prevLayout.showV !== layout.showV ||
-      prevLayout.showH !== layout.showH ||
-      prevLayout.rowHeaderWidth !== layout.rowHeaderWidth ||
-      prevLayout.colHeaderHeight !== layout.colHeaderHeight ||
-      prevLayout.thickness !== layout.thickness;
+      prevLayout.showV !== showV ||
+      prevLayout.showH !== showH ||
+      prevLayout.rowHeaderWidth !== this.rowHeaderWidth ||
+      prevLayout.colHeaderHeight !== this.colHeaderHeight ||
+      prevLayout.thickness !== thickness;
 
     if (layoutChanged) {
       // Track layout is a function of scrollbar visibility + header sizes; avoid rewriting these
@@ -5960,7 +5953,21 @@ export class SpreadsheetApp {
         this.lastScrollbarThumb.hOffset = null;
       }
 
-      this.lastScrollbarLayout = layout;
+      if (prevLayout) {
+        prevLayout.showV = showV;
+        prevLayout.showH = showH;
+        prevLayout.rowHeaderWidth = this.rowHeaderWidth;
+        prevLayout.colHeaderHeight = this.colHeaderHeight;
+        prevLayout.thickness = thickness;
+      } else {
+        this.lastScrollbarLayout = {
+          showV,
+          showH,
+          rowHeaderWidth: this.rowHeaderWidth,
+          colHeaderHeight: this.colHeaderHeight,
+          thickness
+        };
+      }
     }
 
     if (showV) {

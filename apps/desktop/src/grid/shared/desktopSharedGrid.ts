@@ -1924,14 +1924,13 @@ export class DesktopSharedGrid {
     const frozenWidth = Math.min(viewport.frozenWidth, viewport.width);
     const frozenHeight = Math.min(viewport.frozenHeight, viewport.height);
 
-    const layout = { showV, showH, frozenWidth, frozenHeight };
     const prev = this.lastScrollbarLayout;
     const layoutChanged =
       prev === null ||
-      prev.showV !== layout.showV ||
-      prev.showH !== layout.showH ||
-      prev.frozenWidth !== layout.frozenWidth ||
-      prev.frozenHeight !== layout.frozenHeight;
+      prev.showV !== showV ||
+      prev.showH !== showH ||
+      prev.frozenWidth !== frozenWidth ||
+      prev.frozenHeight !== frozenHeight;
 
     if (layoutChanged) {
       // Track layout (positioning/visibility) is a function of viewport/frozen sizes and whether
@@ -1953,7 +1952,14 @@ export class DesktopSharedGrid {
         this.hTrack.style.height = `${thickness}px`;
       }
 
-      this.lastScrollbarLayout = layout;
+      if (prev) {
+        prev.showV = showV;
+        prev.showH = showH;
+        prev.frozenWidth = frozenWidth;
+        prev.frozenHeight = frozenHeight;
+      } else {
+        this.lastScrollbarLayout = { showV, showH, frozenWidth, frozenHeight };
+      }
     }
 
     if (showV) {
