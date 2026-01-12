@@ -28,10 +28,13 @@ const SOURCE_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]
 
 const BANNED_MODULE_SPECIFIERS = new Set();
 for (const mod of builtinModules) {
+  // `builtinModules` is mostly bare specifiers ("fs", "path", "fs/promises", ...)
+  // but Node also includes a small set of `node:`-prefixed entries (e.g. `node:sqlite`).
+  //
+  // Important: do NOT blindly add the stripped `node:` version (e.g. "sqlite") as a banned
+  // specifier, because it may refer to a real npm package and would create false positives.
   BANNED_MODULE_SPECIFIERS.add(mod);
-  if (mod.startsWith("node:")) {
-    BANNED_MODULE_SPECIFIERS.add(mod.slice("node:".length));
-  } else {
+  if (!mod.startsWith("node:")) {
     BANNED_MODULE_SPECIFIERS.add(`node:${mod}`);
   }
 }
