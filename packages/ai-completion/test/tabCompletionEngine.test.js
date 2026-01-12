@@ -806,9 +806,13 @@ test("Named ranges preserve the typed prefix case (lowercase)", async () => {
   );
 });
 
-test("Cursor backend completion inserts at the cursor (=1+ + '2' => =1+2)", async () => {
+test("Completion client request is structured and completion inserts at the cursor", async () => {
+  /** @type {any} */
+  let seenReq = null;
+
   const completionClient = {
-    async completeTabCompletion() {
+    async completeTabCompletion(req) {
+      seenReq = req;
       return "2";
     },
   };
@@ -823,9 +827,14 @@ test("Cursor backend completion inserts at the cursor (=1+ + '2' => =1+2)", asyn
     surroundingCells: createMockCellContext({}),
   });
 
+  assert.deepEqual(seenReq, {
+    input: currentInput,
+    cursorPosition: currentInput.length,
+    cellA1: "A1",
+  });
   assert.ok(
-    suggestions.some((s) => s.text === "=1+2"),
-    `Expected the backend completion to be inserted, got: ${suggestions.map((s) => s.text).join(", ")}`
+    suggestions.some(s => s.text === "=1+2"),
+    `Expected the completion to be inserted, got: ${suggestions.map(s => s.text).join(", ")}`
   );
 });
 
