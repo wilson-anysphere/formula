@@ -8057,7 +8057,7 @@ export class SpreadsheetApp {
       if (isDlpViolation) {
         try {
           const message = typeof (err as any)?.message === "string" ? String((err as any).message) : "Paste blocked by policy.";
-          showToast(message, "error");
+          showToast(message, "warning");
         } catch {
           // `showToast` requires a #toast-root; unit tests don't always include it.
         }
