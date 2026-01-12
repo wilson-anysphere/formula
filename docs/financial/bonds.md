@@ -190,10 +190,10 @@ This definition matches the needs of `PRICE`/`YIELD`/`DURATION` where “remaini
 `DSC` (days from settlement to the next coupon) follows an Excel quirk:
 
 - basis `0` (US/NASD 30/360): **`COUPDAYSNC` is not `DAYS360(settlement, NCD, FALSE)`**. Excel
-  models `E` as a fixed `360/f` coupon period and defines `DSC = E - A` (so `A + DSC = E` for any
+  models `E` as a fixed `360/frequency` coupon period and defines `DSC = E - A` (so `A + DSC = E` for any
   settlement date within the coupon period).
 - basis `4` (European 30/360): Excel models `E` as `DAYS360(PCD, NCD, TRUE)` (so `E` can differ from
-  `360/f`) and also defines `DSC = E - A`. With European 30/360’s additivity, this matches
+  `360/frequency`) and also defines `DSC = E - A`. With European 30/360’s additivity, this matches
   `DAYS360(settlement, NCD, TRUE)` as well.
 - basis `1`/`2`/`3`: `DSC = NCD - settlement` (actual days).
 
@@ -201,9 +201,9 @@ This definition matches the needs of `PRICE`/`YIELD`/`DURATION` where “remaini
 
 `E` is **not always** `days_between(PCD, NCD, basis)` in Excel. Excel uses basis-specific conventions:
 
-- basis `0`/`2`: `E = 360 / f` (constant)
-- basis `3`: `E = 365 / f` (constant)
-- basis `1`: `E = actual_days(NCD - PCD)` (variable, depends on the coupon period)
+- basis `0`/`2`: `E = 360 / frequency` (constant)
+- basis `3`: `E = 365 / frequency` (constant)
+- basis `1`: `E = actual_days(PCD..NCD)` (variable; depends on the coupon period)
 - basis `4`: `E = DAYS360(PCD, NCD, TRUE)` (European 30/360 day count, variable)
 
 This convention is important because for basis `2`/`3` you can have `A + DSC != E` (since `A`/`DSC`
@@ -279,10 +279,10 @@ Let `calc_method` default to `0`.
 Let:
 
 - `E` be the regular period length in days (per the basis conventions from earlier):
-  - basis 1: `E = actual_days(NCD - PCD)` (variable)
-  - basis 0/2: `E = 360/f`
-  - basis 4: `E = DAYS360(PCD, NCD, TRUE)`
-  - basis 3: `E = 365/f`
+  - basis 0/2: `E = 360 / frequency` (constant)
+  - basis 3: `E = 365 / frequency` (constant)
+  - basis 1: `E = actual_days(PCD..NCD)` (variable)
+  - basis 4: `E = DAYS360(PCD, NCD, TRUE)` (European 30/360, variable)
 
 Let:
 
@@ -635,10 +635,10 @@ Excel’s bond functions are historically underspecified. The following are know
 
 2. **`COUPDAYS` (`E`) conventions by basis**
    - Resolution:
-      - basis 1: `E = actual_days(PCD→NCD)` (variable)
-      - basis 0/2: `E = 360/f` (constant)
-      - basis 4: `E = DAYS360(PCD→NCD, TRUE)` (variable)
-      - basis 3: `E = 365/f` (constant)
+      - basis 0/2: `E = 360 / frequency` (constant)
+      - basis 3: `E = 365 / frequency` (constant)
+      - basis 1: `E = actual_days(PCD..NCD)` (variable)
+      - basis 4: `E = DAYS360(PCD, NCD, TRUE)` (European 30/360, variable)
    - This implies `A + DSC` may not equal `E` for basis 2/3; that is expected.
 
 3. **`ACCRINT` `calc_method` behavior**
