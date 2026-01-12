@@ -638,6 +638,72 @@ fn patch_sheet_bin_requires_new_rgcb_when_replacing_rgce_for_formula_with_existi
 }
 
 #[test]
+fn patch_sheet_bin_can_clear_rgcb_when_replacing_rgce_for_formula_with_existing_rgcb() {
+    let ctx = formula_xlsb::workbook_context::WorkbookContext::default();
+
+    let encoded_sum =
+        encode_rgce_with_context("=SUM({1,2,3})", &ctx, CellCoord::new(0, 0)).expect("encode rgce");
+    assert!(
+        !encoded_sum.rgcb.is_empty(),
+        "expected rgcb for array formula"
+    );
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_sheet_name("ArrayRgcb");
+    builder.set_cell_formula_num(
+        0,
+        0,
+        6.0,
+        encoded_sum.rgce.clone(),
+        encoded_sum.rgcb.clone(),
+    );
+
+    let xlsb_bytes = builder.build_bytes();
+    let mut zip = zip::ZipArchive::new(Cursor::new(xlsb_bytes)).expect("open in-memory xlsb zip");
+    let mut entry = zip
+        .by_name("xl/worksheets/sheet1.bin")
+        .expect("find sheet1.bin");
+    let mut sheet_bin = Vec::with_capacity(entry.size() as usize);
+    entry.read_to_end(&mut sheet_bin).expect("read sheet bytes");
+
+    // Update the formula to a version that does not require any trailing rgcb bytes and explicitly
+    // clear the original rgcb payload by providing `Some(empty)`.
+    let encoded_no_rgcb =
+        encode_rgce_with_context("=SUM(1,2,3)", &ctx, CellCoord::new(0, 0)).expect("encode rgce");
+    assert!(
+        encoded_no_rgcb.rgcb.is_empty(),
+        "expected SUM(1,2,3) encoding to not require rgcb bytes"
+    );
+
+    let patched = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Number(6.0),
+            new_formula: Some(encoded_no_rgcb.rgce.clone()),
+            new_rgcb: Some(encoded_no_rgcb.rgcb.clone()),
+            shared_string_index: None,
+        }],
+    )
+    .expect("patch sheet bin");
+
+    let parsed = formula_xlsb::parse_sheet_bin_with_context(&mut Cursor::new(&patched), &[], &ctx)
+        .expect("parse patched sheet");
+    let cell = parsed
+        .cells
+        .iter()
+        .find(|c| (c.row, c.col) == (0, 0))
+        .expect("A1 exists");
+    assert_eq!(cell.value, CellValue::Number(6.0));
+
+    let formula = cell.formula.as_ref().expect("formula metadata");
+    assert_eq!(formula.rgce, encoded_no_rgcb.rgce);
+    assert!(formula.extra.is_empty(), "expected rgcb bytes to be cleared");
+    assert_eq!(formula.text.as_deref(), Some("SUM(1,2,3)"));
+}
+
+#[test]
 fn save_with_edits_can_patch_rk_number_cells() {
     let mut builder = XlsbFixtureBuilder::new();
     builder.set_sheet_name("Sheet1");
