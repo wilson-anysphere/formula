@@ -3,6 +3,7 @@ export const deDE = {
   "menu.file": "Datei",
   "menu.edit": "Bearbeiten",
   "menu.view": "Ansicht",
+  "menu.addComment": "Kommentar hinzufügen",
   "settings.language": "Sprache",
   "presence.anonymous": "Anonym",
   "prompt.unsavedChanges": "Sie haben ungespeicherte Änderungen.",
@@ -57,6 +58,8 @@ export const deDE = {
   "command.view.togglePanel.python": "Python umschalten",
   "command.view.togglePanel.versionHistory": "Versionsverlauf umschalten",
   "command.view.togglePanel.branchManager": "Branch-Manager umschalten",
+  "command.comments.togglePanel": "Kommentarpanel umschalten",
+  "command.comments.addComment": "Kommentar hinzufügen",
   "command.edit.selectCurrentRegion": "Aktuellen Bereich auswählen",
   "commandDescription.view.togglePanel.aiChat": "Das KI-Chat-Panel ein-/ausblenden",
   "commandDescription.view.togglePanel.aiAudit": "Das KI-Audit-Panel ein-/ausblenden",
@@ -67,5 +70,7 @@ export const deDE = {
   "commandDescription.view.togglePanel.python": "Das Python-Panel ein-/ausblenden",
   "commandDescription.view.togglePanel.versionHistory": "Das Versionsverlaufs-Panel ein-/ausblenden",
   "commandDescription.view.togglePanel.branchManager": "Das Branch-Manager-Panel ein-/ausblenden",
+  "commandDescription.comments.togglePanel": "Die Kommentare-Seitenleiste ein-/ausblenden",
+  "commandDescription.comments.addComment": "Das Kommentarpanel öffnen und das Eingabefeld für neue Kommentare fokussieren",
   "commandDescription.edit.selectCurrentRegion": "Den aktuellen Bereich um die aktive Zelle auswählen (Excel: Strg+Umschalt+*)"
 };

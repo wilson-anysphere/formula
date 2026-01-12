@@ -3,6 +3,7 @@ export const ar = {
   "menu.file": "ملف",
   "menu.edit": "تحرير",
   "menu.view": "عرض",
+  "menu.addComment": "إضافة تعليق",
   "settings.language": "اللغة",
   "presence.anonymous": "مجهول",
   "prompt.unsavedChanges": "لديك تغييرات غير محفوظة.",
@@ -57,6 +58,8 @@ export const ar = {
   "command.view.togglePanel.python": "تبديل بايثون",
   "command.view.togglePanel.versionHistory": "تبديل سجل الإصدارات",
   "command.view.togglePanel.branchManager": "تبديل مدير الفروع",
+  "command.comments.togglePanel": "تبديل لوحة التعليقات",
+  "command.comments.addComment": "إضافة تعليق",
   "command.edit.selectCurrentRegion": "تحديد المنطقة الحالية",
   "commandDescription.view.togglePanel.aiChat": "إظهار/إخفاء لوحة دردشة الذكاء الاصطناعي",
   "commandDescription.view.togglePanel.aiAudit": "إظهار/إخفاء لوحة تدقيق الذكاء الاصطناعي",
@@ -67,5 +70,7 @@ export const ar = {
   "commandDescription.view.togglePanel.python": "إظهار/إخفاء لوحة بايثون",
   "commandDescription.view.togglePanel.versionHistory": "إظهار/إخفاء لوحة سجل الإصدارات",
   "commandDescription.view.togglePanel.branchManager": "إظهار/إخفاء لوحة مدير الفروع",
+  "commandDescription.comments.togglePanel": "تبديل اللوحة الجانبية للتعليقات",
+  "commandDescription.comments.addComment": "فتح لوحة التعليقات وتركيز حقل إدخال تعليق جديد",
   "commandDescription.edit.selectCurrentRegion": "تحديد المنطقة الحالية حول الخلية النشطة (Excel: Ctrl+Shift+*)"
 };
