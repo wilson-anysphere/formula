@@ -990,6 +990,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "home.font.bold": formatState.bold,
       "home.font.italic": formatState.italic,
       "home.font.underline": formatState.underline,
+      "home.font.strikethrough": formatState.strikethrough,
       "home.alignment.wrapText": formatState.wrapText,
       "home.alignment.alignLeft": formatState.align === "left",
       "home.alignment.center": formatState.align === "center",
@@ -1021,11 +1022,17 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "home.font.bold": true,
             "home.font.italic": true,
             "home.font.underline": true,
+            "home.font.strikethrough": true,
             "home.font.fontSize": true,
+            "home.font.increaseFont": true,
+            "home.font.decreaseFont": true,
             "home.font.fontColor": true,
             "home.font.fillColor": true,
             "home.font.borders": true,
             "home.alignment.wrapText": true,
+            "home.alignment.topAlign": true,
+            "home.alignment.middleAlign": true,
+            "home.alignment.bottomAlign": true,
             "home.alignment.alignLeft": true,
             "home.alignment.center": true,
             "home.alignment.alignRight": true,
@@ -5187,6 +5194,14 @@ mountRibbon(ribbonRoot, {
         applyToSelection("Underline", (sheetId, ranges) =>
           toggleUnderline(app.getDocument(), sheetId, ranges, { next: pressed }),
         );
+        return;
+      case "home.font.strikethrough":
+        applyToSelection("Strikethrough", (sheetId, ranges) => {
+          const doc = app.getDocument();
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { font: { strike: pressed } }, { label: "Strikethrough" });
+          }
+        });
         return;
       case "home.alignment.wrapText":
         applyToSelection("Wrap", (sheetId, ranges) => toggleWrap(app.getDocument(), sheetId, ranges, { next: pressed }));

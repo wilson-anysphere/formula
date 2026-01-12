@@ -11,6 +11,7 @@ describe("computeSelectionFormatState", () => {
       bold: false,
       italic: false,
       underline: false,
+      strikethrough: false,
       wrapText: false,
       align: "left",
       numberFormat: null,
@@ -20,7 +21,7 @@ describe("computeSelectionFormatState", () => {
   it("detects bold/italic/underline/wrap on a single cell", () => {
     const doc = new DocumentController();
     doc.setRangeFormat("Sheet1", "A1", {
-      font: { bold: true, italic: true, underline: true },
+      font: { bold: true, italic: true, underline: true, strike: true },
       alignment: { wrapText: true },
     });
 
@@ -28,6 +29,7 @@ describe("computeSelectionFormatState", () => {
     expect(state.bold).toBe(true);
     expect(state.italic).toBe(true);
     expect(state.underline).toBe(true);
+    expect(state.strikethrough).toBe(true);
     expect(state.wrapText).toBe(true);
   });
 

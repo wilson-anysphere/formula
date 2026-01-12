@@ -9,6 +9,7 @@ export type SelectionFormatState = {
   bold: boolean;
   italic: boolean;
   underline: boolean;
+  strikethrough: boolean;
   wrapText: boolean;
   align: SelectionHorizontalAlign;
   numberFormat: SelectionNumberFormat;
@@ -86,6 +87,7 @@ type AggregationState = {
   bold: boolean;
   italic: boolean;
   underline: boolean;
+  strikethrough: boolean;
   wrapText: boolean;
   align: "left" | "center" | "right" | "mixed" | null;
   numberFormat: string | null | "mixed" | undefined;
@@ -118,6 +120,7 @@ export function computeSelectionFormatState(
       bold: false,
       italic: false,
       underline: false,
+      strikethrough: false,
       wrapText: false,
       align: "left",
       numberFormat: null,
@@ -137,6 +140,7 @@ export function computeSelectionFormatState(
     bold: true,
     italic: true,
     underline: true,
+    strikethrough: true,
     wrapText: true,
     align: null,
     numberFormat: undefined,
@@ -175,6 +179,7 @@ export function computeSelectionFormatState(
     state.bold = state.bold && Boolean(style?.font?.bold);
     state.italic = state.italic && Boolean(style?.font?.italic);
     state.underline = state.underline && Boolean(style?.font?.underline);
+    state.strikethrough = state.strikethrough && Boolean(style?.font?.strike);
     state.wrapText = state.wrapText && Boolean(style?.alignment?.wrapText);
 
     mergeAlign(style?.alignment?.horizontal);
@@ -205,6 +210,7 @@ export function computeSelectionFormatState(
     bold: state.bold,
     italic: state.italic,
     underline: state.underline,
+    strikethrough: state.strikethrough,
     wrapText: state.wrapText,
     align: state.align ?? "left",
     numberFormat: state.numberFormat === undefined ? null : state.numberFormat,
