@@ -161,6 +161,15 @@ impl ClipboardWritePayload {
             ));
         }
 
+        if let Some(text) = self.text.as_deref() {
+            let len = text.as_bytes().len();
+            if len > max_rich_text_bytes {
+                return Err(ClipboardError::InvalidPayload(format!(
+                    "text exceeds maximum size ({len} > {max_rich_text_bytes} bytes)"
+                )));
+            }
+        }
+
         if let Some(html) = self.html.as_deref() {
             let len = html.as_bytes().len();
             if len > max_rich_text_bytes {
@@ -403,6 +412,22 @@ mod tests {
         let err = payload.validate().expect_err("expected size check to fail");
         match err {
             ClipboardError::InvalidPayload(msg) => assert!(msg.contains("html exceeds maximum size")),
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_rejects_oversized_text() {
+        let payload = ClipboardWritePayload {
+            text: Some("x".repeat(MAX_TEXT_BYTES + 1)),
+            html: None,
+            rtf: None,
+            image_png_base64: None,
+        };
+
+        let err = payload.validate().expect_err("expected size check to fail");
+        match err {
+            ClipboardError::InvalidPayload(msg) => assert!(msg.contains("text exceeds maximum size")),
             other => panic!("unexpected error: {other:?}"),
         }
     }

@@ -718,6 +718,48 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("web: write uses writeText for oversized plain text", async () => {
+    /** @type {any[]} */
+    const writes = [];
+    /** @type {string[]} */
+    const writeTextCalls = [];
+
+    class MockClipboardItem {
+      /**
+       * @param {Record<string, Blob>} data
+       */
+      constructor(data) {
+        this.data = data;
+      }
+    }
+
+    const largeText = "x".repeat(3 * 1024 * 1024);
+
+    await withGlobals(
+      {
+        __TAURI__: undefined,
+        ClipboardItem: MockClipboardItem,
+        navigator: {
+          clipboard: {
+            async write(items) {
+              writes.push(items);
+            },
+            async writeText(text) {
+              writeTextCalls.push(text);
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: largeText, html: "<p>hello</p>", rtf: "{\\\\rtf1 hello}" });
+
+        assert.equal(writes.length, 0);
+        assert.deepEqual(writeTextCalls, [largeText]);
+      }
+    );
+  });
+
   await t.test("web: provider tolerates missing Clipboard APIs", async () => {
     await withGlobals(
       {
@@ -1293,6 +1335,40 @@ test("clipboard provider", async (t) => {
         assert.deepEqual(content, { text: undefined });
 
         await provider.write({ text: "plain" });
+      }
+    );
+  });
+
+  await t.test("tauri: write uses legacy writeText for oversized plain text", async () => {
+    const largeText = "x".repeat(3 * 1024 * 1024);
+
+    /** @type {any[]} */
+    const invokeCalls = [];
+    /** @type {string[]} */
+    const writeTextCalls = [];
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd, args) {
+              invokeCalls.push([cmd, args]);
+              throw new Error("should not call invoke for oversized text");
+            },
+          },
+          clipboard: {
+            async writeText(text) {
+              writeTextCalls.push(text);
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: largeText, html: "<p>hello</p>" });
+
+        assert.deepEqual(invokeCalls, []);
+        assert.deepEqual(writeTextCalls, [largeText]);
       }
     );
   });

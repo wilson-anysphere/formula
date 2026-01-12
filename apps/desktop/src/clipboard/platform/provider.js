@@ -459,6 +459,23 @@ function createTauriClipboardProvider() {
     },
 
     async write(payload) {
+      const text = typeof payload.text === "string" ? payload.text : "";
+
+      // Avoid sending extremely large plain-text payloads over the rich clipboard IPC path.
+      // For oversized payloads, best-effort write plain text only.
+      if (text.length > MAX_RICH_TEXT_CHARS) {
+        if (tauriClipboard?.writeText) {
+          try {
+            await tauriClipboard.writeText(text);
+            return;
+          } catch {
+            // Fall through to web clipboard fallback below.
+          }
+        }
+        await createWebClipboardProvider().write({ text });
+        return;
+      }
+
       const html = typeof payload.html === "string" && payload.html.length <= MAX_RICH_TEXT_CHARS ? payload.html : undefined;
       const rtf = typeof payload.rtf === "string" && payload.rtf.length <= MAX_RICH_TEXT_CHARS ? payload.rtf : undefined;
       const imageBytes = await normalizeImagePngBytes(payload.imagePng);
@@ -476,7 +493,7 @@ function createTauriClipboardProvider() {
       if (typeof tauriInvoke === "function") {
         try {
           /** @type {any} */
-          const richPayload = { text: payload.text };
+          const richPayload = { text };
           if (html) richPayload.html = html;
           if (rtf) richPayload.rtf = rtf;
           if (pngBase64) richPayload.pngBase64 = pngBase64;
@@ -492,7 +509,7 @@ function createTauriClipboardProvider() {
       if (!wrote && typeof tauriInvoke === "function") {
         try {
           await tauriInvoke("write_clipboard", {
-            text: payload.text,
+            text,
             html,
             rtf,
             image_png_base64: pngBase64,
@@ -506,12 +523,12 @@ function createTauriClipboardProvider() {
       if (!wrote) {
         if (tauriClipboard?.writeText) {
           try {
-            await tauriClipboard.writeText(payload.text);
+            await tauriClipboard.writeText(text);
           } catch {
-            await createWebClipboardProvider().write({ text: payload.text });
+            await createWebClipboardProvider().write({ text });
           }
         } else {
-          await createWebClipboardProvider().write({ text: payload.text });
+          await createWebClipboardProvider().write({ text });
         }
       }
 
@@ -527,7 +544,7 @@ function createTauriClipboardProvider() {
         try {
           await clipboard.write([
             new ClipboardItem({
-              "text/plain": new Blob([payload.text], { type: "text/plain" }),
+              "text/plain": new Blob([text], { type: "text/plain" }),
               "text/html": new Blob([html], { type: "text/html" }),
             }),
           ]);
@@ -637,6 +654,35 @@ function createWebClipboardProvider() {
     async write(payload) {
       const clipboard = globalThis.navigator?.clipboard;
 
+      const text = typeof payload.text === "string" ? payload.text : "";
+
+      // For very large text payloads, prefer `writeText()` and skip rich ClipboardItem writes to
+      // avoid allocating large intermediate Blobs.
+      if (text.length > MAX_RICH_TEXT_CHARS) {
+        if (clipboard?.writeText) {
+          try {
+            await clipboard.writeText(text);
+          } catch {
+            // Ignore; clipboard write requires user gesture/permissions in browsers.
+          }
+          return;
+        }
+
+        // Best-effort: `writeText` may be unavailable, but `clipboard.write` might still work.
+        if (typeof ClipboardItem !== "undefined" && clipboard?.write) {
+          try {
+            await clipboard.write([
+              new ClipboardItem({
+                "text/plain": new Blob([text], { type: "text/plain" }),
+              }),
+            ]);
+          } catch {
+            // Ignore.
+          }
+        }
+        return;
+      }
+
       const html = typeof payload.html === "string" && payload.html.length <= MAX_RICH_TEXT_CHARS ? payload.html : undefined;
       const rtf = typeof payload.rtf === "string" && payload.rtf.length <= MAX_RICH_TEXT_CHARS ? payload.rtf : undefined;
       const imagePngBlob = normalizeImagePngBlob(payload.imagePng) ?? normalizeImagePngBlob(payload.pngBase64);
@@ -645,7 +691,7 @@ function createWebClipboardProvider() {
       if (typeof ClipboardItem !== "undefined" && clipboard?.write) {
         /** @type {Record<string, Blob>} */
         const itemPayload = {
-          "text/plain": new Blob([payload.text], { type: "text/plain" }),
+          "text/plain": new Blob([text], { type: "text/plain" }),
         };
         if (html) itemPayload["text/html"] = new Blob([html], { type: "text/html" });
         if (rtf) itemPayload["text/rtf"] = new Blob([rtf], { type: "text/rtf" });
@@ -664,7 +710,7 @@ function createWebClipboardProvider() {
             if (html && (rtf || imagePngBlob)) {
               try {
                 const fallback = new ClipboardItem({
-                  "text/plain": new Blob([payload.text], { type: "text/plain" }),
+                  "text/plain": new Blob([text], { type: "text/plain" }),
                   "text/html": new Blob([html], { type: "text/html" }),
                 });
                 await clipboard.write([fallback]);
@@ -680,7 +726,7 @@ function createWebClipboardProvider() {
 
       if (clipboard?.writeText) {
         try {
-          await clipboard.writeText(payload.text);
+          await clipboard.writeText(text);
         } catch {
           // Ignore; clipboard write requires user gesture/permissions in browsers.
         }
