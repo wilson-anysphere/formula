@@ -136,6 +136,45 @@ fn countif_criteria_parses_numbers_using_value_locale() {
 }
 
 #[test]
+fn countif_criteria_parses_numbers_using_value_locale_equality() {
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+    engine.set_cell_value("Sheet1", "A1", 1.5).unwrap();
+    engine.set_cell_value("Sheet1", "A2", "1,5").unwrap();
+    // A3 left unset (blank).
+
+    engine
+        .set_cell_formula("Sheet1", "Z1", r#"=COUNTIF(A1:A3, "1,5")"#)
+        .unwrap();
+    assert!(
+        engine.bytecode_program_count() > 0,
+        "expected COUNTIF formula to compile to bytecode for this test"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "Z1"), Value::Number(2.0));
+}
+
+#[test]
+fn countif_criteria_parses_dates_using_value_locale_date_order() {
+    let mut engine = Engine::new();
+    engine.set_date_system(ExcelDateSystem::EXCEL_1900);
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+
+    let system = ExcelDateSystem::EXCEL_1900;
+    let feb_1_2020 = ymd_to_serial(ExcelDate::new(2020, 2, 1), system).unwrap();
+    engine
+        .set_cell_value("Sheet1", "A1", feb_1_2020 as f64)
+        .unwrap();
+
+    // Under DMY locales like de-DE, `1/2/2020` is interpreted as 1-Feb-2020.
+    assert_eq!(
+        eval(&mut engine, r#"=COUNTIF(A1:A1, "1/2/2020")"#),
+        Value::Number(1.0)
+    );
+}
+
+#[test]
 fn countif_sparse_blank_counting_counts_missing_cells() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();

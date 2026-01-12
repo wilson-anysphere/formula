@@ -1,3 +1,6 @@
+use chrono::{DateTime, Utc};
+
+use crate::coercion::ValueLocaleConfig;
 use crate::functions::math::criteria::Criteria;
 use crate::date::ExcelDateSystem;
 use crate::{ErrorKind, Value};
@@ -7,6 +10,8 @@ pub fn sumif(
     criteria_range: &[Value],
     criteria: &Value,
     sum_range: Option<&[Value]>,
+    cfg: ValueLocaleConfig,
+    now_utc: DateTime<Utc>,
     system: ExcelDateSystem,
 ) -> Result<f64, ErrorKind> {
     let sum_range = sum_range.unwrap_or(criteria_range);
@@ -17,7 +22,7 @@ pub fn sumif(
     if let Value::Error(e) = criteria {
         return Err(*e);
     }
-    let criteria = Criteria::parse_with_date_system(criteria, system)?;
+    let criteria = Criteria::parse_with_locale_config(criteria, cfg, now_utc, system)?;
     let mut sum = 0.0;
     for (crit_val, sum_val) in criteria_range.iter().zip(sum_range.iter()) {
         if criteria.matches(crit_val) {
@@ -35,6 +40,8 @@ pub fn sumif(
 pub fn sumifs(
     sum_range: &[Value],
     criteria_pairs: &[(&[Value], &Value)],
+    cfg: ValueLocaleConfig,
+    now_utc: DateTime<Utc>,
     system: ExcelDateSystem,
 ) -> Result<f64, ErrorKind> {
     for (range, _) in criteria_pairs {
@@ -49,7 +56,7 @@ pub fn sumifs(
             if let Value::Error(e) = *crit {
                 return Err(*e);
             }
-            Criteria::parse_with_date_system(*crit, system)
+            Criteria::parse_with_locale_config(*crit, cfg, now_utc, system)
         })
         .collect::<Result<Vec<_>, ErrorKind>>()?;
 
@@ -74,6 +81,8 @@ pub fn sumifs(
 /// COUNTIFS(criteria_range1, criteria1, ...)
 pub fn countifs(
     criteria_pairs: &[(&[Value], &Value)],
+    cfg: ValueLocaleConfig,
+    now_utc: DateTime<Utc>,
     system: ExcelDateSystem,
 ) -> Result<f64, ErrorKind> {
     if criteria_pairs.is_empty() {
@@ -93,7 +102,7 @@ pub fn countifs(
             if let Value::Error(e) = *crit {
                 return Err(*e);
             }
-            Criteria::parse_with_date_system(*crit, system)
+            Criteria::parse_with_locale_config(*crit, cfg, now_utc, system)
         })
         .collect::<Result<Vec<_>, ErrorKind>>()?;
 
@@ -115,6 +124,8 @@ pub fn averageif(
     criteria_range: &[Value],
     criteria: &Value,
     average_range: Option<&[Value]>,
+    cfg: ValueLocaleConfig,
+    now_utc: DateTime<Utc>,
     system: ExcelDateSystem,
 ) -> Result<f64, ErrorKind> {
     let average_range = average_range.unwrap_or(criteria_range);
@@ -125,7 +136,7 @@ pub fn averageif(
     if let Value::Error(e) = criteria {
         return Err(*e);
     }
-    let criteria = Criteria::parse_with_date_system(criteria, system)?;
+    let criteria = Criteria::parse_with_locale_config(criteria, cfg, now_utc, system)?;
     let mut sum = 0.0;
     let mut count = 0u64;
     for (crit_val, avg_val) in criteria_range.iter().zip(average_range.iter()) {
@@ -151,6 +162,8 @@ pub fn averageif(
 pub fn averageifs(
     average_range: &[Value],
     criteria_pairs: &[(&[Value], &Value)],
+    cfg: ValueLocaleConfig,
+    now_utc: DateTime<Utc>,
     system: ExcelDateSystem,
 ) -> Result<f64, ErrorKind> {
     for (range, _) in criteria_pairs {
@@ -165,7 +178,7 @@ pub fn averageifs(
             if let Value::Error(e) = *crit {
                 return Err(*e);
             }
-            Criteria::parse_with_date_system(*crit, system)
+            Criteria::parse_with_locale_config(*crit, cfg, now_utc, system)
         })
         .collect::<Result<Vec<_>, ErrorKind>>()?;
 
@@ -198,6 +211,8 @@ pub fn averageifs(
 pub fn maxifs(
     max_range: &[Value],
     criteria_pairs: &[(&[Value], &Value)],
+    cfg: ValueLocaleConfig,
+    now_utc: DateTime<Utc>,
     system: ExcelDateSystem,
 ) -> Result<f64, ErrorKind> {
     for (range, _) in criteria_pairs {
@@ -212,7 +227,7 @@ pub fn maxifs(
             if let Value::Error(e) = *crit {
                 return Err(*e);
             }
-            Criteria::parse_with_date_system(*crit, system)
+            Criteria::parse_with_locale_config(*crit, cfg, now_utc, system)
         })
         .collect::<Result<Vec<_>, ErrorKind>>()?;
 
@@ -238,6 +253,8 @@ pub fn maxifs(
 pub fn minifs(
     min_range: &[Value],
     criteria_pairs: &[(&[Value], &Value)],
+    cfg: ValueLocaleConfig,
+    now_utc: DateTime<Utc>,
     system: ExcelDateSystem,
 ) -> Result<f64, ErrorKind> {
     for (range, _) in criteria_pairs {
@@ -252,7 +269,7 @@ pub fn minifs(
             if let Value::Error(e) = *crit {
                 return Err(*e);
             }
-            Criteria::parse_with_date_system(*crit, system)
+            Criteria::parse_with_locale_config(*crit, cfg, now_utc, system)
         })
         .collect::<Result<Vec<_>, ErrorKind>>()?;
 

@@ -62,16 +62,8 @@ impl Criteria {
 
     /// Parse an Excel criteria value, resolving date/time strings using the supplied workbook
     /// date system.
-    pub fn parse_with_date_system(
-        input: &Value,
-        system: ExcelDateSystem,
-    ) -> Result<Self, ErrorKind> {
-        Self::parse_with_date_system_and_locale(
-            input,
-            system,
-            ValueLocaleConfig::en_us(),
-            Utc::now(),
-        )
+    pub fn parse_with_date_system(input: &Value, system: ExcelDateSystem) -> Result<Self, ErrorKind> {
+        Self::parse_with_date_system_and_locale(input, system, ValueLocaleConfig::en_us(), Utc::now())
     }
 
     /// Parse an Excel criteria value, resolving numeric/date/time strings using the provided value
@@ -110,15 +102,28 @@ impl Criteria {
                 rhs: CriteriaRhs::Blank,
                 number_locale,
             }),
-            Value::Text(s) => {
-                parse_criteria_string(s, system, value_locale, now_utc, number_locale)
-            }
+            Value::Text(s) => parse_criteria_string(s, system, value_locale, now_utc, number_locale),
             Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
             | Value::Lambda(_)
             | Value::Spill { .. } => Err(ErrorKind::Value),
         }
+    }
+
+    /// Parse an Excel criteria value, resolving numeric/date/time strings using the provided value
+    /// locale (decimal/thousands separators, date order) and workbook date system.
+    ///
+    /// This is equivalent to [`Criteria::parse_with_date_system_and_locale`] but uses a more
+    /// ergonomic argument order for callers that already have a [`ValueLocaleConfig`] and
+    /// deterministic `now_utc`.
+    pub fn parse_with_locale_config(
+        input: &Value,
+        cfg: ValueLocaleConfig,
+        now_utc: DateTime<Utc>,
+        system: ExcelDateSystem,
+    ) -> Result<Self, ErrorKind> {
+        Self::parse_with_date_system_and_locale(input, system, cfg, now_utc)
     }
 
     /// If this criteria can be represented as a simple numeric comparator, return the SIMD
@@ -163,9 +168,7 @@ impl Criteria {
                 value,
                 self.number_locale,
             ),
-            CriteriaRhs::Number(n) => {
-                matches_numeric_criteria(self.op, *n, value, self.number_locale)
-            }
+            CriteriaRhs::Number(n) => matches_numeric_criteria(self.op, *n, value, self.number_locale),
             CriteriaRhs::Text(pattern) => matches_text_criteria(self.op, pattern, value),
         }
     }

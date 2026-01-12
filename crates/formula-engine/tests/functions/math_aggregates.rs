@@ -1,9 +1,13 @@
+use chrono::{TimeZone, Utc};
+
+use formula_engine::coercion::ValueLocaleConfig;
 use formula_engine::functions::math;
 use formula_engine::date::ExcelDateSystem;
 use formula_engine::{ErrorKind, Value};
 
 #[test]
 fn sumif_supports_numeric_criteria() {
+    let now_utc = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
     let criteria_range = vec![1.into(), 2.into(), 3.into(), 4.into()];
     let sum_range = vec![10.into(), 20.into(), 30.into(), 40.into()];
 
@@ -13,6 +17,8 @@ fn sumif_supports_numeric_criteria() {
             &criteria_range,
             &criteria,
             Some(&sum_range),
+            ValueLocaleConfig::en_us(),
+            now_utc,
             ExcelDateSystem::EXCEL_1900,
         )
         .unwrap(),
@@ -25,6 +31,8 @@ fn sumif_supports_numeric_criteria() {
             &criteria_range,
             &criteria,
             Some(&sum_range),
+            ValueLocaleConfig::en_us(),
+            now_utc,
             ExcelDateSystem::EXCEL_1900,
         )
         .unwrap(),
@@ -34,6 +42,7 @@ fn sumif_supports_numeric_criteria() {
 
 #[test]
 fn sumif_supports_wildcards_and_blanks() {
+    let now_utc = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
     let criteria_range = vec![
         Value::from("apple"),
         Value::from("banana"),
@@ -49,6 +58,8 @@ fn sumif_supports_wildcards_and_blanks() {
             &criteria_range,
             &criteria,
             Some(&sum_range),
+            ValueLocaleConfig::en_us(),
+            now_utc,
             ExcelDateSystem::EXCEL_1900,
         )
         .unwrap(),
@@ -61,6 +72,8 @@ fn sumif_supports_wildcards_and_blanks() {
             &criteria_range,
             &criteria,
             Some(&sum_range),
+            ValueLocaleConfig::en_us(),
+            now_utc,
             ExcelDateSystem::EXCEL_1900,
         )
         .unwrap(),
@@ -70,6 +83,7 @@ fn sumif_supports_wildcards_and_blanks() {
 
 #[test]
 fn sumifs_requires_all_criteria_to_match() {
+    let now_utc = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
     let sum_range = vec![10.into(), 20.into(), 30.into(), 40.into()];
     let range1 = vec![
         Value::from("A"),
@@ -83,19 +97,34 @@ fn sumifs_requires_all_criteria_to_match() {
     let crit2 = Value::from(">1");
     let criteria_pairs = [(&range1[..], &crit1), (&range2[..], &crit2)];
     assert_eq!(
-        math::sumifs(&sum_range, &criteria_pairs, ExcelDateSystem::EXCEL_1900).unwrap(),
+        math::sumifs(
+            &sum_range,
+            &criteria_pairs,
+            ValueLocaleConfig::en_us(),
+            now_utc,
+            ExcelDateSystem::EXCEL_1900,
+        )
+        .unwrap(),
         20.0
     );
 }
 
 #[test]
 fn sumifs_length_mismatch_is_value_error() {
+    let now_utc = Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
     let sum_range = vec![1.into(), 2.into()];
     let range = vec![1.into()];
     let crit = Value::from("1");
     let criteria_pairs = [(&range[..], &crit)];
     assert_eq!(
-        math::sumifs(&sum_range, &criteria_pairs, ExcelDateSystem::EXCEL_1900).unwrap_err(),
+        math::sumifs(
+            &sum_range,
+            &criteria_pairs,
+            ValueLocaleConfig::en_us(),
+            now_utc,
+            ExcelDateSystem::EXCEL_1900,
+        )
+        .unwrap_err(),
         ErrorKind::Value
     );
 }
