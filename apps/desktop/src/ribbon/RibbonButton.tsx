@@ -47,6 +47,26 @@ export const RibbonButton = React.memo(function RibbonButton({ button, pressed, 
     setMenuOpen(false);
   }, []);
 
+  const focusFirstMenuItem = React.useCallback(() => {
+    const root = dropdownRef.current;
+    if (!root) return;
+    const first = root.querySelector<HTMLButtonElement>(".ribbon-dropdown__menuitem:not(:disabled)");
+    first?.focus();
+  }, []);
+
+  const focusLastMenuItem = React.useCallback(() => {
+    const root = dropdownRef.current;
+    if (!root) return;
+    const items = Array.from(root.querySelectorAll<HTMLButtonElement>(".ribbon-dropdown__menuitem:not(:disabled)"));
+    items.at(-1)?.focus();
+  }, []);
+
+  React.useEffect(() => {
+    if (!menuOpen) return;
+    // Defer so the menu is mounted before trying to move focus.
+    requestAnimationFrame(() => focusFirstMenuItem());
+  }, [focusFirstMenuItem, menuOpen]);
+
   React.useEffect(() => {
     if (!menuOpen) return;
 
@@ -100,6 +120,20 @@ export const RibbonButton = React.memo(function RibbonButton({ button, pressed, 
         }
         onActivate?.(button);
       }}
+      onKeyDown={(event) => {
+        if (!hasMenu) return;
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          setMenuOpen(true);
+          requestAnimationFrame(() => focusFirstMenuItem());
+          return;
+        }
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          setMenuOpen(true);
+          requestAnimationFrame(() => focusLastMenuItem());
+        }
+      }}
       title={button.ariaLabel}
     >
       {button.icon ? (
@@ -124,7 +158,43 @@ export const RibbonButton = React.memo(function RibbonButton({ button, pressed, 
     <div className="ribbon-dropdown" ref={dropdownRef}>
       {buttonEl}
       {menuOpen ? (
-        <div className="ribbon-dropdown__menu" role="menu" aria-label={button.ariaLabel}>
+        <div
+          className="ribbon-dropdown__menu"
+          role="menu"
+          aria-label={button.ariaLabel}
+          onKeyDown={(event) => {
+            const root = dropdownRef.current;
+            if (!root) return;
+            const items = Array.from(root.querySelectorAll<HTMLButtonElement>(".ribbon-dropdown__menuitem:not(:disabled)"));
+            if (items.length === 0) return;
+            const currentIndex = items.findIndex((el) => el === document.activeElement);
+
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % items.length : 0;
+              items[nextIndex]?.focus();
+              return;
+            }
+
+            if (event.key === "ArrowUp") {
+              event.preventDefault();
+              const nextIndex = currentIndex >= 0 ? (currentIndex - 1 + items.length) % items.length : items.length - 1;
+              items[nextIndex]?.focus();
+              return;
+            }
+
+            if (event.key === "Home") {
+              event.preventDefault();
+              items[0]?.focus();
+              return;
+            }
+
+            if (event.key === "End") {
+              event.preventDefault();
+              items.at(-1)?.focus();
+            }
+          }}
+        >
           {button.menuItems?.map((item) => (
             <button
               key={item.id}
@@ -146,6 +216,7 @@ export const RibbonButton = React.memo(function RibbonButton({ button, pressed, 
                   testId: item.testId,
                   disabled: item.disabled,
                 });
+                buttonRef.current?.focus();
               }}
             >
               {item.icon ? (
