@@ -69,22 +69,70 @@ export interface WorkbookContextBuildStats {
    * Only meant for comparing with `durationMs`.
    */
   startedAtMs: number;
+  /**
+   * Total wall-clock duration of `build()` in ms (same clock source as `startedAtMs`).
+   */
   durationMs: number;
   mode: ContextBudgetMode;
   model: string;
+  /**
+   * Number of sheet summaries included in the final payload (active sheet first, plus
+   * additional sheets depending on mode + `maxSheets`).
+   */
   sheetCountSummarized: number;
+  /**
+   * Total number of sampled data blocks included in the final payload.
+   * This counts blocks regardless of whether they came from cache.
+   */
   blockCount: number;
+  /**
+   * Breakdown of `blockCount` by block kind.
+   */
   blockCountByKind: Record<WorkbookContextBlockKind, number>;
+  /**
+   * Total number of cells in `payload.blocks` (sum of `values[row].length` over all rows/blocks).
+   * This counts cells included in the payload, not the number of cells *read* from the tool.
+   */
   blockCellCount: number;
+  /**
+   * Breakdown of `blockCellCount` by block kind.
+   */
   blockCellCountByKind: Record<WorkbookContextBlockKind, number>;
+  /**
+   * Character length of the final `promptContext` string.
+   */
   promptContextChars: number;
+  /**
+   * Estimated token count for the final `promptContext` string using the builder's estimator.
+   * (Heuristic; model providers may tokenize differently.)
+   */
   promptContextTokens: number;
+  /**
+   * Number of actual `read_range` tool calls executed during the build (cache misses only).
+   */
   readBlockCount: number;
+  /**
+   * Total number of cells requested across all `read_range` calls (cache misses only),
+   * after clamping ranges to `maxRows`/`maxCols`.
+   */
   readBlockCellCount: number;
+  /**
+   * Breakdown of `readBlockCount` by block kind.
+   */
   readBlockCountByKind: Record<WorkbookContextBlockKind, number>;
+  /**
+   * Breakdown of `readBlockCellCount` by block kind.
+   */
   readBlockCellCountByKind: Record<WorkbookContextBlockKind, number>;
   cache: {
+    /**
+     * `schema` refers to the per-sheet schema summary cache in `WorkbookContextBuilder`
+     * (not any caching performed by the underlying `schemaProvider`).
+     */
     schema: { hits: number; misses: number; entries: number };
+    /**
+     * `block` refers to the per-range sampled block cache in `WorkbookContextBuilder`.
+     */
     block: { hits: number; misses: number; entries: number };
   };
   rag: {
@@ -93,10 +141,25 @@ export interface WorkbookContextBuildStats {
     retrievedBlockCount: number;
   };
   timingsMs: {
+    /**
+     * Total time spent in the underlying RAG service, if enabled.
+     */
     ragMs: number;
+    /**
+     * Total time spent extracting schemas from sampled values (`extractSheetSchema`).
+     */
     schemaMs: number;
+    /**
+     * Total time spent executing `read_range` tool calls (cache misses only).
+     */
     readBlockMs: number;
+    /**
+     * Total time spent serializing + packing prompt context sections.
+     */
     promptContextMs: number;
+    /**
+     * Breakdown of `readBlockMs` by block kind.
+     */
     readBlockMsByKind: Record<WorkbookContextBlockKind, number>;
   };
 }
