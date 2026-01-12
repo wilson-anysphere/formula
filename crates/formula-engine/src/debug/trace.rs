@@ -745,6 +745,15 @@ impl ParserImpl {
                 {
                     self.parse_sheet_ref()
                 } else {
+                    // The canonical formula language supports structured references like `[@Col]`
+                    // and `Table1[[#Headers],[Col]]`. The debug trace parser does not implement
+                    // structured refs yet; fail fast instead of silently mis-parsing bracketed
+                    // identifiers as names (which would produce incorrect debug values).
+                    if id.starts_with('[') {
+                        return Err(FormulaParseError::UnexpectedToken(
+                            "structured references are not supported".to_string(),
+                        ));
+                    }
                     self.next();
                     match id.to_ascii_uppercase().as_str() {
                         "TRUE" => Ok(SpannedExpr {

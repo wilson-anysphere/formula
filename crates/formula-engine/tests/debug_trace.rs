@@ -1,6 +1,8 @@
 use formula_engine::debug::{Span, TraceKind, TraceRef};
 use formula_engine::eval::CellAddr;
 use formula_engine::{Engine, ExternalValueProvider, NameDefinition, NameScope, Value};
+use formula_model::table::TableColumn;
+use formula_model::{Range, Table};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -25,6 +27,47 @@ impl ExternalValueProvider for TestExternalProvider {
             .expect("lock poisoned")
             .get(&(sheet.to_string(), addr))
             .cloned()
+    }
+}
+
+fn table_fixture_multi_col() -> Table {
+    Table {
+        id: 1,
+        name: "Table1".into(),
+        display_name: "Table1".into(),
+        range: Range::from_a1("A1:D4").unwrap(),
+        header_row_count: 1,
+        totals_row_count: 0,
+        columns: vec![
+            TableColumn {
+                id: 1,
+                name: "Col1".into(),
+                formula: None,
+                totals_formula: None,
+            },
+            TableColumn {
+                id: 2,
+                name: "Col2".into(),
+                formula: None,
+                totals_formula: None,
+            },
+            TableColumn {
+                id: 3,
+                name: "Col3".into(),
+                formula: None,
+                totals_formula: None,
+            },
+            TableColumn {
+                id: 4,
+                name: "Col4".into(),
+                formula: None,
+                totals_formula: None,
+            },
+        ],
+        style: None,
+        auto_filter: None,
+        relationship_id: None,
+        part_path: None,
     }
 }
 
@@ -484,6 +527,29 @@ fn debug_trace_supports_external_refs_with_quoted_sheet_name_after_workbook_pref
             addr: CellAddr { row: 0, col: 0 }
         })
     );
+}
+
+#[test]
+fn debug_trace_rejects_structured_references() {
+    let mut engine = Engine::new();
+    engine.set_sheet_tables("Sheet1", vec![table_fixture_multi_col()]);
+    engine.set_cell_value("Sheet1", "A1", "Col1").unwrap();
+    engine.set_cell_value("Sheet1", "B1", "Col2").unwrap();
+    engine.set_cell_value("Sheet1", "C1", "Col3").unwrap();
+    engine.set_cell_value("Sheet1", "D1", "Col4").unwrap();
+    engine.set_cell_value("Sheet1", "B2", 10.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D2", "=[@Col2]")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(10.0));
+
+    let err = engine.debug_evaluate("Sheet1", "D2").unwrap_err();
+    let formula_engine::EngineError::Parse(formula_engine::eval::FormulaParseError::UnexpectedToken(_)) =
+        err
+    else {
+        panic!("expected structured ref parse error, got: {err:?}");
+    };
 }
 
 #[test]
