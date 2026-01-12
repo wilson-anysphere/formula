@@ -65,10 +65,22 @@ test.describe("collab status indicator (collab mode)", () => {
   });
 
   test.afterAll(async () => {
-    if (syncServer) {
-      syncServer.kill("SIGTERM");
-      syncServer = null;
+    const child = syncServer;
+    syncServer = null;
+    if (!child) return;
+
+    if (!child.killed) {
+      child.kill("SIGTERM");
     }
+
+    // Ensure the Playwright worker doesn't hang on a still-running child process.
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(resolve, 5_000);
+      child.once("exit", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
   });
 
   test("shows Synced after connecting to the sync server", async ({ page }) => {
