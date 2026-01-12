@@ -52,7 +52,9 @@ See [`docs/06-collaboration.md`](../docs/06-collaboration.md) for:
 - desktop binder wiring (`packages/collab/binder/index.js`, `bindYjsToDocumentController`)
 - sheet `view` state storage (`sheets[i].get("view")`)
 - presence rendering (`apps/desktop/src/grid/presence-renderer/`)
+- comments (`@formula/collab-comments`) and conflict monitors (`@formula/collab-conflicts`)
 - collaborative versioning (`@formula/collab-versioning`) and branching (`packages/collab/branching/index.js`)
+- ADRs (shared sheet view state + undo semantics): `docs/adr/ADR-0004-collab-sheet-view-and-undo.md`
 
 ### Sync Server Features
 
