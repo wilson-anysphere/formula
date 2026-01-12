@@ -147,6 +147,36 @@ function emptySheetViewState() {
   return { frozenRows: 0, frozenCols: 0 };
 }
 
+/**
+ * @param {any} a
+ * @param {any} b
+ */
+function sheetViewStateEquals(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.frozenRows !== b.frozenRows) return false;
+  if (a.frozenCols !== b.frozenCols) return false;
+
+  const axisEquals = (left, right) => {
+    if (left === right) return true;
+    const leftKeys = left ? Object.keys(left) : [];
+    const rightKeys = right ? Object.keys(right) : [];
+    if (leftKeys.length !== rightKeys.length) return false;
+    leftKeys.sort((x, y) => Number(x) - Number(y));
+    rightKeys.sort((x, y) => Number(x) - Number(y));
+    for (let i = 0; i < leftKeys.length; i += 1) {
+      const key = leftKeys[i];
+      if (key !== rightKeys[i]) return false;
+      const lv = left[key];
+      const rv = right[key];
+      if (Math.abs(lv - rv) > 1e-6) return false;
+    }
+    return true;
+  };
+
+  return axisEquals(a.colWidths, b.colWidths) && axisEquals(a.rowHeights, b.rowHeights);
+}
+
 function getYMap(value) {
   if (!value || typeof value !== "object") return null;
   // eslint-disable-next-line no-prototype-builtins
@@ -762,7 +792,7 @@ export function bindYjsToDocumentController(options) {
       const after = readSheetViewFromYjsSheetEntry(found?.entry);
       const before = documentController.getSheetView(sheetId);
 
-      if (stableStringify(before) === stableStringify(after)) continue;
+      if (sheetViewStateEquals(before, after)) continue;
 
       deltas.push({ sheetId, before, after });
     }
