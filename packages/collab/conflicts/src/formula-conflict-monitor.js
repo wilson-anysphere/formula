@@ -488,27 +488,6 @@ export class FormulaConflictMonitor {
       currentValue = null
     } = input;
 
-    const isLocal = this.localOrigins.has(origin);
-    if (isLocal) {
-      // Track local edits even when they are not applied via `setLocalFormula`
-      // (e.g. DocumentController→Yjs binder writes). Some local writers may omit
-      // `modifiedBy`, so relying on metadata as a fallback is insufficient for
-      // conflict detection.
-      //
-      // In `"formula+value"` mode local *value* edits also touch the `formula`
-      // key (writing a `formula=null` marker). Those are tracked via
-      // `_lastLocalValueEditByCellKey` / `_lastLocalContentEditByCellKey` instead
-      // and should not be treated as formula edits here.
-      const nextFormula = newFormula.trim();
-      if (this.includeValueConflicts && !nextFormula) return;
-
-      this._lastLocalFormulaEditByCellKey.set(cellKey, {
-        formula: nextFormula,
-        itemId: itemId ?? null
-      });
-      return;
-    }
-
     // When value-conflict mode is enabled, local value writes clear formulas via
     // `formula=null` (creating an Item id). If a remote user concurrently writes
     // a formula, surface a content conflict that presents the local value vs the
