@@ -168,7 +168,9 @@ import {
 import { openExternalHyperlink } from "./hyperlinks/openExternal.js";
 import {
   clampUsedRange,
+  resolveWorkbookLoadChunkRows,
   resolveWorkbookLoadLimits,
+  WORKBOOK_LOAD_CHUNK_ROWS_STORAGE_KEY,
   WORKBOOK_LOAD_MAX_COLS_STORAGE_KEY,
   WORKBOOK_LOAD_MAX_ROWS_STORAGE_KEY,
 } from "./workbook/load/clampUsedRange.js";
@@ -244,7 +246,7 @@ warnIfMissingCrossOriginIsolationInTauriProd();
 
 let workbookSheetStore = new WorkbookSheetStore([{ id: "Sheet1", name: "Sheet1", visibility: "visible" }]);
 
-function getWorkbookLoadLimits(): { maxRows: number; maxCols: number } {
+function getWorkbookLoadLimits(): { maxRows: number; maxCols: number; chunkRows: number } {
   const overrides = (() => {
     try {
       const storage = globalThis.localStorage;
@@ -252,6 +254,7 @@ function getWorkbookLoadLimits(): { maxRows: number; maxCols: number } {
       return {
         maxRows: storage.getItem(WORKBOOK_LOAD_MAX_ROWS_STORAGE_KEY),
         maxCols: storage.getItem(WORKBOOK_LOAD_MAX_COLS_STORAGE_KEY),
+        chunkRows: storage.getItem(WORKBOOK_LOAD_CHUNK_ROWS_STORAGE_KEY),
       };
     } catch {
       // Ignore storage errors (disabled storage, etc).
@@ -259,14 +262,25 @@ function getWorkbookLoadLimits(): { maxRows: number; maxCols: number } {
     }
   })();
 
-  return resolveWorkbookLoadLimits({
-    queryString: typeof window !== "undefined" ? window.location.search : "",
-    env: {
-      ...((import.meta as any).env ?? {}),
-      ...(((globalThis as any).process?.env as Record<string, unknown> | undefined) ?? {}),
-    },
+  const queryString = typeof window !== "undefined" ? window.location.search : "";
+  const env = {
+    ...((import.meta as any).env ?? {}),
+    ...(((globalThis as any).process?.env as Record<string, unknown> | undefined) ?? {}),
+  };
+
+  const limits = resolveWorkbookLoadLimits({
+    queryString,
+    env,
     overrides,
   });
+
+  const chunkRows = resolveWorkbookLoadChunkRows({
+    queryString,
+    env,
+    override: overrides?.chunkRows,
+  });
+
+  return { ...limits, chunkRows };
 }
 // Task 13 adds this helper in collab mode. Declare it here so main.ts can
 // consume it without taking a hard dependency on collab wiring being present.
@@ -8005,8 +8019,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).__workbookSheetStore = workbookSheetStore;
 
-  const CHUNK_ROWS = 200;
-  const { maxRows: MAX_ROWS, maxCols: MAX_COLS } = getWorkbookLoadLimits();
+  const { maxRows: MAX_ROWS, maxCols: MAX_COLS, chunkRows: CHUNK_ROWS } = getWorkbookLoadLimits();
 
   const snapshotSheets: Array<{
     id: string;

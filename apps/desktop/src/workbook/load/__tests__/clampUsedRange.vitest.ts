@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   clampUsedRange,
+  DEFAULT_DESKTOP_LOAD_CHUNK_ROWS,
   DEFAULT_DESKTOP_LOAD_MAX_COLS,
   DEFAULT_DESKTOP_LOAD_MAX_ROWS,
+  resolveWorkbookLoadChunkRows,
   resolveWorkbookLoadLimits,
 } from "../clampUsedRange.js";
 
@@ -156,5 +158,43 @@ describe("resolveWorkbookLoadLimits", () => {
     });
 
     expect(limits).toEqual({ maxRows: DEFAULT_DESKTOP_LOAD_MAX_ROWS, maxCols: DEFAULT_DESKTOP_LOAD_MAX_COLS });
+  });
+});
+
+describe("resolveWorkbookLoadChunkRows", () => {
+  it("uses the default when not configured", () => {
+    expect(resolveWorkbookLoadChunkRows()).toBe(DEFAULT_DESKTOP_LOAD_CHUNK_ROWS);
+  });
+
+  it("uses env vars when query params are not provided", () => {
+    expect(resolveWorkbookLoadChunkRows({ env: { DESKTOP_LOAD_CHUNK_ROWS: "123" } })).toBe(123);
+  });
+
+  it("uses the override when provided", () => {
+    expect(resolveWorkbookLoadChunkRows({ env: { DESKTOP_LOAD_CHUNK_ROWS: "123" }, override: "50" })).toBe(50);
+  });
+
+  it("prefers query params over overrides", () => {
+    expect(resolveWorkbookLoadChunkRows({ queryString: "?loadChunkRows=10", override: "50" })).toBe(10);
+  });
+
+  it("falls back to VITE_* env vars when DESKTOP_* value is invalid", () => {
+    expect(
+      resolveWorkbookLoadChunkRows({
+        env: {
+          DESKTOP_LOAD_CHUNK_ROWS: "nope",
+          VITE_DESKTOP_LOAD_CHUNK_ROWS: "321",
+        },
+      }),
+    ).toBe(321);
+  });
+
+  it("falls back to defaults when config values are invalid", () => {
+    expect(
+      resolveWorkbookLoadChunkRows({
+        queryString: "?chunkRows=-5",
+        env: { DESKTOP_LOAD_CHUNK_ROWS: "0" },
+      }),
+    ).toBe(DEFAULT_DESKTOP_LOAD_CHUNK_ROWS);
   });
 });

@@ -2,9 +2,11 @@ import type { SheetUsedRange } from "@formula/workbook-backend";
 
 export const DEFAULT_DESKTOP_LOAD_MAX_ROWS = 10_000;
 export const DEFAULT_DESKTOP_LOAD_MAX_COLS = 200;
+export const DEFAULT_DESKTOP_LOAD_CHUNK_ROWS = 200;
 
 export const WORKBOOK_LOAD_MAX_ROWS_STORAGE_KEY = "formula.desktop.workbookLoadMaxRows";
 export const WORKBOOK_LOAD_MAX_COLS_STORAGE_KEY = "formula.desktop.workbookLoadMaxCols";
+export const WORKBOOK_LOAD_CHUNK_ROWS_STORAGE_KEY = "formula.desktop.workbookLoadChunkRows";
 
 export type WorkbookLoadLimits = Readonly<{
   maxRows: number;
@@ -14,6 +16,7 @@ export type WorkbookLoadLimits = Readonly<{
 export type WorkbookLoadLimitOverrides = Readonly<{
   maxRows?: unknown;
   maxCols?: unknown;
+  chunkRows?: unknown;
 }>;
 
 function parsePositiveInt(value: unknown): number | null {
@@ -98,6 +101,50 @@ export function resolveWorkbookLoadLimits(
   }
 
   return { maxRows, maxCols };
+}
+
+/**
+ * Resolves the workbook snapshot load chunk size (rows per backend `getRange`).
+ *
+ * Precedence matches `resolveWorkbookLoadLimits`:
+ * 1) defaults
+ * 2) env vars (DESKTOP_LOAD_CHUNK_ROWS)
+ * 3) local overrides (e.g. values read from localStorage)
+ * 4) URL query params (?loadChunkRows=…)
+ *
+ * Note: for backwards-compatibility we also accept `?chunkRows=…`.
+ */
+export function resolveWorkbookLoadChunkRows(
+  options: Readonly<{
+    queryString?: string | null;
+    env?: Record<string, unknown> | null;
+    override?: unknown;
+    defaultChunkRows?: number;
+  }> = {},
+): number {
+  const defaultChunkRows = options.defaultChunkRows ?? DEFAULT_DESKTOP_LOAD_CHUNK_ROWS;
+  let chunkRows = defaultChunkRows;
+
+  const env = options.env ?? {};
+  for (const candidate of [env.DESKTOP_LOAD_CHUNK_ROWS, env.VITE_DESKTOP_LOAD_CHUNK_ROWS]) {
+    const parsed = parsePositiveInt(candidate);
+    if (parsed != null) {
+      chunkRows = parsed;
+      break;
+    }
+  }
+
+  const override = parsePositiveInt(options.override);
+  if (override != null) chunkRows = override;
+
+  const queryString = options.queryString ?? "";
+  if (queryString) {
+    const params = new URLSearchParams(queryString.startsWith("?") ? queryString.slice(1) : queryString);
+    const queryChunkRows = parsePositiveInt(params.get("loadChunkRows") ?? params.get("chunkRows"));
+    if (queryChunkRows != null) chunkRows = queryChunkRows;
+  }
+
+  return chunkRows;
 }
 
 function normalizeIndex(value: number): number {
