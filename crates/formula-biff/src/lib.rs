@@ -8,6 +8,13 @@
 //! The encoder is intentionally scoped to the initial editing workflows:
 //! constants, A1-style refs, basic operators, and a curated set of built-in
 //! functions.
+//!
+//! Notes on structured references (Excel Tables):
+//! - BIFF12/XLSB stores structured references using `PtgExtend(etpg=0x19)` (aka `PtgList`).
+//! - `decode_rgce` supports this token and will emit stable placeholder names (e.g. `Table1`,
+//!   `Column2`) because this crate does not have workbook table metadata.
+//! - `encode_rgce` does **not** currently support structured references; emitting correct BIFF
+//!   requires workbook table-id context.
 
 mod ftab;
 mod function_ids;
