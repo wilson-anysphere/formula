@@ -1158,6 +1158,52 @@ fn bytecode_backend_matches_ast_for_common_logical_error_functions() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_logical_error_functions_with_error_literals() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=IF(FALSE, #N/A, 1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=IF(TRUE, 1, #DIV/0!)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=IFERROR(#DIV/0!, 7)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", "=IFERROR(#N/A, 7)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A5", "=IFNA(#N/A, 7)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A6", "=IFNA(#DIV/0!, 7)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A7", "=IF(#N/A, 1, 2)")
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        7,
+        "expected all formulas to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        ("=IF(FALSE, #N/A, 1)", "A1"),
+        ("=IF(TRUE, 1, #DIV/0!)", "A2"),
+        ("=IFERROR(#DIV/0!, 7)", "A3"),
+        ("=IFERROR(#N/A, 7)", "A4"),
+        ("=IFNA(#N/A, 7)", "A5"),
+        ("=IFNA(#DIV/0!, 7)", "A6"),
+        ("=IF(#N/A, 1, 2)", "A7"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_and_or_reference_semantics_match_ast() {
     let mut engine = Engine::new();
     engine
