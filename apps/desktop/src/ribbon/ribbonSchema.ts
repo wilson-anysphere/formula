@@ -2119,11 +2119,13 @@ export const defaultRibbonSchema: RibbonSchema = {
               kind: "dropdown",
               size: "large",
               menuItems: [
+                { id: "view.zoom.zoom.400", label: "400%", ariaLabel: "Zoom 400%", icon: "400%" },
                 { id: "view.zoom.zoom.200", label: "200%", ariaLabel: "Zoom 200%", icon: "200%" },
                 { id: "view.zoom.zoom.150", label: "150%", ariaLabel: "Zoom 150%", icon: "150%" },
                 { id: "view.zoom.zoom.100", label: "100%", ariaLabel: "Zoom 100%", icon: "100%" },
                 { id: "view.zoom.zoom.75", label: "75%", ariaLabel: "Zoom 75%", icon: "75%" },
                 { id: "view.zoom.zoom.50", label: "50%", ariaLabel: "Zoom 50%", icon: "50%" },
+                { id: "view.zoom.zoom.25", label: "25%", ariaLabel: "Zoom 25%", icon: "25%" },
                 { id: "view.zoom.zoom.custom", label: "Custom…", ariaLabel: "Custom Zoom", icon: "⚙️" },
               ],
             },

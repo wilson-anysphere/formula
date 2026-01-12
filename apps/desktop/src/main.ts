@@ -5975,7 +5975,9 @@ mountRibbon(ribbonReactRoot, {
 
     const openCustomZoomQuickPick = async (): Promise<void> => {
       if (!app.supportsZoom()) return;
-      const baseOptions = [25, 50, 75, 100, 125, 150, 200];
+      // Keep the custom zoom picker aligned with the shared-grid zoom clamp
+      // (currently 25%–400%, Excel-style).
+      const baseOptions = [25, 50, 75, 100, 125, 150, 200, 400];
       const current = Math.round(app.getZoom() * 100);
       const options = baseOptions.includes(current) ? baseOptions : [current, ...baseOptions];
       const picked = await showQuickPick(
