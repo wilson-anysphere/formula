@@ -20,7 +20,7 @@ const WEBVIEW_CSP = [
   "form-action 'none'",
 ].join("; ");
 
-function injectWebviewCsp(html: string): string {
+export function injectWebviewCsp(html: string): string {
   const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${WEBVIEW_CSP}">`;
   const hardenTauriGlobalsScript = `<script>
 (() => {
