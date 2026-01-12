@@ -18,6 +18,8 @@ The source of truth for “what the engine currently implements” is:
     **[`crates/formula-engine/tests/function_catalog_sync.rs`](../crates/formula-engine/tests/function_catalog_sync.rs)**.
   - Used by downstream tooling (JS/TS, docs, scripts) without having to compile Rust.
 
+Current implemented function count (from `shared/functionCatalog.json`): **345** *(auto-updated by `scripts/generate-function-catalog.js`)*
+
 Why it’s committed:
 
 - Stable interface for non-Rust tooling (autocomplete, docs, parity scripts, etc).
