@@ -156,3 +156,16 @@ fn expands_hyperlink_anchor_to_merged_region() {
     let b1 = CellRef::from_a1("B1").unwrap();
     assert!(sheet.hyperlink_at(b1).is_some());
 }
+
+#[test]
+fn ignores_out_of_bounds_hyperlink_anchors() {
+    let bytes = xls_fixture_builder::build_out_of_bounds_hyperlink_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result.workbook.sheet_by_name("OOB").expect("OOB missing");
+    assert!(
+        sheet.hyperlinks.is_empty(),
+        "expected out-of-bounds hyperlink to be ignored, got {:?}",
+        sheet.hyperlinks
+    );
+}

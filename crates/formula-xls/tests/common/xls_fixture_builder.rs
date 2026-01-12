@@ -2,6 +2,8 @@
 
 use std::io::{Cursor, Write};
 
+use formula_model::EXCEL_MAX_COLS;
+
 // This fixture builder writes just enough BIFF8 to exercise the importer. Keep record ids and
 // commonly-used BIFF constants named so the intent stays readable.
 const RECORD_BOF: u16 = 0x0809;
@@ -962,6 +964,26 @@ pub fn build_sanitized_sheet_name_internal_hyperlink_fixture_xls() -> Vec<u8> {
 /// hyperlink anchor to cover the full merged region.
 pub fn build_merged_hyperlink_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_merged_hyperlink_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing an HLINK record whose anchor range is out of Excel
+/// bounds (column >= EXCEL_MAX_COLS). The importer should ignore the hyperlink.
+pub fn build_out_of_bounds_hyperlink_fixture_xls() -> Vec<u8> {
+    let oob_col: u16 = EXCEL_MAX_COLS as u16;
+    let workbook_stream = build_hyperlink_workbook_stream(
+        "OOB",
+        hlink_external_url(0, 0, oob_col, oob_col, "https://example.com", "Example", "Tooltip"),
+    );
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
