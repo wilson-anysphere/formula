@@ -197,15 +197,24 @@ fn record_name(id: u16) -> Option<&'static str> {
         0x0008 => "PROJECTLIBFLAGS",
         0x0009 => "PROJECTVERSION",
         0x000C => "PROJECTCONSTANTS",
+        0x0014 => "PROJECTLCIDINVOKE",
+        // Unicode variants of selected strings (some producers emit these immediately after the
+        // ANSI form; MS-OVBA ProjectNormalizedData prefers the Unicode form when present).
+        0x003C => "PROJECTCONSTANTSUNICODE",
+        0x0040 => "PROJECTDOCSTRINGUNICODE",
+        // Present in many real-world files, but skipped by the MS-OVBA V3ContentNormalizedData
+        // pseudocode.
+        0x004A => "PROJECTCOMPATVERSION",
 
         // ---- Reference records (used by ContentNormalizedData / ProjectNormalizedData) ----
         0x000D => "REFERENCEREGISTERED",
         0x000E => "REFERENCEPROJECT",
-        0x000F => "REFERENCECONTROL",
+        0x002F => "REFERENCECONTROL",
+        0x0030 => "REFERENCEEXTENDED",
+        0x0033 => "REFERENCEORIGINAL",
         0x0010 => "REFERENCETYPELIB",
 
         // ---- Module records ----
-        0x0014 => "PROJECTCOOKIE",
         0x0015 => "MODULECOUNT",
         0x0016 => "PROJECTMODULES",
         0x0019 => "MODULENAME",
@@ -213,7 +222,8 @@ fn record_name(id: u16) -> Option<&'static str> {
         0x001C => "MODULEDOCSTRING",
         0x001D => "MODULEHELPFILEPATH",
         0x001E => "MODULEHELPCONTEXT",
-        0x0021 => "MODULETYPE",
+        0x0021 => "MODULETYPE (procedural TypeRecord.Id=0x0021)",
+        0x0022 => "MODULETYPE (non-procedural TypeRecord.Id=0x0022)",
         0x0025 => "MODULEREADONLY",
         0x0028 => "MODULEPRIVATE",
         0x002B => "MODULETERMINATOR",
@@ -292,4 +302,3 @@ fn dump_project_normalized_data_v3(_vba_project_bin: &[u8]) {
     println!("-- ProjectNormalizedDataV3 --");
     println!("unavailable: formula_vba::project_normalized_data_v3 not found in this build");
 }
-
