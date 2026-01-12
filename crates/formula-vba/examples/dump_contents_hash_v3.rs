@@ -7,6 +7,12 @@ use formula_vba::{project_normalized_data_v3, v3_content_normalized_data};
 
 const DEFAULT_HEAD_BYTES: usize = 64;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Alg {
+    Md5,
+    Sha256,
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -23,14 +29,7 @@ fn run() -> Result<(), String> {
         .next()
         .unwrap_or_else(|| OsString::from("dump_contents_hash_v3"));
 
-    let Some(input) = args.next() else {
-        return Err(usage(&program));
-    };
-    if args.next().is_some() {
-        return Err(usage(&program));
-    }
-
-    let input_path = PathBuf::from(input);
+    let (input_path, alg) = parse_args(&program, args)?;
 
     let (vba_project_bin, source) = load_vba_project_bin(&input_path)?;
 
@@ -56,24 +55,121 @@ fn run() -> Result<(), String> {
         bytes_to_lower_hex(&project[..DEFAULT_HEAD_BYTES.min(project.len())])
     );
 
-    // The debug tool is explicitly interested in the MD5 form of the v3 transcript.
-    let contents_hash_v3_md5 = {
+    // MS-OVBA v3 signature binding hashes the *same transcript* (`ProjectNormalizedData`), but the
+    // on-disk `DigestInfo.digestAlgorithm` can vary (SHA-256 is common, but some producers use MD5).
+    //
+    // This tool prints both digests by default so you can compare against the on-disk digest bytes.
+    let digest_md5 = {
         use sha2::Digest as _;
         md5::Md5::digest(&project)
     };
-    println!(
-        "contents_hash_v3_md5:      {}",
-        bytes_to_lower_hex(contents_hash_v3_md5.as_slice())
-    );
+    let digest_sha256 = {
+        use sha2::Digest as _;
+        sha2::Sha256::digest(&project)
+    };
+
+    match alg {
+        Some(Alg::Md5) => {
+            println!(
+                "digest_md5(ProjectNormalizedData):    {}",
+                bytes_to_lower_hex(digest_md5.as_slice())
+            );
+        }
+        Some(Alg::Sha256) => {
+            println!(
+                "digest_sha256(ProjectNormalizedData): {}",
+                bytes_to_lower_hex(digest_sha256.as_slice())
+            );
+        }
+        None => {
+            println!(
+                "digest_md5(ProjectNormalizedData):    {}",
+                bytes_to_lower_hex(digest_md5.as_slice())
+            );
+            println!(
+                "digest_sha256(ProjectNormalizedData): {}",
+                bytes_to_lower_hex(digest_sha256.as_slice())
+            );
+        }
+    }
 
     Ok(())
 }
 
 fn usage(program: &OsString) -> String {
     format!(
-        "usage: {} <vbaProject.bin|workbook.xlsm|workbook.xlsx|workbook.xlsb>",
+        "usage: {} [--alg md5|sha256] <vbaProject.bin|workbook.xlsm|workbook.xlsx|workbook.xlsb>",
         program.to_string_lossy()
     )
+}
+
+fn parse_args(
+    program: &OsString,
+    mut args: impl Iterator<Item = OsString>,
+) -> Result<(PathBuf, Option<Alg>), String> {
+    let mut input: Option<PathBuf> = None;
+    let mut alg: Option<Alg> = None;
+
+    while let Some(arg) = args.next() {
+        let arg_str = arg.to_string_lossy();
+
+        if arg_str == "--help" || arg_str == "-h" {
+            return Err(usage(program));
+        }
+
+        if arg_str == "--alg" {
+            let Some(value) = args.next() else {
+                return Err(format!(
+                    "missing value for --alg (expected md5|sha256)\n{}",
+                    usage(program)
+                ));
+            };
+            alg = Some(parse_alg(&value).ok_or_else(|| {
+                format!(
+                    "invalid --alg value (expected md5|sha256): {}\n{}",
+                    value.to_string_lossy(),
+                    usage(program)
+                )
+            })?);
+            continue;
+        }
+
+        if let Some(rest) = arg_str.strip_prefix("--alg=") {
+            alg = Some(parse_alg_str(rest).ok_or_else(|| {
+                format!(
+                    "invalid --alg value (expected md5|sha256): {rest}\n{}",
+                    usage(program)
+                )
+            })?);
+            continue;
+        }
+
+        if input.is_none() {
+            input = Some(PathBuf::from(arg));
+            continue;
+        }
+
+        return Err(usage(program));
+    }
+
+    let Some(input) = input else {
+        return Err(usage(program));
+    };
+    Ok((input, alg))
+}
+
+fn parse_alg(arg: &OsString) -> Option<Alg> {
+    parse_alg_str(&arg.to_string_lossy())
+}
+
+fn parse_alg_str(s: &str) -> Option<Alg> {
+    if s.eq_ignore_ascii_case("md5") {
+        return Some(Alg::Md5);
+    }
+    if s.eq_ignore_ascii_case("sha256") {
+        return Some(Alg::Sha256);
+    }
+    None
 }
 
 fn load_vba_project_bin(path: &Path) -> Result<(Vec<u8>, String), String> {
