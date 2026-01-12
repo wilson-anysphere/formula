@@ -766,6 +766,23 @@ fn parse_txo_text_biff8(
         return Some(String::new());
     }
 
+    // Some nonstandard `.xls` producers appear to store BIFF8 TXO text continuation bytes without
+    // the leading "high-byte" option flags byte (i.e. using BIFF5-style raw bytes). If the first
+    // continuation fragment doesn't start with a plausible flags value, fall back to the BIFF5
+    // decoder which treats continuation bytes as ANSI/codepage bytes.
+    if let Some(first_continue_flags) = continues.first().and_then(|frag| frag.first().copied()) {
+        if !matches!(first_continue_flags, 0 | 1) {
+            push_warning(
+                warnings,
+                format!(
+                    "TXO record at offset {} has nonstandard CONTINUE text payload (missing BIFF8 flags byte); decoding as BIFF5 ANSI text",
+                    record.offset
+                ),
+            );
+            return parse_txo_text_biff5(record, codepage, warnings);
+        }
+    }
+
     // `cbRuns` indicates how many bytes at the end of the TXO continuation area are reserved for
     // rich-text formatting runs. We ignore those bytes so we don't misinterpret formatting run data
     // as characters if `cchText` is larger than the available text bytes (truncated/corrupt files).
@@ -1422,6 +1439,36 @@ mod tests {
         assert_eq!(note.obj_id, 1);
         assert_eq!(note.author, "Alice");
         assert_eq!(note.text, "Hello");
+    }
+
+    #[test]
+    fn parses_biff8_txo_text_when_continue_payload_is_missing_flags_byte() {
+        // Some nonstandard `.xls` producers appear to store the TXO continuation bytes without
+        // the leading BIFF8 "high-byte" flags byte. Best-effort parsing should fall back to
+        // treating the payload as BIFF5-style ANSI bytes.
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text_and_cb_runs(5, 4),
+            // CONTINUE payload contains the text bytes directly (no flags byte).
+            record(records::RECORD_CONTINUE, b"Hello"),
+            // Formatting runs CONTINUE payload (dummy bytes, no leading flags byte).
+            record(records::RECORD_CONTINUE, &[0u8; 4]),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("missing BIFF8 flags byte") || w.contains("decoding as BIFF5")),
+            "expected missing-flags warning; warnings={warnings:?}"
+        );
     }
 
     #[test]

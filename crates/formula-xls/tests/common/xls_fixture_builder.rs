@@ -692,6 +692,26 @@ pub fn build_note_comment_author_missing_flags_fixture_xls() -> Vec<u8> {
 }
 
 /// Build a BIFF8 `.xls` fixture containing a single sheet with a NOTE/OBJ/TXO comment where the
+/// TXO text continuation payload omits the BIFF8 flags byte and instead stores raw ANSI bytes
+/// (BIFF5-style).
+///
+/// Some `.xls` producers appear to omit the flags byte; the importer should still recover the
+/// comment text via best-effort decoding.
+pub fn build_note_comment_txo_text_missing_flags_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_txo_text_missing_flags_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a single sheet with a NOTE/OBJ/TXO comment where the
 /// TXO header reports `cchText=0` but still includes a `cbRuns` value and a continued text payload.
 ///
 /// Some `.xls` producers appear to zero out the `cchText` field while still writing the text into
@@ -2131,6 +2151,14 @@ fn build_note_comment_author_missing_flags_workbook_stream() -> Vec<u8> {
     )
 }
 
+fn build_note_comment_txo_text_missing_flags_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream(
+        "NotesTxoTextNoFlags",
+        &build_note_comment_txo_text_missing_flags_sheet_stream(),
+        1252,
+    )
+}
+
 fn build_note_comment_txo_cch_text_zero_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream(
         "NotesTxoCchZero",
@@ -2541,6 +2569,52 @@ fn build_note_comment_author_missing_flags_sheet_stream() -> Vec<u8> {
     );
     push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
     push_txo_logical_record(&mut sheet, TEXT);
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_note_comment_txo_text_missing_flags_sheet_stream() -> Vec<u8> {
+    const OBJECT_ID: u16 = 1;
+    const AUTHOR: &str = "Alice";
+    const TEXT: &str = "Hello";
+    const XF_GENERAL_CELL: u16 = 16;
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes());
+    dims.extend_from_slice(&1u32.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&1u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Ensure the anchor cell exists in the calamine value grid.
+    push_record(&mut sheet, RECORD_BLANK, &blank_cell(0, 0, XF_GENERAL_CELL));
+
+    push_record(
+        &mut sheet,
+        RECORD_NOTE,
+        &note_record(0u16, 0u16, OBJECT_ID, AUTHOR),
+    );
+    push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
+
+    // TXO header: cchText at offset 6, cbRuns at offset 12.
+    let mut txo = [0u8; 18];
+    txo[6..8].copy_from_slice(&(TEXT.len() as u16).to_le_bytes());
+    txo[12..14].copy_from_slice(&4u16.to_le_bytes()); // cbRuns
+    push_record(&mut sheet, RECORD_TXO, &txo);
+
+    // CONTINUE: text bytes only (missing the BIFF8 flags byte).
+    push_record(&mut sheet, RECORD_CONTINUE, TEXT.as_bytes());
+
+    // Formatting runs continuation.
+    push_record(&mut sheet, RECORD_CONTINUE, &[0u8; 4]);
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
