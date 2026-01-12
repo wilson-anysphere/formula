@@ -1,9 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use formula_engine::{
-    lex, EditError as EngineEditError, Engine, EditOp as EngineEditOp,
-    EditResult as EngineEditResult, ErrorKind, NameDefinition, NameScope, ParseOptions, TokenKind,
-    Value as EngineValue,
+    EditError as EngineEditError, Engine, EditOp as EngineEditOp, EditResult as EngineEditResult,
+    ErrorKind, NameDefinition, NameScope, Value as EngineValue,
 };
 use formula_engine::locale::{
     canonicalize_formula, get_locale, FormulaLocale, ValueLocaleConfig, EN_US,
@@ -36,121 +35,6 @@ pub struct CellChange {
 
 fn js_err(message: impl ToString) -> JsValue {
     JsValue::from_str(&message.to_string())
-}
-
-#[derive(Debug, Serialize)]
-struct FormulaTokenDto {
-    kind: String,
-    span: WasmSpan,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    value: Option<JsonValue>,
-}
-
-fn token_kind_to_dto(kind: TokenKind) -> (String, Option<JsonValue>) {
-    match kind {
-        TokenKind::Number(raw) => ("Number".to_string(), Some(JsonValue::String(raw))),
-        TokenKind::String(value) => ("String".to_string(), Some(JsonValue::String(value))),
-        TokenKind::Boolean(v) => ("Boolean".to_string(), Some(JsonValue::Bool(v))),
-        TokenKind::Error(code) => ("Error".to_string(), Some(JsonValue::String(code))),
-        TokenKind::Cell(cell) => (
-            "Cell".to_string(),
-            Some(JsonValue::Object(
-                [
-                    ("col", JsonValue::from(cell.col)),
-                    ("row", JsonValue::from(cell.row)),
-                    ("colAbs", JsonValue::Bool(cell.col_abs)),
-                    ("rowAbs", JsonValue::Bool(cell.row_abs)),
-                ]
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v))
-                .collect(),
-            )),
-        ),
-        TokenKind::R1C1Cell(cell) => (
-            "R1C1Cell".to_string(),
-            Some(JsonValue::Object(
-                [
-                    (
-                        "row",
-                        serde_json::to_value(cell.row).unwrap_or(JsonValue::Null),
-                    ),
-                    (
-                        "col",
-                        serde_json::to_value(cell.col).unwrap_or(JsonValue::Null),
-                    ),
-                ]
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v))
-                .collect(),
-            )),
-        ),
-        TokenKind::R1C1Row(row) => (
-            "R1C1Row".to_string(),
-            Some(JsonValue::Object(
-                [(
-                    "row",
-                    serde_json::to_value(row.row).unwrap_or(JsonValue::Null),
-                )]
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v))
-                .collect(),
-            )),
-        ),
-        TokenKind::R1C1Col(col) => (
-            "R1C1Col".to_string(),
-            Some(JsonValue::Object(
-                [(
-                    "col",
-                    serde_json::to_value(col.col).unwrap_or(JsonValue::Null),
-                )]
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v))
-                .collect(),
-            )),
-        ),
-        TokenKind::Ident(name) => ("Ident".to_string(), Some(JsonValue::String(name))),
-        TokenKind::QuotedIdent(name) => ("QuotedIdent".to_string(), Some(JsonValue::String(name))),
-        TokenKind::Whitespace(text) => ("Whitespace".to_string(), Some(JsonValue::String(text))),
-        TokenKind::Intersect(text) => ("Intersect".to_string(), Some(JsonValue::String(text))),
-        TokenKind::LParen => ("LParen".to_string(), None),
-        TokenKind::RParen => ("RParen".to_string(), None),
-        TokenKind::LBrace => ("LBrace".to_string(), None),
-        TokenKind::RBrace => ("RBrace".to_string(), None),
-        TokenKind::LBracket => ("LBracket".to_string(), None),
-        TokenKind::RBracket => ("RBracket".to_string(), None),
-        TokenKind::Bang => ("Bang".to_string(), None),
-        TokenKind::Colon => ("Colon".to_string(), None),
-        TokenKind::ArgSep => ("ArgSep".to_string(), None),
-        TokenKind::Union => ("Union".to_string(), None),
-        TokenKind::ArrayRowSep => ("ArrayRowSep".to_string(), None),
-        TokenKind::ArrayColSep => ("ArrayColSep".to_string(), None),
-        TokenKind::Plus => ("Plus".to_string(), None),
-        TokenKind::Minus => ("Minus".to_string(), None),
-        TokenKind::Star => ("Star".to_string(), None),
-        TokenKind::Slash => ("Slash".to_string(), None),
-        TokenKind::Caret => ("Caret".to_string(), None),
-        TokenKind::Amp => ("Amp".to_string(), None),
-        TokenKind::Percent => ("Percent".to_string(), None),
-        TokenKind::Hash => ("Hash".to_string(), None),
-        TokenKind::Eq => ("Eq".to_string(), None),
-        TokenKind::Ne => ("Ne".to_string(), None),
-        TokenKind::Lt => ("Lt".to_string(), None),
-        TokenKind::Gt => ("Gt".to_string(), None),
-        TokenKind::Le => ("Le".to_string(), None),
-        TokenKind::Ge => ("Ge".to_string(), None),
-        TokenKind::At => ("At".to_string(), None),
-        TokenKind::Eof => ("Eof".to_string(), None),
-    }
-}
-
-fn parse_options_from_js(options: Option<JsValue>) -> Result<ParseOptions, JsValue> {
-    let Some(value) = options else {
-        return Ok(ParseOptions::default());
-    };
-    if value.is_undefined() || value.is_null() {
-        return Ok(ParseOptions::default());
-    }
-    serde_wasm_bindgen::from_value(value).map_err(|err| js_err(err.to_string()))
 }
 
 fn edit_error_to_string(err: EngineEditError) -> String {
@@ -2071,29 +1955,6 @@ impl WasmWorkbook {
     pub fn default_sheet_name() -> String {
         DEFAULT_SHEET.to_string()
     }
-}
-
-#[wasm_bindgen(js_name = "lexFormula")]
-pub fn lex_formula_js(formula: String, options: Option<JsValue>) -> Result<JsValue, JsValue> {
-    ensure_rust_constructors_run();
-    let opts = parse_options_from_js(options)?;
-
-    let tokens = lex(&formula, &opts).map_err(|err| js_err(err.to_string()))?;
-    let out: Vec<FormulaTokenDto> = tokens
-        .into_iter()
-        .map(|token| {
-            let span = WasmSpan {
-                start: byte_index_to_utf16_cursor(&formula, token.span.start),
-                end: byte_index_to_utf16_cursor(&formula, token.span.end),
-            };
-            let (kind, value) = token_kind_to_dto(token.kind);
-            FormulaTokenDto { kind, span, value }
-        })
-        .collect();
-
-    use serde::ser::Serialize as _;
-    out.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
-        .map_err(|err| js_err(err.to_string()))
 }
 
 #[cfg(test)]
