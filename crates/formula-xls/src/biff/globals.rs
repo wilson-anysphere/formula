@@ -39,9 +39,6 @@ const RECORD_PASSWORD: u16 = 0x0013;
 // WINDOWPROTECT [MS-XLS 2.4.347] (lock workbook windows)
 const RECORD_WINDOWPROTECT: u16 = 0x0019;
 const RECORD_WINDOW1: u16 = 0x003D;
-// FILEPASS [MS-XLS 2.4.105] indicates the workbook stream is encrypted/password-protected.
-// When present in the workbook globals substream, subsequent records are encrypted.
-const RECORD_FILEPASS: u16 = 0x002F;
 const RECORD_FORMAT_BIFF8: u16 = 0x041E;
 const RECORD_FORMAT2_BIFF5: u16 = 0x001E;
 const RECORD_PALETTE: u16 = 0x0092;
@@ -789,7 +786,7 @@ pub(crate) fn parse_biff_workbook_globals(
             // This record indicates the workbook is encrypted/password-protected. We do not
             // attempt to parse encryption details; callers should treat the workbook stream as
             // unreadable without a password and abort import.
-            RECORD_FILEPASS => {
+            records::RECORD_FILEPASS => {
                 out.is_encrypted = true;
                 // Stop scanning: subsequent records are encrypted and may decode to nonsense.
                 // Treat this as an intentional early-termination so we don't emit a misleading
