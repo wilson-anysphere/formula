@@ -106,6 +106,26 @@ In `docker-compose.yml`, the sync server is configured to reuse the API secret b
 SYNC_TOKEN_SECRET=my-local-sync-secret docker compose up --build
 ```
 
+### Sync token introspection (revocation + permission revalidation)
+
+When the sync server verifies JWTs locally (`SYNC_SERVER_AUTH_MODE=jwt-hs256`), token claims can become stale (e.g. if
+sessions are revoked or document permissions change).
+
+To have the sync server revalidate tokens against server-side state, use the API internal introspection endpoint:
+
+- API: `POST /internal/sync/introspect` (requires `INTERNAL_ADMIN_TOKEN` via `x-internal-admin-token`)
+
+Sync server options:
+
+- **Auth mode** (recommended for production deployments): `SYNC_SERVER_AUTH_MODE=introspect`
+  - `SYNC_SERVER_INTROSPECT_URL=<api base url>`
+  - `SYNC_SERVER_INTROSPECT_TOKEN=<same as INTERNAL_ADMIN_TOKEN>`
+- **Optional revalidation** (keep JWT auth, but revalidate during upgrade): set
+  - `SYNC_SERVER_INTROSPECTION_URL=<api base url>`
+  - `SYNC_SERVER_INTROSPECTION_TOKEN=<same as INTERNAL_ADMIN_TOKEN>`
+
+In both cases the sync server forwards `clientIp` and `userAgent` so the API can enforce org IP allowlists.
+
 ## Secret store configuration
 
 The API includes a small database-backed encrypted secret store (`secrets` table). It is used for things like:
