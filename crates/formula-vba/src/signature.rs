@@ -533,10 +533,12 @@ pub fn verify_vba_digital_signature_bound(
             }
 
             VbaSignatureStreamKind::Unknown => {
-                // Unknown stream variant: conservative fallback.
+                // Unknown stream variant: best-effort fallback.
                 //
-                // Only treat the signature as bound if exactly one supported Contents Hash version
-                // matches the signed digest.
+                // If we can compute *all* plausible contents-hash candidates derived from the signed
+                // digest length:
+                // - any match => BoundVerified
+                // - no match  => BoundMismatch
                 let signed_digest = signed.digest.as_slice();
                 let mut match_count = 0usize;
                 let mut missing_candidate = false;
@@ -603,14 +605,21 @@ pub fn verify_vba_digital_signature_bound(
 
                 debug.computed_digest = matching_digest.or(first_computed);
 
-                if signature.verification == VbaSignatureVerification::SignedVerified
-                    && match_count == 1
-                    && !missing_candidate
-                {
-                    return Ok(Some(VbaDigitalSignatureBound {
-                        signature,
-                        binding: VbaProjectBindingVerification::BoundVerified(debug),
-                    }));
+                if signature.verification == VbaSignatureVerification::SignedVerified && !missing_candidate {
+                    if match_count > 0 {
+                        return Ok(Some(VbaDigitalSignatureBound {
+                            signature,
+                            binding: VbaProjectBindingVerification::BoundVerified(debug),
+                        }));
+                    }
+                    // Only treat this as a definite mismatch when we computed at least one plausible
+                    // candidate digest (e.g. MD5/SHA-256-sized digests).
+                    if debug.computed_digest.is_some() {
+                        return Ok(Some(VbaDigitalSignatureBound {
+                            signature,
+                            binding: VbaProjectBindingVerification::BoundMismatch(debug),
+                        }));
+                    }
                 }
             }
         }
