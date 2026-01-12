@@ -343,6 +343,81 @@ test.describe("grid scrolling + virtualization", () => {
     expect(drawn.ranges[0].rect.height).toBeGreaterThan(0);
   });
 
+  test("name box Go To resolves sheet display names and ignores stale names after rename", async ({ page }) => {
+    await gotoDesktop(page);
+    await waitForIdle(page);
+
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+
+      // Ensure the sheet exists in the metadata store with a user-facing display name.
+      // `id` is the stable sheet id used by the DocumentController.
+      const store = (app as any).getWorkbookSheetStore?.();
+      if (!store) throw new Error("Missing workbook sheet store");
+      store.addAfter("Sheet1", { id: "sheet-1", name: "Budget" });
+
+      // Materialize the sheet in the DocumentController.
+      app.getDocument().setCellValue("sheet-1", "A1", "BudgetCell");
+
+      // Start from Sheet1 so sheet-qualified Go To must resolve by display name.
+      app.activateSheet("Sheet1");
+      app.activateCell({ sheetId: "Sheet1", row: 0, col: 0 });
+    });
+    await waitForIdle(page);
+
+    const address = page.getByTestId("formula-address");
+    await address.click();
+    await address.fill("Budget!A1");
+    await address.press("Enter");
+    await waitForIdle(page);
+
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    expect(await page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("sheet-1");
+
+    // Rename the display name and ensure the new name resolves.
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      const store = (app as any).getWorkbookSheetStore?.();
+      if (!store) throw new Error("Missing workbook sheet store");
+      store.rename("sheet-1", "Budget2026");
+
+      // Switch away so we can ensure stale-name Go To doesn't switch sheets.
+      app.activateSheet("Sheet1");
+    });
+    await waitForIdle(page);
+
+    await address.click();
+    await address.fill("Budget2026!A1");
+    await address.press("Enter");
+    await waitForIdle(page);
+    expect(await page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("sheet-1");
+
+    // Stale display name should not create a phantom sheet or change selection.
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      app.activateSheet("Sheet1");
+      app.activateCell({ sheetId: "Sheet1", row: 0, col: 0 });
+    });
+    await waitForIdle(page);
+
+    await address.click();
+    await address.fill("Budget!A1");
+    await address.press("Enter");
+    await waitForIdle(page);
+
+    const state = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      return { activeSheetId: app.getCurrentSheetId(), sheetIds: app.getDocument().getSheetIds() };
+    });
+    expect(state.activeSheetId).toBe("Sheet1");
+    expect(state.sheetIds).not.toContain("Budget");
+  });
+
   test("wheel scroll right reaches far columns and clicking selects correct cell", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);
