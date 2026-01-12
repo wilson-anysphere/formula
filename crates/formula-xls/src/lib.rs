@@ -332,7 +332,11 @@ fn import_xls_path_with_biff_reader(
             }
             out.workbook_protection = std::mem::take(&mut globals.workbook_protection);
             workbook_active_tab = globals.active_tab_index;
-            out.view.window = globals.workbook_window.take();
+            // `Workbook.view.window` is optional metadata. Prefer any value already populated on the
+            // model (e.g. future calamine support) over our best-effort BIFF parsing.
+            if out.view.window.is_none() {
+                out.view.window = globals.workbook_window.take();
+            }
             warnings.extend(globals.warnings.drain(..).map(ImportWarning::new));
             sheet_tab_colors = Some(std::mem::take(&mut globals.sheet_tab_colors));
 
