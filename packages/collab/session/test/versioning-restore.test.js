@@ -28,6 +28,8 @@ function snapshotSheets(session) {
   return session.sheets.toArray().map((sheet) => ({
     id: String(sheet.get("id") ?? ""),
     name: sheet.get("name") == null ? null : String(sheet.get("name")),
+    visibility: sheet.get("visibility") == null ? "visible" : String(sheet.get("visibility")),
+    tabColor: sheet.get("tabColor") == null ? null : String(sheet.get("tabColor")),
   }));
 }
 
@@ -108,6 +110,8 @@ test("CollabVersioning integration: restore syncs + persists (sync-server)", asy
   // Workbook metadata that should be included in checkpoints/restores.
   sheetsA.addSheet({ id: "Sheet2", name: "Budget" });
   sheetsA.moveSheet("Sheet1", 1);
+  sheetsA.setTabColor("Sheet2", "ff00ff00");
+  sheetsA.setVisibility("Sheet2", "hidden");
   namedRangesA.set("MyRange", { sheetId: "Sheet2", range: "A1:B2" });
   metadataA.set("title", "Quarterly Budget");
 
@@ -115,6 +119,8 @@ test("CollabVersioning integration: restore syncs + persists (sync-server)", asy
     const sheets = snapshotSheets(sessionB);
     if (sheets.length !== 2) return false;
     if (sheets[0]?.id !== "Sheet2" || sheets[0]?.name !== "Budget") return false;
+    if (sheets[0]?.visibility !== "hidden") return false;
+    if (sheets[0]?.tabColor !== "FF00FF00") return false;
     if (sheets[1]?.id !== "Sheet1") return false;
     const nr = sessionB.namedRanges.get("MyRange");
     if (nr?.sheetId !== "Sheet2" || nr?.range !== "A1:B2") return false;
@@ -152,6 +158,8 @@ test("CollabVersioning integration: restore syncs + persists (sync-server)", asy
      const sheets = snapshotSheets(sessionB);
      if (sheets.length !== 2) return false;
      if (sheets[0]?.id !== "Sheet2" || sheets[0]?.name !== "Budget") return false;
+     if (sheets[0]?.visibility !== "hidden") return false;
+     if (sheets[0]?.tabColor !== "FF00FF00") return false;
     if (sheets[1]?.id !== "Sheet1") return false;
     const nr = sessionB.namedRanges.get("MyRange");
     if (nr?.sheetId !== "Sheet2" || nr?.range !== "A1:B2") return false;

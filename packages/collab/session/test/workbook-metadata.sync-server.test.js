@@ -27,6 +27,8 @@ function snapshotSheets(session) {
   return session.sheets.toArray().map((sheet) => ({
     id: String(sheet.get("id") ?? ""),
     name: sheet.get("name") == null ? null : String(sheet.get("name")),
+    visibility: sheet.get("visibility") == null ? "visible" : String(sheet.get("visibility")),
+    tabColor: sheet.get("tabColor") == null ? null : String(sheet.get("tabColor")),
   }));
 }
 
@@ -92,6 +94,8 @@ test("CollabSession workbook metadata persists via sync-server (sheets + namedRa
 
   sheetsA.addSheet({ id: "Sheet2", name: "Budget" });
   sheetsA.moveSheet("Sheet1", 1);
+  sheetsA.setTabColor("Sheet2", "ffff0000");
+  sheetsA.setVisibility("Sheet2", "hidden");
   namedRangesA.set("MyRange", { sheetId: "Sheet2", range: "A1:B2" });
   metadataA.set("title", "Quarterly Budget");
 
@@ -99,6 +103,8 @@ test("CollabSession workbook metadata persists via sync-server (sheets + namedRa
     const bSheets = snapshotSheets(sessionB);
     if (bSheets.length !== 2) return false;
     if (bSheets[0]?.id !== "Sheet2" || bSheets[0]?.name !== "Budget") return false;
+    if (bSheets[0]?.tabColor !== "FFFF0000") return false;
+    if (bSheets[0]?.visibility !== "hidden") return false;
     if (bSheets[1]?.id !== "Sheet1") return false;
     const nr = sessionB.namedRanges.get("MyRange");
     const title = sessionB.metadata.get("title");
@@ -108,6 +114,8 @@ test("CollabSession workbook metadata persists via sync-server (sheets + namedRa
   assert.deepEqual(snapshotSheets(sessionB).map((s) => s.id), ["Sheet2", "Sheet1"]);
   assert.deepEqual(sessionB.namedRanges.get("MyRange"), { sheetId: "Sheet2", range: "A1:B2" });
   assert.equal(sessionB.metadata.get("title"), "Quarterly Budget");
+  assert.equal(snapshotSheets(sessionB).find((s) => s.id === "Sheet2")?.visibility, "hidden");
+  assert.equal(snapshotSheets(sessionB).find((s) => s.id === "Sheet2")?.tabColor, "FFFF0000");
 
   // Tear down clients and restart the server, keeping the same data directory.
   sessionA.destroy();
@@ -143,6 +151,8 @@ test("CollabSession workbook metadata persists via sync-server (sheets + namedRa
     const sheets = snapshotSheets(sessionC);
     if (sheets.length !== 2) return false;
     if (sheets[0]?.id !== "Sheet2" || sheets[0]?.name !== "Budget") return false;
+    if (sheets[0]?.tabColor !== "FFFF0000") return false;
+    if (sheets[0]?.visibility !== "hidden") return false;
     if (sheets[1]?.id !== "Sheet1") return false;
     const nr = sessionC.namedRanges.get("MyRange");
     const title = sessionC.metadata.get("title");
@@ -152,4 +162,6 @@ test("CollabSession workbook metadata persists via sync-server (sheets + namedRa
   assert.deepEqual(snapshotSheets(sessionC).map((s) => s.id), ["Sheet2", "Sheet1"]);
   assert.deepEqual(sessionC.namedRanges.get("MyRange"), { sheetId: "Sheet2", range: "A1:B2" });
   assert.equal(sessionC.metadata.get("title"), "Quarterly Budget");
+  assert.equal(snapshotSheets(sessionC).find((s) => s.id === "Sheet2")?.visibility, "hidden");
+  assert.equal(snapshotSheets(sessionC).find((s) => s.id === "Sheet2")?.tabColor, "FFFF0000");
 });
