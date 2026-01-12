@@ -155,7 +155,7 @@ fn get_rel_id(node: &roxmltree::Node<'_, '_>) -> Option<String> {
                 })
                 .map(|attr| attr.value())
         })
-        .map(|s| s.to_string())
+        .map(|s| s.trim().to_string())
 }
 
 fn strip_fragment(target: &str) -> &str {

@@ -178,3 +178,37 @@ fn rich_value_rel_resolve_target_tolerates_targets_prefixed_with_xl_dir() {
         Some("xl/media/image1.png")
     );
 }
+
+#[test]
+fn rich_value_rel_trims_r_id_whitespace() {
+    // Some producers emit whitespace around `r:id` values in richValueRel.xml. Ensure we trim the
+    // values so they still match relationship IDs in richValueRel.xml.rels.
+    let rich_value_rel_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<richValueRel xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rel r:id=" rId1 "/>
+</richValueRel>"#;
+
+    let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+    Target="../media/image1.png"/>
+</Relationships>"#;
+
+    let pkg = build_package(&[
+        ("xl/richData/richValueRel.xml", rich_value_rel_xml),
+        ("xl/richData/_rels/richValueRel.xml.rels", rels_xml),
+        ("xl/media/image1.png", b"png-bytes"),
+    ]);
+
+    let rels = RichValueRels::from_package(&pkg)
+        .expect("parse richValueRel.xml")
+        .expect("richValueRel.xml present");
+
+    assert_eq!(rels.r_ids, vec!["rId1".to_string()]);
+    assert_eq!(
+        rels.resolve_target(&pkg, 0).as_deref(),
+        Some("xl/media/image1.png")
+    );
+}
