@@ -162,6 +162,10 @@ export class DesktopSharedGrid {
     hSize: null,
     hOffset: null
   };
+  private readonly scrollbarThumbScratch = {
+    v: { size: 0, offset: 0 },
+    h: { size: 0, offset: 0 }
+  };
 
   private readonly frozenRows: number;
   private readonly frozenCols: number;
@@ -1970,7 +1974,8 @@ export class DesktopSharedGrid {
         scrollPos: scroll.y,
         viewportSize: Math.max(0, viewport.height - frozenHeight),
         contentSize: Math.max(0, viewport.totalHeight - frozenHeight),
-        trackSize
+        trackSize,
+        out: this.scrollbarThumbScratch.v
       });
 
       if (this.lastScrollbarThumb.vSize !== thumb.size) {
@@ -1994,7 +1999,8 @@ export class DesktopSharedGrid {
         scrollPos: scroll.x,
         viewportSize: Math.max(0, viewport.width - frozenWidth),
         contentSize: Math.max(0, viewport.totalWidth - frozenWidth),
-        trackSize
+        trackSize,
+        out: this.scrollbarThumbScratch.h
       });
 
       if (this.lastScrollbarThumb.hSize !== thumb.size) {

@@ -322,6 +322,10 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     hSize: null,
     hOffset: null
   });
+  const scrollbarThumbScratchRef = useRef({
+    v: { size: 0, offset: 0 },
+    h: { size: 0, offset: 0 }
+  });
 
   const rendererRef = useRef<CanvasGridRenderer | null>(null);
   const onSelectionChangeRef = useRef(props.onSelectionChange);
@@ -496,7 +500,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       viewportSize: Math.max(0, viewport.height - frozenHeight),
       contentSize: Math.max(0, viewport.totalHeight - frozenHeight),
       trackSize: vTrackSize,
-      minThumbSize
+      minThumbSize,
+      out: scrollbarThumbScratchRef.current.v
     });
 
     const prevThumb = scrollbarThumbRef.current;
@@ -514,7 +519,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       viewportSize: Math.max(0, viewport.width - frozenWidth),
       contentSize: Math.max(0, viewport.totalWidth - frozenWidth),
       trackSize: hTrackSize,
-      minThumbSize
+      minThumbSize,
+      out: scrollbarThumbScratchRef.current.h
     });
 
     if (prevThumb.hSize !== hThumbMetrics.size) {
