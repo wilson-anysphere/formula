@@ -327,13 +327,22 @@
   display: block;
 }
 
+.ribbon-button__caret svg,
+.ribbon__collapse-toggle svg {
+  display: block;
+}
+
 .ribbon-button__label {
   display: inline-flex;
   align-items: center;
 }
 
 .ribbon-button__caret {
-  font-size: 10px;
+  display: inline-flex;
+  width: 10px;
+  height: 10px;
+  align-items: center;
+  justify-content: center;
   color: var(--text-secondary);
   margin-left: 2px;
 }
@@ -382,7 +391,8 @@
   right: 4px;
   bottom: 2px;
   margin: 0;
-  font-size: 9px;
+  width: 9px;
+  height: 9px;
 }
 
 /* Dropdown menu */

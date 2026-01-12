@@ -189,7 +189,7 @@ export const RibbonButton = React.memo(function RibbonButton({
       <span className="ribbon-button__label">{label}</span>
       {kind === "dropdown" ? (
         <span className="ribbon-button__caret" aria-hidden="true">
-          ▾
+          <RibbonIcon id="arrowDown" />
         </span>
       ) : null}
     </button>

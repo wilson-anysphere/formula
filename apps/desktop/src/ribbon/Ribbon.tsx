@@ -669,7 +669,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
             aria-pressed={userCollapsed}
             onClick={toggleUserCollapsed}
           >
-            {userCollapsed ? "▾" : "▴"}
+            <RibbonIcon id={userCollapsed ? "arrowDown" : "arrowUp"} width={14} height={14} />
           </button>
         </div>
       </div>
