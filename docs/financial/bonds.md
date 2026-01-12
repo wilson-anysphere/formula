@@ -19,7 +19,9 @@ Implementation should reuse existing helpers where possible:
 - Month stepping / date conversion: `crates/formula-engine/src/functions/date_time/mod.rs` (`edate`, `days360`, `yearfrac`)
 - Iterative solver: `crates/formula-engine/src/functions/financial/iterative.rs` (`newton_raphson`, `EXCEL_ITERATION_TOLERANCE`)
 
-> Scope note: `COUP*`, `PRICE`, `YIELD`, `DURATION`, `MDURATION` assume a **regular coupon schedule** (no odd first/last period). Excel provides `ODDF*` / `ODDL*` for irregular schedules; those are out of scope for this doc.
+> Scope note: `COUP*`, `PRICE`, `YIELD`, `DURATION`, `MDURATION` assume a **regular coupon schedule**
+> (no odd first/last period). Excel provides `ODDF*` / `ODDL*` for irregular schedules; those are
+> out of scope for this doc. See [`docs/financial-odd-coupon-bonds.md`](../financial-odd-coupon-bonds.md).
 
 ---
 
