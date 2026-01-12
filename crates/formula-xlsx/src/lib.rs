@@ -526,10 +526,7 @@ impl XlsxDocument {
         // cell value. When the caller edits the cell value we do not currently update
         // `xl/metadata.xml`, so keep `vm` only when the cell remains a rich-value placeholder
         // (`#VALUE!`).
-        if !matches!(
-            cell_record.value,
-            CellValue::Error(ErrorValue::Value)
-        ) {
+        if !matches!(cell_record.value, CellValue::Error(ErrorValue::Value)) {
             meta.vm = None;
         }
 
