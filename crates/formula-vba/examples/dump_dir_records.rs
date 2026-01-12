@@ -160,6 +160,9 @@ fn dump_dir_records(decompressed: &[u8]) {
             if !data.is_empty() {
                 println!("      ascii: {}", bytes_to_ascii_preview(data));
             }
+            if let Some(v) = record_numeric_preview(id, data) {
+                println!("      value: {v}");
+            }
 
             // MS-OVBA v3 "Unicode" record variants often store:
             //   u32 length prefix (code units or bytes) || UTF-16LE bytes
@@ -170,16 +173,19 @@ fn dump_dir_records(decompressed: &[u8]) {
                 // v3 Unicode record variants, but fall back to decoding the raw bytes if the record
                 // does not match the expected shape. This keeps the output useful even when we are
                 // pointed at non-canonical or partially malformed inputs.
-                let bytes_to_decode = unicode_record_payload_len_prefixed(data).unwrap_or(data);
+                let (bytes_to_decode, label) = match unicode_record_payload_len_prefixed(data) {
+                    Some(payload) => (payload, "utf16le(payload)"),
+                    None => (data, "utf16le(raw)"),
+                };
                 if looks_like_utf16le(bytes_to_decode) {
                     let (cow, had_errors) = UTF_16LE.decode_without_bom_handling(bytes_to_decode);
                     let mut s = cow.into_owned();
                     s.retain(|c| c != '\u{0000}');
                     let escaped = escape_str(&s);
                     if had_errors {
-                        println!("      utf16le(payload): {escaped} <decode errors>");
+                        println!("      {label}: {escaped} <decode errors>");
                     } else {
-                        println!("      utf16le(payload): {escaped}");
+                        println!("      {label}: {escaped}");
                     }
                 }
             } else if looks_like_utf16le(data) {
@@ -299,6 +305,47 @@ fn bytes_to_ascii_preview(bytes: &[u8]) -> String {
         }
     }
     out
+}
+
+fn record_numeric_preview(id: u16, data: &[u8]) -> Option<String> {
+    match id {
+        // PROJECTSYSKIND / PROJECTLCID / PROJECTLCIDINVOKE / PROJECTHELPCONTEXT / PROJECTLIBFLAGS
+        0x0001 | 0x0002 | 0x0014 | 0x0007 | 0x0008 if data.len() >= 4 => {
+            let n = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+            Some(format!("u32_le={n} (0x{n:08x})"))
+        }
+        // PROJECTCODEPAGE
+        0x0003 if data.len() >= 2 => {
+            let n = u16::from_le_bytes([data[0], data[1]]);
+            Some(format!("u16_le={n} (0x{n:04x})"))
+        }
+        // PROJECTVERSION is commonly `u16 major || u16 minor`, but some producers embed a longer
+        // structure. Print a best-effort interpretation.
+        0x0009 if data.len() == 4 => {
+            let major = u16::from_le_bytes([data[0], data[1]]);
+            let minor = u16::from_le_bytes([data[2], data[3]]);
+            Some(format!("version={major}.{minor} (u16/u16)"))
+        }
+        0x0009 if data.len() >= 10 => {
+            let reserved = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+            let major = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+            let minor = u16::from_le_bytes([data[8], data[9]]);
+            Some(format!(
+                "reserved=0x{reserved:08x} major={major} minor={minor} (u32/u32/u16)"
+            ))
+        }
+        // MODULETYPE
+        0x0021 | 0x0022 if data.len() >= 2 => {
+            let n = u16::from_le_bytes([data[0], data[1]]);
+            Some(format!("u16_le={n} (0x{n:04x})"))
+        }
+        // MODULETEXTOFFSET
+        0x0031 if data.len() >= 4 => {
+            let n = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+            Some(format!("u32_le={n} (0x{n:08x})"))
+        }
+        _ => None,
+    }
 }
 
 fn looks_like_utf16le(bytes: &[u8]) -> bool {
