@@ -479,6 +479,71 @@ test.describe("split view", () => {
     expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe(valueBefore);
   });
 
+  test("clipboard/comments/clear commands do not dispatch while secondary in-cell editing is active", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
+
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+    // Focus/select A1 in secondary pane and open the in-cell editor.
+    await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    await page.keyboard.press("F2");
+
+    const editor = secondary.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await expect(editor).toBeFocused();
+
+    // Record commands executed while editing. (We should not dispatch any spreadsheet commands
+    // from keybindings while a text editor is focused.)
+    await page.evaluate(() => {
+      const registry = (window as any).__formulaCommandRegistry;
+      if (!registry) throw new Error("Missing window.__formulaCommandRegistry");
+
+      (window as any).__executedCommandIds = [];
+      (window as any).__disposeExecutedCommandListener = registry.onDidExecuteCommand((evt: any) => {
+        (window as any).__executedCommandIds.push(evt.commandId);
+      });
+    });
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+
+    await page.keyboard.press(`${modifier}+C`);
+    await page.keyboard.press(`${modifier}+X`);
+    await page.keyboard.press(`${modifier}+V`);
+    await page.keyboard.press("Delete");
+    await page.keyboard.press("Backspace");
+    await page.keyboard.press("Shift+F2");
+
+    // Give any async dispatch a chance to run if it was (incorrectly) triggered.
+    await page.waitForTimeout(50);
+
+    const executed = await page.evaluate(() => (window as any).__executedCommandIds ?? []);
+    expect(executed).toEqual([]);
+
+    await page.evaluate(() => {
+      try {
+        (window as any).__disposeExecutedCommandListener?.();
+      } catch {
+        // ignore
+      }
+      (window as any).__disposeExecutedCommandListener = null;
+    });
+
+    // Clean up: cancel editing so later tests aren't affected.
+    await page.keyboard.press("Escape");
+    await waitForIdle(page);
+    await expect(editor).toBeHidden();
+  });
+
   test("primary in-cell edits commit on blur when clicking another cell (shared grid)", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
