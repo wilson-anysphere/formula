@@ -471,3 +471,72 @@ Even before full rich-data editing is implemented, round-trip compatibility need
 If you add fixtures for this feature, document them under `fixtures/xlsx/**` and update this doc with the observed exact XML. Also update:
 
 - [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md) (the detailed richValue* spec note)
+
+---
+
+## Existing regression coverage (do not duplicate)
+
+While planning richer `richData` support, multiple preservation/regression tests were proposed. The
+`crates/formula-xlsx/tests/` suite has since grown broader coverage. Before adding new tests for
+“preserve X on round-trip”, check the existing suite first.
+
+### `vm` / `cm` preservation
+
+- Capture on read (unit test):
+  - `crates/formula-xlsx/src/read/mod.rs` (`reads_cell_cm_and_vm_attributes_into_cell_meta`)
+- Preservation during cell patching:
+  - `crates/formula-xlsx/tests/cell_metadata_preservation.rs`
+  - `crates/formula-xlsx/tests/streaming_cell_metadata_preservation.rs`
+
+### `xl/metadata.xml` preservation
+
+- Document round-trip / part preservation:
+  - `crates/formula-xlsx/tests/metadata_and_richdata_preservation.rs`
+  - `crates/formula-xlsx/tests/preserve_rich_data_parts.rs`
+- Preservation through calcChain removal / recalc policy changes:
+  - `crates/formula-xlsx/tests/recalc_policy_preserves_metadata.rs`
+- Preservation when the writer needs to synthesize `sharedStrings.xml`:
+  - `crates/formula-xlsx/tests/richdata_preserved_on_save.rs`
+
+### `xl/richData/*` parts preservation
+
+- Package patching:
+  - `crates/formula-xlsx/tests/rich_data_streaming_patch_preservation.rs`
+- Document / streaming round-trip preservation:
+  - `crates/formula-xlsx/tests/metadata_and_richdata_preservation.rs`
+  - `crates/formula-xlsx/tests/streaming_preserve_rich_data_parts.rs`
+
+### Recalc-policy / calcChain removal (preserve metadata)
+
+- Ensures `calcChain.xml` can be dropped without also dropping `metadata.xml` (and their rels / content
+  types):
+  - `crates/formula-xlsx/tests/recalc_policy_preserves_metadata.rs`
+
+### SharedStrings synthesis preservation
+
+- Ensures rich-data parts are not rewritten/dropped when `sharedStrings.xml` is synthesized:
+  - `crates/formula-xlsx/tests/richdata_preserved_on_save.rs`
+- Ensures writer respects the sharedStrings target from `workbook.xml.rels` (and does not synthesize a
+  second `xl/sharedStrings.xml`):
+  - `crates/formula-xlsx/tests/shared_strings_target_resolution.rs`
+
+---
+
+## Internal task tracker (rich-data preservation)
+
+The following tasks are now redundant (already covered by repo tests), and should not be re-implemented
+as new standalone regression tests:
+
+| Task | Status | Covered by |
+|------|--------|------------|
+| 190 | Covered / redundant | `crates/formula-xlsx/tests/rich_data_streaming_patch_preservation.rs` |
+| 219 | Covered / redundant | `crates/formula-xlsx/src/read/mod.rs` + `crates/formula-xlsx/tests/cell_metadata_preservation.rs` |
+| 232 / 271 | Covered / redundant | `crates/formula-xlsx/tests/recalc_policy_preserves_metadata.rs` |
+| 238 | Covered / redundant | `crates/formula-xlsx/tests/streaming_cell_metadata_preservation.rs` |
+
+Remaining gaps (still worth doing) are tracked elsewhere and include:
+
+- Task 188 / 247: writer vm/cm emission
+- Task 194: `metadata.xml.rels` discovery
+- Task 344: real linked data types fixture (non-synthetic)
+- Task 372: module naming cleanup
