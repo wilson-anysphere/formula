@@ -1873,8 +1873,8 @@ fn eval_field_access(value: &Value, field_key: &str) -> Value {
         Value::Record(record) => record
             .get_field_case_insensitive(field_key)
             .unwrap_or(Value::Error(ErrorKind::Field)),
-        // Field access on a non-rich value yields `#VALUE!` (type mismatch). `#FIELD!` is reserved
-        // for missing fields on rich values.
+        // Field access on a non-rich value yields `#VALUE!` (wrong argument type). `#FIELD!` is
+        // reserved for missing fields on rich values.
         _ => Value::Error(ErrorKind::Value),
     }
 }

@@ -206,10 +206,7 @@ fn odd_coupon_settlement_boundary_behavior() {
         system,
     )
     .expect("ODDFPRICE should allow settlement == first_coupon");
-    assert!(
-        pr.is_finite() && pr > 0.0,
-        "expected finite price, got {pr}"
-    );
+    assert!(pr.is_finite() && pr > 0.0, "expected finite price, got {pr}");
     let yld_out = oddfyield(
         first_coupon,
         maturity2,

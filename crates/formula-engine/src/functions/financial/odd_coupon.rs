@@ -306,7 +306,7 @@ mod tests {
         let e_coupdays =
             super::super::coupon_schedule::coupdays(settlement, ncd, frequency, basis, system)
                 .unwrap();
-        assert_eq!(e_coupdays, e);
+        assert_eq!(e_coupdays, 360.0 / (frequency as f64));
     }
 }
 
@@ -334,9 +334,7 @@ fn oddf_equation(
         return Err(ExcelError::Num);
     }
 
-    // Excel-oracle parity (see `tools/excel-oracle/odd_coupon_boundary_cases.json`) indicates
-    // ODDF* accepts the boundary equalities `issue == settlement` and `settlement == first_coupon`
-    // (both yield finite results), while still rejecting `issue == first_coupon`.
+    // Excel-style chronology constraints (pinned by excel-oracle parity cases and unit tests):
     //
     // Chronology:
     // - `issue <= settlement <= first_coupon <= maturity`
@@ -372,6 +370,7 @@ fn oddf_equation(
     let dfc = days_between(issue, first_coupon, basis, system)?;
     let dsc = days_between(settlement, first_coupon, basis, system)?;
 
+    // When settlement is on the first coupon date, `dsc` is 0.
     if a < 0.0 || dfc <= 0.0 || dsc < 0.0 {
         return Err(ExcelError::Num);
     }
