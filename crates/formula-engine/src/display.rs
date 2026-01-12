@@ -22,7 +22,10 @@ pub fn format_value_for_display(
             Value::Bool(b) => FmtValue::Bool(*b),
             Value::Blank => FmtValue::Blank,
             Value::Error(e) => FmtValue::Error(e.as_code()),
-            Value::Reference(_) | Value::ReferenceUnion(_) => FmtValue::Error("#VALUE!"),
+            Value::Record(_)
+            | Value::Entity(_)
+            | Value::Reference(_)
+            | Value::ReferenceUnion(_) => FmtValue::Error("#VALUE!"),
             Value::Array(arr) => to_fmt_value(arr.get(0, 0).unwrap_or(&Value::Blank)),
             Value::Lambda(_) => FmtValue::Error("#CALC!"),
             Value::Spill { .. } => FmtValue::Error("#SPILL!"),

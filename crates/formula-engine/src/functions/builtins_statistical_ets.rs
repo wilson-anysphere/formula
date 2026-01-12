@@ -7,7 +7,7 @@ use crate::value::{ErrorKind, Value};
 fn collect_optional_numbers_from_arg(
     ctx: &dyn FunctionContext,
     expr: &CompiledExpr,
-) -> Result<Vec<Option<f64>>, ErrorKind> {
+    ) -> Result<Vec<Option<f64>>, ErrorKind> {
     fn coerce_cell(ctx: &dyn FunctionContext, v: &Value) -> Result<Option<f64>, ErrorKind> {
         match v {
             Value::Error(e) => Err(*e),

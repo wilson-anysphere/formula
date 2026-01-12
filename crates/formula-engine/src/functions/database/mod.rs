@@ -240,7 +240,9 @@ fn header_label(ctx: &dyn FunctionContext, value: &Value) -> Result<Option<Strin
         Value::Error(_) => Ok(None),
         // Header cells that evaluate to these internal runtime values are not considered valid
         // field names. Treat them as missing.
-        Value::Reference(_)
+        Value::Record(_)
+        | Value::Entity(_)
+        | Value::Reference(_)
         | Value::ReferenceUnion(_)
         | Value::Array(_)
         | Value::Lambda(_)

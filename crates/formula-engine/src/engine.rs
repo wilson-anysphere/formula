@@ -6135,17 +6135,19 @@ fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
         Value::Record(v) => bytecode::Value::Text(Arc::from(v.display.as_str())),
         Value::Blank => bytecode::Value::Empty,
         Value::Error(e) => bytecode::Value::Error(engine_error_to_bytecode(*e)),
+        Value::Lambda(_) => bytecode::Value::Error(bytecode::ErrorKind::Calc),
+        | Value::Reference(_)
+        | Value::ReferenceUnion(_) => {
+            bytecode::Value::Error(bytecode::ErrorKind::Value)
+        }
+        Value::Array(_) | Value::Spill { .. } => bytecode::Value::Error(bytecode::ErrorKind::Spill),
         other => match other {
             Value::Lambda(_) => bytecode::Value::Error(bytecode::ErrorKind::Calc),
-            Value::Reference(_) | Value::ReferenceUnion(_) => {
-                bytecode::Value::Error(bytecode::ErrorKind::Value)
-            }
-            Value::Array(_) | Value::Spill { .. } => {
-                bytecode::Value::Error(bytecode::ErrorKind::Spill)
-            }
-            // Rich values (e.g. Entity/Record) can exist in the engine grid but aren't represented
-            // natively in the bytecode runtime yet. Degrade them to their display string so they
-            // behave like text in references (e.g. SUM ignores them).
+            Value::Reference(_) | Value::ReferenceUnion(_) => bytecode::Value::Error(bytecode::ErrorKind::Value),
+            Value::Array(_) | Value::Spill { .. } => bytecode::Value::Error(bytecode::ErrorKind::Spill),
+            // Rich values can exist in the engine grid but may not be represented natively in the
+            // bytecode runtime yet. Degrade them to their display string so they behave like text
+            // in references (e.g. SUM ignores them).
             _ => bytecode::Value::Text(Arc::from(other.to_string())),
         },
     }

@@ -80,6 +80,8 @@ fn collect_npv_values_from_arg(
                         | Value::Entity(_)
                         | Value::Record(_)
                         | Value::Blank
+                        | Value::Record(_)
+                        | Value::Entity(_)
                         | Value::Array(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
@@ -106,6 +108,8 @@ fn collect_npv_values_from_arg(
                     | Value::Entity(_)
                     | Value::Record(_)
                     | Value::Blank
+                    | Value::Record(_)
+                    | Value::Entity(_)
                     | Value::Array(_)
                     | Value::Spill { .. }
                     | Value::Reference(_)
@@ -130,6 +134,8 @@ fn collect_npv_values_from_arg(
                         | Value::Entity(_)
                         | Value::Record(_)
                         | Value::Blank
+                        | Value::Record(_)
+                        | Value::Entity(_)
                         | Value::Array(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
@@ -168,6 +174,8 @@ fn collect_irr_values_from_arg(
                         | Value::Entity(_)
                         | Value::Record(_)
                         | Value::Blank
+                        | Value::Record(_)
+                        | Value::Entity(_)
                         | Value::Array(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
@@ -193,6 +201,8 @@ fn collect_irr_values_from_arg(
                     | Value::Entity(_)
                     | Value::Record(_)
                     | Value::Blank
+                    | Value::Record(_)
+                    | Value::Entity(_)
                     | Value::Array(_)
                     | Value::Spill { .. }
                     | Value::Reference(_)
@@ -217,6 +227,8 @@ fn collect_irr_values_from_arg(
                         | Value::Entity(_)
                         | Value::Record(_)
                         | Value::Blank
+                        | Value::Record(_)
+                        | Value::Entity(_)
                         | Value::Array(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)

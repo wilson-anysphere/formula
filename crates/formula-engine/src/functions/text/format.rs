@@ -71,7 +71,9 @@ pub fn text(
     let fmt_value = match value {
         Value::Error(e) => return Err(*e),
         Value::Spill { .. } => return Err(ErrorKind::Spill),
-        Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) => return Err(ErrorKind::Value),
+        Value::Reference(_)
+        | Value::ReferenceUnion(_)
+        | Value::Lambda(_) => return Err(ErrorKind::Value),
         Value::Array(arr) => return text(&arr.top_left(), format_text, date_system, value_locale),
         Value::Number(n) => {
             if !n.is_finite() {

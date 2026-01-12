@@ -38,10 +38,11 @@ fn xor_update(acc: &mut bool, value: &Value) -> Result<(), ErrorKind> {
         }
         Value::Blank => Ok(()),
         // Scalar text arguments accept TRUE/FALSE (and numeric text) coercions like NOT().
-        Value::Text(_) | Value::Entity(_) | Value::Record(_) => {
+        Value::Text(_) => {
             *acc ^= value.coerce_to_bool()?;
             Ok(())
         }
+        Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
         Value::Array(arr) => {
             for v in arr.iter() {
                 match v {
@@ -68,9 +69,10 @@ fn xor_update(acc: &mut bool, value: &Value) -> Result<(), ErrorKind> {
             }
             Ok(())
         }
-        Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) | Value::Spill { .. } => {
-            Err(ErrorKind::Value)
-        }
+        Value::Reference(_)
+        | Value::ReferenceUnion(_)
+        | Value::Lambda(_)
+        | Value::Spill { .. } => Err(ErrorKind::Value),
     }
 }
 

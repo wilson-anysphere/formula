@@ -34,6 +34,8 @@ fn push_numbers_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), Erro
                     | Value::Entity(_)
                     | Value::Record(_)
                     | Value::Blank
+                    | Value::Record(_)
+                    | Value::Entity(_)
                     | Value::Array(_)
                     | Value::Spill { .. }
                     | Value::Reference(_)
@@ -42,9 +44,12 @@ fn push_numbers_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), Erro
             }
             Ok(())
         }
-        Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) | Value::Spill { .. } => {
-            Err(ErrorKind::Value)
-        }
+        Value::Record(_)
+        | Value::Entity(_)
+        | Value::Reference(_)
+        | Value::ReferenceUnion(_)
+        | Value::Lambda(_)
+        | Value::Spill { .. } => Err(ErrorKind::Value),
     }
 }
 
@@ -64,6 +69,8 @@ fn push_numbers_from_reference(
             | Value::Entity(_)
             | Value::Record(_)
             | Value::Blank
+            | Value::Record(_)
+            | Value::Entity(_)
             | Value::Array(_)
             | Value::Spill { .. }
             | Value::Reference(_)
@@ -94,6 +101,8 @@ fn push_numbers_from_reference_union(
                 | Value::Entity(_)
                 | Value::Record(_)
                 | Value::Blank
+                | Value::Record(_)
+                | Value::Entity(_)
                 | Value::Array(_)
                 | Value::Spill { .. }
                 | Value::Reference(_)

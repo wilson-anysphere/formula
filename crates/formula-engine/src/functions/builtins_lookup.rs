@@ -1756,6 +1756,7 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
             Value::Bool(_) => Some(2),
             Value::Blank => Some(3),
             Value::Error(_) => Some(4),
+            Value::Record(_) | Value::Entity(_) => None,
             Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)

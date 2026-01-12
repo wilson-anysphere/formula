@@ -220,12 +220,15 @@ impl Array {
 
 /// Rich value representing an Excel Entity (linked data type).
 ///
-/// The engine treats entities as opaque values. Functions that accept "text-like" inputs
-/// (e.g. logical range semantics) should handle them similarly to text.
+/// The engine can treat entities as "text-like" (via their [`EntityValue::display`] string), but
+/// also stores a set of named fields that can be accessed via field-access formulas like
+/// `=A1.Price` / `=A1.["Change%"]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntityValue {
     /// Display string shown in the grid UI.
     pub display: String,
+    /// Field values for `.` access (case-insensitive at lookup time).
+    pub fields: HashMap<String, Value>,
 }
 
 impl EntityValue {
@@ -233,17 +236,29 @@ impl EntityValue {
     pub fn new(display: impl Into<String>) -> Self {
         Self {
             display: display.into(),
+            fields: HashMap::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_fields(display: impl Into<String>, fields: HashMap<String, Value>) -> Self {
+        Self {
+            display: display.into(),
+            fields,
         }
     }
 }
 
 /// Rich value representing an Excel Record.
 ///
-/// Records are treated as opaque values by the core engine for now.
+/// Records are "text-like" via their [`RecordValue::display`] string, but can also store a set of
+/// named fields for field-access formulas.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordValue {
     /// Display string shown in the grid UI.
     pub display: String,
+    /// Field values for `.` access (case-insensitive at lookup time).
+    pub fields: HashMap<String, Value>,
 }
 
 impl RecordValue {
@@ -251,6 +266,15 @@ impl RecordValue {
     pub fn new(display: impl Into<String>) -> Self {
         Self {
             display: display.into(),
+            fields: HashMap::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_fields(display: impl Into<String>, fields: HashMap<String, Value>) -> Self {
+        Self {
+            display: display.into(),
+            fields,
         }
     }
 }
@@ -328,7 +352,9 @@ impl Value {
             Value::Text(s) => coerce_text_to_number(s, ctx.value_locale(), ctx.now_utc(), ctx.date_system()),
             Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
-            Value::Reference(_)
+            Value::Record(_)
+            | Value::Entity(_)
+            | Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
             | Value::Lambda(_)
@@ -349,7 +375,9 @@ impl Value {
             ),
             Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
-            Value::Reference(_)
+            Value::Record(_)
+            | Value::Entity(_)
+            | Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
             | Value::Lambda(_)
@@ -365,7 +393,9 @@ impl Value {
             Value::Text(s) => parse_number(s, locale).map_err(map_excel_error),
             Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
-            Value::Reference(_)
+            Value::Record(_)
+            | Value::Entity(_)
+            | Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
             | Value::Lambda(_)
@@ -403,7 +433,9 @@ impl Value {
             }
             Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
-            Value::Reference(_)
+            Value::Record(_)
+            | Value::Entity(_)
+            | Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
             | Value::Lambda(_)
@@ -436,7 +468,9 @@ impl Value {
             }
             Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
-            Value::Reference(_)
+            Value::Record(_)
+            | Value::Entity(_)
+            | Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
             | Value::Lambda(_)
@@ -465,7 +499,9 @@ impl Value {
             }
             Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
-            Value::Reference(_)
+            Value::Record(_)
+            | Value::Entity(_)
+            | Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
             | Value::Lambda(_)
@@ -687,7 +723,10 @@ impl fmt::Display for Value {
             Value::Bool(b) => write!(f, "{b}"),
             Value::Blank => f.write_str(""),
             Value::Error(e) => write!(f, "{e}"),
-            Value::Reference(_) | Value::ReferenceUnion(_) => {
+            Value::Record(_)
+            | Value::Entity(_)
+            | Value::Reference(_)
+            | Value::ReferenceUnion(_) => {
                 f.write_str(ErrorKind::Value.as_code())
             }
             Value::Array(arr) => write!(f, "{}", arr.top_left()),

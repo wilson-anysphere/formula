@@ -43,6 +43,7 @@ pub enum TraceKind {
     CellRef,
     RangeRef,
     StructuredRef,
+    FieldAccess { field: String },
     NameRef { name: String },
     Group,
     Unary { op: UnaryOp },
@@ -90,6 +91,10 @@ pub enum SpannedExprKind<S> {
     RangeRef(crate::eval::RangeRef<S>),
     StructuredRef(crate::structured_refs::StructuredRef),
     NameRef(crate::eval::NameRef<S>),
+    FieldAccess {
+        base: Box<SpannedExpr<S>>,
+        field: String,
+    },
     Group(Box<SpannedExpr<S>>),
     Unary {
         op: UnaryOp,
@@ -145,6 +150,10 @@ impl<S: Clone> SpannedExpr<S> {
                 sheet: f(&n.sheet),
                 name: n.name.clone(),
             }),
+            SpannedExprKind::FieldAccess { base, field } => SpannedExprKind::FieldAccess {
+                base: Box::new(base.map_sheets(f)),
+                field: field.clone(),
+            },
             SpannedExprKind::Group(expr) => SpannedExprKind::Group(Box::new(expr.map_sheets(f))),
             SpannedExprKind::Unary { op, expr } => SpannedExprKind::Unary {
                 op: *op,
@@ -215,6 +224,7 @@ enum TokenKind {
     SheetName(String),
     StructuredRef(crate::structured_refs::StructuredRef),
     Error(ErrorKind),
+    Dot,
     LBrace,
     RBrace,
     LParen,
@@ -364,7 +374,20 @@ impl<'a> Lexer<'a> {
                 '"' => self.lex_string()?,
                 '\'' => self.lex_sheet_name()?,
                 '#' => self.lex_hash_or_error()?,
-                '.' | '0'..='9' => self.lex_number()?,
+                '.' => {
+                    // Leading-decimal numeric literal (e.g. `.5`) vs field-access operator.
+                    let next_is_digit = self.input[self.pos + 1..]
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_digit());
+                    if next_is_digit {
+                        self.lex_number()?
+                    } else {
+                        self.pos += 1;
+                        TokenKind::Dot
+                    }
+                }
+                '0'..='9' => self.lex_number()?,
                 _ if is_ident_start(ch) => self
                     .try_lex_structured_ref()
                     .unwrap_or_else(|| self.lex_ident()),
@@ -673,6 +696,27 @@ fn split_sheet_span_name(name: &str) -> Option<(String, String)> {
     Some((start.to_string(), end.to_string()))
 }
 
+fn parse_bracket_quoted_field_name(raw: &str) -> Result<String, ()> {
+    let raw = raw.trim();
+    let Some(inner) = raw.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
+        return Err(());
+    };
+
+    // Excel string escaping uses doubled quotes: `""` -> `"`.
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '"' && chars.peek() == Some(&'"') {
+            chars.next();
+            out.push('"');
+        } else {
+            out.push(ch);
+        }
+    }
+
+    Ok(out)
+}
+
 struct ParserImpl {
     tokens: Vec<Token>,
     pos: usize,
@@ -886,31 +930,7 @@ impl ParserImpl {
                     self.parse_sheet_ref()
                 } else {
                     self.next();
-                    match id.to_ascii_uppercase().as_str() {
-                        "TRUE" => Ok(SpannedExpr {
-                            span: tok.span,
-                            kind: SpannedExprKind::Bool(true),
-                        }),
-                        "FALSE" => Ok(SpannedExpr {
-                            span: tok.span,
-                            kind: SpannedExprKind::Bool(false),
-                        }),
-                        _ => match parse_a1(id) {
-                            Ok(addr) => self.parse_cell_or_range(
-                                SheetReference::Current,
-                                tok.span.start,
-                                addr,
-                                tok.span.end,
-                            ),
-                            Err(_) => Ok(SpannedExpr {
-                                span: tok.span,
-                                kind: SpannedExprKind::NameRef(crate::eval::NameRef {
-                                    sheet: SheetReference::Current,
-                                    name: id.clone(),
-                                }),
-                            }),
-                        },
-                    }
+                    self.parse_ident_or_field_access(tok.span, id)
                 }
             }
             TokenKind::SheetName(_name) => {
@@ -940,15 +960,209 @@ impl ParserImpl {
             other => Err(FormulaParseError::UnexpectedToken(format!("{other:?}"))),
         }?;
 
-        while matches!(self.peek().kind, TokenKind::Hash) {
-            let hash = self.next();
-            expr = SpannedExpr {
-                span: Span::new(expr.span.start, hash.span.end),
-                kind: SpannedExprKind::SpillRange(Box::new(expr)),
-            };
+        loop {
+            match &self.peek().kind {
+                TokenKind::Dot => {
+                    self.next(); // '.'
+                    expr = self.parse_field_access_after_dot(expr)?;
+                }
+                TokenKind::Hash => {
+                    let hash = self.next();
+                    expr = SpannedExpr {
+                        span: Span::new(expr.span.start, hash.span.end),
+                        kind: SpannedExprKind::SpillRange(Box::new(expr)),
+                    };
+                }
+                _ => break,
+            }
         }
 
         Ok(expr)
+    }
+
+    fn parse_ident_or_field_access(
+        &mut self,
+        span: Span,
+        id: &str,
+    ) -> Result<SpannedExpr<String>, FormulaParseError> {
+        if id.contains('.') {
+            return self.parse_dotted_identifier(span, id);
+        }
+
+        match id.to_ascii_uppercase().as_str() {
+            "TRUE" => Ok(SpannedExpr {
+                span,
+                kind: SpannedExprKind::Bool(true),
+            }),
+            "FALSE" => Ok(SpannedExpr {
+                span,
+                kind: SpannedExprKind::Bool(false),
+            }),
+            _ => match parse_a1(id) {
+                Ok(addr) => self.parse_cell_or_range(
+                    SheetReference::Current,
+                    span.start,
+                    addr,
+                    span.end,
+                ),
+                Err(_) => Ok(SpannedExpr {
+                    span,
+                    kind: SpannedExprKind::NameRef(crate::eval::NameRef {
+                        sheet: SheetReference::Current,
+                        name: id.to_string(),
+                    }),
+                }),
+            },
+        }
+    }
+
+    fn parse_dotted_identifier(
+        &mut self,
+        span: Span,
+        raw: &str,
+    ) -> Result<SpannedExpr<String>, FormulaParseError> {
+        // The lexer permits `.` inside identifiers (e.g. `_xlfn.XLOOKUP`). For formula field access
+        // expressions, treat a dotted identifier (`A1.Price.Net`) as nested postfix field accesses.
+        let mut parts: Vec<&str> = raw.split('.').collect();
+        if parts.len() < 2 {
+            return self.parse_ident_or_field_access(span, raw);
+        }
+
+        let mut pending_selector = false;
+        if parts.last().is_some_and(|p| p.is_empty()) {
+            // Identifier ended with a '.', typically from field selectors like `A1.["Price"]` where
+            // the lexer stops at `[` and leaves the dot attached to the identifier token.
+            parts.pop();
+            pending_selector = true;
+        }
+
+        if parts.iter().any(|p| p.is_empty()) {
+            return Err(FormulaParseError::UnexpectedToken(
+                "invalid dotted identifier".to_string(),
+            ));
+        }
+
+        let base_raw = parts
+            .first()
+            .copied()
+            .expect("split('.') always returns at least one element");
+        let base_end = span.start + base_raw.len();
+        let base_span = Span::new(span.start, base_end);
+
+        let mut expr = match base_raw.to_ascii_uppercase().as_str() {
+            "TRUE" => SpannedExpr {
+                span: base_span,
+                kind: SpannedExprKind::Bool(true),
+            },
+            "FALSE" => SpannedExpr {
+                span: base_span,
+                kind: SpannedExprKind::Bool(false),
+            },
+            _ => match parse_a1(base_raw) {
+                Ok(addr) => SpannedExpr {
+                    span: base_span,
+                    kind: SpannedExprKind::CellRef(crate::eval::CellRef {
+                        sheet: SheetReference::Current,
+                        addr,
+                    }),
+                },
+                Err(_) => SpannedExpr {
+                    span: base_span,
+                    kind: SpannedExprKind::NameRef(crate::eval::NameRef {
+                        sheet: SheetReference::Current,
+                        name: base_raw.to_string(),
+                    }),
+                },
+            },
+        };
+
+        // Apply all dotted field segments that are part of the same identifier token.
+        let mut cursor = base_raw.len();
+        for field in parts.iter().skip(1) {
+            cursor += 1; // '.'
+            cursor += field.len();
+            let end = span.start + cursor;
+            expr = SpannedExpr {
+                span: Span::new(expr.span.start, end),
+                kind: SpannedExprKind::FieldAccess {
+                    base: Box::new(expr),
+                    field: (*field).to_string(),
+                },
+            };
+        }
+
+        if pending_selector {
+            expr = self.parse_field_access_after_dot(expr)?;
+        }
+
+        Ok(expr)
+    }
+
+    fn parse_field_access_after_dot(
+        &mut self,
+        mut base: SpannedExpr<String>,
+    ) -> Result<SpannedExpr<String>, FormulaParseError> {
+        let selector_tok = self.next();
+        match selector_tok.kind {
+            TokenKind::Ident(raw) => {
+                // `.Ident` selector.
+                let segments: Vec<&str> = raw.split('.').collect();
+                if segments.iter().any(|s| s.is_empty()) {
+                    return Err(FormulaParseError::UnexpectedToken(
+                        "invalid field selector".to_string(),
+                    ));
+                }
+
+                let mut offset = 0usize;
+                for (i, segment) in segments.iter().enumerate() {
+                    offset += segment.len();
+                    let end = selector_tok.span.start + offset;
+                    base = SpannedExpr {
+                        span: Span::new(base.span.start, end),
+                        kind: SpannedExprKind::FieldAccess {
+                            base: Box::new(base),
+                            field: (*segment).to_string(),
+                        },
+                    };
+                    if i + 1 < segments.len() {
+                        offset += 1; // '.'
+                    }
+                }
+
+                Ok(base)
+            }
+            TokenKind::StructuredRef(sref) => {
+                // `.["..."]` selector.
+                let field = match sref {
+                    crate::structured_refs::StructuredRef {
+                        table_name: None,
+                        item: None,
+                        columns: crate::structured_refs::StructuredColumns::Single(name),
+                    } => parse_bracket_quoted_field_name(&name).map_err(|_| {
+                        FormulaParseError::UnexpectedToken(
+                            "expected bracket-quoted field selector".to_string(),
+                        )
+                    })?,
+                    _ => {
+                        return Err(FormulaParseError::UnexpectedToken(
+                            "expected field selector".to_string(),
+                        ));
+                    }
+                };
+
+                Ok(SpannedExpr {
+                    span: Span::new(base.span.start, selector_tok.span.end),
+                    kind: SpannedExprKind::FieldAccess {
+                        base: Box::new(base),
+                        field,
+                    },
+                })
+            }
+            other => Err(FormulaParseError::Expected {
+                expected: "field selector".to_string(),
+                got: format!("{other:?}"),
+            }),
+        }
     }
 
     fn parse_array_literal(&mut self) -> Result<SpannedExpr<String>, FormulaParseError> {
@@ -1807,6 +2021,45 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     )
                 }
             },
+            SpannedExprKind::FieldAccess { base, field } => {
+                let (ev, child) = self.eval_value(base);
+                let base_value = self.deref_eval_value_dynamic(ev);
+                let field_name = field.clone();
+
+                let out = elementwise_unary(&base_value, |elem| match elem {
+                    Value::Error(e) => Value::Error(*e),
+                    Value::Record(r) => r
+                        .fields
+                        .iter()
+                        .find(|(k, _)| {
+                            crate::value::cmp_case_insensitive(k, &field_name) == Ordering::Equal
+                        })
+                        .map(|(_, v)| v.clone())
+                        .unwrap_or(Value::Error(ErrorKind::Field)),
+                    Value::Entity(e) => e
+                        .fields
+                        .iter()
+                        .find(|(k, _)| {
+                            crate::value::cmp_case_insensitive(k, &field_name) == Ordering::Equal
+                        })
+                        .map(|(_, v)| v.clone())
+                        .unwrap_or(Value::Error(ErrorKind::Field)),
+                    _ => Value::Error(ErrorKind::Value),
+                });
+
+                (
+                    EvalValue::Scalar(out.clone()),
+                    TraceNode {
+                        kind: TraceKind::FieldAccess {
+                            field: field.clone(),
+                        },
+                        span: expr.span,
+                        value: out,
+                        reference: None,
+                        children: vec![child],
+                    },
+                )
+            }
             SpannedExprKind::Group(inner) => {
                 let (ev, child) = self.eval_value(inner);
                 let (value, reference) = match &ev {
@@ -2612,9 +2865,7 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         };
                         acc += n;
                     }
-                    Value::Entity(_) | Value::Record(_) => {
-                        return (Value::Error(ErrorKind::Value), traces)
-                    }
+                    Value::Record(_) | Value::Entity(_) => return (Value::Error(ErrorKind::Value), traces),
                     Value::Reference(_) | Value::ReferenceUnion(_) => {
                         return (Value::Error(ErrorKind::Value), traces);
                     }
@@ -2625,9 +2876,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                 Value::Number(n) => acc += n,
                                 Value::Bool(_)
                                 | Value::Text(_)
-                                | Value::Entity(_)
-                                | Value::Record(_)
                                 | Value::Blank
+                                | Value::Record(_)
+                                | Value::Entity(_)
                                 | Value::Array(_)
                                 | Value::Lambda(_)
                                 | Value::Spill { .. }
@@ -2648,9 +2899,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                 Value::Number(n) => acc += n,
                                 Value::Bool(_)
                                 | Value::Text(_)
-                                | Value::Entity(_)
-                                | Value::Record(_)
                                 | Value::Blank
+                                | Value::Record(_)
+                                | Value::Entity(_)
                                 | Value::Array(_)
                                 | Value::Lambda(_)
                                 | Value::Spill { .. }
@@ -2968,6 +3219,8 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         Value::Array(_)
             | Value::Lambda(_)
             | Value::Spill { .. }
+            | Value::Record(_)
+            | Value::Entity(_)
             | Value::Reference(_)
             | Value::ReferenceUnion(_)
     ) || matches!(
@@ -2975,6 +3228,8 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         Value::Array(_)
             | Value::Lambda(_)
             | Value::Spill { .. }
+            | Value::Record(_)
+            | Value::Entity(_)
             | Value::Reference(_)
             | Value::ReferenceUnion(_)
     ) {
@@ -3026,6 +3281,10 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         | (_, Value::Lambda(_))
         | (Value::Spill { .. }, _)
         | (_, Value::Spill { .. })
+        | (Value::Record(_), _)
+        | (_, Value::Record(_))
+        | (Value::Entity(_), _)
+        | (_, Value::Entity(_))
         | (Value::Reference(_), _)
         | (_, Value::Reference(_))
         | (Value::ReferenceUnion(_), _)
