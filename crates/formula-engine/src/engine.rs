@@ -5600,11 +5600,14 @@ fn rewrite_defined_name_constants_for_bytecode(
     ) -> Option<crate::Expr> {
         match expr {
             crate::Expr::NameRef(nref) => inline_name_ref(nref, current_sheet, workbook),
-            crate::Expr::FieldAccess(access) => rewrite_inner(access.base.as_ref(), current_sheet, workbook)
-                .map(|base| crate::Expr::FieldAccess(crate::FieldAccessExpr {
-                    base: Box::new(base),
-                    field: access.field.clone(),
-                })),
+            crate::Expr::FieldAccess(access) => {
+                rewrite_inner(access.base.as_ref(), current_sheet, workbook).map(|inner| {
+                    crate::Expr::FieldAccess(crate::FieldAccessExpr {
+                        base: Box::new(inner),
+                        field: access.field.clone(),
+                    })
+                })
+            }
             crate::Expr::FunctionCall(call) => {
                 if matches!(
                     bytecode::ast::Function::from_name(&call.name.name_upper),
