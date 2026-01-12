@@ -441,8 +441,31 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     });
 
     // Seed clipboard with sentinel value so we can verify copy/cut do not overwrite it.
-    await page.evaluate((text) => navigator.clipboard.writeText(text), sentinel);
-    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(sentinel);
+    // Some clipboard implementations require a user gesture even with permissions granted,
+    // so fall back to legacy DOM copy if `navigator.clipboard.writeText` fails.
+    await page.evaluate(async (text) => {
+      try {
+        await navigator.clipboard.writeText(text);
+        return;
+      } catch {
+        // Fall back to legacy DOM copy.
+      }
+
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      textarea.style.top = "0";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const ok = document.execCommand("copy");
+      textarea.remove();
+      if (!ok) throw new Error("Failed to seed clipboard with sentinel text");
+    }, sentinel);
+    await expect
+      .poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).trim()), { timeout: 10_000 })
+      .toBe(sentinel);
 
     // Select A1 and attempt copy (should be blocked).
     await page.click("#grid", { position: { x: 53, y: 29 } });
@@ -457,7 +480,9 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     await expect(copyToast).toBeVisible();
     await expect(copyToast).toContainText(/clipboard copy is blocked|data loss prevention/i);
 
-    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(sentinel);
+    await expect
+      .poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).trim()), { timeout: 10_000 })
+      .toBe(sentinel);
 
     // Clear the existing toast so we can assert cut creates its own message.
     await page.evaluate(() => {
@@ -475,7 +500,9 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     await expect(cutToast).toBeVisible();
     await expect(cutToast).toContainText(/clipboard copy is blocked|data loss prevention/i);
 
-    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(sentinel);
+    await expect
+      .poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).trim()), { timeout: 10_000 })
+      .toBe(sentinel);
 
     const a1ValueAfterCut = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
     expect(a1ValueAfterCut).toBe("Secret");
