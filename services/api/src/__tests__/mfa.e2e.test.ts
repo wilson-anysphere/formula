@@ -163,6 +163,53 @@ describe("MFA e2e: encrypted TOTP secrets + recovery codes + org enforcement", (
     expect(ok.headers["set-cookie"]).toBeTruthy();
   });
 
+  it("rate limits repeated invalid MFA code attempts (brute-force protection)", async () => {
+    const reg = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { email: "mfa-rate-limit@example.com", password: "password1234", name: "MFA Rate Limit", orgName: "Org" }
+    });
+    expect(reg.statusCode).toBe(200);
+    const cookie = extractCookie(reg.headers["set-cookie"]);
+
+    const setup = await app.inject({
+      method: "POST",
+      url: "/auth/mfa/totp/setup",
+      headers: { cookie }
+    });
+    expect(setup.statusCode).toBe(200);
+    const secret = (setup.json() as any).secret as string;
+
+    let limited: any = null;
+    for (let i = 0; i < 20; i++) {
+      const validCode = authenticator.generate(secret);
+      const lastDigit = validCode.slice(-1);
+      const wrongDigit = ((Number.parseInt(lastDigit, 10) + 1) % 10).toString();
+      const wrongCode = validCode.slice(0, -1) + wrongDigit;
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/auth/mfa/totp/confirm",
+        headers: { cookie },
+        payload: { code: wrongCode }
+      });
+
+      if (res.statusCode === 429) {
+        limited = res;
+        break;
+      }
+
+      expect(res.statusCode).toBe(400);
+      expect((res.json() as any).error).toBe("invalid_code");
+    }
+
+    expect(limited).toBeTruthy();
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers["retry-after"]).toBeTypeOf("string");
+    expect(Number(limited.headers["retry-after"])).toBeGreaterThan(0);
+    expect((limited.json() as any).error).toBe("too_many_requests");
+  });
+
   it("generates recovery codes and allows them to be used once for login", async () => {
     const email = "mfa-recovery@example.com";
     const password = "password1234";

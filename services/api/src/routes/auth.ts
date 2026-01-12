@@ -170,6 +170,9 @@ export function registerAuthRoutes(app: FastifyInstance): void {
   const loginIpLimiter = new TokenBucketRateLimiter({ capacity: 20, refillMs: 60_000 });
   const loginEmailLimiter = new TokenBucketRateLimiter({ capacity: 5, refillMs: 60_000 });
   const registerIpLimiter = new TokenBucketRateLimiter({ capacity: 20, refillMs: 60_000 });
+  // Brute-force protection for TOTP/recovery-code verification endpoints.
+  // We only consume tokens on *failed* challenges to keep normal flows snappy.
+  const mfaFailureLimiter = new TokenBucketRateLimiter({ capacity: 5, refillMs: 60_000 });
   const oidcIpLimiter = new TokenBucketRateLimiter({ capacity: 30, refillMs: 60_000 });
   const samlIpLimiter = new TokenBucketRateLimiter({ capacity: 30, refillMs: 60_000 });
 
@@ -624,6 +627,11 @@ export function registerAuthRoutes(app: FastifyInstance): void {
 
     if (!txResult.ok) {
       if (txResult.error === "mfa_required") return reply.code(403).send({ error: "mfa_required" });
+      const limited = mfaFailureLimiter.take(request.user!.id);
+      if (!limited.ok) {
+        app.metrics.rateLimitedTotal.inc({ route: "/auth/mfa/totp/setup", reason: "mfa" });
+        return rateLimited(reply, limited.retryAfterMs);
+      }
       return reply.code(400).send({ error: "invalid_code" });
     }
 
@@ -685,7 +693,14 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       });
       return true;
     });
-    if (!ok) return reply.code(400).send({ error: "invalid_code" });
+    if (!ok) {
+      const limited = mfaFailureLimiter.take(request.user!.id);
+      if (!limited.ok) {
+        app.metrics.rateLimitedTotal.inc({ route: "/auth/mfa/totp/confirm", reason: "mfa" });
+        return rateLimited(reply, limited.retryAfterMs);
+      }
+      return reply.code(400).send({ error: "invalid_code" });
+    }
 
     await writeAuditEvent(
       app.db,
@@ -747,6 +762,11 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     });
     if (!txResult.ok) {
       if (txResult.error === "mfa_required") return reply.code(403).send({ error: "mfa_required" });
+      const limited = mfaFailureLimiter.take(request.user!.id);
+      if (!limited.ok) {
+        app.metrics.rateLimitedTotal.inc({ route: "/auth/mfa/totp/disable", reason: "mfa" });
+        return rateLimited(reply, limited.retryAfterMs);
+      }
       return reply.code(400).send({ error: "invalid_code" });
     }
     await writeAuditEvent(
@@ -870,7 +890,14 @@ export function registerAuthRoutes(app: FastifyInstance): void {
         return { ok: true as const, usedRecoveryCodeId };
       });
 
-      if (!txResult.ok) return reply.code(400).send({ error: "invalid_code" });
+      if (!txResult.ok) {
+        const limited = mfaFailureLimiter.take(request.user!.id);
+        if (!limited.ok) {
+          app.metrics.rateLimitedTotal.inc({ route: "/auth/mfa/recovery-codes/regenerate", reason: "mfa" });
+          return rateLimited(reply, limited.retryAfterMs);
+        }
+        return reply.code(400).send({ error: "invalid_code" });
+      }
 
       await writeAuditEvent(
         app.db,
