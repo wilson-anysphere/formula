@@ -92,9 +92,13 @@ test.describe("Extensions UI integration", () => {
     const tauriTypes = await webviewFrame!.evaluate(() => ({
       tauri: typeof (window as any).__TAURI__,
       tauriIpc: typeof (window as any).__TAURI_IPC__,
+      tauriInternals: typeof (window as any).__TAURI_INTERNALS__,
+      tauriMetadata: typeof (window as any).__TAURI_METADATA__,
     }));
     expect(tauriTypes.tauri, "webview should not expose __TAURI__").toBe("undefined");
     expect(tauriTypes.tauriIpc, "webview should not expose __TAURI_IPC__").toBe("undefined");
+    expect(tauriTypes.tauriInternals, "webview should not expose __TAURI_INTERNALS__").toBe("undefined");
+    expect(tauriTypes.tauriMetadata, "webview should not expose __TAURI_METADATA__").toBe("undefined");
   });
 
   test("runs sampleHello.sumSelection via the Extensions panel and shows a toast", async ({ page }) => {
