@@ -1025,6 +1025,8 @@ Important notes:
   exposed via `formula-vba` as `VbaDigitalSignature::binding`. The desktop Trust Center treats a VBA
   project as "signed" only when the PKCS#7/CMS signature verifies **and** the digest binding check
   reports `Bound`.
+  - For callers that need more detail (hash algorithm OID/name, signed digest bytes, computed digest
+    bytes), use `formula_vba::verify_vba_digital_signature_bound`.
 - Binding uses the hash algorithm indicated by the extracted `DigestInfo` (commonly SHA-1 or
   SHA-256). Unknown/unsupported digest OIDs are treated conservatively as unverified (`binding ==
   Unknown`).

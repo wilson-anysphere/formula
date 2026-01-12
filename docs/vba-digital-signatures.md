@@ -10,6 +10,14 @@ In this repo, `crates/formula-vba` implements best-effort:
 - MS-OVBA-style project digest binding verification (signature is bound to the VBA project OLE
   streams), exposed via `VbaDigitalSignature::binding`
 
+API notes:
+
+- `formula_vba::verify_vba_digital_signature` returns a [`VbaDigitalSignature`] with a coarse
+  binding enum (`VbaSignatureBinding::{Bound, NotBound, Unknown}`).
+- `formula_vba::verify_vba_digital_signature_bound` returns a [`VbaDigitalSignatureBound`] with a
+  richer binding enum (`VbaProjectBindingVerification`) and best-effort debug info (algorithm OID,
+  signed digest bytes, computed digest bytes).
+
 ## Where signatures live
 
 `xl/vbaProject.bin` is an OLE compound document. VBA signatures are stored as special OLE streams
