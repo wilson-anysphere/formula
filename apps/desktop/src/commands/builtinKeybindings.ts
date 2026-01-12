@@ -26,6 +26,12 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: null,
   },
   {
+    command: "clipboard.pasteSpecial",
+    key: "ctrl+alt+v",
+    mac: "cmd+option+v",
+    when: null,
+  },
+  {
     command: "clipboard.copy",
     key: "ctrl+c",
     mac: "cmd+c",
@@ -41,6 +47,73 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     command: "clipboard.paste",
     key: "ctrl+v",
     mac: "cmd+v",
+    when: null,
+  },
+  {
+    command: "edit.find",
+    key: "ctrl+f",
+    mac: "cmd+f",
+    when: null,
+  },
+  {
+    command: "edit.replace",
+    key: "ctrl+h",
+    mac: "cmd+h",
+    when: null,
+  },
+  {
+    command: "navigation.goTo",
+    key: "ctrl+g",
+    mac: "cmd+g",
+    when: null,
+  },
+  {
+    command: "edit.clearContents",
+    key: "delete",
+    // macOS keyboards use Backspace for the "delete backwards" key.
+    mac: "backspace",
+    when: null,
+  },
+  {
+    command: "edit.fillDown",
+    key: "ctrl+d",
+    mac: "cmd+d",
+    when: null,
+  },
+  {
+    command: "edit.fillRight",
+    key: "ctrl+r",
+    mac: "cmd+r",
+    when: null,
+  },
+  {
+    command: "edit.insertDate",
+    key: "ctrl+;",
+    mac: "cmd+;",
+    when: null,
+  },
+  {
+    command: "edit.insertTime",
+    key: "ctrl+shift+;",
+    mac: "cmd+shift+;",
+    when: null,
+  },
+  {
+    command: "edit.autoSum",
+    key: "alt+=",
+    mac: "option+=",
+    when: null,
+  },
+  {
+    command: "workbook.previousSheet",
+    key: "ctrl+pageup",
+    mac: "cmd+pageup",
+    when: null,
+  },
+  {
+    command: "workbook.nextSheet",
+    key: "ctrl+pagedown",
+    mac: "cmd+pagedown",
     when: null,
   },
 ];

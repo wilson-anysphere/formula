@@ -2164,36 +2164,12 @@ if (
   const parsedKeybindings: Array<ReturnType<typeof parseKeybinding>> = [];
   const commandKeybindingDisplayIndex = new Map<string, string[]>();
   let lastLoadedExtensionIds = new Set<string>();
-
-  const builtinKeybindings = [
-    // The command palette is opened by the shell (not via CommandRegistry),
-    // but we register this binding so UI surfaces (e.g. palette shortcuts) can
-    // display the canonical shortcut next to the command id.
-    { command: "workbench.showCommandPalette", key: "ctrl+shift+p", mac: "cmd+shift+p" },
-    { command: "clipboard.cut", key: "ctrl+x", mac: "cmd+x" },
-    { command: "clipboard.copy", key: "ctrl+c", mac: "cmd+c" },
-    { command: "clipboard.paste", key: "ctrl+v", mac: "cmd+v" },
-    { command: "clipboard.pasteSpecial", key: "ctrl+alt+v", mac: "cmd+option+v" },
-    { command: "edit.find", key: "ctrl+f", mac: "cmd+f" },
-    { command: "edit.replace", key: "ctrl+h", mac: "cmd+h" },
-    { command: "navigation.goTo", key: "ctrl+g", mac: "cmd+g" },
-    { command: "edit.clearContents", key: "delete", mac: "backspace" },
-    { command: "edit.fillDown", key: "ctrl+d", mac: "cmd+d" },
-    { command: "edit.fillRight", key: "ctrl+r", mac: "cmd+r" },
-    { command: "edit.insertDate", key: "ctrl+;", mac: "cmd+;" },
-    { command: "edit.insertTime", key: "ctrl+shift+;", mac: "cmd+shift+;" },
-    { command: "edit.autoSum", key: "alt+=", mac: "option+=" },
-    { command: "workbook.previousSheet", key: "ctrl+pageup", mac: "cmd+pageup" },
-    { command: "workbook.nextSheet", key: "ctrl+pagedown", mac: "cmd+pagedown" },
-  ];
-
   const sheetNavigationKeybindings: Array<NonNullable<ReturnType<typeof parseKeybinding>>> = [
     parseKeybinding("workbook.previousSheet", "ctrl+pageup"),
     parseKeybinding("workbook.nextSheet", "ctrl+pagedown"),
     parseKeybinding("workbook.previousSheet", "cmd+pageup"),
     parseKeybinding("workbook.nextSheet", "cmd+pagedown"),
   ].filter((binding): binding is NonNullable<ReturnType<typeof parseKeybinding>> => binding != null);
-
   const syncContributedCommands = () => {
     if (!extensionHostManager.ready || extensionHostManager.error) return;
     try {
