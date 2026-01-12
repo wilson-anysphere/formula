@@ -309,10 +309,10 @@ Notes:
 * The image bytes are stored under `xl/media/*.png` (or other formats) and typically use the relevant
   `<Default Extension="…">` entry rather than an explicit `<Override>`.
 
-## 8) Important: **no `xl/cellimages.xml`** (for Place in Cell)
+## 8) Cell image store part (`xl/cellimages.xml`) is optional
 
-For the verified “Place in Cell” scenario above, Excel/rust_xlsxwriter **does not** create or reference
-`xl/cellImages.xml` (or the lowercase variant `xl/cellimages.xml`).
+For the verified “Place in Cell” scenario above (the `rdRichValue*` schema), Excel/rust_xlsxwriter **does not**
+create or reference `xl/cellImages.xml` / `xl/cellimages.xml`.
 
 Instead, it uses:
 
@@ -320,9 +320,13 @@ Instead, it uses:
 * `xl/richData/*` (rich value structures/values + relationship indirection)
 * `xl/media/*` (actual image bytes)
 
-Open question:
+However, other real Excel workbooks **do** include a `cellimages` store part. In this repo:
 
-* Excel has multiple image-related features (floating drawings, background images, legacy objects, the `IMAGE()` function, “data types”, etc.). It is still possible that **other** Excel scenarios use a `cellImages` part (`xl/cellImages.xml` / `xl/cellimages.xml`) or additional parts. If/when we encounter such files in the corpus, we should extend this document with concrete samples.
+* `fixtures/xlsx/rich-data/images-in-cell.xlsx` (notes in `fixtures/xlsx/rich-data/images-in-cell.md`) contains:
+  - `xl/cellimages.xml` + `xl/_rels/cellimages.xml.rels` + `xl/media/*`, in addition to the RichData tables.
+
+So: do not assume `xl/cellimages.xml` is absent. Treat it as an optional workbook-level image store and preserve it
+byte-for-byte when round-tripping.
 
 ## 9) Real Excel example: multiple cells + multiple images (fixture)
 
