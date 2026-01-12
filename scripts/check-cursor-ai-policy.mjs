@@ -152,6 +152,7 @@ const SCANNED_BASENAMES_WITHOUT_EXTENSION = new Set([
   "config",
   "license",
   "notice",
+  ".gitkeep",
   ".gitignore",
   ".gitattributes",
   ".dockerignore",
