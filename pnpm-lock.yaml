@@ -341,6 +341,9 @@ importers:
       '@formula/extension-host':
         specifier: workspace:*
         version: link:../extension-host
+      '@formula/marketplace-shared':
+        specifier: workspace:*
+        version: link:../../shared
 
   packages/fill-engine:
     devDependencies:
@@ -640,6 +643,8 @@ importers:
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
+
+  shared: {}
 
 packages:
 

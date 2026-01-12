@@ -1,12 +1,12 @@
 import type {
   ReadExtensionPackageV2Result,
   VerifiedExtensionPackageV2
-} from "../../../shared/extension-package/v2-browser.mjs";
+} from "@formula/marketplace-shared/extension-package/v2-browser.mjs";
 import {
   readExtensionPackageV2,
   verifyExtensionPackageV2Browser
-} from "../../../shared/extension-package/v2-browser.mjs";
-import { validateExtensionManifest } from "../../../shared/extension-manifest/index.mjs";
+} from "@formula/marketplace-shared/extension-package/v2-browser.mjs";
+import { validateExtensionManifest } from "@formula/marketplace-shared/extension-manifest/index.mjs";
 
 import { MarketplaceClient } from "./MarketplaceClient";
 

@@ -7,7 +7,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@formula/extension-host": "workspace:*"
+    "@formula/extension-host": "workspace:*",
+    "@formula/marketplace-shared": "workspace:*"
   }
 }
-

@@ -6,11 +6,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 // CJS helpers (shared/* is CommonJS).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const signingPkg: any = await import("../../../shared/crypto/signing.js");
+const signingPkg: any = await import("@formula/marketplace-shared/crypto/signing.js");
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const extensionPackagePkg: any = await import("../../../shared/extension-package/index.js");
+const extensionPackagePkg: any = await import("@formula/marketplace-shared/extension-package/index.js");
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const browserVerifierPkg: any = await import("../../../shared/extension-package/v2-browser.mjs");
+const browserVerifierPkg: any = await import("@formula/marketplace-shared/extension-package/v2-browser.mjs");
 
 const { generateEd25519KeyPair } = signingPkg;
 const { createExtensionPackageV2 } = extensionPackagePkg;
@@ -88,4 +88,3 @@ describe("verifyExtensionPackageV2Browser (desktop Ed25519 fallback)", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 });
-
