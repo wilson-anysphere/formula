@@ -49,7 +49,6 @@ function EngineDemoApp() {
       }
     >()
   );
-  const lastAppliedAxisSheetRef = useRef<string | null>(null);
 
   const HEADER_ROWS = 1;
   const HEADER_COLS = 1;
@@ -251,7 +250,6 @@ function EngineDemoApp() {
   useEffect(() => {
     // Reset any persisted sizing when swapping providers (e.g. importing a new workbook).
     axisSizesBySheetRef.current.clear();
-    lastAppliedAxisSheetRef.current = null;
   }, [provider]);
 
   useEffect(() => {
@@ -570,8 +568,6 @@ function EngineDemoApp() {
     }
 
     api.applyAxisSizeOverrides({ rows, cols }, { resetUnspecified: true });
-
-    lastAppliedAxisSheetRef.current = activeSheet;
   }, [provider, activeSheet]);
 
   useEffect(() => {
