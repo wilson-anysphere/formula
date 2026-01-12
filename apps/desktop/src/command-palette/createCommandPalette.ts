@@ -654,11 +654,20 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     inputDebounce,
   );
 
-  const ensureLatestResultsSync = (): void => {
+  const prepareForKeyboardInteraction = (): void => {
     if (!isOpen) return;
-    if (!debouncedRender.pending() && !chunkSearchController) return;
-    debouncedRender.cancel();
-    renderResults("sync");
+    // If the user navigates/executes immediately after typing, ensure we apply the
+    // latest query first. Prefer flushing the debounced render (which may start a
+    // chunked search) rather than forcing a potentially expensive synchronous re-score.
+    if (debouncedRender.pending()) {
+      debouncedRender.flush();
+    }
+
+    // If we're still refining results in the background, freeze the list so keyboard
+    // navigation doesn't jump around while the user is moving selection.
+    if (chunkSearchController) {
+      abortChunkedSearch();
+    }
   };
 
   function updateSelection(nextIndex: number): void {
@@ -721,21 +730,21 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      ensureLatestResultsSync();
+      prepareForKeyboardInteraction();
       updateSelection(selectedIndex + 1);
       return;
     }
 
     if (e.key === "ArrowUp") {
       e.preventDefault();
-      ensureLatestResultsSync();
+      prepareForKeyboardInteraction();
       updateSelection(selectedIndex - 1);
       return;
     }
 
     if (e.key === "Enter") {
       e.preventDefault();
-      ensureLatestResultsSync();
+      prepareForKeyboardInteraction();
       runSelected();
     }
   };
