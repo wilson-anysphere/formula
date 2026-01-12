@@ -152,6 +152,13 @@ function buildWithWasmPack() {
   const limitAs = process.env.FORMULA_CARGO_LIMIT_AS ?? "14G";
   const runLimited = path.join(repoRoot, "scripts", "run_limited.sh");
   const canUseRunLimited = process.platform !== "win32" && existsSync(runLimited);
+  const verbose =
+    process.env.FORMULA_WASM_PACK_VERBOSE === "1" || process.env.FORMULA_WASM_PACK_VERBOSE === "true";
+  // `wasm-pack build` inherits cargo's per-crate compile output, which is very verbose. In CI/agent
+  // environments where stdout isn't a TTY this can create enormous logs and even hit output capture
+  // limits. Pass `--quiet` through to cargo in those cases unless callers explicitly opt into
+  // verbose output.
+  const cargoExtraArgs = !verbose && !process.stdout.isTTY ? ["--quiet"] : [];
   const rustcWrapper = process.env.RUSTC_WRAPPER ?? process.env.CARGO_BUILD_RUSTC_WRAPPER ?? "";
   const rustcWorkspaceWrapper =
     process.env.RUSTC_WORKSPACE_WRAPPER ??
@@ -165,7 +172,7 @@ function buildWithWasmPack() {
   // When `sccache` is unavailable/misconfigured, wasm-pack builds can fail even for
   // `cargo metadata`/`rustc -vV`. Explicitly setting `RUSTC_WRAPPER=""` disables
   // any configured wrapper unless the user overrides it in the environment.
-  const wasmPackArgs = ["build", "--target", "nodejs", "--out-dir", "pkg-node", "--dev"];
+  const wasmPackArgs = ["build", "--target", "nodejs", "--out-dir", "pkg-node", "--dev", ...cargoExtraArgs];
   const env = {
     ...process.env,
     CARGO_HOME: cargoHome,
