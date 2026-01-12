@@ -303,9 +303,9 @@ function createTauriClipboardProvider() {
         try {
           await tauriInvoke("write_clipboard", {
             text: payload.text,
-            html: payload.html,
-            rtf: payload.rtf,
-            image_png_base64: payload.pngBase64,
+            html,
+            rtf,
+            image_png_base64: pngBase64,
           });
           wrote = true;
         } catch {
