@@ -151,7 +151,8 @@ async function ensureBuilt({ repoRoot, binPath }) {
         // if the caller didn't source `scripts/agent-init.sh`.
         CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? "4",
         MAKEFLAGS: process.env.MAKEFLAGS ?? "-j4",
-        RUSTFLAGS: process.env.RUSTFLAGS ?? "-C codegen-units=4",
+        CARGO_PROFILE_DEV_CODEGEN_UNITS:
+          process.env.CARGO_PROFILE_DEV_CODEGEN_UNITS ?? (process.env.CARGO_BUILD_JOBS ?? "4"),
         // Some environments configure Cargo globally with `build.rustc-wrapper`. When the
         // wrapper is unavailable/misconfigured, builds can fail even for `cargo metadata`.
         // Default to disabling any configured wrapper unless the user explicitly overrides it.

@@ -84,7 +84,8 @@ const raw = await run("cargo", [
     // if the caller didn't source `scripts/agent-init.sh`.
     CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? "4",
     MAKEFLAGS: process.env.MAKEFLAGS ?? "-j4",
-    RUSTFLAGS: process.env.RUSTFLAGS ?? "-C codegen-units=4",
+    CARGO_PROFILE_DEV_CODEGEN_UNITS:
+      process.env.CARGO_PROFILE_DEV_CODEGEN_UNITS ?? (process.env.CARGO_BUILD_JOBS ?? "4"),
     // Some environments configure Cargo to use `sccache` via `build.rustc-wrapper`.
     // Default to disabling any configured wrapper unless the user explicitly sets one.
     RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
