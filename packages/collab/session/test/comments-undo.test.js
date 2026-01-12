@@ -9,6 +9,21 @@ import { REMOTE_ORIGIN } from "@formula/collab-undo";
 import { createCommentManagerForSession, createYComment } from "../../comments/src/manager.ts";
 import { createCollabSession } from "../src/index.ts";
 
+function requireYjsCjs() {
+  const require = createRequire(import.meta.url);
+  const prevError = console.error;
+  console.error = (...args) => {
+    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
+    prevError(...args);
+  };
+  try {
+    // eslint-disable-next-line import/no-named-as-default-member
+    return require("yjs");
+  } finally {
+    console.error = prevError;
+  }
+}
+
 /**
  * @param {Y.Doc} docA
  * @param {Y.Doc} docB
@@ -180,9 +195,7 @@ test("CollabSession undo does not clobber legacy Array-backed comments root (in-
 });
 
 test("CollabSession undo captures comment edits when comments root was created by a different Yjs instance (CJS applyUpdate)", () => {
-  const require = createRequire(import.meta.url);
-  // eslint-disable-next-line import/no-named-as-default-member
-  const Ycjs = require("yjs");
+  const Ycjs = requireYjsCjs();
 
   const remote = new Ycjs.Doc();
   const comments = remote.getMap("comments");

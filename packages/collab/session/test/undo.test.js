@@ -8,6 +8,21 @@ import { REMOTE_ORIGIN } from "@formula/collab-undo";
 
 import { createCollabSession } from "../src/index.ts";
 
+function requireYjsCjs() {
+  const require = createRequire(import.meta.url);
+  const prevError = console.error;
+  console.error = (...args) => {
+    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
+    prevError(...args);
+  };
+  try {
+    // eslint-disable-next-line import/no-named-as-default-member
+    return require("yjs");
+  } finally {
+    console.error = prevError;
+  }
+}
+
 /**
  * @param {Y.Doc} docA
  * @param {Y.Doc} docB
@@ -65,9 +80,7 @@ test("CollabSession undo only reverts local edits (in-memory sync)", async () =>
 });
 
 test("CollabSession undo captures cell edits when cell maps were created by a different Yjs instance (CJS applyUpdate)", async () => {
-  const require = createRequire(import.meta.url);
-  // eslint-disable-next-line import/no-named-as-default-member
-  const Ycjs = require("yjs");
+  const Ycjs = requireYjsCjs();
 
   const remote = new Ycjs.Doc();
   const cells = remote.getMap("cells");
@@ -104,9 +117,7 @@ test("CollabSession undo captures cell edits when cell maps were created by a di
 });
 
 test("CollabSession undo works when the cells root was created by a different Yjs instance (CJS Doc.getMap)", async () => {
-  const require = createRequire(import.meta.url);
-  // eslint-disable-next-line import/no-named-as-default-member
-  const Ycjs = require("yjs");
+  const Ycjs = requireYjsCjs();
 
   const doc = new Y.Doc();
 
