@@ -19,7 +19,8 @@ export async function installUpdateAndRestart(): Promise<void> {
   // frontend leans on global `__TAURI__` bindings (see `src/main.ts`).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tauri = (globalThis as any).__TAURI__;
-  const updater = tauri?.updater ?? tauri?.plugin?.updater;
+  // Tauri's global API shape can vary across versions/builds.
+  const updater = tauri?.updater ?? tauri?.plugin?.updater ?? tauri?.plugins?.updater;
 
   if (!updater) {
     throw new Error(t("updater.unavailable"));
