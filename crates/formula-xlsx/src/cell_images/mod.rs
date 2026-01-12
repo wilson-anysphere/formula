@@ -62,16 +62,6 @@ pub struct CellImageEntry {
     pub pic_xml: Option<String>,
 }
 
-/// Best-effort loader for Excel "in-cell" images (`xl/cellimages*.xml`).
-///
-/// This is intended as a lightweight helper for callers that only need to load
-/// referenced media payloads into `workbook.images` during XLSX parsing.
-///
-/// Missing parts / parse errors are ignored by design.
-pub fn load_cell_images_from_parts(parts: &BTreeMap<String, Vec<u8>>, workbook: &mut formula_model::Workbook) {
-    let _ = CellImages::parse_from_parts(parts, workbook);
-}
-
 impl CellImages {
     /// Discover and parse workbook-level cell images parts (`xl/cellimages*.xml`).
     ///
