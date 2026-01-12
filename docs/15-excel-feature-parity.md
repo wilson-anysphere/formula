@@ -377,14 +377,14 @@ This document tracks every Excel feature and our implementation status. Features
 | CUMPRINC | ⬜ | |
 | DB | ⬜ | |
 | DDB | ✅ | |
-| DISC | ⬜ | |
+| DISC | ✅ | |
 | DOLLARDE | ⬜ | |
 | DOLLARFR | ⬜ | |
 | DURATION | ⬜ | |
 | EFFECT | ⬜ | |
 | FV | ✅ | P0 |
 | FVSCHEDULE | ⬜ | |
-| INTRATE | ⬜ | |
+| INTRATE | ✅ | |
 | IPMT | ✅ | |
 | IRR | ✅ | P0 |
 | ISPMT | ⬜ | |
@@ -401,23 +401,23 @@ This document tracks every Excel feature and our implementation status. Features
 | PMT | ✅ | P0 |
 | PPMT | ✅ | |
 | PRICE | ⬜ | |
-| PRICEDISC | ⬜ | |
-| PRICEMAT | ⬜ | |
+| PRICEDISC | ✅ | |
+| PRICEMAT | ✅ | |
 | PV | ✅ | P0 |
 | RATE | ✅ | |
-| RECEIVED | ⬜ | |
+| RECEIVED | ✅ | |
 | RRI | ⬜ | |
 | SLN | ✅ | |
 | SYD | ✅ | |
-| TBILLEQ | ⬜ | |
-| TBILLPRICE | ⬜ | |
-| TBILLYIELD | ⬜ | |
+| TBILLEQ | ✅ | |
+| TBILLPRICE | ✅ | |
+| TBILLYIELD | ✅ | |
 | VDB | ⬜ | |
 | XIRR | ✅ | P0 |
 | XNPV | ✅ | P0 |
 | YIELD | ⬜ | |
-| YIELDDISC | ⬜ | |
-| YIELDMAT | ⬜ | |
+| YIELDDISC | ✅ | |
+| YIELDMAT | ✅ | |
 
 ---
 
