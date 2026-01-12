@@ -8339,24 +8339,29 @@ export class SpreadsheetApp {
       }
 
       // Build an Excel-compatible payload:
-      // - `text/plain` should contain *display values* (including computed formula results).
-      // - `text/html` can include both display values (cell text) and formulas (data-formula attr)
-      //   so spreadsheet-to-spreadsheet pastes preserve formulas.
-      const grid = getCellGridFromRange(this.document, this.sheetId, cellRange) as any[][];
-      for (let r = 0; r < grid.length; r += 1) {
-        const row = grid[r] ?? [];
-        for (let c = 0; c < row.length; c += 1) {
-          const cell = row[c];
-          if (!cell || cell.formula == null) continue;
+       // - `text/plain` should contain *display values* (including computed formula results).
+       // - `text/html` can include both display values (cell text) and formulas (data-formula attr)
+       //   so spreadsheet-to-spreadsheet pastes preserve formulas.
+       const grid = getCellGridFromRange(this.document, this.sheetId, cellRange) as any[][];
+       const coordScratch = { row: 0, col: 0 };
+       const baseRow = cellRange.start.row;
+       const baseCol = cellRange.start.col;
+       for (let r = 0; r < grid.length; r += 1) {
+         const row = grid[r] ?? [];
+         for (let c = 0; c < row.length; c += 1) {
+           const cell = row[c];
+           if (!cell || cell.formula == null) continue;
           // When copying formulas, the clipboard payload should include the displayed value
           // (including the computed result of the formula). If the computed value is `null`,
-          // treat it as an empty cell so plain-text consumers (and Paste Values) don't fall
-          // back to copying the formula text.
-          const computed = this.getCellComputedValue({ row: cellRange.start.row + r, col: cellRange.start.col + c }) as any;
-          cell.value = computed ?? "";
-        }
-      }
-      const payload = serializeCellGridToClipboardPayload(grid as any);
+           // treat it as an empty cell so plain-text consumers (and Paste Values) don't fall
+           // back to copying the formula text.
+           coordScratch.row = baseRow + r;
+           coordScratch.col = baseCol + c;
+           const computed = this.getCellComputedValue(coordScratch) as any;
+           cell.value = computed ?? "";
+         }
+       }
+       const payload = serializeCellGridToClipboardPayload(grid as any);
       const cells = this.snapshotClipboardCells(range);
       const provider = await this.getClipboardProvider();
       await provider.write(payload);
@@ -8558,16 +8563,21 @@ export class SpreadsheetApp {
         });
       }
 
-      const grid = getCellGridFromRange(this.document, this.sheetId, cellRange) as any[][];
-      for (let r = 0; r < grid.length; r += 1) {
-        const row = grid[r] ?? [];
-        for (let c = 0; c < row.length; c += 1) {
-          const cell = row[c];
-          if (!cell || cell.formula == null) continue;
-          const computed = this.getCellComputedValue({ row: cellRange.start.row + r, col: cellRange.start.col + c }) as any;
-          cell.value = computed ?? "";
-        }
-      }
+       const grid = getCellGridFromRange(this.document, this.sheetId, cellRange) as any[][];
+       const coordScratch = { row: 0, col: 0 };
+       const baseRow = cellRange.start.row;
+       const baseCol = cellRange.start.col;
+       for (let r = 0; r < grid.length; r += 1) {
+         const row = grid[r] ?? [];
+         for (let c = 0; c < row.length; c += 1) {
+           const cell = row[c];
+           if (!cell || cell.formula == null) continue;
+           coordScratch.row = baseRow + r;
+           coordScratch.col = baseCol + c;
+           const computed = this.getCellComputedValue(coordScratch) as any;
+           cell.value = computed ?? "";
+         }
+       }
       const payload = serializeCellGridToClipboardPayload(grid as any);
       const cells = this.snapshotClipboardCells(range);
       const provider = await this.getClipboardProvider();
