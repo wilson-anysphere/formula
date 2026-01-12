@@ -296,6 +296,64 @@ fn debug_trace_supports_array_arithmetic_broadcasting() {
 }
 
 #[test]
+fn debug_trace_supports_spill_range_arithmetic_broadcasting() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SEQUENCE(3,1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SEQUENCE(1,4)")
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "A5", "=A1#+C1#").unwrap();
+    engine.recalculate();
+
+    let dbg = engine.debug_evaluate("Sheet1", "A5").unwrap();
+    assert_eq!(slice(&dbg.formula, dbg.trace.span), "A1#+C1#");
+    assert_eq!(
+        dbg.trace.kind,
+        TraceKind::Binary {
+            op: formula_engine::eval::BinaryOp::Add
+        }
+    );
+
+    assert_eq!(dbg.trace.children.len(), 2);
+    assert_eq!(dbg.trace.children[0].kind, TraceKind::SpillRange);
+    assert_eq!(slice(&dbg.formula, dbg.trace.children[0].span), "A1#");
+    assert_eq!(
+        dbg.trace.children[0].reference,
+        Some(TraceRef::Range {
+            sheet: formula_engine::functions::SheetId::Local(0),
+            start: CellAddr { row: 0, col: 0 },
+            end: CellAddr { row: 2, col: 0 },
+        })
+    );
+
+    assert_eq!(dbg.trace.children[1].kind, TraceKind::SpillRange);
+    assert_eq!(slice(&dbg.formula, dbg.trace.children[1].span), "C1#");
+    assert_eq!(
+        dbg.trace.children[1].reference,
+        Some(TraceRef::Range {
+            sheet: formula_engine::functions::SheetId::Local(0),
+            start: CellAddr { row: 0, col: 2 },
+            end: CellAddr { row: 0, col: 5 },
+        })
+    );
+
+    let Value::Array(arr) = dbg.value else {
+        panic!(
+            "expected Value::Array from debug evaluation, got {:?}",
+            dbg.value
+        );
+    };
+    assert_eq!(arr.rows, 3);
+    assert_eq!(arr.cols, 4);
+    assert_eq!(arr.get(0, 0), Some(&Value::Number(2.0)));
+    assert_eq!(arr.get(0, 3), Some(&Value::Number(5.0)));
+    assert_eq!(arr.get(2, 0), Some(&Value::Number(4.0)));
+    assert_eq!(arr.get(2, 3), Some(&Value::Number(7.0)));
+}
+
+#[test]
 fn debug_trace_supports_concat_operator_and_precedence() {
     let mut engine = Engine::new();
     engine.set_cell_formula("Sheet1", "A1", "=1+2&3").unwrap();
