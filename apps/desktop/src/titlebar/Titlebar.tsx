@@ -1,5 +1,7 @@
 import React from "react";
 
+import { RedoIcon, UndoIcon } from "../ui/icons/index.js";
+
 import "./titlebar.css";
 
 export type TitlebarAction = {
@@ -107,24 +109,7 @@ export function Titlebar({
             disabled={!undoRedo.canUndo}
             onClick={undoRedo.onUndo}
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="M9 14 4 9l5-5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M4 9h10a6 6 0 0 1 0 12h-2"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+            <UndoIcon />
           </button>
           <button
             type="button"
@@ -135,24 +120,7 @@ export function Titlebar({
             disabled={!undoRedo.canRedo}
             onClick={undoRedo.onRedo}
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="M15 14 20 9l-5-5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M20 9H10a6 6 0 0 0 0 12h2"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+            <RedoIcon />
           </button>
         </div>
       ) : null}
