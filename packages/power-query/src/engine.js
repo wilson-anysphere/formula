@@ -3788,9 +3788,26 @@ async function* tableToGridBatches(table, options) {
       yield { rowOffset: 0, values: [table.columns.map((c) => c.name)] };
     }
 
-    const { arrowTableToGridBatches } = await loadDataIoModule();
-    for await (const batch of arrowTableToGridBatches(table.table, { batchSize, includeHeader: false })) {
-      yield { rowOffset: baseOffset + batch.rowOffset, values: batch.values };
+    try {
+      const { arrowTableToGridBatches } = await loadDataIoModule();
+      for await (const batch of arrowTableToGridBatches(table.table, { batchSize, includeHeader: false })) {
+        yield { rowOffset: baseOffset + batch.rowOffset, values: batch.values };
+      }
+    } catch (err) {
+      // Arrow-backed grid batching is optional. When the Arrow stack isn't available (or the
+      // data-io module isn't present), fall back to row iteration via the adapter.
+      if (!isOptionalArrowDependencyError(err) && !isModuleNotFoundError(err)) {
+        throw err;
+      }
+
+      for (let rowStart = 0; rowStart < table.rowCount; rowStart += batchSize) {
+        const slice = [];
+        const end = Math.min(table.rowCount, rowStart + batchSize);
+        for (let rowIndex = rowStart; rowIndex < end; rowIndex++) {
+          slice.push(table.getRow(rowIndex));
+        }
+        yield { rowOffset: baseOffset + rowStart, values: slice };
+      }
     }
     return;
   }

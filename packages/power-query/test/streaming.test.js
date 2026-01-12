@@ -27,6 +27,45 @@ function collectBatches(batches) {
 }
 
 /**
+ * Build a minimal Arrow-like table object sufficient for `ArrowTableAdapter`.
+ * This lets us exercise ArrowTableAdapter code paths even when `apache-arrow`
+ * isn't installed.
+ *
+ * @param {Record<string, unknown[]>} columns
+ * @param {Record<string, string>} typeHints
+ */
+function makeFakeArrowTable(columns, typeHints) {
+  const names = Object.keys(columns);
+  const rowCount = Math.max(0, ...names.map((name) => columns[name]?.length ?? 0));
+
+  return {
+    numRows: rowCount,
+    schema: {
+      fields: names.map((name) => ({
+        name,
+        type: { toString: () => typeHints[name] ?? "Utf8" },
+      })),
+    },
+    getChildAt: (index) => {
+      const name = names[index];
+      const values = columns[name] ?? [];
+      return {
+        length: rowCount,
+        get: (rowIndex) => values[rowIndex],
+      };
+    },
+    slice: (start, end) => {
+      /** @type {Record<string, unknown[]>} */
+      const sliced = {};
+      for (const name of names) {
+        sliced[name] = (columns[name] ?? []).slice(start, end);
+      }
+      return makeFakeArrowTable(sliced, typeHints);
+    },
+  };
+}
+
+/**
  * @param {unknown[][]} grid
  */
 function gridDatesToIso(grid) {
@@ -187,4 +226,38 @@ test("executeQueryStreamingNonMaterializing supports distinctRows across batches
   const streamed = collectBatches(batches);
   const expected = (await engine.executeQuery(query, { tables: { t: table } }, {})).toGrid();
   assert.deepEqual(gridDatesToIso(streamed), gridDatesToIso(expected));
+});
+
+test("executeQueryStreaming can stream ArrowTableAdapter values without apache-arrow (fallback batching)", { skip: arrowAvailable }, async () => {
+  const engine = new QueryEngine();
+
+  const fake = new ArrowTableAdapter(
+    makeFakeArrowTable(
+      { Region: ["East", "West"], Sales: [100, 200] },
+      { Region: "Utf8", Sales: "Int32" },
+    ),
+    [
+      { name: "Region", type: "string" },
+      { name: "Sales", type: "number" },
+    ],
+  );
+
+  const query = {
+    id: "q_stream_fake_arrow",
+    name: "Stream Fake Arrow",
+    source: { type: "table", table: "t" },
+    steps: [],
+  };
+
+  const batches = [];
+  await engine.executeQueryStreaming(query, { tables: { t: fake } }, {
+    batchSize: 1,
+    onBatch: (batch) => batches.push(batch),
+  });
+
+  assert.deepEqual(collectBatches(batches), [
+    ["Region", "Sales"],
+    ["East", 100],
+    ["West", 200],
+  ]);
 });
