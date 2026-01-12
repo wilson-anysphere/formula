@@ -2556,6 +2556,18 @@ class BrowserExtensionHost {
         if (!sheetId) return;
         this._activeSheetId = sheetId;
 
+        // Only taint-track selection events when they include cell data (values). Hosts may emit
+        // truncated selectionChanged events with empty matrices for very large selections to avoid
+        // allocating huge 2D arrays. Those events do not expose spreadsheet values and should not
+        // make subsequent clipboard writes fail DLP checks.
+        try {
+          if (selection?.truncated) return;
+          const values = selection?.values;
+          if (!Array.isArray(values) || values.length === 0) return;
+        } catch {
+          return;
+        }
+
         this._taintExtensionRange(extension, {
           sheetId,
           startRow: range.startRow,
