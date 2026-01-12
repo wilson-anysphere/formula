@@ -102,5 +102,19 @@ fn rgce_coverage_cli_reports_zero_failures_for_fixtures() {
             capped_summary["formulas_total"].as_u64().unwrap_or(0) <= 1,
             "fixture {rel} --max 1 should cap formulas_total"
         );
+
+        let zero = run_rgce_coverage(&path, &["--max", "0"]);
+        let zero_summary = summary_from_output(&zero);
+        assert_eq!(zero_summary["decoded_failed"], 0, "fixture {rel} --max 0");
+        assert_eq!(
+            zero_summary["formulas_total"].as_u64().unwrap_or(0),
+            0,
+            "fixture {rel} --max 0 should produce zero formulas"
+        );
+        assert_eq!(
+            zero.len(),
+            1,
+            "fixture {rel} --max 0 should emit only the summary line"
+        );
     }
 }
