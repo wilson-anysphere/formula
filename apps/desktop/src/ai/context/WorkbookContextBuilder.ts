@@ -354,6 +354,7 @@ export interface WorkbookContextBuilderOptions {
       topK?: number;
       includePromptContext?: boolean;
       dlp?: any;
+      signal?: AbortSignal;
     }): Promise<any>;
   } | null;
   dlp?: any;
@@ -601,6 +602,7 @@ export class WorkbookContextBuilder {
             // + token estimation work inside the underlying RAG service.
             includePromptContext: false,
             dlp,
+            signal,
           });
         } finally {
           if (stats) stats.timingsMs.ragMs += nowMs() - startedAt;

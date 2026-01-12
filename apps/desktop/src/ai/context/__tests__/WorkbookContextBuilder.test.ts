@@ -36,7 +36,15 @@ class CountingSpreadsheetApi extends DocumentControllerSpreadsheetApi {
 
   override readRange(range: RangeAddress): CellData[][] {
     this.readRangeCalls.push(range);
+    this.onReadRange?.(this.readRangeCalls.length, range);
     return super.readRange(range);
+  }
+
+  constructor(
+    controller: DocumentController,
+    private readonly onReadRange?: (count: number, range: RangeAddress) => void,
+  ) {
+    super(controller);
   }
 }
 
@@ -839,6 +847,7 @@ describe("WorkbookContextBuilder", () => {
       ragService: null,
       mode: "chat",
       model: "unit-test-model",
+      maxSheets: 1,
     });
 
     await builder.build({ activeSheetId: "Sheet1" });
@@ -970,5 +979,83 @@ describe("WorkbookContextBuilder", () => {
 
     const sheetsRead = new Set(spreadsheet.readRangeCalls.map((call) => call.sheet));
     expect([...sheetsRead].sort()).toEqual(["Sheet01", "Sheet10", "Sheet11"].sort());
+  });
+
+  it("aborts mid-build and stops reading additional ranges", async () => {
+    const documentController = new DocumentController();
+
+    // Populate a bunch of sheets so a non-aborted build would attempt many reads.
+    for (let i = 1; i <= 50; i++) {
+      documentController.setRangeValues(`Sheet${i}`, "A1", [[`v${i}`]]);
+    }
+
+    const abortController = new AbortController();
+    const spreadsheet = new CountingSpreadsheetApi(documentController, (count) => {
+      // Abort during the second range read; the builder should stop promptly and
+      // avoid reading the rest of the sheets.
+      if (count === 2) abortController.abort();
+    });
+
+    const builder = new WorkbookContextBuilder({
+      workbookId: "wb_abort_mid_build",
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+      maxSheets: 50,
+    });
+
+    const promise = builder.build({ activeSheetId: "Sheet1", signal: abortController.signal });
+    await expect(promise).rejects.toMatchObject({ name: "AbortError" });
+    // We should stop promptly after aborting (and not scan all 50 sheets).
+    expect(spreadsheet.readRangeCalls.length).toBeLessThan(10);
+  });
+
+  it("passes AbortSignal to RAG and aborts while awaiting retrieval", async () => {
+    const documentController = new DocumentController();
+    documentController.setRangeValues("Sheet1", "A1", [["Hello"]]);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+
+    const abortController = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+
+    const ragService = {
+      buildWorkbookContextFromSpreadsheetApi: (params: any) => {
+        receivedSignal = params.signal;
+        // Never resolve unless aborted.
+        return new Promise((_resolve, reject) => {
+          const signal: AbortSignal | undefined = params.signal;
+          if (!signal) return;
+          const onAbort = () => {
+            const error = new Error("Aborted");
+            error.name = "AbortError";
+            reject(error);
+          };
+          signal.addEventListener("abort", onAbort, { once: true });
+          if (signal.aborted) onAbort();
+        });
+      },
+    };
+
+    const builder = new WorkbookContextBuilder({
+      workbookId: "wb_rag_abort",
+      documentController,
+      spreadsheet,
+      ragService: ragService as any,
+      mode: "chat",
+      model: "unit-test-model",
+    });
+
+    const promise = builder.build({
+      activeSheetId: "Sheet1",
+      focusQuestion: "test query",
+      signal: abortController.signal,
+    });
+
+    expect(receivedSignal).toBe(abortController.signal);
+    abortController.abort();
+    await expect(promise).rejects.toMatchObject({ name: "AbortError" });
   });
 });

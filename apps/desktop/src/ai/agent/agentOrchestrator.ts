@@ -233,7 +233,7 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
     if (remainingMs() <= 0) throw new AgentTimeoutError(`Agent run exceeded maxDurationMs (${maxDurationMs})`);
   }
 
-  async function guard<T>(promise: Promise<T>): Promise<T> {
+  async function guard<T>(promise: Promise<T>, abortController?: AbortController): Promise<T> {
     throwIfCancelled();
 
     const timeoutMs = remainingMs();
@@ -244,17 +244,30 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
       signal == null
         ? null
         : new Promise<never>((_resolve, reject) => {
-            abortListener = () => reject(new AgentCancelledError("Agent run aborted"));
+            abortListener = () => {
+              try {
+                abortController?.abort();
+              } catch {
+                // ignore
+              }
+              reject(new AgentCancelledError("Agent run aborted"));
+            };
             signal.addEventListener("abort", abortListener, { once: true });
+            // Handle the race where the signal aborts before registering the listener.
+            if (signal.aborted) abortListener();
           });
 
     const timeoutPromise =
       Number.isFinite(timeoutMs) && timeoutMs > 0
         ? new Promise<never>((_resolve, reject) => {
-            timeoutId = setTimeout(
-              () => reject(new AgentTimeoutError(`Agent run exceeded maxDurationMs (${maxDurationMs})`)),
-              timeoutMs
-            );
+            timeoutId = setTimeout(() => {
+              try {
+                abortController?.abort();
+              } catch {
+                // ignore
+              }
+              reject(new AgentTimeoutError(`Agent run exceeded maxDurationMs (${maxDurationMs})`));
+            }, timeoutMs);
           })
         : Promise.reject(new AgentTimeoutError(`Agent run exceeded maxDurationMs (${maxDurationMs})`));
 
@@ -357,13 +370,16 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
     });
 
     async function refreshSystemMessage(targetMessages: any[]): Promise<void> {
+      throwIfCancelled();
+      const contextAbortController = new AbortController();
       const ctx = await guard(
         contextBuilder.build({
           activeSheetId: defaultSheetId,
-          signal,
           dlp,
-          focusQuestion: goal
-        })
+          focusQuestion: goal,
+          signal: contextAbortController.signal
+        }),
+        contextAbortController
       );
       if (!targetMessages.length || targetMessages[0]?.role !== "system") {
         targetMessages.unshift({ role: "system", content: buildSystemPrompt(ctx.promptContext) });
