@@ -2516,6 +2516,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "vba")]
     fn parses_vba_project_from_package() {
         let fixture = load_fixture();
         let pkg = XlsxPackage::from_bytes(&fixture).expect("read pkg");

@@ -216,6 +216,8 @@ pub fn patch_xlsx_streaming_with_recalc_policy<R: Read + Seek, W: Write + Seek>(
         patches.sort_by_key(|p| (p.cell.row, p.cell.col));
     }
     let mut archive = ZipArchive::new(input)?;
+    // `vm` (cell value-metadata) is preserved by default for fidelity. Callers can explicitly
+    // override/clear it via `WorksheetCellPatch`.
     let mut formula_changed = cell_patches
         .iter()
         .any(|p| formula_is_material(p.formula.as_deref()));
@@ -3720,13 +3722,10 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     let t_tag = prefixed_tag(prefix, "t");
 
     let mut existing_t: Option<String> = None;
-    let mut has_vm = false;
     for attr in cell_start.attributes() {
         let attr = attr?;
-        match attr.key.as_ref() {
-            b"t" => existing_t = Some(attr.unescape_value()?.into_owned()),
-            b"vm" => has_vm = true,
-            _ => {}
+        if attr.key.as_ref() == b"t" {
+            existing_t = Some(attr.unescape_value()?.into_owned());
         }
     }
 
@@ -3742,39 +3741,10 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         inner_buf.clear();
     }
 
-    // Excel uses `vm="..."` to point into `xl/metadata.xml` value metadata (rich values / in-cell
-    // images).
-    //
-    // For most rich-data cells, we preserve `vm` across patches so the rich metadata stays
-    // attached to the cell.
-    //
-    // There are two cases where we drop `vm`:
-    // - The original cell is an embedded-image placeholder represented as an error cell with a
-    //   `#VALUE!` cached value, and the patch edits the cell away from that placeholder value.
-    // - When patching an incomplete workbook package (see `drop_vm_on_value_change`), drop `vm`
-    //   when the cached value changes away from the rich-value placeholder semantics.
-    let existing_value_is_value_error = if existing_t.as_deref() == Some("e") {
-        extract_cell_v_text(&inner_events)?.is_some_and(|v| v.trim() == "#VALUE!")
-    } else {
-        false
-    };
-    let patch_value_is_value_error = matches!(
-        patch.value,
-        CellValue::Error(formula_model::ErrorValue::Value)
-    );
     let clear_cached_value = patch.clear_cached_value && patch_formula.is_some();
-    let value_changed = if drop_vm_on_value_change && has_vm && !patch_value_is_value_error {
-        !cell_value_semantics_eq(
-            existing_t.as_deref(),
-            &inner_events,
-            &patch.value,
-            patch.shared_string_idx,
-        )?
-    } else {
-        false
-    };
-    let drop_vm = has_vm
-        && ((existing_value_is_value_error && !patch_value_is_value_error) || value_changed);
+    let _ = drop_vm_on_value_change;
+    // Preserve `vm` by default; callers can explicitly override/clear it via the patch.
+    let drop_vm = false;
 
     let mut c = BytesStart::new(cell_tag.as_str());
     let mut has_r = false;
