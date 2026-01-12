@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { builtinKeybindings } from "./builtinKeybindings.js";
+import { ContextKeyService } from "../extensions/contextKeys.js";
+import { evaluateWhenClause } from "../extensions/whenClause.js";
 import { buildCommandKeybindingDisplayIndex, getPrimaryCommandKeybindingDisplay, parseKeybinding } from "../extensions/keybindings.js";
 
 describe("builtin keybinding catalog", () => {
@@ -26,6 +28,74 @@ describe("builtin keybinding catalog", () => {
       .map((kb) => kb.command);
 
     expect(offenders).toEqual([]);
+  });
+
+  it("evaluates key when-clauses against context keys", () => {
+    const contextKeys = new ContextKeyService();
+    const lookup = contextKeys.asLookup();
+
+    const copyWhen = builtinKeybindings.find((kb) => kb.command === "clipboard.copy" && kb.key === "ctrl+c")?.when;
+    expect(typeof copyWhen).toBe("string");
+
+    contextKeys.set("focus.inTextInput", true);
+    expect(evaluateWhenClause(copyWhen, lookup)).toBe(false);
+
+    contextKeys.set("focus.inTextInput", false);
+    expect(evaluateWhenClause(copyWhen, lookup)).toBe(true);
+
+    const formatWhen = builtinKeybindings.find((kb) => kb.command === "format.toggleBold" && kb.key === "ctrl+b")?.when;
+    expect(typeof formatWhen).toBe("string");
+
+    contextKeys.batch({ "spreadsheet.isEditing": false, "focus.inTextInput": false });
+    expect(evaluateWhenClause(formatWhen, lookup)).toBe(true);
+
+    contextKeys.batch({ "spreadsheet.isEditing": true, "focus.inTextInput": false });
+    expect(evaluateWhenClause(formatWhen, lookup)).toBe(false);
+
+    contextKeys.batch({ "spreadsheet.isEditing": false, "focus.inTextInput": true });
+    expect(evaluateWhenClause(formatWhen, lookup)).toBe(false);
+
+    const sheetPrevWhen = builtinKeybindings.find((kb) => kb.command === "workbook.previousSheet" && kb.key === "ctrl+pageup")?.when;
+    expect(typeof sheetPrevWhen).toBe("string");
+
+    contextKeys.batch({
+      "focus.inSheetTabRename": true,
+      "focus.inTextInput": false,
+      "spreadsheet.formulaBarFormulaEditing": false,
+    });
+    expect(evaluateWhenClause(sheetPrevWhen, lookup)).toBe(false);
+
+    // Normal grid navigation.
+    contextKeys.batch({
+      "focus.inSheetTabRename": false,
+      "focus.inTextInput": false,
+      "spreadsheet.formulaBarFormulaEditing": false,
+    });
+    expect(evaluateWhenClause(sheetPrevWhen, lookup)).toBe(true);
+
+    // Allow sheet switching while editing a formula in the formula bar.
+    contextKeys.batch({
+      "focus.inSheetTabRename": false,
+      "focus.inTextInput": true,
+      "spreadsheet.formulaBarFormulaEditing": true,
+    });
+    expect(evaluateWhenClause(sheetPrevWhen, lookup)).toBe(true);
+
+    // But not while editing other text inputs.
+    contextKeys.batch({
+      "focus.inSheetTabRename": false,
+      "focus.inTextInput": true,
+      "spreadsheet.formulaBarFormulaEditing": false,
+    });
+    expect(evaluateWhenClause(sheetPrevWhen, lookup)).toBe(false);
+
+    const paletteWhen = builtinKeybindings.find((kb) => kb.command === "workbench.showCommandPalette" && kb.key === "ctrl+shift+p")?.when;
+    expect(typeof paletteWhen).toBe("string");
+
+    contextKeys.set("workbench.commandPaletteOpen", true);
+    expect(evaluateWhenClause(paletteWhen, lookup)).toBe(false);
+    contextKeys.set("workbench.commandPaletteOpen", false);
+    expect(evaluateWhenClause(paletteWhen, lookup)).toBe(true);
   });
 
   it("formats expected display strings per platform", () => {

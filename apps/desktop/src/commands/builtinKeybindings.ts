@@ -5,6 +5,12 @@ export type BuiltinKeybinding = {
   when?: string | null;
 };
 
+const WHEN_NOT_IN_TEXT_INPUT = "!focus.inTextInput";
+const WHEN_NOT_EDITING_OR_TEXT_INPUT = "!spreadsheet.isEditing && !focus.inTextInput";
+const WHEN_SHEET_NAVIGATION =
+  "!focus.inSheetTabRename && (!focus.inTextInput || spreadsheet.formulaBarFormulaEditing)";
+const WHEN_COMMAND_PALETTE = "!workbench.commandPaletteOpen";
+
 /**
  * Built-in keybindings that power UI affordances (Command Palette + context menus)
  * without touching SpreadsheetApp's existing keyboard handling yet.
@@ -53,20 +59,20 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     command: "workbench.showCommandPalette",
     key: "ctrl+shift+p",
     mac: "cmd+shift+p",
-    when: null,
+    when: WHEN_COMMAND_PALETTE,
   },
   {
     // Some keyboards (and remote desktop setups) can emit both ctrlKey+metaKey for the
     // command palette chord. Add an explicit binding so the palette remains reachable.
     command: "workbench.showCommandPalette",
     key: "ctrl+cmd+shift+p",
-    when: null,
+    when: WHEN_COMMAND_PALETTE,
   },
   {
     command: "edit.editCell",
     key: "f2",
     mac: "f2",
-    when: null,
+    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
   },
   {
     command: "view.togglePanel.aiChat",
@@ -91,47 +97,47 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     command: "clipboard.pasteSpecial",
     key: "ctrl+shift+v",
     mac: "cmd+shift+v",
-    when: null,
+    when: WHEN_NOT_IN_TEXT_INPUT,
   },
   {
     command: "clipboard.pasteSpecial",
     key: "ctrl+cmd+shift+v",
-    when: null,
+    when: WHEN_NOT_IN_TEXT_INPUT,
   },
   {
     command: "clipboard.copy",
     key: "ctrl+c",
     mac: "cmd+c",
-    when: null,
+    when: WHEN_NOT_IN_TEXT_INPUT,
   },
   {
     // Some keyboards (and remote desktop setups) can emit both ctrlKey+metaKey for
     // common clipboard chords. Add explicit bindings so copy remains reliable.
     command: "clipboard.copy",
     key: "ctrl+cmd+c",
-    when: null,
+    when: WHEN_NOT_IN_TEXT_INPUT,
   },
   {
     command: "clipboard.cut",
     key: "ctrl+x",
     mac: "cmd+x",
-    when: null,
+    when: WHEN_NOT_IN_TEXT_INPUT,
   },
   {
     command: "clipboard.cut",
     key: "ctrl+cmd+x",
-    when: null,
+    when: WHEN_NOT_IN_TEXT_INPUT,
   },
   {
     command: "clipboard.paste",
     key: "ctrl+v",
     mac: "cmd+v",
-    when: null,
+    when: WHEN_NOT_IN_TEXT_INPUT,
   },
   {
     command: "clipboard.paste",
     key: "ctrl+cmd+v",
-    when: null,
+    when: WHEN_NOT_IN_TEXT_INPUT,
   },
   {
     command: "edit.find",
@@ -212,7 +218,7 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     command: "format.toggleBold",
     key: "ctrl+b",
     mac: "cmd+b",
-    when: null,
+    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
   },
   {
     command: "format.toggleItalic",
@@ -220,55 +226,55 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     // IMPORTANT: Cmd+I is reserved for toggling the AI sidebar (see instructions/ui.md).
     // Italic formatting remains Ctrl+I to preserve the AI toggle on macOS.
     mac: "ctrl+i",
-    when: null,
+    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
   },
   {
     command: "format.toggleUnderline",
     key: "ctrl+u",
     mac: "cmd+u",
-    when: null,
+    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
   },
   {
     command: "format.numberFormat.currency",
     key: "ctrl+shift+$",
     mac: "cmd+shift+$",
-    when: null,
+    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
   },
   {
     command: "format.numberFormat.percent",
     key: "ctrl+shift+%",
     mac: "cmd+shift+%",
-    when: null,
+    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
   },
   {
     command: "format.numberFormat.date",
     key: "ctrl+shift+#",
     mac: "cmd+shift+#",
-    when: null,
+    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
   },
   {
     command: "format.openFormatCells",
     key: "ctrl+1",
     mac: "cmd+1",
-    when: null,
+    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
   },
   {
     command: "workbook.previousSheet",
     key: "ctrl+pageup",
     mac: "cmd+pageup",
-    when: null,
+    when: WHEN_SHEET_NAVIGATION,
   },
   {
     command: "workbook.nextSheet",
     key: "ctrl+pagedown",
     mac: "cmd+pagedown",
-    when: null,
+    when: WHEN_SHEET_NAVIGATION,
   },
   {
     command: "comments.addComment",
     key: "shift+f2",
     mac: "shift+f2",
-    when: null,
+    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
   },
   {
     command: "comments.togglePanel",
