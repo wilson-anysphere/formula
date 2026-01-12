@@ -177,6 +177,8 @@ The repo test wrapper (`scripts/run-node-tests.mjs`) keeps the suite reliable by
 - capping overall test-file concurrency by default
 - running `*.e2e.test.js` files serially (`--test-concurrency=1`)
 - running sync-server-backed tests (files that reference `startSyncServer`) serially
+- installing a TypeScript-aware ESM loader (when `typescript` is installed) so `.test.js`
+  suites can import workspace `.ts` sources without a separate build step
 
 To tune the default non-e2e/non-sync-server test-file concurrency explicitly:
 
