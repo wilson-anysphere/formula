@@ -121,6 +121,15 @@ fn encodes_and_decodes_builtin_function_via_ftab() {
 }
 
 #[test]
+fn encodes_and_decodes_if_with_missing_arg() {
+    let ctx = WorkbookContext::default();
+    let encoded =
+        encode_rgce_with_context("=IF(,1,0)", &ctx, CellCoord::new(0, 0)).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(normalize("=IF(,1,0)"), normalize(&decoded));
+}
+
+#[test]
 fn encodes_and_decodes_discount_securities_and_tbill_functions_via_ftab() {
     let ctx = WorkbookContext::default();
     for formula in [

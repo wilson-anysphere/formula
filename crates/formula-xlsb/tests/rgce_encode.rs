@@ -33,6 +33,13 @@ fn rgce_roundtrip_if_comparison() {
 }
 
 #[test]
+fn rgce_roundtrip_if_missing_arg() {
+    let rgce = formula_biff::encode_rgce("IF(,1,0)").expect("encode");
+    let decoded = decode_rgce(&rgce).expect("decode");
+    assert_eq!(normalize("IF(,1,0)"), normalize(&decoded));
+}
+
+#[test]
 fn rgce_roundtrip_intersection() {
     let rgce = formula_biff::encode_rgce("A1:B2 C1:D4").expect("encode");
     let decoded = decode_rgce(&rgce).expect("decode");

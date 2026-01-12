@@ -35,6 +35,15 @@ fn rgce_roundtrip_if_comparison() {
 }
 
 #[test]
+fn rgce_roundtrip_if_missing_arg() {
+    // Excel encodes blank function arguments as `PtgMissArg` (0x16). Missing args can appear at
+    // any position, not just as a trailing optional argument.
+    let rgce = encode_rgce("IF(,1,0)").expect("encode");
+    let decoded = decode_rgce(&rgce).expect("decode");
+    assert_eq!(normalize("IF(,1,0)"), normalize(&decoded));
+}
+
+#[test]
 fn rgce_roundtrip_intersection() {
     let rgce = encode_rgce("A1:B2 C1:D4").expect("encode");
     let decoded = decode_rgce(&rgce).expect("decode");
