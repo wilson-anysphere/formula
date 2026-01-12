@@ -675,6 +675,9 @@ fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Value::Error(ErrorKind::Value);
+    }
     let match_mode = match args.get(2) {
         Some(expr) if matches!(expr, CompiledExpr::Blank) => lookup::MatchMode::Exact,
         Some(expr) => match eval_scalar_arg(ctx, expr).coerce_to_i64_with_ctx(ctx) {
@@ -791,6 +794,9 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let lookup_value = eval_scalar_arg(ctx, &args[0]);
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
+    }
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Value::Error(ErrorKind::Value);
     }
 
     let if_not_found = match args.get(3) {

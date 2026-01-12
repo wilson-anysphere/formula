@@ -7803,6 +7803,9 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Value::Error(ErrorKind::Value);
+    }
     if matches!(
         lookup_value,
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_)
@@ -7959,6 +7962,9 @@ fn fn_xmatch(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Value::Error(ErrorKind::Value);
+    }
     if matches!(
         lookup_value,
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_)
@@ -8051,6 +8057,9 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     let lookup_value = apply_implicit_intersection(args[0].clone(), grid, base);
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
+    }
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Value::Error(ErrorKind::Value);
     }
     if matches!(
         lookup_value,
