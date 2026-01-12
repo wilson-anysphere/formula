@@ -146,6 +146,16 @@ test("desktop index.html exposes required shell containers and testids", () => {
     /data-testid="collab-status"[^>]*\baria-label="Collaboration status"/,
     'Expected collab-status element to include aria-label="Collaboration status" for accessibility',
   );
+  assert.match(
+    html,
+    /data-testid="collab-status"[^>]*\baria-live="polite"/,
+    'Expected collab-status element to include aria-live="polite" for accessibility',
+  );
+  assert.match(
+    html,
+    /data-testid="collab-status"[^>]*\baria-atomic="true"/,
+    'Expected collab-status element to include aria-atomic="true" for accessibility',
+  );
 
   // A11y: sheet position updates should be announced politely by screen readers.
   assert.match(
@@ -157,6 +167,16 @@ test("desktop index.html exposes required shell containers and testids", () => {
     html,
     /data-testid="sheet-position"[^>]*\baria-label="Sheet position"/,
     'Expected sheet-position element to include aria-label="Sheet position" for accessibility',
+  );
+  assert.match(
+    html,
+    /data-testid="sheet-position"[^>]*\baria-live="polite"/,
+    'Expected sheet-position element to include aria-live="polite" for accessibility',
+  );
+  assert.match(
+    html,
+    /data-testid="sheet-position"[^>]*\baria-atomic="true"/,
+    'Expected sheet-position element to include aria-atomic="true" for accessibility',
   );
 
   // Debug controls should live in the ribbon (React) rather than being duplicated in the

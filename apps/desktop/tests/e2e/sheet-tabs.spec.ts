@@ -721,10 +721,15 @@ test.describe("sheet tabs", () => {
 
     // Hide Sheet2 so the visible tabs are [Sheet1, Sheet3] while the full order is
     // [Sheet1, Sheet2(hidden), Sheet3].
-    await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
-      app.getWorkbookSheetStore().hide("Sheet2");
-    });
+    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right", position: { x: 10, y: 10 } });
+    {
+      const menu = page.getByTestId("sheet-tab-context-menu");
+      // Ensure the sheet tab context menu is the one that's open.
+      await expect(page.getByTestId("context-menu")).toBeHidden();
+      await expect(menu).toBeVisible();
+      await menu.getByRole("button", { name: "Hide", exact: true }).click();
+      await expect(menu).toBeHidden();
+    }
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
 
     // Drag Sheet3 before Sheet1.
@@ -766,10 +771,14 @@ test.describe("sheet tabs", () => {
       .toEqual(desiredAll);
 
     // Unhide Sheet2 and ensure it lands at the end (i.e. hidden sheet moved as expected).
-    await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
-      app.getWorkbookSheetStore().unhide("Sheet2");
-    });
+    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
+    {
+      const menu = page.getByTestId("sheet-tab-context-menu");
+      await expect(page.getByTestId("context-menu")).toBeHidden();
+      await expect(menu).toBeVisible();
+      await menu.getByRole("button", { name: "Unhide…" }).click();
+      await menu.getByRole("button", { name: "Sheet2" }).click();
+    }
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
 
     await expect
@@ -798,19 +807,26 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
 
     // Hide Sheet2 so the position indicator reflects visible sheets (Excel-like behavior).
-    await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
-      app.getWorkbookSheetStore().hide("Sheet2");
-    });
+    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right", position: { x: 10, y: 10 } });
+    {
+      const menu = page.getByTestId("sheet-tab-context-menu");
+      await expect(page.getByTestId("context-menu")).toBeHidden();
+      await expect(menu).toBeVisible();
+      await menu.getByRole("button", { name: "Hide", exact: true }).click();
+    }
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
 
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
 
     // Unhide Sheet2 and ensure position updates.
-    await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
-      app.getWorkbookSheetStore().unhide("Sheet2");
-    });
+    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
+    {
+      const menu = page.getByTestId("sheet-tab-context-menu");
+      await expect(page.getByTestId("context-menu")).toBeHidden();
+      await expect(menu).toBeVisible();
+      await menu.getByRole("button", { name: "Unhide…" }).click();
+      await menu.getByRole("button", { name: "Sheet2" }).click();
+    }
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
 
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
@@ -907,10 +923,13 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
 
     // Hide the middle sheet.
-    await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
-      app.getWorkbookSheetStore().hide("Sheet2");
-    });
+    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right", position: { x: 10, y: 10 } });
+    {
+      const menu = page.getByTestId("sheet-tab-context-menu");
+      await expect(page.getByTestId("context-menu")).toBeHidden();
+      await expect(menu).toBeVisible();
+      await menu.getByRole("button", { name: "Hide", exact: true }).click();
+    }
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
 
     // Sheet1 -> Sheet3 (Sheet2 is hidden).
