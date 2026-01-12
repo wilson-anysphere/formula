@@ -952,6 +952,24 @@ mod tests {
     }
 
     #[test]
+    fn python_rpc_create_sheet_rejects_duplicate_name_with_unicode_case_folding_expansion() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("straße".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        let err = host
+            .handle_rpc("create_sheet", Some(json!({ "name": "STRASSE" })))
+            .expect_err("expected create_sheet to reject duplicate name");
+        assert_eq!(
+            err,
+            formula_model::SheetNameError::DuplicateName.to_string(),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn python_rpc_create_sheet_rejects_invalid_character_with_canonical_error() {
         let mut workbook = crate::file_io::Workbook::new_empty(None);
         workbook.add_sheet("Sheet1".to_string());
@@ -1060,6 +1078,28 @@ mod tests {
             .handle_rpc(
                 "rename_sheet",
                 Some(json!({ "sheet_id": "Sheet2", "name": "sheet1" })),
+            )
+            .expect_err("expected rename_sheet to reject duplicate name");
+        assert_eq!(
+            err,
+            formula_model::SheetNameError::DuplicateName.to_string(),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn python_rpc_rename_sheet_rejects_duplicate_name_with_unicode_case_folding_expansion() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("straße".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        let err = host
+            .handle_rpc(
+                "rename_sheet",
+                Some(json!({ "sheet_id": "Sheet2", "name": "STRASSE" })),
             )
             .expect_err("expected rename_sheet to reject duplicate name");
         assert_eq!(
