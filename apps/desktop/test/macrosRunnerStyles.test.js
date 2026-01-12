@@ -13,6 +13,8 @@ test("renderMacroRunner is class-driven (no inline style assignments)", () => {
   const usesInlineStyle =
     // Direct DOM style manipulation (element.style.* / element.style = ... / etc).
     /\.style\b/.test(src) ||
+    // Bracket access to the style property (element["style"] / element['style']).
+    /\[\s*["']style["']\s*\]/.test(src) ||
     // Attribute-based inline styles.
     /setAttribute\(\s*["']style["']/.test(src) ||
     /setAttributeNS\(\s*[^,]+,\s*["']style["']/.test(src) ||
