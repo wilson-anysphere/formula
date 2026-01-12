@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -9,7 +11,7 @@ const require = createRequire(import.meta.url);
 
 // Include an explicit `.ts` specifier so `scripts/run-node-tests.mjs` can skip this
 // suite when TypeScript execution isn't available (no transpile loader and no
-// `--experimental-strip-types` support).
+// built-in TypeScript support).
 import { valueFromBar } from "./__fixtures__/resolve-ts-imports/foo.ts";
 import { valueFromBarExtensionless } from "./__fixtures__/resolve-ts-imports/foo-extensionless.ts";
 import { valueFromDirImport } from "./__fixtures__/resolve-ts-imports/foo-dir-import.ts";
@@ -20,12 +22,39 @@ test("node:test runner resolves bundler-style + extensionless + directory TS spe
   assert.equal(valueFromDirImport(), 42);
 });
 
-function supportsTypeStripping() {
-  const probe = spawnSync(process.execPath, ["--experimental-strip-types", "-e", "process.exit(0)"], {
+function getBuiltInTypeScriptSupport() {
+  const flagProbe = spawnSync(process.execPath, ["--experimental-strip-types", "-e", "process.exit(0)"], {
     stdio: "ignore",
   });
-  return probe.status === 0;
+  if (flagProbe.status === 0) {
+    return { enabled: true, args: ["--experimental-strip-types"] };
+  }
+
+  const tmpFile = path.join(os.tmpdir(), `formula-strip-types-probe.${process.pid}.${Date.now()}.ts`);
+  try {
+    writeFileSync(
+      tmpFile,
+      [
+        "const x: number = 1;",
+        "if (x !== 1) throw new Error('strip-types probe failed');",
+        "process.exit(0);",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const nativeProbe = spawnSync(process.execPath, [tmpFile], { stdio: "ignore" });
+    if (nativeProbe.status === 0) {
+      return { enabled: true, args: [] };
+    }
+  } catch {
+    // ignore
+  } finally {
+    rmSync(tmpFile, { force: true });
+  }
+  return { enabled: false, args: [] };
 }
+
+const builtInTypeScript = getBuiltInTypeScriptSupport();
 
 function supportsRegister() {
   try {
@@ -58,8 +87,8 @@ function resolveNodeLoaderArgs(loaderUrl) {
 }
 
 test(
-  "resolve-ts-imports-loader works under --experimental-strip-types (no TypeScript dependency)",
-  { skip: !supportsTypeStripping() },
+  "resolve-ts-imports-loader works under Node built-in TypeScript execution (no TypeScript dependency)",
+  { skip: !builtInTypeScript.enabled },
   () => {
     const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
     const loaderUrl = pathToFileURL(path.join(repoRoot, "scripts", "resolve-ts-imports-loader.mjs")).href;
@@ -67,7 +96,7 @@ test(
       process.execPath,
       [
         "--no-warnings",
-        "--experimental-strip-types",
+        ...builtInTypeScript.args,
         ...resolveNodeLoaderArgs(loaderUrl),
         "--input-type=module",
         "-e",
