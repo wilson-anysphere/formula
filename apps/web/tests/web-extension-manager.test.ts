@@ -463,6 +463,114 @@ test("loadInstalled triggers onStartupFinished activation + initial workbookOpen
   }
 });
 
+test("loadInstalled falls back to host.startup() when startupExtension is unavailable (first extension)", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-startup-fallback-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const manifest = {
+    name: "startup-fallback-ext",
+    publisher: "test",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    browser: "./dist/extension.js",
+    engines: { formula: "^1.0.0" },
+    activationEvents: ["onStartupFinished"],
+    contributes: {}
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+  await fs.writeFile(path.join(extDir, "dist", "extension.js"), `export async function activate() {}\n`);
+
+  const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "test.startup-fallback-ext",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const loaded: Array<{ id: string }> = [];
+  let startupCalls = 0;
+  const host = {
+    loadExtension: async ({ extensionId }: { extensionId: string }) => {
+      loaded.push({ id: extensionId });
+      return extensionId;
+    },
+    listExtensions: () => loaded,
+    startup: async () => {
+      startupCalls++;
+    }
+  };
+
+  const manager = new WebExtensionManager({ marketplaceClient, host: host as any, engineVersion: "1.0.0" });
+  try {
+    await manager.install("test.startup-fallback-ext");
+    await manager.loadInstalled("test.startup-fallback-ext");
+    expect(startupCalls).toBe(1);
+  } finally {
+    await manager.dispose();
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("loadInstalled does not call host.startup() when startupExtension is unavailable and other extensions exist", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-startup-fallback-existing-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const manifest = {
+    name: "startup-fallback-existing-ext",
+    publisher: "test",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    browser: "./dist/extension.js",
+    engines: { formula: "^1.0.0" },
+    activationEvents: ["onStartupFinished"],
+    contributes: {}
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+  await fs.writeFile(path.join(extDir, "dist", "extension.js"), `export async function activate() {}\n`);
+
+  const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "test.startup-fallback-existing-ext",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const loaded: Array<{ id: string }> = [{ id: "test.preloaded-ext" }];
+  let startupCalls = 0;
+  const host = {
+    loadExtension: async ({ extensionId }: { extensionId: string }) => {
+      loaded.push({ id: extensionId });
+      return extensionId;
+    },
+    listExtensions: () => loaded,
+    startup: async () => {
+      startupCalls++;
+    }
+  };
+
+  const manager = new WebExtensionManager({
+    marketplaceClient,
+    host: host as any,
+    engineVersion: "1.0.0"
+  });
+  try {
+    await manager.install("test.startup-fallback-existing-ext");
+    await manager.loadInstalled("test.startup-fallback-existing-ext");
+    expect(startupCalls).toBe(0);
+  } finally {
+    await manager.dispose();
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("loadAllInstalled triggers onStartupFinished + workbookOpened and is idempotent", async () => {
   const keys = generateEd25519KeyPair();
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-startup-all-"));
