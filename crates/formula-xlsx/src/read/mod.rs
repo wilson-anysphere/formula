@@ -1326,13 +1326,22 @@ impl MetadataPart {
     }
 
     fn value_metadata_block_by_vm_index(&self, vm_idx: u32) -> Option<&ValueMetadataBlock> {
-        // Excel emits `c/@vm` as a 1-based index into `<valueMetadata><bk>` (with some producers
-        // observed to be off-by-one / 0-based). Prefer `vm-1` (1-based) and fall back to `vm`
-        // (0-based) when the preferred lookup fails.
-        vm_idx
-            .checked_sub(1)
-            .and_then(|idx| self.value_metadata_block_by_vm_index_candidate(idx))
-            .or_else(|| self.value_metadata_block_by_vm_index_candidate(vm_idx))
+        // Excel emits `c/@vm` indices as 1-based, but some producers use 0-based indices. Prefer
+        // the inferred workbook vm base when available, while still allowing a fallback to the
+        // other interpretation for resilience.
+        match self.vm_index_base {
+            VmIndexBase::ZeroBased => self
+                .value_metadata_block_by_vm_index_candidate(vm_idx)
+                .or_else(|| {
+                    vm_idx
+                        .checked_sub(1)
+                        .and_then(|idx| self.value_metadata_block_by_vm_index_candidate(idx))
+                }),
+            VmIndexBase::OneBased | VmIndexBase::Unknown => vm_idx
+                .checked_sub(1)
+                .and_then(|idx| self.value_metadata_block_by_vm_index_candidate(idx))
+                .or_else(|| self.value_metadata_block_by_vm_index_candidate(vm_idx)),
+        }
     }
 
     fn value_metadata_block_by_vm_index_candidate(
@@ -2241,28 +2250,12 @@ fn parse_worksheet_into_model(
 
     // Resolve `c/@vm` values to rich value record indices after parsing the sheet.
     //
-    // Some producers encode worksheet `vm` values as 0-based, while `xl/metadata.xml` commonly
-    // references `<valueMetadata><bk>` indices as 1-based.
-    //
-    // When we have a direct `vm -> rich value` mapping (from the DOM-based metadata parser), base
-    // handling is already done inside `MetadataPart::vm_to_rich_value_index`, so we must not apply
-    // an additional sheet-local `+1` offset here.
-    //
-    // When we *don't* have a direct mapping (streaming metadata parser), we still need a
-    // best-effort offset to avoid ambiguous 0/1-based interpretations for multi-entry workbooks.
+    // Note: `c/@vm` is ambiguous across producers (0-based vs 1-based). `MetadataPart` performs
+    // best-effort resolution using workbook-level heuristics, so we always pass through the raw
+    // `vm` value here (do not apply an additional offset).
     if !pending_vm_cells.is_empty() {
         if let (Some(metadata_part), Some(rich_value_cells)) = (metadata_part, rich_value_cells) {
-            let vm_offset = if metadata_part.vm_to_rich_value.is_empty() {
-                pending_vm_cells
-                    .iter()
-                    .any(|(_cell_ref, vm)| *vm == 0)
-                    .then_some(1u32)
-                    .unwrap_or(0)
-            } else {
-                0
-            };
             for (cell_ref, vm) in pending_vm_cells {
-                let vm = vm.saturating_add(vm_offset);
                 if let Some(idx) = metadata_part.vm_to_rich_value_index(vm) {
                     rich_value_cells.insert((worksheet_id, cell_ref), idx);
                 }
