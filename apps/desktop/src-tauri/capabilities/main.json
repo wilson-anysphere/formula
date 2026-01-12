@@ -9,8 +9,6 @@
     {
       "identifier": "core:allow-invoke",
       "allow": [
-        "clipboard_read",
-        "clipboard_write",
         "open_workbook",
         "new_workbook",
         "add_sheet",

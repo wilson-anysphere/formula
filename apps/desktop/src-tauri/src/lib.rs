@@ -1,7 +1,7 @@
 pub(crate) mod atomic_write;
 pub mod commands;
 mod fs_scope;
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", test))]
 pub mod clipboard;
 pub mod file_io;
 #[cfg(any(feature = "desktop", test))]
