@@ -130,10 +130,9 @@ fn multirange_unique_areas(r: &MultiRangeRef, base: CellCoord) -> Vec<ResolvedSh
         let resolved = area.range.resolve(base);
 
         let seen = seen_by_sheet.entry(sheet).or_default();
-        let existing = seen.clone();
 
         let mut pieces = vec![resolved];
-        for prev in existing {
+        for prev in seen.iter().copied() {
             let mut next = Vec::new();
             for piece in pieces {
                 next.extend(subtract_resolved_range(piece, prev));
