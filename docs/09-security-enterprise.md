@@ -481,6 +481,11 @@ Public (external) share links are enforced server-side using `DLP_ACTION.SHARE_E
 - `POST /docs/:docId/share-links` blocks creation when `visibility = "public"` is disallowed by DLP.
 - `POST /share-links/:token/redeem` re-evaluates DLP when the redeemer is not already an org member (treat as “external access”).
 
+Additionally, org settings provide coarse-grained controls:
+
+- `org_settings.allow_public_links = false` prevents creating new public links (`403 { error: "public_links_disabled" }`).
+- `org_settings.allow_external_sharing = false` prevents non-org-members from redeeming public links (redeem requires org membership).
+
 To avoid leaking sensitive classification/policy thresholds, the API responds with:
 
 - `403 { error: "dlp_blocked" }`
