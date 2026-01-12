@@ -88,6 +88,35 @@ test.describe("Ctrl/Cmd+Shift+* (select current region)", () => {
       await expect(page.getByTestId("active-cell")).toHaveText("F2");
     });
 
+    test(`includes the active cell when it is empty but adjacent outside the region (${mode})`, async ({ page }) => {
+      await gotoDesktop(page, `/?grid=${mode}`);
+      await waitForIdle(page);
+
+      await page.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const sheetId = app.getCurrentSheetId();
+        const doc = app.getDocument();
+        doc.setCellValue(sheetId, "E1", 1);
+        doc.setCellValue(sheetId, "F1", null);
+      });
+      await waitForIdle(page);
+
+      const gridBox = await page.locator("#grid").boundingBox();
+      expect(gridBox).not.toBeNull();
+
+      const f1Rect = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("F1"));
+      expect(f1Rect).not.toBeNull();
+
+      await page.mouse.click(gridBox!.x + f1Rect!.x + f1Rect!.width / 2, gridBox!.y + f1Rect!.y + f1Rect!.height / 2);
+      await expect(page.getByTestId("active-cell")).toHaveText("F1");
+
+      const modifier = process.platform === "darwin" ? "Meta" : "Control";
+      await page.keyboard.press(`${modifier}+Shift+8`);
+
+      await expect(page.getByTestId("selection-range")).toHaveText("E1:F1");
+      await expect(page.getByTestId("active-cell")).toHaveText("F1");
+    });
+
     test(`falls back to the active cell when there is no adjacent region (${mode})`, async ({ page }) => {
       await gotoDesktop(page, `/?grid=${mode}`);
       await waitForIdle(page);
