@@ -92,6 +92,34 @@ test.describe("collaboration: sheet metadata", () => {
 
       await expect(pageB.getByTestId("sheet-tab-Sheet2")).toBeVisible({ timeout: 30_000 });
 
+      // 1.5) Perform sheet-tab UI actions on client A and assert they propagate to client B
+      // via the shared session.sheets schema (this exercises CollabWorkbookSheetStore write-backs).
+      //
+      // Hide Sheet2.
+      await pageA.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
+      const menuA = pageA.getByTestId("sheet-tab-context-menu");
+      await expect(menuA).toBeVisible();
+      await menuA.getByRole("button", { name: "Hide" }).click();
+      await expect(pageA.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0);
+      await expect(pageB.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0, { timeout: 30_000 });
+
+      // Unhide Sheet2.
+      await pageA.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+      await expect(menuA).toBeVisible();
+      await menuA.getByRole("button", { name: "Unhide…" }).click();
+      await menuA.getByRole("button", { name: "Sheet2" }).click();
+      await expect(pageA.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+      await expect(pageB.getByTestId("sheet-tab-Sheet2")).toBeVisible({ timeout: 30_000 });
+
+      // Set Sheet2 tab color (pick a non-red color so we can distinguish from Sheet1 later).
+      await pageA.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
+      await expect(menuA).toBeVisible();
+      await menuA.getByRole("button", { name: "Tab Color" }).click();
+      await menuA.getByRole("button", { name: "Blue" }).click();
+      await expect(pageB.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-tab-color", "#0070c0", {
+        timeout: 30_000,
+      });
+
       // 2) Rename Sheet1 by updating Yjs metadata (remote-driven rename).
       await pageA.evaluate(() => {
         const app = (window as any).__formulaApp;
@@ -231,6 +259,9 @@ test.describe("collaboration: sheet metadata", () => {
 
       await expect(pageB.getByTestId("sheet-tab-Sheet2")).toBeVisible({ timeout: 30_000 });
       await expect(pageB.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-tab-color", "#ff0000", {
+        timeout: 30_000,
+      });
+      await expect(pageB.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-tab-color", "#0070c0", {
         timeout: 30_000,
       });
 
