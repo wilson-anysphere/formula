@@ -480,7 +480,8 @@ fn parse_rich_value_rel_ids(xml: &str) -> Result<Vec<String>, XlsxError> {
         match reader.read_event_into(&mut buf)? {
             Event::Eof => break,
             Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"rel" => {
-                let mut rid: Option<String> = None;
+                let mut rid_prefixed: Option<String> = None;
+                let mut rid_unprefixed: Option<String> = None;
                 for attr in e.attributes() {
                     let attr = attr?;
                     let key = attr.key.as_ref();
@@ -489,19 +490,19 @@ fn parse_rich_value_rel_ids(xml: &str) -> Result<Vec<String>, XlsxError> {
                         continue;
                     }
                     let value = attr.unescape_value()?.into_owned();
-                    // Relationship IDs are typically `rIdN` (digits). Be defensive and ignore
-                    // other `id=` attributes.
                     let trimmed = value.trim();
-                    if trimmed.starts_with("rId")
-                        && trimmed.len() > 3
-                        && trimmed[3..].chars().all(|c| c.is_ascii_digit())
-                    {
-                        rid = Some(trimmed.to_string());
-                        break;
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    // Prefer namespaced `r:id`, but be tolerant of unqualified `id`.
+                    if key.iter().any(|b| *b == b':') {
+                        rid_prefixed = Some(trimmed.to_string());
+                    } else {
+                        rid_unprefixed = Some(trimmed.to_string());
                     }
                 }
                 // Preserve missing/invalid entries as placeholders so indices remain stable.
-                out.push(rid.unwrap_or_default());
+                out.push(rid_prefixed.or(rid_unprefixed).unwrap_or_default());
             }
             _ => {}
         }
