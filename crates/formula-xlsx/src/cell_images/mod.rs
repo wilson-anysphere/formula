@@ -83,13 +83,7 @@ pub fn load_cell_images_from_parts(parts: &BTreeMap<String, Vec<u8>>, workbook: 
                 continue;
             };
 
-            let file_name = target_path
-                .strip_prefix("xl/media/")
-                .or_else(|| target_path.strip_prefix("media/"))
-                .unwrap_or(&target_path)
-                .to_string();
-            let image_id = ImageId::new(file_name);
-
+            let image_id = image_id_from_target_path(&target_path);
             if workbook.images.get(&image_id).is_some() {
                 continue;
             }
@@ -148,6 +142,7 @@ fn extract_relationship_ids(xml: &[u8]) -> HashSet<String> {
 
     out
 }
+
 /// Parsed workbook-level cell images parts.
 #[derive(Debug, Clone, Default)]
 pub struct CellImages {
@@ -278,13 +273,7 @@ fn parse_cell_images_part(
         }
 
         let target_path = resolve_target_best_effort(path, &rels_path, &rel.target, parts)?;
-
-        let file_name = target_path
-            .strip_prefix("xl/media/")
-            .or_else(|| target_path.strip_prefix("media/"))
-            .unwrap_or(&target_path)
-            .to_string();
-        let image_id = ImageId::new(file_name);
+        let image_id = image_id_from_target_path(&target_path);
 
         if workbook.images.get(&image_id).is_none() {
             let bytes = parts
@@ -348,12 +337,7 @@ fn parse_cell_images_part(
         }
 
         let target_path = resolve_target_best_effort(path, &rels_path, &rel.target, parts)?;
-        let file_name = target_path
-            .strip_prefix("xl/media/")
-            .or_else(|| target_path.strip_prefix("media/"))
-            .unwrap_or(&target_path)
-            .to_string();
-        let image_id = ImageId::new(file_name);
+        let image_id = image_id_from_target_path(&target_path);
 
         if workbook.images.get(&image_id).is_none() {
             let bytes = parts
@@ -470,6 +454,16 @@ fn get_cell_image_rel_id(cell_image_node: &roxmltree::Node<'_, '_>) -> Option<St
         })
         .map(|s| s.to_string())
 }
+
+fn image_id_from_target_path(target_path: &str) -> ImageId {
+    let file_name = target_path
+        .strip_prefix("xl/media/")
+        .or_else(|| target_path.strip_prefix("media/"))
+        .unwrap_or(target_path)
+        .to_string();
+    ImageId::new(file_name)
+}
+
 fn slice_node_xml(node: &roxmltree::Node<'_, '_>, doc: &str) -> Option<String> {
     let range = node.range();
     doc.get(range).map(|s| s.to_string())
