@@ -376,6 +376,8 @@ function createTauriClipboardProvider() {
 
           await clipboard.write([new ClipboardItem(itemPayload)]);
         } catch {
+          // Some WebViews reject `text/rtf` (or other rich types). Retry with
+          // the simplest HTML+plain path.
           if (html) {
             try {
               await clipboard.write([
