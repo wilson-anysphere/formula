@@ -37,8 +37,9 @@ export type ClipboardWritePayload = {
 
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
-// NOTE: Keep this in sync with the clipboard platform provider's guardrails.
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
+// NOTE: Keep this in sync with the clipboard platform provider's guardrails and the Rust backend
+// (`apps/desktop/src-tauri/src/clipboard/mod.rs`).
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB
 
 const isTrimChar = (code: number) => code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d; // space, tab, lf, cr
 
