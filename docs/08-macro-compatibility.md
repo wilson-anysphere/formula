@@ -1027,12 +1027,11 @@ Important notes:
   reports `Bound`.
   - For callers that need more detail (hash algorithm OID/name, signed digest bytes, computed digest
     bytes), use `formula_vba::verify_vba_digital_signature_bound`.
-- Binding uses the hash algorithm indicated by the extracted `DigestInfo` (commonly SHA-1 or
-  SHA-256). Unknown/unsupported digest OIDs are treated conservatively as unverified (`binding ==
-  Unknown`).
-- Because binding is best-effort (and may not perfectly match Excel/MS-OVBA on all real-world files
-  yet), this policy can produce **false negatives** (a legitimately signed workbook treated as
-  untrusted). We prefer false negatives over false positives for `trusted_signed_only`.
+- We currently support digest algorithm OIDs SHA-1 and SHA-256 (best-effort) when verifying binding.
+  Unknown/unsupported digest OIDs are treated conservatively as unverified (`binding == Unknown`).
+- Binding verification is deterministic best-effort and may not match Excel/MS-OVBA for all
+  real-world files yet; this policy can produce **false negatives** (a legitimately signed workbook
+  treated as untrusted). We prefer false negatives over false positives for `trusted_signed_only`.
 - Certificate chain trust ("trusted publisher") is not enforced by default (OpenSSL `NOVERIFY`), but
   can be evaluated as an **opt-in** step by calling `formula-vba`'s
   `verify_vba_digital_signature_with_trust` with an explicit root certificate set.
@@ -1070,14 +1069,16 @@ How to obtain the signed digest for MS-OVBA “project digest” binding:
   signatures, `eContentType` is typically `SpcIndirectDataContent` (`1.3.6.1.4.1.311.2.1.4`).
   - In the detached `content || pkcs7` variant, the detached `content` prefix plays the same role
     as `eContent`.
-- Decode the `SpcIndirectDataContent` structure and extract its `messageDigest: DigestInfo`:
-  - digest algorithm (hash OID)
-  - digest bytes
+- Decode the `SpcIndirectDataContent` / `SpcIndirectDataContentV2` structure and extract its
+  `messageDigest: DigestInfo`:
+  - digest algorithm (hash OID; currently SHA-1 / SHA-256 supported)
+  - digest bytes (length depends on the hash algorithm)
 
 Binding (best-effort; see MS-OVBA):
 
 1. Compute the MS-OVBA-style “VBA project digest” over the project streams (excluding the signature
-   streams), using the hash algorithm indicated by the extracted `DigestInfo`.
+   streams), using the hash algorithm indicated by the extracted `DigestInfo` (currently SHA-1 /
+   SHA-256 supported).
 2. Compare the computed digest to the `DigestInfo` digest bytes.
 3. `trusted_signed_only` is treated as satisfied only when:
     - the PKCS#7/CMS signature verifies (`SignedVerified`), **and**

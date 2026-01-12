@@ -1,7 +1,7 @@
-# VBA Digital Signatures (vbaProject.bin)
+# VBA Digital Signatures (vbaProject.bin / vbaProjectSignature.bin)
 
-This document captures how Excel/VBA macro signatures are stored in `xl/vbaProject.bin`, and how we
-extract and **bind** those signatures against the MS-OVBA “VBA project digest”.
+This document captures how Excel/VBA macro signatures are stored in XLSM files, and how we extract
+and **bind** those signatures against the MS-OVBA “VBA project digest”.
 
 In this repo, `crates/formula-vba` implements best-effort:
 
@@ -30,13 +30,49 @@ whose names begin with the control character `0x05` (U+0005):
 Notes:
 
 - This is **not** the same as an OPC/package-level Digital Signature (XML-DSig) stored in
-  `_xmlsignatures/*` parts. The VBA signature lives inside the embedded OLE `vbaProject.bin`.
+  `_xmlsignatures/*` parts. VBA signatures use Authenticode-like PKCS#7/CMS and can appear either as
+  OLE streams inside `vbaProject.bin` (described here) or in a dedicated signature part (see below).
 - These can appear at the root, e.g. `\x05DigitalSignature`.
 - Some producers store the signature as a **storage** named `\x05DigitalSignature*` containing one
   or more streams, e.g. `\x05DigitalSignature/sig`. Signature discovery should therefore match on
   any *path component*, not only a root stream.
 - If more than one signature stream exists, Excel/MS-OVBA prefers the newest stream:
   `DigitalSignatureExt` → `DigitalSignatureEx` → `DigitalSignature`.
+
+## Signatures stored in external OPC parts (vbaProjectSignature.bin)
+
+Some XLSM producers store the VBA signature **outside** `xl/vbaProject.bin`, in a separate OPC part.
+
+- Common part name: `xl/vbaProjectSignature.bin`
+- The part is typically referenced from `xl/_rels/vbaProject.bin.rels` via a relationship with type:
+  `http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature`
+- The relationship target may point at a different part name (resolve it relative to
+  `xl/vbaProject.bin` rather than hard-coding `xl/vbaProjectSignature.bin`).
+
+Payload variants seen in the wild:
+
+- An OLE/CFB container containing a `\x05DigitalSignature*` stream (similar to the embedded case).
+- **Raw PKCS#7/CMS DER bytes** (not an OLE compound document) stored directly in the part.
+
+### `formula-xlsx` behavior
+
+When inspecting/verifying signatures, `formula-xlsx`:
+
+1. Prefers the dedicated signature part when present, resolving it via `xl/_rels/vbaProject.bin.rels`
+   (with a fallback to `xl/vbaProjectSignature.bin`).
+2. Attempts to verify the signature-part bytes:
+   - first as an OLE container (delegating to `formula-vba`), and
+   - if that fails, as a raw PKCS#7/CMS signature blob.
+3. Falls back to scanning `xl/vbaProject.bin` for embedded `\x05DigitalSignature*` streams.
+
+### Binding limitations (until Task 128)
+
+The dedicated signature part does not include the full set of VBA project streams needed for the
+MS-OVBA project digest transcript. Current `formula-xlsx` behavior is:
+
+- the signature can be cryptographically verified (`SignedVerified`), but
+- binding is reported as `Unknown` unless the project bytes from `xl/vbaProject.bin` are also used
+  for binding (tracked in Task 128).
 
 ## Signature stream payload variants (what the bytes look like)
 
