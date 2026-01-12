@@ -84,20 +84,18 @@ fn project_normalized_data_project_properties_parse_name_and_value_tokens_withou
 
     // Expected transcript:
     // - selected `VBA/dir` record payload bytes (here: PROJECTCODEPAGE / 1252)
-    // - FormsNormalizedData (designer storage bytes padded to 1023-byte blocks)
     // - ProjectProperties as name token bytes + value token bytes (no separators, no quotes, no NWLN)
+    // - For each `BaseClass=` line, the corresponding designer storage bytes are inserted *before*
+    //   the `BaseClass` property name/value tokens.
     //
-    // MS-OVBA §2.4.2.6 appends `NormalizeDesignerStorage` output for `BaseClass=` before the
-    // property name/value tokens for that property; we model this by emitting designer bytes before
-    // ProjectProperties token bytes.
     let mut expected_designer_storage = Vec::new();
     expected_designer_storage.extend_from_slice(b"DESIGNER");
     expected_designer_storage.extend(std::iter::repeat_n(0u8, 1023 - b"DESIGNER".len()));
 
     let mut expected = Vec::new();
     expected.extend_from_slice(&1252u16.to_le_bytes());
-    expected.extend_from_slice(&expected_designer_storage);
     expected.extend_from_slice(b"NameVBAProject");
+    expected.extend_from_slice(&expected_designer_storage);
     expected.extend_from_slice(b"BaseClassUserForm1");
     expected.extend_from_slice(b"HelpFilec:\\example path\\example.hlp");
     expected.extend_from_slice(b"HelpContextID1");
@@ -161,19 +159,16 @@ fn project_normalized_data_project_properties_accepts_lfcr_newlines() {
         project_normalized_data(&vba_project_bin).expect("compute ProjectNormalizedData");
 
     // `ProjectNormalizedData` should be insensitive to NWLN being encoded as LFCR instead of CRLF.
-    // In particular, the designer storage bytes referenced by `BaseClass=` must still be appended.
-
-    // MS-OVBA §2.4.2.6 appends `NormalizeDesignerStorage` output before appending the BaseClass
-    // property name/value tokens. Our implementation models this by emitting the designer storage
-    // bytes (`FormsNormalizedData`) before the PROJECT stream property tokens.
+    // In particular, the designer storage bytes referenced by `BaseClass=` must still be appended
+    // before the BaseClass property tokens.
     let mut expected_designer_storage = Vec::new();
     expected_designer_storage.extend_from_slice(b"DESIGNER");
     expected_designer_storage.extend(std::iter::repeat_n(0u8, 1023 - b"DESIGNER".len()));
 
     let mut expected = Vec::new();
     expected.extend_from_slice(&1252u16.to_le_bytes());
-    expected.extend_from_slice(&expected_designer_storage);
     expected.extend_from_slice(b"NameVBAProject");
+    expected.extend_from_slice(&expected_designer_storage);
     expected.extend_from_slice(b"BaseClassUserForm1");
     expected.extend_from_slice(b"HelpFilec:\\example path\\example.hlp");
     expected.extend_from_slice(b"HelpContextID1");
@@ -282,4 +277,75 @@ fn project_normalized_data_project_properties_excludes_project_id_property_entir
 
     // With an empty `VBA/dir` and no designers, the output should be exactly the Name token bytes.
     assert_eq!(normalized, b"NameVBAProject");
+}
+
+#[test]
+fn project_normalized_data_project_properties_excludes_document_property_entirely() {
+    // MS-OVBA §2.4.2.6 excludes ProjectDocModule (`Document=...`) from ProjectNormalizedData.
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        // PROJECTCODEPAGE (u16 LE): Windows-1252.
+        push_record(&mut out, 0x0003, &1252u16.to_le_bytes());
+
+        // Designer module group for `UserForm1` so `BaseClass=UserForm1` can resolve to storage.
+        push_record(&mut out, 0x0019, b"UserForm1"); // MODULENAME
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"UserForm1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes()); // reserved u16
+        push_record(&mut out, 0x001A, &stream_name); // MODULESTREAMNAME
+        push_record(&mut out, 0x0021, &0x0003u16.to_le_bytes()); // MODULETYPE (UserForm)
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+
+    // Include an excluded Document property *before* the BaseClass property.
+    let project_stream = concat!(
+        "Document=ThisWorkbook/&H00000000\r\n",
+        "BaseClass=UserForm1\r\n",
+        "Name=\"VBAProject\"\r\n",
+    );
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(project_stream.as_bytes())
+            .expect("write PROJECT");
+    }
+
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    // Designer storage referenced by BaseClass.
+    ole.create_storage("UserForm1")
+        .expect("create designer storage");
+    {
+        let mut s = ole
+            .create_stream("UserForm1/f")
+            .expect("create designer stream");
+        s.write_all(b"DESIGNER").expect("write designer bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized =
+        project_normalized_data(&vba_project_bin).expect("compute ProjectNormalizedData");
+
+    assert!(
+        find_subslice(&normalized, b"DocumentThisWorkbook").is_none(),
+        "expected Document property tokens to be excluded"
+    );
+
+    // Sanity checks: designer bytes and included Name property tokens should still be present.
+    assert!(
+        find_subslice(&normalized, b"DESIGNER").is_some(),
+        "expected designer bytes to be included"
+    );
+    assert!(
+        find_subslice(&normalized, b"NameVBAProject").is_some(),
+        "expected Name property tokens to be included"
+    );
 }

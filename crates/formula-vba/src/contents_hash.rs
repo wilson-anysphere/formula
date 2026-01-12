@@ -1,9 +1,12 @@
+use std::io::{Cursor, Read};
+
 use encoding_rs::{Encoding, UTF_16LE, WINDOWS_1252};
 use md5::Md5;
 use sha2::Digest as _;
 use sha2::Sha256;
 
 use crate::forms_normalized_data;
+use crate::dir::ModuleRecord;
 use crate::{decompress_container, DirParseError, DirStream, OleFile, ParseError};
 
 #[derive(Debug, Clone, Default)]
@@ -206,23 +209,61 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
     let mut project_properties = Vec::new();
     let mut host_extender_info = Vec::new();
     if let Some(project_stream_bytes) = ole.read_stream_opt("PROJECT")? {
-        project_properties = project_properties_normalized_bytes(&project_stream_bytes);
+        project_properties =
+            project_properties_normalized_bytes(vba_project_bin, &dir_decompressed, &project_stream_bytes);
         host_extender_info = host_extender_info_normalized_bytes(&project_stream_bytes);
     }
 
-    // MS-OVBA §2.4.2.6 appends `NormalizeDesignerStorage` output before appending the BaseClass
-    // property name/value tokens. We model that ordering by emitting the designer storage bytes
-    // (`FormsNormalizedData`) before the BaseClass tokens derived from the PROJECT stream.
-    if let Ok(forms) = forms_normalized_data(vba_project_bin) {
-        out.extend_from_slice(&forms);
-    }
     out.extend_from_slice(&project_properties);
     out.extend_from_slice(&host_extender_info);
 
     Ok(out)
 }
 
-fn project_properties_normalized_bytes(project_stream_bytes: &[u8]) -> Vec<u8> {
+fn project_properties_normalized_bytes(
+    vba_project_bin: &[u8],
+    dir_decompressed: &[u8],
+    project_stream_bytes: &[u8],
+) -> Vec<u8> {
+    // ProjectProperties are MBCS/ASCII bytes; we must preserve them verbatim in the transcript.
+    // However, resolving `BaseClass=` designer module identifiers requires decoding into a Rust
+    // `String` so we can match them to `VBA/dir` module records.
+
+    fn is_excluded_project_property_name(name: &[u8]) -> bool {
+        // MS-OVBA §2.4.2.6 exclusions:
+        // - ProjectId (`ID=...`)
+        // - ProjectDocModule (`Document=...`)
+        // - ProjectProtectionState / ProjectPassword / ProjectVisibilityState (commonly `CMG` / `DPB` / `GC`)
+        //
+        // Some producers also emit longer-key variants (`ProtectionState`, `Password`, `VisibilityState`) or
+        // alternate doc-module keys (`DocModule`); treat them as excluded too for robustness.
+        name.eq_ignore_ascii_case(b"ID")
+            || name.eq_ignore_ascii_case(b"Document")
+            || name.eq_ignore_ascii_case(b"DocModule")
+            || name.eq_ignore_ascii_case(b"CMG")
+            || name.eq_ignore_ascii_case(b"DPB")
+            || name.eq_ignore_ascii_case(b"GC")
+            || name.eq_ignore_ascii_case(b"ProtectionState")
+            || name.eq_ignore_ascii_case(b"Password")
+            || name.eq_ignore_ascii_case(b"VisibilityState")
+    }
+
+    let encoding = crate::detect_project_codepage(project_stream_bytes)
+        .or_else(|| {
+            DirStream::detect_codepage(dir_decompressed)
+                .map(|cp| crate::encoding_for_codepage(cp as u32))
+        })
+        .unwrap_or(WINDOWS_1252);
+
+    // We need `VBA/dir` module records to map BaseClass identifiers to designer storage names.
+    let dir_stream = DirStream::parse_with_encoding(dir_decompressed, encoding).ok();
+    let modules: &[ModuleRecord] = dir_stream.as_ref().map(|d| d.modules.as_slice()).unwrap_or(&[]);
+
+    // To normalize designer storages we need storage enumeration, which is only exposed by the
+    // underlying `cfb::CompoundFile`. Keep this best-effort: if anything goes wrong, we still
+    // output the property tokens without designer bytes.
+    let mut file = cfb::CompoundFile::open(Cursor::new(vba_project_bin)).ok();
+
     let mut out = Vec::new();
     for raw_line in split_nwln_lines(project_stream_bytes) {
         let line = trim_ascii_whitespace(raw_line);
@@ -248,9 +289,24 @@ fn project_properties_normalized_bytes(project_stream_bytes: &[u8]) -> Vec<u8> {
             continue;
         }
 
-        // MS-OVBA §2.4.2.6 excludes the ProjectId (`ID=...`) from the transcript.
-        if name.eq_ignore_ascii_case(b"ID") {
+        if is_excluded_project_property_name(name) {
             continue;
+        }
+
+        // MS-OVBA §2.4.2.6: for ProjectDesignerModule (`BaseClass=`) append `NormalizeDesignerStorage`
+        // output for the referenced designer storage *before* appending the name/value token bytes.
+        if name.eq_ignore_ascii_case(b"BaseClass") {
+            if let Some(file) = file.as_mut() {
+                let (cow, _, _) = encoding.decode(value);
+                let module_identifier = cow.trim().trim_matches('"');
+                if let Some(storage_name) =
+                    match_designer_module_stream_name(modules, module_identifier)
+                {
+                    if let Ok(bytes) = normalize_designer_storage(file, storage_name) {
+                        out.extend_from_slice(&bytes);
+                    }
+                }
+            }
         }
 
         // MS-OVBA pseudocode appends property name bytes then property value bytes, with no
@@ -260,6 +316,58 @@ fn project_properties_normalized_bytes(project_stream_bytes: &[u8]) -> Vec<u8> {
     }
 
     out
+}
+
+fn match_designer_module_stream_name<'a>(
+    modules: &'a [ModuleRecord],
+    module_identifier: &str,
+) -> Option<&'a str> {
+    if let Some(m) = modules.iter().find(|m| m.name == module_identifier) {
+        return Some(m.stream_name.as_str());
+    }
+    let needle = module_identifier.to_ascii_lowercase();
+    modules
+        .iter()
+        .find(|m| m.name.to_ascii_lowercase() == needle)
+        .map(|m| m.stream_name.as_str())
+}
+
+fn normalize_designer_storage<F: Read + std::io::Seek>(
+    file: &mut cfb::CompoundFile<F>,
+    storage_name: &str,
+) -> std::io::Result<Vec<u8>> {
+    let entries = file.walk_storage(storage_name)?;
+
+    // `walk_storage` includes the storage itself as the first entry.
+    let mut stream_paths = Vec::new();
+    let mut first = true;
+    for entry in entries {
+        if first {
+            first = false;
+            continue;
+        }
+        if entry.is_stream() {
+            stream_paths.push(entry.path().to_string_lossy().to_string());
+        }
+    }
+
+    let mut out = Vec::new();
+    for path in stream_paths {
+        let mut s = file.open_stream(&path)?;
+        let mut buf = Vec::new();
+        s.read_to_end(&mut buf)?;
+        append_stream_padded_1023(&mut out, &buf);
+    }
+
+    Ok(out)
+}
+
+fn append_stream_padded_1023(out: &mut Vec<u8>, bytes: &[u8]) {
+    out.extend_from_slice(bytes);
+    let rem = bytes.len() % 1023;
+    if rem != 0 {
+        out.extend(std::iter::repeat(0u8).take(1023 - rem));
+    }
 }
 
 fn strip_ascii_quotes(bytes: &[u8]) -> &[u8] {
