@@ -199,16 +199,16 @@ Further reading:
 
 ##### Worksheet cell encoding
 
-Excel-generated “Place in Cell” images are commonly encoded as an **error** (`t="e"`) with cached `#VALUE!`, and the real value is referenced through the `vm` (**value metadata**) attribute.
-
-Some producers/fixtures omit `t="e"` and store a placeholder numeric cached value like `<v>0</v>`; the image binding still comes from `vm` + `xl/metadata.xml` + `xl/richData/*`.
+Excel has been observed to use multiple worksheet-level encodings for “Place in Cell” images. In all
+observed variants, the image binding comes from metadata pointers (`vm`, sometimes `cm`) into
+`xl/metadata.xml` + `xl/richData/*` (not the cached `<v>` value).
 
 ```xml
-<!-- Excel-generated "Place in Cell" -->
+<!-- Variant A: error cell with cached "#VALUE!" (observed in fixtures/xlsx/basic/image-in-cell.xlsx) -->
 <c t="e" vm="N"><v>#VALUE!</v></c>
 
-<!-- Variant seen in some producers/fixtures -->
-<c vm="N"><v>0</v></c>
+<!-- Variant B: placeholder numeric cached value (observed in fixtures/xlsx/rich-data/images-in-cell.xlsx) -->
+<c vm="N" cm="M"><v>0</v></c>
 ```
 
 Indexing note:
