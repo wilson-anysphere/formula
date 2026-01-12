@@ -128,8 +128,18 @@ export class DocumentCellProvider implements CellProvider {
     const controller: any = this.options.document as any;
 
     const getNumberFormat = (docStyle: any): string | null => {
-      const raw = docStyle?.numberFormat ?? docStyle?.number_format;
-      return typeof raw === "string" && raw.trim() !== "" ? raw : null;
+      // formula-model serializes number formats as `number_format` (snake_case), but UI patches use `numberFormat`.
+      // If the UI explicitly sets `numberFormat: null` to clear formatting, treat it as authoritative and do not
+      // fall back to the imported `number_format` value.
+      if (hasOwn(docStyle, "numberFormat")) {
+        const raw = docStyle?.numberFormat;
+        return typeof raw === "string" && raw.trim() !== "" ? raw : null;
+      }
+      if (hasOwn(docStyle, "number_format")) {
+        const raw = docStyle?.number_format;
+        return typeof raw === "string" && raw.trim() !== "" ? raw : null;
+      }
+      return null;
     };
 
     const styleTable: any = (this.options.document as any)?.styleTable;
@@ -305,7 +315,7 @@ export class DocumentCellProvider implements CellProvider {
     );
     if (fontColor) out.color = fontColor;
 
-    const rawNumberFormat = (docStyle as any).numberFormat ?? (docStyle as any).number_format;
+    const rawNumberFormat = hasOwn(docStyle, "numberFormat") ? (docStyle as any).numberFormat : (docStyle as any).number_format;
     if (typeof rawNumberFormat === "string" && rawNumberFormat.trim() !== "") out.numberFormat = rawNumberFormat;
 
     const alignment = isPlainObject(docStyle.alignment) ? docStyle.alignment : null;

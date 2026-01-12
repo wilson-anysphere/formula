@@ -123,6 +123,49 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     expect(style.wrapMode).toBeUndefined();
   });
 
+  it("allows UI patches to clear an imported snake_case number_format", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    doc.setCellValue(sheetId, "A1", 0.5);
+    // Imported formula-model style (snake_case).
+    doc.setRangeFormat(sheetId, "A1", { number_format: "0%" });
+
+    const importedProvider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+    });
+
+    const importedCell = importedProvider.getCell(1, 1);
+    expect(importedCell).not.toBeNull();
+    expect(importedCell?.value).toBe("50%");
+
+    // User clears the number format (e.g. Format Cells → Number → General).
+    doc.setRangeFormat(sheetId, "A1", { numberFormat: null });
+
+    const clearedProvider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+    });
+
+    const clearedCell = clearedProvider.getCell(1, 1);
+    expect(clearedCell).not.toBeNull();
+    // If `numberFormat: null` is present, it should override the imported `number_format` string.
+    expect(clearedCell?.value).toBe(0.5);
+  });
+
   it("maps alignment.indent into grid CellStyle.textIndentPx", () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";
