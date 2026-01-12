@@ -1,33 +1,12 @@
-use crate::error::{ExcelError, ExcelResult};
+use super::builtins_helpers::{coerce_to_finite_number, excel_result_number};
 use crate::eval::CompiledExpr;
 use crate::functions::{ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{ErrorKind, Value};
 
-fn excel_result_number(res: ExcelResult<f64>) -> Value {
-    match res {
-        Ok(n) => Value::Number(n),
-        Err(e) => Value::Error(match e {
-            ExcelError::Div0 => ErrorKind::Div0,
-            ExcelError::Value => ErrorKind::Value,
-            ExcelError::Num => ErrorKind::Num,
-        }),
-    }
-}
-
 fn eval_number_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<f64, ErrorKind> {
     let v = ctx.eval_scalar(expr);
-    match v {
-        Value::Error(e) => Err(e),
-        other => {
-            let n = other.coerce_to_number_with_ctx(ctx)?;
-            if n.is_finite() {
-                Ok(n)
-            } else {
-                Err(ErrorKind::Num)
-            }
-        }
-    }
+    coerce_to_finite_number(ctx, &v)
 }
 
 inventory::submit! {
@@ -129,4 +108,3 @@ fn cumprinc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         typ,
     ))
 }
-

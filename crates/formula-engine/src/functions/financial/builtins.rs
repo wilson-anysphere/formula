@@ -1,21 +1,10 @@
-use crate::error::{ExcelError, ExcelResult};
+use super::builtins_helpers::excel_result_number;
 use crate::eval::CompiledExpr;
 use crate::functions::{ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{ErrorKind, Value};
 
 const VAR_ARGS: usize = 255;
-
-fn excel_result_number(res: ExcelResult<f64>) -> Value {
-    match res {
-        Ok(n) => Value::Number(n),
-        Err(e) => Value::Error(match e {
-            ExcelError::Div0 => ErrorKind::Div0,
-            ExcelError::Value => ErrorKind::Value,
-            ExcelError::Num => ErrorKind::Num,
-        }),
-    }
-}
 
 fn eval_number_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<f64, ErrorKind> {
     let v = ctx.eval_scalar(expr);

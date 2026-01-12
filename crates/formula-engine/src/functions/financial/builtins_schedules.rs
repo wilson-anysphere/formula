@@ -1,19 +1,8 @@
-use crate::error::{ExcelError, ExcelResult};
+use super::builtins_helpers::excel_result_number;
 use crate::eval::CompiledExpr;
 use crate::functions::{eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{ErrorKind, Value};
-
-fn excel_result_number(res: ExcelResult<f64>) -> Value {
-    match res {
-        Ok(n) => Value::Number(n),
-        Err(e) => Value::Error(match e {
-            ExcelError::Div0 => ErrorKind::Div0,
-            ExcelError::Value => ErrorKind::Value,
-            ExcelError::Num => ErrorKind::Num,
-        }),
-    }
-}
 
 fn collect_schedule_values_from_arg(
     ctx: &dyn FunctionContext,
