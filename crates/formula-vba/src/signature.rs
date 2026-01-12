@@ -1442,7 +1442,7 @@ pub fn verify_vba_project_signature_binding(
         // we can usually detect the `DigitalSignature*` variant from the stream path and apply the
         // correct MS-OVBA digest:
         // - `DigitalSignature` / `DigitalSignatureEx`: legacy Content/Agile Content Hash (MD5)
-        // - `DigitalSignatureExt`: v3 binding digest (V3 Content Hash; MD5)
+        // - `DigitalSignatureExt`: v3 binding digest (`ContentsHashV3` / V3 Content Hash; SHA-256)
         //
         // When the signature bytes are provided as a raw PKCS#7/CMS blob, the original stream name
         // is unknown; in that case we try both legacy and v3 binding digests.
