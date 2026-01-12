@@ -743,10 +743,10 @@ export function bindYjsToDocumentController(options) {
 
   /**
    * @param {string} sheetId
-   * @returns {{ index: number, entry: any } | null}
+   * @returns {Array<{ index: number, entry: any, isLocal: boolean }>}
    */
-  function findYjsSheetEntryById(sheetId) {
-    if (!sheetId) return null;
+  function findYjsSheetEntriesById(sheetId) {
+    if (!sheetId) return [];
     /** @type {Array<{ index: number, entry: any, isLocal: boolean }>} */
     const candidates = [];
     for (let i = 0; i < sheets.length; i += 1) {
@@ -757,6 +757,16 @@ export function bindYjsToDocumentController(options) {
       const isLocal = typeof client === "number" && client === ydoc.clientID;
       candidates.push({ index: i, entry, isLocal });
     }
+
+    return candidates;
+  }
+
+  /**
+   * @param {string} sheetId
+   * @returns {{ index: number, entry: any } | null}
+   */
+  function findYjsSheetEntryById(sheetId) {
+    const candidates = findYjsSheetEntriesById(sheetId);
 
     if (candidates.length === 0) return null;
     if (candidates.length === 1) return candidates[0];
@@ -1184,42 +1194,59 @@ export function bindYjsToDocumentController(options) {
       for (const item of prepared) {
         const { sheetId, view } = item;
 
-        const found = findYjsSheetEntryById(sheetId);
+        // If the doc temporarily contains duplicate sheet entries for the same id,
+        // apply the view update to *all* matching entries. This avoids losing view
+        // state if schema normalization later prunes one of the duplicates.
+        let foundEntries = findYjsSheetEntriesById(sheetId);
 
-        let sheetMap = getYMap(found?.entry);
-        if (!sheetMap) {
-          sheetMap = new Y.Map();
+        if (foundEntries.length === 0) {
+          const sheetMap = new Y.Map();
           sheetMap.set("id", sheetId);
-
-          const name = coerceString(found?.entry?.get?.("name") ?? found?.entry?.name) ?? sheetId;
-          sheetMap.set("name", name);
-
-          // If an existing entry was stored as a plain object, preserve any unknown
-          // metadata keys by copying them into the new Y.Map.
-          if (isRecord(found?.entry)) {
-            const keys = Object.keys(found.entry).sort();
-            for (const key of keys) {
-              if (key === "id" || key === "name" || key === "view" || key === "frozenRows" || key === "frozenCols") {
-                continue;
-              }
-              const value = found.entry[key];
-              try {
-                sheetMap.set(key, structuredClone(value));
-              } catch {
-                sheetMap.set(key, value);
-              }
-            }
-          }
-
-          if (found) {
-            sheets.delete(found.index, 1);
-            sheets.insert(found.index, [sheetMap]);
-          } else {
-            sheets.push([sheetMap]);
-          }
+          sheetMap.set("name", sheetId);
+          sheets.push([sheetMap]);
+          foundEntries = [{ index: sheets.length - 1, entry: sheetMap, isLocal: true }];
         }
 
-        sheetMap.set("view", view);
+        for (const found of foundEntries) {
+          let sheetMap = getYMap(found?.entry);
+          if (!sheetMap) {
+            sheetMap = new Y.Map();
+            sheetMap.set("id", sheetId);
+
+            const name = coerceString(found?.entry?.get?.("name") ?? found?.entry?.name) ?? sheetId;
+            sheetMap.set("name", name);
+
+            // If an existing entry was stored as a plain object, preserve any unknown
+            // metadata keys by copying them into the new Y.Map.
+            if (isRecord(found?.entry)) {
+              const keys = Object.keys(found.entry).sort();
+              for (const key of keys) {
+                if (
+                  key === "id" ||
+                  key === "name" ||
+                  key === "view" ||
+                  key === "frozenRows" ||
+                  key === "frozenCols" ||
+                  key === "colWidths" ||
+                  key === "rowHeights"
+                ) {
+                  continue;
+                }
+                const value = found.entry[key];
+                try {
+                  sheetMap.set(key, structuredClone(value));
+                } catch {
+                  sheetMap.set(key, value);
+                }
+              }
+            }
+
+            sheets.delete(found.index, 1);
+            sheets.insert(found.index, [sheetMap]);
+          }
+
+          sheetMap.set("view", view);
+        }
       }
     };
 

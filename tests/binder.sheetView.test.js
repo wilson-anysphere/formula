@@ -152,13 +152,10 @@ test("binder: prefers non-local sheet entries when duplicates exist", async () =
     assert.ok(localEntries.length > 0, "expected at least one local duplicate entry");
     assert.ok(nonLocalEntries.length > 0, "expected at least one non-local duplicate entry");
 
-    // The binder should prefer writing view state to a non-local entry (matching
-    // ensureWorkbookSchema duplicate pruning behavior).
-    for (const entry of nonLocalEntries) {
+    // The binder should apply view state to all duplicates so whichever entry
+    // survives schema normalization retains the view settings.
+    for (const entry of entries) {
       assert.deepEqual(entry.get("view"), { frozenRows: 1, frozenCols: 0 });
-    }
-    for (const entry of localEntries) {
-      assert.equal(entry.get("view"), undefined);
     }
   } finally {
     binder.destroy();
