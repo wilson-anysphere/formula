@@ -3,7 +3,7 @@ import { normalizeFormula } from "../formula/normalize.js";
 
 /**
  * @typedef {{ row: number, col: number }} CellRef
- * @typedef {{ value?: any, formula?: string | null, format?: any }} Cell
+ * @typedef {{ value?: any, formula?: string | null, format?: any, enc?: any }} Cell
  *
  * @typedef {{ cells: Map<string, Cell> }} SheetState
  *
@@ -63,9 +63,12 @@ function stableStringify(value) {
  * @returns {string}
  */
 function cellSignature(cell) {
+  const enc = cell?.enc;
+  const isEncrypted = enc !== null && enc !== undefined;
   const normalized = {
-    value: cell?.value ?? null,
-    formula: normalizeFormula(cell?.formula) ?? null,
+    enc: isEncrypted ? enc : null,
+    value: isEncrypted ? null : (cell?.value ?? null),
+    formula: isEncrypted ? null : (normalizeFormula(cell?.formula) ?? null),
     format: cell?.format ?? null,
   };
   return stableStringify(normalized);
@@ -76,6 +79,14 @@ function cellSignature(cell) {
  * @param {Cell} b
  */
 function sameValueAndFormula(a, b) {
+  const aEnc = a?.enc;
+  const bEnc = b?.enc;
+  const aEncrypted = aEnc !== null && aEnc !== undefined;
+  const bEncrypted = bEnc !== null && bEnc !== undefined;
+  if (aEncrypted || bEncrypted) {
+    if (!aEncrypted || !bEncrypted) return false;
+    return isDeepStrictEqual(aEnc, bEnc);
+  }
   const av = a?.value ?? null;
   const bv = b?.value ?? null;
   const af = normalizeFormula(a?.formula) ?? null;
@@ -195,4 +206,3 @@ export function semanticDiff(before, after) {
 
   return result;
 }
-

@@ -15,6 +15,62 @@ function isYMap(value) {
   );
 }
 
+function isYArray(value) {
+  if (value instanceof Y.Array) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = /** @type {any} */ (value);
+  if (maybe.constructor?.name !== "YArray") return false;
+  return typeof maybe.get === "function" && typeof maybe.toArray === "function";
+}
+
+function isYText(value) {
+  if (value instanceof Y.Text) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = /** @type {any} */ (value);
+  if (maybe.constructor?.name !== "YText") return false;
+  return typeof maybe.toString === "function";
+}
+
+/**
+ * Convert a Yjs value (potentially nested) into a plain JS value.
+ *
+ * This is primarily used for encrypted cell payloads where we need deterministic,
+ * deep-equality-friendly data but must not attempt to decrypt.
+ *
+ * @param {any} value
+ * @returns {any}
+ */
+function yjsValueToJson(value) {
+  if (isYText(value)) return value.toString();
+  if (isYArray(value)) return value.toArray().map((v) => yjsValueToJson(v));
+  if (isYMap(value)) {
+    /** @type {Record<string, any>} */
+    const out = {};
+    const keys = [];
+    value.forEach((_v, k) => keys.push(String(k)));
+    keys.sort();
+    for (const k of keys) out[k] = yjsValueToJson(value.get(k));
+    return out;
+  }
+
+  if (Array.isArray(value)) return value.map((v) => yjsValueToJson(v));
+
+  if (value && typeof value === "object") {
+    const proto = Object.getPrototypeOf(value);
+    // Only canonicalize plain objects; preserve prototypes for non-plain types.
+    if (proto !== Object.prototype && proto !== null) {
+      return structuredClone(value);
+    }
+    /** @type {Record<string, any>} */
+    const out = {};
+    const keys = Object.keys(value).sort();
+    for (const key of keys) out[key] = yjsValueToJson(value[key]);
+    return out;
+  }
+
+  return value;
+}
+
 /**
  * @param {Y.Doc} doc
  * @param {string} name
@@ -47,16 +103,20 @@ export function parseSpreadsheetCellKey(key, opts = {}) {
  */
 function extractCell(cellData) {
   if (isYMap(cellData)) {
+    const enc = cellData.get("enc");
     return {
-      value: cellData.get("value") ?? null,
-      formula: cellData.get("formula") ?? null,
+      ...(enc !== null && enc !== undefined
+        ? { enc: yjsValueToJson(enc), value: null, formula: null }
+        : { value: cellData.get("value") ?? null, formula: cellData.get("formula") ?? null }),
       format: cellData.get("format") ?? cellData.get("style") ?? null,
     };
   }
   if (cellData && typeof cellData === "object") {
+    const enc = cellData.enc;
     return {
-      value: cellData.value ?? null,
-      formula: cellData.formula ?? null,
+      ...(enc !== null && enc !== undefined
+        ? { enc: yjsValueToJson(enc), value: null, formula: null }
+        : { value: cellData.value ?? null, formula: cellData.formula ?? null }),
       format: cellData.format ?? cellData.style ?? null,
     };
   }
