@@ -611,12 +611,27 @@ test.describe("tauri workbook integration", () => {
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveText("Sheet2");
 
     // Delete the renamed sheet (Sheet1 -> "Budget").
-    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
+    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    await page.evaluate(() => {
+      const tab = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
+      if (!tab) throw new Error("Missing Sheet1 tab");
+      const rect = tab.getBoundingClientRect();
+      tab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 10,
+          clientY: rect.top + 10,
+        }),
+      );
+    });
     const menu = page.getByTestId("sheet-tab-context-menu");
     await expect(menu).toBeVisible();
 
-    page.once("dialog", (dialog) => dialog.accept());
     await menu.getByRole("button", { name: "Delete" }).click();
+    // The desktop web harness uses the non-blocking quick-pick dialog instead of the
+    // browser-native `window.confirm` prompt.
+    await page.getByTestId("quick-pick").getByTestId("quick-pick-item-0").click();
 
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveCount(0);
 
