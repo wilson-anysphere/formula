@@ -395,6 +395,39 @@ mod tests {
     }
 
     #[test]
+    fn content_types_remove_calc_chain_removes_prefixed_non_empty_override() {
+        // Some producers emit overrides with explicit end tags (not self-closing). Ensure we still
+        // remove calcChain overrides in the prefixed form, while preserving other overrides.
+        let input = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
+  <ct:Override PartName="/xl/calcChain.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml"></ct:Override>
+  <ct:Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
+</ct:Types>
+"#;
+
+        let updated =
+            content_types_remove_calc_chain(input.as_bytes()).expect("rewrite content types");
+        let updated = std::str::from_utf8(&updated).expect("utf8 updated content types");
+
+        assert!(
+            !updated.contains("calcChain.xml"),
+            "calcChain override should be removed, got: {updated}"
+        );
+        assert!(
+            updated.contains(r#"PartName="/xl/metadata.xml""#),
+            "metadata override should be preserved, got: {updated}"
+        );
+        assert!(
+            updated.contains("<ct:Types"),
+            "expected root prefix to be preserved, got: {updated}"
+        );
+        assert!(
+            updated.contains("<ct:Override"),
+            "expected Override prefix to be preserved, got: {updated}"
+        );
+    }
+
+    #[test]
     fn workbook_xml_force_full_calc_on_load_patches_prefixed_calc_pr() {
         let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
