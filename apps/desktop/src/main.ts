@@ -8669,7 +8669,6 @@ try {
       // without relying on capability-gated process relaunch APIs. Like `quit_app`, this promise
       // is expected to never resolve on success because the process terminates shortly after the
       // command is invoked.
-      // without relying on capability-gated process relaunch APIs.
       try {
         await invoke("restart_app");
       } catch (err) {
