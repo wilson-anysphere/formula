@@ -4062,6 +4062,13 @@ if (
           getPrimaryCommandKeybindingDisplay("edit.clearContents", commandKeybindingDisplayIndex) ?? (isMac ? "⌫" : "Del"),
         onSelect: () => executeBuiltinCommand("edit.clearContents"),
       },
+      {
+        type: "item",
+        label: "Inline AI Edit…",
+        enabled: allowEditCommands,
+        shortcut: getPrimaryCommandKeybindingDisplay("ai.inlineEdit", commandKeybindingDisplayIndex) ?? primaryShortcut("K"),
+        onSelect: () => executeBuiltinCommand("ai.inlineEdit"),
+      },
       { type: "separator" },
       {
         type: "submenu",

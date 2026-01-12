@@ -3440,6 +3440,7 @@ export class SpreadsheetApp {
     // Inline edit should not trigger while the formula bar is actively editing.
     if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
     this.inlineEditController.open();
+    this.updateEditState();
   }
 
   toggleCommentsPanel(): void {
