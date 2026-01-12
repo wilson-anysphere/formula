@@ -131,6 +131,18 @@ fn days360_matches_excel_examples() {
     let end = ymd_to_serial(ExcelDate::new(2021, 2, 28), system).unwrap();
     assert_eq!(date_time::days360(start, end, false, system).unwrap(), 363);
     assert_eq!(date_time::days360(start, end, true, system).unwrap(), 360);
+
+    // Cross-year non-leap February month-end to leap-day month-end.
+    let start = ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2020, 2, 29), system).unwrap();
+    assert_eq!(date_time::days360(start, end, false, system).unwrap(), 360);
+    assert_eq!(date_time::days360(start, end, true, system).unwrap(), 361);
+
+    // Cross-year non-leap February month-end to leap-year Feb 28 (not month-end).
+    let start = ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2020, 2, 28), system).unwrap();
+    assert_eq!(date_time::days360(start, end, false, system).unwrap(), 358);
+    assert_eq!(date_time::days360(start, end, true, system).unwrap(), 360);
 }
 
 #[test]

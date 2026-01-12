@@ -275,6 +275,22 @@ fn days360_matches_excel_examples() {
         &sheet.eval("=DAYS360(DATE(2020,2,28),DATE(2021,2,28),TRUE)"),
         360.0,
     );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2019,2,28),DATE(2020,2,29))"),
+        360.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2019,2,28),DATE(2020,2,29),TRUE)"),
+        361.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2019,2,28),DATE(2020,2,28))"),
+        358.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2019,2,28),DATE(2020,2,28),TRUE)"),
+        360.0,
+    );
     assert_eq!(
         sheet.eval("=DAYS360(\"nope\",DATE(2020,1,1))"),
         Value::Error(ErrorKind::Value)
