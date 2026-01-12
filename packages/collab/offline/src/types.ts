@@ -1,7 +1,17 @@
 import type * as Y from "yjs";
 
+/**
+ * Legacy offline persistence types.
+ *
+ * @deprecated Prefer `@formula/collab-persistence` (and `CollabSessionOptions.persistence`).
+ */
 export type OfflinePersistenceMode = "indexeddb" | "file";
 
+/**
+ * Legacy offline persistence handle.
+ *
+ * @deprecated Prefer `@formula/collab-persistence`.
+ */
 export type OfflinePersistenceHandle = {
   /**
    * Resolves once persisted state has been loaded into the provided Y.Doc.
@@ -25,6 +35,11 @@ export type OfflinePersistenceHandle = {
   clear: () => Promise<void>;
 };
 
+/**
+ * Legacy offline persistence options.
+ *
+ * @deprecated Prefer `@formula/collab-persistence`.
+ */
 export type OfflinePersistenceOptions = {
   mode: OfflinePersistenceMode;
   /**
@@ -43,4 +58,9 @@ export type OfflinePersistenceOptions = {
   autoLoad?: boolean;
 };
 
+/**
+ * Legacy attach function signature.
+ *
+ * @deprecated Prefer `@formula/collab-persistence`.
+ */
 export type OfflinePersistenceAttach = (doc: Y.Doc, opts: OfflinePersistenceOptions) => OfflinePersistenceHandle;
