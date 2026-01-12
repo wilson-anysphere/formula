@@ -94,8 +94,10 @@ async function main() {
 
   let runCmd = binary;
   let runArgs = args;
-  if (process.platform === "linux" && (!process.env.DISPLAY || process.env.CI)) {
+  if (process.platform === "linux") {
     // Ensure we have a virtual display in CI/headless environments.
+    // xvfb-run-safe.sh is also safe to use on developer machines: if a working
+    // DISPLAY is already available it will simply `exec` the command directly.
     runCmd = path.join(repoRoot, "scripts", "xvfb-run-safe.sh");
     runArgs = [binary, ...args];
   }
