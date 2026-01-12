@@ -217,7 +217,6 @@ fn collect_unknown_function_calls(expr: &eval::Expr<String>, unknown: &mut BTree
         }
         eval::Expr::Unary { expr, .. } => collect_unknown_function_calls(expr, unknown),
         eval::Expr::Postfix { expr, .. } => collect_unknown_function_calls(expr, unknown),
-        eval::Expr::FieldAccess { base, .. } => collect_unknown_function_calls(base, unknown),
         eval::Expr::Binary { left, right, .. } | eval::Expr::Compare { left, right, .. } => {
             collect_unknown_function_calls(left, unknown);
             collect_unknown_function_calls(right, unknown);
@@ -252,7 +251,6 @@ fn collect_function_calls(expr: &eval::Expr<String>, called: &mut BTreeSet<Strin
         }
         eval::Expr::Unary { expr, .. } => collect_function_calls(expr, called),
         eval::Expr::Postfix { expr, .. } => collect_function_calls(expr, called),
-        eval::Expr::FieldAccess { base, .. } => collect_function_calls(base, called),
         eval::Expr::Binary { left, right, .. } | eval::Expr::Compare { left, right, .. } => {
             collect_function_calls(left, called);
             collect_function_calls(right, called);
