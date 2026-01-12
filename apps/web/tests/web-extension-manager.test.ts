@@ -409,6 +409,36 @@ test("install persists contributed panel metadata (icon + defaultDock) into the 
   await fs.rm(tmpRoot, { recursive: true, force: true });
 });
 
+test("install overwrites a corrupted contributed panel seed store", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const manager = new WebExtensionManager({ marketplaceClient, host: null, engineVersion: "1.0.0" });
+
+  // Simulate a corrupted seed store from an older/broken build.
+  globalThis.localStorage.setItem("formula.extensions.contributedPanels.v1", "{not-json");
+
+  await manager.install("formula.sample-hello");
+
+  const seedRaw = globalThis.localStorage.getItem("formula.extensions.contributedPanels.v1");
+  expect(seedRaw).not.toBeNull();
+  const seed = JSON.parse(String(seedRaw));
+  expect(seed["sampleHello.panel"]).toMatchObject({
+    extensionId: "formula.sample-hello",
+    title: "Sample Hello Panel"
+  });
+
+  await manager.dispose();
+});
+
 test("install clears contributed panel seed store entries when updating to a version without panels", async () => {
   const keys = generateEd25519KeyPair();
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-panel-seed-update-"));
