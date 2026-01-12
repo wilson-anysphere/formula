@@ -27,10 +27,11 @@ and exits non-zero if mismatches exceed the configured threshold.
 ## Repository layout
 
 - `cases.json` — curated (~2k) formula + input-grid cases (deterministic).
-- `cases_odd_coupon_long.json` — supplemental **long odd-coupon** (`ODDF*` / `ODDL*`) cases.
-  This is a convenience subset file for running the Windows + Excel oracle quickly. The canonical
-  case corpus (`cases.json`) already includes these cases (tagged `odd_coupon` / `long_stub`), but
-  this smaller file is useful when you only want to (re)pin the long-stub scenarios.
+- Supplemental small corpora for targeted Windows + Excel runs:
+  - `tools/excel-oracle/odd_coupon_long_stub_cases.json` — long odd-coupon (`ODDF*` / `ODDL*`) **long-stub**
+    scenarios (DFC/E > 1 or DSM/E > 1).
+  - `tools/excel-oracle/odd_coupon_boundary_cases.json` — boundary date-equality scenarios
+    (e.g. `issue == settlement`, `settlement == first_coupon`).
 - `datasets/` — results datasets:
   - `excel-oracle.pinned.json` — pinned Excel dataset for CI (no Excel needed).
   - `versioned/` — version-tagged pinned datasets (useful when Excel behavior differs across versions/builds).

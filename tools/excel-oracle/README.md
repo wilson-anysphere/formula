@@ -126,7 +126,7 @@ use the small subset corpus:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1 `
-  -CasesPath tests/compatibility/excel-oracle/cases_odd_coupon_long.json `
+  -CasesPath tools/excel-oracle/odd_coupon_long_stub_cases.json `
   -OutPath  tests/compatibility/excel-oracle/datasets/excel-oracle.json
 ```
 
