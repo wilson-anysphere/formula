@@ -2,23 +2,7 @@ use crate::date::ExcelDateSystem;
 use crate::error::{ExcelError, ExcelResult};
 use crate::functions::date_time;
 
-fn days_between(start: i32, end: i32, basis: i32, system: ExcelDateSystem) -> ExcelResult<i64> {
-    match basis {
-        0 => date_time::days360(start, end, false, system),
-        4 => date_time::days360(start, end, true, system),
-        1 | 2 | 3 => Ok(i64::from(end) - i64::from(start)),
-        _ => Err(ExcelError::Num),
-    }
-}
-
-fn months_per_period(frequency: i32) -> Option<i32> {
-    match frequency {
-        1 => Some(12),
-        2 => Some(6),
-        4 => Some(3),
-        _ => None,
-    }
-}
+use super::coupon_schedule::{coupon_period_e, days_between, validate_basis, validate_frequency};
 
 const MAX_COUPON_STEPS: usize = 50_000;
 
@@ -42,9 +26,7 @@ pub fn accrintm(
     if !par.is_finite() || par <= 0.0 {
         return Err(ExcelError::Num);
     }
-    if !(0..=4).contains(&basis) {
-        return Err(ExcelError::Num);
-    }
+    validate_basis(basis)?;
 
     let yf = date_time::yearfrac(issue, settlement, basis, system)?;
     let result = par * rate * yf;
@@ -78,11 +60,10 @@ pub fn accrint(
     if !par.is_finite() || par <= 0.0 {
         return Err(ExcelError::Num);
     }
-    if !(0..=4).contains(&basis) {
-        return Err(ExcelError::Num);
-    }
+    validate_basis(basis)?;
 
-    let months = months_per_period(frequency).ok_or(ExcelError::Num)?;
+    let frequency = validate_frequency(frequency)?;
+    let months = 12 / frequency;
     let coupon = par * rate / f64::from(frequency);
     if !coupon.is_finite() || coupon < 0.0 {
         return Err(ExcelError::Num);
@@ -137,18 +118,7 @@ pub fn accrint(
         return Err(ExcelError::Num);
     }
 
-    let e = match basis {
-        1 => {
-            let e = i64::from(ncd) - i64::from(pcd);
-            if e <= 0 {
-                return Err(ExcelError::Num);
-            }
-            e as f64
-        }
-        0 | 2 | 4 => 360.0 / f64::from(frequency),
-        3 => 365.0 / f64::from(frequency),
-        _ => return Err(ExcelError::Num),
-    };
+    let e = coupon_period_e(pcd, ncd, frequency, basis, system)?;
     if !e.is_finite() || e <= 0.0 {
         return Err(ExcelError::Num);
     }
