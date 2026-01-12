@@ -200,6 +200,16 @@ fn workbook_relationship_targets(xml: &[u8]) -> std::collections::BTreeMap<Strin
     out
 }
 
+fn workbook_target_to_part_name(target: &str) -> String {
+    if let Some(rest) = target.strip_prefix('/') {
+        rest.to_string()
+    } else if target.starts_with("xl/") {
+        target.to_string()
+    } else {
+        format!("xl/{target}")
+    }
+}
+
 fn content_type_overrides(xml: &[u8]) -> std::collections::BTreeSet<String> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(true);
@@ -301,20 +311,34 @@ fn sheet_edits_preserve_richdata_parts_and_relationships() {
     let added_target = workbook_rels
         .get(added_rid)
         .expect("Added sheet r:id must exist in workbook.xml.rels");
-    let added_part_name = if let Some(path) = added_target.strip_prefix('/') {
-        path.to_string()
-    } else {
-        format!("xl/{added_target}")
-    };
+    let added_part_name = workbook_target_to_part_name(added_target);
     assert!(
         archive.by_name(&added_part_name).is_ok(),
         "expected Added sheet backing part to exist in output package: {added_part_name}"
+    );
+
+    let sheet1_rid = workbook_sheet_rids
+        .iter()
+        .find(|(name, _)| name == "Sheet1")
+        .map(|(_, rid)| rid.as_str())
+        .expect("Sheet1 must have an r:id");
+    let sheet1_target = workbook_rels
+        .get(sheet1_rid)
+        .expect("Sheet1 r:id must exist in workbook.xml.rels");
+    let sheet1_part_name = workbook_target_to_part_name(sheet1_target);
+    assert!(
+        archive.by_name(&sheet1_part_name).is_ok(),
+        "expected Sheet1 backing part to exist in output package: {sheet1_part_name}"
     );
 
     let content_types = content_type_overrides(&zip_part(&saved, "[Content_Types].xml"));
     assert!(
         !content_types.contains("/xl/worksheets/sheet2.xml"),
         "expected [Content_Types].xml to drop override for deleted /xl/worksheets/sheet2.xml"
+    );
+    assert!(
+        content_types.contains(&format!("/{sheet1_part_name}")),
+        "expected [Content_Types].xml to retain override for Sheet1 worksheet part"
     );
     assert!(
         content_types.contains("/xl/metadata.xml"),
