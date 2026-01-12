@@ -187,10 +187,11 @@ function relativeToRoot(filePath, rootDir) {
  */
 function shouldScanFile(filePath) {
   const ext = path.extname(filePath);
-  if (ext && !SCANNED_FILE_EXTENSIONS.has(ext)) return false;
+  const extLower = ext ? ext.toLowerCase() : "";
+  if (extLower && !SCANNED_FILE_EXTENSIONS.has(extLower)) return false;
   // Files without extensions (rare) are ignored by default to reduce false
   // positives on license/readme-style blobs that can live inside packages.
-  if (!ext) return false;
+  if (!extLower) return false;
   return true;
 }
 
