@@ -129,7 +129,7 @@ The wrapper scripts automatically use a **repo-local CARGO_HOME** at `target/car
 lock contention when ~200 agents build concurrently. This means:
 
 - Each repo has its own registry cache (more disk, but disk is abundant)
-- `cargo clean` or deleting `target/` also clears the local registry cache
+- `bash scripts/cargo_agent.sh clean` (or deleting `target/`) also clears the local registry cache
 - `cargo install` binaries go to `target/cargo-home/bin`
 
 To use a shared cache (CI), set `CARGO_HOME` before running:
@@ -207,7 +207,7 @@ Disk is abundant (110TB). Don't worry about it, but be aware:
 
 ```bash
 # Periodically clean if disk somehow becomes an issue
-cargo clean
+bash scripts/cargo_agent.sh clean
 rm -rf node_modules/.cache
 rm -rf .next/cache  # if using Next.js
 ```
