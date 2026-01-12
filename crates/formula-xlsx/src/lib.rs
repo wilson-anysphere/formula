@@ -365,21 +365,19 @@ impl XlsxDocument {
         let Some(sheet) = self.workbook.sheet_mut(sheet_id) else {
             return false;
         };
-        let was_value_error_placeholder = sheet
+        let old_value = sheet
             .cell(cell)
-            .is_some_and(|c| matches!(c.value, CellValue::Error(formula_model::ErrorValue::Value)));
-        let is_value_error_placeholder =
-            matches!(value, CellValue::Error(formula_model::ErrorValue::Value));
+            .map(|record| record.value.clone())
+            .unwrap_or(CellValue::Empty);
+        let value_changed = old_value != value;
 
-        // Embedded images-in-cell are represented in the worksheet as a `#VALUE!` placeholder with
-        // a `vm="..."` pointer into `xl/metadata.xml`. If a caller overwrites the cell with a
-        // normal value, drop the vm pointer so Excel doesn't continue treating it as an embedded
-        // image cell.
+        // `vm="..."` is a SpreadsheetML value-metadata pointer (typically into `xl/metadata*.xml`).
+        // If the cached value changes we can't update the corresponding metadata records, so drop
+        // `vm` to avoid leaving dangling rich-data references.
         //
-        // This happens before `sheet.set_value` so that clearing a placeholder cell can remove the
-        // corresponding meta entry (since `vm` participates in `keep_due_to_metadata` checks
-        // below).
-        if was_value_error_placeholder && !is_value_error_placeholder {
+        // Note: this must happen before `sheet.set_value` so clearing a cell can also remove its
+        // associated `CellMeta` entry (since `vm` participates in `keep_due_to_metadata` below).
+        if value_changed {
             if let Some(meta) = self.meta.cell_meta.get_mut(&(sheet_id, cell)) {
                 meta.vm = None;
             }
@@ -400,11 +398,7 @@ impl XlsxDocument {
         };
 
         let meta = self.meta.cell_meta.entry((sheet_id, cell)).or_default();
-        if was_value_error_placeholder && !is_value_error_placeholder {
-            // Embedded images-in-cell are represented in the worksheet as a `#VALUE!` placeholder
-            // with a `vm="..."` pointer into `xl/metadata.xml`. If a caller overwrites the cell with
-            // a normal value, drop the vm pointer so Excel doesn't continue treating it as an
-            // embedded image cell.
+        if value_changed {
             meta.vm = None;
             self.meta.rich_value_cells.remove(&(sheet_id, cell));
         }

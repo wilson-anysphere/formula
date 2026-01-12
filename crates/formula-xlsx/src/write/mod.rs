@@ -3984,14 +3984,38 @@ fn append_cell_xml(
     //
     // Excel emits `vm`/`cm` attributes on `<c>` elements to reference value metadata and cell
     // metadata records (used for modern features like linked data types / rich values).
-    //
-    // When we are rendering `<sheetData>` from the in-memory model (rather than patching an
-    // existing sheet), emit these attributes directly from `CellMeta` so callers can round-trip or
-    // synthesize rich-data workbooks.
-    if let Some(vm) = meta.and_then(|m| m.vm.as_deref()).filter(|s| !s.is_empty()) {
-        out.push_str(&format!(r#" vm="{}""#, escape_attr(vm)));
+    if let Some(vm) = meta
+        .and_then(|m| m.vm.as_deref())
+        .filter(|s| !s.is_empty())
+    {
+        // `vm="..."` is a SpreadsheetML value-metadata pointer (typically into `xl/metadata*.xml`).
+        // If the cell's value changes and we can't update the corresponding metadata records,
+        // drop `vm` to avoid leaving a dangling reference.
+        let preserve_vm = matches!(cell.value, CellValue::Error(ErrorValue::Value))
+            || meta.is_some_and(|m| m.raw_value.is_none())
+            || match (&cell.value, meta.and_then(|m| m.raw_value.as_deref())) {
+                (CellValue::Number(n), Some(raw)) => raw.parse::<f64>().ok() == Some(*n),
+                (CellValue::Boolean(b), Some(raw)) => (raw == "1" && *b) || (raw == "0" && !*b),
+                (CellValue::Error(err), Some(raw)) => raw == err.as_str(),
+                (CellValue::String(s), Some(raw)) => raw == s,
+                (CellValue::RichText(rich), Some(raw)) => raw == rich.text,
+                (CellValue::Entity(entity), Some(raw)) => raw == entity.display_value,
+                (CellValue::Record(record), Some(raw)) => raw == record.to_string(),
+                (CellValue::Image(image), Some(raw)) => image
+                    .alt_text
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .is_some_and(|alt| raw == alt),
+                _ => false,
+            };
+        if preserve_vm {
+            out.push_str(&format!(r#" vm="{}""#, escape_attr(vm)));
+        }
     }
-    if let Some(cm) = meta.and_then(|m| m.cm.as_deref()).filter(|s| !s.is_empty()) {
+    if let Some(cm) = meta
+        .and_then(|m| m.cm.as_deref())
+        .filter(|s| !s.is_empty())
+    {
         out.push_str(&format!(r#" cm="{}""#, escape_attr(cm)));
     }
     out.push('>');
