@@ -65,7 +65,7 @@ function installTauriStubForTests(
           case "add_sheet":
             // Purposefully return an id that differs from the requested name to ensure
             // the frontend treats the backend response as canonical.
-            return { id: String(args?.sheet_id ?? "Sheet2-backend"), name: String(args?.name ?? "Sheet2") };
+            return { id: String(args?.sheet_id ?? args?.id ?? "Sheet2-backend"), name: String(args?.name ?? "Sheet2") };
 
           case "list_defined_names":
             return [];
