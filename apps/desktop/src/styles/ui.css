@@ -462,6 +462,11 @@
   display: none;
 }
 
+.ai-inline-edit-error[hidden],
+.ai-inline-edit-preview[hidden] {
+  display: none;
+}
+
 .command-palette {
   background: var(--cmdk-bg);
   border: 1px solid var(--cmdk-border);
