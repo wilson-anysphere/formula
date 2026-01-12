@@ -115,6 +115,59 @@ async fn autosave_persists_and_exports_round_trip() {
     assert_eq!(cell.value, CellScalar::Number(1.0));
 }
 
+#[tokio::test]
+async fn export_creates_parent_dirs_for_new_workbook() {
+    let tmp_dir = tempfile::tempdir().expect("temp dir");
+    let db_path = tmp_dir.path().join("autosave.sqlite");
+
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("Sheet1".to_string());
+    let sheet_id = workbook.sheets[0].id.clone();
+    assert!(
+        workbook.origin_xlsx_bytes.is_none(),
+        "expected new workbook to have no origin_xlsx_bytes"
+    );
+
+    let mut state = AppState::new();
+    state
+        .load_workbook_persistent(workbook, WorkbookPersistenceLocation::OnDisk(db_path))
+        .expect("load persistent workbook");
+
+    state
+        .set_cell(&sheet_id, 0, 0, Some(json!(1.0)), None)
+        .expect("set A1");
+
+    state
+        .autosave_manager()
+        .expect("autosave")
+        .flush()
+        .await
+        .expect("flush autosave");
+
+    let export_storage = state.persistent_storage().expect("storage handle");
+    let export_id = state.persistent_workbook_id().expect("workbook id");
+    let export_meta = state.get_workbook().expect("workbook").clone();
+    assert!(
+        export_meta.origin_xlsx_bytes.is_none(),
+        "expected exported workbook metadata to have no origin_xlsx_bytes"
+    );
+
+    let xlsx_path = tmp_dir.path().join("nested").join("dir").join("export.xlsx");
+    let parent = xlsx_path.parent().expect("has parent");
+    assert!(!parent.exists(), "expected export parent dir to not exist yet");
+
+    write_xlsx_from_storage(&export_storage, export_id, &export_meta, &xlsx_path).expect("export xlsx");
+
+    assert!(parent.is_dir(), "expected export to create parent dirs");
+    assert!(xlsx_path.is_file(), "expected export file to exist");
+    let bytes = std::fs::read(&xlsx_path).expect("read exported xlsx bytes");
+    assert!(
+        bytes.starts_with(b"PK"),
+        "expected exported xlsx to start with ZIP header, got: {:?}",
+        bytes.get(..4)
+    );
+}
+
 #[test]
 fn xlsx_import_uses_origin_bytes_to_preserve_styles_in_storage() {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -6,6 +6,7 @@ pub use workbook_state::{open_memory_manager, open_storage};
 use crate::file_io::{
     DefinedName as AppDefinedName, Sheet as AppSheet, Table as AppTable, Workbook as AppWorkbook,
 };
+use crate::atomic_write::write_file_atomic;
 use crate::state::{Cell, CellScalar};
 use anyhow::Context;
 use directories::ProjectDirs;
@@ -331,7 +332,7 @@ pub fn write_xlsx_from_storage(
     }
 
     let bytes = Arc::<[u8]>::from(bytes);
-    std::fs::write(path, bytes.as_ref()).with_context(|| format!("write workbook {path:?}"))?;
+    write_file_atomic(path, bytes.as_ref()).with_context(|| format!("write workbook {path:?}"))?;
     Ok(bytes)
 }
 

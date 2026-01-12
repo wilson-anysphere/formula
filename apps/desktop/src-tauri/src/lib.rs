@@ -1,3 +1,4 @@
+pub(crate) mod atomic_write;
 pub mod commands;
 mod fs_scope;
 #[cfg(feature = "desktop")]
