@@ -69,11 +69,17 @@ function fallbackColorFromHash(hash: number): string {
 
 function colorFromId(id: string): string {
   const hash = hashStringToUInt32(id);
-  const fallback = resolveCssVar("--formula-grid-remote-presence-default", { fallback: fallbackColorFromHash(hash) });
+  // Presence renderers accept any CSS color, but for collab identity we standardize
+  // on `#rrggbb` strings so downstream metadata (comments/conflicts) is portable and
+  // consistent across environments.
+  const fallbackFromHash = fallbackColorFromHash(hash);
+  const fallbackFromCss = resolveCssVar("--formula-grid-remote-presence-default", { fallback: fallbackFromHash });
+  const fallback = normalizeHexColor(fallbackFromCss) ?? fallbackFromHash;
   if (COLOR_TOKEN_PALETTE.length === 0) return fallback;
   const idx = hash % COLOR_TOKEN_PALETTE.length;
   const token = COLOR_TOKEN_PALETTE[idx]!;
-  return resolveCssVar(token, { fallback });
+  const resolved = resolveCssVar(token, { fallback });
+  return normalizeHexColor(resolved) ?? fallback;
 }
 
 function defaultNameFromId(id: string): string {
