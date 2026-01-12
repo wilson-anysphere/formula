@@ -7457,20 +7457,21 @@ fn bytecode_expr_is_eligible_inner(
             }
             bytecode::Expr::Unary { op, expr } => match op {
                 UnaryOp::ImplicitIntersection => BytecodeLocalBindingKind::Scalar,
-                UnaryOp::Plus | UnaryOp::Neg => infer_binding_kind(expr, scopes),
+                UnaryOp::Plus | UnaryOp::Neg => match infer_binding_kind(expr, scopes) {
+                    BytecodeLocalBindingKind::Scalar => BytecodeLocalBindingKind::Scalar,
+                    BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::ArrayLiteral => {
+                        BytecodeLocalBindingKind::ArrayLiteral
+                    }
+                },
             },
             bytecode::Expr::Binary { left, right, .. } => {
                 let left_kind = infer_binding_kind(left, scopes);
                 let right_kind = infer_binding_kind(right, scopes);
                 match (left_kind, right_kind) {
-                    (BytecodeLocalBindingKind::Range, _) | (_, BytecodeLocalBindingKind::Range) => {
-                        BytecodeLocalBindingKind::Range
+                    (BytecodeLocalBindingKind::Scalar, BytecodeLocalBindingKind::Scalar) => {
+                        BytecodeLocalBindingKind::Scalar
                     }
-                    (BytecodeLocalBindingKind::ArrayLiteral, _)
-                    | (_, BytecodeLocalBindingKind::ArrayLiteral) => {
-                        BytecodeLocalBindingKind::ArrayLiteral
-                    }
-                    _ => BytecodeLocalBindingKind::Scalar,
+                    _ => BytecodeLocalBindingKind::ArrayLiteral,
                 }
             }
             bytecode::Expr::FuncCall {
@@ -7496,8 +7497,40 @@ fn bytecode_expr_is_eligible_inner(
                 scopes.pop();
                 kind
             }
-            // All other supported functions currently return scalars in the bytecode backend.
-            bytecode::Expr::FuncCall { .. } => BytecodeLocalBindingKind::Scalar,
+            // Most supported functions return scalars in the bytecode backend. A handful lift over
+            // array/range inputs (e.g. ISBLANK) or can return dynamic arrays (e.g. ROW/ COLUMN).
+            //
+            // This kind inference is used to prevent LET locals from "smuggling" array results into
+            // scalar-only bytecode contexts (e.g. ABS/CONCAT), which would otherwise compile to
+            // bytecode but produce incorrect `#SPILL!` errors at runtime.
+            bytecode::Expr::FuncCall { func, args } => match func {
+                Function::Row
+                | Function::Column
+                | Function::IsError
+                | Function::IsNa
+                | Function::IsBlank
+                | Function::IsNumber
+                | Function::IsText
+                | Function::IsLogical
+                | Function::IsErr
+                | Function::ErrorType
+                | Function::N
+                | Function::T => {
+                    let mut all_scalar = true;
+                    for arg in args {
+                        if infer_binding_kind(arg, scopes) != BytecodeLocalBindingKind::Scalar {
+                            all_scalar = false;
+                            break;
+                        }
+                    }
+                    if all_scalar {
+                        BytecodeLocalBindingKind::Scalar
+                    } else {
+                        BytecodeLocalBindingKind::ArrayLiteral
+                    }
+                }
+                _ => BytecodeLocalBindingKind::Scalar,
+            },
         }
     }
 

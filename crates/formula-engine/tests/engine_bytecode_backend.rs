@@ -1341,6 +1341,54 @@ fn bytecode_backend_let_nested_let_range_result_locals_do_not_enable_scalar_func
 }
 
 #[test]
+fn bytecode_backend_let_array_returning_function_locals_do_not_enable_scalar_functions() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", -1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", -2.0).unwrap();
+
+    // N(A1:A2) returns an array result. Ensure binding it to a LET local does not allow scalar-only
+    // bytecode functions like ABS to compile (they do not yet lift over arrays in bytecode).
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ABS(LET(x, N(A1:A2), x))")
+        .unwrap();
+
+    // ABS should be evaluated via the AST backend, so this formula should not compile to bytecode.
+    assert_eq!(engine.bytecode_program_count(), 0);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.spill_range("Sheet1", "B1"),
+        Some((parse_a1("B1").unwrap(), parse_a1("B2").unwrap()))
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(2.0));
+}
+
+#[test]
+fn bytecode_backend_let_array_result_is_not_treated_as_range_for_match() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+
+    // MATCH is bytecode-eligible only for reference-like lookup arrays; ensure a LET-bound array
+    // result (from range arithmetic) does not incorrectly compile to bytecode.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=LET(x, A1:A3*10, MATCH(20, x, 0))")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 0);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+    assert_engine_matches_ast(&engine, "=LET(x, A1:A3*10, MATCH(20, x, 0))", "B1");
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_countif_grouped_numeric_criteria() {
     let mut engine = Engine::new();
     engine
