@@ -137,7 +137,7 @@ function parseCssColorToRgbNoDom(value) {
 
     let alphaPart = null;
 
-    // Support modern slash syntax: rgb(r g b / a).
+    // Support modern slash syntax: rgb(… / …).
     if (args.includes("/")) {
       const parts = args.split("/");
       if (parts.length !== 2) return null;
