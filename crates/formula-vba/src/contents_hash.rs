@@ -4,6 +4,7 @@ use encoding_rs::{
     WINDOWS_1258, WINDOWS_874,
 };
 
+use crate::forms_normalized_data;
 use crate::{decompress_container, DirParseError, DirStream, OleFile, ParseError};
 
 #[derive(Debug, Clone, Default)]
@@ -163,6 +164,186 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack
         .windows(needle.len())
         .position(|window| window == needle)
+}
+
+#[derive(Debug, Clone, Default)]
+struct ModuleInfoV3 {
+    stream_name: String,
+    text_offset: Option<usize>,
+    // Bytes contributed to V3ContentNormalizedData before the module's normalized source code.
+    //
+    // We keep this as raw bytes (as stored in the decompressed `VBA/dir` record payloads) to match
+    // the MS-OVBA transcript semantics and avoid codepage decoding concerns.
+    transcript_prefix: Vec<u8>,
+}
+
+/// Build the MS-OVBA §2.4.2 V3 "V3ContentNormalizedData" byte sequence for a VBA project.
+///
+/// This is the transcript used by MS-OVBA "Contents Hash" version 3, commonly associated with the
+/// `\x05DigitalSignatureExt` signature stream.
+///
+/// Compared to [`content_normalized_data`] (v1-ish), this includes additional metadata required by
+/// the v3 transcript, notably:
+/// - additional reference record types (e.g. control references), and
+/// - module identity/metadata record payloads (module name/stream name/type) in `VBA/dir` order.
+///
+/// Spec reference: MS-OVBA §2.4.2 "Contents Hash" (version 3).
+pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
+    let mut ole = OleFile::open(vba_project_bin)?;
+
+    let project_stream_bytes = ole.read_stream_opt("PROJECT")?;
+    let dir_bytes = ole
+        .read_stream_opt("VBA/dir")?
+        .ok_or(ParseError::MissingStream("VBA/dir"))?;
+    let dir_decompressed = decompress_container(&dir_bytes)?;
+    let encoding = project_stream_bytes
+        .as_deref()
+        .and_then(detect_project_codepage)
+        .or_else(|| DirStream::detect_codepage(&dir_decompressed).map(encoding_for_codepage))
+        .unwrap_or(WINDOWS_1252);
+
+    let mut out = Vec::new();
+    let mut current_module: Option<ModuleInfoV3> = None;
+
+    let mut offset = 0usize;
+    while offset < dir_decompressed.len() {
+        if offset + 6 > dir_decompressed.len() {
+            return Err(DirParseError::Truncated.into());
+        }
+
+        let id = u16::from_le_bytes([dir_decompressed[offset], dir_decompressed[offset + 1]]);
+        let len = u32::from_le_bytes([
+            dir_decompressed[offset + 2],
+            dir_decompressed[offset + 3],
+            dir_decompressed[offset + 4],
+            dir_decompressed[offset + 5],
+        ]) as usize;
+        offset += 6;
+        if offset + len > dir_decompressed.len() {
+            return Err(DirParseError::BadRecordLength { id, len }.into());
+        }
+        let data = &dir_decompressed[offset..offset + len];
+        offset += len;
+
+        match id {
+            // ---- References ----
+            //
+            // See MS-OVBA §2.4.2 for which reference record types are incorporated in each content
+            // hash version.
+
+            // REFERENCEREGISTERED
+            0x000D => {
+                out.extend_from_slice(data);
+            }
+
+            // REFERENCEPROJECT
+            0x000E => {
+                out.extend_from_slice(&normalize_reference_project(data)?);
+            }
+
+            // REFERENCECONTROL
+            //
+            // Note: the exact record payload structure is defined in MS-OVBA, but the v3 transcript
+            // incorporates the record's raw data bytes as stored in the decompressed `VBA/dir`
+            // stream.
+            0x002F => {
+                out.extend_from_slice(data);
+            }
+
+            // REFERENCEEXTENDED
+            0x0030 => {
+                out.extend_from_slice(data);
+            }
+
+            // REFERENCEORIGINAL
+            0x0033 => {
+                out.extend_from_slice(data);
+            }
+
+            // ---- Modules ----
+
+            // MODULENAME: start a new module record group.
+            0x0019 => {
+                if let Some(m) = current_module.take() {
+                    append_v3_module(&mut out, &mut ole, &m)?;
+                }
+                let name = decode_dir_string(data, encoding);
+                let mut transcript_prefix = Vec::new();
+                transcript_prefix.extend_from_slice(data);
+                current_module = Some(ModuleInfoV3 {
+                    stream_name: name,
+                    text_offset: None,
+                    transcript_prefix,
+                });
+            }
+
+            // MODULESTREAMNAME. Some files include a reserved u16 at the end.
+            0x001A => {
+                if let Some(m) = current_module.as_mut() {
+                    let trimmed = trim_reserved_u16(data);
+                    m.stream_name = decode_dir_string(trimmed, encoding);
+                    m.transcript_prefix.extend_from_slice(trimmed);
+                }
+            }
+
+            // MODULETYPE (u16 LE).
+            0x0021 => {
+                if let Some(m) = current_module.as_mut() {
+                    m.transcript_prefix.extend_from_slice(data);
+                }
+            }
+
+            // MODULETEXTOFFSET (u32 LE).
+            0x0031 => {
+                if let Some(m) = current_module.as_mut() {
+                    if data.len() >= 4 {
+                        let n = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+                        m.text_offset = Some(n);
+                    }
+                }
+            }
+
+            _ => {}
+        }
+    }
+
+    if let Some(m) = current_module.take() {
+        append_v3_module(&mut out, &mut ole, &m)?;
+    }
+
+    Ok(out)
+}
+
+fn append_v3_module(
+    out: &mut Vec<u8>,
+    ole: &mut OleFile,
+    module: &ModuleInfoV3,
+) -> Result<(), ParseError> {
+    out.extend_from_slice(&module.transcript_prefix);
+
+    let stream_path = format!("VBA/{}", module.stream_name);
+    let module_stream = ole
+        .read_stream_opt(&stream_path)?
+        .ok_or(ParseError::MissingStream("module stream"))?;
+
+    let text_offset = module
+        .text_offset
+        .unwrap_or_else(|| guess_text_offset(&module_stream));
+    let text_offset = text_offset.min(module_stream.len());
+    let source_container = &module_stream[text_offset..];
+    let source = decompress_container(source_container)?;
+    out.extend_from_slice(&normalize_module_source(&source));
+    Ok(())
+}
+
+/// Build the MS-OVBA §2.4.2 v3 `ProjectNormalizedData` byte sequence for a `vbaProject.bin`.
+///
+/// Spec reference: MS-OVBA §2.4.2 ("Contents Hash" version 3).
+pub fn project_normalized_data_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
+    let mut out = v3_content_normalized_data(vba_project_bin)?;
+    let forms = forms_normalized_data(vba_project_bin)?;
+    out.extend_from_slice(&forms);
+    Ok(out)
 }
 
 fn normalize_reference_project(data: &[u8]) -> Result<Vec<u8>, ParseError> {

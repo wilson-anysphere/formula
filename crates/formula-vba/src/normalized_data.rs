@@ -22,7 +22,6 @@ pub fn forms_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseErr
         .read_stream_opt("VBA/dir")?
         .ok_or(ParseError::MissingStream("VBA/dir"))?;
     let dir_decompressed = decompress_container(&dir_bytes)?;
-
     let project_bytes = ole
         .read_stream_opt("PROJECT")?
         .ok_or(ParseError::MissingStream("PROJECT"))?;
@@ -198,4 +197,3 @@ fn normalize_storage_into_vec(
 
     Ok(())
 }
-

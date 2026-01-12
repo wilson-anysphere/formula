@@ -1,9 +1,9 @@
 use md5::Md5;
 use sha1::Sha1;
-use sha2::Sha256;
 use sha2::Digest as _;
+use sha2::Sha256;
 
-use crate::{signature::SignatureError, OleFile};
+use crate::{contents_hash::project_normalized_data_v3, signature::SignatureError, OleFile, ParseError};
 
 /// Digest algorithm used by [`compute_vba_project_digest`].
 ///
@@ -99,6 +99,21 @@ pub fn compute_vba_project_digest(
         hasher.update(&bytes);
     }
 
+    Ok(hasher.finalize())
+}
+
+/// Compute the MS-OVBA "Contents Hash" v3 digest of a `vbaProject.bin`.
+///
+/// This is the project digest used by the MS-OVBA §2.4.2 v3 transcript (`ProjectNormalizedData`
+/// constructed from `V3ContentNormalizedData` + `FormsNormalizedData`), commonly associated with
+/// the `\x05DigitalSignatureExt` signature stream.
+pub fn compute_vba_project_digest_v3(
+    vba_project_bin: &[u8],
+    alg: DigestAlg,
+) -> Result<Vec<u8>, ParseError> {
+    let normalized = project_normalized_data_v3(vba_project_bin)?;
+    let mut hasher = Hasher::new(alg);
+    hasher.update(&normalized);
     Ok(hasher.finalize())
 }
 
