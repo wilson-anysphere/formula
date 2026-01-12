@@ -848,8 +848,9 @@ impl AppState {
         // The macro runtime context stores sheet indices; keep them stable so it continues to
         // point at the same sheet(s) after reordering.
         {
-            // Avoid `self.get_workbook()` here so we can mutably borrow `self.macro_host` while
-            // holding an immutable reference to the workbook (borrow-splitting across fields).
+            // Avoid `self.get_workbook()` here: it borrows the entire `AppState` immutably for the
+            // lifetime of the returned reference, which prevents us from mutably borrowing the
+            // independent `macro_host` field below.
             let workbook = self
                 .workbook
                 .as_ref()
