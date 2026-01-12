@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
 use formula_model::SheetVisibility;
@@ -7,7 +7,9 @@ use formula_xlsx::load_from_bytes;
 use pretty_assertions::assert_eq;
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use zip::write::FileOptions;
 use zip::ZipArchive;
+use zip::ZipWriter;
 
 fn fixture_bytes() -> Vec<u8> {
     std::fs::read(fixture_path()).expect("fixture exists")
@@ -373,4 +375,122 @@ fn preserves_sheet_ids_when_internal_ids_change() {
 
     let content_types = String::from_utf8(zip_part(&saved, "[Content_Types].xml")).expect("utf8");
     assert!(!content_types.contains("/xl/sharedStrings.xml"));
+}
+
+#[test]
+fn add_sheet_preserves_richdata_relationships_and_content_types() {
+    let rich_value = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><richValue/>"#.to_vec();
+    let rich_value_rel =
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><richValueRel/>"#.to_vec();
+    let rich_value_types =
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><richValueTypes/>"#.to_vec();
+    let rich_value_structure = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><richValueStructure/>"#.to_vec();
+
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>
+"#;
+
+    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId3" Type="http://example.com/relationships/richData" Target="richData/richValueRel.xml"/>
+</Relationships>
+"#;
+
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/richData/richValue.xml" ContentType="application/xml"/>
+  <Override PartName="/xl/richData/richValueRel.xml" ContentType="application/xml"/>
+  <Override PartName="/xl/richData/richValueTypes.xml" ContentType="application/xml"/>
+  <Override PartName="/xl/richData/richValueStructure.xml" ContentType="application/xml"/>
+</Types>
+"#;
+
+    let sheet1_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData/>
+</worksheet>
+"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+    for (name, bytes) in [
+        ("[Content_Types].xml", content_types.as_bytes()),
+        ("xl/workbook.xml", workbook_xml.as_bytes()),
+        ("xl/_rels/workbook.xml.rels", workbook_rels.as_bytes()),
+        ("xl/worksheets/sheet1.xml", sheet1_xml.as_bytes()),
+        ("xl/richData/richValue.xml", rich_value.as_slice()),
+        ("xl/richData/richValueRel.xml", rich_value_rel.as_slice()),
+        ("xl/richData/richValueTypes.xml", rich_value_types.as_slice()),
+        ("xl/richData/richValueStructure.xml", rich_value_structure.as_slice()),
+    ] {
+        zip.start_file(name, options).expect("start file");
+        zip.write_all(bytes).expect("write part");
+    }
+    let fixture = zip.finish().expect("finish zip").into_inner();
+
+    let mut doc = load_from_bytes(&fixture).expect("load fixture");
+    doc.workbook.add_sheet("Added").unwrap();
+
+    let saved = doc.save_to_vec().expect("save");
+
+    assert_eq!(
+        zip_part(&saved, "xl/richData/richValue.xml"),
+        rich_value,
+        "richValue.xml must be preserved byte-for-byte"
+    );
+    assert_eq!(
+        zip_part(&saved, "xl/richData/richValueRel.xml"),
+        rich_value_rel,
+        "richValueRel.xml must be preserved byte-for-byte"
+    );
+    assert_eq!(
+        zip_part(&saved, "xl/richData/richValueTypes.xml"),
+        rich_value_types,
+        "richValueTypes.xml must be preserved byte-for-byte"
+    );
+    assert_eq!(
+        zip_part(&saved, "xl/richData/richValueStructure.xml"),
+        rich_value_structure,
+        "richValueStructure.xml must be preserved byte-for-byte"
+    );
+
+    let rels = workbook_relationship_targets(&zip_part(&saved, "xl/_rels/workbook.xml.rels"));
+    assert_eq!(
+        rels,
+        BTreeMap::from([
+            ("rId1".to_string(), "worksheets/sheet1.xml".to_string()),
+            ("rId2".to_string(), "styles.xml".to_string()),
+            (
+                "rId3".to_string(),
+                "richData/richValueRel.xml".to_string()
+            ),
+            ("rId4".to_string(), "worksheets/sheet2.xml".to_string()),
+        ]),
+        "workbook.xml.rels must keep RichData relationship and only add a new worksheet relationship"
+    );
+
+    let content_types_out = String::from_utf8(zip_part(&saved, "[Content_Types].xml")).expect("utf8");
+    for part in [
+        "/xl/richData/richValue.xml",
+        "/xl/richData/richValueRel.xml",
+        "/xl/richData/richValueTypes.xml",
+        "/xl/richData/richValueStructure.xml",
+    ] {
+        assert!(
+            content_types_out.contains(part),
+            "[Content_Types].xml must retain RichData override for {part}"
+        );
+    }
 }
