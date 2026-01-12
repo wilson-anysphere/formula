@@ -18,8 +18,6 @@ The source of truth for “what the engine currently implements” is:
     **[`crates/formula-engine/tests/function_catalog_sync.rs`](../crates/formula-engine/tests/function_catalog_sync.rs)**.
   - Used by downstream tooling (JS/TS, docs, scripts) without having to compile Rust.
 
-Current implemented function count (from `shared/functionCatalog.json`): **345**
-
 Why it’s committed:
 
 - Stable interface for non-Rust tooling (autocomplete, docs, parity scripts, etc).
@@ -77,31 +75,27 @@ Useful report flags:
 Note: FTAB includes many legacy XLM/macro-only functions and reserved slots; the FTAB-based “missing”
 count is **not** a direct “worksheet function parity” percentage.
 
-## Current snapshot (generated)
+## Current snapshot (counts only)
 
-To get up-to-date numbers for your checkout, run:
-
-```bash
-node tools/parity/report_functions.mjs
-```
-
-or the more detailed report (includes top-N lists):
+This section is a snapshot of the summary produced by:
 
 ```bash
 pnpm -w run report:function-parity
 ```
 
-Example output (counts will vary over time):
+To regenerate: run the command above and replace the block between the markers below.
 
+<!-- BEGIN GENERATED: report-function-parity -->
 ```text
 Function parity report (catalog ↔ BIFF FTAB)
 
-Catalog functions (shared/functionCatalog.json): <count>
-FTAB functions (crates/formula-biff/src/ftab.rs): <count>
-Catalog ∩ FTAB (case-insensitive name match): <count>
-FTAB \\ Catalog (missing from catalog): <count>
-Catalog \\ FTAB (not present in FTAB): <count>
+Catalog functions (shared/functionCatalog.json): 345
+FTAB functions (crates/formula-biff/src/ftab.rs): 478
+Catalog ∩ FTAB (case-insensitive name match): 260
+FTAB \ Catalog (missing from catalog): 218
+Catalog \ FTAB (not present in FTAB): 85
 ```
+<!-- END GENERATED: report-function-parity -->
 
 ## Notes on tricky function families
 
