@@ -6,6 +6,10 @@ describe("shiftFormulaA1", () => {
     expect(shiftFormulaA1("=A1+$B$1", 1, 0)).toBe("=A2+$B$1");
     expect(shiftFormulaA1("=$A1+B$1", 2, 3)).toBe("=$A3+E$1");
   });
+
+  it("drops the spill-range postfix when shifting creates a #REF!", () => {
+    expect(shiftFormulaA1("=A1#", 0, -1)).toBe("=#REF!");
+  });
 });
 
 describe("computeFillEdits", () => {

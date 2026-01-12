@@ -236,8 +236,17 @@ export function shiftFormulaA1(formula: string, deltaRow: number, deltaCol: numb
       const next = formula[i + token.length];
 
       if (shouldTreatAsCellRefBoundary(prev, next)) {
-        out += shiftCellRef(parsed, deltaRow, deltaCol);
+        const shifted = shiftCellRef(parsed, deltaRow, deltaCol);
+        out += shifted;
         i += token.length;
+        // Excel drops the spill-range operator (`#`) once the base reference becomes invalid.
+        // If shifting turns a reference into `#REF!`, consume any following `#` characters so
+        // `A1#` does not become `#REF!#`.
+        if (shifted.endsWith("#REF!") && formula[i] === "#") {
+          while (formula[i] === "#") {
+            i++;
+          }
+        }
         continue;
       }
     }
