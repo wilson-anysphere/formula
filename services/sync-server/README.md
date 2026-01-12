@@ -103,6 +103,8 @@ Set:
 
 The request/response format is the same as the token introspection auth mode described below.
 
+The sync-server forwards `clientIp` and `userAgent` to the introspection endpoint when available.
+
 ### Token introspection (auth mode)
 
 Set:
@@ -121,8 +123,16 @@ POST ${SYNC_SERVER_INTROSPECT_URL}/internal/sync/introspect
 Content-Type: application/json
 x-internal-admin-token: ${SYNC_SERVER_INTROSPECT_TOKEN}
 
-{ "token": "<client token>", "docId": "<requested doc id>" }
+{
+  "token": "<client token>",
+  "docId": "<requested doc id>",
+  "clientIp": "<client ip address>",
+  "userAgent": "<user agent header>"
+}
 ```
+
+`clientIp` and `userAgent` are optional. When present, they allow the introspection service to enforce org
+IP allowlists and record richer audit information.
 
 Expected response:
 
@@ -137,6 +147,9 @@ denied).
 
 Introspection results are cached in-memory for `SYNC_SERVER_INTROSPECT_CACHE_MS`, so token revocation
 may not take effect immediately.
+
+Cache keys are scoped per `(token, docId, clientIp)` so a token cannot be replayed from a different
+client IP during the cache window.
 
 ## Persistence backends
 
