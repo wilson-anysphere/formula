@@ -2,26 +2,48 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let showInputBox = null;
 try {
-  const extensionsDir = path.join(__dirname, "..", "src", "extensions");
-  const candidates = ["ui.js", "ui.ts"];
-  for (const candidate of candidates) {
-    const candidatePath = path.join(extensionsDir, candidate);
-    if (!fs.existsSync(candidatePath)) continue;
-    // eslint-disable-next-line no-await-in-loop
-    const mod = await import(new URL(`../src/extensions/${candidate}`, import.meta.url).href);
-    if (typeof mod.showInputBox === "function") {
-      showInputBox = mod.showInputBox;
-      break;
+  const mainPath = path.join(__dirname, "..", "src", "main.ts");
+  const mainSource = fs.readFileSync(mainPath, "utf8");
+  const uiImportMatch = mainSource.match(
+    /import\s+\{[^}]*\bshowInputBox\b[^}]*\}\s+from\s+["'](\.\/extensions\/ui[^"']*)["'];/,
+  );
+
+  if (uiImportMatch?.[1]) {
+    const candidatePath = path.join(__dirname, "..", "src", uiImportMatch[1]);
+    if (fs.existsSync(candidatePath)) {
+      const mod = await import(pathToFileURL(candidatePath).href);
+      if (typeof mod.showInputBox === "function") {
+        showInputBox = mod.showInputBox;
+      }
     }
   }
 } catch {
-  // ignore; test will be skipped below if showInputBox is unavailable.
+  // ignore; fall back to probing known filenames below.
+}
+
+if (!showInputBox) {
+  try {
+    const extensionsDir = path.join(__dirname, "..", "src", "extensions");
+    const candidates = ["ui.js", "ui.ts"];
+    for (const candidate of candidates) {
+      const candidatePath = path.join(extensionsDir, candidate);
+      if (!fs.existsSync(candidatePath)) continue;
+      // eslint-disable-next-line no-await-in-loop
+      const mod = await import(new URL(`../src/extensions/${candidate}`, import.meta.url).href);
+      if (typeof mod.showInputBox === "function") {
+        showInputBox = mod.showInputBox;
+        break;
+      }
+    }
+  } catch {
+    // ignore; test will be skipped below if showInputBox is unavailable.
+  }
 }
 
 let JSDOM = null;
