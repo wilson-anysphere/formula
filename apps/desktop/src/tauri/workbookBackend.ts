@@ -100,6 +100,17 @@ export class TauriWorkbookBackend implements WorkbookBackend {
     return (payload as SheetUsedRange | null) ?? null;
   }
 
+  /**
+   * Best-effort: not all backend builds expose formatting snapshot commands.
+   * Callers should tolerate failures and treat them as "no persisted formatting".
+   */
+  async getSheetFormatting(sheetId: string): Promise<unknown | null> {
+    const payload = await this.invoke("get_sheet_formatting", {
+      sheet_id: sheetId,
+    });
+    return (payload as unknown | null) ?? null;
+  }
+
   async setCell(params: {
     sheetId: string;
     row: number;

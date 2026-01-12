@@ -175,6 +175,12 @@ import {
   WORKBOOK_LOAD_MAX_ROWS_STORAGE_KEY,
 } from "./workbook/load/clampUsedRange.js";
 import { warnIfWorkbookLoadTruncated, type WorkbookLoadTruncation } from "./workbook/load/truncationWarning.js";
+import {
+  mergeFormattingIntoSnapshot,
+  type CellFormatClampBounds,
+  type SheetFormattingSnapshot,
+  type SnapshotCell,
+} from "./workbook/mergeFormattingIntoSnapshot.js";
 import { exportDocumentRangeToCsv } from "./import-export/csv/export.js";
 
 // Best-effort: older desktop builds persisted provider selection + API keys in localStorage.
@@ -9780,15 +9786,35 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     name: string;
     visibility: SheetVisibility;
     tabColor?: TabColor;
-    cells: any[];
+    cells: SnapshotCell[];
+    defaultFormat?: unknown | null;
+    rowFormats?: unknown;
+    colFormats?: unknown;
+    formatRunsByCol?: unknown;
   }> = [];
   const truncations: WorkbookLoadTruncation[] = [];
 
+  const formattingBySheetIdPromise: Promise<Array<{ sheetId: string; formatting: SheetFormattingSnapshot | null }>> = Promise.all(
+    sheets.map(async (sheet) => {
+      try {
+        const formatting = (await tauriBackend.getSheetFormatting(sheet.id)) as SheetFormattingSnapshot | null;
+        return { sheetId: sheet.id, formatting };
+      } catch (err) {
+        // Best-effort: treat formatting load failures as "no persisted formatting".
+        console.warn(`[formula][desktop] Failed to load formatting for sheet ${sheet.id}:`, err);
+        return { sheetId: sheet.id, formatting: null };
+      }
+    }),
+  );
+
+  const clampCellFormatBoundsBySheetId = new Map<string, CellFormatClampBounds | null>();
+
   for (const sheet of sheets) {
-    const cells: Array<{ row: number; col: number; value: unknown | null; formula: string | null; format: null }> = [];
+    const cells: SnapshotCell[] = [];
 
     const usedRange = await tauriBackend.getSheetUsedRange(sheet.id);
     if (!usedRange) {
+      clampCellFormatBoundsBySheetId.set(sheet.id, null);
       snapshotSheets.push({
         id: sheet.id,
         name: sheet.name,
@@ -9803,6 +9829,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
       maxRows: MAX_ROWS,
       maxCols: MAX_COLS,
     });
+    clampCellFormatBoundsBySheetId.set(sheet.id, truncatedRows || truncatedCols ? { startRow, endRow, startCol, endCol } : null);
     if (truncatedRows || truncatedCols) {
       truncations.push({
         sheetId: sheet.id,
@@ -9875,6 +9902,18 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
       tabColor: sheet.tabColor,
       cells,
     });
+  }
+
+  const formattingBySheetId = new Map<string, SheetFormattingSnapshot | null>();
+  for (const { sheetId, formatting } of await formattingBySheetIdPromise) {
+    formattingBySheetId.set(sheetId, formatting);
+  }
+
+  for (const sheet of snapshotSheets) {
+    const formatting = formattingBySheetId.get(sheet.id) ?? null;
+    const clampCellFormatsTo = clampCellFormatBoundsBySheetId.get(sheet.id) ?? null;
+    const merged = mergeFormattingIntoSnapshot({ cells: sheet.cells, formatting, clampCellFormatsTo });
+    Object.assign(sheet, merged);
   }
 
   const snapshot = encodeDocumentSnapshot({ schemaVersion: 1, sheets: snapshotSheets });
