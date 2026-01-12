@@ -52,6 +52,42 @@ test.describe("Ctrl/Cmd+Shift+* (select current region)", () => {
       await expect(page.getByTestId("active-cell")).toHaveText("F2");
     });
 
+    test(`supports Ctrl/Cmd+NumpadMultiply (${mode})`, async ({ page }) => {
+      await gotoDesktop(page, `/?grid=${mode}`);
+      await waitForIdle(page);
+
+      await page.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const sheetId = app.getCurrentSheetId();
+        const doc = app.getDocument();
+
+        doc.setCellValue(sheetId, "E1", 1);
+        doc.setCellValue(sheetId, "E2", 2);
+        doc.setCellValue(sheetId, "E3", 3);
+        doc.setCellValue(sheetId, "F1", 4);
+        doc.setCellValue(sheetId, "F3", 5);
+        doc.setCellValue(sheetId, "G1", 6);
+        doc.setCellValue(sheetId, "G2", 7);
+        doc.setCellValue(sheetId, "G3", 8);
+      });
+      await waitForIdle(page);
+
+      const gridBox = await page.locator("#grid").boundingBox();
+      expect(gridBox).not.toBeNull();
+
+      const f2Rect = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("F2"));
+      expect(f2Rect).not.toBeNull();
+
+      await page.mouse.click(gridBox!.x + f2Rect!.x + f2Rect!.width / 2, gridBox!.y + f2Rect!.y + f2Rect!.height / 2);
+      await expect(page.getByTestId("active-cell")).toHaveText("F2");
+
+      const modifier = process.platform === "darwin" ? "Meta" : "Control";
+      await page.keyboard.press(`${modifier}+NumpadMultiply`);
+
+      await expect(page.getByTestId("selection-range")).toHaveText("E1:G3");
+      await expect(page.getByTestId("active-cell")).toHaveText("F2");
+    });
+
     test(`falls back to the active cell when there is no adjacent region (${mode})`, async ({ page }) => {
       await gotoDesktop(page, `/?grid=${mode}`);
       await waitForIdle(page);
