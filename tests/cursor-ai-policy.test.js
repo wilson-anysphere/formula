@@ -295,6 +295,71 @@ test("cursor AI policy guard scans plist files for provider strings", async () =
   }
 });
 
+test("cursor AI policy guard scans .b64 files for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-b64-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "tools/example/fixture.xlsx.b64", "OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans .base64 files for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-base64-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "crates/example/tests/fixtures/fixture.xlsx.base64", "OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans .pem files for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-pem-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "services/example/localhost-cert.pem", "OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans .key files for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-key-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "services/example/localhost.key", "OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans .crt files for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-crt-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "services/example/localhost.crt", "OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("cursor AI policy guard scans extensionless config files named `config`", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-config-basename-fail-"));
   try {

@@ -127,6 +127,11 @@ const SCANNED_FILE_EXTENSIONS = new Set([
   ".hpp",
   ".proto",
   ".wgsl",
+  ".b64",
+  ".base64",
+  ".pem",
+  ".key",
+  ".crt",
   ".sh",
 ]);
 
