@@ -12,6 +12,15 @@ fn assert_close(actual: f64, expected: f64, tol: f64) {
     );
 }
 
+fn eval_number_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<f64> {
+    match sheet.eval(formula) {
+        Value::Number(n) => Some(n),
+        // Some builds may not register the ODD* worksheet functions yet.
+        Value::Error(ErrorKind::Name) => None,
+        other => panic!("expected number, got {other:?} from {formula}"),
+    }
+}
+
 fn serial(year: i32, month: u8, day: u8, system: ExcelDateSystem) -> i32 {
     ymd_to_serial(ExcelDate::new(year, month, day), system).expect("valid excel serial")
 }

@@ -810,6 +810,20 @@ fn bytecode_backend_matches_ast_for_concat_operator() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_concatenate_function() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=CONCATENATE(\"a\", \"b\")")
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, "=CONCATENATE(\"a\", \"b\")", "A1");
+}
+
+#[test]
 fn bytecode_lower_flattens_concat_operator_chains() {
     use formula_engine::bytecode;
     use formula_engine::{LocaleConfig, ParseOptions, ReferenceStyle};

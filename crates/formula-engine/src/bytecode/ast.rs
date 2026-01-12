@@ -107,7 +107,7 @@ impl Function {
             "ROUNDDOWN" => Function::RoundDown,
             "MOD" => Function::Mod,
             "SIGN" => Function::Sign,
-            "CONCAT" => Function::Concat,
+            "CONCAT" | "CONCATENATE" => Function::Concat,
             "NOT" => Function::Not,
             "NOW" => Function::Now,
             "TODAY" => Function::Today,
