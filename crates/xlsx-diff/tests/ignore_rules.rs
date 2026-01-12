@@ -445,6 +445,62 @@ fn ignore_glob_suppresses_docprops_plumbing_diffs() {
 }
 
 #[test]
+fn ignore_rules_do_not_hide_relationship_target_changes_to_non_ignored_parts() {
+    let expected_zip = zip_bytes(&[
+        (
+            "[Content_Types].xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>"#,
+        ),
+        (
+            "_rels/.rels",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>"#,
+        ),
+    ]);
+
+    let actual_zip = zip_bytes(&[
+        (
+            "[Content_Types].xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+</Types>"#,
+        ),
+        (
+            "_rels/.rels",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="customXml/item1.xml"/>
+</Relationships>"#,
+        ),
+    ]);
+
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let options = DiffOptions {
+        ignore_parts: Default::default(),
+        ignore_globs: vec!["docProps/*".to_string()],
+    };
+
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|d| d.part == "_rels/.rels" && d.kind == "attribute_changed"),
+        "expected _rels/.rels diff to remain (target changed to non-ignored part), got {:#?}",
+        report.differences
+    );
+}
+
+#[test]
 fn cli_exit_code_honors_fail_on_with_only_warning_diffs() {
     let expected_zip = zip_bytes(&[
         (

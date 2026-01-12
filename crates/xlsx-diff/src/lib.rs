@@ -251,14 +251,13 @@ pub fn diff_archives_with_options(
                         BTreeSet::new()
                     };
                     let ignored_rel_ids = if part.ends_with(".rels") {
-                        let mut ids =
-                            ignored_relationship_ids(part, expected_bytes, &ignore).unwrap_or_default();
-                        ids.extend(
-                            ignored_relationship_ids(part, actual_bytes, &ignore).unwrap_or_default(),
-                        );
-                        ids
+                        let expected = relationship_target_ignore_map(part, expected_bytes, &ignore)
+                            .unwrap_or_default();
+                        let actual = relationship_target_ignore_map(part, actual_bytes, &ignore)
+                            .unwrap_or_default();
+                        RelationshipIgnoreMaps { expected, actual }
                     } else {
-                        BTreeSet::new()
+                        RelationshipIgnoreMaps::default()
                     };
                     for diff in diff_xml(&expected_xml, &actual_xml, base) {
                         if should_ignore_xml_diff(part, &diff.path, &ignored_rel_ids, &ignore) {
@@ -451,7 +450,7 @@ impl IgnoreMatcher {
 fn should_ignore_xml_diff(
     part: &str,
     path: &str,
-    ignored_rel_ids: &BTreeSet<String>,
+    ignored_rels: &RelationshipIgnoreMaps,
     ignore: &IgnoreMatcher,
 ) -> bool {
     if part == "[Content_Types].xml" {
@@ -465,8 +464,11 @@ fn should_ignore_xml_diff(
 
     if part.ends_with(".rels") {
         if let Some(id) = relationship_id_from_path(path) {
-            if ignored_rel_ids.contains(id) {
-                return true;
+            let expected = ignored_rels.expected.get(id).copied();
+            let actual = ignored_rels.actual.get(id).copied();
+            match (expected, actual) {
+                (Some(true), Some(true)) | (Some(true), None) | (None, Some(true)) => return true,
+                _ => {}
             }
         }
     }
@@ -501,16 +503,22 @@ fn normalize_opc_path(path: &str) -> String {
     out.join("/")
 }
 
-fn ignored_relationship_ids(
+#[derive(Debug, Default)]
+struct RelationshipIgnoreMaps {
+    expected: BTreeMap<String, bool>,
+    actual: BTreeMap<String, bool>,
+}
+
+fn relationship_target_ignore_map(
     rels_part: &str,
     bytes: &[u8],
     ignore: &IgnoreMatcher,
-) -> Result<BTreeSet<String>> {
+) -> Result<BTreeMap<String, bool>> {
     let text =
         std::str::from_utf8(bytes).with_context(|| format!("part {rels_part} is not valid UTF-8"))?;
     let doc = Document::parse(text).with_context(|| format!("parse xml for {rels_part}"))?;
 
-    let mut ids = BTreeSet::new();
+    let mut ids = BTreeMap::new();
     for node in doc
         .descendants()
         .filter(|node| node.is_element() && node.tag_name().name() == "Relationship")
@@ -520,9 +528,7 @@ fn ignored_relationship_ids(
         };
         let target = node.attribute("Target").unwrap_or_default();
         let resolved = resolve_relationship_target(rels_part, target);
-        if ignore.matches(&resolved) {
-            ids.insert(id.to_string());
-        }
+        ids.insert(id.to_string(), ignore.matches(&resolved));
     }
 
     Ok(ids)
