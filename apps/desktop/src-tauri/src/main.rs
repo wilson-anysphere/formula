@@ -35,6 +35,20 @@ const WORKBOOK_ID: &str = "local-workbook";
 
 static CLOSE_REQUEST_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
+// Canonical Tauri event names exchanged between the Rust host and the frontend.
+// Keep this list (and any new additions) in sync with the event allowlist in:
+// `apps/desktop/src-tauri/capabilities/main.json`.
+//
+// Rust -> JS (frontend `listen`):
+// - close-prep, close-requested, open-file, file-dropped, oauth-redirect
+// - tray-*, shortcut-*, menu-*
+// - startup:window-visible, startup:webview-loaded, startup:tti, startup:metrics
+// - update-check-started, update-check-already-running, update-not-available, update-check-error, update-available
+//
+// JS -> Rust (frontend `emit`):
+// - open-file-ready, oauth-redirect-ready
+// - close-prep-done, close-handled
+// - coi-check-result, updater-ui-ready
 const OPEN_FILE_EVENT: &str = "open-file";
 const OPEN_FILE_READY_EVENT: &str = "open-file-ready";
 

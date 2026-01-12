@@ -8075,6 +8075,14 @@ try {
   // If you add a new `listen(...)` (Rust -> JS) or `emit(...)` (JS -> Rust) call here, you MUST
   // update the corresponding allowlist there (and the `eventPermissions.vitest.ts` guardrail test)
   // or the call will fail with a permissions error.
+  //
+  // Canonical desktop event names (keep in sync with the allowlist):
+  // - Rust -> JS (`listen`): close-prep, close-requested, open-file, file-dropped, oauth-redirect,
+  //   tray-*, shortcut-*, menu-*,
+  //   startup:window-visible, startup:webview-loaded, startup:tti, startup:metrics,
+  //   update-check-started, update-check-already-running, update-not-available, update-check-error, update-available
+  // - JS -> Rust (`emit`): open-file-ready, oauth-redirect-ready, close-prep-done, close-handled,
+  //   coi-check-result, updater-ui-ready
   const listen = getTauriListen();
   const emit = getTauriEmit();
   let pendingOpenFiles: Promise<void> = Promise.resolve();
