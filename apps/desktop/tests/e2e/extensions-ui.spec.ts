@@ -60,6 +60,29 @@ test.describe("Extensions UI integration", () => {
   });
 
   test("runs sampleHello.openPanel and renders the panel webview", async ({ page }) => {
+    // Simulate a runtime that injects Tauri globals into iframe documents.
+    // The injected webview hardening script should remove them before any extension code can access them.
+    await page.addInitScript(() => {
+      // Only inject into iframes so we don't accidentally toggle the desktop app into "Tauri mode"
+      // during web-based e2e runs.
+      try {
+        if (window.top === window) return;
+      } catch {
+        // Assume we're in a frame if we can't compare `top` safely.
+      }
+
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const w = window as any;
+        if (!("__TAURI__" in w)) w.__TAURI__ = {};
+        if (!("__TAURI_IPC__" in w)) w.__TAURI_IPC__ = {};
+        if (!("__TAURI_INTERNALS__" in w)) w.__TAURI_INTERNALS__ = {};
+        if (!("__TAURI_METADATA__" in w)) w.__TAURI_METADATA__ = {};
+      } catch {
+        // Ignore.
+      }
+    });
+
     await gotoDesktop(page);
     await grantSampleHelloPermissions(page);
 
@@ -88,6 +111,7 @@ test.describe("Extensions UI integration", () => {
     const sandboxInfo = await webviewFrame!.evaluate(() => (window as any).__formulaWebviewSandbox);
     expect(sandboxInfo, "webview should inject a sandbox hardening script").toBeTruthy();
     expect(typeof sandboxInfo.tauriGlobalsPresent).toBe("boolean");
+    expect(sandboxInfo.tauriGlobalsPresent, "webview should detect injected Tauri globals").toBe(true);
 
     const sandboxDescriptor = await webviewFrame!.evaluate(() => {
       const desc = Object.getOwnPropertyDescriptor(window, "__formulaWebviewSandbox") as any;
