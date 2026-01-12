@@ -6192,19 +6192,29 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     fn iter_cells(
         &self,
     ) -> Option<Box<dyn Iterator<Item = (bytecode::CellCoord, bytecode::Value)> + '_>> {
+        self.iter_cells_on_sheet(self.sheet)
+    }
+
+    fn iter_cells_on_sheet(
+        &self,
+        sheet: usize,
+    ) -> Option<Box<dyn Iterator<Item = (bytecode::CellCoord, bytecode::Value)> + '_>> {
         // When external values are provided out-of-band, we cannot safely iterate just the
         // snapshot's stored cells because we'd miss provider-backed cells that should contribute
         // to aggregates.
         if self.snapshot.external_value_provider.is_some() {
             return None;
         }
+        if !self.snapshot.sheets.contains(&sheet) {
+            return None;
+        }
 
         let start = CellKey {
-            sheet: self.sheet,
+            sheet,
             addr: CellAddr { row: 0, col: 0 },
         };
         let end = CellKey {
-            sheet: self.sheet,
+            sheet,
             addr: CellAddr {
                 row: u32::MAX,
                 col: u32::MAX,

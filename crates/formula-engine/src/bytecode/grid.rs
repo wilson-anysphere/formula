@@ -54,6 +54,19 @@ pub trait Grid: Sync {
         None
     }
 
+    /// Sheet-aware variant of [`Grid::iter_cells`].
+    ///
+    /// This is used to support sparse iteration for multi-sheet references (e.g. 3D sheet spans)
+    /// without forcing dense column caches or scanning every implicit blank cell.
+    #[inline]
+    fn iter_cells_on_sheet(
+        &self,
+        sheet: usize,
+    ) -> Option<Box<dyn Iterator<Item = (CellCoord, Value)> + '_>> {
+        let _ = sheet;
+        self.iter_cells()
+    }
+
     /// Sheet-aware variant of [`Grid::column_slice`].
     #[inline]
     fn column_slice_on_sheet(

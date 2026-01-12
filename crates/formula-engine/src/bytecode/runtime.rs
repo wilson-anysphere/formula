@@ -3379,6 +3379,34 @@ fn sum_range_on_sheet(
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Err(ErrorKind::Ref);
     }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
+            let mut sum = 0.0;
+            let mut best_error: Option<(i32, i32, ErrorKind)> = None;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                match v {
+                    Value::Number(n) => sum += n,
+                    Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
+                    // SUM ignores text/logicals/blanks in references.
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+            if let Some((_, _, err)) = best_error {
+                return Err(err);
+            }
+            return Ok(sum);
+        }
+    }
+
     let mut sum = 0.0;
     for col in range.col_start..=range.col_end {
         if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end) {
@@ -3475,6 +3503,38 @@ fn sum_count_range_on_sheet(
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Err(ErrorKind::Ref);
     }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
+            let mut sum = 0.0;
+            let mut count = 0usize;
+            let mut best_error: Option<(i32, i32, ErrorKind)> = None;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                match v {
+                    Value::Number(n) => {
+                        sum += n;
+                        count += 1;
+                    }
+                    Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
+                    // Ignore non-numeric values in references.
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+            if let Some((_, _, err)) = best_error {
+                return Err(err);
+            }
+            return Ok((sum, count));
+        }
+    }
+
     let mut sum = 0.0;
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
@@ -3547,6 +3607,22 @@ fn count_range_on_sheet(
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Err(ErrorKind::Ref);
     }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
+            let mut count = 0usize;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                if matches!(v, Value::Number(_)) {
+                    count += 1;
+                }
+            }
+            return Ok(count);
+        }
+    }
+
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
         if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end) {
