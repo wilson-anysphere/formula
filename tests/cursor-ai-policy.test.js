@@ -436,6 +436,27 @@ test(
 );
 
 test(
+  "cursor AI policy guard rejects symlinked root directories (avoid scan bypass)",
+  { skip: process.platform === "win32" },
+  async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-symlink-dir-fail-"));
+    try {
+      // Create a symlink for a *scanned* root directory (packages/) to ensure the
+      // non-git filesystem walker doesn't silently follow it.
+      await writeFixtureFile(tmpRoot, "real-packages/example/src/index.js", "export const answer = 42;\n");
+      await fs.symlink("real-packages", path.join(tmpRoot, "packages"));
+
+      const result = await runPolicyApi(tmpRoot, { maxViolations: 1 });
+      assert.equal(result.ok, false);
+      assert.equal(result.violations[0]?.ruleId, "symlink");
+      assert.equal(result.violations[0]?.file, "packages");
+    } finally {
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "cursor AI policy guard rejects tracked symlinks in a git repo (tracked-files mode)",
   { skip: !HAS_GIT || process.platform === "win32" },
   async () => {

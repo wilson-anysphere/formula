@@ -861,11 +861,20 @@ export async function checkCursorAiPolicy(options = {}) {
     }
   } else {
     const dirsToScan = [];
-      for (const dir of includedDirs) {
-        const abs = path.join(rootDir, dir);
-        try {
-          const st = await stat(abs);
-          if (st.isDirectory()) dirsToScan.push(abs);
+    for (const dir of includedDirs) {
+      const abs = path.join(rootDir, dir);
+      try {
+        // Use lstat() so we detect symlinked root dirs (e.g. `packages` -> external path).
+        const st = await lstat(abs);
+        if (st.isSymbolicLink()) {
+          record({
+            file: relativeToRoot(abs, rootDir),
+            ruleId: "symlink",
+            message: "Forbidden: symlinked files/directories are not allowed (can bypass Cursor-only AI policy scans).",
+          });
+          continue;
+        }
+        if (st.isDirectory()) dirsToScan.push(abs);
       } catch {
         // ignore missing
       }
@@ -878,17 +887,17 @@ export async function checkCursorAiPolicy(options = {}) {
 
     // Also scan root-level config files (package.json, Cargo.toml, etc). Those can
     // reintroduce forbidden dependencies without touching the main code trees.
-      if (violations.length < maxViolations) {
-        try {
-          const rootEntries = await readdir(rootDir, { withFileTypes: true });
-          for (const entry of rootEntries) {
-            if (violations.length >= maxViolations) break;
-            if (!(entry.isFile() || entry.isSymbolicLink())) continue;
-            await scanFile(path.join(rootDir, entry.name));
-          }
-        } catch {
-          // ignore
+    if (violations.length < maxViolations) {
+      try {
+        const rootEntries = await readdir(rootDir, { withFileTypes: true });
+        for (const entry of rootEntries) {
+          if (violations.length >= maxViolations) break;
+          if (!(entry.isFile() || entry.isSymbolicLink())) continue;
+          await scanFile(path.join(rootDir, entry.name));
         }
+      } catch {
+        // ignore
+      }
     }
   }
 
