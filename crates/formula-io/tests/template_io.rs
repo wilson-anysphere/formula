@@ -43,6 +43,38 @@ fn saving_xlsm_as_xltx_strips_vba_and_sets_template_content_type() {
 }
 
 #[test]
+fn saving_xlsx_with_xlm_macrosheets_as_xltx_strips_macrosheets() {
+    // Start from a macro-free XLSX fixture and inject an XLM macro sheet part. This simulates an
+    // XLSX package containing macro-capable content without a VBA project.
+    let path = fixture_path("xlsx/basic/basic.xlsx");
+    let wb = open_workbook(&path).expect("open workbook");
+    let Workbook::Xlsx(mut pkg) = wb else {
+        panic!("expected Workbook::Xlsx");
+    };
+
+    // Any content is fine for this test; macro stripping is based on the part name.
+    pkg.set_part("xl/macrosheets/sheet1.xml", b"<worksheet/>".to_vec());
+    assert!(
+        pkg.macro_presence().has_xlm_macrosheets,
+        "expected test package to contain XLM macro sheet parts"
+    );
+    assert!(
+        pkg.vba_project_bin().is_none(),
+        "expected test package to contain no VBA project"
+    );
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let out_path = dir.path().join("out.xltx");
+    save_workbook(&Workbook::Xlsx(pkg), &out_path).expect("save workbook");
+
+    let saved = reopen_pkg(&out_path);
+    assert!(
+        saved.part("xl/macrosheets/sheet1.xml").is_none(),
+        "expected XLM macro sheet parts to be stripped when saving to `.xltx`"
+    );
+}
+
+#[test]
 fn saving_xlsm_as_xltm_preserves_vba_and_sets_template_macro_content_type() {
     let path = fixture_path("xlsx/macros/basic.xlsm");
     let wb = open_workbook(&path).expect("open workbook");
