@@ -1427,6 +1427,15 @@ export class WebExtensionManager {
     }
 
     const hadOtherExtensions = existing.length > 0;
+    const hostReportsExtensionActive = existing.some((ext: any) => {
+      if (!ext || typeof ext !== "object") return false;
+      if (!Object.prototype.hasOwnProperty.call(ext, "active")) return false;
+      return Boolean((ext as any).active);
+    });
+    const hostProvidesActiveFlag = existing.some((ext: any) => {
+      if (!ext || typeof ext !== "object") return false;
+      return Object.prototype.hasOwnProperty.call(ext, "active");
+    });
 
     await this.host.loadExtension({
       extensionId: installed.id,
@@ -1455,15 +1464,21 @@ export class WebExtensionManager {
         // for extensions already started via `startupExtension()` (e.g. desktop flows that load
         // an extension before the app's main `loadAllInstalled()` boot hook runs).
         this._didHostStartup = true;
-      } else if (this.host.startup && !hadOtherExtensions) {
-        // Fallback for older hosts: only call startup() when we're confident it won't
+      } else if (
+        this.host.startup &&
+        // Safe fallback for older hosts: only call startup() when we're confident it won't
         // re-emit startup events to extensions that were already running.
         //
+        // In particular, allow startup() when:
+        // - there were no other loaded extensions, OR
+        // - the host reports an `active` flag and none of the existing extensions are active
+        //   (so re-broadcasting `workbookOpened` is not a duplicate).
+        (!hadOtherExtensions || (hostProvidesActiveFlag && !hostReportsExtensionActive))
+      ) {
         // Note: we intentionally *don't* guard this with `_didHostStartup`. In older hosts without
-        // `startupExtension()`, the safest way to start an extension that needs
-        // `onStartupFinished` is to call `startup()` when it's the only loaded extension. If the
-        // host previously ran `startup()` with *zero* extensions loaded, `_didHostStartup` may be
-        // true but re-running startup now is still safe (and required) for newly loaded extensions.
+        // `startupExtension()`, the manager may have set `_didHostStartup` after an earlier
+        // `startup()` call that ran with *zero* loaded extensions. Re-running startup here is still
+        // safe (and required) as long as we are not spamming already-active extensions.
         await this.host.startup();
         this._didHostStartup = true;
       }

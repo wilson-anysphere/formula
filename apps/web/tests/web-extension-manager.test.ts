@@ -737,6 +737,63 @@ test("loadInstalled does not call host.startup() when startupExtension is unavai
   }
 });
 
+test("loadInstalled calls host.startup() when existing extensions are loaded but none are active (startupExtension unavailable)", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-startup-fallback-inactive-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const manifest = {
+    name: "startup-fallback-inactive-ext",
+    publisher: "test",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    browser: "./dist/extension.js",
+    engines: { formula: "^1.0.0" },
+    activationEvents: ["onStartupFinished"],
+    contributes: {}
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+  await fs.writeFile(path.join(extDir, "dist", "extension.js"), `export async function activate() {}\n`);
+
+  const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "test.startup-fallback-inactive-ext",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  // Pretend the host already has a (built-in) extension loaded but not started.
+  const loaded: Array<{ id: string; active?: boolean }> = [{ id: "test.preloaded-ext", active: false }];
+  let startupCalls = 0;
+  const host = {
+    loadExtension: async ({ extensionId }: { extensionId: string }) => {
+      loaded.push({ id: extensionId, active: false });
+      return extensionId;
+    },
+    listExtensions: () => loaded,
+    startup: async () => {
+      startupCalls++;
+    }
+  };
+
+  const manager = new WebExtensionManager({
+    marketplaceClient,
+    host: host as any,
+    engineVersion: "1.0.0"
+  });
+  try {
+    await manager.install("test.startup-fallback-inactive-ext");
+    await manager.loadInstalled("test.startup-fallback-inactive-ext");
+    expect(startupCalls).toBe(1);
+  } finally {
+    await manager.dispose();
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("loadAllInstalled triggers onStartupFinished + workbookOpened and is idempotent", async () => {
   const keys = generateEd25519KeyPair();
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-startup-all-"));
