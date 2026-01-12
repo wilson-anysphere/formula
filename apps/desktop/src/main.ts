@@ -6885,6 +6885,57 @@ async function handleRibbonClearPrintArea(): Promise<void> {
   }
 }
 
+async function handleRibbonAddToPrintArea(): Promise<void> {
+  const invoke = getTauriInvokeForPrint();
+  if (!invoke) return;
+
+  try {
+    const sheetId = app.getCurrentSheetId();
+    const selection = selectionBoundingBox1Based();
+
+    const settings = await invoke("get_sheet_print_settings", { sheet_id: sheetId });
+    const existing = (settings as any)?.print_area;
+    const ranges = Array.isArray(existing) ? existing : [];
+
+    const next = ranges
+      .map((r: any) => ({
+        start_row: Number(r?.start_row),
+        end_row: Number(r?.end_row),
+        start_col: Number(r?.start_col),
+        end_col: Number(r?.end_col),
+      }))
+      .filter(
+        (r: any) =>
+          Number.isFinite(r.start_row) &&
+          Number.isFinite(r.end_row) &&
+          Number.isFinite(r.start_col) &&
+          Number.isFinite(r.end_col),
+      );
+
+    const selectionTauri = {
+      start_row: selection.startRow,
+      end_row: selection.endRow,
+      start_col: selection.startCol,
+      end_col: selection.endCol,
+    };
+
+    const alreadyIncluded = next.some(
+      (r: any) =>
+        r.start_row === selectionTauri.start_row &&
+        r.end_row === selectionTauri.end_row &&
+        r.start_col === selectionTauri.start_col &&
+        r.end_col === selectionTauri.end_col,
+    );
+    if (!alreadyIncluded) next.push(selectionTauri);
+
+    await invoke("set_sheet_print_area", { sheet_id: sheetId, print_area: next });
+    app.focus();
+  } catch (err) {
+    console.error("Failed to add to print area:", err);
+    showToast(`Failed to add to print area: ${String(err)}`, "error");
+  }
+}
+
 async function handleRibbonExportPdf(): Promise<void> {
   const invoke = getTauriInvokeForPrint();
   if (!invoke) return;
@@ -8254,10 +8305,15 @@ mountRibbon(ribbonReactRoot, {
         void handleRibbonPageSetup();
         return;
       case "pageLayout.printArea.setPrintArea":
+      case "pageLayout.pageSetup.printArea.set":
         void handleRibbonSetPrintArea();
         return;
       case "pageLayout.printArea.clearPrintArea":
+      case "pageLayout.pageSetup.printArea.clear":
         void handleRibbonClearPrintArea();
+        return;
+      case "pageLayout.pageSetup.printArea.addTo":
+        void handleRibbonAddToPrintArea();
         return;
       case "pageLayout.export.exportPdf":
         void handleRibbonExportPdf();
