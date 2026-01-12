@@ -6,6 +6,7 @@ use js_sys::{Object, Reflect};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::wasm_bindgen_test;
 
+use formula_model::CellValue as ModelCellValue;
 use formula_wasm::{lex_formula, parse_formula_partial, WasmWorkbook, DEFAULT_SHEET};
 
 #[derive(Debug, serde::Deserialize, PartialEq, Eq)]
@@ -1440,6 +1441,38 @@ fn rich_values_roundtrip_through_wasm_exports() {
     let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
     assert!(cell.input.is_null());
     assert_eq!(cell.value, JsonValue::String("Apple Inc.".to_string()));
+}
+
+#[wasm_bindgen_test]
+fn rich_values_accept_formula_model_cell_value_schema() {
+    let mut wb = WasmWorkbook::new();
+
+    let typed = ModelCellValue::Entity(
+        formula_model::EntityValue::new("Apple Inc.")
+            .with_entity_type("stock")
+            .with_entity_id("AAPL")
+            .with_property("Price", 12.5),
+    );
+
+    wb.set_cell_rich(
+        DEFAULT_SHEET.to_string(),
+        "A1".to_string(),
+        serde_wasm_bindgen::to_value(&typed).unwrap(),
+    )
+    .unwrap();
+    wb.set_cell("B1".to_string(), JsValue::from_str("=A1.Price"), None)
+        .unwrap();
+    wb.recalculate(None).unwrap();
+
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_json_number(&b1.value, 12.5);
+
+    let got_js = wb
+        .get_cell_rich(DEFAULT_SHEET.to_string(), "A1".to_string())
+        .unwrap();
+    let got: ModelCellValue = serde_wasm_bindgen::from_value(got_js).unwrap();
+    assert_eq!(got, typed);
 }
 
 #[wasm_bindgen_test]

@@ -1114,6 +1114,75 @@ impl WorkbookState {
         address: &str,
         input: JsonValue,
     ) -> Result<(), JsValue> {
+        // Accept `formula-model`'s JSON-friendly `{type,value}` representation as an alternate
+        // input format for rich cells. This allows JS callers to pass serialized `CellValue`
+        // objects directly (including recursively-tagged field/property values).
+        //
+        // For non-entity/record values, preserve the scalar worker protocol by degrading the
+        // `CellValue` into a scalar `input` and delegating to `set_cell_internal`.
+        if let Some(obj) = input.as_object() {
+            if obj.contains_key("type") && obj.contains_key("value") {
+                if let Ok(model_value) = serde_json::from_value::<CellValue>(input.clone()) {
+                    if matches!(&model_value, CellValue::Entity(_) | CellValue::Record(_)) {
+                        let sheet = self.ensure_sheet(sheet);
+                        let cell_ref = Self::parse_address(address)?;
+                        let address = cell_ref.to_a1();
+
+                        if let Some((origin, end)) = self.engine.spill_range(&sheet, &address) {
+                            let edited_row = cell_ref.row;
+                            let edited_col = cell_ref.col;
+                            for row in origin.row..=end.row {
+                                for col in origin.col..=end.col {
+                                    // Skip the origin cell (top-left); we only need to clear spill outputs.
+                                    if row == origin.row && col == origin.col {
+                                        continue;
+                                    }
+                                    // If the user overwrote a spill output cell with a literal value, don't emit a
+                                    // spill-clear change for that cell; the caller already knows its new input.
+                                    if row == edited_row && col == edited_col {
+                                        continue;
+                                    }
+                                    self.pending_spill_clears.insert(FormulaCellKey::new(
+                                        sheet.clone(),
+                                        CellRef::new(row, col),
+                                    ));
+                                }
+                            }
+                        }
+
+                        // Persist the typed rich input (so wasm callers can round-trip it), while still keeping
+                        // the scalar workbook schema stable.
+                        self.sheets_rich
+                            .entry(sheet.clone())
+                            .or_default()
+                            .insert(address.clone(), model_value.clone());
+
+                        let engine_value = cell_value_to_engine_rich(&model_value)?;
+                        self.engine
+                            .set_cell_value(&sheet, &address, engine_value)
+                            .map_err(|err| js_err(err.to_string()))?;
+
+                        // Remove any stored scalar input for this cell so scalar callers see an empty input.
+                        let sheet_cells = self
+                            .sheets
+                            .get_mut(&sheet)
+                            .expect("sheet just ensured must exist");
+                        sheet_cells.remove(&address);
+
+                        self.pending_spill_clears
+                            .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
+                        self.pending_formula_baselines
+                            .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
+                        return Ok(());
+                    }
+
+                    // Degrade non-rich values to the scalar input protocol.
+                    let scalar_input = cell_value_to_scalar_json_input(&model_value);
+                    return self.set_cell_internal(sheet, address, scalar_input);
+                }
+            }
+        }
+
         // Preserve the scalar-only JS worker protocol by delegating to the existing
         // implementation for all scalar inputs (including formulas and null-clears).
         if is_scalar_json(&input) {
@@ -2514,6 +2583,17 @@ impl WasmWorkbook {
     pub fn get_cell_rich(&self, sheet: String, address: String) -> Result<JsValue, JsValue> {
         let sheet = self.inner.require_sheet(&sheet)?.to_string();
         let address = WorkbookState::parse_address(&address)?.to_a1();
+        if let Some(input) = self
+            .inner
+            .sheets_rich
+            .get(&sheet)
+            .and_then(|cells| cells.get(&address))
+        {
+            // If this cell was set via the `formula-model` typed schema, preserve that shape for
+            // round-trip correctness.
+            return serde_wasm_bindgen::to_value(input).map_err(|err| js_err(err.to_string()));
+        }
+
         let value = engine_value_to_json_rich(self.inner.engine.get_cell_value(&sheet, &address));
         serde_wasm_bindgen::to_value(&value).map_err(|err| js_err(err.to_string()))
     }
@@ -2802,6 +2882,59 @@ mod tests {
 
         let b1 = wb.get_cell_data(DEFAULT_SHEET, "B1").unwrap();
         assert_eq!(b1.value, json!("#FIELD!"));
+    }
+
+    #[test]
+    fn set_cell_rich_accepts_cell_value_schema_for_entities() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        let typed = CellValue::Entity(
+            formula_model::EntityValue::new("Apple Inc.")
+                .with_entity_type("stock")
+                .with_entity_id("AAPL")
+                .with_property("Price", 12.5),
+        );
+        let input = serde_json::to_value(&typed).unwrap();
+
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", input).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1.Price"))
+            .unwrap();
+        wb.recalculate_internal(None).unwrap();
+
+        let b1 = wb.get_cell_data(DEFAULT_SHEET, "B1").unwrap();
+        assert_eq!(b1.value, json!(12.5));
+
+        let a1 = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(a1.input, JsonValue::Null);
+        assert_eq!(a1.value, json!("Apple Inc."));
+
+        assert_eq!(
+            wb.sheets_rich
+                .get(DEFAULT_SHEET)
+                .and_then(|cells| cells.get("A1")),
+            Some(&typed)
+        );
+    }
+
+    #[test]
+    fn set_cell_rich_accepts_cell_value_schema_for_scalars_by_degrading_to_scalar_io() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        let typed = CellValue::Number(42.0);
+        let input = serde_json::to_value(&typed).unwrap();
+
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", input).unwrap();
+
+        let cell = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(cell.input, json!(42.0));
+        assert_eq!(cell.value, json!(42.0));
+
+        // Scalar edits should not persist the typed rich schema entry.
+        assert!(wb
+            .sheets_rich
+            .get(DEFAULT_SHEET)
+            .and_then(|cells| cells.get("A1"))
+            .is_none());
     }
 
     #[test]
