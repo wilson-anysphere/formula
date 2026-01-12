@@ -11,6 +11,7 @@
  * It scans source-code directories for a small set of forbidden patterns and
  * exits non-zero when any are found.
  */
+import { spawnSync } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -211,6 +212,41 @@ function computeLineColumn(content, index) {
   const line = lines.length;
   const column = lines[lines.length - 1]?.length + 1;
   return { line, column };
+}
+
+/**
+ * Attempt to list git-tracked files for the repository rooted at `rootDir`.
+ *
+ * This avoids scanning untracked local files (e.g. developer `.env.local`) when
+ * running the guard in a git checkout, while preserving the filesystem-walk
+ * fallback for fixtures and non-git environments.
+ *
+ * @param {string} rootDir
+ * @returns {string[] | null} file paths relative to rootDir (posix-ish)
+ */
+function listGitTrackedFiles(rootDir) {
+  try {
+    const toplevel = spawnSync("git", ["-C", rootDir, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (toplevel.status !== 0) return null;
+    const resolvedTop = path.resolve(String(toplevel.stdout || "").trim());
+    if (resolvedTop !== path.resolve(rootDir)) return null;
+
+    const proc = spawnSync("git", ["-C", rootDir, "ls-files", "-z"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    if (proc.status !== 0) return null;
+    const out = String(proc.stdout || "");
+    // `git ls-files -z` separates entries by NUL.
+    const files = out.split("\0").filter(Boolean);
+    return files;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -482,34 +518,48 @@ export async function checkCursorAiPolicy(options = {}) {
     }
   }
 
-  const dirsToScan = [];
-  for (const dir of includedDirs) {
-    const abs = path.join(rootDir, dir);
-    try {
-      const st = await stat(abs);
-      if (st.isDirectory()) dirsToScan.push(abs);
-    } catch {
-      // ignore missing
+  const includedDirPrefixes = includedDirs.map((d) => (d.endsWith("/") ? d : `${d}/`));
+
+  const tracked = listGitTrackedFiles(rootDir);
+  if (tracked) {
+    for (const rel of tracked) {
+      if (violations.length >= maxViolations) break;
+      // Always scan root-level files; scan included directories by prefix.
+      const isRootFile = !rel.includes("/");
+      const isInIncludedDir = includedDirPrefixes.some((prefix) => rel.startsWith(prefix));
+      if (!isRootFile && !isInIncludedDir) continue;
+      await scanFile(path.join(rootDir, rel));
     }
-  }
-
-  for (const dir of dirsToScan) {
-    await walkDir(dir, rootDir, scanFile);
-    if (violations.length >= maxViolations) break;
-  }
-
-  // Also scan root-level config files (package.json, Cargo.toml, etc). Those can
-  // reintroduce forbidden dependencies without touching the main code trees.
-  if (violations.length < maxViolations) {
-    try {
-      const rootEntries = await readdir(rootDir, { withFileTypes: true });
-      for (const entry of rootEntries) {
-        if (violations.length >= maxViolations) break;
-        if (!entry.isFile()) continue;
-        await scanFile(path.join(rootDir, entry.name));
+  } else {
+    const dirsToScan = [];
+    for (const dir of includedDirs) {
+      const abs = path.join(rootDir, dir);
+      try {
+        const st = await stat(abs);
+        if (st.isDirectory()) dirsToScan.push(abs);
+      } catch {
+        // ignore missing
       }
-    } catch {
-      // ignore
+    }
+
+    for (const dir of dirsToScan) {
+      await walkDir(dir, rootDir, scanFile);
+      if (violations.length >= maxViolations) break;
+    }
+
+    // Also scan root-level config files (package.json, Cargo.toml, etc). Those can
+    // reintroduce forbidden dependencies without touching the main code trees.
+    if (violations.length < maxViolations) {
+      try {
+        const rootEntries = await readdir(rootDir, { withFileTypes: true });
+        for (const entry of rootEntries) {
+          if (violations.length >= maxViolations) break;
+          if (!entry.isFile()) continue;
+          await scanFile(path.join(rootDir, entry.name));
+        }
+      } catch {
+        // ignore
+      }
     }
   }
 

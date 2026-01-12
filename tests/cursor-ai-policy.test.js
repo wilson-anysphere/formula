@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 const SCRIPT = path.resolve("scripts/check-cursor-ai-policy.mjs");
+const HAS_GIT = spawnSync("git", ["--version"], { encoding: "utf8" }).status === 0;
 
 async function writeFixtureFile(root, relativePath, contents) {
   const fullPath = path.join(root, relativePath);
@@ -86,6 +87,56 @@ test("cursor AI policy guard scans .env* files for provider strings", async () =
     await fs.rm(tmpRoot, { recursive: true, force: true });
   }
 });
+
+test(
+  "cursor AI policy guard ignores untracked .env* files when scanning a git repo (tracked-files mode)",
+  { skip: !HAS_GIT },
+  async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-git-untracked-env-pass-"));
+    try {
+      await writeFixtureFile(tmpRoot, "packages/example/src/index.js", "export const answer = 42;\n");
+      // Untracked .env files are common in developer checkouts; the policy guard should
+      // only scan tracked files when running inside a git repo.
+      await writeFixtureFile(tmpRoot, ".env.local", "OPENAI_API_KEY=test\n");
+
+      const init = spawnSync("git", ["init"], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(init.status, 0, init.stderr);
+      const add = spawnSync("git", ["add", "packages/example/src/index.js"], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(add.status, 0, add.stderr);
+
+      const proc = runPolicy(tmpRoot);
+      assert.equal(proc.status, 0, proc.stderr || proc.stdout);
+    } finally {
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "cursor AI policy guard still scans tracked .env* files in a git repo (tracked-files mode)",
+  { skip: !HAS_GIT },
+  async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-git-tracked-env-fail-"));
+    try {
+      await writeFixtureFile(tmpRoot, "packages/example/src/index.js", "export const answer = 42;\n");
+      await writeFixtureFile(tmpRoot, ".env.local", "OPENAI_API_KEY=test\n");
+
+      const init = spawnSync("git", ["init"], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(init.status, 0, init.stderr);
+      const add = spawnSync("git", ["add", "packages/example/src/index.js", ".env.local"], {
+        cwd: tmpRoot,
+        encoding: "utf8",
+      });
+      assert.equal(add.status, 0, add.stderr);
+
+      const proc = runPolicy(tmpRoot);
+      assert.notEqual(proc.status, 0);
+      assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+    } finally {
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    }
+  },
+);
 
 test("cursor AI policy guard scans Dockerfiles for provider strings", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-dockerfile-fail-"));
