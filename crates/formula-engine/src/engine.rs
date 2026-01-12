@@ -2990,7 +2990,7 @@ impl Engine {
                 .unwrap_or_else(|| expr.clone()),
             crate::Expr::FieldAccess(access) => crate::Expr::FieldAccess(crate::FieldAccessExpr {
                 base: Box::new(self.inline_static_defined_names_for_bytecode_inner(
-                    access.base.as_ref(),
+                    &access.base,
                     current_sheet,
                     visiting,
                 )),
@@ -5551,9 +5551,9 @@ fn rewrite_defined_name_constants_for_bytecode(
         match expr {
             crate::Expr::NameRef(nref) => inline_name_ref(nref, current_sheet, workbook),
             crate::Expr::FieldAccess(access) => {
-                rewrite_inner(access.base.as_ref(), current_sheet, workbook).map(|inner| {
+                rewrite_inner(access.base.as_ref(), current_sheet, workbook).map(|base| {
                     crate::Expr::FieldAccess(crate::FieldAccessExpr {
-                        base: Box::new(inner),
+                        base: Box::new(base),
                         field: access.field.clone(),
                     })
                 })

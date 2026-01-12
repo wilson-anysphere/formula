@@ -1242,6 +1242,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "$1:$1");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -1262,6 +1263,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "$A:$A");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -1310,6 +1312,7 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "$1:$1,$A:$A");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
     }
 
     #[test]
@@ -1334,6 +1337,66 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Sheet1!$1:$1");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_whole_column_area3d_as_col_range() {
+        let sheet_names = vec!["Sheet1".to_string()];
+        let externsheet = vec![ExternSheetRef {
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        let mut rgce = Vec::new();
+        rgce.push(0x3B); // PtgArea3d
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // ixti
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        rgce.extend_from_slice(&BIFF8_MAX_ROW.to_le_bytes()); // rwLast
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // colLast
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "Sheet1!$A:$A");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_print_titles_union_area3d_as_row_and_col_ranges() {
+        let sheet_names = vec!["Sheet1".to_string()];
+        let externsheet = vec![ExternSheetRef {
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // `Sheet1!$1:$1,Sheet1!$A:$A` in RPN form: [area3d row][area3d col][union].
+        let mut rgce = Vec::new();
+        // $1:$1
+        rgce.push(0x3B); // PtgArea3d
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // ixti
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rwLast
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        rgce.extend_from_slice(&BIFF8_MAX_COL.to_le_bytes()); // colLast
+        // $A:$A
+        rgce.push(0x3B); // PtgArea3d
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // ixti
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        rgce.extend_from_slice(&BIFF8_MAX_ROW.to_le_bytes()); // rwLast
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // colLast
+        // Union
+        rgce.push(0x10); // PtgUnion
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "Sheet1!$1:$1,Sheet1!$A:$A");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
     }
 
     #[test]
