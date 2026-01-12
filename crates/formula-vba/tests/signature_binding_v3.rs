@@ -117,6 +117,77 @@ fn build_minimal_vba_project_bin_v3(
     ole.into_inner().into_inner()
 }
 
+fn build_single_userform_vba_project_bin_v3(
+    signature_blob: Option<&[u8]>,
+    designer_payload: &[u8],
+) -> Vec<u8> {
+    let userform_source = b"Sub FormHello()\r\nEnd Sub\r\n";
+    let userform_container = compress_container(userform_source);
+
+    // `PROJECT` must reference the designer module via `BaseClass=` so `FormsNormalizedData` is
+    // non-empty.
+    let project_stream = b"Name=\"VBAProject\"\r\nBaseClass=\"UserForm1\"\r\n";
+
+    // Minimal decompressed `VBA/dir` stream describing a single UserForm module.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // MODULENAME (UserForm/designer module)
+        push_record(&mut out, 0x0019, b"UserForm1");
+        // MODULESTREAMNAME + reserved u16
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"UserForm1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        // MODULETYPE = UserForm (0x0003 per MS-OVBA).
+        push_record(&mut out, 0x0021, &0x0003u16.to_le_bytes());
+        // MODULETEXTOFFSET
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    ole.create_storage("UserForm1").expect("designer storage");
+
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(project_stream).expect("write PROJECT");
+    }
+
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole
+            .create_stream("VBA/UserForm1")
+            .expect("userform module stream");
+        s.write_all(&userform_container)
+            .expect("write userform module");
+    }
+
+    // Designer payload so FormsNormalizedData is non-empty.
+    {
+        let mut s = ole
+            .create_stream("UserForm1/Payload")
+            .expect("designer stream");
+        s.write_all(designer_payload)
+            .expect("write designer payload");
+    }
+
+    if let Some(sig) = signature_blob {
+        let mut s = ole
+            .create_stream("\u{0005}DigitalSignatureExt")
+            .expect("signature stream");
+        s.write_all(sig).expect("write signature");
+    }
+
+    ole.into_inner().into_inner()
+}
+
 fn build_signature_part_ole(signature_stream_payload: &[u8]) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -253,6 +324,41 @@ fn digital_signature_ext_uses_v3_project_digest_for_binding() {
         bound.binding,
         VbaProjectBindingVerification::BoundVerified(_)
     ));
+}
+
+#[test]
+fn digital_signature_ext_binds_md5_digest_bytes_even_when_oid_is_sha256() {
+    // ---- 1) Build a minimal V3 project with non-empty FormsNormalizedData ----
+    let unsigned = build_single_userform_vba_project_bin_v3(None, b"ABC");
+
+    // ---- 2) Compute the V3 binding digest bytes (MD5, 16 bytes) ----
+    let digest_md5 = compute_vba_project_digest_v3(&unsigned, DigestAlg::Md5).expect("digest v3");
+    assert_eq!(digest_md5.len(), 16, "MD5 digest must be 16 bytes");
+
+    // ---- 3) Construct SpcIndirectDataContent with SHA-256 OID but MD5 digest bytes ----
+    //
+    // This mirrors Office behavior described in MS-OSHARED §4.3: the digest bytes for VBA signature
+    // binding are MD5 even when the DigestInfo algorithm OID indicates SHA-256.
+    let signed_content = build_spc_indirect_data_content_sha256(&digest_md5);
+
+    // ---- 4) Sign and store in \x05DigitalSignatureExt ----
+    let pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&signed_content);
+    let mut signature_stream = signed_content.clone();
+    signature_stream.extend_from_slice(&pkcs7);
+
+    let signed = build_single_userform_vba_project_bin_v3(Some(&signature_stream), b"ABC");
+
+    // ---- 5) Verify ----
+    let sig = verify_vba_digital_signature(&signed)
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(
+        sig.binding,
+        VbaSignatureBinding::Bound,
+        "expected DigitalSignatureExt binding to be Bound even when DigestInfo.digestAlgorithm is SHA-256 but digest bytes are MD5"
+    );
 }
 
 #[test]

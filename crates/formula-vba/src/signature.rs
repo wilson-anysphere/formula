@@ -830,7 +830,9 @@ pub fn verify_vba_signature_binding_with_stream_path(
         // signature. As a best-effort fallback, attempt v3 binding even for 16-byte digests when we
         // couldn't match the legacy Content/Agile hash.
         if matches!(stream_kind, Some(VbaSignatureStreamKind::Unknown) | None) {
-            if let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) {
+            let alg = digest_alg_from_digest_len(signed_digest.len())
+                .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid));
+            if let Some(alg) = alg {
                 if let Ok(computed) = compute_vba_project_digest_v3(vba_project_bin, alg) {
                     if signed_digest == computed.as_slice() {
                         return VbaSignatureBinding::Bound;
@@ -905,6 +907,14 @@ fn digest_alg_from_oid_str(oid: &str) -> Option<crate::DigestAlg> {
 }
 
 fn digest_alg_from_digest_len(len: usize) -> Option<crate::DigestAlg> {
+    // VBA signature binding digests in the wild typically use one of:
+    // - MD5    (16 bytes)
+    // - SHA-1  (20 bytes)
+    // - SHA-256 (32 bytes)
+    //
+    // For VBA signature binding, the `DigestInfo.digestAlgorithm.algorithm` OID is sometimes
+    // inconsistent with the digest bytes (MS-OSHARED §4.3); length-based inference is therefore a
+    // more reliable first-pass.
     match len {
         16 => Some(crate::DigestAlg::Md5),
         20 => Some(crate::DigestAlg::Sha1),
@@ -1560,7 +1570,9 @@ pub fn verify_vba_project_signature_binding(
         // This handles cases where callers pass raw `\x05DigitalSignatureExt` stream bytes (or a
         // detached `content || pkcs7` blob) without an accompanying stream path/CFB container.
         if matches!(payload.stream_kind, Some(VbaSignatureStreamKind::Unknown) | None) {
-            if let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) {
+            let alg = digest_alg_from_digest_len(signed_digest.len())
+                .or_else(|| digest_alg_from_oid_str(&signed.digest_algorithm_oid));
+            if let Some(alg) = alg {
                 let computed = match v3_digest.as_ref() {
                     Some((cached_alg, bytes)) if *cached_alg == alg => bytes.clone(),
                     _ => match compute_vba_project_digest_v3(project_ole, alg) {
