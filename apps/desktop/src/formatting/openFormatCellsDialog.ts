@@ -2,6 +2,7 @@ import { applyFormatCells } from "./formatCellsDialog.js";
 import { getEffectiveCellStyle } from "./getEffectiveCellStyle.js";
 import { getStyleFillFgColor, getStyleFontSizePt, getStyleNumberFormat, getStyleWrapText } from "./styleFieldAccess.js";
 import { showToast } from "../extensions/ui.js";
+import { markKeybindingBarrier } from "../keybindingBarrier.js";
 import { DEFAULT_GRID_LIMITS } from "../selection/selection.js";
 import type { GridLimits, Range } from "../selection/types";
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize, normalizeSelectionRange } from "./selectionSizeGuard.js";
@@ -81,7 +82,7 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
   const dialog = document.createElement("dialog");
   dialog.className = "format-cells-dialog";
   dialog.dataset.testid = "format-cells-dialog";
-  dialog.dataset.keybindingBarrier = "true";
+  markKeybindingBarrier(dialog);
 
   const header = document.createElement("div");
   header.className = "format-cells-dialog__header";

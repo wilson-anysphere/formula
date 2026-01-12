@@ -1,4 +1,5 @@
 import { formatA1Range, parseGoTo } from "../../../../../packages/search/index.js";
+import { markKeybindingBarrier } from "../../keybindingBarrier.js";
 
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
@@ -16,7 +17,7 @@ function el(tag, attrs = {}, children = []) {
 export function createGoToDialog({ workbook, getCurrentSheetName, setActiveCell, selectRange }) {
   const dialog = el("dialog", { className: "goto-dialog" });
   dialog.dataset.testid = "goto-dialog";
-  dialog.dataset.keybindingBarrier = "true";
+  markKeybindingBarrier(dialog);
   const input = el("input", { type: "text", placeholder: "Reference (e.g. Sheet1!A1 or MyName)" });
   const error = el("div", { className: "error" });
 

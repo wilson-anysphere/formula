@@ -1,5 +1,6 @@
 import { cellRefFromKey, numberToCol } from "../../../../../packages/collab/conflicts/src/cell-ref.js";
 import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.ts";
+import { markKeybindingBarrier } from "../../keybindingBarrier.js";
 
 /**
  * A minimal DOM-based UI for resolving *structural* (move/delete-vs-edit) cell
@@ -27,6 +28,7 @@ export class StructuralConflictUiController {
 
     this._toastEl = document.createElement("div");
     this._dialogEl = document.createElement("div");
+    markKeybindingBarrier(this._dialogEl);
 
     this._toastEl.dataset.testid = "structural-conflict-toast-root";
     this._dialogEl.dataset.testid = "structural-conflict-dialog-root";

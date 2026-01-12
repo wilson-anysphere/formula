@@ -2,6 +2,7 @@ import type { CommandContribution, CommandRegistry } from "../extensions/command
 import type { ContextKeyService } from "../extensions/contextKeys.js";
 
 import { t, tWithVars } from "../i18n/index.js";
+import { markKeybindingBarrier } from "../keybindingBarrier.js";
 
 import { debounce } from "./debounce.js";
 import {
@@ -310,6 +311,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   overlay.setAttribute("role", "dialog");
   overlay.setAttribute("aria-modal", "true");
   overlay.setAttribute("aria-label", t("commandPalette.aria.label"));
+  markKeybindingBarrier(overlay);
 
   const palette = document.createElement("div");
   palette.className = "command-palette";

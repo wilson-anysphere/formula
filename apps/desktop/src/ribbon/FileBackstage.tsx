@@ -230,6 +230,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
   return (
     <div
       className="ribbon-backstage-overlay"
+      data-keybinding-barrier="true"
       role="dialog"
       aria-modal="true"
       aria-label="File menu"

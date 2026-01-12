@@ -1,4 +1,5 @@
 import type { ToolPlanPreview } from "../../../../../packages/ai-tools/src/preview/preview-engine.js";
+import { markKeybindingBarrier } from "../../keybindingBarrier.js";
 
 export interface InlineEditOverlayCallbacks {
   onCancel: () => void;
@@ -35,6 +36,7 @@ export class InlineEditOverlay {
     root.dataset.keybindingBarrier = "true";
     root.setAttribute("role", "dialog");
     root.setAttribute("aria-label", "AI inline edit");
+    markKeybindingBarrier(root);
 
     // Stop key events from reaching the grid while the overlay is open.
     root.addEventListener(

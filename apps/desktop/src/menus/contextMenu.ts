@@ -1,3 +1,5 @@
+import { markKeybindingBarrier } from "../keybindingBarrier.js";
+
 export type ContextMenuSeparator = { type: "separator" };
 
 export type ContextMenuLeading = {
@@ -83,6 +85,7 @@ export class ContextMenu {
     overlay.dataset.keybindingBarrier = "true";
     overlay.className = "context-menu-overlay";
     overlay.hidden = true;
+    markKeybindingBarrier(overlay);
 
     const menu = document.createElement("div");
     menu.className = "context-menu";

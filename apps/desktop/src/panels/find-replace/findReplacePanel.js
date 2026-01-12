@@ -1,5 +1,6 @@
 import { formatA1Address } from "../../../../../packages/search/index.js";
 import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.ts";
+import { markKeybindingBarrier } from "../../keybindingBarrier.js";
 
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
@@ -17,7 +18,7 @@ function el(tag, attrs = {}, children = []) {
 export function createFindReplaceDialog(controller, { mode = "find" } = {}) {
   const dialog = el("dialog", { className: "find-replace-dialog" });
   dialog.dataset.testid = mode === "replace" ? "replace-dialog" : "find-dialog";
-  dialog.dataset.keybindingBarrier = "true";
+  markKeybindingBarrier(dialog);
 
   const findInput = el("input", { type: "text", placeholder: "Find what…" });
   const replaceInput = el("input", { type: "text", placeholder: "Replace with…" });

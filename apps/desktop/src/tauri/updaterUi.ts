@@ -1,5 +1,6 @@
 import { showToast } from "../extensions/ui.js";
 import { t, tWithVars } from "../i18n/index.js";
+import { markKeybindingBarrier } from "../keybindingBarrier.js";
 
 import { requestAppRestart } from "./appQuit";
 import { notify } from "./notifications";
@@ -416,7 +417,7 @@ function ensureUpdateDialog(): DialogElements {
   const dialog = document.createElement("dialog");
   dialog.className = "dialog updater-dialog";
   dialog.dataset.testid = "updater-dialog";
-  dialog.dataset.keybindingBarrier = "true";
+  markKeybindingBarrier(dialog);
 
   const title = document.createElement("div");
   title.className = "dialog__title";

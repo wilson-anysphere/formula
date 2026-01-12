@@ -1,4 +1,5 @@
 import * as nativeDialogs from "../tauri/nativeDialogs.js";
+import { markKeybindingBarrier } from "../keybindingBarrier.js";
 
 type NetworkRequestInfo = {
   host?: string;
@@ -72,7 +73,7 @@ async function promptOnce(req: ExtensionPermissionPromptRequest): Promise<boolea
   const dialog = document.createElement("dialog");
   dialog.className = "dialog";
   dialog.dataset.testid = "extension-permission-prompt";
-  dialog.dataset.keybindingBarrier = "true";
+  markKeybindingBarrier(dialog);
 
   const title = document.createElement("div");
   title.className = "dialog__title";

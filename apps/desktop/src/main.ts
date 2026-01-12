@@ -106,6 +106,7 @@ import { CELL_CONTEXT_MENU_ID, COLUMN_CONTEXT_MENU_ID, CORNER_CONTEXT_MENU_ID, R
 import { buildContextMenuModel } from "./extensions/contextMenuModel.js";
 import { getPrimaryCommandKeybindingDisplay, type ContributedKeybinding } from "./extensions/keybindings.js";
 import { KeybindingService } from "./extensions/keybindingService.js";
+import { isEventWithinKeybindingBarrier, markKeybindingBarrier } from "./keybindingBarrier.js";
 import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js";
 import { installKeyboardContextKeys, KeyboardContextKeyIds } from "./keyboard/installKeyboardContextKeys.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
@@ -3637,6 +3638,13 @@ window.addEventListener(
     if (!primary) return;
     if (e.shiftKey || e.altKey) return;
     if (e.key !== "PageUp" && e.key !== "PageDown") return;
+
+    // When a modal/overlay is open, do not allow global sheet-navigation shortcuts to
+    // affect the workbook. Still prevent the browser default (tab switching).
+    if (isEventWithinKeybindingBarrier(e)) {
+      e.preventDefault();
+      return;
+    }
 
     // Ctrl/Cmd+PgUp/PgDn should generally not switch sheets while editing (cell editor,
     // inline AI edit, etc). Exception: when the formula bar is actively editing a *formula*
@@ -7800,7 +7808,7 @@ function pageSetupToTauri(raw: PageSetup): TauriPageSetup {
 function showPageSetupDialogModal(args: { initialValue: PageSetup; onChange: (next: PageSetup) => void }): void {
   const dialog = document.createElement("dialog");
   dialog.className = "page-setup-dialog";
-  dialog.dataset.keybindingBarrier = "true";
+  markKeybindingBarrier(dialog);
 
   const container = document.createElement("div");
   dialog.appendChild(container);
