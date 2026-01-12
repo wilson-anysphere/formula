@@ -38,6 +38,34 @@ test("toggleBold reads full-column formatting from the column layer (no per-cell
   assert.equal(sheet.cells.size, 0, "Toggling full-column formatting should not materialize per-cell overrides");
 });
 
+test("toggleBold does not scan sheet.cells when sheet has many content-only cells (styleId=0)", () => {
+  const doc = new DocumentController();
+
+  // Create a bunch of stored cells with content but no explicit cell-level formatting.
+  const values = Array.from({ length: 5000 }, () => ["x"]);
+  doc.setRangeValues("Sheet1", "A1", values);
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.cells.size, 5000);
+  assert.equal(sheet.styledCells.size, 0);
+
+  // If `toggleBold` iterates `sheet.cells.entries()` (O(#stored cells)) this will throw.
+  const originalEntries = sheet.cells.entries;
+  sheet.cells.entries = () => {
+    throw new Error("sheet.cells.entries() was called");
+  };
+
+  toggleBold(doc, "Sheet1", "A1:A1048576");
+
+  // Restore for test hygiene.
+  sheet.cells.entries = originalEntries;
+
+  assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").font?.bold), true);
+  // Content cells remain; we should not have materialized extra per-cell style entries.
+  assert.equal(sheet.cells.size, 5000);
+});
+
 test("toggleWrap reads full-column formatting from the column layer (no per-cell scan)", () => {
   const doc = new DocumentController();
 

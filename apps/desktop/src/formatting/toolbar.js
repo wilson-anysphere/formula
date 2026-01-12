@@ -278,8 +278,9 @@ function allCellsMatchRange(doc, sheetId, range, predicate) {
       storedBounds.startCol <= range.end.col);
 
   const styledKeys = sheet.styledCells;
+  const hasStyledCellsIndex = Boolean(styledKeys && typeof styledKeys[Symbol.iterator] === "function");
 
-  if (selectionIntersectsStoredBounds && styledKeys && styledKeys.size > 0) {
+  if (selectionIntersectsStoredBounds && hasStyledCellsIndex) {
     for (const key of styledKeys) {
       const cell = sheet.cells.get(key);
       if (!cell || cell.styleId === 0) continue;
