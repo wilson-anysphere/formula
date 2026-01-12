@@ -1858,6 +1858,38 @@ mod tests {
     }
 
     #[test]
+    fn decodes_ptg_range_colon_operator() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // A1:B2 encoded via two PtgRef tokens + PtgRange (0x11).
+        let row_a1 = 0u16;
+        let col_a1 = encode_col_field(0, true, true);
+        let row_b2 = 1u16;
+        let col_b2 = encode_col_field(1, true, true);
+        let rgce = [
+            0x24, // PtgRef
+            row_a1.to_le_bytes()[0],
+            row_a1.to_le_bytes()[1],
+            col_a1.to_le_bytes()[0],
+            col_a1.to_le_bytes()[1],
+            0x24, // PtgRef
+            row_b2.to_le_bytes()[0],
+            row_b2.to_le_bytes()[1],
+            col_b2.to_le_bytes()[0],
+            col_b2.to_le_bytes()[1],
+            0x11, // PtgRange (:)
+        ];
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "A1:B2");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn renders_unsupported_tokens_as_parseable_excel_errors() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = Vec::new();
