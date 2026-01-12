@@ -6,6 +6,12 @@ import "./titlebar.css";
 
 export type TitlebarAction = {
   /**
+   * Optional stable identifier used as the React `key` when rendering the action list.
+   *
+   * Useful when actions have the same label/aria-label but represent distinct commands.
+   */
+  id?: string;
+  /**
    * Visible label for the action button (e.g. "Share").
    */
   label: string;
@@ -180,7 +186,7 @@ export function Titlebar({
               action.variant === "primary" ? "formula-titlebar__action-button--primary" : "";
             return (
               <button
-                key={`${action.ariaLabel}:${action.label}`}
+                key={action.id ?? `${action.ariaLabel}:${action.label}`}
                 type="button"
                 className={["formula-titlebar__action-button", variantClass].filter(Boolean).join(" ")}
                 aria-label={action.ariaLabel}
