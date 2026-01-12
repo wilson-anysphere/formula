@@ -21,10 +21,13 @@ const REL_TYPE_RD_RICH_VALUE: &str =
 const REL_TYPE_RD_RICH_VALUE_STRUCTURE: &str =
     "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure";
 const REL_TYPE_RICH_VALUE: &str = "http://schemas.microsoft.com/office/2017/06/relationships/richValue";
+const REL_TYPE_RICH_VALUE_2017: &str = "http://schemas.microsoft.com/office/2017/relationships/richValue";
 const REL_TYPE_RICH_VALUE_REL: &str =
     "http://schemas.microsoft.com/office/2022/10/relationships/richValueRel";
-const REL_TYPE_RICH_VALUE_REL_2017: &str =
+const REL_TYPE_RICH_VALUE_REL_2017_06: &str =
     "http://schemas.microsoft.com/office/2017/06/relationships/richValueRel";
+const REL_TYPE_RICH_VALUE_REL_2017: &str =
+    "http://schemas.microsoft.com/office/2017/relationships/richValueRel";
 const REL_TYPE_IMAGE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 
@@ -86,7 +89,8 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
             let target = path::resolve_target("xl/workbook.xml", &rel.target);
             metadata_part = Some(target);
         } else if rich_value_part.is_none()
-            && rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE)
+            && (rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE)
+                || rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE_2017))
         {
             let target = path::resolve_target("xl/workbook.xml", &rel.target);
             rich_value_part = Some(target);
@@ -103,6 +107,7 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
             rdrichvaluestructure_part = Some(target);
         } else if rich_value_rel_part.is_none()
             && (rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE_REL)
+                || rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE_REL_2017_06)
                 || rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE_REL_2017))
         {
             let target = path::resolve_target("xl/workbook.xml", &rel.target);
@@ -127,6 +132,58 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
     }
     if rich_value_rel_part.is_none() && pkg.part("xl/richData/richValueRel.xml").is_some() {
         rich_value_rel_part = Some("xl/richData/richValueRel.xml".to_string());
+    }
+
+    // Some workbooks relate the richData parts from `xl/metadata.xml` via `xl/_rels/metadata.xml.rels`
+    // (rather than directly from `xl/workbook.xml`). If we still haven't found the rich-value parts,
+    // attempt to discover them via metadata relationships.
+    if rich_value_part.is_none()
+        || rdrichvalue_part.is_none()
+        || rdrichvaluestructure_part.is_none()
+        || rich_value_rel_part.is_none()
+    {
+        if let Some(metadata_part_name) = metadata_part.as_deref() {
+            let metadata_rels_part = path::rels_for_part(metadata_part_name);
+            if let Some(rels_bytes) = pkg.part(&metadata_rels_part) {
+                let relationships = openxml::parse_relationships(rels_bytes)?;
+                for rel in relationships {
+                    let target = path::resolve_target(metadata_part_name, &rel.target);
+
+                    if rich_value_part.is_none()
+                        && (rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE)
+                            || rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE_2017))
+                    {
+                        rich_value_part = Some(target);
+                        continue;
+                    }
+
+                    if rich_value_rel_part.is_none()
+                        && (rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE_REL)
+                            || rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE_REL_2017_06)
+                            || rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE_REL_2017))
+                    {
+                        rich_value_rel_part = Some(target);
+                        continue;
+                    }
+
+                    if rdrichvalue_part.is_none()
+                        && rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE)
+                    {
+                        rdrichvalue_part = Some(target);
+                        continue;
+                    }
+
+                    if rdrichvaluestructure_part.is_none()
+                        && rel
+                            .type_uri
+                            .eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE_STRUCTURE)
+                    {
+                        rdrichvaluestructure_part = Some(target);
+                        continue;
+                    }
+                }
+            }
+        }
     }
 
     let vm_to_rich_value_index = match metadata_part

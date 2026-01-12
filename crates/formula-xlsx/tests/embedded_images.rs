@@ -96,11 +96,32 @@ const RDRICHVALUE_XML_REORDERED: &str = r#"<?xml version="1.0" encoding="UTF-8" 
 </rvData>
 "#;
 
+const RICH_VALUE_XML_MINIMAL: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <rv type="0">
+      <v kind="rel">0</v>
+    </rv>
+  </values>
+</rvData>
+"#;
+
 const RICH_VALUE_REL_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <richValueRel xmlns="http://schemas.microsoft.com/office/2022/10/spreadsheetml/richvaluerelationships"
               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <rel r:id="rId1"/>
 </richValueRel>
+"#;
+
+const METADATA_RELS_XML_CUSTOM_RICHVALUE_PARTS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+                Type="http://schemas.microsoft.com/office/2017/relationships/richValue"
+                Target="richData/customRichValue.xml"/>
+  <Relationship Id="rId2"
+                Type="http://schemas.microsoft.com/office/2017/relationships/richValueRel"
+                Target="richData/customRichValueRel.xml"/>
+</Relationships>
 "#;
 
 const RICH_VALUE_REL_RELS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -214,6 +235,64 @@ fn extracts_embedded_image_when_metadata_uses_direct_rich_value_index() {
 fn extracts_embedded_image_when_cell_vm_is_zero() {
     // Some workbooks have been observed to use 0-based `vm` indices.
     assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(METADATA_XML, 0);
+}
+
+#[test]
+fn extracts_when_richdata_parts_are_related_from_metadata_rels() {
+    let png_bytes = STANDARD
+        .decode(PNG_1X1_TRANSPARENT_B64)
+        .expect("decode png base64");
+
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet.write_number(1, 1, 1.0).unwrap(); // B2
+    let xlsx_bytes = workbook.save_to_buffer().unwrap();
+
+    let mut pkg = XlsxPackage::from_bytes(&xlsx_bytes).unwrap();
+
+    // Patch the worksheet cell to include the `vm` attribute expected by Excel's rich value schema.
+    let sheet_part = "xl/worksheets/sheet1.xml";
+    let mut sheet_xml = String::from_utf8(pkg.part(sheet_part).unwrap().to_vec()).unwrap();
+    sheet_xml = sheet_xml.replacen(r#"r="B2""#, r#"r="B2" vm="1""#, 1);
+    pkg.set_part(sheet_part, sheet_xml.into_bytes());
+
+    // Use canonical `xl/metadata.xml` but store richData parts under non-canonical names.
+    //
+    // The extractor should discover these via `xl/_rels/metadata.xml.rels` (not via
+    // workbook.xml.rels or canonical-path fallback).
+    pkg.set_part("xl/metadata.xml", METADATA_XML.as_bytes().to_vec());
+    pkg.set_part(
+        "xl/_rels/metadata.xml.rels",
+        METADATA_RELS_XML_CUSTOM_RICHVALUE_PARTS.as_bytes().to_vec(),
+    );
+    pkg.set_part(
+        "xl/richData/customRichValue.xml",
+        RICH_VALUE_XML_MINIMAL.as_bytes().to_vec(),
+    );
+    pkg.set_part(
+        "xl/richData/customRichValueRel.xml",
+        RICH_VALUE_REL_XML.as_bytes().to_vec(),
+    );
+    pkg.set_part(
+        "xl/richData/_rels/customRichValueRel.xml.rels",
+        RICH_VALUE_REL_RELS_XML.as_bytes().to_vec(),
+    );
+    pkg.set_part("xl/media/image1.png", png_bytes.clone());
+
+    // Round-trip through ZIP writer to ensure the extractor works on a real package.
+    let bytes = pkg.write_to_bytes().unwrap();
+    let pkg = XlsxPackage::from_bytes(&bytes).unwrap();
+
+    let images = extract_embedded_images(&pkg).unwrap();
+    assert_eq!(images.len(), 1);
+
+    let image = &images[0];
+    assert_eq!(image.sheet_part, "xl/worksheets/sheet1.xml");
+    assert_eq!(image.cell, CellRef::from_a1("B2").unwrap());
+    assert_eq!(image.image_target, "xl/media/image1.png");
+    assert_eq!(image.bytes, png_bytes);
+    assert_eq!(image.alt_text, None);
+    assert!(!image.decorative);
 }
 
 #[test]
