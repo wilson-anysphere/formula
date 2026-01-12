@@ -1,5 +1,6 @@
 import type { DocumentController } from "../document/documentController.js";
 import type { Range } from "../selection/types";
+import { getStyleFontSizePt, getStyleNumberFormat, getStyleWrapText } from "../formatting/styleFieldAccess.js";
 
 export type SelectionHorizontalAlign = "left" | "center" | "right" | "mixed";
 
@@ -252,7 +253,7 @@ export function computeSelectionFormatState(
     state.strikethrough = state.strikethrough && strike;
 
     const alignment = style?.alignment ?? null;
-    const wrapText = typeof alignment?.wrapText === "boolean" ? alignment.wrapText : false;
+    const wrapText = getStyleWrapText(style);
     state.wrapText = state.wrapText && wrapText;
 
     const fontName =
@@ -269,15 +270,7 @@ export function computeSelectionFormatState(
                 : undefined;
     mergeFontName(fontName);
 
-    const fontSize =
-      typeof font?.size === "number"
-        ? font.size
-        : typeof style?.fontSize === "number"
-          ? style.fontSize
-          : typeof style?.font_size === "number"
-            ? style.font_size
-            : undefined;
-    mergeFontSize(fontSize);
+    mergeFontSize(getStyleFontSizePt(style));
 
     const horizontal =
       alignment?.horizontal ??
@@ -286,7 +279,7 @@ export function computeSelectionFormatState(
       style?.horizontalAlignment ??
       style?.horizontal_alignment;
     mergeAlign(horizontal);
-    mergeNumberFormat(style?.numberFormat ?? style?.number_format);
+    mergeNumberFormat(getStyleNumberFormat(style));
   };
 
   outer: for (const range of ranges) {

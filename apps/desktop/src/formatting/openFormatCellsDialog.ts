@@ -1,5 +1,6 @@
 import { applyFormatCells } from "./formatCellsDialog.js";
 import { getEffectiveCellStyle } from "./getEffectiveCellStyle.js";
+import { getStyleFillFgColor, getStyleFontSizePt, getStyleNumberFormat, getStyleWrapText } from "./styleFieldAccess.js";
 import { showToast } from "../extensions/ui.js";
 import { DEFAULT_GRID_LIMITS } from "../selection/selection.js";
 import type { GridLimits, Range } from "../selection/types";
@@ -342,7 +343,7 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
 
   // --- Initialize UI from active style --------------------------------------
 
-  const activeNumberFormat = typeof activeStyle?.numberFormat === "string" ? activeStyle.numberFormat : null;
+  const activeNumberFormat = getStyleNumberFormat(activeStyle);
   const initialPreset =
     activeNumberFormat == null
       ? ""
@@ -353,9 +354,10 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
   italicBtn.setAttribute("aria-pressed", Boolean(activeStyle?.font?.italic) ? "true" : "false");
   underlineBtn.setAttribute("aria-pressed", Boolean(activeStyle?.font?.underline) ? "true" : "false");
 
-  fontSizeInput.value = typeof activeStyle?.font?.size === "number" ? String(activeStyle.font.size) : "";
+  const activeFontSize = getStyleFontSizePt(activeStyle);
+  fontSizeInput.value = typeof activeFontSize === "number" ? String(activeFontSize) : "";
 
-  const activeFill = normalizeArgb(activeStyle?.fill?.fgColor ?? activeStyle?.fill?.background);
+  const activeFill = normalizeArgb(getStyleFillFgColor(activeStyle));
   if (!activeFill) {
     selectedFill = "none";
   } else {
@@ -378,7 +380,7 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
       : activeHorizontal
         ? "__custom__"
         : "";
-  wrapInput.checked = Boolean(activeStyle?.alignment?.wrapText);
+  wrapInput.checked = getStyleWrapText(activeStyle);
 
   function computeChanges(currentStyle: any): Record<string, any> | null {
     /** @type {Record<string, any>} */
@@ -388,7 +390,7 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
     const preset = numberSelect.value;
     if (preset !== "__custom__") {
       const desiredNumberFormat = preset ? NUMBER_FORMAT_CODE_BY_PRESET[preset] ?? null : null;
-      const currentNumberFormat = typeof currentStyle?.numberFormat === "string" ? currentStyle.numberFormat : null;
+      const currentNumberFormat = getStyleNumberFormat(currentStyle);
       if ((currentNumberFormat ?? null) !== (desiredNumberFormat ?? null)) {
         changes.numberFormat = desiredNumberFormat;
       }
@@ -405,7 +407,7 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
 
     const parsedSize = Number(fontSizeInput.value);
     const desiredSize = Number.isFinite(parsedSize) && parsedSize > 0 ? parsedSize : null;
-    const currentSize = typeof currentStyle?.font?.size === "number" ? currentStyle.font.size : null;
+    const currentSize = getStyleFontSizePt(currentStyle);
     if ((currentSize ?? null) !== (desiredSize ?? null)) fontPatch.size = desiredSize;
 
     if (Object.keys(fontPatch).length > 0) changes.font = fontPatch;
@@ -413,7 +415,7 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
     // Fill
     if (selectedFill !== "custom") {
       const desiredFillArgb = selectedFill === "none" ? null : resolveFillArgbFromSwatchId(selectedFill);
-      const currentFillArgb = normalizeArgb(currentStyle?.fill?.fgColor ?? currentStyle?.fill?.background);
+      const currentFillArgb = normalizeArgb(getStyleFillFgColor(currentStyle));
       if ((currentFillArgb ?? null) !== (normalizeArgb(desiredFillArgb) ?? null)) {
         changes.fill = desiredFillArgb ? { pattern: "solid", fgColor: desiredFillArgb } : null;
       }
@@ -431,7 +433,7 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
     }
 
     const desiredWrap = wrapInput.checked;
-    const currentWrap = Boolean(currentStyle?.alignment?.wrapText);
+    const currentWrap = getStyleWrapText(currentStyle);
     if (currentWrap !== desiredWrap) alignmentPatch.wrapText = desiredWrap;
     if (Object.keys(alignmentPatch).length > 0) changes.alignment = alignmentPatch;
 

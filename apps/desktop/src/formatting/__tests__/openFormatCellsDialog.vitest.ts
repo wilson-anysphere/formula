@@ -120,4 +120,34 @@ describe("openFormatCellsDialog formatting performance guards", () => {
     expect(rangeArg?.end?.row).toBe(0);
     expect(rangeArg?.end?.col).toBe(DEFAULT_GRID_LIMITS.maxCols - 1);
   });
+
+  it("initializes dialog controls from snake_case (formula-model) formatting keys", () => {
+    const doc = new DocumentController();
+    doc.setRangeFormat("Sheet1", "A1", {
+      alignment: { wrap_text: true },
+      font: { size_100pt: 1200 },
+      number_format: "0%",
+    });
+
+    openFormatCellsDialog({
+      isEditing: () => false,
+      getDocument: () => doc,
+      getSheetId: () => "Sheet1",
+      getActiveCell: () => ({ row: 0, col: 0 }),
+      getSelectionRanges: () => [],
+      focusGrid: () => {},
+    });
+
+    const dialog = document.querySelector<HTMLDialogElement>("dialog.format-cells-dialog");
+    expect(dialog).not.toBeNull();
+
+    const wrap = dialog!.querySelector<HTMLInputElement>('[data-testid="format-cells-wrap"]');
+    expect(wrap?.checked).toBe(true);
+
+    const number = dialog!.querySelector<HTMLSelectElement>('[data-testid="format-cells-number"]');
+    expect(number?.value).toBe("percent");
+
+    const fontSize = dialog!.querySelector<HTMLInputElement>('[data-testid="format-cells-font-size"]');
+    expect(fontSize?.value).toBe("12");
+  });
 });

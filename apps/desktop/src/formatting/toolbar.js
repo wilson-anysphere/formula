@@ -1,13 +1,14 @@
 import { normalizeRange, parseRangeA1 } from "../document/coords.js";
 import { showToast } from "../extensions/ui.js";
 import { applyStylePatch } from "./styleTable.js";
+import { getStyleWrapText } from "./styleFieldAccess.js";
 
 // Excel grid limits (used by the selection model and layered formatting fast paths).
 const EXCEL_MAX_ROW = 1_048_576 - 1;
 const EXCEL_MAX_COL = 16_384 - 1;
 // Keep aligned with `apps/desktop/src/formatting/selectionSizeGuard.ts` default UI limit.
-// This guard exists to prevent *per-cell* enumeration from exploding (e.g. multi-range
-// selections of many medium rectangles).
+// This guard exists to prevent formatting operations from enumerating or materializing
+// extremely large selections in JS.
 const MAX_RANGE_FORMATTING_CELLS = 100_000;
 const MAX_RANGE_FORMATTING_CELLS_LABEL = MAX_RANGE_FORMATTING_CELLS.toLocaleString();
 // Full-width row formatting still requires enumerating each row in the selection
@@ -743,7 +744,7 @@ export function toggleWrap(doc, sheetId, range, options = {}) {
   const next =
     typeof options.next === "boolean"
       ? options.next
-      : !allCellsMatch(doc, sheetId, range, (s) => Boolean(s.alignment?.wrapText));
+      : !allCellsMatch(doc, sheetId, range, (s) => getStyleWrapText(s));
   let applied = true;
   for (const r of normalizeRanges(range)) {
     const ok = doc.setRangeFormat(sheetId, r, { alignment: { wrapText: next } }, { label: "Wrap" });
