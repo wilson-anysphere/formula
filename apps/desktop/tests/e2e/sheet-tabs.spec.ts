@@ -104,6 +104,11 @@ test.describe("sheet tabs", () => {
     await page.keyboard.press("Enter");
     await expect(page.getByRole("tab", { name: "Sheet2" })).toHaveAttribute("aria-selected", "true");
     await expect(page.getByTestId("active-value")).toHaveText("Hello from Sheet2");
+
+    // Sheet activation should return focus to the grid so keyboard navigation can continue.
+    await expect
+      .poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.id))
+      .toBe("grid");
   });
 
   test("Shift+F10 opens the context menu for the focused sheet tab", async ({ page }) => {
