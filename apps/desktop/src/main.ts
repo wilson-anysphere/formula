@@ -43,6 +43,7 @@ import {
 } from "./power-query/service.js";
 import { createPowerQueryRefreshStateStore } from "./power-query/refreshStateStore.js";
 import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
+import { mountRibbon } from "./ribbon/mountRibbon.js";
 import { DesktopExtensionHostManager } from "./extensions/extensionHostManager.js";
 import { ExtensionPanelBridge } from "./extensions/extensionPanelBridge.js";
 import { ContextKeyService } from "./extensions/contextKeys.js";
@@ -98,6 +99,16 @@ const gridRoot = document.getElementById("grid");
 if (!gridRoot) {
   throw new Error("Missing #grid container");
 }
+
+const ribbonRoot = document.getElementById("ribbon");
+if (!ribbonRoot) {
+  throw new Error("Missing #ribbon container");
+}
+mountRibbon(ribbonRoot, {
+  onCommand: (commandId) => {
+    showToast(`Ribbon: ${commandId}`);
+  },
+});
 
 const formulaBarRoot = document.getElementById("formula-bar");
 if (!formulaBarRoot) {

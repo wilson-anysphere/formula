@@ -15,7 +15,8 @@
       #app {
         height: 100%;
         display: grid;
-        grid-template-rows: auto auto 1fr auto auto;
+        /* titlebar, ribbon, formula bar, workspace, sheet tabs, status bar */
+        grid-template-rows: auto auto auto 1fr auto auto;
       }
 
       .formula-bar {
@@ -349,6 +350,7 @@
           </button>
         </div>
       </div>
+      <div id="ribbon"></div>
       <div id="formula-bar"></div>
       <div id="workspace">
         <div id="dock-left" data-testid="dock-left"></div>

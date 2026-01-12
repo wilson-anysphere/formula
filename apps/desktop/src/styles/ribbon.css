@@ -43,6 +43,15 @@
     border-color var(--motion-duration-fast) var(--motion-ease);
 }
 
+.ribbon__tab:focus-visible {
+  outline: 2px solid var(--selection-border);
+  outline-offset: 2px;
+}
+
+.ribbon__tab.ribbon__tab--file:focus-visible {
+  outline-color: var(--text-on-accent);
+}
+
 .ribbon__tab:hover {
   color: var(--text-primary);
   background: var(--bg-tertiary);
