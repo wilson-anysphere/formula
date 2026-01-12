@@ -1045,7 +1045,7 @@ fn ensure_sheet_xml_has_controls(
 
     let controls_str = std::str::from_utf8(controls_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8("controls".to_string(), e))?;
-    let controls_str = remap_relationship_ids(controls_str, rid_map);
+    let mut controls_str = remap_relationship_ids(controls_str, rid_map);
 
     let xml_str = std::str::from_utf8(sheet_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
@@ -1067,6 +1067,12 @@ fn ensure_sheet_xml_has_controls(
         .any(|n| n.is_element() && n.tag_name().name() == "controls")
     {
         return Ok(sheet_xml.to_vec());
+    }
+
+    let controls_prefix = root_element_prefix(&controls_str)?;
+    if controls_prefix.as_deref() != root_prefix {
+        controls_str =
+            rewrite_fragment_prefix(&controls_str, controls_prefix.as_deref(), root_prefix)?;
     }
 
     let root_qname = crate::xml::prefixed_tag(root_prefix, root_name);
@@ -1117,7 +1123,7 @@ fn ensure_sheet_xml_has_drawing_hf(
 
     let drawing_hf_str = std::str::from_utf8(drawing_hf_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8("drawingHF".to_string(), e))?;
-    let drawing_hf_str = remap_relationship_ids(drawing_hf_str, rid_map);
+    let mut drawing_hf_str = remap_relationship_ids(drawing_hf_str, rid_map);
 
     let xml_str = std::str::from_utf8(sheet_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
@@ -1139,6 +1145,12 @@ fn ensure_sheet_xml_has_drawing_hf(
         .any(|n| n.is_element() && n.tag_name().name() == "drawingHF")
     {
         return Ok(sheet_xml.to_vec());
+    }
+
+    let drawing_hf_prefix = root_element_prefix(&drawing_hf_str)?;
+    if drawing_hf_prefix.as_deref() != root_prefix {
+        drawing_hf_str =
+            rewrite_fragment_prefix(&drawing_hf_str, drawing_hf_prefix.as_deref(), root_prefix)?;
     }
 
     let root_qname = crate::xml::prefixed_tag(root_prefix, root_name);
@@ -1478,6 +1490,78 @@ mod tests {
     }
 
     #[test]
+    fn inserts_controls_with_prefix_when_worksheet_is_prefix_only() {
+        let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:sheetData/>
+</x:worksheet>"#;
+        let controls = br#"<controls><control r:id="rId1"/></controls>"#;
+
+        let updated = ensure_sheet_xml_has_controls(
+            sheet_xml,
+            "xl/worksheets/sheet1.xml",
+            controls,
+            &HashMap::new(),
+        )
+        .expect("insert controls");
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        roxmltree::Document::parse(updated_str).expect("output XML should be well-formed");
+        assert!(
+            updated_str.contains("<x:controls>") && updated_str.contains("</x:controls>"),
+            "expected inserted <x:controls> block, got:\n{updated_str}"
+        );
+        assert!(
+            updated_str.contains("<x:control r:id=\"rId1\"/>"),
+            "expected inserted <x:control>, got:\n{updated_str}"
+        );
+        assert!(
+            !updated_str.contains("<controls"),
+            "should not introduce unprefixed <controls> in prefix-only worksheets, got:\n{updated_str}"
+        );
+        assert!(
+            updated_str.contains("xmlns:r="),
+            "expected xmlns:r to be added to root when inserting r:* attributes, got:\n{updated_str}"
+        );
+    }
+
+    #[test]
+    fn inserts_controls_without_prefix_when_worksheet_uses_default_namespace() {
+        let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+</worksheet>"#;
+        let controls = br#"<x:controls><x:control r:id="rId1"/></x:controls>"#;
+
+        let updated = ensure_sheet_xml_has_controls(
+            sheet_xml,
+            "xl/worksheets/sheet1.xml",
+            controls,
+            &HashMap::new(),
+        )
+        .expect("insert controls");
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        roxmltree::Document::parse(updated_str).expect("output XML should be well-formed");
+        assert!(
+            updated_str.contains("<controls>") && updated_str.contains("</controls>"),
+            "expected inserted <controls> block, got:\n{updated_str}"
+        );
+        assert!(
+            updated_str.contains("<control r:id=\"rId1\"/>"),
+            "expected inserted <control>, got:\n{updated_str}"
+        );
+        assert!(
+            !updated_str.contains("<x:controls"),
+            "should not introduce prefixed <x:controls> tags in default-namespace worksheets, got:\n{updated_str}"
+        );
+        assert!(
+            updated_str.contains("xmlns:r="),
+            "expected xmlns:r to be added to root when inserting r:* attributes, got:\n{updated_str}"
+        );
+    }
+
+    #[test]
     fn inserts_drawing_hf_before_picture_and_after_sheet_data() {
         let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData><row r="1"/></sheetData><picture r:id="rId9"/><extLst><ext/></extLst></worksheet>"#;
         let drawing_hf = br#"<drawingHF r:id="rId7"/>"#;
@@ -1500,6 +1584,86 @@ mod tests {
         assert!(
             updated_str.contains("xmlns:r="),
             "expected xmlns:r to be added when inserting r:* attributes, got:\n{updated_str}"
+        );
+    }
+
+    #[test]
+    fn inserts_drawing_hf_with_prefix_when_worksheet_is_prefix_only() {
+        let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:sheetData/>
+  <x:picture/>
+</x:worksheet>"#;
+        let drawing_hf = br#"<drawingHF r:id="rId7"/>"#;
+
+        let updated = ensure_sheet_xml_has_drawing_hf(
+            sheet_xml,
+            "xl/worksheets/sheet1.xml",
+            drawing_hf,
+            &HashMap::new(),
+        )
+        .expect("insert drawingHF");
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        roxmltree::Document::parse(updated_str).expect("output XML should be well-formed");
+        assert!(
+            updated_str.contains("<x:drawingHF r:id=\"rId7\"/>"),
+            "expected inserted <x:drawingHF>, got:\n{updated_str}"
+        );
+        assert!(
+            !updated_str.contains("<drawingHF r:id"),
+            "should not introduce unprefixed <drawingHF> in prefix-only worksheets, got:\n{updated_str}"
+        );
+        let sheet_data_end = updated_str.find("<x:sheetData").unwrap();
+        let drawing_hf_pos = updated_str.find("<x:drawingHF").unwrap();
+        let picture_pos = updated_str.find("<x:picture").unwrap();
+        assert!(
+            drawing_hf_pos > sheet_data_end && drawing_hf_pos < picture_pos,
+            "drawingHF should be inserted after sheetData and before picture, got:\n{updated_str}"
+        );
+        assert!(
+            updated_str.contains("xmlns:r="),
+            "expected xmlns:r to be added to root when inserting r:* attributes, got:\n{updated_str}"
+        );
+    }
+
+    #[test]
+    fn inserts_drawing_hf_without_prefix_when_worksheet_uses_default_namespace() {
+        let sheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+  <picture/>
+</worksheet>"#;
+        let drawing_hf = br#"<x:drawingHF r:id="rId7"/>"#;
+
+        let updated = ensure_sheet_xml_has_drawing_hf(
+            sheet_xml,
+            "xl/worksheets/sheet1.xml",
+            drawing_hf,
+            &HashMap::new(),
+        )
+        .expect("insert drawingHF");
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        roxmltree::Document::parse(updated_str).expect("output XML should be well-formed");
+        assert!(
+            updated_str.contains("<drawingHF r:id=\"rId7\"/>"),
+            "expected inserted <drawingHF> without a prefix, got:\n{updated_str}"
+        );
+        assert!(
+            !updated_str.contains("<x:drawingHF"),
+            "should not introduce prefixed <x:drawingHF> tags in default-namespace worksheets, got:\n{updated_str}"
+        );
+        let sheet_data_pos = updated_str.find("<sheetData").unwrap();
+        let drawing_hf_pos = updated_str.find("<drawingHF").unwrap();
+        let picture_pos = updated_str.find("<picture").unwrap();
+        assert!(
+            drawing_hf_pos > sheet_data_pos && drawing_hf_pos < picture_pos,
+            "drawingHF should be inserted after sheetData and before picture, got:\n{updated_str}"
+        );
+        assert!(
+            updated_str.contains("xmlns:r="),
+            "expected xmlns:r to be added to root when inserting r:* attributes, got:\n{updated_str}"
         );
     }
 
