@@ -1744,6 +1744,10 @@ if (
   });
   ribbonLayoutController = layoutController;
 
+  // Expose layout state for Playwright assertions (e.g. split view persistence).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).__layoutController = layoutController;
+
   const panelMounts = new Map<string, { container: HTMLElement; dispose: () => void }>();
 
   const scriptingWorkbook = new DocumentControllerWorkbookAdapter(app.getDocument(), {
@@ -1980,6 +1984,54 @@ if (
       splitSelectionSyncInProgress = false;
     }
   });
+  // --- Split view primary pane persistence (scroll/zoom) ----------------------
+  // --- Split view primary pane persistence (scroll/zoom) ----------------------
+
+  let stopPrimaryScrollSubscription: (() => void) | null = null;
+  let stopPrimaryZoomSubscription: (() => void) | null = null;
+  let primaryPaneViewportRestored = false;
+
+  const stopPrimarySplitPanePersistence = () => {
+    stopPrimaryScrollSubscription?.();
+    stopPrimaryScrollSubscription = null;
+    stopPrimaryZoomSubscription?.();
+    stopPrimaryZoomSubscription = null;
+    window.removeEventListener("beforeunload", persistLayoutNow);
+  };
+
+  const ensurePrimarySplitPanePersistence = () => {
+    if (stopPrimaryScrollSubscription || stopPrimaryZoomSubscription) return;
+
+    stopPrimaryScrollSubscription = app.subscribeScroll((scroll) => {
+      if (layoutController.layout.splitView.direction === "none") return;
+
+      const pane = layoutController.layout.splitView.panes.primary;
+      if (pane.scrollX === scroll.x && pane.scrollY === scroll.y) return;
+
+      layoutController.setSplitPaneScroll("primary", { scrollX: scroll.x, scrollY: scroll.y }, { persist: false });
+      scheduleSplitPanePersist();
+    });
+
+    stopPrimaryZoomSubscription = app.subscribeZoom((zoom) => {
+      if (layoutController.layout.splitView.direction === "none") return;
+
+      const pane = layoutController.layout.splitView.panes.primary;
+      if (pane.zoom === zoom) return;
+
+      layoutController.setSplitPaneZoom("primary", zoom, { persist: false });
+      scheduleSplitPanePersist();
+    });
+
+    window.addEventListener("beforeunload", persistLayoutNow);
+  };
+
+  const restorePrimarySplitPaneViewport = () => {
+    const pane = layoutController.layout.splitView.panes.primary;
+    if (app.supportsZoom()) {
+      app.setZoom(pane.zoom ?? 1);
+    }
+    app.setScroll(pane.scrollX ?? 0, pane.scrollY ?? 0);
+  };
 
   function renderSplitView() {
     const split = layoutController.layout.splitView;
@@ -1994,11 +2046,19 @@ if (
     if (split.direction === "none") {
       secondaryGridView?.destroy();
       secondaryGridView = null;
+      stopPrimarySplitPanePersistence();
+      primaryPaneViewportRestored = false;
       flushSplitPanePersist();
       gridRoot.dataset.splitActive = "false";
       gridSecondaryEl.dataset.splitActive = "false";
       return;
     }
+
+    if (!primaryPaneViewportRestored) {
+      restorePrimarySplitPaneViewport();
+      primaryPaneViewportRestored = true;
+    }
+    ensurePrimarySplitPanePersistence();
 
     if (!secondaryGridView) {
       const pane = split.panes.secondary;

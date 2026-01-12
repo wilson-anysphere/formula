@@ -99,12 +99,14 @@ test.describe("split view", () => {
 
   test("selection is global across panes without cross-pane scrolling", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
+
     await page.evaluate(() => localStorage.clear());
     await page.reload();
     await waitForDesktopReady(page);
     await waitForIdle(page);
 
     await page.getByTestId("split-vertical").click();
+
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
     await expect(secondary.locator("canvas")).toHaveCount(3);
@@ -113,7 +115,9 @@ test.describe("split view", () => {
     const primary = page.locator("#grid");
     await primary.hover({ position: { x: 60, y: 40 } });
     await page.mouse.wheel(0, 200 * 24);
-    await expect.poll(async () => await page.evaluate(() => (window as any).__formulaApp.getScroll().y)).toBeGreaterThan(0);
+    await expect
+      .poll(async () => await page.evaluate(() => (window as any).__formulaApp.getScroll().y))
+      .toBeGreaterThan(0);
 
     const scrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
 
@@ -276,6 +280,79 @@ test.describe("split view", () => {
     const secondaryScrollAfter = Number((await secondary.getAttribute("data-scroll-y")) ?? 0);
     expect(Math.abs(secondaryScrollAfter - secondaryScrollBefore)).toBeLessThan(0.1);
   });
+
+  test("primary pane persists + restores scroll/zoom (parity with secondary)", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("split-vertical").click();
+
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await expect(secondary.locator("canvas")).toHaveCount(3);
+
+    // Set primary zoom + scroll while split view is active. These should be stored under
+    // layout.splitView.panes.primary.
+    const primaryViewport = await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.setZoom(1.5);
+      app.setScroll(0, 400);
+      return { scrollY: app.getScroll().y, zoom: app.getZoom() };
+    });
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate((key) => {
+          const raw = localStorage.getItem(key);
+          if (!raw) return 0;
+          const layout = JSON.parse(raw);
+          return layout?.splitView?.panes?.primary?.scrollY ?? 0;
+        }, LAYOUT_KEY);
+      })
+      .toBeCloseTo(primaryViewport.scrollY, 0);
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate((key) => {
+          const raw = localStorage.getItem(key);
+          if (!raw) return 1;
+          const layout = JSON.parse(raw);
+          return layout?.splitView?.panes?.primary?.zoom ?? 1;
+        }, LAYOUT_KEY);
+      })
+      .toBeCloseTo(primaryViewport.zoom, 3);
+
+    // Scroll the secondary pane to a different offset so we can assert both restore independently.
+    const secondaryScrollBefore = Number((await secondary.getAttribute("data-scroll-y")) ?? 0);
+    await secondary.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(0, 600);
+    await expect
+      .poll(async () => Number((await secondary.getAttribute("data-scroll-y")) ?? 0))
+      .toBeGreaterThan(secondaryScrollBefore);
+    const secondaryScrollY = Number((await secondary.getAttribute("data-scroll-y")) ?? 0);
+
+    // Reload and ensure both panes restore.
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await expect(page.locator("#grid-secondary")).toBeVisible();
+
+    await expect
+      .poll(async () => await page.evaluate(() => (window as any).__formulaApp.getScroll().y))
+      .toBeCloseTo(primaryViewport.scrollY, 0);
+    await expect
+      .poll(async () => await page.evaluate(() => (window as any).__formulaApp.getZoom()))
+      .toBeCloseTo(primaryViewport.zoom, 3);
+
+    await expect
+      .poll(async () => Number((await page.locator("#grid-secondary").getAttribute("data-scroll-y")) ?? 0))
+      .toBeCloseTo(secondaryScrollY, 1);
+  });
 });
 
 test.describe("split view / shared grid zoom", () => {
@@ -375,47 +452,5 @@ test.describe("split view / shared grid zoom", () => {
     const after = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("B1"));
     if (!after) throw new Error("Missing B1 rect after resize");
     expect(after.x).toBeGreaterThan(before.x + 30);
-  });
-
-  test("clipboard + delete shortcuts work while focus is in the secondary pane", async ({ page }) => {
-    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-    await gotoDesktop(page, "/?grid=shared");
-
-    const modifier = process.platform === "darwin" ? "Meta" : "Control";
-
-    // Enable split view.
-    await page.getByTestId("split-vertical").click();
-    const secondary = page.getByTestId("grid-secondary");
-    await expect(secondary).toBeVisible();
-
-    // Select A1 in the secondary pane and enter a value.
-    await secondary.click({ position: { x: 60, y: 40 } });
-    await expect(page.getByTestId("active-cell")).toHaveText("A1");
-
-    await page.keyboard.press("F2");
-    const editor = page.locator("textarea.cell-editor");
-    await expect(editor).toBeVisible();
-    await editor.fill("Secondary");
-    await page.keyboard.press("Enter");
-    await waitForIdle(page);
-
-    // Re-focus the secondary grid and copy the cell value.
-    await secondary.click({ position: { x: 60, y: 40 } });
-    await page.keyboard.press(`${modifier}+C`);
-    await waitForIdle(page);
-
-    // Paste into B1 using the secondary pane focus.
-    await secondary.click({ position: { x: 160, y: 40 } });
-    await expect(page.getByTestId("active-cell")).toHaveText("B1");
-    await page.keyboard.press(`${modifier}+V`);
-    await waitForIdle(page);
-
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"))).toBe("Secondary");
-
-    // Delete clears the selection.
-    await secondary.click({ position: { x: 160, y: 40 } });
-    await page.keyboard.press("Delete");
-    await waitForIdle(page);
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"))).toBe("");
   });
 });

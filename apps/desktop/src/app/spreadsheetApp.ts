@@ -549,6 +549,7 @@ export class SpreadsheetApp {
   });
   private readonly selectionListeners = new Set<(selection: SelectionState) => void>();
   private readonly scrollListeners = new Set<(scroll: { x: number; y: number }) => void>();
+  private readonly zoomListeners = new Set<(zoom: number) => void>();
 
   private editState = false;
   private readonly editStateListeners = new Set<(isEditing: boolean) => void>();
@@ -955,15 +956,16 @@ export class SpreadsheetApp {
             const nextZoom = this.sharedGrid?.renderer.getZoom() ?? prevZoom;
 
             const zoomChanged = nextZoom !== prevZoom;
-            if (zoomChanged) {
-              this.sharedGridZoom = nextZoom;
-              // Document sheet views store base axis sizes at zoom=1. When zoom changes via
-              // gestures (e.g. Ctrl/Cmd+wheel), the renderer scales its internal state but we
-              // still need to reapply persisted axis overrides at the new zoom level.
-              this.syncSharedGridAxisSizesFromDocument();
-              this.dispatchZoomChanged();
-              effectiveViewport = this.sharedGrid?.renderer.getViewportState() ?? viewport;
-            }
+             if (zoomChanged) {
+               this.sharedGridZoom = nextZoom;
+               // Document sheet views store base axis sizes at zoom=1. When zoom changes via
+               // gestures (e.g. Ctrl/Cmd+wheel), the renderer scales its internal state but we
+               // still need to reapply persisted axis overrides at the new zoom level.
+               this.syncSharedGridAxisSizesFromDocument();
+               this.dispatchZoomChanged();
+               this.notifyZoomListeners();
+               effectiveViewport = this.sharedGrid?.renderer.getViewportState() ?? viewport;
+             }
 
             const prevX = this.scrollX;
             const prevY = this.scrollY;
@@ -1784,6 +1786,12 @@ export class SpreadsheetApp {
     return () => this.scrollListeners.delete(listener);
   }
 
+  subscribeZoom(listener: (zoom: number) => void): () => void {
+    this.zoomListeners.add(listener);
+    listener(this.getZoom());
+    return () => this.zoomListeners.delete(listener);
+  }
+
   setScroll(x: number, y: number): void {
     const changed = this.setScrollInternal(x, y);
     // Shared-grid mode repaints via CanvasGridRenderer and invokes the onScroll callback; the
@@ -1799,6 +1807,13 @@ export class SpreadsheetApp {
     }
   }
 
+  private notifyZoomListeners(): void {
+    if (this.zoomListeners.size === 0) return;
+    const zoom = this.getZoom();
+    for (const listener of this.zoomListeners) {
+      listener(zoom);
+    }
+  }
   getGridMode(): DesktopGridMode {
     return this.gridMode;
   }
@@ -4584,7 +4599,6 @@ export class SpreadsheetApp {
   private setScrollInternal(nextX: number, nextY: number): boolean {
     if (!Number.isFinite(nextX)) nextX = 0;
     if (!Number.isFinite(nextY)) nextY = 0;
-
     if (this.sharedGrid) {
       const before = this.sharedGrid.getScroll();
       this.sharedGrid.scrollTo(nextX, nextY);
