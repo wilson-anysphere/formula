@@ -458,29 +458,28 @@ export class ContextMenu {
         const swatch = document.createElement("span");
         swatch.className = "context-menu__leading context-menu__leading--swatch";
         swatch.setAttribute("aria-hidden", "true");
+        const svgNs = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(svgNs, "svg");
+        svg.setAttribute("viewBox", "0 0 14 14");
+        svg.setAttribute("width", "14");
+        svg.setAttribute("height", "14");
+        svg.setAttribute("focusable", "false");
+        svg.setAttribute("aria-hidden", "true");
+
+        const rect = document.createElementNS(svgNs, "rect");
+        rect.setAttribute("x", "0");
+        rect.setAttribute("y", "0");
+        rect.setAttribute("width", "14");
+        rect.setAttribute("height", "14");
+        rect.setAttribute("rx", "3");
+        rect.setAttribute("ry", "3");
+
         const rawColor = String(item.leading.color ?? "").trim();
-        if (rawColor) {
-          // Render an SVG swatch so we can set the color via attributes instead of
-          // inline styles (ContextMenu guard tests only allow left/top).
-          const svgNs = "http://www.w3.org/2000/svg";
-          const svg = document.createElementNS(svgNs, "svg");
-          svg.setAttribute("viewBox", "0 0 14 14");
-          svg.setAttribute("focusable", "false");
-          svg.setAttribute("aria-hidden", "true");
+        const fill = rawColor.startsWith("--") ? `var(${rawColor}, none)` : rawColor;
+        rect.setAttribute("fill", fill || "none");
 
-          const rect = document.createElementNS(svgNs, "rect");
-          rect.setAttribute("x", "0");
-          rect.setAttribute("y", "0");
-          rect.setAttribute("width", "14");
-          rect.setAttribute("height", "14");
-          rect.setAttribute("rx", "4");
-
-          const fill = rawColor.startsWith("--") ? `var(${rawColor}, none)` : rawColor;
-          rect.setAttribute("fill", fill);
-
-          svg.appendChild(rect);
-          swatch.appendChild(svg);
-        }
+        svg.appendChild(rect);
+        swatch.appendChild(svg);
         btn.appendChild(swatch);
       }
 
