@@ -2,7 +2,6 @@ import {
   cellStateEquals,
   cloneCellState,
   emptyCellState,
-  normalizeCellState,
 } from "./cell.js";
 import { normalizeRange, parseA1, parseRangeA1 } from "./coords.js";
 import { applyStylePatch, StyleTable } from "../formatting/styleTable.js";
@@ -529,16 +528,16 @@ class SheetModel {
     const beforeHasContent = Boolean(before && (before.value != null || before.formula != null));
     const beforeHasFormat = Boolean(before);
 
-    const normalized = normalizeCellState(cell);
-    const afterIsEmpty = normalized.value == null && normalized.formula == null && normalized.styleId === 0;
-    const afterHasContent = Boolean(normalized.value != null || normalized.formula != null);
+    const after = cloneCellState(cell);
+    const afterIsEmpty = after.value == null && after.formula == null && after.styleId === 0;
+    const afterHasContent = Boolean(after.value != null || after.formula != null);
     const afterHasFormat = !afterIsEmpty;
 
     // Update the canonical cell map first.
     if (afterIsEmpty) {
       this.cells.delete(key);
     } else {
-      this.cells.set(key, cloneCellState(normalized));
+      this.cells.set(key, after);
     }
 
     // Maintain content-cell count.
