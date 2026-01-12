@@ -178,4 +178,47 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
 
     expect(b1StyleId).toBe(a1StyleId);
   });
+
+  test("copy/paste preserves inherited (effective) formatting from column defaults", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await gotoDesktop(page);
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      doc.beginBatch({ label: "Seed clipboard column-default style" });
+      doc.setCellValue(sheetId, "A1", "X");
+      // Apply bold to the entire column A. With layered formats this should be stored
+      // as a column default (so individual cells may still have styleId=0).
+      doc.setRangeFormat(sheetId, "A1:A1048576", { font: { bold: true } }, { label: "Bold column" });
+      doc.endBatch();
+      app.refresh();
+    });
+    await waitForIdle(page);
+
+    // Copy A1 and paste to B1.
+    await page.click("#grid", { position: { x: 53, y: 29 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    await page.keyboard.press(`${modifier}+C`);
+    await waitForIdle(page);
+
+    await page.click("#grid", { position: { x: 160, y: 40 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("B1");
+    await page.keyboard.press(`${modifier}+V`);
+    await waitForIdle(page);
+
+    const b1Bold = await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      const b1 = doc.getCell(sheetId, "B1");
+      const style = doc.styleTable.get(b1.styleId);
+      return style?.font?.bold === true;
+    });
+
+    expect(b1Bold).toBe(true);
+  });
 });

@@ -5618,6 +5618,17 @@ export class SpreadsheetApp {
   }
 
   private snapshotClipboardCells(range: Range): Array<Array<{ value: unknown; formula: string | null; styleId: number }>> {
+    // Snapshot the *effective* style for each cell so internal copy/paste preserves
+    // inherited (layered) formatting (sheet/row/col defaults) even when
+    // `cell.styleId` is 0.
+    //
+    // This intentionally interns the resolved style into `document.styleTable`
+    // so the internal paste path can keep pasting styleIds (fast) rather than
+    // materializing per-cell format objects.
+    const docAny = this.document as any;
+    const styleIdByLayerKey = new Map<string, number>();
+    const styleIdByResolvedStyle = new WeakMap<object, number>();
+
     const cells: Array<Array<{ value: unknown; formula: string | null; styleId: number }>> = [];
     for (let row = range.startRow; row <= range.endRow; row += 1) {
       const outRow: Array<{ value: unknown; formula: string | null; styleId: number }> = [];
@@ -5627,7 +5638,70 @@ export class SpreadsheetApp {
           formula: string | null;
           styleId: number;
         };
-        outRow.push({ value: cell.value ?? null, formula: cell.formula ?? null, styleId: cell.styleId ?? 0 });
+        const baseStyleId = typeof cell.styleId === "number" ? cell.styleId : 0;
+
+        // Cache effective style ids by their underlying layer ids when possible.
+        const layerKey = (() => {
+          if (typeof docAny.getEffectiveStyleKey === "function") {
+            try {
+              const key = docAny.getEffectiveStyleKey(this.sheetId, { row, col });
+              if (typeof key === "string" && key) return key;
+            } catch {
+              // Ignore; fall back to other key strategies.
+            }
+          }
+
+          const sheetStyleId =
+            typeof docAny.getSheetStyleId === "function" ? (docAny.getSheetStyleId(this.sheetId) as unknown) : null;
+          const rowStyleId =
+            typeof docAny.getRowStyleId === "function" ? (docAny.getRowStyleId(this.sheetId, row) as unknown) : null;
+          const colStyleId =
+            typeof docAny.getColStyleId === "function" ? (docAny.getColStyleId(this.sheetId, col) as unknown) : null;
+
+          if (typeof sheetStyleId === "number" && typeof rowStyleId === "number" && typeof colStyleId === "number") {
+            return `${sheetStyleId}:${rowStyleId}:${colStyleId}:${baseStyleId}`;
+          }
+
+          return null;
+        })();
+
+        let styleId = layerKey ? styleIdByLayerKey.get(layerKey) : undefined;
+        if (styleId === undefined) {
+          // Prefer an API that returns the effective style id directly if available.
+          if (typeof docAny.getEffectiveStyleId === "function") {
+            try {
+              const effective = docAny.getEffectiveStyleId(this.sheetId, { row, col });
+              if (typeof effective === "number") {
+                styleId = effective;
+              }
+            } catch {
+              // Ignore and fall back to style object resolution.
+            }
+          }
+
+          if (styleId === undefined) {
+            // Otherwise resolve the effective style object, intern it, and snapshot the id.
+            if (typeof docAny.getEffectiveStyle === "function") {
+              try {
+                const effectiveStyle = docAny.getEffectiveStyle(this.sheetId, { row, col });
+                if (effectiveStyle && typeof effectiveStyle === "object") {
+                  styleId = styleIdByResolvedStyle.get(effectiveStyle as object);
+                  if (styleId === undefined) {
+                    styleId = this.document.styleTable.intern(effectiveStyle);
+                    styleIdByResolvedStyle.set(effectiveStyle as object, styleId);
+                  }
+                }
+              } catch {
+                // Ignore and fall back to base style id.
+              }
+            }
+          }
+
+          if (styleId === undefined) styleId = baseStyleId;
+          if (layerKey) styleIdByLayerKey.set(layerKey, styleId);
+        }
+
+        outRow.push({ value: cell.value ?? null, formula: cell.formula ?? null, styleId });
       }
       cells.push(outRow);
     }
