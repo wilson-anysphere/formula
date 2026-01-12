@@ -328,6 +328,57 @@ fn coup_schedule_leap_day_clamps_previous_coupon_date() {
 }
 
 #[test]
+fn coup_schedule_leap_day_maturity_clamps_back_to_february_month_end() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    // Maturity itself is the leap-day month-end. The schedule should be treated as EOM and remain
+    // pinned to month-end, clamping back to Feb 28 in the non-leap year when stepping back 12
+    // months.
+    //
+    // Semiannual schedule anchored at maturity:
+    //   ... 2023-02-28, 2023-08-31, 2024-02-29 (maturity)
+    let settlement = ymd_to_serial(ExcelDate::new(2023, 3, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2024, 2, 29), system).unwrap();
+
+    let expected_pcd = ymd_to_serial(ExcelDate::new(2023, 2, 28), system).unwrap();
+    let expected_ncd = ymd_to_serial(ExcelDate::new(2023, 8, 31), system).unwrap();
+
+    for basis in [0, 1, 2, 3, 4] {
+        assert_eq!(
+            couppcd(settlement, maturity, 2, basis, system).unwrap(),
+            expected_pcd
+        );
+        assert_eq!(
+            coupncd(settlement, maturity, 2, basis, system).unwrap(),
+            expected_ncd
+        );
+        assert_eq!(
+            coupnum(settlement, maturity, 2, basis, system).unwrap(),
+            2.0
+        );
+    }
+
+    // Day-count sanity across bases.
+    let pcd_b1 = couppcd(settlement, maturity, 2, 1, system).unwrap();
+    let ncd_b1 = coupncd(settlement, maturity, 2, 1, system).unwrap();
+    let days_b1 = coupdays(settlement, maturity, 2, 1, system).unwrap();
+    assert_eq!(days_b1, (ncd_b1 - pcd_b1) as f64);
+    let daybs_b1 = coupdaybs(settlement, maturity, 2, 1, system).unwrap();
+    let daysnc_b1 = coupdaysnc(settlement, maturity, 2, 1, system).unwrap();
+    assert_eq!(days_b1, daybs_b1 + daysnc_b1);
+
+    for basis in [0, 2, 4] {
+        assert_eq!(
+            coupdays(settlement, maturity, 2, basis, system).unwrap(),
+            360.0 / 2.0
+        );
+    }
+    assert_eq!(
+        coupdays(settlement, maturity, 2, 3, system).unwrap(),
+        365.0 / 2.0
+    );
+}
+
+#[test]
 fn builtins_coup_dates_handle_eom_and_leap_day_schedules() {
     let system = ExcelDateSystem::EXCEL_1900;
     let mut sheet = TestSheet::new();
@@ -364,6 +415,37 @@ fn builtins_coup_dates_handle_eom_and_leap_day_schedules() {
             expected_ncd_b,
         );
     }
+}
+
+#[test]
+fn builtins_coup_handle_leap_day_maturity_schedule() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    let mut sheet = TestSheet::new();
+
+    sheet.set("A1", "2023-03-01");
+    sheet.set("A2", "2024-02-29");
+
+    let expected_pcd = ymd_to_serial(ExcelDate::new(2023, 2, 28), system).unwrap() as f64;
+    let expected_ncd = ymd_to_serial(ExcelDate::new(2023, 8, 31), system).unwrap() as f64;
+
+    for basis in [0, 1, 2, 3, 4] {
+        assert_number(&sheet.eval(&format!("=COUPPCD(A1,A2,2,{basis})")), expected_pcd);
+        assert_number(&sheet.eval(&format!("=COUPNCD(A1,A2,2,{basis})")), expected_ncd);
+        assert_number(&sheet.eval(&format!("=COUPNUM(A1,A2,2,{basis})")), 2.0);
+    }
+
+    // Day-count sanity for the bases that are most sensitive to month-end / leap-year behavior.
+    assert_number(&sheet.eval("=COUPDAYBS(A1,A2,2,0)"), 1.0);
+    assert_number(&sheet.eval("=COUPDAYSNC(A1,A2,2,0)"), 179.0);
+    assert_number(&sheet.eval("=COUPDAYS(A1,A2,2,0)"), 180.0);
+
+    assert_number(&sheet.eval("=COUPDAYBS(A1,A2,2,1)"), 1.0);
+    assert_number(&sheet.eval("=COUPDAYSNC(A1,A2,2,1)"), 183.0);
+    assert_number(&sheet.eval("=COUPDAYS(A1,A2,2,1)"), 184.0);
+
+    assert_number(&sheet.eval("=COUPDAYBS(A1,A2,2,4)"), 3.0);
+    assert_number(&sheet.eval("=COUPDAYSNC(A1,A2,2,4)"), 177.0);
+    assert_number(&sheet.eval("=COUPDAYS(A1,A2,2,4)"), 180.0);
 }
 
 #[test]
