@@ -24,6 +24,7 @@ If you are editing collaboration code, start here and keep this doc in sync with
 - Desktop binder: [`packages/collab/binder/index.js`](../packages/collab/binder/index.js) (`bindYjsToDocumentController`)
 - Presence (Awareness wrapper): [`packages/collab/presence/src/presenceManager.js`](../packages/collab/presence/src/presenceManager.js) (`PresenceManager`)
 - Desktop presence renderer: [`apps/desktop/src/grid/presence-renderer/`](../apps/desktop/src/grid/presence-renderer/) (`PresenceRenderer`)
+- Permissions + masking: [`packages/collab/permissions/index.js`](../packages/collab/permissions/index.js) (`getCellPermissions`, `maskCellValue`)
 - Offline persistence helper: [`packages/collab/offline/src/index.ts`](../packages/collab/offline/src/index.ts) / [`index.node.ts`](../packages/collab/offline/src/index.node.ts) (`attachOfflinePersistence`)
 - Comments (Yjs `comments` root helpers): [`packages/collab/comments/src/manager.ts`](../packages/collab/comments/src/manager.ts) (`CommentManager`, `createCommentManagerForSession`, `migrateCommentsArrayToMap`)
 - Conflict monitors: [`packages/collab/conflicts/index.js`](../packages/collab/conflicts/index.js) (`FormulaConflictMonitor`, `CellConflictMonitor`, `CellStructuralConflictMonitor`)
@@ -124,6 +125,44 @@ Notes:
 - Plaintext is JSON `{ value, formula, format? }` and is bound to `{ docId, sheetId, row, col }` via AES-GCM Additional Authenticated Data (AAD) to prevent replay across docs/cells.
 - When `enc` is present, plaintext `value`/`formula` fields are omitted.
 - If a collaborator does not have the right key, `@formula/collab-session` and the desktop binder will surface a masked value and **refuse plaintext writes** into that cell.
+
+### Permissions + masking (roles + range restrictions)
+
+Formula supports a simple role model plus optional per-range allowlists:
+
+- Roles: `owner | admin | editor | commenter | viewer`
+- Range restrictions: each restriction can include a `readAllowlist` and/or `editAllowlist` for a rectangular range
+
+Implementation: `@formula/collab-permissions` (see [`packages/collab/permissions/index.js`](../packages/collab/permissions/index.js)).
+
+Important: **masking is not confidentiality**. Masking is a UX/access-control measure; for true confidentiality use end-to-end encryption (`enc`) as described above.
+
+#### Session-level permissions (`CollabSession`)
+
+`CollabSession` exposes permission-aware helpers:
+
+- `session.setPermissions({ role, rangeRestrictions, userId })`
+- `session.canReadCell({ sheetId, row, col })`
+- `session.canEditCell({ sheetId, row, col })`
+
+These checks also incorporate encryption invariants (e.g. refusing writes to encrypted cells when no key is available).
+
+#### Desktop binder permissions (`bindYjsToDocumentController`)
+
+The desktop binder can enforce permissions and masking at the UI projection layer:
+
+- Unreadable cells are masked in `DocumentController` (default mask is `"###"`).
+- Disallowed edits are rejected and reverted (optionally surfaced via `onEditRejected`).
+
+The binder accepts either:
+
+- a function: `permissions(cell) -> { canRead, canEdit }`, or
+- a role-based object: `{ role, restrictions, userId }`
+
+Note the naming difference:
+
+- `CollabSession.setPermissions` uses `rangeRestrictions`
+- `bindYjsToDocumentController` expects `restrictions`
 
 ### Sheet schema (`sheets` array entries)
 
