@@ -743,6 +743,58 @@ test("api errors: workbook.openWorkbook requires a non-empty path", async (t) =>
   assert.deepEqual(result, { ok: false, message: "Workbook path must be a non-empty string" });
 });
 
+test("api errors: workbook.openWorkbook rejects missing path argument", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-workbook-open-missing-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "workbookExt.openMissing";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "workbook-open-missing-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Workbook Open Missing" }] },
+      permissions: ["ui.commands", "workbook.manage"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async (workbookPath) => {
+          try {
+            await formula.workbook.openWorkbook(workbookPath);
+            return { ok: true };
+          } catch (err) {
+            return { ok: false, message: err?.message ?? String(err) };
+          }
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+  const result = await host.executeCommand(commandId);
+  assert.deepEqual(result, { ok: false, message: "Workbook path must be a non-empty string" });
+});
+
 test("permissions: workbook.openWorkbook requires workbook.manage", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-workbook-open-deny-"));
   const extDir = path.join(dir, "ext");
@@ -1053,6 +1105,75 @@ test("api errors: non-Error host throws preserve name/code for extensions", asyn
 
   const result = await host.executeCommand(commandId);
   assert.deepEqual(result, { ok: false, name: "AbortError", message: "Range cancelled", code: "BOOM" });
+});
+
+test("api errors: workbook.saveAs rejects missing path argument", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-workbook-saveas-missing-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "workbookExt.saveAsMissing";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "workbook-saveas-missing-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Workbook SaveAs Missing" }] },
+      permissions: ["ui.commands", "workbook.manage"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async (nextPath) => {
+          const workbook = await formula.workbook.getActiveWorkbook();
+          const staticResult = await (async () => {
+            try {
+              await formula.workbook.saveAs(nextPath);
+              return { ok: true };
+            } catch (err) {
+              return { ok: false, message: err?.message ?? String(err) };
+            }
+          })();
+          const instanceResult = await (async () => {
+            try {
+              await workbook.saveAs(nextPath);
+              return { ok: true };
+            } catch (err) {
+              return { ok: false, message: err?.message ?? String(err) };
+            }
+          })();
+          return { staticResult, instanceResult };
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+  host.openWorkbook(path.join(dir, "Initial.xlsx"));
+
+  const result = await host.executeCommand(commandId);
+  assert.deepEqual(result, {
+    staticResult: { ok: false, message: "Workbook path must be a non-empty string" },
+    instanceResult: { ok: false, message: "Workbook path must be a non-empty string" }
+  });
 });
 
 test("permissions: workbook.saveAs requires workbook.manage and denial prevents updating workbook path", async (t) => {

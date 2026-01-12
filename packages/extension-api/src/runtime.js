@@ -400,6 +400,9 @@ function enhanceWorkbook(workbook) {
       }
     },
     async saveAs(workbookPath) {
+      if (workbookPath == null) {
+        throw new Error("Workbook path must be a non-empty string");
+      }
       await rpcCall("workbook", "saveAs", [String(workbookPath)]);
       const updated = await rpcCall("workbook", "getActiveWorkbook", []);
       if (updated && typeof updated === "object") {
@@ -544,6 +547,9 @@ const workbook = {
   },
 
   async openWorkbook(workbookPath) {
+    if (workbookPath == null) {
+      throw new Error("Workbook path must be a non-empty string");
+    }
     const result = await rpcCall("workbook", "openWorkbook", [String(workbookPath)]);
     return enhanceWorkbook(result);
   },
@@ -558,6 +564,9 @@ const workbook = {
   },
 
   async saveAs(workbookPath) {
+    if (workbookPath == null) {
+      throw new Error("Workbook path must be a non-empty string");
+    }
     await rpcCall("workbook", "saveAs", [String(workbookPath)]);
   },
 
