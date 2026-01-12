@@ -123,6 +123,27 @@ fn add_sheet_truncates_base_name_to_fit_unique_suffix() {
 }
 
 #[test]
+fn add_sheet_truncates_base_name_to_fit_two_digit_unique_suffix() {
+    let long = "a".repeat(31);
+    let mut workbook = Workbook::new_empty(None);
+    // Seed the workbook with the base name and all single-digit disambiguations so the next suffix
+    // will be two digits (" 10"), which is 3 UTF-16 code units.
+    workbook.add_sheet(long.clone());
+    for n in 2..=9 {
+        workbook.add_sheet(format!("{} {n}", "a".repeat(29)));
+    }
+
+    let mut state = AppState::new();
+    state.load_workbook(workbook);
+
+    let added = state
+        .add_sheet(long, None, None, None)
+        .expect("expected add_sheet to succeed with a unique suffix");
+    assert_eq!(added.name, format!("{} 10", "a".repeat(28)));
+    assert_eq!(added.name.encode_utf16().count(), 31);
+}
+
+#[test]
 fn add_sheet_truncates_base_name_by_utf16_units_to_fit_unique_suffix() {
     // 🙂 counts as 2 UTF-16 code units in Excel; build an exactly-31-unit name.
     let long = format!("{}a", "🙂".repeat(15));
