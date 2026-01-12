@@ -1,6 +1,27 @@
 use formula_engine::eval::parse_a1;
+use formula_engine::value::EntityValue;
 use formula_engine::{Engine, ErrorKind, Value};
 use pretty_assertions::assert_eq;
+
+#[test]
+fn compares_rich_values_as_text_case_insensitive() {
+    fn assert_mode(bytecode: bool) {
+        let mut engine = Engine::new();
+        engine.set_bytecode_enabled(bytecode);
+        engine
+            .set_cell_value("Sheet1", "A1", Value::Entity(EntityValue::new("Apple")))
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", "B1", "=A1=\"apple\"")
+            .unwrap();
+        engine.recalculate();
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Bool(true));
+    }
+
+    // Cover both evaluator and bytecode runtime compare paths.
+    assert_mode(false);
+    assert_mode(true);
+}
 
 #[test]
 fn error_propagation_and_short_circuiting() {

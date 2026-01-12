@@ -1,4 +1,5 @@
 use formula_engine::eval::parse_a1;
+use formula_engine::value::{EntityValue, RecordValue};
 use formula_engine::{Engine, ErrorKind, Value};
 
 #[test]
@@ -108,6 +109,50 @@ fn sort_sorts_numbers_and_text() {
         engine.get_cell_value("Sheet1", "D3"),
         Value::Text("c".to_string())
     );
+}
+
+#[test]
+fn sort_sorts_rich_values_by_display_string() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_value("Sheet1", "A1", Value::Entity(EntityValue::new("b")))
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "A2", Value::Record(RecordValue::new("A")))
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "A3", Value::Entity(EntityValue::new("c")))
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SORT(A1:A3)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Record(RecordValue::new("A"))
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C2"),
+        Value::Entity(EntityValue::new("b"))
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C3"),
+        Value::Entity(EntityValue::new("c"))
+    );
+}
+
+#[test]
+fn sort_orders_field_error_by_error_code() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SORT({#FIELD!;#VALUE!;#DIV/0!})")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Div0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Error(ErrorKind::Value));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Error(ErrorKind::Field));
 }
 
 #[test]

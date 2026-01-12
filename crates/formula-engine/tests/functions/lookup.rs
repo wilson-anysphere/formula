@@ -1,5 +1,6 @@
 use formula_engine::functions::lookup;
 use formula_engine::locale::ValueLocaleConfig;
+use formula_engine::value::EntityValue;
 use formula_engine::Engine;
 use formula_engine::{ErrorKind, Value};
 
@@ -13,6 +14,17 @@ fn xmatch_finds_case_insensitive_text() {
     assert_eq!(
         lookup::xmatch(&Value::from("missing"), &array).unwrap_err(),
         ErrorKind::NA
+    );
+}
+
+#[test]
+fn lookup_matches_rich_values_by_display_string() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", Value::Entity(EntityValue::new("Apple")));
+    sheet.set("B1", 42.0);
+    assert_eq!(
+        sheet.eval("=VLOOKUP(\"apple\", A1:B1, 2, FALSE)"),
+        Value::Number(42.0)
     );
 }
 
