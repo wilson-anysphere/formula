@@ -6954,7 +6954,42 @@ async function handleRibbonExportPdf(): Promise<void> {
     await drainBackendSync();
 
     const sheetId = app.getCurrentSheetId();
-    let range: PrintCellRange = selectionBoundingBox1Based();
+    const doc = app.getDocument();
+    const limits = getGridLimitsForFormatting();
+    const active = app.getActiveCell();
+
+    // Use the selection by default, but clip full-row/full-column/full-sheet selections to the
+    // used range to avoid generating PDFs that span millions of empty cells.
+    let selectionRange0 = selectionBoundingBox0Based();
+    const activeCellFallback0: CellRange = {
+      start: { row: active.row, col: active.col },
+      end: { row: active.row, col: active.col },
+    };
+    const isFullHeight = selectionRange0.start.row === 0 && selectionRange0.end.row === limits.maxRows - 1;
+    const isFullWidth = selectionRange0.start.col === 0 && selectionRange0.end.col === limits.maxCols - 1;
+    if (isFullHeight || isFullWidth) {
+      const used = doc.getUsedRange(sheetId);
+      if (used) {
+        const startRow = Math.max(selectionRange0.start.row, used.startRow);
+        const endRow = Math.min(selectionRange0.end.row, used.endRow);
+        const startCol = Math.max(selectionRange0.start.col, used.startCol);
+        const endCol = Math.min(selectionRange0.end.col, used.endCol);
+        const clipped =
+          startRow <= endRow && startCol <= endCol
+            ? { start: { row: startRow, col: startCol }, end: { row: endRow, col: endCol } }
+            : null;
+        selectionRange0 = clipped ?? activeCellFallback0;
+      } else {
+        selectionRange0 = activeCellFallback0;
+      }
+    }
+
+    let range: PrintCellRange = {
+      startRow: selectionRange0.start.row + 1,
+      endRow: selectionRange0.end.row + 1,
+      startCol: selectionRange0.start.col + 1,
+      endCol: selectionRange0.end.col + 1,
+    };
 
     try {
       const settings = await invoke("get_sheet_print_settings", { sheet_id: sheetId });
