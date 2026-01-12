@@ -7753,6 +7753,8 @@ export class SpreadsheetApp {
     // Editing
     // Excel-style: Shift+F2 adds/edits a comment (we wire this to "Add Comment").
     if (e.key === "F2" && e.shiftKey) {
+      // Avoid opening comment UI while the formula bar is actively editing (range selection mode).
+      if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
       e.preventDefault();
       this.openCommentsPanel();
       this.focusNewCommentInput();
@@ -7760,6 +7762,8 @@ export class SpreadsheetApp {
     }
 
     if (e.key === "F2") {
+      // In-cell editing should never start while the formula bar is actively editing (range selection mode).
+      if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
       e.preventDefault();
       const cell = this.selection.active;
       const bounds = this.getCellRect(cell);

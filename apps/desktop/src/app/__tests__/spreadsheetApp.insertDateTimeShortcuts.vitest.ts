@@ -407,6 +407,43 @@ describe("SpreadsheetApp Excel-style date/time insertion shortcuts (serial value
     formulaBar.remove();
   });
 
+  it("does not open the in-cell editor with F2 while the formula bar is actively editing", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const input = formulaBar.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
+    expect(input).not.toBeNull();
+
+    input!.focus();
+    expect(app.isEditing()).toBe(true);
+
+    // Mimic a range-selection workflow where focus temporarily moves back to the grid.
+    root.focus();
+
+    root.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "F2",
+      }),
+    );
+
+    expect(app.isCellEditorOpen()).toBe(false);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
   it("falls back to only inserting into the active cell when the selection exceeds 10k cells", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2020, 0, 2, 3, 4, 5));
