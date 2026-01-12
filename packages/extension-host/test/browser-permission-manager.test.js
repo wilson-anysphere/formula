@@ -238,3 +238,33 @@ test("browser PermissionManager: resetAllPermissions clears all extensions", asy
   assert.deepEqual(await pm.getGrantedPermissions("pub.one"), {});
   assert.deepEqual(await pm.getGrantedPermissions("pub.two"), {});
 });
+
+test("browser PermissionManager: accepts object-form declared permissions", async () => {
+  const { PermissionManager } = await importBrowserPermissionManager();
+
+  const storage = createMemoryStorage();
+  const storageKey = "formula.test.permissions.objectDeclared";
+  const extensionId = "pub.obj";
+
+  const pm = new PermissionManager({
+    storage,
+    storageKey,
+    prompt: async () => true,
+  });
+
+  await pm.ensurePermissions(
+    {
+      extensionId,
+      displayName: "Obj",
+      declaredPermissions: [{ network: { mode: "allowlist", hosts: ["example.com"] } }, { clipboard: true }],
+    },
+    ["network", "clipboard"],
+  );
+
+  // `ensurePermissions` only uses declared permissions as a boolean gate; it should still store
+  // the v2 record format for the granted permissions.
+  assert.deepEqual(await pm.getGrantedPermissions(extensionId), {
+    network: { mode: "full" },
+    clipboard: true,
+  });
+});
