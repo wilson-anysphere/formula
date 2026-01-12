@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import http from "node:http";
 
-import { gotoDesktop, waitForDesktopReady } from "./helpers";
+import { gotoDesktop, openExtensionsPanel, waitForDesktopReady } from "./helpers";
 
 test.describe("Extensions permissions UI", () => {
   test("can view and revoke extension network permission from the Extensions panel", async ({ page }) => {
@@ -33,7 +33,7 @@ test.describe("Extensions permissions UI", () => {
 
       await gotoDesktop(page);
 
-      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+      await openExtensionsPanel(page);
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       await expect(page.getByTestId(`extension-card-${extensionId}`)).toBeVisible();
@@ -107,7 +107,7 @@ test.describe("Extensions permissions UI", () => {
 
       await gotoDesktop(page);
 
-      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+      await openExtensionsPanel(page);
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       await expect(page.getByTestId(`extension-card-${extensionId}`)).toBeVisible();
@@ -181,7 +181,7 @@ test.describe("Extensions permissions UI", () => {
         }
       });
 
-      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+      await openExtensionsPanel(page);
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("not granted");
@@ -202,7 +202,7 @@ test.describe("Extensions permissions UI", () => {
       await page.reload();
       await waitForDesktopReady(page);
 
-      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+      await openExtensionsPanel(page);
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("127.0.0.1");
@@ -250,7 +250,7 @@ test.describe("Extensions permissions UI", () => {
       });
     });
 
-    await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+    await openExtensionsPanel(page);
     await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
     await page.getByTestId("run-command-sampleHello.sumSelection").click();
@@ -318,7 +318,7 @@ test.describe("Extensions permissions UI", () => {
 
       await gotoDesktop(page);
 
-      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+      await openExtensionsPanel(page);
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       // First run: allow permissions so network allowlist gets seeded for 127.0.0.1.
@@ -388,7 +388,7 @@ test.describe("Extensions permissions UI", () => {
         }
       });
 
-      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+      await openExtensionsPanel(page);
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       await expect(page.getByTestId(`extension-card-${extensionId}`)).toBeVisible();
@@ -413,7 +413,7 @@ test.describe("Extensions permissions UI", () => {
       await page.reload();
       await waitForDesktopReady(page);
 
-      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+      await openExtensionsPanel(page);
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("not granted");
@@ -468,7 +468,7 @@ test.describe("Extensions permissions UI", () => {
 
       await gotoDesktop(page);
 
-      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+      await openExtensionsPanel(page);
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       // First host.
@@ -483,7 +483,7 @@ test.describe("Extensions permissions UI", () => {
       await page.getByTestId("extension-permission-allow").click();
 
       await expect(page.getByTestId("toast-root")).toContainText("Fetched: one");
-      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("one.example");
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("one.example");
 
       // Second host should prompt again and, when allowed, expand the allowlist.
       await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
@@ -500,8 +500,8 @@ test.describe("Extensions permissions UI", () => {
       await expect(page.getByTestId("extension-permission-network")).toHaveCount(0);
 
       await expect(page.getByTestId("toast-root")).toContainText("Fetched: two");
-      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("one.example");
-      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("two.example");
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("one.example");
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("two.example");
     } finally {
       await page.unroute("http://one.example/**").catch(() => {});
       await page.unroute("http://two.example/**").catch(() => {});
@@ -532,7 +532,7 @@ test.describe("Extensions permissions UI", () => {
 
       await gotoDesktop(page);
 
-      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+      await openExtensionsPanel(page);
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       // Grant permissions (ui.commands + network) by running fetchText once.

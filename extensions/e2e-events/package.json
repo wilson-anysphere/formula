@@ -11,7 +11,14 @@
   "engines": {
     "formula": "^1.0.0"
   },
-  "activationEvents": ["onStartupFinished"],
-  "contributes": {},
+  "activationEvents": ["onStartupFinished", "onView:e2eEvents.panel"],
+  "contributes": {
+    "panels": [
+      {
+        "id": "e2eEvents.panel",
+        "title": "E2E Events Panel"
+      }
+    ]
+  },
   "permissions": ["storage"]
 }

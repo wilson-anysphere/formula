@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { gotoDesktop } from "./helpers";
+import { gotoDesktop, openExtensionsPanel } from "./helpers";
 
 const PERMISSIONS_KEY = "formula.extensionHost.permissions";
 const SAMPLE_HELLO_ID = "formula.sample-hello";
@@ -27,7 +27,7 @@ test.describe("Extension permission prompts (desktop UI)", () => {
       },
     });
 
-    await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+    await openExtensionsPanel(page);
     const runButton = page.getByTestId("run-command-sampleHello.copySumToClipboard");
     await expect(runButton).toBeVisible({ timeout: 30_000 });
     // Avoid hit-target flakiness from fixed overlays (status bar/sheet tabs) by

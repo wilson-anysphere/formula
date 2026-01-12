@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { gotoDesktop } from "./helpers";
+import { gotoDesktop, openExtensionsPanel } from "./helpers";
 
 const EXTENSION_ID = "formula.e2e-events";
 const STORAGE_KEY = `formula.extensionHost.storage.${EXTENSION_ID}`;
@@ -111,9 +111,9 @@ test.describe("formula.events desktop wiring", () => {
     });
 
     // Ensure the extension host is loaded (deferred until Extensions panel is opened).
-    await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+    await openExtensionsPanel(page);
     await expect(page.getByTestId("panel-extensions")).toBeVisible();
-    await expect(page.getByTestId("run-command-sampleHello.sumSelection")).toBeVisible();
+    await expect(page.getByTestId("run-command-sampleHello.sumSelection")).toBeVisible({ timeout: 30_000 });
 
     // Ensure the e2e extension has activated and initialized its storage.
     await page.waitForFunction((storageKey) => {
@@ -128,14 +128,14 @@ test.describe("formula.events desktop wiring", () => {
     }, STORAGE_KEY);
 
     // Opening an extension-contributed panel should emit formula.events.onViewActivated.
-    await expect(page.getByTestId("open-panel-sampleHello.panel")).toBeVisible();
-    await page.getByTestId("open-panel-sampleHello.panel").click();
+    await expect(page.getByTestId("open-panel-e2eEvents.panel")).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId("open-panel-e2eEvents.panel").click();
     await page.waitForFunction((storageKey) => {
       const raw = localStorage.getItem(String(storageKey));
       if (!raw) return false;
       try {
         const parsed = JSON.parse(raw);
-        return parsed?.viewActivated?.viewId === "sampleHello.panel";
+        return parsed?.viewActivated?.viewId === "e2eEvents.panel";
       } catch {
         return false;
       }

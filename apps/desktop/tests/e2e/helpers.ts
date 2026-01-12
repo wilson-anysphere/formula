@@ -86,3 +86,37 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
     }
   }
 }
+
+/**
+ * Click the toolbar/ribbon button that toggles the Extensions panel.
+ *
+ * The desktop UI renders both a modern ribbon command button and (in some HTML scaffolds) a
+ * fallback toolbar button with the same `data-testid="open-extensions-panel"`. Playwright strict
+ * locators fail when multiple elements share a test id, so prefer the ribbon button when present.
+ */
+export async function openExtensionsPanel(page: Page): Promise<void> {
+  const panel = page.getByTestId("panel-extensions");
+  const panelVisible = await panel.isVisible().catch(() => false);
+
+  if (!panelVisible) {
+    const ribbonButton = page.getByTestId("ribbon-root").getByTestId("open-extensions-panel");
+    try {
+      await ribbonButton.click({ timeout: 5_000 });
+    } catch {
+      // Fallback: click the first visible matching element (avoid strict-mode violations).
+      await page.locator('[data-testid="open-extensions-panel"]:visible').first().click();
+    }
+
+    await panel.waitFor({ state: "visible", timeout: 30_000 });
+  }
+
+  // If the panel was already open (e.g. persisted layout after reload), it can render the
+  // "Loading extensions…" placeholder until the lazy extension host boot completes. Wait for
+  // the panel body to settle (either loaded or errored) before returning.
+  await page.waitForFunction(() => {
+    const panel = document.querySelector('[data-testid="panel-extensions"]');
+    if (!panel) return false;
+    const text = panel.textContent ?? "";
+    return !text.includes("Loading extensions");
+  }, undefined, { timeout: 30_000 });
+}

@@ -77,6 +77,12 @@ export function ExtensionsPanel({
 }) {
   const [, bump] = React.useState(0);
   React.useEffect(() => manager.subscribe(() => bump((v) => v + 1)), [manager]);
+  React.useEffect(() => {
+    if (manager.ready) return;
+    void manager.loadBuiltInExtensions().catch(() => {
+      // Errors are surfaced via `manager.error` and rendered in the panel body.
+    });
+  }, [manager]);
 
   const [permissionsByExtension, setPermissionsByExtension] = React.useState<Record<string, GrantedPermissions>>({});
   const [permissionsError, setPermissionsError] = React.useState<string | null>(null);

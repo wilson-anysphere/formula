@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { gotoDesktop } from "./helpers";
+import { gotoDesktop, openExtensionsPanel } from "./helpers";
 
 test.describe("Extensions workbook API integration (desktop)", () => {
   test.use({ viewport: { width: 1280, height: 900 } });
@@ -142,7 +142,7 @@ test.describe("Extensions workbook API integration (desktop)", () => {
     await gotoDesktop(page);
     await grantSampleHelloPermissions(page);
 
-    await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+    await openExtensionsPanel(page);
     await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
     const openDemo = page.getByTestId("run-command-sampleHello.workbookOpenDemo");

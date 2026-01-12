@@ -50,6 +50,7 @@ export class DesktopExtensionHostManager {
   private readonly uiApi: ExtensionHostUiApi;
   private _ready = false;
   private _error: unknown = null;
+  private _loadPromise: Promise<void> | null = null;
 
   private _extensionApiModule: { url: string; revoke: () => void } | null = null;
   private readonly _loadedBuiltIns = new Map<string, { mainUrl: string; revoke: () => void }>();
@@ -145,54 +146,68 @@ export class DesktopExtensionHostManager {
 
   async loadBuiltInExtensions(): Promise<void> {
     if (this._ready) return;
-
-    let error: unknown = null;
-
-    try {
-      await this.loadBuiltInSampleHello();
-      await this.loadBuiltInE2eEvents();
-    } catch (err) {
-      error = err;
+    if (this._loadPromise) {
+      await this._loadPromise;
+      return;
     }
 
-    // Always run `startup()` so the Extensions UI can render (even with zero loaded extensions).
-    //
-    // Desktop also supports IndexedDB-installed extensions via WebExtensionManager. Use the
-    // manager's `loadAllInstalled()` boot helper so `onStartupFinished` + the initial
-    // `workbookOpened` event behave consistently for built-in *and* installed extensions.
-    try {
-      await this.getMarketplaceExtensionManager().loadAllInstalled({
-        onExtensionError: ({ id, version, error }) => {
-          const message = `Failed to load extension ${id}@${version}: ${String((error as any)?.message ?? error)}`;
-          // eslint-disable-next-line no-console
-          console.error(`[formula][desktop] ${message}`);
-          try {
-            void this.uiApi.showMessage?.(message, "error");
-          } catch {
-            // ignore UI errors
-          }
-        },
-      });
-    } catch (err) {
-      // Best-effort: surface startup failures but keep going so built-in extensions can run.
-      try {
-        const msg = String((err as any)?.message ?? err);
-        void this.uiApi.showMessage?.(`Failed to load installed extensions: ${msg}`, "error");
-      } catch {
-        // ignore
-      }
-      // Fallback: if loading installed extensions fails (IndexedDB unavailable/corrupted),
-      // still attempt to start the host so built-in extensions can run.
-      try {
-        await this.host.startup();
-      } catch (startupErr) {
-        error ??= startupErr;
-      }
-    }
+    this._loadPromise = (async () => {
+      let error: unknown = null;
 
-    this._error = error;
-    this._ready = true;
-    this.emit();
+      try {
+        await this.loadBuiltInSampleHello();
+        // The e2e-events helper extension is for Playwright coverage only; do not ship it in
+        // production builds.
+        if (import.meta.env.DEV) {
+          await this.loadBuiltInE2eEvents();
+        }
+      } catch (err) {
+        error = err;
+      }
+
+      // Always run `startup()` so the Extensions UI can render (even with zero loaded extensions).
+      //
+      // Desktop also supports IndexedDB-installed extensions via WebExtensionManager. Use the
+      // manager's `loadAllInstalled()` boot helper so `onStartupFinished` + the initial
+      // `workbookOpened` event behave consistently for built-in *and* installed extensions.
+      try {
+        await this.getMarketplaceExtensionManager().loadAllInstalled({
+          onExtensionError: ({ id, version, error }) => {
+            const message = `Failed to load extension ${id}@${version}: ${String((error as any)?.message ?? error)}`;
+            // eslint-disable-next-line no-console
+            console.error(`[formula][desktop] ${message}`);
+            try {
+              void this.uiApi.showMessage?.(message, "error");
+            } catch {
+              // ignore UI errors
+            }
+          },
+        });
+      } catch (err) {
+        // Best-effort: surface startup failures but keep going so built-in extensions can run.
+        try {
+          const msg = String((err as any)?.message ?? err);
+          void this.uiApi.showMessage?.(`Failed to load installed extensions: ${msg}`, "error");
+        } catch {
+          // ignore
+        }
+        // Fallback: if loading installed extensions fails (IndexedDB unavailable/corrupted),
+        // still attempt to start the host so built-in extensions can run.
+        try {
+          await this.host.startup();
+        } catch (startupErr) {
+          error ??= startupErr;
+        }
+      }
+
+      this._error = error;
+      this._ready = true;
+      this.emit();
+    })().finally(() => {
+      this._loadPromise = null;
+    });
+
+    await this._loadPromise;
   }
 
   private async loadBuiltInSampleHello(): Promise<void> {

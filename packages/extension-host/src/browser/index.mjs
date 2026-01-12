@@ -787,6 +787,19 @@ class BrowserExtensionHost {
     const extension = this._extensions.get(extensionId);
     if (!extension) throw new Error(`Extension not loaded: ${extensionId}`);
 
+    // Executing a contributed command is a user-facing UI surface. Even if the extension has
+    // already activated (and registered its command handlers), re-check `ui.commands` so revoking
+    // permissions takes effect immediately without requiring a full host restart.
+    await this._permissionManager.ensurePermissions(
+      {
+        extensionId: extension.id,
+        displayName: extension.manifest.displayName ?? extension.manifest.name,
+        declaredPermissions: extension.manifest.permissions ?? []
+      },
+      ["ui.commands"],
+      { apiKey: "commands.executeCommand" }
+    );
+
     if (!extension.active) {
       const activationEvent = `onCommand:${commandId}`;
       if (!(extension.manifest.activationEvents ?? []).includes(activationEvent)) {
