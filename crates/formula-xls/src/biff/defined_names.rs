@@ -214,18 +214,28 @@ fn parse_biff8_name_record(
             cursor.skip_bytes(cch - 1)?;
         }
 
-        // `chKey` is documented as a keyboard shortcut for user-defined names; when `fBuiltin` is
-        // set, some writers still populate `chKey`. Empirically Excel appears to prefer the built-in
-        // id stored in `rgchName` and treat `chKey` as a shortcut.
-        let id = match (id_from_name, ch_key) {
-            (Some(id_from_name), ch_key) if ch_key != 0 && id_from_name != ch_key => {
-                log::debug!(
-                    "NAME record built-in id mismatch: rgchName=0x{id_from_name:02X} chKey=0x{ch_key:02X} (using rgchName)"
-                );
+        let id = match id_from_name {
+            Some(id_from_name) => {
+                // `chKey` is documented as a keyboard shortcut. Some files in the wild populate
+                // both `chKey` and the built-in id byte stored in `rgchName`, but the values can
+                // disagree. Empirically Excel prefers the `rgchName` id, so treat `chKey` as a
+                // shortcut and keep the built-in id from the name payload.
+                if ch_key != 0 && id_from_name != ch_key {
+                    log::debug!(
+                        "NAME record built-in id mismatch: rgchName=0x{id_from_name:02X} chKey=0x{ch_key:02X} (using rgchName)"
+                    );
+                }
                 id_from_name
             }
-            (Some(id_from_name), _) => id_from_name,
-            (None, ch_key) => ch_key,
+            None => {
+                // Best-effort fallback for malformed NAME records that omit `rgchName`.
+                if ch_key != 0 {
+                    log::debug!(
+                        "NAME record missing built-in id in rgchName; using chKey=0x{ch_key:02X}"
+                    );
+                }
+                ch_key
+            }
         };
 
         (Some(id), builtin_name_to_string(id))
