@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-// `pnpm -C apps/desktop test:e2e -- ...` currently forwards a literal `"--"` argument.
+// `pnpm -C apps/desktop test:e2e -- ...` forwards a literal `"--"` argument.
 // Playwright treats `--` as an option-parsing sentinel, so any subsequent flags (e.g. `--grep`)
 // are interpreted as positional file patterns instead of options. Strip it so developers can
 // pass Playwright CLI flags through `pnpm test:e2e -- ...` reliably.

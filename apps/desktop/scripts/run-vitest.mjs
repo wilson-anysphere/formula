@@ -4,7 +4,12 @@ import { spawn } from "node:child_process";
 // callsites pass file paths rooted at the repo (e.g. `apps/desktop/src/...`).
 // Normalize those to paths relative to the desktop package so Vitest can find them.
 const PREFIX = "apps/desktop/";
-const normalizedArgs = process.argv.slice(2).map((arg) => {
+let args = process.argv.slice(2);
+// Unlike npm/yarn, pnpm forwards a literal `--` separator to the underlying command.
+// Strip it so `pnpm -C apps/desktop vitest -- run <file>` behaves as expected.
+if (args[0] === "--") args = args.slice(1);
+
+const normalizedArgs = args.map((arg) => {
   if (typeof arg !== "string") return arg;
   if (arg.startsWith(PREFIX)) return arg.slice(PREFIX.length);
   return arg;
@@ -29,4 +34,3 @@ child.on("error", (err) => {
   console.error(err);
   process.exit(1);
 });
-
