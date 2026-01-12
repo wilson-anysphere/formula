@@ -2843,7 +2843,6 @@ fn build_defined_names_external_workbook_refs_workbook_stream() -> Vec<u8> {
     // This SUPBOOK is only used for the PtgNameX workbook-scoped external-name test.
     push_record(&mut globals, RECORD_SUPBOOK, &supbook_external("Book2.xlsx", &[]));
     push_record(&mut globals, RECORD_EXTERNNAME, &externname_record("WBName"));
-
     push_record(
         &mut globals,
         RECORD_EXTERNSHEET,
@@ -2866,8 +2865,6 @@ fn build_defined_names_external_workbook_refs_workbook_stream() -> Vec<u8> {
         RECORD_NAME,
         &name_record("ExtSpan", 0, false, None, &ptg_ref3d(1, 0, 0)),
     );
-
-    // External defined name reference via PtgNameX: should render as `'[Book1.xlsx]SheetA'!ExtDefined`.
     push_record(
         &mut globals,
         RECORD_NAME,
@@ -3584,7 +3581,6 @@ fn ptg_namex(ixti: u16, iname: u16) -> Vec<u8> {
     out.extend_from_slice(&0u16.to_le_bytes());
     out
 }
-
 fn build_outline_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -6035,19 +6031,19 @@ fn supbook_external(workbook_name: &str, sheet_names: &[&str]) -> Vec<u8> {
 }
 
 fn externname_record(name: &str) -> Vec<u8> {
-    // Minimal EXTERNNAME record payload (best-effort) matching the parser heuristic in
-    // `crates/formula-xls/src/biff/supbook.rs`.
+    // EXTERNNAME record payload (best-effort fixture encoding).
     //
-    // Layout:
+    // The BIFF8 EXTERNNAME structure is complex; the importer’s SUPBOOK parser currently expects
+    // the common layout:
     //   [grbit: u16][reserved: u32][cch: u8][rgchName: XLUnicodeStringNoCch]
     let mut out = Vec::<u8>::new();
     out.extend_from_slice(&0u16.to_le_bytes()); // grbit
     out.extend_from_slice(&0u32.to_le_bytes()); // reserved
-    out.push(
-        name.len()
-            .try_into()
-            .expect("EXTERNNAME too long for u8 cch"),
-    ); // cch
+    let cch: u8 = name
+        .len()
+        .try_into()
+        .expect("EXTERNNAME too long for u8 cch");
+    out.push(cch);
     write_unicode_string_no_cch(&mut out, name);
     out
 }

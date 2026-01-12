@@ -1481,6 +1481,7 @@ fn format_external_workbook_name(workbook: &str) -> String {
         .unwrap_or(trimmed);
     format!("[{inner}]")
 }
+
 fn quote_sheet_name_if_needed(name: &str) -> String {
     if is_unquoted_sheet_name(name) {
         return name.to_string();
