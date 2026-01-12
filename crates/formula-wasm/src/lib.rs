@@ -3445,6 +3445,165 @@ mod tests {
     }
 
     #[test]
+    fn apply_operation_move_range_updates_inputs_and_returns_moved_ranges() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(42.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "C1", json!("=A1")).unwrap();
+
+        let result = wb
+            .apply_operation_internal(EditOpDto::MoveRange {
+                sheet: DEFAULT_SHEET.to_string(),
+                src: "A1:B1".to_string(),
+                dst_top_left: "A2".to_string(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            wb.engine.get_cell_value(DEFAULT_SHEET, "A2"),
+            EngineValue::Number(42.0)
+        );
+        assert_eq!(
+            wb.engine.get_cell_formula(DEFAULT_SHEET, "B2"),
+            Some("=A2")
+        );
+        assert_eq!(
+            wb.engine.get_cell_formula(DEFAULT_SHEET, "C1"),
+            Some("=A2"),
+            "formulas outside the moved range should follow the moved cells"
+        );
+        assert_eq!(wb.engine.get_cell_value(DEFAULT_SHEET, "A1"), EngineValue::Blank);
+        assert_eq!(wb.engine.get_cell_value(DEFAULT_SHEET, "B1"), EngineValue::Blank);
+
+        let sheet_cells = wb.sheets.get(DEFAULT_SHEET).unwrap();
+        assert_eq!(sheet_cells.get("A2"), Some(&json!(42.0)));
+        assert_eq!(sheet_cells.get("B2"), Some(&json!("=A2")));
+        assert_eq!(sheet_cells.get("C1"), Some(&json!("=A2")));
+        assert!(!sheet_cells.contains_key("A1"));
+        assert!(!sheet_cells.contains_key("B1"));
+
+        assert_eq!(
+            result.moved_ranges,
+            vec![EditMovedRangeDto {
+                sheet: DEFAULT_SHEET.to_string(),
+                from: "A1:B1".to_string(),
+                to: "A2:B2".to_string(),
+            }]
+        );
+
+        assert!(
+            result.formula_rewrites.contains(&EditFormulaRewriteDto {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "B2".to_string(),
+                before: "=A1".to_string(),
+                after: "=A2".to_string(),
+            }),
+            "expected formula rewrite for moved formula cell"
+        );
+        assert!(
+            result.formula_rewrites.contains(&EditFormulaRewriteDto {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "C1".to_string(),
+                before: "=A1".to_string(),
+                after: "=A2".to_string(),
+            }),
+            "expected formula rewrite for external reference"
+        );
+    }
+
+    #[test]
+    fn apply_operation_copy_range_adjusts_relative_references() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1")).unwrap();
+
+        let result = wb
+            .apply_operation_internal(EditOpDto::CopyRange {
+                sheet: DEFAULT_SHEET.to_string(),
+                src: "B1".to_string(),
+                dst_top_left: "B2".to_string(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            wb.engine.get_cell_formula(DEFAULT_SHEET, "B1"),
+            Some("=A1")
+        );
+        assert_eq!(
+            wb.engine.get_cell_formula(DEFAULT_SHEET, "B2"),
+            Some("=A2"),
+            "copied formulas should adjust relative references to the new location"
+        );
+
+        let sheet_cells = wb.sheets.get(DEFAULT_SHEET).unwrap();
+        assert_eq!(sheet_cells.get("B1"), Some(&json!("=A1")));
+        assert_eq!(sheet_cells.get("B2"), Some(&json!("=A2")));
+
+        assert!(result.moved_ranges.is_empty());
+        assert!(
+            result.formula_rewrites.contains(&EditFormulaRewriteDto {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "B2".to_string(),
+                before: "=A1".to_string(),
+                after: "=A2".to_string(),
+            }),
+            "expected formula rewrite for copied formula cell"
+        );
+    }
+
+    #[test]
+    fn apply_operation_fill_repeats_formulas_and_updates_relative_references() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "C1", json!("=A1+B1"))
+            .unwrap();
+
+        let result = wb
+            .apply_operation_internal(EditOpDto::Fill {
+                sheet: DEFAULT_SHEET.to_string(),
+                src: "C1".to_string(),
+                dst: "C1:C3".to_string(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            wb.engine.get_cell_formula(DEFAULT_SHEET, "C1"),
+            Some("=A1+B1")
+        );
+        assert_eq!(
+            wb.engine.get_cell_formula(DEFAULT_SHEET, "C2"),
+            Some("=A2+B2")
+        );
+        assert_eq!(
+            wb.engine.get_cell_formula(DEFAULT_SHEET, "C3"),
+            Some("=A3+B3")
+        );
+
+        let sheet_cells = wb.sheets.get(DEFAULT_SHEET).unwrap();
+        assert_eq!(sheet_cells.get("C1"), Some(&json!("=A1+B1")));
+        assert_eq!(sheet_cells.get("C2"), Some(&json!("=A2+B2")));
+        assert_eq!(sheet_cells.get("C3"), Some(&json!("=A3+B3")));
+
+        assert!(result.moved_ranges.is_empty());
+        assert!(
+            result.formula_rewrites.contains(&EditFormulaRewriteDto {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "C2".to_string(),
+                before: "=A1+B1".to_string(),
+                after: "=A2+B2".to_string(),
+            }),
+            "expected formula rewrite for filled cell C2"
+        );
+        assert!(
+            result.formula_rewrites.contains(&EditFormulaRewriteDto {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "C3".to_string(),
+                before: "=A1+B1".to_string(),
+                after: "=A3+B3".to_string(),
+            }),
+            "expected formula rewrite for filled cell C3"
+        );
+    }
+
+    #[test]
     fn apply_operation_clears_stale_spill_outputs_on_next_recalc() {
         let mut wb = WorkbookState::new_with_default_sheet();
         wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("=SEQUENCE(1,2)"))
