@@ -168,12 +168,12 @@ export function registerBuiltinCommands(params: {
 
   commandRegistry.registerBuiltinCommand(
     "ai.inlineEdit",
-    "Inline AI Edit…",
+    t("command.ai.inlineEdit"),
     () => app.openInlineAiEdit(),
     {
-      category: "AI",
+      category: t("commandCategory.ai"),
       icon: null,
-      description: "Use AI to transform the current selection",
+      description: t("commandDescription.ai.inlineEdit"),
       keywords: ["ai", "inline edit", "transform"],
     },
   );
@@ -576,7 +576,7 @@ export function registerBuiltinCommands(params: {
     t("command.edit.clearContents"),
     () => app.clearContents(),
     {
-      category: "Edit",
+      category: t("commandCategory.editing"),
       icon: null,
       description: t("commandDescription.edit.clearContents"),
       keywords: ["clear", "contents", "delete"],
