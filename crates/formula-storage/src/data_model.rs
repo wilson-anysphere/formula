@@ -816,11 +816,17 @@ pub(crate) fn load_data_model_schema(
             "#,
         )?;
         let col_rows = col_stmt.query_map(params![table_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, Option<String>>(0).ok().flatten(),
+                row.get::<_, Option<String>>(1).ok().flatten(),
+            ))
         })?;
         let mut columns = Vec::new();
         for col in col_rows {
             let Ok((name, column_type_raw)) = col else {
+                continue;
+            };
+            let (Some(name), Some(column_type_raw)) = (name, column_type_raw) else {
                 continue;
             };
             let column_type: ColumnTypeV1 = match serde_json::from_str(&column_type_raw) {
@@ -858,23 +864,36 @@ pub(crate) fn load_data_model_schema(
     )?;
     let rel_rows = rel_stmt.query_map(params![&workbook_id_str], |row| {
         Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, String>(4)?,
-            row.get::<_, String>(5)?,
-            row.get::<_, String>(6)?,
-            row.get::<_, i64>(7)?,
-            row.get::<_, i64>(8)?,
+            row.get::<_, Option<String>>(0).ok().flatten(),
+            row.get::<_, Option<String>>(1).ok().flatten(),
+            row.get::<_, Option<String>>(2).ok().flatten(),
+            row.get::<_, Option<String>>(3).ok().flatten(),
+            row.get::<_, Option<String>>(4).ok().flatten(),
+            row.get::<_, Option<String>>(5).ok().flatten(),
+            row.get::<_, Option<String>>(6).ok().flatten(),
+            row.get::<_, Option<i64>>(7).ok().flatten(),
+            row.get::<_, Option<i64>>(8).ok().flatten(),
         ))
     })?;
     let mut relationships = Vec::new();
     for row in rel_rows {
-        let Ok((name, from_table, from_column, to_table, to_column, card, dir, active, ri)) = row
+        let Ok((name, from_table, from_column, to_table, to_column, card, dir, active, ri)) = row else {
+            continue;
+        };
+        let (
+            Some(name),
+            Some(from_table),
+            Some(from_column),
+            Some(to_table),
+            Some(to_column),
+            Some(card),
+            Some(dir),
+        ) = (name, from_table, from_column, to_table, to_column, card, dir)
         else {
             continue;
         };
+        let active = active.unwrap_or(0);
+        let ri = ri.unwrap_or(0);
         let Ok(cardinality) = parse_cardinality(&card) else {
             continue;
         };
@@ -904,8 +923,8 @@ pub(crate) fn load_data_model_schema(
     )?;
     let measure_rows = measure_stmt.query_map(params![&workbook_id_str], |row| {
         Ok(DataModelMeasureSchema {
-            name: row.get(0)?,
-            expression: row.get(1)?,
+            name: row.get(0).unwrap_or_default(),
+            expression: row.get(1).unwrap_or_default(),
         })
     })?;
     let mut measures = Vec::new();
@@ -926,9 +945,9 @@ pub(crate) fn load_data_model_schema(
     )?;
     let calc_rows = calc_stmt.query_map(params![&workbook_id_str], |row| {
         Ok(DataModelCalculatedColumnSchema {
-            table: row.get(0)?,
-            name: row.get(1)?,
-            expression: row.get(2)?,
+            table: row.get(0).unwrap_or_default(),
+            name: row.get(1).unwrap_or_default(),
+            expression: row.get(2).unwrap_or_default(),
         })
     })?;
     let mut calculated_columns = Vec::new();
