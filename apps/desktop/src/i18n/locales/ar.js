@@ -8,6 +8,7 @@ export const ar = {
   "prompt.unsavedChanges": "لديك تغييرات غير محفوظة.",
   "prompt.unsavedChangesDiscardConfirm": "لديك تغييرات غير محفوظة. هل تريد تجاهلها؟",
   "commandPalette.command.checkForUpdates": "التحقق من التحديثات",
+  "commandPalette.goToSuggestion": "انتقل إلى {query}",
   "commandPalette.group.recent": "الأخيرة",
   "commandPalette.group.commands": "الأوامر",
   "commandPalette.group.functions": "الدوال",

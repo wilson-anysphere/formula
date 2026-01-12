@@ -8,6 +8,7 @@ export const deDE = {
   "prompt.unsavedChanges": "Sie haben ungespeicherte Änderungen.",
   "prompt.unsavedChangesDiscardConfirm": "Sie haben ungespeicherte Änderungen. Verwerfen?",
   "commandPalette.command.checkForUpdates": "Nach Updates suchen",
+  "commandPalette.goToSuggestion": "Gehe zu {query}",
   "commandPalette.group.recent": "KÜRZLICH",
   "commandPalette.group.commands": "BEFEHLE",
   "commandPalette.group.functions": "FUNKTIONEN",
