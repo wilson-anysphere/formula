@@ -34,9 +34,11 @@ class CountingSpreadsheet implements SpreadsheetApi {
     // no-op
   }
 
-  applyFormatting(): number {
+  applyFormatting(range: any): number {
     this.formatCalls += 1;
-    return 0;
+    const rows = Number(range?.endRow) - Number(range?.startRow) + 1;
+    const cols = Number(range?.endCol) - Number(range?.startCol) + 1;
+    return rows * cols;
   }
 
   getLastUsedRow(): number {
@@ -87,7 +89,8 @@ describe("ToolExecutor range size limits", () => {
     if (!result.ok || result.tool !== "apply_formatting") {
       throw new Error(`Expected apply_formatting to succeed: ${result.error?.message ?? "unknown error"}`);
     }
-    expect(result.data?.formatted_cells).toBe(0);
+    // Range is 26 columns by 8,000 rows.
+    expect(result.data?.formatted_cells).toBe(208_000);
     expect(api.formatCalls).toBe(1);
     // Ensure we still don't materialize cell grids for formatting operations.
     expect(api.readCalls).toBe(0);
