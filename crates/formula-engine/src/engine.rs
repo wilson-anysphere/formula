@@ -7839,9 +7839,8 @@ fn bytecode_expr_is_eligible_inner(
             bytecode::Value::Missing => true,
             bytecode::Value::Error(_) => true,
             // Array literals are supported by the bytecode runtime as full typed arrays, but not
-            // all bytecode function implementations support Excel's array-lifting semantics yet
-            // (e.g. `ABS({1;2})` should spill via the AST evaluator). Gate array literals by
-            // context using the `allow_array_literals` flag.
+            // all bytecode function implementations support Excel's array-lifting semantics yet.
+            // Gate array literals by context using the `allow_array_literals` flag.
             bytecode::Value::Array(_) => allow_array_literals,
             bytecode::Value::Range(_) | bytecode::Value::MultiRange(_) | bytecode::Value::Lambda(_) => {
                 false
