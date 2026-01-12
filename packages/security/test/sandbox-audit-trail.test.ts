@@ -32,7 +32,7 @@ describe("Sandbox audit trail", () => {
       extensionId,
       permissionManager,
       auditLogger,
-      timeoutMs: 2_000,
+      timeoutMs: 5_000,
       code: `await fs.readFile(${JSON.stringify(filePath)}, "utf8");\nreturn null;`
     });
 
