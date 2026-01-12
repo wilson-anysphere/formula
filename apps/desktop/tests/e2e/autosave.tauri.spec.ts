@@ -148,4 +148,132 @@ test.describe("AutoSave (tauri)", () => {
       { timeout: 12_000 },
     );
   });
+
+  test("prompts for Save As when enabling AutoSave on an unsaved workbook and reverts to Off on cancel", async ({ page }) => {
+    await page.addInitScript(() => {
+      const listeners: Record<string, any> = {};
+      const invokes: Array<{ cmd: string; args: any }> = [];
+      let dialogSaveCalls = 0;
+
+      (window as any).__tauriListeners = listeners;
+      (window as any).__tauriInvokes = invokes;
+      (window as any).__tauriDialogSaveCalls = () => dialogSaveCalls;
+
+      try {
+        localStorage.removeItem("formula.desktop.autoSave.enabled");
+      } catch {
+        // ignore
+      }
+
+      // Avoid modal prompts blocking the test.
+      window.confirm = () => true;
+
+      (window as any).__TAURI__ = {
+        core: {
+          invoke: async (cmd: string, args: any) => {
+            invokes.push({ cmd, args });
+            switch (cmd) {
+              case "new_workbook":
+                return {
+                  path: null,
+                  origin_path: null,
+                  sheets: [{ id: "Sheet1", name: "Sheet1" }],
+                };
+
+              case "get_sheet_used_range":
+                return { start_row: 0, end_row: 0, start_col: 0, end_col: 0 };
+
+              case "get_range": {
+                const startRow = Number(args?.start_row ?? 0);
+                const endRow = Number(args?.end_row ?? startRow);
+                const startCol = Number(args?.start_col ?? 0);
+                const endCol = Number(args?.end_col ?? startCol);
+                const rows = Math.max(0, endRow - startRow + 1);
+                const cols = Math.max(0, endCol - startCol + 1);
+
+                const values = Array.from({ length: rows }, () =>
+                  Array.from({ length: cols }, () => ({ value: null, formula: null, display_value: "" })),
+                );
+
+                return { values, start_row: startRow, start_col: startCol };
+              }
+
+              case "list_defined_names":
+                return [];
+              case "list_tables":
+                return [];
+              case "get_workbook_theme_palette":
+                return null;
+
+              case "get_macro_security_status":
+                return { has_macros: false, trust: "trusted_always" };
+              case "set_macro_ui_context":
+                return null;
+              case "fire_workbook_open":
+                return { ok: true, output: [], updates: [] };
+
+              case "set_cell":
+              case "set_range":
+              case "save_workbook":
+              case "mark_saved":
+                return null;
+
+              default:
+                // Best-effort: ignore unrelated invocations so new backend calls don't break the test.
+                return null;
+            }
+          },
+        },
+        event: {
+          listen: async (name: string, handler: any) => {
+            listeners[name] = handler;
+            return () => {
+              delete listeners[name];
+            };
+          },
+          emit: async () => {},
+        },
+        dialog: {
+          open: async () => null,
+          save: async () => {
+            dialogSaveCalls += 1;
+            return null;
+          },
+        },
+        window: {
+          getCurrentWebviewWindow: () => ({
+            hide: async () => {},
+            close: async () => {},
+          }),
+        },
+      };
+    });
+
+    await gotoDesktop(page);
+
+    // Create a new (unsaved) workbook so enabling AutoSave requires a Save As.
+    const ribbon = page.getByTestId("ribbon-root");
+    await ribbon.getByRole("tab", { name: "File" }).click();
+    await ribbon.getByTestId("file-new").click();
+
+    await page.waitForFunction(() => {
+      const invokes = (window as any).__tauriInvokes as Array<{ cmd: string; args: any }> | undefined;
+      return Boolean(invokes?.some((entry) => entry.cmd === "new_workbook"));
+    });
+
+    // Attempt to enable AutoSave; Save As should be prompted (and cancelled by our dialog stub).
+    await ribbon.getByRole("tab", { name: "File" }).click();
+    const autoSave = ribbon.getByTestId("file-auto-save");
+    await expect(autoSave).toBeVisible();
+    await autoSave.click();
+
+    await page.waitForFunction(() => typeof (window as any).__tauriDialogSaveCalls === "function" && (window as any).__tauriDialogSaveCalls() > 0);
+
+    // AutoSave should revert to Off after the user cancels Save As.
+    await page.waitForFunction(() => localStorage.getItem("formula.desktop.autoSave.enabled") === "false");
+
+    await ribbon.getByRole("tab", { name: "File" }).click();
+    const autoSaveAfter = ribbon.getByTestId("file-auto-save");
+    await expect(autoSaveAfter).toHaveAttribute("aria-checked", "false");
+  });
 });
