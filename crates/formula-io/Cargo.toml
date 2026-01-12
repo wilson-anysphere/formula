@@ -3,22 +3,23 @@ name = "formula-io"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+# Keep Parquet support behind a feature so `formula-io` stays lightweight by default.
+parquet = ["dep:formula-columnar"]
+
 [dependencies]
 cfb = "0.10"
 encoding_rs = "0.8"
+formula-columnar = { path = "../formula-columnar", optional = true, features = ["arrow"] }
 formula-format = { path = "../formula-format" }
 formula-model = { path = "../formula-model" }
-formula-columnar = { path = "../formula-columnar", optional = true, features = ["arrow"] }
 formula-xlsx = { path = "../formula-xlsx" }
 formula-xls = { path = "../formula-xls" }
 formula-xlsb = { path = "../formula-xlsb" }
 tempfile = "3.10"
 thiserror = "1.0"
 zip = { version = "2.1", default-features = false }
-
-[features]
-default = []
-parquet = ["dep:formula-columnar"]
 
 [dev-dependencies]
 xlsx-diff = { path = "../xlsx-diff" }

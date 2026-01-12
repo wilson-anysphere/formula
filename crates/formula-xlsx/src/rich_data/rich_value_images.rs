@@ -212,6 +212,16 @@ fn parse_rich_value_part(part_name: &str, bytes: &[u8]) -> Result<Vec<ParsedRv>,
                     },
                 });
             }
+            Event::Empty(e) if e.local_name().as_ref() == b"rv" => {
+                let explicit_index = parse_rv_explicit_index(&e)?;
+                out.push(ParsedRv {
+                    explicit_index,
+                    entry: RichValueEntry {
+                        source_part: part_name.to_string(),
+                        embed_rel_id: None,
+                    },
+                });
+            }
             Event::Eof => break,
             _ => {}
         }

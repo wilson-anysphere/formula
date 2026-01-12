@@ -1,8 +1,13 @@
 #![cfg(feature = "parquet")]
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use formula_io::{open_workbook, save_workbook};
+use formula_columnar::{
+    parquet::write_columnar_to_parquet_bytes, ColumnSchema, ColumnType, ColumnarTableBuilder,
+    TableOptions, Value,
+};
+use formula_io::{open_workbook, save_workbook, Workbook};
 use formula_model::CellValue;
 
 fn parquet_fixture_path(rel: &str) -> PathBuf {
@@ -12,7 +17,62 @@ fn parquet_fixture_path(rel: &str) -> PathBuf {
 }
 
 #[test]
-fn parquet_import_can_export_to_xlsx() {
+fn opens_parquet_and_saves_as_xlsx() {
+    let schema = vec![
+        ColumnSchema {
+            name: "col1".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "col2".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+
+    let mut builder = ColumnarTableBuilder::new(schema, TableOptions::default());
+    builder.append_row(&[
+        Value::Number(1.0),
+        Value::String(Arc::<str>::from("hello")),
+    ]);
+    builder.append_row(&[
+        Value::Number(2.0),
+        Value::String(Arc::<str>::from("world")),
+    ]);
+    let table = builder.finalize();
+
+    let bytes = write_columnar_to_parquet_bytes(&table).expect("write parquet bytes");
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let parquet_path = dir.path().join("data.parquet");
+    std::fs::write(&parquet_path, bytes).expect("write parquet file");
+
+    let wb = open_workbook(&parquet_path).expect("open parquet workbook");
+    match wb {
+        Workbook::Model(_) => {}
+        other => panic!("expected Workbook::Model, got {other:?}"),
+    }
+
+    let out_path = dir.path().join("out.xlsx");
+    save_workbook(&wb, &out_path).expect("save xlsx");
+
+    let file = std::fs::File::open(&out_path).expect("open output xlsx");
+    let model = formula_io::xlsx::read_workbook_from_reader(file).expect("read output xlsx");
+    let sheet = model.sheets.first().expect("sheet");
+
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value_a1("B1").unwrap(),
+        CellValue::String("hello".to_string())
+    );
+    assert_eq!(sheet.value_a1("A2").unwrap(), CellValue::Number(2.0));
+    assert_eq!(
+        sheet.value_a1("B2").unwrap(),
+        CellValue::String("world".to_string())
+    );
+}
+
+#[test]
+fn parquet_fixture_can_export_to_xlsx() {
     let parquet_path = parquet_fixture_path("simple.parquet");
     let wb = open_workbook(&parquet_path).expect("open parquet workbook");
 
@@ -34,4 +94,3 @@ fn parquet_import_can_export_to_xlsx() {
     assert_eq!(sheet.value_a1("C2").unwrap(), CellValue::Boolean(false));
     assert_eq!(sheet.value_a1("D3").unwrap(), CellValue::Number(3.75));
 }
-

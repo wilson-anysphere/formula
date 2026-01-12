@@ -1,7 +1,11 @@
+use std::borrow::Cow;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
+use encoding_rs::WINDOWS_1252;
+use formula_model::import::{import_csv_into_workbook, CsvImportError, CsvOptions, CsvTextEncoding};
+use formula_model::sanitize_sheet_name;
 use tempfile::NamedTempFile;
 
 #[derive(Debug)]
@@ -43,14 +47,15 @@ fn atomic_write<E>(
         },
     }
 }
-
 pub use formula_xls as xls;
 pub use formula_xlsb as xlsb;
 pub use formula_xlsx as xlsx;
-use formula_model::import::{import_csv_into_workbook, CsvImportError, CsvOptions, CsvTextEncoding};
-use formula_model::sanitize_sheet_name;
 
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+const PARQUET_MAGIC: [u8; 4] = *b"PAR1";
+
+// Maximum bytes to inspect for text/CSV sniffing.
+const TEXT_SNIFF_LEN: usize = 16 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -60,7 +65,9 @@ pub enum Error {
         "encrypted workbook not supported: workbook `{path}` is password-protected/encrypted; remove password protection in Excel and try again"
     )]
     EncryptedWorkbook { path: PathBuf },
-    #[error("parquet support not enabled; enable formula-io feature `parquet`")]
+    #[error(
+        "parquet support not enabled: workbook `{path}` appears to be a `.parquet` file; rebuild with the `formula-io/parquet` feature"
+    )]
     ParquetSupportNotEnabled { path: PathBuf },
     #[error("failed to open workbook `{path}`: {source}")]
     OpenIo {
@@ -167,6 +174,80 @@ pub enum WorkbookFormat {
     Unknown,
 }
 
+fn looks_like_text_csv_prefix(prefix: &[u8]) -> bool {
+    if prefix.is_empty() {
+        return false;
+    }
+
+    // Avoid misclassifying binary formats as text.
+    if prefix.iter().any(|b| *b == 0) {
+        return false;
+    }
+
+    // Reject disallowed control bytes (keep common whitespace used in delimited text).
+    for &b in prefix {
+        if b < 0x20 && !matches!(b, b'\t' | b'\n' | b'\r') {
+            return false;
+        }
+        if b == 0x7F {
+            return false;
+        }
+    }
+
+    let prefix = prefix
+        .strip_prefix(&[0xEF, 0xBB, 0xBF]) // UTF-8 BOM (common in Excel-exported CSVs)
+        .unwrap_or(prefix);
+
+    // Prefer UTF-8, but accept Windows-1252 (matching CSV import behavior).
+    let decoded: Cow<'_, str> = match std::str::from_utf8(prefix) {
+        Ok(s) => Cow::Borrowed(s),
+        Err(_) => {
+            let (cow, _, _) = WINDOWS_1252.decode(prefix);
+            cow
+        }
+    };
+    let decoded = decoded.as_ref();
+
+    // Require at least one newline so we don't classify single-line text/binary fragments as CSV.
+    if !decoded.contains('\n') && !decoded.contains('\r') {
+        return false;
+    }
+
+    // Require a plausible delimiter.
+    if !(decoded.contains(',')
+        || decoded.contains(';')
+        || decoded.contains('\t')
+        || decoded.contains('|'))
+    {
+        return false;
+    }
+
+    // Conservative: reject inputs with a high proportion of control characters (excluding common
+    // whitespace used in delimited text).
+    let mut control = 0usize;
+    let mut total = 0usize;
+    for ch in decoded.chars().take(2048) {
+        total += 1;
+        if ch.is_control() && !matches!(ch, '\n' | '\r' | '\t') {
+            control += 1;
+        }
+    }
+    if total > 0 && control * 100 > total {
+        // >1% control chars is unlikely for a CSV/text file.
+        return false;
+    }
+
+    true
+}
+
+fn sniff_text_csv<R: Read + Seek>(reader: &mut R) -> Result<bool, std::io::Error> {
+    reader.seek(std::io::SeekFrom::Start(0))?;
+    let mut buf = vec![0u8; TEXT_SNIFF_LEN];
+    let n = reader.read(&mut buf)?;
+    buf.truncate(n);
+    Ok(looks_like_text_csv_prefix(&buf))
+}
+
 /// Detect the workbook format based on file signatures (and ZIP part names when needed).
 ///
 /// This is intended to support opening workbooks even when the file extension is missing
@@ -205,7 +286,7 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
         }
         return Ok(WorkbookFormat::Xls);
     }
-    if header.len() >= 4 && header[..4] == *b"PAR1" {
+    if header.len() >= PARQUET_MAGIC.len() && header[..PARQUET_MAGIC.len()] == PARQUET_MAGIC {
         return Ok(WorkbookFormat::Parquet);
     }
 
@@ -259,27 +340,13 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
         return Ok(WorkbookFormat::Unknown);
     }
 
-    // Fall back to CSV when the content looks like text (even if the extension is missing or
-    // incorrect).
-    //
-    // Keep this conservative by only checking a small prefix and requiring that it decodes as
-    // UTF-8 or Windows-1252 without obvious binary markers.
-    const TEXT_SNIFF_LEN: usize = 8 * 1024;
-    let mut prefix = Vec::with_capacity(TEXT_SNIFF_LEN.min(header.len()));
-    prefix.extend_from_slice(header);
-    if prefix.len() < TEXT_SNIFF_LEN {
-        let mut buf = vec![0u8; TEXT_SNIFF_LEN - prefix.len()];
-        let m = file.read(&mut buf).map_err(|source| Error::DetectIo {
-            path: path.to_path_buf(),
-            source,
-        })?;
-        prefix.extend_from_slice(&buf[..m]);
-    }
-    if looks_like_text_csv(&prefix) {
+    // Only consider CSV/text once we have ruled out known binary formats.
+    if sniff_text_csv(&mut file).map_err(|source| Error::DetectIo {
+        path: path.to_path_buf(),
+        source,
+    })? {
         return Ok(WorkbookFormat::Csv);
     }
-
-    // Only consider CSV via extension once we have ruled out known binary formats.
     let ext = path
         .extension()
         .and_then(|s| s.to_str())
@@ -288,71 +355,11 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
     if ext == "csv" {
         return Ok(WorkbookFormat::Csv);
     }
+    if ext == "parquet" {
+        return Ok(WorkbookFormat::Parquet);
+    }
 
     Ok(WorkbookFormat::Unknown)
-}
-
-fn looks_like_text_csv(sample: &[u8]) -> bool {
-    use encoding_rs::WINDOWS_1252;
-
-    // Empty input is valid for "text-ness"; downstream CSV import will produce a more specific
-    // error (`CsvImportError::EmptyInput`) if needed.
-    if sample.is_empty() {
-        return true;
-    }
-
-    // If the sample doesn't contain any obvious CSV markers (delimiter/line breaks), don't treat
-    // it as CSV. This keeps format detection conservative for arbitrary plaintext files.
-    //
-    // Single-cell CSV files (no delimiters, no newlines) are still supported when the extension
-    // is explicitly `.csv`.
-    if !sample
-        .iter()
-        .any(|&b| matches!(b, b',' | b';' | b'\t' | b'\n' | b'\r'))
-    {
-        return false;
-    }
-
-    // Reject obvious binary: NUL bytes or disallowed control characters.
-    //
-    // Allow only common whitespace controls used by text formats.
-    for &b in sample {
-        if b == 0 {
-            return false;
-        }
-        if b < 0x20 && !matches!(b, b'\t' | b'\n' | b'\r') {
-            return false;
-        }
-        if b == 0x7F {
-            return false;
-        }
-    }
-
-    // Fast path: valid UTF-8 with no disallowed control bytes.
-    if std::str::from_utf8(sample).is_ok() {
-        return true;
-    }
-
-    // If it's not UTF-8, only treat it as text if it still has a reasonable amount of ASCII
-    // (prevents misclassifying arbitrary binary blobs that happen to avoid NUL bytes).
-    let ascii_like = sample
-        .iter()
-        .filter(|&&b| matches!(b, b'\t' | b'\n' | b'\r') || (0x20..=0x7E).contains(&b))
-        .count();
-    if ascii_like * 2 < sample.len() {
-        // <50% ASCII-ish bytes.
-        return false;
-    }
-
-    // Best-effort: Windows-1252 (common Excel behavior on Windows for CSV). Reject if decoding
-    // yields replacement or control characters.
-    let (decoded, had_errors) = WINDOWS_1252.decode_without_bom_handling(sample);
-    if had_errors {
-        return false;
-    }
-    !decoded.chars().any(|c| {
-        c == '\u{FFFD}' || (c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
-    })
 }
 
 fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
@@ -397,20 +404,11 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
         }
     };
 
-    // ZIP local file header signature (XLSX/XLSM/XLSB).
-    const ZIP_MAGIC: [u8; 4] = [0x50, 0x4B, 0x03, 0x04];
-    // Parquet files start with "PAR1".
-    const PARQUET_MAGIC: [u8; 4] = *b"PAR1";
-
     let mut header = [0u8; 8];
     let n = file.read(&mut header).map_err(|source| Error::OpenIo {
         path: path.to_path_buf(),
         source,
     })?;
-
-    if n >= PARQUET_MAGIC.len() && header[..PARQUET_MAGIC.len()] == PARQUET_MAGIC {
-        return Ok(WorkbookFormat::Parquet);
-    }
 
     if n >= OLE_MAGIC.len() && header[..OLE_MAGIC.len()] == OLE_MAGIC {
         // OLE compound files can either be legacy `.xls` BIFF workbooks, or Office-encrypted
@@ -418,10 +416,11 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
         // `EncryptedPackage` stream.
         //
         // We don't support decryption here; detect and return a user-friendly error.
-        file.seek(SeekFrom::Start(0)).map_err(|source| Error::OpenIo {
-            path: path.to_path_buf(),
-            source,
-        })?;
+        file.seek(SeekFrom::Start(0))
+            .map_err(|source| Error::OpenIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
         if let Ok(mut ole) = cfb::CompoundFile::open(file) {
             if stream_exists(&mut ole, "EncryptionInfo") && stream_exists(&mut ole, "EncryptedPackage")
             {
@@ -434,12 +433,18 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
         return Ok(WorkbookFormat::Xls);
     }
 
-    if n >= ZIP_MAGIC.len() && header[..ZIP_MAGIC.len()] == ZIP_MAGIC {
+    if n >= PARQUET_MAGIC.len() && header[..PARQUET_MAGIC.len()] == PARQUET_MAGIC {
+        return Ok(WorkbookFormat::Parquet);
+    }
+
+    // ZIP-based formats (XLSX/XLSM/XLSB) all begin with a `PK` signature.
+    if n >= 2 && header[..2] == *b"PK" {
         // Rewind so ZipArchive can read from the start.
-        file.seek(SeekFrom::Start(0)).map_err(|source| Error::OpenIo {
-            path: path.to_path_buf(),
-            source,
-        })?;
+        file.seek(SeekFrom::Start(0))
+            .map_err(|source| Error::OpenIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
 
         if let Ok(zip) = zip::ZipArchive::new(file) {
             let mut has_workbook_xml = false;
@@ -479,28 +484,25 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
                 });
             }
         }
-    } else {
-        // If it's neither an OLE compound file nor a ZIP/OPC package, fall back to treating it as
-        // CSV when it looks like plain text. This supports:
-        // - extensionless CSV files
-        // - CSV files renamed to `.xlsx`/`.xls`/etc.
-        //
-        // Keep this conservative: only classify as CSV when a small prefix looks like text.
-        const TEXT_SNIFF_LEN: usize = 8 * 1024;
-        let mut prefix = Vec::with_capacity(TEXT_SNIFF_LEN.min(n));
-        prefix.extend_from_slice(&header[..n]);
-        if prefix.len() < TEXT_SNIFF_LEN {
-            let mut buf = vec![0u8; TEXT_SNIFF_LEN - prefix.len()];
-            let m = file.read(&mut buf).map_err(|source| Error::OpenIo {
-                path: path.to_path_buf(),
-                source,
-            })?;
-            prefix.extend_from_slice(&buf[..m]);
-        }
 
-        if looks_like_text_csv(&prefix) {
-            return Ok(WorkbookFormat::Csv);
-        }
+        // ZIP signatures must win even if we can't classify the archive: fall back to
+        // extension-based dispatch (or an unsupported-extension error) rather than treating the
+        // input as text/CSV.
+        return match ext_format {
+            Some(fmt) => Ok(fmt),
+            None => Err(Error::UnsupportedExtension {
+                path: path.to_path_buf(),
+                extension: ext,
+            }),
+        };
+    }
+
+    // Only consider CSV/text once we have ruled out known binary formats.
+    if sniff_text_csv(&mut file).map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })? {
+        return Ok(WorkbookFormat::Csv);
     }
 
     match ext_format {
@@ -659,12 +661,14 @@ pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
                 path: path.to_path_buf(),
                 source,
             }),
-        WorkbookFormat::Xlsb => xlsb::XlsbWorkbook::open(path)
-            .map(Workbook::Xlsb)
-            .map_err(|source| Error::OpenXlsb {
-                path: path.to_path_buf(),
-                source,
-            }),
+        WorkbookFormat::Xlsb => {
+            xlsb::XlsbWorkbook::open(path)
+                .map(Workbook::Xlsb)
+                .map_err(|source| Error::OpenXlsb {
+                    path: path.to_path_buf(),
+                    source,
+                })
+        }
         WorkbookFormat::Csv => {
             let file = std::fs::File::open(path).map_err(|source| Error::OpenIo {
                 path: path.to_path_buf(),
@@ -715,31 +719,20 @@ fn open_parquet_model_workbook(path: &Path) -> Result<formula_model::Workbook, E
     use formula_model::CellRef;
     use std::sync::Arc;
 
-    let bytes = std::fs::read(path).map_err(|source| Error::OpenIo {
-        path: path.to_path_buf(),
-        source,
-    })?;
-
-    let table = formula_columnar::parquet::read_parquet_bytes_to_columnar(&bytes).map_err(|source| {
-        Error::OpenParquet {
+    let table =
+        formula_columnar::parquet::read_parquet_to_columnar(path).map_err(|source| Error::OpenParquet {
             path: path.to_path_buf(),
             source: Box::new(source),
-        }
-    })?;
+        })?;
 
     let mut workbook = formula_model::Workbook::new();
 
-    let default_sheet_name = "Sheet1".to_string();
-    let candidate_name = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_string())
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| default_sheet_name.clone());
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    let sheet_name = sanitize_sheet_name(stem);
 
     let sheet_id = workbook
-        .add_sheet(candidate_name.clone())
-        .or_else(|_| workbook.add_sheet(default_sheet_name.clone()))
+        .add_sheet(sheet_name)
+        .or_else(|_| workbook.add_sheet("Sheet1"))
         .expect("Sheet1 is always a valid sheet name");
 
     let sheet = workbook
