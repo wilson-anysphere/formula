@@ -20,3 +20,14 @@ test("tWithVars interpolates placeholders", () => {
   setLocale("en-US");
   assert.equal(tWithVars("chat.errorWithMessage", { message: "Oops" }), "Error: Oops");
 });
+
+test("sheet position status bar string is localizable", () => {
+  setLocale("en-US");
+  assert.equal(tWithVars("statusBar.sheetPosition", { position: 1, total: 3 }), "Sheet 1 of 3");
+
+  setLocale("de-DE");
+  assert.equal(tWithVars("statusBar.sheetPosition", { position: 1, total: 3 }), "Blatt 1 von 3");
+
+  setLocale("ar");
+  assert.equal(tWithVars("statusBar.sheetPosition", { position: 1, total: 3 }), "ورقة 1 من 3");
+});
