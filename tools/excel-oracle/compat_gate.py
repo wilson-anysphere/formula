@@ -124,6 +124,83 @@ def _normalize_tags(tags: list[str]) -> list[str]:
     return [t for t in (s.strip() for s in tags) if t]
 
 
+def _effective_include_tags(*, tier: str, user_include_tags: list[str]) -> list[str]:
+    normalized = _normalize_tags(user_include_tags)
+    if normalized:
+        return normalized
+    return list(_TIER_TO_INCLUDE_TAGS[tier])
+
+
+def _build_engine_cmd(
+    *,
+    cases_path: Path,
+    actual_path: Path,
+    max_cases: int,
+    include_tags: list[str],
+    exclude_tags: list[str],
+) -> list[str]:
+    cmd = [
+        "cargo",
+        "run",
+        "-p",
+        "formula-excel-oracle",
+        "--quiet",
+        "--locked",
+        "--",
+        "--cases",
+        str(cases_path),
+        "--out",
+        str(actual_path),
+    ]
+    if max_cases and max_cases > 0:
+        cmd += ["--max-cases", str(max_cases)]
+    for t in include_tags:
+        cmd += ["--include-tag", t]
+    for t in exclude_tags:
+        cmd += ["--exclude-tag", t]
+    return cmd
+
+
+def _build_compare_cmd(
+    *,
+    cases_path: Path,
+    expected_path: Path,
+    actual_path: Path,
+    report_path: Path,
+    max_cases: int,
+    include_tags: list[str],
+    exclude_tags: list[str],
+    max_mismatch_rate: float,
+    abs_tol: float,
+    rel_tol: float,
+) -> list[str]:
+    cmd = [
+        sys.executable,
+        "tools/excel-oracle/compare.py",
+        "--cases",
+        str(cases_path),
+        "--expected",
+        str(expected_path),
+        "--actual",
+        str(actual_path),
+        "--report",
+        str(report_path),
+        "--max-mismatch-rate",
+        str(max_mismatch_rate),
+        "--abs-tol",
+        str(abs_tol),
+        "--rel-tol",
+        str(rel_tol),
+    ]
+    if max_cases and max_cases > 0:
+        cmd += ["--max-cases", str(max_cases)]
+    for t in include_tags:
+        cmd += ["--include-tag", t]
+    for t in exclude_tags:
+        cmd += ["--exclude-tag", t]
+    return cmd
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument(
@@ -201,8 +278,7 @@ def main() -> int:
     actual_path = Path(args.actual)
     report_path = Path(args.report)
 
-    user_include_tags = _normalize_tags(args.include_tag)
-    include_tags = user_include_tags if user_include_tags else list(_TIER_TO_INCLUDE_TAGS[args.tier])
+    include_tags = _effective_include_tags(tier=args.tier, user_include_tags=args.include_tag)
     exclude_tags = _normalize_tags(args.exclude_tag)
 
     repo_root = Path(__file__).resolve().parents[2]
@@ -218,52 +294,28 @@ def main() -> int:
         env["CARGO_HOME"] = str(repo_root / "target" / "cargo-home")
     Path(env["CARGO_HOME"]).mkdir(parents=True, exist_ok=True)
 
-    engine_cmd = [
-        "cargo",
-        "run",
-        "-p",
-        "formula-excel-oracle",
-        "--quiet",
-        "--locked",
-        "--",
-        "--cases",
-        str(cases_path),
-        "--out",
-        str(actual_path),
-    ]
-    if args.max_cases and args.max_cases > 0:
-        engine_cmd += ["--max-cases", str(args.max_cases)]
-    for t in include_tags:
-        engine_cmd += ["--include-tag", t]
-    for t in exclude_tags:
-        engine_cmd += ["--exclude-tag", t]
+    engine_cmd = _build_engine_cmd(
+        cases_path=cases_path,
+        actual_path=actual_path,
+        max_cases=args.max_cases,
+        include_tags=include_tags,
+        exclude_tags=exclude_tags,
+    )
 
     subprocess.run(engine_cmd, check=True, cwd=repo_root, env=env)
 
-    compare_cmd = [
-        sys.executable,
-        "tools/excel-oracle/compare.py",
-        "--cases",
-        str(cases_path),
-        "--expected",
-        str(expected_path),
-        "--actual",
-        str(actual_path),
-        "--report",
-        str(report_path),
-        "--max-mismatch-rate",
-        str(args.max_mismatch_rate),
-        "--abs-tol",
-        str(args.abs_tol),
-        "--rel-tol",
-        str(args.rel_tol),
-    ]
-    if args.max_cases and args.max_cases > 0:
-        compare_cmd += ["--max-cases", str(args.max_cases)]
-    for t in include_tags:
-        compare_cmd += ["--include-tag", t]
-    for t in exclude_tags:
-        compare_cmd += ["--exclude-tag", t]
+    compare_cmd = _build_compare_cmd(
+        cases_path=cases_path,
+        expected_path=expected_path,
+        actual_path=actual_path,
+        report_path=report_path,
+        max_cases=args.max_cases,
+        include_tags=include_tags,
+        exclude_tags=exclude_tags,
+        max_mismatch_rate=args.max_mismatch_rate,
+        abs_tol=args.abs_tol,
+        rel_tol=args.rel_tol,
+    )
 
     proc = subprocess.run(compare_cmd)
 

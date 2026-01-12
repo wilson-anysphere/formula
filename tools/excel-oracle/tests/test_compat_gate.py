@@ -76,5 +76,59 @@ class CompatGateDatasetSelectionTests(unittest.TestCase):
                 os.chdir(old_cwd)
 
 
+class CompatGateTierPresetTests(unittest.TestCase):
+    def _load_compat_gate(self):
+        compat_gate_py = Path(__file__).resolve().parents[1] / "compat_gate.py"
+        self.assertTrue(compat_gate_py.is_file(), f"compat_gate.py not found at {compat_gate_py}")
+
+        spec = importlib.util.spec_from_file_location("excel_oracle_compat_gate", compat_gate_py)
+        assert spec is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+
+    def test_full_tier_defaults_to_no_include_tags(self) -> None:
+        compat_gate = self._load_compat_gate()
+
+        include_tags = compat_gate._effective_include_tags(tier="full", user_include_tags=[])
+        self.assertEqual(include_tags, [])
+
+        cmd = compat_gate._build_engine_cmd(
+            cases_path=Path("cases.json"),
+            actual_path=Path("engine-results.json"),
+            max_cases=0,
+            include_tags=include_tags,
+            exclude_tags=["error"],
+        )
+        self.assertNotIn("--include-tag", cmd)
+        self.assertIn("--exclude-tag", cmd)
+        self.assertIn("error", cmd)
+
+    def test_user_include_tag_overrides_tier_presets(self) -> None:
+        compat_gate = self._load_compat_gate()
+
+        include_tags = compat_gate._effective_include_tags(tier="smoke", user_include_tags=[" add ", "", "cmp"])
+        self.assertEqual(include_tags, ["add", "cmp"])
+
+        cmd = compat_gate._build_compare_cmd(
+            cases_path=Path("cases.json"),
+            expected_path=Path("expected.json"),
+            actual_path=Path("actual.json"),
+            report_path=Path("report.json"),
+            max_cases=0,
+            include_tags=include_tags,
+            exclude_tags=[],
+            max_mismatch_rate=0.0,
+            abs_tol=1e-9,
+            rel_tol=1e-9,
+        )
+        # Ensure we only pass through the explicit tags.
+        self.assertEqual(cmd.count("--include-tag"), 2)
+        self.assertIn("add", cmd)
+        self.assertIn("cmp", cmd)
+
+
 if __name__ == "__main__":
     unittest.main()
