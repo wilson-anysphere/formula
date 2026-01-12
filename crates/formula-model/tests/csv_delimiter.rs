@@ -104,3 +104,22 @@ fn csv_auto_detect_respects_excel_sep_directive_with_utf8_bom() {
     assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.0));
     assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Number(2.0));
 }
+
+#[test]
+fn csv_auto_detect_prefers_semicolon_when_decimal_separator_is_comma_and_no_header() {
+    // In locales where `,` is the decimal separator, semicolon-delimited CSVs often contain many
+    // commas inside numbers. When delimiter detection is ambiguous (both `;` and `,` yield a
+    // consistent column count), prefer `;` when `decimal_separator` is `,`.
+    let csv = "1,23;4,56\n7,89;0,12\n";
+    let options = CsvOptions {
+        has_header: false,
+        decimal_separator: ',',
+        ..CsvOptions::default()
+    };
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), options).unwrap();
+
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.23));
+    assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Number(4.56));
+    assert_eq!(sheet.value(CellRef::new(1, 0)), CellValue::Number(7.89));
+    assert_eq!(sheet.value(CellRef::new(1, 1)), CellValue::Number(0.12));
+}

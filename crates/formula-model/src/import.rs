@@ -69,8 +69,19 @@ pub const CSV_DELIMITER_AUTO: u8 = 0;
 ///
 /// Note: this also honors Excel's `sep=<delimiter>` directive when present on the first line.
 pub fn sniff_csv_delimiter(sample: &[u8]) -> u8 {
+    sniff_csv_delimiter_with_decimal_separator(sample, '.')
+}
+
+/// Guess a CSV delimiter from a byte sample, using a locale-aware decimal separator.
+///
+/// When `decimal_separator` is `,`, this biases delimiter selection toward `;` in ambiguous cases,
+/// matching common Excel locale behavior (CSV files frequently use `;` as the field delimiter in
+/// locales where `,` is used as the decimal separator).
+///
+/// This still honors Excel's `sep=<delimiter>` directive when present on the first line.
+pub fn sniff_csv_delimiter_with_decimal_separator(sample: &[u8], decimal_separator: char) -> u8 {
     let mut cursor = Cursor::new(sample);
-    sniff_csv_delimiter_prefix(&mut cursor)
+    sniff_csv_delimiter_prefix(&mut cursor, decimal_separator)
         .map(|(_, delimiter)| delimiter)
         .unwrap_or(b',')
 }
@@ -143,7 +154,7 @@ pub fn import_csv_to_columnar_table<R: BufRead>(
     options: CsvOptions,
 ) -> Result<ColumnarTable, CsvImportError> {
     let (sniff_prefix, delimiter) = if options.delimiter == CSV_DELIMITER_AUTO {
-        sniff_csv_delimiter_prefix(&mut reader).map_err(CsvImportError::Io)?
+        sniff_csv_delimiter_prefix(&mut reader, options.decimal_separator).map_err(CsvImportError::Io)?
     } else {
         (Vec::new(), options.delimiter)
     };
@@ -379,7 +390,10 @@ fn parse_csv_sep_directive(prefix: &[u8]) -> Option<u8> {
     Some(delimiter)
 }
 
-fn sniff_csv_delimiter_prefix<R: Read>(reader: &mut R) -> Result<(Vec<u8>, u8), std::io::Error> {
+fn sniff_csv_delimiter_prefix<R: Read>(
+    reader: &mut R,
+    decimal_separator: char,
+) -> Result<(Vec<u8>, u8), std::io::Error> {
     let mut prefix: Vec<u8> = Vec::new();
     let mut hists: Vec<HashMap<usize, usize>> =
         CSV_SNIFF_DELIMITERS.iter().map(|_| HashMap::new()).collect();
@@ -502,7 +516,7 @@ fn sniff_csv_delimiter_prefix<R: Read>(reader: &mut R) -> Result<(Vec<u8>, u8), 
         }
     }
 
-    let delimiter = select_sniffed_csv_delimiter(&hists);
+    let delimiter = select_sniffed_csv_delimiter(&hists, decimal_separator);
     Ok((prefix, delimiter))
 }
 
@@ -523,16 +537,25 @@ fn commit_csv_sniff_record(
     *sampled_records += 1;
 }
 
-fn select_sniffed_csv_delimiter(hists: &[HashMap<usize, usize>]) -> u8 {
+fn select_sniffed_csv_delimiter(hists: &[HashMap<usize, usize>], decimal_separator: char) -> u8 {
     // Pick the delimiter whose sampled records most frequently share the same column count (>1).
     //
     // If two delimiters are equally consistent, prefer the one with the higher consistent column
     // count (mode field count), matching Excel-like behavior.
     //
-    // Tie-break deterministically in `CSV_SNIFF_DELIMITERS` order: `,` > `;` > tab > `|`.
-    let mut best_delim = b',';
-    let mut best_mode_count: usize = 0;
-    let mut best_mode_fields: usize = 0;
+    // Tie-break:
+    // - In locales where `,` is the decimal separator, `;` is commonly used as the CSV delimiter.
+    //   If `;` and `,` are equally consistent, prefer `;` to avoid mistaking decimal commas for
+    //   field separators.
+    // - Otherwise, tie-break deterministically in `CSV_SNIFF_DELIMITERS` order: `,` > `;` > tab > `|`.
+
+    #[derive(Clone, Copy, Debug, Default)]
+    struct Stats {
+        mode_count: usize,
+        mode_fields: usize,
+    }
+
+    let mut stats: [Stats; CSV_SNIFF_DELIMITERS.len()] = [Stats::default(); CSV_SNIFF_DELIMITERS.len()];
 
     for (idx, hist) in hists.iter().enumerate() {
         let mut mode_count = 0usize;
@@ -543,20 +566,53 @@ fn select_sniffed_csv_delimiter(hists: &[HashMap<usize, usize>]) -> u8 {
                 mode_fields = *fields;
             }
         }
+        stats[idx] = Stats {
+            mode_count,
+            mode_fields,
+        };
+    }
 
-        if (mode_count, mode_fields) > (best_mode_count, best_mode_fields) {
-            best_mode_count = mode_count;
-            best_mode_fields = mode_fields;
-            best_delim = CSV_SNIFF_DELIMITERS[idx];
+    let max_mode_count = stats.iter().map(|s| s.mode_count).max().unwrap_or(0);
+    if max_mode_count == 0 {
+        return b',';
+    }
+
+    if decimal_separator == ',' {
+        let mut comma = None;
+        let mut semicolon = None;
+        for (idx, delim) in CSV_SNIFF_DELIMITERS.iter().enumerate() {
+            match *delim {
+                b',' => comma = Some(idx),
+                b';' => semicolon = Some(idx),
+                _ => {}
+            }
+        }
+        if let (Some(comma_idx), Some(semi_idx)) = (comma, semicolon) {
+            if stats[comma_idx].mode_count == max_mode_count && stats[semi_idx].mode_count == max_mode_count {
+                return b';';
+            }
         }
     }
 
-    // Fall back to comma if we couldn't find a delimiter that produces >1 columns.
-    if best_mode_count == 0 {
-        b','
-    } else {
-        best_delim
+    let mut best_idx: Option<usize> = None;
+    for (idx, stat) in stats.iter().enumerate() {
+        if stat.mode_count != max_mode_count {
+            continue;
+        }
+        match best_idx {
+            None => best_idx = Some(idx),
+            Some(best) => {
+                if stat.mode_fields > stats[best].mode_fields {
+                    best_idx = Some(idx);
+                } else if stat.mode_fields == stats[best].mode_fields && idx < best {
+                    // Deterministic tie-break in CSV_SNIFF_DELIMITERS order.
+                    best_idx = Some(idx);
+                }
+            }
+        }
     }
+
+    best_idx.map(|idx| CSV_SNIFF_DELIMITERS[idx]).unwrap_or(b',')
 }
 
 /// Import a CSV stream into a new [`Worksheet`] backed by a columnar table.
