@@ -21,7 +21,7 @@
 //
 // Keep this in sync with the Rust backend clipboard guards (`MAX_PNG_BYTES`).
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB (raw PNG bytes)
-const MAX_RICH_TEXT_BYTES = 2 * 1024 * 1024; // 2MB (HTML / RTF)
+const MAX_RICH_TEXT_BYTES = 2 * 1024 * 1024; // 2MB (HTML / RTF / text)
 const MAX_RICH_TEXT_CHARS = 2 * 1024 * 1024; // writing: approximate guard for JS strings
 
 function hasTauri() {
@@ -528,6 +528,10 @@ function createWebClipboardProvider() {
     async read() {
       const clipboard = globalThis.navigator?.clipboard;
 
+      // If we skip an oversized plain-text payload from `clipboard.read()`, do not fall back to
+      // `clipboard.readText()` (which may allocate the same oversized string anyway).
+      let skipped_oversized_plain_text = false;
+
       // Prefer rich read if available.
       if (clipboard?.read) {
         try {
@@ -547,7 +551,22 @@ function createWebClipboardProvider() {
             const imagePngType = item.types.find((t) => matchMime(t, "image/png"));
 
             const html = htmlType ? await readClipboardItemText(item, htmlType, MAX_RICH_TEXT_BYTES) : undefined;
-            const text = textType ? await readClipboardItemText(item, textType, Number.POSITIVE_INFINITY) : undefined;
+            /** @type {string | undefined} */
+            let text;
+            if (textType) {
+              try {
+                const blob = await item.getType(textType);
+                if (blob && typeof blob.size === "number") {
+                  if (blob.size > MAX_RICH_TEXT_BYTES) {
+                    skipped_oversized_plain_text = true;
+                  } else {
+                    text = await blob.text();
+                  }
+                }
+              } catch {
+                text = undefined;
+              }
+            }
             const rtf = rtfType ? await readClipboardItemText(item, rtfType, MAX_RICH_TEXT_BYTES) : undefined;
             const imagePng = imagePngType ? await readClipboardItemPng(item, imagePngType, MAX_IMAGE_BYTES) : undefined;
 
@@ -571,10 +590,19 @@ function createWebClipboardProvider() {
         }
       }
 
+      if (skipped_oversized_plain_text) {
+        return {};
+      }
+
       let text;
       try {
         text = clipboard?.readText ? await clipboard.readText() : undefined;
       } catch {
+        text = undefined;
+      }
+      if (typeof text === "string" && text.length > MAX_RICH_TEXT_CHARS) {
+        // Best-effort guardrail: `readText()` provides no size metadata, so we can only cap after
+        // the fact. Still avoid returning huge strings downstream.
         text = undefined;
       }
       return { text };
