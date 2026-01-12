@@ -66,7 +66,9 @@ The user experience must honor Excel's familiar mental model while introducing m
 
 ## Command Palette
 
-### Trigger: `Cmd+K` (Mac) / `Ctrl+K` (Windows)
+### Trigger: `Cmd+Shift+P` (Mac) / `Ctrl+Shift+P` (Windows/Linux)
+
+**Note:** `Cmd/Ctrl+K` is reserved for **inline AI edit** directly in the grid selection (see `apps/desktop/src/app/spreadsheetApp.ts`), so the command palette uses `Cmd/Ctrl+Shift+P` to avoid a keybinding conflict.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -97,10 +99,10 @@ The user experience must honor Excel's familiar mental model while introducing m
 
 ### Search Behavior
 
-- Fuzzy matching: "pvt tbl" → "Pivot Table"
-- Shortcut search: "/" → shows all shortcuts
-- Recent commands prioritized
-- Context-aware suggestions
+- Fuzzy matching: "pvt tbl" → "Pivot Table" *(planned)*
+- Shortcut search: "/" → shows all shortcuts *(planned)*
+- Recent commands prioritized *(planned)*
+- Context-aware suggestions *(planned)*
 
 ---
 

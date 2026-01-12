@@ -53,7 +53,7 @@ Build a spreadsheet that achieves **100% Excel compatibility** while introducing
 │  PRESENTATION LAYER (TypeScript/React)                                       │
 │  ├── Canvas-Based Grid Renderer (60fps virtualized scrolling)               │
 │  ├── Formula Bar with AI Autocomplete                                        │
-│  ├── Command Palette (Cmd+K)                                                 │
+│  ├── Command Palette (Cmd/Ctrl+Shift+P)                                      │
 │  └── AI Chat Panel                                                           │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  CORE ENGINE (Rust/WASM - runs in Worker thread)                            │
