@@ -229,6 +229,52 @@ test("Typing =DROP(A suggests a contiguous range above the current cell", async 
   );
 });
 
+test("Typing =_xlfn.TAKE(A suggests a contiguous range above the current cell", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=_xlfn.TAKE(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.TAKE(A1:A10)"),
+    `Expected an _xlfn.TAKE range suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =_xlfn.DROP(A suggests a contiguous range above the current cell", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=_xlfn.DROP(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.DROP(A1:A10)"),
+    `Expected an _xlfn.DROP range suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Range suggestions do not auto-close parens when the function needs more args (CHOOSECOLS)", async () => {
   const engine = new TabCompletionEngine();
 
@@ -249,6 +295,29 @@ test("Range suggestions do not auto-close parens when the function needs more ar
   assert.ok(
     suggestions.some(s => s.text === "=CHOOSECOLS(A1:A10"),
     `Expected a CHOOSECOLS range suggestion without closing paren, got: ${suggestions.map(s => s.text).join(", ")}`
+  );
+});
+
+test("Range suggestions do not auto-close parens when the function needs more args (_xlfn.CHOOSECOLS)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=_xlfn.CHOOSECOLS(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.CHOOSECOLS(A1:A10"),
+    `Expected an _xlfn.CHOOSECOLS range suggestion without closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 
@@ -275,6 +344,29 @@ test("Range suggestions do not auto-close parens when the function needs more ar
   );
 });
 
+test("Range suggestions do not auto-close parens when the function needs more args (_xlfn.CHOOSEROWS)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=_xlfn.CHOOSEROWS(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.CHOOSEROWS(A1:A10"),
+    `Expected an _xlfn.CHOOSEROWS range suggestion without closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Range suggestions do not auto-close parens when the function needs more args (EXPAND)", async () => {
   const engine = new TabCompletionEngine();
 
@@ -295,6 +387,29 @@ test("Range suggestions do not auto-close parens when the function needs more ar
   assert.ok(
     suggestions.some(s => s.text === "=EXPAND(A1:A10"),
     `Expected an EXPAND range suggestion without closing paren, got: ${suggestions.map(s => s.text).join(", ")}`
+  );
+});
+
+test("Range suggestions do not auto-close parens when the function needs more args (_xlfn.EXPAND)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=_xlfn.EXPAND(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.EXPAND(A1:A10"),
+    `Expected an _xlfn.EXPAND range suggestion without closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 
