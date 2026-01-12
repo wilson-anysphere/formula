@@ -23,7 +23,7 @@ export const BRANCHING_APPLY_ORIGIN = "branching-apply";
  *
  * Key behaviors:
  * - Treat `binderOrigin` (DocumentController-driven edits) as local.
- * - Treat `sessionOrigin` (branch checkout/merge, conflict resolution writes) as local.
+ * - Treat `sessionOrigin` (conflict resolution writes, etc) as local.
  * - Ignore bulk "time travel" operations (`VERSIONING_RESTORE_ORIGIN`, `BRANCHING_APPLY_ORIGIN`)
  *   so they do not surface conflict UI or pollute local-edit tracking.
  *
