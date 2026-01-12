@@ -1383,12 +1383,9 @@ fn reduce_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         _ => return Value::Error(ErrorKind::Value),
     };
 
-    let mut acc = match scalarize_value(initial) {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    if let Value::Error(e) = acc {
-        return Value::Error(e);
+    let mut acc = initial;
+    if let Value::Error(e) = &acc {
+        return Value::Error(*e);
     }
 
     let array = match eval_array_arg(ctx, array_expr) {
@@ -1408,9 +1405,9 @@ fn reduce_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let call = prepare_lambda_call(&call_name, 2);
     for cell in &array.values {
         let args = [acc.clone(), cell.clone()];
-        acc = invoke_lambda(ctx, &lambda, &call, &args);
-        if let Value::Error(e) = acc {
-            return Value::Error(e);
+        acc = invoke_lambda_value(ctx, &lambda, &call, &args);
+        if let Value::Error(e) = &acc {
+            return Value::Error(*e);
         }
     }
 
@@ -1596,6 +1593,19 @@ fn invoke_lambda(
     call: &LambdaCall,
     args: &[Value],
 ) -> Value {
+    let value = invoke_lambda_value(ctx, lambda, call, args);
+    match scalarize_value(value) {
+        Ok(v) => v,
+        Err(e) => Value::Error(e),
+    }
+}
+
+fn invoke_lambda_value(
+    ctx: &dyn FunctionContext,
+    lambda: &Lambda,
+    call: &LambdaCall,
+    args: &[Value],
+) -> Value {
     if args.len() != call.arg_names.len() {
         return Value::Error(ErrorKind::Value);
     }
@@ -1606,11 +1616,7 @@ fn invoke_lambda(
         bindings.insert(name.clone(), value.clone());
     }
 
-    let value = ctx.eval_formula_with_bindings(&call.expr, &bindings);
-    match scalarize_value(value) {
-        Ok(v) => v,
-        Err(e) => Value::Error(e),
-    }
+    ctx.eval_formula_with_bindings(&call.expr, &bindings)
 }
 
 fn scalarize_value(value: Value) -> Result<Value, ErrorKind> {

@@ -99,3 +99,28 @@ fn scan_spills_running_accumulations_over_range() {
     assert_eq!(engine.get_cell_value("Sheet1", "F3"), Value::Number(6.0));
 }
 
+#[test]
+fn reduce_can_accumulate_dynamic_arrays() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 3.0).unwrap();
+
+    // REDUCE should allow the lambda to return a (spillable) dynamic array and continue reducing
+    // over it. This enables common patterns like building a result via VSTACK/HSTACK.
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "C1",
+            "=REDUCE(1,A1:A2,LAMBDA(acc,v,VSTACK(acc,v)))",
+        )
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "C1").expect("spill range");
+    assert_eq!(start, parse_a1("C1").unwrap());
+    assert_eq!(end, parse_a1("C3").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C3"), Value::Number(3.0));
+}
