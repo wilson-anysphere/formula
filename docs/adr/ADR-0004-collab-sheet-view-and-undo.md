@@ -133,6 +133,12 @@ session and already wrap mutations in `session.transactLocal`, e.g.:
 - `createMetadataManagerForSession(session)` (`@formula/collab-workbook`)
 - `createCommentManagerForSession(session)` (`@formula/collab-comments`)
 
+Desktop note: the desktop app sometimes uses a *binder-origin* undo scope (tracking
+DocumentController→Yjs transactions under a distinct origin token, instead of
+`session.origin`). In that setup, comment mutations must run inside the
+binder-origin transact wrapper (e.g. `createCommentManagerForDoc({ doc: session.doc, transact: undoService.transact })`)
+so they participate in the same undo stack as cell edits.
+
 ---
 
 ### 3) Interaction with `bindYjsToDocumentController` and “local-only undo”
