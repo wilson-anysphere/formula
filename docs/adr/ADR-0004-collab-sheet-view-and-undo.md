@@ -125,8 +125,13 @@ session.transactLocal(() => {
 });
 ```
 
-For feature code that uses managers, prefer `create*ForSession(session)` helpers
-that already use `session.transactLocal`.
+For feature code that uses managers, prefer helpers that bind a manager to the
+session and already wrap mutations in `session.transactLocal`, e.g.:
+
+- `createSheetManagerForSession(session)` (`@formula/collab-workbook`)
+- `createNamedRangeManagerForSession(session)` (`@formula/collab-workbook`)
+- `createMetadataManagerForSession(session)` (`@formula/collab-workbook`)
+- `createCommentManagerForSession(session)` (`@formula/collab-comments`)
 
 ---
 
@@ -190,4 +195,3 @@ Practical guidance:
 - DocumentController↔Yjs binder: `bindYjsToDocumentController`
   (`packages/collab/binder/index.js`)
 - Branch snapshot adapter reading `sheets[].view`: `packages/versioning/branches/src/yjs/branchStateAdapter.js`
-
