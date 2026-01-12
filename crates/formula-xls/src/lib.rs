@@ -24,11 +24,10 @@ use std::path::{Path, PathBuf};
 
 use calamine::{open_workbook, Data, Reader, Sheet, SheetType, SheetVisible, Xls};
 use formula_model::{
-    normalize_formula_text, CellRef, CellValue, Comment, CommentAuthor, CommentKind, ErrorValue,
-    HyperlinkTarget, Range, SheetVisibility, Style, TabColor, Workbook, EXCEL_MAX_COLS,
+    normalize_formula_text, CellRef, CellValue, Comment, CommentAuthor, CommentKind, DefinedNameScope,
+    ErrorValue, HyperlinkTarget, Range, SheetVisibility, Style, TabColor, Workbook, EXCEL_MAX_COLS,
     EXCEL_MAX_ROWS, EXCEL_MAX_SHEET_NAME_LEN,
 };
-use formula_model::DefinedNameScope;
 use thiserror::Error;
 
 mod biff;
@@ -180,6 +179,22 @@ pub enum ImportError {
 /// malformed or unsupported records may produce warnings rather than failing
 /// the import.
 pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, ImportError> {
+    import_xls_path_with_biff_reader(path.as_ref(), biff::read_workbook_stream_from_xls)
+}
+
+/// Import a legacy `.xls` workbook from disk while treating BIFF workbook-stream parsing as
+/// unavailable.
+///
+/// This is intended for testing the importer's best-effort fallback paths.
+#[doc(hidden)]
+pub fn import_xls_path_without_biff(path: impl AsRef<Path>) -> Result<XlsImportResult, ImportError> {
+    import_xls_path_with_biff_reader(path.as_ref(), |_| Err("BIFF parsing disabled".to_string()))
+}
+
+fn import_xls_path_with_biff_reader(
+    path: &Path,
+    read_biff_workbook_stream: impl FnOnce(&Path) -> Result<Vec<u8>, String>,
+) -> Result<XlsImportResult, ImportError> {
     let path = path.as_ref();
     let mut workbook: Xls<_> = open_workbook(path)?;
 
@@ -191,7 +206,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
     let mut used_sheet_names: Vec<String> = Vec::new();
     let mut warnings = Vec::new();
     let mut merged_ranges = Vec::new();
-    let workbook_stream = match biff::read_workbook_stream_from_xls(path) {
+    let workbook_stream = match read_biff_workbook_stream(path) {
         Ok(bytes) => Some(bytes),
         Err(err) => {
             warnings.push(ImportWarning::new(format!(
@@ -1034,6 +1049,40 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             Err(err) => warnings.push(ImportWarning::new(format!(
                 "failed to import `.xls` defined names: {err}"
             ))),
+        }
+    }
+
+    // If BIFF workbook parsing is unavailable (or didn't yield any defined names), fall back to
+    // calamine's best-effort string representation.
+    if out.defined_names.is_empty() {
+        let mut skipped_count: usize = 0;
+        for (name, refers_to) in workbook.defined_names() {
+            let name = name.replace('\0', "");
+            let refers_to = refers_to.trim();
+            let refers_to = refers_to
+                .strip_prefix('=')
+                .unwrap_or(refers_to)
+                .to_string();
+
+            if out
+                .create_defined_name(
+                    DefinedNameScope::Workbook,
+                    name,
+                    refers_to,
+                    None,
+                    false,
+                    None,
+                )
+                .is_err()
+            {
+                skipped_count = skipped_count.saturating_add(1);
+            }
+        }
+
+        if skipped_count > 0 {
+            warnings.push(ImportWarning::new(format!(
+                "skipped {skipped_count} `.xls` defined names from calamine fallback due to invalid/duplicate names"
+            )));
         }
     }
 
