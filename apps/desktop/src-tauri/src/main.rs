@@ -772,6 +772,10 @@ fn main() {
         // Override Tauri's default `asset:` protocol handler to attach COEP-friendly headers.
         // See `asset_protocol.rs` for details.
         .register_uri_scheme_protocol("asset", asset_protocol::handler)
+        // Core platform plugins used by the frontend (dialog, clipboard, shell).
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             // OAuth PKCE deep-link redirect capture (e.g. `formula://oauth/callback?...`).
             //
