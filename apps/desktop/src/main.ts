@@ -3648,14 +3648,10 @@ if (
   const getClipboardDlpSelection = () => {
     const sheetId = app.getCurrentSheetId();
     const active = app.getActiveCell();
-    const activeRange = { startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col };
-    const ranges = app.getSelectionRanges?.() ?? [];
-    const normalizedRanges = ranges.map(normalizeSelectionRange);
-    const containing = normalizedRanges.find(
-      (r) => active.row >= r.startRow && active.row <= r.endRow && active.col >= r.startCol && active.col <= r.endCol,
-    );
-    // If selection state is somehow inconsistent, prefer the active cell (matches typical copy semantics).
-    const range = containing ?? activeRange;
+    const selection = app.getSelectionRanges?.()[0] ?? null;
+    const range = selection
+      ? normalizeSelectionRange(selection)
+      : { startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col };
     return { sheetId, range };
   };
 
