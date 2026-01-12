@@ -863,7 +863,12 @@ mod tests {
         //     (remaining fields set to 0)
         // - signature bytes at signatureOffset
         let digsig_blob_header_len = 8usize;
-        let digsig_info_len = 0x24usize; // 9 DWORDs (cbSignature/signatureOffset + 7 reserved fields)
+        // DigSigInfoSerialized is 9 DWORDs total in MS-OSHARED:
+        // cbSignature, signatureOffset, cbSigningCertStore, certStoreOffset, cbProjectName,
+        // projectNameOffset, fTimestamp, cbTimestampUrl, timestampUrlOffset.
+        // For this synthetic fixture we only care about the first two, so the remaining fields are
+        // set to 0.
+        let digsig_info_len = 0x24usize;
         let signature_offset = digsig_blob_header_len + digsig_info_len; // 0x2C
 
         let mut stream = Vec::new();

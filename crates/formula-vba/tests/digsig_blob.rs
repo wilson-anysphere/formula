@@ -28,7 +28,10 @@ fn build_oshared_digsig_blob(valid_pkcs7: &[u8]) -> Vec<u8> {
     invalid_pkcs7[last] ^= 0xFF;
 
     let digsig_blob_header_len = 8usize; // cb + serializedPointer
-    let digsig_info_len = 0x24usize; // 9 DWORDs (cbSignature/signatureOffset + 7 reserved pairs/flags)
+    // DigSigInfoSerialized is 9 DWORDs total in MS-OSHARED:
+    // cbSignature, signatureOffset, cbSigningCertStore, certStoreOffset, cbProjectName,
+    // projectNameOffset, fTimestamp, cbTimestampUrl, timestampUrlOffset.
+    let digsig_info_len = 0x24usize;
 
     let invalid_offset = digsig_blob_header_len + digsig_info_len; // 0x2C (matches MS-OSHARED examples)
     assert_eq!(invalid_offset, 0x2C);
