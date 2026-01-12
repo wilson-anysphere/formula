@@ -303,18 +303,17 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
         let ty_png = nsstring_from_str(TYPE_PNG)?;
         let ty_tiff = nsstring_from_str(TYPE_TIFF)?;
 
-        let text = pasteboard_string_for_type_limited(pasteboard, &*ty_string, MAX_TEXT_BYTES)
-            .or_else(|| {
-                pasteboard_data_for_type(pasteboard, &*ty_string, MAX_TEXT_BYTES)
-                    .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-            })
+        // Prefer reading `NSData` first so we can size-check before allocating potentially huge
+        // `NSString` instances (some clipboard producers can place very large plain text/HTML on the
+        // pasteboard).
+        let text = pasteboard_data_for_type(pasteboard, &*ty_string, MAX_TEXT_BYTES)
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .or_else(|| pasteboard_string_for_type_limited(pasteboard, &*ty_string, MAX_TEXT_BYTES))
             .and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
 
-        let html = pasteboard_string_for_type_limited(pasteboard, &*ty_html, MAX_TEXT_BYTES)
-            .or_else(|| {
-                pasteboard_data_for_type(pasteboard, &*ty_html, MAX_TEXT_BYTES)
-                    .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-            })
+        let html = pasteboard_data_for_type(pasteboard, &*ty_html, MAX_TEXT_BYTES)
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .or_else(|| pasteboard_string_for_type_limited(pasteboard, &*ty_html, MAX_TEXT_BYTES))
             .and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
 
         let rtf = pasteboard_data_for_type(pasteboard, &*ty_rtf, MAX_TEXT_BYTES)
