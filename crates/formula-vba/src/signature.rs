@@ -283,11 +283,12 @@ pub fn list_vba_digital_signatures(
         let signature = ole.read_stream_opt(&path)?.unwrap_or_default();
         let signer_subject = extract_first_certificate_subject(&signature);
         let verification = verify_signature_blob(&signature);
+        // Prefer deterministic MS-OSHARED DigSigBlob offsets when present.
         let (digsig_info_version, pkcs7_offset, pkcs7_len) =
-            if let Some(info) = crate::offcrypto::parse_digsig_info_serialized(&signature) {
-                (info.version, Some(info.pkcs7_offset), Some(info.pkcs7_len))
-            } else if let Some(info) = crate::offcrypto::parse_digsig_blob(&signature) {
+            if let Some(info) = crate::offcrypto::parse_digsig_blob(&signature) {
                 (None, Some(info.pkcs7_offset), Some(info.pkcs7_len))
+            } else if let Some(info) = crate::offcrypto::parse_digsig_info_serialized(&signature) {
+                (info.version, Some(info.pkcs7_offset), Some(info.pkcs7_len))
             } else {
                 (None, None, None)
             };
