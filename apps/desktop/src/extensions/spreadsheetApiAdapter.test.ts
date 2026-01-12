@@ -51,37 +51,48 @@ describe("desktop spreadsheetApi adapter helpers", () => {
 
   describe("buildSheetNameToIdMap / resolveSheetIdByName", () => {
     it("maps display names to ids", () => {
-      const workbookSheetNames = new Map([
-        ["sheet-1", "Sheet1"],
-        ["sheet-2", "Sheet2"],
-      ]);
+      const sheetStore = {
+        getName(sheetId: string) {
+          if (sheetId === "sheet-1") return "Sheet1";
+          if (sheetId === "sheet-2") return "Sheet2";
+          return undefined;
+        },
+      };
       const sheetIds = ["sheet-1", "sheet-2"];
-      const map = buildSheetNameToIdMap(sheetIds, workbookSheetNames);
+      const map = buildSheetNameToIdMap(sheetIds, sheetStore);
       expect(map.get("Sheet1")).toBe("sheet-1");
       expect(map.get("Sheet2")).toBe("sheet-2");
     });
 
     it("falls back to ids when display names are missing", () => {
-      const workbookSheetNames = new Map<string, string>();
+      const sheetStore = {
+        getName(_sheetId: string) {
+          return undefined;
+        },
+      };
       const sheetIds = ["Sheet1"];
-      const map = buildSheetNameToIdMap(sheetIds, workbookSheetNames);
+      const map = buildSheetNameToIdMap(sheetIds, sheetStore);
       expect(map.get("Sheet1")).toBe("Sheet1");
     });
 
     it("throws when resolving unknown sheet names", () => {
-      const workbookSheetNames = new Map([["sheet-1", "Sheet1"]]);
+      const sheetStore = {
+        getName(sheetId: string) {
+          return sheetId === "sheet-1" ? "Sheet1" : undefined;
+        },
+      };
       expect(() =>
-        resolveSheetIdByName({ sheetName: "Missing", sheetIds: ["sheet-1"], workbookSheetNames }),
+        resolveSheetIdByName({ sheetName: "Missing", sheetIds: ["sheet-1"], sheetStore }),
       ).toThrow(/Unknown sheet/i);
     });
 
     it("throws when sheet names are ambiguous", () => {
-      const workbookSheetNames = new Map([
-        ["sheet-1", "Data"],
-        ["sheet-2", "Data"],
-      ]);
-      expect(() => buildSheetNameToIdMap(["sheet-1", "sheet-2"], workbookSheetNames)).toThrow(/Duplicate sheet name/i);
+      const sheetStore = {
+        getName(_sheetId: string) {
+          return "Data";
+        },
+      };
+      expect(() => buildSheetNameToIdMap(["sheet-1", "sheet-2"], sheetStore)).toThrow(/Duplicate sheet name/i);
     });
   });
 });
-

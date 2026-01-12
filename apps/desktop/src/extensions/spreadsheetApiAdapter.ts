@@ -18,14 +18,18 @@ export function parseSheetQualifiedA1Range(input: string): ParsedSheetQualifiedR
   return { sheetName, ref, ...range };
 }
 
-export function getSheetDisplayName(sheetId: string, workbookSheetNames: Map<string, string>): string {
-  return workbookSheetNames.get(sheetId) ?? sheetId;
+export type SheetNameLookup = {
+  getName(sheetId: string): string | undefined;
+};
+
+export function getSheetDisplayName(sheetId: string, sheetStore: SheetNameLookup): string {
+  return sheetStore.getName(sheetId) ?? sheetId;
 }
 
-export function buildSheetNameToIdMap(sheetIds: string[], workbookSheetNames: Map<string, string>): Map<string, string> {
+export function buildSheetNameToIdMap(sheetIds: string[], sheetStore: SheetNameLookup): Map<string, string> {
   const out = new Map<string, string>();
   for (const sheetId of sheetIds) {
-    const name = getSheetDisplayName(sheetId, workbookSheetNames);
+    const name = getSheetDisplayName(sheetId, sheetStore);
     const existing = out.get(name);
     if (existing && existing !== sheetId) {
       throw new Error(`Duplicate sheet name: ${name}`);
@@ -38,17 +42,16 @@ export function buildSheetNameToIdMap(sheetIds: string[], workbookSheetNames: Ma
 export function resolveSheetIdByName(args: {
   sheetName: string;
   sheetIds: string[];
-  workbookSheetNames: Map<string, string>;
+  sheetStore: SheetNameLookup;
 }): string {
   const sheetName = String(args.sheetName ?? "").trim();
   if (!sheetName) {
     throw new Error("Sheet name must be a non-empty string");
   }
-  const map = buildSheetNameToIdMap(args.sheetIds, args.workbookSheetNames);
+  const map = buildSheetNameToIdMap(args.sheetIds, args.sheetStore);
   const id = map.get(sheetName);
   if (!id) {
     throw new Error(`Unknown sheet: ${sheetName}`);
   }
   return id;
 }
-

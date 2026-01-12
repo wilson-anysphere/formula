@@ -2,11 +2,18 @@ import { expect, test } from "@playwright/test";
 
 import { gotoDesktop } from "./helpers";
 
-function installTauriStubForTests(options: { usedRange?: { start_row: number; end_row: number; start_col: number; end_col: number } } = {}) {
+function installTauriStubForTests(
+  options: {
+    usedRange?: { start_row: number; end_row: number; start_col: number; end_col: number };
+    sheets?: Array<{ id: string; name: string }>;
+  } = {},
+) {
   const listeners: Record<string, any> = {};
   (window as any).__tauriListeners = listeners;
   (window as any).__tauriInvokeCalls = [];
   const usedRange = options.usedRange ?? { start_row: 0, end_row: 0, start_col: 0, end_col: 0 };
+  const sheets =
+    Array.isArray(options.sheets) && options.sheets.length > 0 ? options.sheets : [{ id: "Sheet1", name: "Sheet1" }];
 
   const pushCall = (cmd: string, args: any) => {
     (window as any).__tauriInvokeCalls.push({ cmd, args });
@@ -21,8 +28,8 @@ function installTauriStubForTests(options: { usedRange?: { start_row: number; en
             return {
               path: args?.path ?? null,
               origin_path: args?.path ?? null,
-              sheets: [{ id: "Sheet1", name: "Sheet1" }],
-              };
+              sheets,
+            };
 
           case "get_sheet_used_range":
             return usedRange;
@@ -94,10 +101,14 @@ function installTauriStubForTests(options: { usedRange?: { start_row: number; en
 
 test.describe("tauri workbook integration", () => {
   test("file-dropped event opens a workbook and populates the document", async ({ page }) => {
-    await page.addInitScript(installTauriStubForTests);
+    await page.addInitScript(installTauriStubForTests, {
+      sheets: [
+        { id: "sheet-1", name: "Budget" },
+        { id: "sheet-2", name: "Summary" },
+      ],
+    });
 
     await gotoDesktop(page);
-    
 
     await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
     await page.evaluate(() => {
@@ -106,7 +117,11 @@ test.describe("tauri workbook integration", () => {
 
     await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
 
-    await expect(page.getByTestId("sheet-switcher")).toHaveValue("Sheet1");
+    await expect(page.getByTestId("sheet-tab-sheet-1")).toHaveText("Budget");
+    await expect(page.getByTestId("sheet-tab-sheet-2")).toHaveText("Summary");
+
+    await expect(page.getByTestId("sheet-switcher")).toHaveValue("sheet-1");
+    await expect(page.getByTestId("sheet-switcher").locator("option")).toHaveText(["Budget", "Summary"]);
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
     await expect(page.getByTestId("active-value")).toHaveText("Hello");
 
@@ -134,7 +149,7 @@ test.describe("tauri workbook integration", () => {
     });
 
     await expect(page.getByTestId("toast-root")).toContainText(
-      "Workbook is larger than the current load limit; only the first 10000 rows and 200 columns were loaded.",
+      "Workbook partially loaded due to load limits (maxRows=10000, maxCols=200).",
       { timeout: 30_000 },
     );
   });
@@ -156,7 +171,7 @@ test.describe("tauri workbook integration", () => {
     });
 
     await expect(page.getByTestId("toast-root")).toContainText(
-      "Workbook is larger than the current load limit; only the first 5 rows and 6 columns were loaded.",
+      "Workbook partially loaded due to load limits (maxRows=5, maxCols=6).",
       { timeout: 30_000 },
     );
   });

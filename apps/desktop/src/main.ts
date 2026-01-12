@@ -218,7 +218,6 @@ function warnIfMissingCrossOriginIsolationInTauriProd(): void {
 warnIfMissingCrossOriginIsolationInTauriProd();
 
 let workbookSheetStore = new WorkbookSheetStore([{ id: "Sheet1", name: "Sheet1", visibility: "visible" }]);
-const workbookSheetNames = new Map<string, string>();
 
 function getWorkbookLoadLimits(): { maxRows: number; maxCols: number } {
   return resolveWorkbookLoadLimits({
@@ -229,15 +228,6 @@ function getWorkbookLoadLimits(): { maxRows: number; maxCols: number } {
     },
   });
 }
-
-function syncWorkbookSheetNamesFromSheetStore(): void {
-  workbookSheetNames.clear();
-  for (const sheet of workbookSheetStore.listAll()) {
-    workbookSheetNames.set(sheet.id, sheet.name);
-  }
-}
-
-syncWorkbookSheetNamesFromSheetStore();
 
 // Task 13 adds this helper in collab mode. Declare it here so main.ts can
 // consume it without taking a hard dependency on collab wiring being present.
@@ -1888,7 +1878,6 @@ function syncSheetStoreFromCollabSession(session: CollabSession): void {
   // The sheet store instance is replaced whenever collab metadata changes; keep any
   // main.ts listeners (status bar, context keys, etc) subscribed to the latest store.
   installSheetStoreSubscription();
-  syncWorkbookSheetNamesFromSheetStore();
 }
 
 function listSheetsForUi(): SheetUiInfo[] {
@@ -2105,10 +2094,6 @@ function syncSheetUi(): void {
       syncSheetStoreFromCollabSession(session);
     }
 
-    // Keep `workbookSheetNames` in sync so sheet-name consumers (extension API,
-    // context keys, etc) reflect collab metadata.
-    syncWorkbookSheetNamesFromSheetStore();
-
     const sheets = listSheetsForUi();
     const activeId = app.getCurrentSheetId();
     if (!sheets.some((sheet) => sheet.id === activeId)) {
@@ -2158,7 +2143,6 @@ function installSheetStoreSubscription(): void {
       }
     }
 
-    syncWorkbookSheetNamesFromSheetStore();
     const sheets = listSheetsForUi();
     const activeId = app.getCurrentSheetId();
 
@@ -7414,11 +7398,41 @@ function encodeDocumentSnapshot(snapshot: unknown): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(snapshot));
 }
 
-function normalizeSheetList(info: WorkbookInfo): { id: string; name: string }[] {
+function normalizeSheetList(info: WorkbookInfo): SheetUiInfo[] {
   const sheets = Array.isArray(info.sheets) ? info.sheets : [];
   return sheets
-    .map((s) => ({ id: String((s as any).id ?? ""), name: String((s as any).name ?? (s as any).id ?? "") }))
-    .filter((s) => s.id.trim() !== "");
+    .map((sheet) => {
+      const id = String((sheet as any)?.id ?? "").trim();
+      const nameRaw = (sheet as any)?.name ?? (sheet as any)?.id ?? "";
+      const name = String(nameRaw).trim() || id;
+
+      const rawVisibility = (sheet as any)?.visibility;
+      const visibility: SheetVisibility =
+        rawVisibility === "visible" || rawVisibility === "hidden" || rawVisibility === "veryHidden"
+          ? rawVisibility
+          : "visible";
+
+      const rawTabColor = (sheet as any)?.tabColor;
+      const tabColor: TabColor | undefined = (() => {
+        if (rawTabColor == null) return undefined;
+        if (typeof rawTabColor === "string") {
+          const rgb = rawTabColor.trim();
+          return rgb ? { rgb } : undefined;
+        }
+        if (typeof rawTabColor !== "object") return undefined;
+        const color = rawTabColor as any;
+        const out: TabColor = {};
+        if (typeof color.rgb === "string" && color.rgb.trim() !== "") out.rgb = color.rgb;
+        if (typeof color.theme === "number") out.theme = color.theme;
+        if (typeof color.indexed === "number") out.indexed = color.indexed;
+        if (typeof color.tint === "number") out.tint = color.tint;
+        if (typeof color.auto === "boolean") out.auto = color.auto;
+        return Object.keys(out).length > 0 ? out : undefined;
+      })();
+
+      return { id, name, visibility, tabColor };
+    })
+    .filter((sheet) => sheet.id !== "");
 }
 
 async function confirmDiscardDirtyState(actionLabel: string): Promise<boolean> {
@@ -7506,10 +7520,10 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     sheets.map((sheet) => ({
       id: sheet.id,
       name: sheet.name,
-      visibility: "visible",
+      visibility: sheet.visibility ?? "visible",
+      tabColor: sheet.tabColor,
     })),
   );
-  syncWorkbookSheetNamesFromSheetStore();
   installSheetStoreSubscription();
   // Keep the e2e harness up-to-date when we swap the store after opening a workbook.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
