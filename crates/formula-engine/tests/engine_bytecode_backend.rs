@@ -2166,6 +2166,36 @@ fn bytecode_backend_matches_ast_for_explicit_implicit_intersection_operator() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_implicit_intersection_over_sheet_span_when_only_one_area_hits() {
+    let mut engine = Engine::new();
+
+    // Bytecode lowering currently supports 3D sheet spans, but not plain `Sheet2!A1` references.
+    // Use a 3D span and custom sheet dimensions to create a case where only one sheet contributes
+    // a non-#VALUE result under implicit intersection.
+    engine.ensure_sheet("Sheet3");
+    engine
+        .set_sheet_dimensions("Sheet2", 1, formula_model::EXCEL_MAX_COLS)
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "A5", "=@Sheet1:Sheet3!A1:A3")
+        .unwrap();
+
+    // Ensure this formula is compiled to bytecode (and isn't forcing AST fallback).
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let via_bytecode = engine.get_cell_value("Sheet1", "A5");
+    assert_eq!(via_bytecode, Value::Error(ErrorKind::Ref));
+
+    // Compare to AST-only evaluation.
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "A5");
+    assert_eq!(via_bytecode, via_ast);
+}
+
+#[test]
 fn bytecode_implicit_intersection_matches_ast_for_2d_range_inside_rectangle() {
     use formula_engine::bytecode::{CellCoord, GridMut, SparseGrid, Vm};
 
