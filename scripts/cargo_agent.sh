@@ -92,7 +92,7 @@ fi
 # Prefer the wrapper-specific override, but fall back to the standard Cargo env var so
 # `source scripts/agent-init.sh` (which sets `CARGO_BUILD_JOBS`) influences the wrapper too.
 jobs="${FORMULA_CARGO_JOBS:-${CARGO_BUILD_JOBS:-4}}"
-limit_as="${FORMULA_CARGO_LIMIT_AS:-12G}"
+limit_as="${FORMULA_CARGO_LIMIT_AS:-14G}"
 
 # Rustc can spawn many internal worker threads during codegen (roughly proportional to
 # `codegen-units`). On multi-agent machines this can hit OS thread limits and manifest as
